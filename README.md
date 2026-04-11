@@ -9,6 +9,8 @@ Stack: **Next.js (App Router)**, **PostgreSQL**, **Redis**.
 - `apps/web` — Next.js UI, MDX content, and `/api/v1/*` route handlers (deploy this app)
 - `packages/*` — reserved for shared packages (optional)
 
+**Documentation:** keep in-repo prose in **this README only** (no extra markdown guides under `docs/` or elsewhere).
+
 ## Full stack in Docker (Postgres + Redis + Next.js)
 
 Runs migrations and catalog seed on container start, then the production Next server.
@@ -122,8 +124,6 @@ git push -u origin development
 ```
 
 On GitHub: **Settings → General → Default branch** should be **main**. Use **development** for ongoing feature work.
-
-More detail: [docs/GITHUB_SETUP.md](docs/GITHUB_SETUP.md).
 
 ## CI
 
