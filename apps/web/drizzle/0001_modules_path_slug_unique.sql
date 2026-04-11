@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "modules_path_slug_uid" ON "modules" USING btree ("path_id","slug");
