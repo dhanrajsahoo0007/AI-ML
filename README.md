@@ -67,6 +67,8 @@ Run with `DATABASE_URL` and `REDIS_URL` pointing at your Postgres and Redis inst
 
 ## GitHub repository ([dhanrajsahoo0007](https://github.com/dhanrajsahoo0007))
 
+More detail: [docs/GITHUB_SETUP.md](docs/GITHUB_SETUP.md).
+
 Creating the remote repo requires you to be logged in (browser or [GitHub CLI](https://cli.github.com/) `gh auth login`).
 
 ### Option A: GitHub CLI
