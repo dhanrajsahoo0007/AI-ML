@@ -25,15 +25,21 @@ export default async function HomePage() {
     <div className="space-y-10">
       <section className="space-y-3">
         <p className="text-sm font-medium text-muted-foreground">
-          Beginner-friendly roadmap
+          From zero to GenAI, LLMs, and agents—with interview depth
         </p>
         <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
-          Start your AI and machine learning journey with structure.
+          Origins AI Learn
         </h1>
         <p className="max-w-2xl text-pretty text-lg text-muted-foreground">
-          Curated learning paths, interview-style Q&amp;A, and ML system design
-          notes—backed by a small LMS spine (Postgres + Redis) so you can track
-          module progress as the platform grows.
+          A structured path from <strong className="text-foreground">scratch</strong>{" "}
+          through <strong className="text-foreground">ML</strong>,{" "}
+          <strong className="text-foreground">deep learning</strong>,{" "}
+          <strong className="text-foreground">generative AI</strong>,{" "}
+          <strong className="text-foreground">LLMs</strong>, and{" "}
+          <strong className="text-foreground">agentic AI</strong>—with{" "}
+          <strong className="text-foreground">interview prep</strong> and{" "}
+          <strong className="text-foreground">ML system design</strong> so you see how
+          ideas land in real systems. Progress is backed by Postgres and Redis.
         </p>
       </section>
 

@@ -21,8 +21,13 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-3 px-4">
-        <Link href="/" className="font-semibold tracking-tight">
-          AI-ML Hub
+        <Link
+          href="/"
+          className="max-w-[min(100%,14rem)] truncate font-semibold tracking-tight sm:max-w-none"
+          title="Origins AI Learn — from scratch to job-ready AI"
+        >
+          <span className="sm:hidden">Origins</span>
+          <span className="hidden sm:inline">Origins AI Learn</span>
         </Link>
         <Separator orientation="vertical" className="hidden h-6 sm:block" />
         <nav className="hidden items-center gap-4 text-sm text-muted-foreground sm:flex">

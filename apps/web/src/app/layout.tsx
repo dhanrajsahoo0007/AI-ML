@@ -13,10 +13,26 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const siteTitle = "Origins AI Learn";
+const siteDescription =
+  "Origins AI Learn is a structured learning system for going from scratch to job-ready in modern AI: machine learning, deep learning, generative AI, large language models, agentic AI, and adjacent topics. It combines guided learning paths, interview prep (question-first drills), and ML system design notes so you understand both concepts and how they show up in real systems.";
+
 export const metadata: Metadata = {
-  title: "AI-ML Learning Platform",
-  description:
-    "Learning paths, interview prep, and ML system design for beginners starting AI and ML.",
+  title: {
+    default: siteTitle,
+    template: `%s · ${siteTitle}`,
+  },
+  description: siteDescription,
+  openGraph: {
+    title: siteTitle,
+    description: siteDescription,
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: siteTitle,
+    description: siteDescription,
+  },
 };
 
 export default function RootLayout({
