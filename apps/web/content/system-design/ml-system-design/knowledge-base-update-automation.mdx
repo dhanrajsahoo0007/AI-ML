@@ -1,0 +1,22 @@
+---
+title: Knowledge Base Update Automation
+description: Keeping retrieval corpora, embeddings, and knowledge graphs fresh with event-driven ingestion, change detection, and reliability controls.
+---
+
+Retrieval-augmented systems go stale the moment documentation, pricing, or policies change without the index noticing. Automated document ingestion pipelines watch sources such as CMS webhooks, git repositories, ticketing exports, and blob storage prefixes. Each detected change should enqueue normalization jobs that extract text, preserve provenance metadata, and apply access-control tags so multi-tenant indexes never leak restricted sections. Batch crawls still matter as a safety net when events are missed, but event-driven updates reduce time-to-freshness for critical pages.
+
+Change detection goes beyond file hashes: semantic diffing can skip re-embedding paragraphs that moved but did not edit, while structural edits in HTML might alter chunk boundaries enough to require full section re-chunking. Incremental re-embedding strategies embed only new or altered chunks and update vector stores with delete-insert semantics keyed by stable document and chunk identifiers. Stale content detection complements push updates by scoring last-reviewed dates, decaying trust for pages with conflicting numeric facts, or comparing live fetches to cached snapshots when legal requires periodic reaffirmation.
+
+Knowledge graph updates introduce entity resolution challenges: merging synonyms, deprecating nodes, and validating new edges against ontology rules. Freshness scoring helps rankers prefer recently verified facts without ignoring stable reference material. Scheduled jobs suit predictable publisher releases; event-driven workers suit bursty wiki edits. Reliability demands idempotent consumers, dead-letter queues for poison documents, and shadow indexing environments where new corpora are evaluated for retrieval precision and hallucination rate before the router switches production traffic.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you architect incremental re-embedding when documents are large and edits are small?" category="Architecture">
+    Parse documents into stable chunk IDs based on headings or content hashes, diff at chunk granularity, and enqueue embedding jobs only for changed chunks while tombstoning removed spans in the vector index. Maintain a mapping table from chunk IDs to vector IDs in the store. For boundary shifts, detect overlap with neighboring chunks and re-embed affected windows to avoid orphaned partial text.
+  </InterviewQuestion>
+  <InterviewQuestion question="What automation patterns balance freshness against cost for a million-document corpus?" category="Automation">
+    Tier sources by business criticality: high-value namespaces update in near real time with streaming workers, while archival tiers refresh weekly. Cache embedding models in warm pools, batch embed within latency budgets, and deduplicate identical boilerplate across pages. Use sampling-based audits to catch drift instead of re-embedding everything on a short cadence.
+  </InterviewQuestion>
+  <InterviewQuestion question="What reliability issues appear when webhook-driven ingestion is the only update path?" category="Reliability">
+    Missed deliveries, duplicate events, and out-of-order updates can leave the index inconsistent unless consumers are idempotent with monotonic version vectors per document. Network partitions between the CMS and workers cause silent staleness unless reconciled by periodic full scans or cursor-based backfills. Always monitor lag percentiles and alert when any namespace exceeds freshness SLOs.
+  </InterviewQuestion>
+</InterviewQuestions>

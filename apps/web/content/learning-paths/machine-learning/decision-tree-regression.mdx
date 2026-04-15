@@ -1,0 +1,34 @@
+---
+title: Decision Tree Regression
+description: Piecewise-constant predictions from recursive axis-aligned splits; highly interpretable splits that capture interactions but prone to overfitting without constraints.
+---
+
+A regression tree partitions the feature space with **axis-aligned splits** (e.g., “if $x_3 \le 2.7$, go left; else go right”). Each leaf stores a constant prediction—typically the **mean** of training targets in that leaf—so the overall function is a step surface. Trees automatically model **interactions** because deeper paths combine conditions on multiple features without you hand-engineering cross-terms.
+
+Interviewers care about **split criteria** and **stopping rules**. Common impurity for regression is **mean squared error (MSE)** reduction (or related variance reduction): at each node, the algorithm searches thresholds and features to minimize weighted variance of children. Without constraints, trees memorize noise (low bias, high variance). Practical trees set **max depth**, **min samples per leaf**, **min impurity decrease**, or use pruning / ensembles.
+
+Trees shine for nonlinearities and heterogeneous data; their weakness is instability: small data changes can flip early splits and reshape the whole tree.
+
+At a node $t$ with samples $\mathcal{I}_t$, the leaf prediction is the average $\bar{y}_t = \frac{1}{|\mathcal{I}_t|}\sum_{i\in\mathcal{I}_t} y_i$. A common MSE impurity is:
+
+$$
+L(t) = \frac{1}{|\mathcal{I}_t|} \sum_{i \in \mathcal{I}_t} (y_i - \bar{y}_t)^2
+$$
+
+A split into left/right children $t_L, t_R$ is scored by impurity decrease:
+
+$$
+\Delta = L(t) - \frac{|\mathcal{I}_{t_L}|}{|\mathcal{I}_t|} L(t_L) - \frac{|\mathcal{I}_{t_R}|}{|\mathcal{I}_t|} L(t_R)
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why are single decision trees high variance?" category="Bias-Variance">
+    They make a sequence of discrete choices; changing a few training points can alter the best early split, cascading into a different partition. Averaging many trees (bagging or forests) reduces variance.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a regression tree handle feature scales?" category="Feature Engineering">
+    Axis-aligned splits compare thresholds per feature; monotonic rescaling can change which thresholds are equivalent, but trees do not require linearly separable geometry like SVMs. Still, some implementations and split search behaviors interact with feature resolution; tree ensembles are generally less sensitive than distance-based methods.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the bias–variance tradeoff of deep vs shallow trees?" category="Bias-Variance">
+    Deeper trees decrease bias (more flexible piecewise fits) but increase variance and overfitting risk. Shallow trees increase bias (underfit) but are more stable and interpretable.
+  </InterviewQuestion>
+</InterviewQuestions>

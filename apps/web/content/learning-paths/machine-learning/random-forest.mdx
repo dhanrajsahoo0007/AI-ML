@@ -1,0 +1,26 @@
+---
+title: Random Forest
+description: Bagging decision trees with random feature subsets at each split—strong default for tabular data with reduced variance.
+---
+
+A random forest trains many decision trees on bootstrap samples of the data and averages their predictions (regression) or takes a majority vote (classification). The key twist beyond plain bagging is **random subspace**: at each split, only a random subset of features is considered. That decorrelates trees so the ensemble average removes variance more effectively than averaging highly similar trees.
+
+Random forests are often a strong baseline: they handle nonlinearities and mixed feature types reasonably well, require less tuning than boosting, and give out-of-bag (OOB) error estimates for free when using bootstrap training. Interview talking points include why bagging reduces variance (averaging i.i.d.-ish errors), why feature randomization helps, and limitations like larger model size and less state-of-the-art accuracy than tuned gradient boosting on some benchmarks.
+
+With $B$ trees and predictions $h_b(x)$, the forest prediction for regression is the average $\hat{f}(x) = \frac{1}{B}\sum_{b=1}^{B} h_b(x)$. For classification with $K$ classes, each tree outputs class probabilities or votes; averaging probabilities (“soft voting”) is common:
+
+$$
+\hat{p}_k(x) = \frac{1}{B}\sum_{b=1}^{B} p_{b,k}(x), \quad \hat{y}(x) = \arg\max_k \hat{p}_k(x)
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why does a random forest typically beat a single decision tree?" category="Bias-Variance">
+    Individual trees are high-variance; small data changes can change the structure a lot. Bootstrap resampling plus averaging smooths predictions. Random feature subsets at splits reduce correlation between trees so the average is more effective at canceling errors than bagging identical split rules would be.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is out-of-bag (OOB) error and when is it trustworthy?" category="Evaluation">
+    Each bootstrap sample leaves out roughly a third of points out of bag. For each point, you can evaluate only trees that did not train on that point and aggregate their vote. That gives a validation-like score without a separate holdout set. It is useful for quick diagnostics but can differ from a true temporal or grouped split when independence assumptions fail.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you tune max_features and number of trees?" category="Hyperparameters">
+    More trees generally improve stability up to a plateau (the ensemble variance decreases as you add more trees, but bias is mostly set by tree depth and the data). The max_features setting controls the randomness versus correlation tradeoff: smaller values increase diversity but may raise bias. Common defaults use the square root of the number of features for classification, and roughly one third of the feature count or the square root of the feature count for regression, but cross-validation on your metric is the honest answer.
+  </InterviewQuestion>
+</InterviewQuestions>

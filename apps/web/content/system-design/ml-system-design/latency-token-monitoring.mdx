@@ -1,0 +1,24 @@
+---
+title: Latency & Token Usage Monitoring
+description: Percentile latency, time-to-first-token, throughput, queue depth, and SLO design for production LLM serving.
+---
+
+Latency for generative models is not a single number. Clients perceive time-to-first-token, or TTFT, as responsiveness, while total completion time grows with output length. Server-side metrics therefore need both TTFT and tokens per second after the first chunk, plus end-to-end request duration including prefill, batching waits, and streaming overhead. Histograms that export P50, P95, and P99 let you catch tail behavior where a minority of requests hit cold caches, oversized prompts, or overloaded GPUs; averages alone hide saturation.
+
+Token usage is both a cost driver and a proxy for work done. Tracking input versus output tokens per route, model, and tenant supports chargeback and capacity planning. Queue depth at schedulers, batch formation layers, or Kubernetes pod autoscaler signals impending backlog before P99 explodes. Pair queue metrics with admission control or shedding policies so alerts lead to actionable playbooks rather than panic after user-visible timeouts.
+
+SLOs should be defined on user-visible slices: for chat, TTFT under a budget for interactive tiers and streaming chunk cadence within bounds; for batch jobs, job completion time and backlog age. SLAs are contractual and often stricter; leave margin between internal SLO targets and external commitments. Optimizing TTFT typically involves KV-cache reuse, smaller effective prefill through prompt compression, speculative decoding where applicable, and right-sizing max concurrency so prefill is not starved by decode-heavy workloads.
+
+Trade-offs appear everywhere: aggressive batching improves throughput and cost per token but hurts tail latency for small requests. Dynamic batching with timeout caps balances the two but complicates autoscaling signals. Token-based autoscaling is more faithful than CPU for GPU workloads but reacts more slowly; combining predictive scaling with queue-depth alerts reduces oscillation.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why are P95 and P99 often more important than average latency for LLM APIs?" category="Performance">
+    Averages are dominated by short requests and hide long tails where users abandon flows or triggers cascade retries. P95 and P99 expose contention, cold starts, oversized contexts, and scheduler starvation. SRE practices use percentiles to set budgets and error budgets that match real user pain, especially for streaming interfaces where a stalled tail feels like a hung application.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you define an SLO for a streaming chat product versus a batch summarization pipeline?" category="SLOs">
+    For chat, define SLOs on TTFT below a threshold for a high fraction of sessions, plus a maximum gap between streamed chunks so the UI never appears frozen. For batch jobs, target queue time plus wall clock to completion per job size class, and measure backlog age so delayed processing is visible before deadlines slip. Keep measurement windows and exclusions for canary traffic explicit so error budgets stay meaningful.
+  </InterviewQuestion>
+  <InterviewQuestion question="What metrics beyond wall-clock latency help you diagnose a sudden regression in LLM serving?" category="Metrics">
+    Inspect batch size distributions, prefill versus decode time splits, GPU memory pressure, KV-cache hit rates if applicable, tokenizer overhead, retrieval latency if RAG is in path, rate-limit or retry storms from upstream dependencies, and per-model token throughput. Compare input token histograms for context bloat and check deployment timestamps against configuration changes such as max sequence length or quantization mode.
+  </InterviewQuestion>
+</InterviewQuestions>

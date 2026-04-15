@@ -1,0 +1,24 @@
+---
+title: Access Control & RBAC
+description: Apply role-based access control across ML stacks, secure model endpoints and data paths, manage API keys, and enforce least privilege for LLM tools and service mesh policies.
+---
+
+Role-based access control maps identities to roles such as data scientist, MLOps engineer, or service account, and roles to permissions on resources like datasets, training jobs, model registry entries, and deployment stages. ML systems complicate classic RBAC because the same vector store might serve both internal research and customer-isolated indexes, and because LLM endpoints effectively execute arbitrary natural language that can request sensitive tools. Policies must cover who can trigger training on production-tenant data, who can promote models, and who can read evaluation artifacts that may contain PII samples.
+
+Model endpoint authentication typically combines mutual TLS or OAuth between services with scoped API keys for external developers. Short-lived tokens reduce blast radius when a key leaks, and audience restrictions prevent a token minted for one microservice from being replayed against the inference gateway. Data access policies align with row-level security in warehouses and with bucket policies in object stores so training jobs receive narrow temporary credentials via workload identity rather than long-lived secrets on VMs.
+
+Service mesh authorization (for example Istio or Envoy RBAC filters) enforces which services may call an inference pod, which HTTP routes are allowed, and which headers must be present for tenant routing. For LLM tool use, least privilege means each tool adapter declares allowed operations and parameter schemas; the runtime rejects tool calls that exceed the session role, and secrets for downstream systems never enter the model context. API key management belongs in a vault or managed secrets store with rotation, break-glass procedures, and audit trails for issuance.
+
+Trade-offs include coarse roles that are easy to administer but over-permission many users versus fine-grained attribute-based policies that are accurate but complex to reason about. Centralized identity providers help, but latency-sensitive inference paths must cache authorization decisions carefully without stale permissions after revocation.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you secure a multi-tenant model serving API?" category="Security">
+    I would require tenant-scoped tokens with explicit audience, enforce quotas and rate limits per tenant, isolate tenant-specific adapters or LoRA weights in separate storage namespaces, and validate that retrieval queries cannot cross tenant boundaries. Logging would include tenant id and request id without storing sensitive payloads unless policy allows. I would run periodic penetration tests on authentication bypass paths and monitor for anomalous token usage patterns indicative of key theft.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where does RBAC plug into the MLOps control plane?" category="Architecture">
+    RBAC applies to experiment tracking, notebook platforms, feature stores, registries, and orchestrators like Kubernetes or workflow engines. The architecture should propagate the caller identity through the pipeline so data access decisions use the human or service principal that initiated the job, not a shared superuser. Service accounts for training should be distinct from serving accounts, with promotion workflows granting time-bounded elevation only when needed.
+  </InterviewQuestion>
+  <InterviewQuestion question="What implementation details reduce LLM tool abuse risk?" category="Implementation">
+    Implement tools as server-side functions with fixed allowlists rather than arbitrary shell access, validate arguments with strict JSON schema, and bind each session to a credential vault handle that resolves secrets out-of-band. Log tool invocations with structured fields for auditing. Cap recursion depth and parallel tool calls, and require human confirmation for irreversible actions such as financial transfers or mass emails when policies demand it.
+  </InterviewQuestion>
+</InterviewQuestions>

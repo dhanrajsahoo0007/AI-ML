@@ -1,0 +1,24 @@
+---
+title: Document Processing & Chunking Strategies
+description: Parsing, splitting, and enriching documents so embeddings and retrieval pipelines preserve meaning and stay efficient.
+---
+
+Retrieval-augmented generation and similar workflows depend on turning documents into retrievable units. Chunking is not merely splitting text at a character budget; it is a compression of structure and semantics into segments that an embedding model can represent faithfully and that a retriever can rank against queries. Poor chunking produces fragments that lack local context, duplicate content across neighbors, or split tables and code blocks in ways that destroy parseability.
+
+Parsing paths differ by format. HTML benefits from DOM-aware extraction that strips boilerplate and preserves headings as metadata. Markdown often carries explicit hierarchy you can use for section-aware splits. PDFs are hardest: layout engines, multi-column pages, headers, and footers require specialized libraries or OCR when text is embedded as images, and you should store page numbers and bounding boxes when downstream citations matter. Regardless of format, extracting titles, section paths, source URLs, authorship, and timestamps as metadata improves filtering and reranking later.
+
+Chunking strategies include fixed-size windows with overlap, recursive splitting that prefers natural boundaries such as paragraphs and sentences, and semantic chunking that merges or splits based on embedding similarity between adjacent sentences. Fixed windows are predictable and cheap but can bisect lists and equations. Recursive approaches respect linguistic boundaries at the cost of variable chunk sizes. Semantic chunking can yield more coherent units but adds latency and complexity because it requires an embedding pass or a smaller model to score coherence before the main embedding job.
+
+Overlap reduces boundary effects where a concept spans two chunks, but excessive overlap inflates storage, increases redundant hits in retrieval, and can bias vector indexes toward repetitive boilerplate. Chunk size trades recall against precision: very small chunks match specific facts but lose surrounding constraints; very large chunks preserve context but dilute the embedding and may exceed model input limits during reranking. Production systems often combine hierarchical chunking (parent documents with child passages), deduplication at index time, and evaluation with human-judged retrieval metrics rather than guessing sizes from defaults alone.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why might recursive splitting outperform fixed-size chunking for technical documentation?" category="RAG">
+    Technical docs contain lists, code fences, and cross-references that fixed windows cut arbitrarily. Recursive splitting walks a hierarchy of separators so chunks tend to end at paragraph or sentence boundaries, keeping syntactic units intact. That improves both human readability in citations and embedding quality because the model sees complete instructions rather than half a code block.
+  </InterviewQuestion>
+  <InterviewQuestion question="What metadata would you attach to each chunk before indexing?" category="Implementation">
+    At minimum store document id, stable chunk id, section title or path, content type, language, creation or crawl time, and source URI. For PDFs add page number; for APIs add tenant or product id if multi-tenant. Optional enrichments include token count, quality flags from parsing, ACL scope for authorization at query time, and parent chunk ids for hierarchical retrieval.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose chunk size and overlap for a new domain?" category="Trade-offs">
+    Start from embedding model context limits and reranker budgets, then run offline experiments with labeled question-chunk relevance pairs or LLM judges on a held-out query set. Measure nDCG or recall at k across chunk sizes and overlaps, and inspect failure modes such as merged topics or over-split procedures. Balance index size and cost: larger overlap improves recall at boundaries but multiplies vectors and can add noisy duplicates unless you deduplicate or down-weight them.
+  </InterviewQuestion>
+</InterviewQuestions>

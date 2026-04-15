@@ -1,0 +1,24 @@
+---
+title: Model Registry & Governance
+description: Catalog models with cards and approvals, govern staging-to-production promotion, track lineage, and retire models safely so production ML stays auditable and compliant.
+---
+
+A model registry is the operational catalog between training output and inference deployment. It stores versioned model packages with metadata: metrics on canonical benchmarks, intended use constraints, training data provenance, fairness evaluations, and owning teams. Consumers resolve a logical model name to a pinned stage such as staging or production, which decouples frequent training iterations from the stability requirements of live traffic. Governance layers add approval workflows so risk, legal, or domain experts sign off before promotion.
+
+Model cards and documentation are not paperwork for its own sake; they encode the assumptions under which metrics were measured and the known failure modes. Approval workflows should attach evidence: links to experiment runs, evaluation notebooks or reports, and change summaries when architecture or data shifts. Staging environments mirror production feature pipelines so promoted models are validated against realistic inputs before receiving customer load. Deprecation policies specify end-of-life dates, fallback models, and communication paths so dependent services do not silently reference retired versions.
+
+Lineage tracking connects datasets, feature engineering jobs, training code revisions, and deployed endpoints. When an upstream data vendor corrects historical records or a bug is found in a labeler tool, lineage makes blast-radius analysis feasible: which models consumed affected partitions and which endpoints must be rolled back or retrained. Governance policies translate organizational risk appetite into automated checks: block promotion if mandatory tests are missing, if PII scanning failed, or if a high-risk use case lacks secondary review.
+
+Trade-offs include centralization versus team autonomy. A strict global registry improves auditability but can bottleneck teams if every hotfix needs a committee. Federated registries per business unit with shared interfaces sometimes scale better. Another tension is metadata completeness versus form fatigue; dynamic forms that adapt to model type (tabular versus generative) keep required fields relevant without drowning computer vision teams in NLP-specific questions.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What gates would you require before promoting a generative model to production?" category="Governance">
+    I would require documented intended use and out-of-scope uses, safety and content policy evaluations including adversarial prompts, privacy checks for memorization or PII leakage on representative corpora, latency and cost envelopes, and rollback plans. Technical gates include reproducible evaluation artifacts, versioned training data references, and sign-off from product and policy owners. Automated checks would enforce presence of those artifacts and block if red-team findings are open without explicit exception records.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a model registry fit into a microservices architecture?" category="Architecture">
+    Serving services resolve model ids and stages from the registry API or synced configuration rather than baking file paths into containers. Training pipelines publish new versions to the registry after validation, and deployment controllers pull immutable bundles from object storage using registry-supplied URIs and checksums. This separation lets inference scale independently, supports blue-green and canary releases, and keeps authorization for who can promote models centralized at the registry boundary.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you operationalize model deprecation?" category="Operations">
+    I would announce deprecation with a timeline, mark the registry stage as deprecated with warnings in client SDKs, and monitor remaining traffic by consumer id. Automated jobs would migrate workloads to the successor model with shadow comparison where needed, then enforce hard cutoffs after the window. I would retain artifacts per retention policy for audits, archive evaluation reports, and run post-deprecation reviews to capture lessons for the next lifecycle.
+  </InterviewQuestion>
+</InterviewQuestions>

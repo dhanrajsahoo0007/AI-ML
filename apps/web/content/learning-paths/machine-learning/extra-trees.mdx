@@ -1,0 +1,26 @@
+---
+title: Extra Trees
+description: Extremely Randomized Trees—like random forests but with random split thresholds to trade more bias for lower variance and speed.
+---
+
+Extra Trees (Extremely Randomized Trees) are an ensemble of decision trees like random forests: multiple trees on bootstrap or full data samples, aggregated by averaging or voting. The difference is **how splits are chosen**: instead of searching the best threshold along each candidate feature, Extra Trees often picks a random threshold within the feature’s range observed at the node (or among a small random set). That injects more randomness than random forests, which still optimize thresholds among considered features.
+
+The extra randomization tends to **decorrelate** trees more aggressively, which can reduce variance further at the cost of slightly higher bias. Training can be faster because exhaustive threshold search is reduced. In interviews, position Extra Trees as a sibling baseline to Random Forest—try both on tabular problems when you want a low-tuning ensemble before investing in gradient boosting.
+
+If $X_j$ denotes feature $j$ at a node with value range $[a_j, b_j]$, an extremely randomized split may sample a threshold $t_j \sim \mathrm{Uniform}(a_j, b_j)$ and partition $\{x : x_j \le t_j\}$ vs $\{x : x_j > t_j\}$, then score the split with the usual impurity or MSE criterion. The forest prediction aggregates $B$ such trees:
+
+$$
+\hat{f}(x) = \frac{1}{B}\sum_{b=1}^{B} h_b(x)
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the main difference between Random Forest and Extra Trees?" category="Comparison">
+    Both randomize which features are tried at a split, but Random Forest still searches for the best split threshold among training values. Extra Trees adds stronger randomization by using random thresholds (and sometimes trains on the full dataset per tree rather than only bootstrap samples, depending on implementation). That increases diversity and can lower variance.
+  </InterviewQuestion>
+  <InterviewQuestion question="When might Extra Trees be preferable to Random Forest?" category="Model Selection">
+    When you want faster training on large datasets with many candidate thresholds, or when you see Random Forest overfitting correlated features—Extra Trees’ stronger randomization can generalize well. When the signal is very weak and threshold precision matters, Random Forest’s exhaustive search can win.
+  </InterviewQuestion>
+  <InterviewQuestion question="Does using the full dataset for each tree (no bootstrap) hurt Extra Trees?" category="Training">
+    Not necessarily; random thresholds already diversify trees. Without bootstrap, you lose OOB estimation and may increase correlation slightly, but the algorithm still relies on random splits for diversity. In practice, implementations may offer `bootstrap=False` as a default; validate with cross-validation rather than assuming one mode is always better.
+  </InterviewQuestion>
+</InterviewQuestions>

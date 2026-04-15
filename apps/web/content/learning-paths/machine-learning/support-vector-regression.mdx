@@ -1,0 +1,36 @@
+---
+title: Support Vector Regression
+description: Fit a regression function with an ε-insensitive tube and optional kernel mapping; emphasizes support vectors and margin-style robustness.
+---
+
+Support Vector Regression (SVR) predicts a continuous target using ideas from Support Vector Machines. Instead of penalizing every small error, SVR uses an **ε-insensitive loss**: errors smaller than $\varepsilon$ count as zero loss, which makes the fit less sensitive to tiny deviations and focuses capacity on larger residuals. Points outside the tube (or on its boundary) become **support vectors** that determine the solution, which can yield sparse representations in the dual formulation.
+
+The linear version finds a flat function $f(\mathbf{x}) = \mathbf{w}^\top \mathbf{x} + b$ with controlled slope. With kernels, SVR implicitly maps inputs to a richer space where nonlinear relationships can be captured while still solving a convex optimization problem (under standard formulations). Interviewers often probe **hyperparameters**: $\varepsilon$ controls the width of the “ignore small errors” band; **C** trades off fit versus regularization; kernel choice and kernel hyperparameters control smoothness and capacity.
+
+SVR is less dominant today on tabular data than tree ensembles, but it remains a strong conceptual model for **margin-based regularization**, **kernels**, and **sparsity via support vectors**.
+
+**Linear SVR (primal-style objective sketch):**
+
+$$
+\min_{\mathbf{w}, b, \boldsymbol{\xi}, \boldsymbol{\xi}^*} \tfrac{1}{2}\|\mathbf{w}\|_2^2 + C \sum_{i=1}^{n} (\xi_i + \xi_i^*)
+$$
+
+subject to $y_i - (\mathbf{w}^\top \mathbf{x}_i + b) \le \varepsilon + \xi_i$, $(\mathbf{w}^\top \mathbf{x}_i + b) - y_i \le \varepsilon + \xi_i^*$, and $\xi_i, \xi_i^* \ge 0$.
+
+With a kernel $k(\cdot,\cdot)$, predictions use support vectors $\mathbf{x}_s$ and dual coefficients:
+
+$$
+f(\mathbf{x}) = \sum_{s \in \mathcal{S}} (\alpha_s - \alpha_s^*)\, k(\mathbf{x}_s, \mathbf{x}) + b
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the intuition behind the epsilon-insensitive tube?" category="Loss Functions">
+    It tells the optimizer not to chase noise within a small band around the prediction. That encourages a simpler, more stable function and reduces sensitivity to tiny label noise, at the cost of controlled bias for points inside the tube.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does SVR relate conceptually to SVM classification?" category="Comparison">
+    Both maximize margin-like structure while allowing slack variables controlled by C. Classification separates classes with a margin; regression fits a band around a function and penalizes violations outside the band.
+  </InterviewQuestion>
+  <InterviewQuestion question="When might SVR underperform tree ensembles on tabular data?" category="Model Selection">
+    Tree models often handle heterogeneous features, interactions, and missingness with less manual tuning. SVR can be excellent in moderate dimensions with meaningful kernels, but training, scaling, and hyperparameter sensitivity can hurt on messy wide tables without careful preprocessing.
+  </InterviewQuestion>
+</InterviewQuestions>

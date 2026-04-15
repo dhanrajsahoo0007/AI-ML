@@ -1,0 +1,24 @@
+---
+title: State Persistence & Retrieval
+description: Checkpoint orchestration and agent state with durable storage, serialization discipline, and recovery patterns so long workflows survive failures and scale across processes.
+---
+
+Stateful agents and multi-step workflows need more than an in-memory variable between HTTP requests. Persistence stores conversation transcripts, partial plan objects, tool outputs awaiting approval, and cursor positions in batch jobs. Checkpointing captures a serializable snapshot at stable boundaries: after each tool call, after human confirmation, or on a timer for streaming tasks. Without clear boundaries, you either over-persist noisy intermediate states or under-persist and lose hours of work on crash.
+
+Serialization should be explicit about schema versioning and backward compatibility. Prefer JSON with typed records or protobuf over pickled Python objects, and avoid embedding non-portable handles unless you also persist what they reference. Large binary artifacts belong in object storage with references in the state document. Encrypt sensitive fields at rest and scope encryption keys per tenant where compliance requires it.
+
+Session management ties user identity, device, and workflow id to a state record in Redis for low-latency ephemeral coordination or in a relational database when you need transactions, auditing, and complex queries. Redis suits short-lived locks, rate limits, and fast resume; Postgres suits authoritative records and compliance trails. Hybrid designs use Redis as a hot cache with asynchronous write-through to durable storage.
+
+Distributed coordination arises when multiple workers handle one session or when you scale orchestration horizontally. You need optimistic concurrency with version counters, leases with TTL to avoid stuck locks, and idempotent side effects so retries after partial failure do not double-charge or double-send. Recovery patterns include replay from last checkpoint, compensating transactions for irreversible steps, and dead-letter queues for sessions that cannot proceed.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you recover a long agent run after a worker crash?" category="Reliability">
+    Reload the last successful checkpoint from durable storage, validate schema version and referenced artifacts still exist, and resume from the next node in the graph. Re-execute idempotent steps freely; gate irreversible external calls behind idempotency keys and compare stored intent hashes before retrying. Surface partial results to the user with a clear resumed status and audit log of the failure window.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you choose Redis versus a SQL database for workflow state?" category="Architecture">
+    Use Redis when you need sub-millisecond reads, ephemeral coordination, and can tolerate optional durability trade-offs unless you enable persistence features carefully. Use SQL when you need strong durability guarantees, complex querying, relational integrity across tables, and straightforward backup and compliance reporting. Many systems use Redis for fast locks plus async persistence to SQL for source of truth.
+  </InterviewQuestion>
+  <InterviewQuestion question="What serialization pitfalls break agent checkpointing in production?" category="Implementation">
+    Non-serializable objects such as open sockets or closures, unbounded growth of debug fields, implicit timezone-naive timestamps, and breaking changes to field names without migrations. Also watch for secrets ending up in plaintext snapshots. Mitigate with explicit DTOs, size limits, migration shims, and field-level encryption for credentials or tokens referenced by state.
+  </InterviewQuestion>
+</InterviewQuestions>

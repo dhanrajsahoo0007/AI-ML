@@ -1,0 +1,24 @@
+---
+title: Guardrails & Output Validation
+description: Layer policy, filtering, and validation around LLM inputs and outputs so systems remain safe, compliant, and aligned with product rules under adversarial and noisy real-world traffic.
+---
+
+Guardrails span the request path and the response path. Input guardrails screen for jailbreak patterns, prompt injection attempts, disallowed topics, oversized payloads, and sensitive attachments before they reach the model or tools. Output guardrails enforce tone policies, block prohibited content, redact or block personally identifiable information, and verify that claims stay within allowed knowledge boundaries when that matters for regulated domains. Architecturally, these are independent services or libraries with clear interfaces so policies can evolve faster than core model routing.
+
+Off-the-shelf frameworks such as NeMo Guardrails and Guardrails AI provide rule languages, validators, and integration patterns for chaining checks. They shine when you want declarative policies, conversation-level constraints (for example, stay on topic across turns), and reusable validators for structured fields. Custom validators remain essential for domain logic: verifying that a generated SQL references only allow-listed tables, that medical advice includes required disclaimers, or that JSON outputs satisfy business invariants. Combine lightweight regex and keyword filters for obvious cases with model-based classifiers for nuanced abuse, keeping latency budgets explicit.
+
+Fail-safe defaults matter as much as detection accuracy. When a classifier is uncertain, the safer product choice may be to refuse, ask a clarifying question, or route to human review rather than to stream a confident harmful answer. Logging blocked events with redacted excerpts supports tuning thresholds without storing excessive sensitive data. Be cautious of feedback loops where aggressive filtering degrades user trust; tune precision and recall against real traffic slices and measure false positives on legitimate edge cases.
+
+Trade-offs include latency stacking when many checks run sequentially, maintenance of policy rules across locales, and adversarial adaptation where attackers probe your stack. Parallelize independent checks, cache policy compilation results, and version policies alongside prompts so regressions are testable.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you balance safety versus false positives on legitimate queries?" category="Safety">
+    Measure blocked rates and human review queues on stratified samples including sensitive but legitimate topics. Tune thresholds using precision-recall targets, add context-aware second-stage review for borderline scores, and expose user-visible explanations where appropriate. Continuously add false positives from user reports into regression tests so policy updates do not repeat the same mistakes.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where should guardrails live in a microservices LLM architecture?" category="Architecture">
+    Place coarse input filters at the edge or API gateway for rate and size limits, run policy-heavy checks in a dedicated policy service shared by all callers, and keep final output validation close to the channel that renders to users or triggers tools. Avoid duplicating contradictory rules in every service; centralize policy definitions with local enforcement hooks so latency and consistency remain manageable.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you implement PII detection in an LLM response pipeline?" category="Implementation">
+    Run a detector ensemble: fast pattern-based scans for emails and phone-like strings, NER or transformer-based detectors for names and addresses, and optional allow-lists for known safe placeholders. On match, either redact with tokens, block the response, or route to human review based on severity. Log counts and categories without retaining raw PII unless legally authorized, and test with multilingual and formatted edge cases.
+  </InterviewQuestion>
+</InterviewQuestions>

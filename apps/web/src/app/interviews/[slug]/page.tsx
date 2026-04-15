@@ -1,10 +1,5 @@
 import { notFound } from "next/navigation";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
+import { Breadcrumb } from "@/components/breadcrumb";
 import { ArticleLayout } from "@/components/article-layout";
 import { getContentSlugs, loadMdxDoc } from "@/lib/mdx-doc";
 
@@ -26,32 +21,17 @@ export default async function InterviewPage({
 
   const doc = await loadMdxDoc("interviews", slug);
 
-  return (
-    <div className="space-y-8">
-      <section className="not-prose rounded-lg border border-dashed border-border/70 bg-muted/30 p-4">
-        <h2 className="text-sm font-semibold tracking-tight">Accordion drill</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Use the component below for quick recall; the MDX page keeps the same
-          questions with native collapses for zero JavaScript.
-        </p>
-        <Accordion className="mt-4 w-full">
-          <AccordionItem value="one">
-            <AccordionTrigger>How do you structure a take-home answer?</AccordionTrigger>
-            <AccordionContent>
-              Clarify requirements, propose metrics, sketch architecture, call out
-              tradeoffs, and end with tests, rollout, and observability.
-            </AccordionContent>
-          </AccordionItem>
-          <AccordionItem value="two">
-            <AccordionTrigger>What signals a strong ML system design interview?</AccordionTrigger>
-            <AccordionContent>
-              Explicit data contracts, offline vs online paths, failure handling,
-              cost controls, and iterative delivery—not just model choice.
-            </AccordionContent>
-          </AccordionItem>
-        </Accordion>
-      </section>
+  const crumbs = [
+    { label: "Home", href: "/" },
+    { label: "Interviews", href: "/interviews" },
+    { label: doc.frontmatter.title ?? slug },
+  ];
 
+  return (
+    <div>
+      <div className="mx-auto max-w-4xl px-4 pt-6 md:px-8">
+        <Breadcrumb items={crumbs} />
+      </div>
       <ArticleLayout
         title={doc.frontmatter.title ?? slug}
         description={doc.frontmatter.description}

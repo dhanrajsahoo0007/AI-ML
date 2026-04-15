@@ -1,0 +1,32 @@
+---
+title: Gradient Boosting Regression
+description: Sequentially add weak learners to correct residuals, minimizing loss via gradient descent in function space; the backbone of many winning tabular models.
+---
+
+Gradient boosting builds an additive model in stages. You start with a simple base prediction (often the mean target), then add a new weak learner—usually a **shallow regression tree**—chosen to reduce the loss most effectively. The key idea is **pseudo-residuals**: for many losses, the “direction” to improve resembles negative gradients of the loss with respect to the current predictions, hence the name **gradient** boosting. Each new tree fits those residuals (or a related target), and its contribution is scaled by a **learning rate** (shrinkage) to prevent overshooting.
+
+Interviewers expect you to discuss **bias–variance** differently from bagging: boosting tends to reduce bias stepwise and can overfit if you add too many deep trees without regularization. Modern implementations add safeguards: **subsample** (stochastic boosting), **column subsampling**, **L1/L2 leaf regularization**, **early stopping** on a validation set, and depth limits. Boosting often achieves excellent accuracy on structured data but requires more careful tuning than Random Forests.
+
+Conceptually, boosting optimizes a loss $\mathcal{L}(y, \hat{y})$ by expanding $\hat{y}$ as a sum of weak learners $h_m$:
+
+$$
+\hat{y}^{(M)}(\mathbf{x}) = \hat{y}^{(0)} + \eta \sum_{m=1}^{M} h_m(\mathbf{x})
+$$
+
+where $\eta$ is the learning rate (shrinkage). Each $h_m$ is trained to approximate the negative gradient of the loss with respect to the current predictions at training points:
+
+$$
+r_{i}^{(m)} = - \left. \frac{\partial \mathcal{L}(y_i, \hat{y})}{\partial \hat{y}} \right|_{\hat{y} = \hat{y}^{(m-1)}(\mathbf{x}_i)}
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question="How does boosting differ from Random Forests in mechanism and typical error profile?" category="Comparison">
+    Forests train trees independently on bootstrapped data and average predictions (variance reduction). Boosting trains trees sequentially to correct errors of the ensemble (often strong low bias if unchecked, with overfitting risk). Boosting frequently wins with tuning; forests are a robust low-effort baseline.
+  </InterviewQuestion>
+  <InterviewQuestion question="What role does the learning rate play?" category="Training">
+    It scales each new tree’s contribution. A smaller learning rate typically requires more trees (more stages) but can improve generalization by taking smaller steps toward the loss minimum, analogous to gentler optimization.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why are shallow trees common in boosting?" category="Architecture">
+    Each tree is meant to be a weak correction; depth controls capacity per stage. Shallow trees reduce overfitting per step and let many stages combine into a flexible overall function under shrinkage and other regularizers.
+  </InterviewQuestion>
+</InterviewQuestions>

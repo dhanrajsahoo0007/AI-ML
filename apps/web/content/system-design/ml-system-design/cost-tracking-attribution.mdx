@@ -1,0 +1,24 @@
+---
+title: Cost Tracking & Attribution
+description: Per-request LLM cost, attribution to products and teams, budgets, and showback versus chargeback for generative AI workloads.
+---
+
+LLM bills are volatile: list prices change, cached tokens discount prefill, and tool calls add hidden compute. Production systems should compute an estimated cost per request at inference time using model id, pricing table version, input and output token counts, and any surcharges such as embedding or reranker calls. Persisting cost alongside trace identifiers lets finance and engineering reconcile provider invoices with internal usage and spot anomalies like runaway loops or prompt injection that balloon tokens.
+
+Attribution ties those costs to business dimensions: feature flags, product surfaces, customer tiers, engineering teams, or experiments. Tag requests at the edge with stable dimensions propagated through async work so allocation survives fan-out. Without tags, centralized AI platforms become opaque cost centers. With tags, product leaders can compare unit economics across flows and decide where cheaper models or caching are acceptable.
+
+Budget alerts should be layered: soft warnings when burn rate exceeds forecast, harder throttles for runaway jobs, and executive dashboards for monthly variance. Optimization strategies include prompt compression, retrieval limits, model routing to smaller models for easy subtasks, response length caps, semantic caching for repeated queries, and batch APIs for non-interactive work. Chargeback moves real dollars to cost centers and drives behavior fast but adds accounting overhead and can discourage shared platform investment. Showback displays costs without internal billing and is gentler for adoption but weaker for accountability.
+
+Governance ties cost to policy: approved models per data class, approval for high-spend experiments, and guardrails so junior services cannot call frontier models by default. Architecturally, a central inference gateway can enforce metering, quotas, and logging in one place rather than reimplementing limits in every client.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you attribute shared infrastructure cost when many microservices call the same LLM gateway?" category="Cost">
+    Require every caller to send non-optional dimensions such as service name, product id, and environment, validate them at the gateway, and aggregate usage in a warehouse keyed by those dimensions. For untagged legacy traffic, fall back to inferred attribution from API keys or mTLS identity and run remediation programs. Amortize reserved GPU or committed spend across tenants using agreed rules such as proportional token use or fixed platform fees plus variable usage.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are the trade-offs between chargeback and showback for an internal AI platform?" category="Governance">
+    Chargeback creates strong incentives to optimize and fund shared capacity fairly but increases disputes, forecasting work, and risk that teams bypass the platform to avoid internal bills. Showback educates owners with lower friction and keeps collaboration high but may not change behavior until budgets are exceeded externally. Hybrid models with showback first and selective chargeback for high-spend teams are common during platform maturation.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where in the architecture should cost metering live for LLM calls?" category="Architecture">
+    A centralized inference proxy or sidecar is ideal because it sees final token counts, model routing decisions, and retries in one place and can apply consistent pricing versions. Client-only estimates drift when retries and streaming chunk accounting differ from provider logs. The gateway should emit immutable metering events to an analytics pipeline while still allowing async reconciliation against vendor invoices nightly.
+  </InterviewQuestion>
+</InterviewQuestions>

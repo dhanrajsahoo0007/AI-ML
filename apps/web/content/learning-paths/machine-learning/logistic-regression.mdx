@@ -1,0 +1,34 @@
+---
+title: Logistic Regression
+description: A linear model for binary and multi-class classification using the logistic (sigmoid) link and maximum likelihood.
+---
+
+Logistic regression predicts **class probabilities** by passing a linear score through a squashing function. You still learn weights for each feature, but the output is bounded between 0 and 1 instead of an unbounded real line like ordinary least squares. That makes it a natural fit for **classification** and for **calibrated** probability estimates when assumptions are roughly met.
+
+Training usually maximizes the **log-likelihood** (or equivalently minimizes **log loss / cross-entropy**). Because the loss is convex in the weights (for the standard formulation), you get a **single global optimum** with standard solvers—no messy local minima from the objective itself. In practice, regularization (L1/L2) is common to reduce overfitting and stabilize coefficients when features are correlated or high-dimensional.
+
+Interviewers often probe whether you treat logistic regression as “regression” or “classification.” The name is historical: it **models the log-odds as linear in the features**, but the decision rule and evaluation are classification-oriented. It shines when relationships are mostly **monotonic** and **additive**; it struggles with strong nonlinear boundaries unless you add features, interactions, or use other models.
+
+$$
+P(y=1 \mid \mathbf{x}) = \sigma(\mathbf{w}^\top \mathbf{x} + b) = \frac{1}{1 + e^{-(\mathbf{w}^\top \mathbf{x} + b)}}
+$$
+
+For multi-class problems, **softmax** generalizes the same idea:
+
+$$
+P(y=k \mid \mathbf{x}) = \frac{e^{\mathbf{w}_k^\top \mathbf{x} + b_k}}{\sum_{j} e^{\mathbf{w}_j^\top \mathbf{x} + b_j}}
+$$
+
+Training maximizes $\sum_i \log P(y_i \mid \mathbf{x}_i)$ (with optional regularization on $\mathbf{w}$).
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why do we use the sigmoid instead of thresholding a linear regression output?" category="Model Design">
+    A raw linear score is unbounded, so it is not a coherent probability model and hard-thresholding is brittle. The sigmoid maps the score to (0,1) and arises naturally from modeling log-odds as linear in the features, which also yields a smooth, convex log-likelihood for optimization.
+  </InterviewQuestion>
+  <InterviewQuestion question="Is logistic regression linear or nonlinear?" category="Fundamentals">
+    The decision boundary in feature space is linear (a hyperplane) for the standard model because the boundary is where w·x+b=0. The mapping from parameters to probabilities is nonlinear (sigmoid/softmax), but the separation surface remains linear in the given features.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does L2 vs L1 regularization change the learned weights?" category="Regularization">
+    L2 shrinks coefficients smoothly toward zero and spreads weight across correlated features. L1 encourages sparsity (many exact zeros), performing implicit feature selection, but can be unstable with highly correlated predictors unless combined (e.g., elastic net).
+  </InterviewQuestion>
+</InterviewQuestions>

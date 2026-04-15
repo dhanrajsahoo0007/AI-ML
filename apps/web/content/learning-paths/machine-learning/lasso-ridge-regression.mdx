@@ -1,0 +1,36 @@
+---
+title: Lasso & Ridge Regression
+description: Linear regression with L2 (Ridge) or L1 (Lasso) penalties to shrink coefficients, reduce variance, and perform implicit feature selection.
+---
+
+**Ridge regression** adds an L2 penalty on the weights: it pulls coefficients toward zero but typically keeps all features in the model. That shrinks large weights and reduces variance, which helps when you have correlated features or more dimensions than you can reliably estimate from limited data. The tradeoff is controlled by a tuning hyperparameter (often denoted $\lambda$ or $\alpha$): larger values mean more shrinkage and a simpler model.
+
+**Lasso regression** adds an L1 penalty. L1 is special because it can drive some coefficients exactly to zero, producing **sparse** solutions that behave like embedded feature selection. That is useful when you suspect many features are irrelevant or when you want an interpretable short list of drivers. Lasso can be unstable when features are highly correlated (it may arbitrarily pick one among a correlated group).
+
+In interviews, be ready to compare **bias–variance**: both methods introduce bias to reduce variance; Ridge is often better for prediction when all features carry signal; Lasso helps when the true model is sparse. **ElasticNet** (a separate note in this path) blends L1 and L2 to get some of both behaviors.
+
+**Ridge (L2):**
+
+$$
+\min_{\mathbf{w}, b} \sum_{i=1}^{n} \left( y_i - (\mathbf{w}^\top \mathbf{x}_i + b) \right)^2 + \lambda \|\mathbf{w}\|_2^2
+$$
+
+**Lasso (L1):**
+
+$$
+\min_{\mathbf{w}, b} \sum_{i=1}^{n} \left( y_i - (\mathbf{w}^\top \mathbf{x}_i + b) \right)^2 + \lambda \|\mathbf{w}\|_1
+$$
+
+where $\|\mathbf{w}\|_1 = \sum_j |w_j|$ and $\|\mathbf{w}\|_2^2 = \sum_j w_j^2$.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Geometrically or intuitively, why does L1 sparsify while L2 does not?" category="Regularization">
+    The L1 penalty has corners along coordinate axes in the weight space; the optimum often sits on a corner where some weights are exactly zero. The L2 penalty is rotationally symmetric and smooth, so the optimum generally shrinks all weights proportionally without forcing exact zeros.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should you standardize features before Ridge or Lasso?" category="Feature Engineering">
+    Yes, in most cases. Penalties treat all dimensions equally in magnitude; if one feature is on a much larger scale, it will be unfairly penalized or dominate unless features are scaled consistently (for example standardization).
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose lambda in practice?" category="Hyperparameters">
+    Use cross-validation on a held-out metric (often MSE or MAE). You sweep a grid of lambda values on a log scale, fit models, and pick the value that generalizes best, balancing underfitting (too large lambda) versus overfitting (too small lambda).
+  </InterviewQuestion>
+</InterviewQuestions>

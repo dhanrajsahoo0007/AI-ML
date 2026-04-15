@@ -1,0 +1,24 @@
+---
+title: A/B Testing for Prompts & Models
+description: Experiment design, traffic allocation, statistical power, guardrails, sequential testing, and bandits for prompt optimization.
+---
+
+Prompt and model changes are not traditional UI tweaks; they alter distributions of tokens, safety outcomes, and downstream automation. Experiments need preregistered hypotheses, primary metrics such as task success or revenue proxies, and guardrail metrics including toxicity rate, P95 latency, cost per session, and escalation to human support. Traffic splitting should be stable per user or session to avoid inconsistent experiences, implemented at a reliable assignment layer with salted hashes rather than ad hoc random calls in each microservice.
+
+Statistical power depends on baseline rates, minimum detectable effect, and variance. Rare events like safety violations need enormous samples, so composite guardrails and Bayesian monitoring help, but do not replace careful power analysis before launch. Sequential testing methods allow earlier stopping under controlled false-positive rates when effects are large, which suits fast iteration environments, though they require statistical literacy to avoid peeking abuse.
+
+Multi-armed bandits allocate more traffic to better-performing arms dynamically, useful when exploring many prompt variants or retrieval configurations. They trade exploration for exploitation: pure bandits optimize short-term reward but can under-explore risky tails, so constrained bandits with safety caps or periodic exploration phases are safer for LLM products.
+
+Architecture considerations include feature flags with consistent bucketing, back-end enforcement so clients cannot self-select variants, and idempotent logging of assignments for analysis. When models differ in cost, cap concurrent exposure of expensive arms and monitor infrastructure saturation as a first-class outcome.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you choose metrics and guardrails for an A/B test comparing two system prompts for a customer-facing assistant?" category="Experimentation">
+    Pick a primary metric aligned with the product goal such as successful task completion or customer satisfaction proxy, and define guardrails on latency, cost per conversation, harmful output rate, human handoff rate, and regression on critical intents from a labeled mini-eval. Precommit to stopping rules and duration, and segment readouts by cohorts like language or plan tier to catch hidden harms.
+  </InterviewQuestion>
+  <InterviewQuestion question="What statistical pitfalls appear when analyzing LLM experiments with high variance outcomes?" category="Statistics">
+    High variance widens confidence intervals and demands larger samples; peeking without sequential correction inflates false positives; multiple metrics increase family-wise error unless adjusted; Simpson's paradox can appear if traffic mix shifts during the test. Use preanalysis plans, cluster standard errors if users contribute repeated sessions, and validate with offline held-out sets when online signals are noisy.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you use a multi-armed bandit instead of a fixed 50-50 A/B allocation for prompt selection?" category="Architecture">
+    Use bandits when you have many candidates, exploration cost is tolerable, and the reward signal is frequent enough for learning within the experiment window, such as click-through on suggested replies. Prefer fixed A/B for rare or high-risk outcomes, when you need clean causal readouts for executive reporting, or when infrastructure cannot handle uneven unpredictable load from adaptive routing without autoscaling headroom.
+  </InterviewQuestion>
+</InterviewQuestions>

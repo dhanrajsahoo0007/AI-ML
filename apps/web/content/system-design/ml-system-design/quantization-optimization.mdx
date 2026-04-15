@@ -1,0 +1,24 @@
+---
+title: Quantization & Optimization Techniques
+description: Shrinking models and accelerating inference with reduced-precision weights and complementary compression methods.
+---
+
+Quantization maps high-precision weights and activations to lower bit widths so models fit in less VRAM and move fewer bytes per matmul. INT8 post-training quantization is widely supported and often preserves accuracy on large models when kernels are well tuned. INT4 and mixed schemes such as GPTQ or AWQ push further by exploiting per-channel scales and sometimes protecting sensitive weight outliers. FP8 on Hopper-class hardware offers a sweet spot where dynamic range is better than INT8 with competitive throughput when tensor cores expose fast FP8 paths.
+
+GGUF and similar formats matter for CPU and consumer-GPU inference ecosystems where portability and mmap-friendly single files simplify deployment, though server-class GPU stacks more often use TensorRT engines or vendor-specific checkpoints. Quantization is not the only lever: structured pruning removes whole channels or heads with retraining or distillation to recover accuracy, and knowledge distillation trains a smaller student to mimic a teacher logits or hidden states.
+
+Quality degradation must be measured on tasks that mirror production, not only perplexity. Use held-out prompts with rubric scoring, regression suites for function calling and JSON validity, and domain-specific benchmarks for code or math. Calibration datasets for static quantization should reflect real input token distributions; mismatched calibration, for example only short prompts when production uses huge contexts, skews scales and raises error rates.
+
+Trade-offs include engineering time to integrate kernels, brittleness across hardware generations, and harder debugging when numerical issues surface as subtle hallucination increases rather than hard crashes. Some teams keep a full-precision shadow model for offline evaluation while serving quantized weights online.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between PTQ and QAT for LLM deployment?" category="Optimization">
+    Post-training quantization adjusts scales and zero points after training without gradient updates, which is fast but can clip important weights if outliers are mishandled. Quantization-aware training simulates low precision during training so weights adapt, often yielding better accuracy at aggressive bit widths at the cost of longer training cycles and more complex tooling.
+  </InterviewQuestion>
+  <InterviewQuestion question="When might INT4 weight-only quantization be risky for a customer support bot?" category="Trade-offs">
+    Customer bots mix long context, policy-heavy language, and tool use where small logits shifts break JSON or choose wrong tools. INT4 can increase brittle failures on rare intents. If tail quality and compliance matter, validate on stratified transcripts, keep safety classifiers calibrated, and consider INT8 or FP8 for the highest-risk tenants or reserve INT4 for draft generation with verification.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you build a calibration dataset for static INT8 activation quantization?" category="Implementation">
+    Sample realistic prompts and multimodal inputs from production logs with PII scrubbed, stratified by length, language, and feature flags. Include edge cases such as empty inputs, unicode-heavy text, and maximum-length stress tests. Run enough batches to stabilize histograms of activations, version the dataset with the model checkpoint, and re-run calibration when architecture or preprocessing changes.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,24 @@
+---
+title: Alerting & Dashboards
+description: Dashboard design, SLO burn rates, anomaly alerts, and on-call patterns for LLM production systems.
+---
+
+Dashboards for LLM systems should tell a story in three layers: user experience, pipeline health, and economics. The experience layer shows TTFT, error rates, and client-side abandonment if instrumented. The pipeline layer breaks out retrieval, reranking, model inference, and tool calls with saturation indicators such as queue depth and thread pool usage. The economics layer tracks tokens, cost per successful request, and cache hit rates so incidents that spare latency still surface when they burn budget.
+
+Visualization choices matter: heatmaps by model version and route expose canary regressions; burn-rate charts for SLOs highlight fast versus slow violations of error budgets. Anomaly detection on seasonal metrics such as weekend traffic can reduce false positives compared to static thresholds, but needs baselines that account for marketing launches and model upgrades. SLO burn-rate alerting, popularized by Google SRE practice, pages engineers when consumption of the monthly error budget accelerates dangerously even if instantaneous rates look fine.
+
+Integrations with Grafana, Datadog, or cloud-native observability stacks reuse existing on-call rotations, escalation policies, and incident timelines. LLM-specific nuance is that some failures are soft quality degradations without HTTP 500s, so alerts should include evaluation score drops, rising toxicity block rates, or sudden embedding latency spikes. Runbooks should link from alerts to dashboards filtered to the failing region and to recent deploys or feature flags.
+
+Trade-offs include alert fatigue from flaky judges or sampled metrics versus missing silent failures when sampling is too sparse. Align alert thresholds with customer-visible pain, use multi-window burn rates, and route non-urgent quality drift to daytime tickets rather than pages.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What distinguishes a good on-call runbook for an LLM serving incident from a generic API outage runbook?" category="Operations">
+    It includes steps for checking model version rollouts, tokenizer or template mismatches, GPU OOM patterns, retrieval index freshness, rate limits from upstream providers, and quality metric dashboards not just status codes. It names owners for prompt changes versus infra changes, documents safe rollback including prior model weights or cached prompt ids, and lists communication templates for customer-facing degradation when outputs are low quality but technically 200 OK.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you architect dashboards so product and platform teams share one source of truth?" category="Architecture">
+    Store canonical metrics in a time-series backend with consistent naming conventions and required dimensions such as product, model, and region. Build curated boards per persona that read from the same metric definitions rather than duplicating queries. Use recording rules or metric layers so complex formulas live in one place, version dashboard JSON in git where possible, and document semantic meaning of each panel to avoid divergent interpretations.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you use multi-window burn-rate alerts instead of simple threshold alerts on error rate?" category="Monitoring">
+    Multi-window burn rates catch both sharp spikes and gradual leaks of reliability by comparing short and long windows against SLO budgets. Simple thresholds miss slow burns that exhaust the budget over days or misfire on noisy low-traffic routes. Burn-rate alerts align paging to customer impact tied to explicit SLOs, though they require careful tuning of severity windows and minimum event counts to avoid flapping on sparse data.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,24 @@
+---
+title: Batch vs Real-time Inference
+description: Choosing and combining offline batch scoring with synchronous online serving based on SLAs and data freshness.
+---
+
+Batch inference maximizes throughput by scheduling large volumes of inputs when latency to any single row is flexible. It fits nightly scoring, embedding backfills, evaluation harnesses, and offline feature generation for training sets. Systems typically partition inputs, run embarrassingly parallel workers with checkpointing, and write idempotent outputs to partitioned tables. Failures are retried at partition granularity without user-visible timeouts.
+
+Real-time inference serves individual or small batches of requests with tight latency budgets, often through autoscaling HTTP or gRPC services behind load balancers. It fits search ranking, fraud checks, chat assistants, and personalization where the user waits on the result. These paths optimize for tail latency, graceful degradation, and observability per request rather than aggregate rows per dollar alone.
+
+Hybrid patterns are common: embed documents asynchronously while querying synchronously against the warm index, or run a fast online model with periodic batch refresh of heavier teacher scores. Feature freshness requirements drive the split: if marketing segments can tolerate hours of lag, batch is cheaper; if fraud signals must reflect the last few seconds, you pay for streaming features and online models.
+
+SLA-driven design starts from user-visible deadlines, then budgets network, gateway, retrieval, and model time. When SLAs conflict with cost, teams introduce approximate answers, partial retrieval, or model cascades that try cheap paths first. The main trade-off is operational complexity: two stacks to maintain versus forcing batch jobs into an online path that will thrash under load or waste GPUs idle overnight.
+
+<InterviewQuestions>
+  <InterviewQuestion question="When is batch inference inappropriate even if average latency requirements seem loose?" category="Architecture">
+    It is inappropriate when decisions must reflect events that arrive continuously and stale scores cause bad outcomes, such as live bidding, safety moderation on uploads, or operational alerts. It is also wrong when feedback loops need immediate updates to avoid training on outdated labels, unless you explicitly design delayed supervision with safe defaults in between.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are the main downsides of running everything as real-time inference?" category="Trade-offs">
+    Cost scales with peak concurrency, GPUs sit underutilized off-peak, and complex autoscaling increases incident surface. Large bulk recomputes become expensive and slow compared to optimized batch frameworks. You also lose easy checkpointed replay unless you build the same durability guarantees batch systems get for free.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you design a hybrid pipeline for document classification with a daily retrain?" category="Design">
+    Stream new documents into a queue that updates a near-real-time tier one classifier for user-facing triage, while nightly jobs retrain or finetune on accumulated labels and validate on holdouts. Promote new weights through a canary deployment with shadow scoring, then switch the online service. Keep versioned features so batch training rows align with what online inference used historically.
+  </InterviewQuestion>
+</InterviewQuestions>

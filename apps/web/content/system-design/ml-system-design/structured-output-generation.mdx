@@ -1,0 +1,24 @@
+---
+title: Structured Output Generation
+description: Force LLM responses into machine-parseable shapes using schema-aware decoding, tool interfaces, and validation loops so downstream systems stay dependable.
+---
+
+Downstream automation breaks when models emit prose instead of predictable records. Modern APIs expose JSON mode, constrained decoding, or function and tool calling interfaces that bias generation toward syntactically valid structures. Architecturally, you decide whether structure is enforced primarily by the model provider, by a grammar-constrained local decoder, or by post-hoc parsing and repair. Provider-native JSON modes reduce client complexity but tie you to vendor behavior and error messages; local constrained generation can add latency and integration work but offers portability.
+
+Application layers often model expected outputs with typed schemas (for example, Pydantic or JSON Schema) and validate parsed objects before business logic runs. Validation catches subtle issues: correct JSON with wrong field types, missing required keys, or enum values outside the allowed set. A common pattern is generate, parse, validate, and on failure issue a short repair prompt or switch to a smaller verifier model that only fixes syntax against the schema. Recursive summarization of validation errors into the retry prompt improves convergence compared to generic try again messages.
+
+Grammar-based generation and logit masking (where supported) reduce the probability of malformed tokens at the source by restricting each decoding step to tokens that keep the partial string in a valid grammar for JSON or a domain-specific language. This is powerful for strict protocols but can interact poorly with tokenizer boundaries and may not be available on every endpoint. Function calling treats the schema as a tool definition the model fills, which can yield higher reliability for tool-shaped tasks than free-form JSON instructions alone.
+
+Trade-offs include latency from retries, cost from multi-pass generation, and brittleness when the schema is overly rigid for genuinely fuzzy user intents. Good design matches schema granularity to the task, separates free-text user explanations from machine fields, and logs structured parse failures to refine prompts or schemas over time.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Outline a robust retry flow when structured output fails validation." category="Implementation">
+    Parse the raw completion, run schema validation, and if it fails return a compact error summary listing missing fields and type mismatches. Retry with the same model or a cheaper repair-focused prompt that sees only the invalid JSON and the schema excerpt, capped at a small number of attempts. If still failing, fall back to a deterministic template partial fill plus human review flag, and log the failure pattern for prompt or schema updates.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why might JSON mode still produce logically invalid outputs?" category="Reliability">
+    JSON mode generally enforces syntax, not semantics. The model can emit valid JSON with wrong keys, wrong types, hallucinated enum values, or values that violate cross-field constraints. Without a validation layer and business rules, consumers can misinterpret data silently. Always pair syntactic guarantees with schema validation and domain checks.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose between function calling and a plain JSON schema prompt?" category="Design">
+    Prefer function calling when the provider implements it well for your target models and your output maps naturally to a tool invocation shape. Use explicit JSON schema prompts when you need broader portability, custom wrapping, or when the task is record extraction rather than tool routing. Base the decision on measured parse success, latency, and how tightly you need to couple arguments to named capabilities.
+  </InterviewQuestion>
+</InterviewQuestions>

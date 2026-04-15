@@ -1,0 +1,24 @@
+---
+title: Hallucination & Safety Detection
+description: Detection methods, safety classifiers, grounding, and confidence signals for unreliable LLM outputs.
+---
+
+Hallucinations range from subtle factual slips to confident fabrication of citations and APIs. Detection strategies include natural language inference models that check whether each sentence is entailed by retrieved context, self-consistency checks that compare multiple sampled answers for stability, and citation verification pipelines that resolve claimed URLs or document ids back to the corpus. None are foolproof: NLI models have their own errors, self-consistency is expensive, and citation strings can be well-formed but wrong.
+
+Safety classifiers address policy violations: hate, harassment, sexual content, self-harm instructions, malware assistance, and PII leakage. They may run on user input, model output, or both, with tiered models from fast linear baselines to heavier transformers or frontier models for escalation. Real-time filtering trades latency for coverage; asynchronous review can catch slower abuse patterns such as coordinated probing. Confidence scoring is fragile when models are miscalibrated, but combining verbalized uncertainty with consistency checks and retrieval score thresholds still helps triage responses for human review or templated safe fallbacks.
+
+Grounding techniques reduce hallucination upstream: force answers to quote spans, require structured outputs that reference passage ids, use constrained decoding when schemas are known, and refuse when retrieval confidence is low. Architecturally, detection often lives in a policy layer wrapping the model service so policies can evolve without retraining the base model. Logging blocked attempts supports adversarial analysis and threshold tuning.
+
+The central trade-off is false positives versus false negatives. Aggressive blocking protects brand and compliance but angers legitimate users; permissive settings increase incident risk. Calibrate thresholds per surface, offer appeals or human escalation paths for high-stakes flows, and measure downstream metrics such as override rates and time-to-resolution rather than classifier accuracy alone.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Describe how you would combine retrieval grounding with an NLI-based entailment check for factual QA." category="Safety">
+    Retrieve top passages with scores, generate an answer conditioned only on those passages, then split the answer into atomic claims and run an NLI model pairwise against each supporting passage or the union of passages. Flag or rewrite claims that are contradicted or neutral with weak evidence. Add a final policy pass for unsafe content even when claims are entailed, because grounded harmful instructions are still unacceptable.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are limitations of self-consistency for hallucination detection?" category="Detection">
+    Self-consistency assumes that the majority of diverse samples cluster around a correct answer, which fails under systematic biases, narrow sampling, or when all samples share a mistaken premise from bad retrieval. It multiplies inference cost and latency. It also struggles with subjective or creative tasks where multiple valid answers exist, so the method fits structured factual settings better than open-ended brainstorming.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where should safety and hallucination checks live in a microservices architecture for LLMs?" category="Architecture">
+    Place fast input filters at the edge or API gateway to drop obvious abuse before expensive work, run generation in a dedicated model service, then apply output classifiers and grounding verifiers in a policy microservice that can be updated independently. Stream partial tokens only after policies that can operate on prefixes if needed, or buffer minimally when checks require full answers. Centralize audit logs and configuration for thresholds to avoid inconsistent enforcement across clients.
+  </InterviewQuestion>
+</InterviewQuestions>

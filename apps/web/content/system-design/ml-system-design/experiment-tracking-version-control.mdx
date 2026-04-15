@@ -1,0 +1,24 @@
+---
+title: Experiment Tracking & Version Control
+description: Capture experiment metadata, hyperparameters, and artifacts with tools like MLflow and Weights and Biases so teams can reproduce runs, compare models, and ship with confidence.
+---
+
+Experiment tracking answers a deceptively simple question: what exactly did we run, and how did it compare to everything else? Platforms such as MLflow Tracking and Weights and Biases centralize scalar metrics, parameter dictionaries, tags, source code versions, environment fingerprints, and pointers to large artifacts like checkpoints or evaluation reports. Without that spine, notebooks and ad hoc scripts become the system of record, and reproducing a leaderboard result weeks later is often impossible.
+
+Hyperparameter logging is only the surface layer. Mature setups log dataset identifiers, preprocessing commit hashes, tokenizer versions, evaluation harness versions, and hardware details (GPU model, driver, batch size) because small shifts in any of these can move metrics more than a learning-rate tweak. Artifact versioning ties trained weights to the exact code and data that produced them; object stores or managed artifact backends keep blobs out of git while still preserving lineage through content hashes and signed metadata.
+
+Reproducibility is a spectrum. Full bitwise reproducibility across GPUs is rare, but engineering teams can target statistical reproducibility within tight confidence intervals by fixing seeds where libraries allow, recording nondeterminism flags, and storing container images or conda lockfiles. Comparison dashboards then become decision tools: filter runs by task, data snapshot, or author, diff hyperparameter grids, and overlay learning curves to catch early divergence that predicts a bad allocation of compute budget.
+
+The main trade-off is observability overhead versus researcher velocity. Heavy mandatory fields slow exploration; too light a schema invites junk tags that do not support audits. A balanced approach defines a minimal required schema per project (task id, data version, primary metric) and lets optional rich metadata attach as JSON. Another tension is cost of long-term storage for large checkpoints versus the need to resume training; retention policies should align with regulatory needs and model deprecation schedules.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do MLflow and Weights and Biases differ in typical adoption patterns?" category="Tooling">
+    MLflow is often chosen when teams want an open-source stack they can self-host, tight integration with Spark and batch training jobs, and a model registry in the same ecosystem. Weights and Biases emphasizes collaborative experiment UI, rich media logging for gradients and media, and managed SaaS with low operational burden. Both support REST APIs and Python SDKs; the choice frequently hinges on hosting constraints, budget for SaaS, and whether the organization already standardized on one vendor for the rest of MLOps.
+  </InterviewQuestion>
+  <InterviewQuestion question="What would you log to maximize reproducibility of a fine-tuning run?" category="Reproducibility">
+    I would log the git commit, full dependency lockfile or container digest, base model identifier and revision, dataset snapshot ids with checksums, train and validation splits construction code, tokenizer and vocabulary hash, training configuration including optimizer state format, mixed precision settings, and random seed policy. I would store evaluation scripts and benchmark versions, plus artifacts for checkpoints at intervals. For distributed training, I would log world size, framework version, and any custom kernels so another engineer can replay or at least closely approximate the run.
+  </InterviewQuestion>
+  <InterviewQuestion question="How should teams structure experiment naming and tagging methodology?" category="Methodology">
+    Use stable project namespaces and human-readable run names that encode the hypothesis, not only the date. Tags should separate concerns: environment (staging versus research), dataset slice, model family, and milestone such as paper submission or production candidate. Avoid overloading a single tag field with composite strings that are hard to query. Establish code review norms for experiments that declare production intent so metadata is complete before sharing results with stakeholders or promoting a model.
+  </InterviewQuestion>
+</InterviewQuestions>

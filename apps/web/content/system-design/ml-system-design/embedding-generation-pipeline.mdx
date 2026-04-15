@@ -1,0 +1,24 @@
+---
+title: Embedding Generation Pipeline
+description: Design patterns for scalable, maintainable vectorization of data with clear quality and freshness guarantees.
+---
+
+An embedding pipeline turns text, images, or multimodal records into dense vectors used for search, clustering, and feature inputs. Architecture centers on throughput, idempotency, and the lifecycle of models: you must be able to re-embed corpora when models change, handle late-arriving documents, and avoid double-charging GPU hours on duplicate work. Treat embeddings as derived artifacts versioned alongside the model name, dimensionality, and preprocessing recipe.
+
+Model selection balances quality, latency, dimensionality, license terms, and whether you need multilingual or domain adaptation. Open models let you self-host for data residency; hosted APIs simplify operations but couple cost to volume. Dimensionality affects index size and query speed: higher dimensions can improve separability but increase RAM and distance-compute cost; some teams train or apply PCA after the fact, though that is less common with modern API embeddings that ship fixed sizes.
+
+Batch generation maximizes GPU utilization by packing sequences to pad-efficient shapes and amortizing kernel launch overhead; it fits offline backfills and periodic reindex jobs. Streaming or micro-batch paths prioritize freshness for user-visible documents and pair well with queue consumers that scale with ingestion rate. Hybrid designs batch within short windows to smooth spikes while keeping p95 lag bounded.
+
+Normalize vectors when your distance metric assumes unit length, which is typical for cosine similarity workflows. Incremental updates require a stable document-to-chunk mapping so you re-embed only changed segments, using content hashes to skip unchanged work. Embedding drift arises when upstream text edits, the model is upgraded, or the data distribution shifts; mitigate it with dual-write periods, versioned vector namespaces, gradual reranking experiments, and monitoring retrieval quality against golden queries rather than assuming static vectors stay optimal forever.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you architect a pipeline to re-embed ten billion tokens after swapping embedding models?" category="Architecture">
+    Partition the corpus by shard keys, enqueue work idempotently with content hashes, and run GPU workers that write to a new index namespace keyed by model version. Keep the old index serving until the new one passes quality gates on a benchmark query set, then flip a routing flag and retire the old namespace asynchronously. Track cost and throughput per shard to right-size clusters and use spot or preemptible instances only for fault-tolerant stages with checkpointing.
+  </InterviewQuestion>
+  <InterviewQuestion question="What batching considerations matter most for embedding throughput?" category="Performance">
+    Dynamic padding or bucketing by length reduces wasted compute on short sequences. Micro-batching should respect GPU memory headroom for peak lengths. Avoid per-item synchronous API calls when self-hosting; instead pipeline tokenization, GPU forward, and vector upload with overlapping stages. Monitor queue lag and batch formation time because overly large batches improve MFU but can violate freshness SLAs.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you decide between a general-purpose embedding model and a domain-finetuned one?" category="Model Selection">
+    Start with a strong general model and measure retrieval precision on in-domain queries. Finetune or use adapters when you have labeled relevance data or consistent vocabulary mismatch. Finetuning improves in-domain clustering and recall but raises MLOps cost, risks catastrophic forgetting on out-of-domain queries, and forces a reindex. If data is sensitive or small, few-shot rerankers on top of a general retriever may be enough without changing the base embedder.
+  </InterviewQuestion>
+</InterviewQuestions>

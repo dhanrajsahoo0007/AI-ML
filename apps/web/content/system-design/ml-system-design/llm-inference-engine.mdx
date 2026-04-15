@@ -1,0 +1,24 @@
+---
+title: LLM Inference Engine
+description: Serving stack patterns for high-throughput large language model inference, from memory layout to batching and decoding optimizations.
+---
+
+Modern LLM serving engines such as vLLM, TensorRT-LLM, and Text Generation Inference exist to squeeze useful tokens per second from expensive GPUs. The dominant cost after weights are loaded is memory bandwidth and attention: autoregressive decoding spends most time on matrix multiplies and on managing the key-value cache that grows linearly with sequence length for every active sequence. Engines therefore focus on memory-efficient KV storage, batching many requests together, and reducing redundant computation across users.
+
+PagedAttention virtualizes the KV cache into non-contiguous blocks similar to an OS paging allocator, reducing fragmentation when concurrent requests have different lengths. Continuous batching, sometimes called iteration-level scheduling, adds new sequences to the running batch as others finish prefill or decode steps, which improves GPU utilization compared to static batching that waits for the slowest member. Together these techniques materially raise throughput on variable-length production traffic.
+
+Speculative decoding uses a smaller draft model or n-gram heuristics to propose multiple tokens per step, which the large model verifies in parallel, trading extra compute for fewer large-model forward passes when drafts are often correct. Prefix caching reuses KV blocks for shared system prompts or tool schemas so repeated prefixes do not recompute from scratch. Quality-of-service features may include separate queues for interactive versus batch workloads, max concurrency limits, and preemption policies.
+
+Throughput and latency pull in opposite directions: large batches improve MFU but increase queueing delay for short requests. Production sizing requires percentile latency targets, not averages, and often pairs an engine with request prioritization, load shedding under overload, and autoscaling that understands GPU fragmentation.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why does naive static batching waste GPU capacity for LLM decoding?" category="Performance">
+    Static batches form a group of requests that advance in lockstep; the batch effective size shrinks as sequences finish at different lengths, leaving SIMD lanes idle. Padding to the longest sequence wastes compute on shorter ones. Continuous batching refills the batch each iteration so the GPU stays fuller, and paged KV reduces memory holes that would otherwise cap concurrency.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where does prefix caching help most in a typical RAG or agent deployment?" category="Architecture">
+    It helps when many requests share long identical prefixes such as system instructions, retrieved context templates, or repeated tool definitions. Those shared tokens amortize prefill cost across requests. It helps less when every user message is unique and placed early in the prompt with little shared structure, so measure hit rates before assuming large wins.
+  </InterviewQuestion>
+  <InterviewQuestion question="What operational metrics would you watch when rolling out speculative decoding?" category="Implementation">
+    Track acceptance rate of draft tokens, end-to-end latency percentiles, tokens per second per dollar, and error rates from verification mismatches. Watch GPU memory for holding two models if draft is separate, and monitor tail latency if speculation adds variance. Compare quality on golden prompts because aggressive drafting can interact badly with certain sampling configurations.
+  </InterviewQuestion>
+</InterviewQuestions>

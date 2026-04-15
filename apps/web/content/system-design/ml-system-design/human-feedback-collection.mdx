@@ -1,0 +1,24 @@
+---
+title: Human Feedback Collection
+description: Annotation UX, agreement metrics, aggregation, active learning, and preference data at scale for LLM improvement.
+---
+
+Human feedback remains the gold standard for subtle quality, safety, and brand alignment. The feedback UI should minimize cognitive load: clear instructions, keyboard shortcuts, side-by-side layouts for preferences, and visible timers or quotas to prevent rater burnout. For free-text critique, constrain dimensions with rubrics and exemplars so comments are actionable for model or prompt updates rather than vague dissatisfaction.
+
+Annotation tools need workflow features: queue management, adjudication for disagreements, versioning of tasks when prompts change, and audit trails for compliance. Inter-annotator agreement metrics such as Cohen kappa or Fleiss kappa quantify rubric clarity; low agreement usually indicates ambiguous guidelines or underspecified edge cases before it indicates lazy raters. Aggregation rules might be majority vote, adjudicator override, or Bayesian models that weight rater reliability learned from gold items sprinkled into production batches.
+
+Active learning prioritizes labeling examples where the model is uncertain, diverse in embedding space, or likely failure modes from error detection. It improves data efficiency but can skew the dataset toward hard negatives if not balanced with random sampling to preserve calibration. Preference collection at scale pairs responses from two policies and records which humans prefer, feeding reward modeling or direct preference optimization pipelines.
+
+Trade-offs include cost, latency of human loops versus shipping velocity, and selection bias when only power users leave feedback. Instrument silent signals and stratified sampling to avoid optimizing only for vocal minorities.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What makes a rubric effective for collecting comparable human judgments on LLM outputs?" category="Design">
+    It defines each score level with concrete behaviors, includes anchor examples for borderline cases, separates dimensions such as factuality and tone, and explains common failure modes specific to your product. Iteratively update the rubric when adjudication patterns show recurring confusion, and train raters with calibration tasks before production labeling.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you measure and improve inter-annotator agreement on a subjective helpfulness task?" category="Methodology">
+    Start with pilot batches, compute kappa or rank correlation, run adjudication sessions to refine definitions, and add negative and positive control items with known labels to detect drift. Track per-rater statistics privately for coaching, not punishment without context, and rotate raters across items to separate item difficulty from rater bias.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you scale preference collection without drowning in redundant near-duplicate examples?" category="Scaling">
+    Use embedding deduplication and clustering to diversify batches, cap contributions per user session to reduce spam, apply active learning to focus on model disagreement regions, and subsample high-volume happy paths. Store raw preferences with metadata for later reweighting, and periodically rebalance toward underrepresented languages or domains.
+  </InterviewQuestion>
+</InterviewQuestions>

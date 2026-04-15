@@ -1,0 +1,24 @@
+---
+title: CI/CD/CT for Prompts & Pipelines
+description: Unify continuous integration for code, data, and models with continuous training triggers, prompt validation gates, and deployment automation using GitHub Actions or GitLab CI.
+---
+
+Modern ML systems ship three moving parts in lockstep: application code, training and inference pipelines, and the artifacts they consume (datasets, prompts, model weights). Continuous integration for ML extends beyond unit tests to include data schema checks, statistical tests on slices, lightweight model smoke tests, and contract tests between training jobs and serving containers. Pipelines should pin dependencies with lockfiles, build reproducible training images, and fail fast when a pull request breaks backward compatibility for feature stores or serialization formats.
+
+Continuous training (CT) complements CI/CD by deciding when to retrain or refresh models based on schedules, drift monitors, or business events rather than only on merges to main. Architecturally, CT is a workflow orchestrator (Airflow, Prefect, Argo Workflows, GitHub Actions on cron) that kicks off training with immutable inputs: a git commit hash, a dataset snapshot id, and a configuration bundle. The same CI gates that protect application deploys should gate model promotion: offline metrics thresholds, fairness checks on held-out demographics, latency and memory budgets on representative hardware, and canary analysis hooks before traffic shifts.
+
+Prompt and LLM pipeline CI deserves the same rigor. Treat prompts and tool definitions as versioned assets: run static analysis for injection-prone concatenation, render templates against golden fixtures, snapshot outputs on a frozen model stub or a small representative model tier, and diff token counts against budgets. For RAG, validate that retrieval connectors return structured documents within latency SLOs and that chunking logic is deterministic across environments. GitHub Actions and GitLab CI are natural homes for these steps because they integrate with branch protection, required reviews, and secret management for API keys used in evaluation jobs.
+
+Trade-offs center on cost versus coverage. Full fine-tune or large-model evals on every commit are expensive; teams often tier checks (lint and schema on every push, nightly regression suites, manual promotion for major releases). Another tension is speed of iteration versus blast radius: permissive pipelines let researchers move fast but increase the odds of shipping incompatible tokenizer bundles or silently shifted data distributions. The pragmatic pattern is artifact immutability, explicit promotion stages, and making every production inference traceable to a pipeline run id.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you layer CI checks for an LLM feature that uses RAG and tool calling?" category="Automation">
+    I would run fast checks on every pull request: template schema validation, static checks for unsafe string assembly, unit tests for parsers and tool routers, and mocked retrieval with fixed fixtures to assert prompt assembly. Nightly or merge-to-main jobs would hit real vector indexes with read-only credentials, run regression prompts against pinned model versions, and capture latency histograms. Promotion to production would require a green bundle that includes evaluation summaries, cost estimates from token usage, and signed artifacts for prompts and configuration hashes tied to the git commit.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where should continuous training live relative to application CI/CD?" category="Architecture">
+    CT should be a separate orchestrated workflow with its own schedules and triggers, but it should reuse the same build artifacts and validation gates as application CD so training containers and serving containers stay aligned. Events from drift detection or performance monitors publish to a queue or webhook that starts a training job with immutable dataset references. The output model version flows through a registry and only reaches inference after the same promotion pipeline used for code, keeping a single source of truth for what is allowed in production.
+  </InterviewQuestion>
+  <InterviewQuestion question="What reliability practices matter most for ML pipelines in CI?" category="Reliability">
+    Pin data snapshots and random seeds where feasible, cache intermediate artifacts with content-addressable storage, and make failures actionable with structured logs that include run ids and input hashes. Use idempotent training steps and automatic retries only for transient infrastructure faults, not for nondeterministic divergence. Enforce timeouts and resource limits so a stuck GPU job does not block the merge queue, and surface flaky tests with quarantine policies rather than silent reruns that hide regressions.
+  </InterviewQuestion>
+</InterviewQuestions>

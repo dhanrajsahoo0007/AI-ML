@@ -1,0 +1,22 @@
+---
+title: GPU/TPU Resource Management
+description: Scheduling, partitioning, memory, and cost controls for accelerator-heavy ML training and inference at scale.
+---
+
+Accelerator capacity is almost always the binding constraint in modern ML infrastructure. GPUs expose several sharing models: time-slicing interleaves processes on the same device with context switches, which raises throughput for many small jobs but harms predictable latency. NVIDIA Multi-Process Service reduces launch overhead for concurrent CUDA contexts on a single GPU, which helps colocated inference microservices if memory headroom exists. Multi-Instance GPU hardware-splits a physical card into isolated instances with dedicated memory and compute slices, improving isolation compared with pure software oversubscription at the cost of rigid partition sizes.
+
+Fractional GPU allocation in Kubernetes is usually implemented via MIG profiles, time-slicing configuration on the device plugin, or vendor-specific virtual GPU mechanisms. The architecture decision is whether you optimize for average utilization or worst-case latency. Training jobs often want whole devices or tightly coupled multi-GPU pods with NVLink-friendly topology; inference tiers may accept smaller slices if batching and KV-cache residency still fit in the allocated VRAM. TPUs differ in pod-shaped reservations and compile-time graph placement, but the same product tension appears: bin-pack for efficiency versus reserve headroom for tail latency and compilation and data loading spikes.
+
+VRAM management spans model weights, optimizer states in training, activation checkpoints, and runtime caches such as attention key-value stores in large language model serving. Spot and preemptible instances discount cost dramatically but require checkpoint frequency tuned to expected lifetime distributions and idempotent data staging so a restart does not corrupt shared filesystems. Monitoring should combine hardware counters with application signals: GPU utilization percentage alone is misleading when a kernel is memory-bound, so track SM occupancy, PCIe throughput, power cap throttling, and out-of-memory events correlated with queue depth.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is high GPU utilization not always a healthy sign for an inference service?" category="Resources">
+    A saturated GPU can mean you are batching aggressively and meeting throughput goals, but it can also hide memory-bound kernels where compute units stall waiting for DRAM or HBM, or indicate queueing that inflates end-to-end latency. For latency-sensitive APIs you often prefer moderate utilization with controlled batch sizes, explicit concurrency caps, and metrics that tie device activity to per-request latency percentiles rather than averages.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do spot or preemptible accelerators change how you design distributed training?" category="Cost">
+    You design for elasticity: frequent checkpoints to durable object storage, elastic worker groups that tolerate shrinkage, and rendezvous protocols that do not assume a fixed world size for the entire epoch. You may mix a small on-demand coordinator or parameter server tier with spot workers, and you price in recomputation of the last checkpoint window when nodes disappear. Cost savings only hold if wasted partial epochs and engineering toil do not erase the discount.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you choose MIG over time-slicing for colocated inference workloads?" category="Architecture">
+    MIG provides stronger isolation of memory and compute so one tenant’s peak allocation cannot exhaust another’s VRAM as easily, which matters for multi-tenant SaaS with contractual limits. Time-slicing is more flexible for highly variable micro-services that rarely need a full card but can tolerate less deterministic latency. MIG’s downside is coarse slice sizes and operational complexity reprovisioning profiles when model families change.
+  </InterviewQuestion>
+</InterviewQuestions>

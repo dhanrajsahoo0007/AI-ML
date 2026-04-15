@@ -1,0 +1,24 @@
+---
+title: Data Versioning & Lineage
+description: Provenance, reproducibility, and governance for datasets and transformations in ML systems.
+---
+
+Machine learning experiments are only reproducible if you can reconstruct the exact inputs and code that produced a model. Data versioning tools such as DVC treat large artifacts as content-addressed blobs while keeping lightweight metadata in Git, which makes diffs reviewable without committing terabytes. LakeFS layers git-like branching over object storage so teams can isolate ETL changes, run experiments on snapshots, and merge curated datasets with atomic promotions. Both approaches complement rather than replace database migrations and contract tests.
+
+Immutable datasets are a practical discipline: once a snapshot is used for a benchmark or regulatory submission, you never overwrite it in place. Instead you append new versions with explicit metadata including schema hash, row counts, and sampling strategy. Schema versioning should be explicit in Avro, Protobuf, or JSON Schema registries so producers and consumers negotiate compatibility rules rather than failing silently when a new column appears.
+
+Lineage graphs connect raw sources through transformations to features, training sets, and exported models. OpenLineage and similar standards help unify metadata across Spark, dbt, and orchestrators so you can answer impact questions when a source column is deprecated. The hard parts are completeness across ad hoc notebooks, third-party SaaS extracts, and manual human labels, which often become lineage gaps unless ingestion is forced through governed paths.
+
+Reproducibility still breaks when nondeterminism enters through floating-point order, distributed shuffles without fixed seeds, time-dependent splits, or silently updated vendor snapshots. Governance adds retention policies, access logs, and PII tagging so lineage is not only technical but auditable. Trade-offs include storage cost for many snapshots, slower iteration if every exploratory query must be cataloged, and engineer friction unless tooling is fast enough to become the default path.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is content addressing useful for large training datasets?" category="Reproducibility">
+    Content hashes let you verify that two machines or two months later refer to identical bytes even if file paths differ. It prevents accidental overwrites, supports deduplication across experiments, and gives a stable identifier to log next to model checkpoints. Pair hashes with human-readable aliases or tags so scientists can discover datasets without memorizing digests.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does LakeFS differ from only using DVC for data versioning?" category="Tooling">
+    LakeFS operates at the data lake layer with branches, merges, and isolation for ETL jobs against object storage, which helps multi-team workflows on shared tables. DVC is closer to Git-centric ML projects and excels at tying specific data revisions to code commits for single-repo experiments. Many organizations use both: LakeFS for warehouse-scale isolation and DVC for project-scoped experiment bundles.
+  </InterviewQuestion>
+  <InterviewQuestion question="What metadata belongs on a lineage edge between two pipeline tasks?" category="Governance">
+    Capture source and destination identifiers, transformation name and version, runtime environment fingerprint, start and end timestamps, row counts or byte metrics, and success status. For regulated workloads also log operator identity, purpose codes, and whether PII was transformed or masked. Rich edges make blast-radius analysis accurate when you need to invalidate downstream assets after a bad ingest.
+  </InterviewQuestion>
+</InterviewQuestions>

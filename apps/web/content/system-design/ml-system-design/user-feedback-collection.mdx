@@ -1,0 +1,22 @@
+---
+title: User Feedback Collection
+description: Designing signals, storage, and pipelines that turn user reactions into measurable model improvement without violating trust.
+---
+
+Explicit feedback such as thumbs up and down, star ratings, or structured corrections gives the clearest training signal when volume and bias are managed. Thumbs are cheap to collect but ambiguous: a downvote may reflect model error, policy disagreement, or user frustration unrelated to quality. Richer corrections, where users rewrite an answer or highlight a wrong span, are gold for supervised fine-tuning but require careful UX to avoid exhausting contributors. Ratings on dimensions such as helpfulness versus safety help disentangle failure modes that binary labels collapse.
+
+Implicit behavioral signals scale where explicit labels do not. Copy events, dwell time, follow-up reformulations, abandonment mid-session, and regenerate clicks all hint at dissatisfaction or exploration. These proxies correlate with quality but are noisy and context-dependent; a user who copies text may be delighted or may be archiving a bad answer for escalation. Instrumentation should log minimal identifiers, session correlation keys, and model version hashes so analysts can join feedback to prompts without retaining more raw content than policy allows.
+
+A durable feedback store feeds analytics dashboards, human review queues, and automated retraining or preference learning datasets. The architecture typically lands events in an append-only log or warehouse, deduplicates spam, and applies consent filters before export to labeling tools. Privacy considerations dominate: inform users what is logged, minimize retention of prompts containing personal data, support deletion requests that propagate to derived datasets, and segregate environments so staging feedback never poisons production training corpora.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you design a UX that increases high-quality explicit feedback without annoying users?" category="Design">
+    Ask for feedback at natural completion points, default to low-friction options like thumbs with optional free text, and explain briefly how corrections help. Offer progressive disclosure: after a negative signal, invite a structured reason list before freeform input. Close the loop selectively, for example thanking internal testers, without creating pressure that biases ratings upward.
+  </InterviewQuestion>
+  <InterviewQuestion question="What architectural components sit between the client and a training pipeline for user feedback?" category="Architecture">
+    An ingestion API or SDK that validates schema and authentication, a streaming bus or batch landing zone, PII scanning and redaction workers, a feature store or warehouse for aggregates, and workflow gates that promote curated slices into labeling or fine-tuning jobs. Each hop should attach model version, prompt template hash, and retrieval corpus identifiers for reproducibility.
+  </InterviewQuestion>
+  <InterviewQuestion question="What privacy pitfalls appear when using implicit signals for model training?" category="Privacy">
+    Users may not expect silent logging of partial drafts or sensitive queries, and inferred labels can encode surveillance-like inferences. Retention without purpose limitation violates many regulations, and cross-user joins can re-identify individuals if session keys leak. Mitigate with transparent settings, aggressive minimization, differential access controls for derived datasets, and periodic audits that verify consent scopes match actual exports.
+  </InterviewQuestion>
+</InterviewQuestions>

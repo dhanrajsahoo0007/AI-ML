@@ -1,0 +1,24 @@
+---
+title: Compliance & Audit Logging
+description: Align ML systems with GDPR, the EU AI Act, and SOC 2 style controls using immutable audit logs, retention policies, and decision logging that supports explanation obligations.
+---
+
+Compliance for AI systems intersects privacy law, sector regulation, and voluntary assurance frameworks. GDPR influences how personal data in training sets, logs, and prompts is processed, including legal bases, data minimization, cross-border transfers, and data subject rights such as access and erasure that conflict with immutable training snapshots unless engineered with pseudonymization and reversible mappings. The EU AI Act introduces risk-tiered obligations for high-risk systems, including documentation, human oversight, and post-market monitoring expectations that shape logging and model governance.
+
+SOC 2 oriented controls emphasize access logging, change management, vulnerability management, and availability monitoring rather than prescribing exact AI metrics. Immutable audit logs append-only to tamper-evident storage or WORM buckets support investigations into who promoted a model, who exported a dataset, or which administrator changed a safety threshold. Retention policies balance forensic value against storage cost and privacy: shorter retention for raw prompts containing PII, longer retention for aggregated metrics and cryptographic hashes of configurations.
+
+Right-to-explanation requirements vary by jurisdiction and often do not mandate a single interpretability technique, but they push teams toward logging inputs, outputs, model version, and material factors considered in automated decisions, plus human-readable summaries where feasible. Model decision logging for scoring systems might store top features from an explainability method with known limitations; for generative systems, logging focuses on policy versions, retrieval sources, and tool traces rather than claiming step-by-step causal reasoning.
+
+Trade-offs include comprehensive logging that aids audits but increases privacy risk if logs become a new sensitive datastore. Pseudonymization, field-level encryption, and purpose-limited access roles mitigate that tension. Another challenge is reconciling erasure requests with model unlearning realities; operational responses may rely on suppression lists at inference time and retraining schedules rather than perfect parameter-level deletion.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What GDPR considerations apply to LLM chat logs used for improvement?" category="Compliance">
+    You need a lawful basis such as consent or legitimate interests, clear notice to users, and often a way to opt out of training use. Logs may contain special category data inferred from conversation, which triggers additional safeguards. Cross-border transfers require appropriate mechanisms such as standard contractual clauses. Retention should be minimized and aligned with documented purposes; fulfilling erasure may require deleting or anonymizing stored transcripts and excluding them from future training sets even if historical models cannot be fully unlearned.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you design governance for EU AI Act high-risk classification?" category="Governance">
+    I would maintain a risk register linking product use cases to Annex categories, assign accountable owners for conformity documentation, and implement required technical measures such as logging, human oversight interfaces, and incident reporting workflows. Change control would capture model and data updates that materially affect risk. I would coordinate legal review for labeling accuracy claims and ensure post-market monitoring feeds back into the risk assessment on a defined cadence.
+  </InterviewQuestion>
+  <InterviewQuestion question="What belongs in an immutable audit log for model promotion?" category="Architecture">
+    Include actor identity, role, timestamp, source and destination stages, model version ids, checksums, linked evaluation report ids, approval ticket references, and hashes of safety configuration. The log stream should be append-only with cryptographic chaining or external notarization where threat models warrant it. Read APIs should enforce least privilege and support efficient queries by model id and time range for auditors without exposing customer content inline unless strictly necessary and separately authorized.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,22 @@
+---
+title: Multi-Region / Edge Deployment
+description: Placing models close to users while respecting latency, consistency, and data residency constraints across regions and the edge.
+---
+
+Global ML products face a geographic tension: users expect low latency, regulators expect data to stay in defined jurisdictions, and engineering teams want a single logical model version without running twelve divergent forks. A common pattern is to replicate inference endpoints per region behind geo-DNS or anycast, backed by regional object stores or container registries that host the same versioned artifacts. Training and batch analytics may remain centralized where raw data is allowed to accumulate, while online inference consumes only derived features or redacted payloads permitted to cross borders.
+
+Edge inference pushes computation toward Points of Presence, cellular gateways, or on-prem appliances. Runtimes such as ONNX Runtime and TensorFlow Lite target constrained devices with quantized weights, operator fusion, and reduced precision execution. The architecture work is not only shrinking the model but also defining update channels: differential bundles, staged rollouts, and integrity verification when devices are intermittently connected. Latency-aware routing at the edge must integrate with health checks that distinguish regional outage from model-specific failure, otherwise traffic shifts can amplify bad deployments.
+
+Data residency rules may forbid storing prompts, embeddings, or logs in foreign regions even when the model weights are identical worldwide. That implies regional logging sinks, separate vector indexes built only on locally ingested documents, and clear contracts for what metadata replication is allowed. Model synchronization across regions can use immutable version tags in artifact storage plus control-plane APIs that advertise which digest is active per region, optionally with deliberate staggered promotion to limit blast radius. Content delivery networks help distribute static bundles and WASM or JS inference assets to browsers, but large binary checkpoints usually stay off generic CDNs unless you have signed URLs, byte-range integrity, and abuse protections tuned for multi-gigabyte downloads.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you keep model versions consistent across regions without forcing a single global failure domain?" category="Architecture">
+    Treat each region as an independent deployment target that pins to immutable artifact digests promoted through a control plane. Use a manifest that lists approved versions per region and environment, automate promotion with gates, and allow rollback by repointing the manifest. Avoid shared mutable storage for weights; replicate objects asynchronously but only mark traffic after checksum verification and smoke tests complete in that geography.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are the main latency pitfalls when serving from the edge versus a regional data center?" category="Latency">
+    Cold caches on sparse POPs, TLS handshakes without session resumption, oversized payloads crossing last-mile networks, and device thermal throttling all dominate over raw operator latency. You must measure end-to-end time including client-side preprocessing, choose quantization and sequence limits appropriate for the link, and place authentication and tokenization close to where data is allowed to exist to avoid extra round trips across slow paths.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does data residency affect a retrieval-augmented generation system that indexes enterprise documents?" category="Compliance">
+    Embeddings and chunk text for each tenant must reside in approved regions, which often means dedicated clusters per jurisdiction, no cross-border vector search unless contracts allow it, and audit logs that prove query and index data never left the zone. Replicated global indexes are only viable when the underlying content itself is globally portable; otherwise you duplicate ingestion pipelines and maintain separate freshness SLAs per region.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,30 @@
+---
+title: UMAP
+description: Manifold learning and visualization via fuzzy topological structure and cross-entropy optimization; often compared to t-SNE in interviews for speed and global structure.
+---
+
+**UMAP (Uniform Manifold Approximation and Projection)** builds a **fuzzy simplicial set** representation of the data: it approximates a manifold by connecting each point to its nearest neighbors with **fuzzy** membership strengths, then seeks a low-dimensional embedding where similar fuzzy relations hold. Informally, it tries to preserve **local** connectivity while also representing **global** relationships better than t-SNE in many practical plots, and it often scales more favorably with modern approximate nearest-neighbor backends.
+
+In interviews, contrast UMAP with PCA (linear versus nonlinear), and with t-SNE (both are stochastic/nonlinear embeddings, but UMAP’s construction emphasizes topological preservation and graph weights derived from local smoothness assumptions). Discuss **hyperparameters** such as **n_neighbors** (larger emphasizes global structure) and **min_dist** (how tightly points pack in the embedding). Like t-SNE, UMAP is mainly for **exploration and visualization** unless you treat the coordinates as features with care and validation.
+
+UMAP is not magic: it encodes assumptions about local metric structure and sampling; on noisy sparse data or wrong distance choices, plots can mislead. Always validate structure with labels, robust statistics, or downstream tasks rather than over-interpreting a single 2D layout.
+
+The high-level optimization compares fuzzy **memberships** $w_{ij}$ in data space to $v_{ij}$ in embedding space and minimizes **cross-entropy**–style loss of the form:
+
+$$
+\mathcal{L} = \sum_{i,j} \Big( w_{ij} \log\frac{w_{ij}}{v_{ij}} + (1 - w_{ij}) \log\frac{1 - w_{ij}}{1 - v_{ij}} \Big)
+$$
+
+with $w_{ij}$ constructed from smooth local neighborhood kernels and $v_{ij}$ from a low-dimensional curve (often akin to t-SNE-style repulsive/attractive balance in implementation).
+
+<InterviewQuestions>
+  <InterviewQuestion question="When might you prefer UMAP over t-SNE for visualization?" category="Comparison">
+    When you want faster approximate embeddings on larger datasets and often more interpretable global relationships, UMAP is a common choice. t-SNE remains a strong baseline for local neighborhood preservation; the best approach is to try both and validate.
+  </InterviewQuestion>
+  <InterviewQuestion question="Is it safe to train a classifier on UMAP coordinates?" category="Model Selection">
+    Only with caution. Coordinates are an artifact of the embedding algorithm and hyperparameters; they can leak optimization noise and do not correspond to unique physical axes. If you need features, consider PCA, supervised representations, or evaluate UMAP features with rigorous cross-validation.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does n_neighbors differ intuitively from t-SNE perplexity?" category="Hyperparameters">
+    Both set a notion of local neighborhood scale, but they enter different constructions. Larger n_neighbors in UMAP pulls more non-local graph edges into the fuzzy set, emphasizing macro structure; smaller values focus on fine local detail. You still tune by stability, label-colored plots, and downstream usefulness.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,24 @@
+---
+title: Memory Summarization & Compression
+description: Compress dialogue and documents into hierarchical summaries and structured facts so agents retain useful state within tight context limits while controlling information loss.
+---
+
+As sessions lengthen, verbatim history stops scaling. Summarization pipelines condense older content into shorter narratives or bullet memories while preserving decision-relevant details. Progressive summarization updates a running summary each turn or every n turns, amortizing cost and keeping latency predictable compared with recomputing from full history. Hierarchical memory stores summaries at multiple timescales (recent turns raw, session summary, user profile facts) so the model can attend to the right granularity for the current subtask.
+
+Stronger compression goes beyond prose: entity extraction builds a typed graph of people, accounts, and preferences; fact tables store constraints the user stated explicitly; and task state machines record open goals. Recursive summarization chains repeatedly compress summaries for very long threads, which is powerful but accumulates abstraction error if each step drops nuance. Mitigations include retaining citations to original turn ids, storing confidence flags, and running periodic consistency checks that compare extracted facts against the latest user messages.
+
+Information loss is the central trade-off. Summaries hallucinate or merge incompatible constraints; aggressive compression improves token metrics but can remove negation, numbers, or legal qualifiers that change meaning. Product and safety reviews should define which fields must never be summarized away (for example, dosage numbers, account ids) and keep those in structured slots rather than narrative text.
+
+Implementation-wise, choose summarizer models smaller than the main reasoning model when possible, validate outputs with schema where applicable, and log diff metrics when replacing raw history with summaries so regressions are visible in offline replay.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you design hierarchical memory for a long-running support agent?" category="Architecture">
+    Keep the last few exchanges verbatim for tone and pending questions, maintain a rolling session summary with open tickets and decisions, and persist a durable user profile of stable preferences and account facts validated against tools. Route retrieval so the model sees session summary plus relevant profile slices rather than an undifferentiated blob. Version each layer so debugging can trace what the model saw.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are the main risks of recursive summarization chains?" category="Trade-offs">
+    Each hop can drop details, blur temporal order, or introduce confident-sounding inaccuracies. Errors compound because later stages only see compressed text. Mitigate with structured extraction for critical facts, caps on recursion depth, occasional full-context refresh for high-stakes threads, and human escalation paths when confidence is low.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you implement fact compression alongside narrative summaries?" category="Implementation">
+    Run a structured extraction pass that outputs JSON facts with provenance turn ids, merge into a canonical store with conflict resolution rules, and inject a concise fact list into the system context while the narrative summary handles story flow. Validate types and enums in code, and reconcile updates when new messages contradict old facts rather than appending duplicates blindly.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,32 @@
+---
+title: Linear Regression
+description: Fit a straight-line (or hyperplane) relationship between features and a continuous target; the baseline for regression and many interview discussions.
+---
+
+Linear regression assumes that the expected value of your target is a **linear combination** of the input features (plus noise). Geometrically, in two dimensions you are drawing the “best” line through a cloud of points; in higher dimensions you are fitting a hyperplane. “Best” usually means minimizing squared errors between predictions and actual values, which leads to a convex optimization problem with a closed-form solution under mild conditions.
+
+Interviewers like this topic because it tests whether you understand **assumptions** (linearity, independence of errors, homoscedasticity, and normality of residuals in classical inference), **interpretation** of coefficients as marginal effects holding other features fixed, and **failure modes** such as multicollinearity and extrapolation beyond the training distribution. It is also the conceptual parent of regularized variants and many generalized linear models.
+
+Practically, ordinary least squares (OLS) is fast, interpretable, and a strong baseline. Its main limitation is rigidity: if the true relationship is nonlinear or interactions matter, plain linear models underfit unless you engineer features (e.g., polynomials, splines) or move to richer models.
+
+$$
+\hat{y} = \mathbf{w}^\top \mathbf{x} + b = \sum_{j=1}^{p} w_j x_j + b
+$$
+
+Ordinary least squares minimizes the sum of squared residuals:
+
+$$
+\min_{\mathbf{w}, b} \sum_{i=1}^{n} \left( y_i - (\mathbf{w}^\top \mathbf{x}_i + b) \right)^2
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question="When would you prefer linear regression over a more complex model?" category="Model Selection">
+    When the signal is approximately linear, you need interpretable coefficients, data is limited or noisy, or you want a stable baseline before investing in complexity. Linear models also train quickly and are less prone to overfitting than very flexible learners on small datasets.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is multicollinearity, and why does it matter for linear regression?" category="Assumptions">
+    Multicollinearity means features are highly correlated. OLS can still predict well, but coefficient estimates become unstable (large variance) and hard to interpret individually. Mitigations include removing redundant features, combining them, or using regularization (Ridge).
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do we use squared error instead of absolute error by default?" category="Loss Functions">
+    Squared error is smooth and differentiable everywhere, which yields a clean closed-form solution and emphasizes large errors more heavily. Absolute error (L1) is more robust to outliers but is piecewise linear and optimization/inference behave differently; the choice encodes how much you want to penalize large mistakes versus outliers.
+  </InterviewQuestion>
+</InterviewQuestions>

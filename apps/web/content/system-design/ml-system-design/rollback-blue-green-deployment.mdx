@@ -1,0 +1,22 @@
+---
+title: Rollback & Blue-Green Deployment
+description: Safe promotion and rapid recovery for ML models using blue-green pairs, canaries, shadow traffic, and automated quality gates.
+---
+
+Blue-green deployment for ML keeps two parallel stacks: blue serves production traffic while green hosts the candidate model, tokenizer changes, prompt template revisions, or feature extraction updates. A router or load balancer flips traffic atomically once health checks and synthetic canaries pass. Unlike stateless microservices, ML rollouts must validate not only error rates but also distribution shift in outputs, latency regressions from larger graphs, and memory footprint changes that only appear under realistic batch sizes.
+
+Canary releases send a small percentage of live traffic to the new version while comparing golden metrics: HTTP 5xx rates, timeout ratios, business KPIs such as conversion, and model-specific scores like toxicity classifier pass rates or embedding drift against a reference corpus. Shadow mode duplicates requests to the new stack without returning its responses to users, which avoids user-visible risk but still exercises real inputs if privacy policy allows storing mirrored payloads securely. Shadow traffic must not double-charge paid upstream APIs or write side effects unless you explicitly neutralize those code paths.
+
+Traffic shifting strategies include stepwise percentage ramps, geography-based canaries, and cohort routing for internal users first. Automated rollback triggers should combine fast signals such as error spikes with slower signals such as statistically significant quality drops detected via logged judgments or delayed feedback. Feature flags decouple binary deployment from behavioral exposure so you can deploy artifacts widely but gate model IDs, temperature defaults, or retrieval corpora per tenant. The trade-off is configuration complexity: flags that interact badly can produce states nobody tested, so treat flag matrices as part of release engineering with contract tests.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is a low HTTP error rate insufficient to declare an ML canary successful?" category="Deployment">
+    Models can return syntactically valid responses that are systematically wrong, biased, or empty in ways that damage user trust without raising transport errors. You need outcome metrics, human evaluation samples, automated quality checks on outputs, and comparisons to baseline distributions for length, refusal rate, and tool-call success. Roll forward only when those secondary signals remain within agreed bounds.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does shadow traffic help, and what are its limits?" category="Reliability">
+    Shadow requests validate runtime stability, autoscaling behavior, and integration with dependencies under production load shapes without user impact. Limits include inability to measure user satisfaction on the shadow path, potential privacy issues if payloads are sensitive, doubled compute cost, and blind spots if shadow consumers lack idempotency or mutate state you forgot to disable. Always tag shadow spans in tracing to avoid polluting production analytics.
+  </InterviewQuestion>
+  <InterviewQuestion question="What operational playbooks should exist around automated rollback for models?" category="Operations">
+    Define explicit owners and thresholds per metric, ensure rollbacks revert not only routing weights but also caches and prompt bundles that were co-versioned, and verify observability distinguishes rollback events from unrelated incidents. Post-incident reviews should capture whether triggers were too sensitive causing churn or too slow allowing damage, and update SLO-based gates accordingly. Document manual override paths when automation conflicts with a planned experiment.
+  </InterviewQuestion>
+</InterviewQuestions>

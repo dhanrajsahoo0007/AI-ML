@@ -1,33 +1,56 @@
-import Link from "next/link";
-import { getContentSlugs } from "@/lib/mdx-doc";
+import { getContentSlugs, getTopLevelMeta, partitionSlugs } from "@/lib/mdx-doc";
+import { SectionIndex } from "@/components/section-index";
+import { TopicCard } from "@/components/topic-card";
 
 export const revalidate = 3600;
 
 export default async function SystemDesignIndexPage() {
-  const slugs = await getContentSlugs("system-design");
+  const allSlugs = await getContentSlugs("system-design");
+  const meta = await getTopLevelMeta("system-design");
+  const { topLevel, children } = partitionSlugs(allSlugs);
 
   return (
-    <main className="space-y-8">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">ML system design</h1>
-        <p className="max-w-2xl text-muted-foreground">
-          Architecture notes focused on reliability, data movement, and the
-          interfaces between research and production.
-        </p>
-      </header>
-      <ul className="grid gap-3 sm:grid-cols-2">
-        {slugs.map((slug) => (
-          <li key={slug}>
-            <Link
-              className="block rounded-lg border border-border/70 bg-card px-4 py-3 transition hover:border-border"
+    <SectionIndex
+      breadcrumbLabel="ML System Design"
+      title="ML system design"
+      subtitle="Architecture notes focused on reliability, data movement, and the interfaces between research and production."
+    >
+      {topLevel.flatMap((slug) => {
+        const m = meta.find((x) => x.slug === slug);
+        const childCount = (children[slug] ?? []).length;
+
+        if (m?.groups && m.groups.length > 0) {
+          return m.groups.map((g) => (
+            <TopicCard
+              key={`${slug}--${g.name}`}
               href={`/system-design/${slug}`}
-            >
-              <div className="font-medium capitalize">{slug.replaceAll("-", " ")}</div>
-              <div className="text-xs text-muted-foreground">Architecture note</div>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </main>
+              icon={g.icon ?? m.icon}
+              title={g.name}
+              description={m.description ?? "Architecture note."}
+              childCount={
+                childCount > 0
+                  ? g.categories.length < (m.categories?.length ?? 0)
+                    ? undefined
+                    : childCount
+                  : undefined
+              }
+              categories={g.categories}
+            />
+          ));
+        }
+
+        return (
+          <TopicCard
+            key={slug}
+            href={`/system-design/${slug}`}
+            icon={m?.icon}
+            title={m?.title ?? slug.replaceAll("-", " ")}
+            description={m?.description ?? "Architecture note."}
+            childCount={childCount > 0 ? childCount : undefined}
+            categories={m?.categories}
+          />
+        );
+      })}
+    </SectionIndex>
   );
 }

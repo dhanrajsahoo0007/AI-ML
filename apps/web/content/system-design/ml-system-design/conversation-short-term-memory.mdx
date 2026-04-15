@@ -1,0 +1,24 @@
+---
+title: Conversation / Short-Term Memory
+description: Fit multi-turn dialogue into finite context windows through budgeting, pruning, and prompt design so assistants stay coherent without exhausting tokens or latency budgets.
+---
+
+Short-term memory in LLM applications is whatever you place in the model context for the current request: system instructions, tool definitions, retrieved documents, prior user and assistant turns, and hidden scratchpad content. The hard constraint is the context window measured in tokens, not characters, which interacts with model pricing, latency, and quality because very long contexts can dilute attention to early or buried details. Architecture starts with an explicit token budget per category so no single source silently crowds out others.
+
+Sliding windows keep only the most recent k turns verbatim, which is simple and predictable but drops early user constraints such as preferences or task definitions. Alternatives include summarizing older turns into a rolling digest, retaining the first n turns plus a summary of the middle, or importance-weighted retention where heuristics or a small model score which messages to keep. System prompt optimization matters because static instructions repeat every call; compress policies into minimal bullets and move rarely used reference material to retrieval on demand.
+
+Message pruning must preserve tool-call and tool-result pairs where the API requires strict ordering, and should not break structured conversations where the assistant asked a clarifying question the user answered ten turns ago. Some stacks inject periodic reminders of immutable facts extracted at session start (session variables) so they survive pruning better than raw chat text.
+
+Trade-offs are sharp: aggressive pruning saves cost and latency but increases forgetfulness and contradiction risk; always carrying full history avoids that until you hit limits or confuse the model with noise. Measure retention policies against task completion metrics and user frustration signals, not token savings alone.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you design a token budget across system, tools, RAG, and history?" category="Architecture">
+    Allocate fixed caps per section with overflow handling: reserve headroom for the model completion, cap retrieved chunks by relevance and diversity, bound tool schemas, and give history a dynamic slice after fixed costs. When retrieval or history exceeds its cap, degrade gracefully by trimming lowest-scored chunks or oldest turns while preserving pinned facts and open tool threads. Emit metrics when trims occur so you can tune budgets from data.
+  </InterviewQuestion>
+  <InterviewQuestion question="What performance implications does long conversation context have?" category="Performance">
+    Longer prompts increase prefill compute and time-to-first-token linearly or superlinearly depending on implementation, and raise per-request dollar cost. They can also slow end-to-end latency if you serialize large payloads to the provider. Caching of prefixes helps when system and document prefixes repeat. Pruning reduces all of these but shifts work to summarization passes if you use them.
+  </InterviewQuestion>
+  <InterviewQuestion question="Compare sliding-window history with summarization-based retention." category="Trade-offs">
+    Sliding windows are cheap, deterministic, and easy to debug but forget early constraints. Summarization preserves gist at the cost of an extra model call, possible hallucination of facts in the summary, and engineering complexity to refresh summaries safely. Hybrid approaches often keep the first segment verbatim, summarize the middle, and keep recent turns raw for fidelity on active subtasks.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,36 @@
+---
+title: Gradient Boosting Classifier
+description: An additive ensemble that fits successive weak learners to negative gradients of a differentiable loss (e.g., log loss).
+---
+
+Gradient boosting builds an **additive model**: start with a simple prediction and iteratively add a **weak learner** (typically a shallow tree) that corrects remaining errors. The key idea is to view boosting as **gradient descent in function space**—each new tree approximates the **negative gradient** of the loss with respect to the current model’s predictions (pseudo-residuals). For classification with **log loss**, those pseudo-residuals relate to the difference between observed labels and predicted probabilities.
+
+Unlike bagging forests, boosting is **sequential** and tends to **reduce bias** while needing care to control **variance** (learning rate/shrinkage, tree depth, number of estimators, subsampling rows/features). Modern implementations (XGBoost, LightGBM, CatBoost) add **regularization**, efficient split finding, and categorical handling, making boosting a top performer on many **tabular** benchmarks when tuned sensibly.
+
+Interviewers often ask about **learning rate** vs **n_estimators**, **early stopping**, and **why shallow trees** work: each stage makes a small correction; many stages compose into a flexible boundary without a single giant high-variance tree.
+
+**Additive model** after $M$ stages:
+
+$$
+F_M(\mathbf{x}) = F_0(\mathbf{x}) + \sum_{m=1}^{M} \eta \, h_m(\mathbf{x})
+$$
+
+where $\eta$ is the **learning rate** (shrinkage) and $h_m$ is the weak learner fit to pseudo-residuals:
+
+$$
+r_{im} = - \left. \frac{\partial \ell(y_i, \hat{y})}{\partial \hat{y}} \right|_{\hat{y} = F_{m-1}(\mathbf{x}_i)}
+$$
+
+For **binary log loss** with labels $y_i \in \{0,1\}$ and predicted probability $\hat{p}_i = \sigma(F_{m-1}(\mathbf{x}_i))$, a common pseudo-residual is $y_i - \hat{p}_i$ up to scaling used by the specific algorithm.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why use a small learning rate with more trees?" category="Hyperparameters">
+    Shrinkage makes each update small, reducing the chance of overshooting and overfitting any single noisy direction. You compensate with more boosting rounds (more trees). This typically improves generalization compared to large steps with few trees, at higher training cost.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does subsampling rows/features help boosting?" category="Regularization">
+    Stochastic boosting (for example, subsampling training rows per iteration) introduces noise into the gradient estimates, which acts as regularization and can improve generalization. Column subsampling reduces co-adaptation among splits, similar in spirit to random forests, and can speed training while improving robustness.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is early stopping, and what are you monitoring?" category="Training">
+    Early stopping halts boosting when performance on a validation set stops improving (for example, log loss or accuracy). Because boosting can keep reducing training loss while worsening validation error, early stopping is a practical variance control tool; implementations track the best iteration and optionally restore that model.
+  </InterviewQuestion>
+</InterviewQuestions>

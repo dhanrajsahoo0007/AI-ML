@@ -1,0 +1,34 @@
+---
+title: ElasticNet Regression
+description: Combine L1 and L2 penalties to get sparse solutions like Lasso with more stable handling of correlated features, common in high-dimensional regression.
+---
+
+ElasticNet is linear regression with **both** an L1 (Lasso) and an L2 (Ridge) penalty on the coefficients. The L1 part encourages sparsity—pushing unneeded feature weights to zero—while the L2 part spreads weight among correlated predictors instead of letting Lasso arbitrarily pick a single “winner” from a correlated cluster. That makes ElasticNet a popular compromise in **high-dimensional** settings (many features, multicollinearity) where pure Lasso can be unstable.
+
+In interviews, explain the **grouping effect**: Ridge-like shrinkage tends to keep correlated features together with similar magnitudes, whereas pure Lasso may zero out all but one. ElasticNet is widely used as a default strong baseline when you want regularization but do not want to commit fully to either extreme. As always, feature scaling matters because penalties are not scale invariant.
+
+You typically tune two hyperparameters: overall strength and the **mixing ratio** between L1 and L2.
+
+$$
+\min_{\mathbf{w}, b} \sum_{i=1}^{n} \left( y_i - (\mathbf{w}^\top \mathbf{x}_i + b) \right)^2 + \lambda_1 \|\mathbf{w}\|_1 + \lambda_2 \|\mathbf{w}\|_2^2
+$$
+
+A common equivalent parameterization uses $\alpha$ (total penalty strength) and $\ell_1$ ratio $\rho \in [0,1]$:
+
+$$
+\min_{\mathbf{w}, b} \|\mathbf{y} - \mathbf{X}\mathbf{w} - b\mathbf{1}\|_2^2 + \alpha \left( \rho \|\mathbf{w}\|_1 + \tfrac{1}{2}(1-\rho)\|\mathbf{w}\|_2^2 \right)
+$$
+
+(Exact conventions vary by library; the key idea is the L1+L2 combination.)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why not always use ElasticNet instead of Lasso or Ridge alone?" category="Model Selection">
+    It adds another hyperparameter to tune and can be unnecessary if features are uncorrelated and sparsity is not needed (Ridge may suffice) or if sparsity is paramount and correlations are mild (Lasso may suffice). ElasticNet shines when both sparsity and correlated groups matter.
+  </InterviewQuestion>
+  <InterviewQuestion question="What problem in Lasso does ElasticNet specifically address?" category="Regularization">
+    With correlated features, Lasso’s L1 geometry can select an arbitrary subset and produce high-variance coefficient paths. The L2 component stabilizes estimates and tends to keep correlated coefficients from collapsing inconsistently.
+  </InterviewQuestion>
+  <InterviewQuestion question="Does ElasticNet guarantee a sparse solution?" category="Regularization">
+    The L1 component can still produce exact zeros for some coefficients when the penalty is strong enough, but the presence of L2 means sparsity patterns differ from pure Lasso; in practice you still get sparsity, often less extreme, depending on the L1 ratio and overall penalty strength.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,24 @@
+---
+title: Semantic Caching
+description: Reuse prior LLM responses for semantically similar requests using embedding similarity, careful invalidation, and observability to cut cost and latency without serving stale or wrong answers.
+---
+
+Exact-match caches miss when users rephrase the same intent. Semantic caching keys requests by an embedding of normalized text (and optionally structured context such as locale or model parameters), then searches a store of past (query embedding, response, metadata) pairs for neighbors above a similarity threshold. On a hit, you can return the cached completion immediately or use it as a draft for a cheaper verification pass. The architecture parallels recommendation nearest-neighbor retrieval but optimizes for equivalence of task outcomes rather than personalization.
+
+Similarity thresholds encode a policy choice: higher thresholds reduce false reuse where wording differences actually change the answer, while lower thresholds increase hit rate but risk serving incorrect or noncompliant text for subtly different constraints. Multi-field keys help, for example hashing tool definitions and schema versions into the cache key so a prompt or capability change does not silently reuse incompatible answers. GPTCache and similar libraries illustrate embedding backends, vector stores, and eviction policies you can adapt to your stack.
+
+Invalidation is harder than for byte-identical caches. You need rules for TTL on time-sensitive topics, explicit busting when underlying documents or tools change version, and per-tenant purge APIs for privacy requests. For regulated answers, prefer shorter TTLs or disable semantic reuse entirely. Monitoring should track hit rate, estimated dollar savings, and downstream error rates attributed to cache hits versus misses.
+
+Trade-offs include storage growth, embedding compute on every request, and the cold-start period before the cache is warm. False positives are more damaging than a cache miss, so conservative thresholds and optional lightweight judges often pay for themselves.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you tune semantic cache similarity thresholds in production?" category="Performance">
+    Start conservative with high similarity and measure hit rate, user corrections, and task failure rates on cached responses versus misses. Use shadow mode that logs would-be hits without serving them to estimate savings safely. Adjust by segment because creative writing tolerates looser matching than legal or medical style tasks. Revisit thresholds when you change embedding models because geometry shifts.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you estimate cost savings from semantic caching?" category="Cost">
+    Compare token usage and model tier costs for served traffic with a counterfactual without cache using logged prompt lengths. Include embedding costs and vector store queries in the net savings. Report savings net of any verifier model calls you add. Watch for traffic shaping effects where faster responses increase total usage, partially offsetting per-request savings.
+  </InterviewQuestion>
+  <InterviewQuestion question="What invalidation strategies prevent stale cached answers?" category="Architecture">
+    Combine TTLs with version stamps for knowledge bases, tools, and prompts in the cache key, and provide admin APIs to purge by tenant or tag. For retrieval-heavy answers, invalidate when source document versions change. For high-risk domains, shorten TTL or require periodic revalidation against a checksum of retrieved evidence ids stored with the cache entry.
+  </InterviewQuestion>
+</InterviewQuestions>

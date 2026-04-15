@@ -1,0 +1,30 @@
+---
+title: t-SNE
+description: Nonlinear embedding that preserves local neighborhoods for visualization; essential to discuss perplexity, crowding, and misuse in interviews.
+---
+
+**t-distributed stochastic neighbor embedding (t-SNE)** maps high-dimensional points to two or three dimensions for **visualization** by matching **pairwise similarities**. In the high-dimensional space it converts distances into probabilities using a Gaussian kernel; in the low-dimensional map it uses a **Student t** distribution with heavy tails so moderate distances are not over-penalized, which helps separate clusters visually (**crowding problem** mitigation). It then minimizes **KL divergence** between the two similarity distributions so nearby neighbors in input space tend to stay nearby in the embedding.
+
+Interviewers expect you to say t-SNE is **primarily for exploration**, not faithful global geometry: inter-cluster distances and overall density can be misleading. **Perplexity** behaves like a smooth neighborhood size; small values emphasize local structure, large values pull in more global context. Different random seeds can yield different layouts even when local neighborhoods are similar.
+
+Use t-SNE to sanity-check class separation, cluster hypotheses, or manifold structure, then validate with metrics, supervised learning, or domain inspection. Avoid reading precise distances off the plot, and be cautious applying it to very large n without approximations (Barnes–Hut, FFT-accelerated variants).
+
+Let $p_{j \mid i}$ be conditional neighbor probabilities in the input space (from Gaussian affinities with perplexity), symmetrized to $p_{ij}$; let $q_{ij}$ be low-dimensional affinities from the t-distribution. t-SNE minimizes:
+
+$$
+C = \mathrm{KL}(P \,\|\, Q) = \sum_{i \neq j} p_{ij} \log \frac{p_{ij}}{q_{ij}}
+$$
+
+with $q_{ij} \propto (1 + \|\mathbf{y}_i - \mathbf{y}_j\|^2)^{-1}$ for embedded points $\mathbf{y}_i$.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Can you use t-SNE distances to rank which clusters are “farther apart”?" category="Interpretability">
+    Not reliably. t-SNE preserves local neighborhoods better than global distances; cluster spacing can change across runs and hyperparameters. Use UMAP, PCA projections, or quantitative cluster metrics if global separation matters.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does perplexity control?" category="Hyperparameters">
+    It sets the effective number of neighbors when converting distances to probabilities, trading local versus more global structure. Typical values are in the tens to low hundreds depending on sample size; it should be smaller than the sample size n.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why a t-distribution in the embedding space instead of a Gaussian?" category="Fundamentals">
+    Gaussians fall off quickly, making it hard to model moderately separated points in low dimensions (“crowding”). The heavier-tailed t-distribution allows dissimilar points to be modeled farther apart without dominating the KL cost, yielding clearer visual separation.
+  </InterviewQuestion>
+</InterviewQuestions>

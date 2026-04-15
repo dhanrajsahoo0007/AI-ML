@@ -1,0 +1,28 @@
+---
+title: CatBoost
+description: Gradient boosting with ordered boosting and symmetric trees—strong defaults for high-cardinality categoricals and leakage-aware training.
+---
+
+CatBoost is a gradient boosting library designed around **robust handling of categorical features** and reducing **prediction shift** (a form of target leakage) when using ordered statistics. Instead of naive target encoding that mixes future label information into training rows, CatBoost uses permutations and “ordered” boosting updates so encodings for a row depend only on prior observations in a synthetic ordering. It also supports **oblivious (symmetric) trees** where the same split decision applies across an entire depth level, which can regularize the model.
+
+In interviews, emphasize why high-cardinality categoricals break naive one-hot (sparse, huge dimension) and why target statistics need careful cross-validation. CatBoost automates much of that discipline, but you still validate on real holdouts and watch for temporal drift. CatBoost supports GPU training and various losses for ranking and classification.
+
+For a categorical level $v$ of feature $j$, a smoothed target statistic can be written as:
+
+$$
+\hat{x}_{j,v} = \frac{\sum_{i \in D_{<}(i)} \mathbb{1}[x_{ij}=v]\, y_i + a\, P}{\sum_{i \in D_{<}(i)} \mathbb{1}[x_{ij}=v] + a}
+$$
+
+where $D_{<}(i)$ denotes only prior rows under an ordering (CatBoost’s ordered scheme), $P$ is a prior (often global mean), and $a$ controls smoothing—this is the conceptual form; implementations add permutations and multiple orderings for stability.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is prediction shift in the context of categorical target encoding?" category="Feature Engineering">
+    If you replace category levels with the mean target computed on the full training set including each row’s own label, features become optimistically biased and validation scores inflate. CatBoost mitigates this with ordered boosting and ordered target statistics so a row’s encoding does not peek at its own label inappropriately.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are symmetric (oblivious) trees in CatBoost?" category="Architecture">
+    All nodes at the same depth use the same feature and threshold, producing a balanced structure that can reduce overfitting compared to unconstrained asymmetric trees. The tradeoff is less flexible partitioning, which may need more depth or iterations for some problems.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you still avoid relying on automatic categorical handling?" category="Model Selection">
+    When domain semantics need explicit embeddings (text, graphs), when categories are extremely rare and you need explicit grouping, or when production constraints require fully interpretable manual encoding. Always confirm with a leakage-safe validation split (especially for time series) regardless of library.
+  </InterviewQuestion>
+</InterviewQuestions>

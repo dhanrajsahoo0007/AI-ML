@@ -1,0 +1,24 @@
+---
+title: LLM-as-Judge Evaluation
+description: Rubrics, pairwise judging, bias mitigation, and multi-judge setups for scalable LLM output evaluation.
+---
+
+Using a language model to score or rank other model outputs scales evaluation beyond human panels, but only if the judging protocol is disciplined. Rubrics should define discrete score anchors with concrete behaviors, include negative examples, and separate dimensions such as correctness, verbosity, and tone so judges do not conflate them. Pairwise comparison, where the judge picks A or B with optional ties, often yields more stable preferences than absolute grading because relative judgments reduce scale drift.
+
+Reference-free evaluation asks the judge only for the prompt and candidate answer, sometimes plus context for RAG. It is portable when gold answers are unavailable but risks circularity if judge and generator share similar biases or training data. Reference-based evaluation anchors to ground truth when it exists and is usually preferred for factual tasks, though constructing references is expensive. Judge model selection is a trade-off: stronger judges correlate better with humans but cost more; weaker judges add noise and can be swayed by position bias or eloquent wrong answers.
+
+Bias in LLM judges is well documented: position bias favors the first or second answer depending on model and framing; verbosity bias rewards longer responses; self-enhancement bias favors outputs from the same family as the judge. Mitigations include swapping answer order across duplicate trials, using blinded labels, calibrating scores with a small human-labeled set, and aggregating across multiple judges or prompts. Multi-judge consensus reduces variance at the cost of compute; disagreement itself is a useful signal for ambiguous items worth human review.
+
+Calibration means mapping raw judge scores to probabilities or human-equivalent scales so thresholds for release gates are interpretable. Without calibration, a score of four out of five is not comparable across judge versions or prompt templates.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is pairwise judging often preferred to absolute 1-5 scores when using an LLM as a judge?" category="Evaluation">
+    Relative comparisons reduce calibration drift because the judge anchors on two concrete options in the same context rather than mapping to an abstract numeric scale that shifts across sessions. Pairwise designs also map naturally to preference learning for reward models. The downside is more comparisons needed to rank many candidates and potential intransitivity if not aggregated carefully.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you design a methodology to detect and reduce position bias in LLM judges?" category="Methodology">
+    Run each pair twice with swapped order and discard or downweight inconsistent decisions, report agreement across orders as a quality metric for the judge setup, and use neutral framing that does not hint which system is baseline. Augment with a subset of human-adjudicated pairs to measure bias magnitude and track it over judge model upgrades. Consider Bradley-Terry or Elo aggregation instead of raw win counts when comparing many systems.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are the main trade-offs of multi-judge consensus versus a single strong judge model?" category="Trade-offs">
+    Multiple judges reduce variance and catch idiosyncratic failures but increase latency and cost linearly unless run in parallel with batching. A single strong judge is simpler operationally but concentrates model-specific biases. A hybrid is common: a cheap judge for triage and a strong judge for borderline cases or high-risk domains, with human review when judges disagree.
+  </InterviewQuestion>
+</InterviewQuestions>

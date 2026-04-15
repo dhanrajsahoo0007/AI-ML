@@ -1,0 +1,32 @@
+---
+title: Naive Bayes
+description: A fast probabilistic classifier applying Bayes' rule with a strong conditional independence assumption across features.
+---
+
+Naive Bayes classifies by estimating **$P(y \mid \mathbf{x})$** using **Bayes’ theorem**, but it makes the **naive conditional independence** assumption: given the class label, features are independent. That assumption is often wrong in reality, yet the classifier can still work well—especially for **text classification**—because what matters is whether the **ranking** of classes by estimated score is correct, not perfect density estimation.
+
+Training decomposes into estimating **class priors** $P(y)$ and **likelihoods** $P(x_j \mid y)$ per feature (or per feature-value for categoricals). Because of factorization, parameter estimation is **cheap and closed-form** for many choices (e.g., Gaussian for continuous features, multinomial/Bernoulli for counts or binary word presence). It handles **high dimensions** relatively well and is a strong **baseline** before heavier models.
+
+The “naive” part is the modeling shortcut; the “Bayes” part is the decision rule: pick the class with highest posterior. Interviewers may ask when independence fails (correlated features) and mitigations (feature engineering, other models), or which variant matches **count vs continuous** data.
+
+$$
+P(y=c \mid \mathbf{x}) \propto P(y=c) \prod_{j=1}^{d} P(x_j \mid y=c)
+$$
+
+**Decision rule** (predict the maximum a posteriori class):
+
+$$
+\hat{y} = \operatorname*{arg\,max}_{c} \left( \log P(y=c) + \sum_{j=1}^{d} \log P(x_j \mid y=c) \right)
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question='Why is it called "naive," and when does the model still perform well?' category="Assumptions">
+    It assumes conditional independence of features given the class, which is usually false. It can still work when the decision boundary is simple enough that violated independence does not reorder posteriors badly, or when features provide redundant evidence in the same direction (common in text).
+  </InterviewQuestion>
+  <InterviewQuestion question="Gaussian vs Multinomial Naive Bayes—when do you use each?" category="Model Selection">
+    Multinomial and Bernoulli variants model discrete counts or binary events (classic bag-of-words). Gaussian Naive Bayes models continuous features by assuming each feature given the class is normal (often with per-class mean and variance). Pick the likelihood that matches the data type and supports stable estimation.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you prevent zero probabilities from unseen feature-class pairs?" category="Training">
+    Use smoothing (for example Laplace or add-one smoothing for categorical or multinomial estimates) so the log conditional probability never becomes negative infinity. Smoothing trades a small bias for much better generalization on sparse events.
+  </InterviewQuestion>
+</InterviewQuestions>

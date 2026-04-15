@@ -1,0 +1,32 @@
+---
+title: Voting
+description: Combine multiple classifiers or regressors by majority vote or averaged probabilities—simple ensembling without a meta-learner.
+---
+
+Voting ensembles aggregate predictions from several models that each solve the same task. **Hard voting** for classification chooses the class with the most top-1 votes from members. **Soft voting** averages predicted class probabilities (when available) and then takes the argmax, which often works better because it uses confidence, not just the winner label. For regression, voting usually means **simple averaging** of member predictions unless you assign manual weights.
+
+Voting is simpler than stacking—no meta-training—but assumes roughly comparable calibration and quality; a terrible model gets equal say unless you use weights. In interviews, compare voting to stacking (learned combination vs fixed rule) and mention when weighted voting helps (e.g., trust a slower, stronger model more).
+
+For hard voting with $B$ classifiers producing labels $\hat{y}_b(x) \in \{1,\dots,K\}$:
+
+$$
+\hat{y}(x) = \arg\max_{c \in \{1,\dots,K\}} \sum_{b=1}^{B} \mathbb{1}[\hat{y}_b(x) = c]
+$$
+
+For soft voting with probabilities $p_{b,c}(x)$:
+
+$$
+\hat{y}(x) = \arg\max_c \; \frac{1}{B}\sum_{b=1}^{B} p_{b,c}(x)
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question="When does soft voting beat hard voting?" category="Evaluation">
+    When models output well-calibrated probabilities, averaging probabilities uses margin information—two confident disagreeing models surface uncertainty better than brittle majority among three weak votes. If probabilities are miscalibrated, temperature scaling or Platt scaling may be needed first.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose weights in a weighted average ensemble?" category="Hyperparameters">
+    Use validation performance: inverse error weights, optimize nonnegative weights with a convex solver subject to summing to 1, or stack with a linear meta-model (which generalizes weighted voting). Avoid tuning weights on the test set.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the main downside of voting versus stacking?" category="Comparison">
+    Voting uses a fixed combination rule, so it cannot learn nonlinear corrections like “trust model A when feature X is large.” Stacking can, at the cost of more complex training and leakage risk. Voting is cheaper and easier to productionize when members are stable.
+  </InterviewQuestion>
+</InterviewQuestions>

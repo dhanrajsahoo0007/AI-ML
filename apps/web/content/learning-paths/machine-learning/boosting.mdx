@@ -1,0 +1,28 @@
+---
+title: Boosting
+description: Sequential ensemble learning that focuses each new model on the remaining errors of the committee.
+---
+
+Boosting combines weak learners into a strong learner **sequentially**: the ensemble starts simple, and each new stage adds a model trained to correct the shortcomings of the current sum. Unlike bagging, stages are **not independent**—later models pay attention to which examples the current model gets wrong (for AdaBoost via sample weights; for gradient boosting via pseudo-residuals of a differentiable loss). The result is often lower bias and excellent accuracy on structured data, with the caveat that boosting can overfit if unregularized.
+
+Classic AdaBoost reweights misclassified examples; modern gradient boosting fits trees to negative gradients of a loss. Interview narratives should cover the bias–variance angle (boosting reduces bias but can increase variance without constraints), the need for early stopping, and the importance of honest validation because boosting can exploit leakage aggressively.
+
+AdaBoost updates example weights multiplicatively after round $t$: with weak classifier $h_t$ and weight $\alpha_t$, weights $w_i$ are proportional to:
+
+$$
+w_i^{(t+1)} \propto w_i^{(t)} \exp\big(-\alpha_t\, y_i\, h_t(x_i)\big)
+$$
+
+where for binary $y_i \in \{-1,+1\}$, misclassified points receive larger weights for the next weak learner fit (normalized to a distribution).
+
+<InterviewQuestions>
+  <InterviewQuestion question="Is boosting more about reducing bias or variance?" category="Bias-Variance">
+    Primarily bias: shallow weak learners are biased; boosting composes many small corrections to fit complex functions. In practice, variance can rise if you add too many stages without shrinkage or subsampling, so regularization and early stopping control both.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain AdaBoost’s intuition in one minute." category="Fundamentals">
+    Train a weak classifier, increase weights on misclassified points, train another classifier on the reweighted data, repeat. Combine them with coefficients related to each classifier’s weighted error. Points that remain hard receive more influence until the committee fits them or limits are hit.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why can boosting overfit more visibly than random forests?" category="Comparison">
+    Sequential fitting aggressively reduces training loss; without learning rate decay, depth limits, subsampling, or early stopping, later trees specialize to noise. Forests average independent-ish trees and often plateau smoothly; boosting curves can keep improving training loss while validation loss worsens—monitor a holdout set.
+  </InterviewQuestion>
+</InterviewQuestions>

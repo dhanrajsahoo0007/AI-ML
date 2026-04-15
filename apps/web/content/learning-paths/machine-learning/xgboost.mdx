@@ -1,0 +1,28 @@
+---
+title: XGBoost
+description: Optimized gradient boosting with second-order approximation, sparsity-aware splits, and built-in regularization on tree structure.
+---
+
+XGBoost (“Extreme Gradient Boosting”) implements gradient boosted trees with engineering and algorithmic details that make it fast and accurate on large tabular datasets: an approximate split finder using quantiles of gradients, column blocks for parallel work, sparsity-aware split directions for missing values, and **regularization** that penalizes leaf weights and tree complexity. In interviews, treat XGBoost as gradient boosting plus a principled objective with second derivatives and systems optimizations.
+
+It remains a common Kaggle and production baseline alongside LightGBM and CatBoost; choice often comes down to data size, categorical handling needs, training speed, and which library’s defaults mesh with your validation workflow. Second-order information (Hessian) makes each boosting step closer to Newton refinement than plain negative-gradient matching alone.
+
+Let $\ell_i^{(t)} = \ell(y_i, \hat{y}_i^{(t)})$. Adding a tree $f_t$, XGBoost minimizes a second-order approximation with regularization on leaves:
+
+$$
+\mathcal{L}^{(t)} \approx \sum_{i=1}^{n} \left[ g_i f_t(x_i) + \frac{1}{2} h_i f_t(x_i)^2 \right] + \Omega(f_t), \quad g_i = \frac{\partial \ell_i}{\partial \hat{y}}\Big|_{\hat{y}^{(t-1)}}, \; h_i = \frac{\partial^2 \ell_i}{\partial \hat{y}^2}\Big|_{\hat{y}^{(t-1)}}
+$$
+
+with $\Omega(f) = \gamma T + \frac{\lambda}{2}\sum_{j=1}^{T} w_j^2$ for $T$ leaves with weights $w_j$.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does XGBoost gain from using the Hessian in addition to the gradient?" category="Optimization">
+    The loss is locally approximated as quadratic in the score update, so split scoring can weight steps by curvature. That often yields better split decisions and convergence than using only first derivatives, especially for losses like log loss where curvature varies across samples.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does XGBoost handle missing values during training?" category="Implementation">
+    It learns a default direction (left or right child) for missing values per split by evaluating which side improves the objective when missing entries follow that branch. At inference, missing features traverse the learned direction. This avoids a separate imputation step but still requires careful monitoring so missingness itself does not become a spurious signal.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between hist and exact tree methods in practice?" category="Training">
+    Exact methods enumerate splits on sorted unique feature values; histogram (hist) methods bucket continuous features into quantile bins for approximate best split search. Histogram training is much faster on large data with minor approximation error; exact can be slower but slightly more precise when data is small.
+  </InterviewQuestion>
+</InterviewQuestions>

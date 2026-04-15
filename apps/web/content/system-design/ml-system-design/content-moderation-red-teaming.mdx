@@ -1,0 +1,24 @@
+---
+title: Content Moderation & Red-Teaming
+description: Systematically stress-test LLMs with red-team programs, classifiers and moderation APIs, human review loops, and defenses against jailbreaks mapped to attack taxonomies.
+---
+
+Red-teaming for language models is structured adversarial testing: skilled testers probe models and surrounding systems (prompt layers, tools, retrieval corpora) to elicit harmful, biased, or policy-violating outputs under realistic threat models. Methodologies range from time-boxed internal campaigns with defined success criteria to continuous purple-team exercises where defenders harden prompts and filters based on findings. Effective programs document attack taxonomies such as instruction hijacking, role-play evasion, encoding tricks, multi-turn escalation, and indirect injection via retrieved documents.
+
+Content classifiers and moderation APIs provide scalable first-line defense by scoring user inputs and model outputs for violence, sexual content, hate, self-harm, and custom enterprise policies. Architecturally, classifiers can run synchronously on the critical path with low-latency distilled models or asynchronously for audit and training data mining. Combining model-based moderation with rules for known patterns catches cases where neural scores are miscalibrated. Human-in-the-loop review handles edge cases, appeals, and high-stakes domains where false positives carry legal or reputational cost.
+
+Jailbreak prevention spans system prompts, output filters, tool permission boundaries, and retrieval hardening so untrusted text cannot override instructions. Attack taxonomies help prioritize mitigations: if indirect prompt injection is in scope, you invest in document sanitization, privilege separation for tools, and logging of tool arguments. Red-team findings should flow into regression suites of forbidden prompts and into metrics tracked over releases.
+
+Trade-offs include latency and cost from extra model calls versus residual risk from a single-layer defense in depth. Aggressive blocking improves safety metrics but can frustrate legitimate users in sensitive domains like medicine or journalism. Calibrating thresholds per surface area (public chat versus internal analyst assistant) aligns policy with context.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you scope a red-team engagement for a customer-facing assistant with tool use?" category="Safety">
+    I would define prohibited behaviors aligned with product policy and regulation, enumerate assets including prompts, tools, and third-party APIs, and agree on reporting severity rubrics. Testers would attempt direct jailbreaks, multi-turn social engineering, and injection via user-supplied files and retrieved web snippets. I would require safe rollback channels, synthetic accounts, and logging that captures attack traces without storing unnecessary user PII. Outcomes feed prioritized fixes and automated regression tests before any public disclosure.
+  </InterviewQuestion>
+  <InterviewQuestion question="What methodology separates one-off red teams from continuous assurance?" category="Methodology">
+    One-off engagements produce a snapshot assessment before launch, while continuous programs schedule rotating testers, integrate automated adversarial generators, and track time-to-remediate by severity. Continuous methodology ties findings to version control so each model or prompt change retriggers a minimum battery of probes. Metrics include open critical issues, repeat-offense rate on known attacks, and coverage of new policy areas as regulations evolve.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where do moderation classifiers sit in the inference architecture?" category="Architecture">
+    A common pattern is pre-classification on user input to block or rewrite before the main model runs, plus post-classification on the draft output before delivery, with optional escalation to a stricter model or human queue. Classifiers should receive the same context the policy cares about, including conversation history summaries where relevant. The architecture must handle timeouts gracefully, degrade to safe defaults when the moderation service is unavailable, and avoid leaking blocked content into logs accessible to low-privilege operators.
+  </InterviewQuestion>
+</InterviewQuestions>

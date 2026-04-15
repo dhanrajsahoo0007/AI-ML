@@ -1,0 +1,24 @@
+---
+title: Automated Regression Testing
+description: CI pipelines, prompt snapshots, assertions, and reliability practices for ML and LLM regression suites.
+---
+
+Traditional software regression tests assert deterministic outputs. LLM outputs are stochastic, so automated regression shifts toward property-based checks, structured output validation, semantic similarity bands, and golden snapshots with tolerances. A practical suite combines frozen prompts with recorded fixtures for retrieval, executes tools in sandboxes when behavior must be exact, and uses small deterministic models for cheap smoke tests while reserving frontier models for nightly gates.
+
+Snapshot testing for prompts captures expected completions under pinned model versions and decoding parameters. When snapshots change, reviewers inspect diffs for intentional improvements versus regressions. This pattern mirrors Jest snapshots but requires discipline: noisy snapshots that change every provider maintenance create churn, so prefer assertions on extracted JSON fields or intermediate representations when possible.
+
+CI integration treats evaluation jobs as first-class workflows with artifacts, flaky-test quarantine policies, and parallelism across shards. Assertion-based evaluation includes schema validators, regex for required disclaimers, unit tests on post-processing code, and binary checks that forbidden substrings never appear on safety cases. Flaky tests arise from temperature greater than zero, provider nondeterminism, and race conditions in parallel tool calls; mitigations are temperature zero for CI, retries only where documented, and marking known provider issues.
+
+Coverage strategies span intent classes, languages, token lengths, and failure modes from past incidents. Coverage is never complete; the goal is representative stress plus continuous growth from production failures. Reliability also means fast feedback: tiered pipelines keep merge requests snappy while protecting main from silent degradation.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you test LLM applications in CI when outputs are not bitwise reproducible?" category="Testing">
+    Pin models and decoding settings for smoke tiers, assert on structured fields and tool call arguments, use multiple samples with majority vote only in nightly jobs if needed, and compare embeddings or ROUGE-style metrics within thresholds for free text when appropriate. Separate deterministic unit tests for all non-model code paths so flakiness is isolated to explicitly labeled suites.
+  </InterviewQuestion>
+  <InterviewQuestion question="What belongs in a CI/CD pipeline versus a scheduled offline job for LLM regression?" category="CI/CD">
+    CI should run fast schema and policy checks, small golden prompt sets with cheap models, static analysis on prompts and tools, and contract tests for APIs. Scheduled jobs run larger judge-based suites, multilingual corpora, and load tests that would slow every pull request. Promote failures from scheduled jobs to new CI cases when they represent repeatable high-severity defects.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle a flaky evaluation test that sometimes fails without a clear product regression?" category="Reliability">
+    Reproduce with fixed seeds and logged contexts, check for provider capacity or version skew, tighten assertions to less brittle properties, move borderline cases to human-reviewed sets, and quarantine only with an owner and expiry. Track flakiness rates in metrics; chronic flakes erode trust and hide real failures. Prefer root-cause fixes over blind retries except for documented transient network errors with tight limits.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,24 @@
+---
+title: Load Balancing & Auto-Scaling
+description: Distributing inference across GPUs and clusters while controlling latency, cost, and cold-start behavior.
+---
+
+LLM inference load balancers must be GPU-aware. A naive round robin ignores memory headroom: two heavy prompts landing on the same card can cause eviction or out-of-memory while another card sits idle. Better schedulers track KV cache usage estimates, batch depth, and model shard placement for tensor-parallel replicas. Session affinity matters when using continuous batching with sticky prefixes, but strict affinity can create hot spots, so hybrid policies route new work to the least loaded replica while optionally pinning long sessions.
+
+Request queuing is inevitable under bursts. You choose between rejecting with retry-after headers, degrading to shorter outputs, or queueing with explicit timeouts. Deep queues improve utilization but explode tail latency, so tiered queues for premium versus best-effort traffic are common. Autoscaling signals include queue depth, p95 prefill and decode latency, GPU utilization, and power draw proxies such as SM occupancy. Pure CPU metrics mislead because a GPU can be memory bound while reporting high utilization.
+
+Cold start includes pulling container images, loading multi-hundred-gigabyte weights from disk to VRAM, and JIT compilation for some runtimes. Warm pools of preloaded instances reduce risk at the cost of idle spend. Spot or preemptible GPUs cut cost for fault-tolerant batch inference but need checkpoint-friendly jobs and rapid failover to on-demand capacity for SLA-backed endpoints.
+
+Architectures often combine a gateway that authenticates and rate limits, a router that picks model replicas, and horizontal pod autoscaler rules tuned with custom metrics exporters from the inference server. Cost optimization trades replica count against SLOs: aggressive scale-to-zero saves money but conflicts with strict latency guarantees unless you maintain a minimum fleet during peak windows.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is GPU utilization alone a weak autoscaling metric for LLM serving?" category="Scaling">
+    Utilization can look healthy while memory bandwidth is saturated or KV cache is full, which still causes queueing and timeouts. Conversely low average utilization can hide bursty prefill phases. Pair utilization with request queue age, batch formation rate, and latency error budget consumption to scale before users notice degradation.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you design load balancing for tensor-parallel model shards?" category="Architecture">
+    Requests must land on complete shard groups that communicate in lockstep, so the load balancer targets replica sets rather than individual pods. Health checks should verify all shards in a group are ready. Scale replica groups as a unit and avoid splitting a user session across groups unless your client layer can transparently reconnect, which is hard for streaming sessions.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the cost trade-off of keeping a warm pool versus aggressive scale-to-zero?" category="Cost">
+    Warm pools pay for idle GPUs and electricity but protect latency SLOs and absorb unpredictable spikes without queue buildup. Scale-to-zero minimizes baseline cost yet pays in cold starts, potential thundering herds on wake, and more complex burst handling. Hybrid approaches keep a small warm baseline, use predictive scaling from historical traffic, and burst onto spot for non-interactive workloads.
+  </InterviewQuestion>
+</InterviewQuestions>

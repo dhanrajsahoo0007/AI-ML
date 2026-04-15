@@ -1,0 +1,24 @@
+---
+title: Data Privacy & PII Handling
+description: Detect and protect PII across pipelines with NER and classifiers, apply masking and differential privacy where appropriate, and harden systems against prompt injection that exfiltrates sensitive data.
+---
+
+PII detection stacks combine fast heuristics such as regex and dictionary checks for emails and phone numbers with named-entity recognition models tuned for person, location, and organization spans in multiple languages. LLM-assisted detection can catch contextual leaks that regex misses but should not be the only gate in high-risk settings because models hallucinate labels and may themselves see sensitive text. A practical architecture runs deterministic detectors first, escalates uncertain spans to stronger models or human review queues, and stores confidence scores for tuning thresholds.
+
+Data masking and anonymization reduce exposure in logs, training exports, and analytics. Techniques include token replacement with stable pseudonyms for longitudinal joins, generalization of quasi-identifiers like birth year buckets, and redaction of spans in free text used for display. Differential privacy adds calibrated noise to aggregates or training objectives so individual contributions are plausibly deniable at a chosen epsilon budget; it is powerful for reporting and some federated settings but complicates utility and requires careful composition across repeated queries.
+
+Training data privacy extends to how third-party scrapes, user uploads, and enterprise documents are labeled for consent and segregation from internet-scale pretraining mixes. Prompt injection aimed at PII extraction tricks assistants into repeating system prompts, tool outputs, or memories that contain secrets. Defenses include minimizing sensitive content in prompts, separating secrets from model-visible context, output filters that block structured secret patterns, and training staff not to paste credentials into chat interfaces.
+
+Trade-offs include aggressive redaction that breaks downstream model quality versus permissive pipelines that leak in embeddings or memorization. Data minimization means collecting only fields needed for the task and setting TTLs on caches holding user context. Differential privacy trades accuracy for guarantees, which may be unacceptable for small cohort analytics unless budgets are tuned with expert review.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you build a layered PII detection pipeline for user-generated documents?" category="Privacy">
+    I would scan on upload with regex and checksum blocklists for known secret formats, run a NER model with language detection per segment, and route high-risk documents to stricter models or manual review based on policy. Detected spans would be written to storage with encryption and access controls, with hashed fingerprints for deduplication. I would continuously evaluate precision and recall on labeled corpora and monitor for new leak patterns after incidents.
+  </InterviewQuestion>
+  <InterviewQuestion question="What implementation choices support safe logging around LLMs?" category="Implementation">
+    Implement structured scrubbers on the logging path that remove or tokenize PII before logs hit centralized systems, default to payload omission for LLM traces, and use allowlisted fields for debugging. Separate environments so production keys never appear in staging prompts. Use automated tests that fail builds if sample logs contain patterns resembling secrets, and rotate keys promptly if accidental logging occurs.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does differential privacy interact with ML training at a high level?" category="Architecture">
+    In deep learning, common approaches add noise to gradients or use private aggregation of teacher ensembles to limit leakage from any single training example. The architecture must track cumulative privacy spend across training updates and releases, because repeated publication consumes the budget. For analytics APIs, differential privacy engines sit between analysts and databases, enforcing per-query noise and enforcing budgets per user or organization to prevent reconstruction attacks.
+  </InterviewQuestion>
+</InterviewQuestions>

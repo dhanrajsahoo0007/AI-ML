@@ -1,0 +1,22 @@
+---
+title: Reinforcement & Preference Learning Loops
+description: Aligning generative models with human intent using reward modeling, reinforcement fine-tuning, and direct preference optimization.
+---
+
+Reinforcement learning from human feedback starts from a supervised policy and improves it using a reward model trained to predict human preferences between pairs of outputs for the same prompt. The policy is then updated with a policy-gradient style optimizer, often Proximal Policy Optimization, that increases probability on actions judged better while a KL penalty to a reference model stops the policy from collapsing into reward hacking or incoherent text. The pipeline spans costly human labeling, reward model generalization outside the comparison distribution, and careful evaluation because reward scores are not automatically aligned with user happiness.
+
+Direct Preference Optimization reframes the problem: instead of fitting an explicit scalar reward and running RL, DPO optimizes the policy directly from preference pairs using a closed-form objective derived under a Bradley-Terry preference model and a KL-regularized RL target. Practically, DPO can be more stable to tune than PPO for modest datasets because it removes the inner loop of sampling from the evolving policy for reward scoring, but it still demands diverse, high-quality preference data and can overfit when the reference model is weak or comparisons are noisy.
+
+Preference data collection must cover edge cases the base model mishandles: refusals, tool use, long-context faithfulness, and multilingual fairness. Online learning periodically samples from the live policy and asks labelers to compare fresh rollouts, which tracks real drift but risks exposing users to worse intermediates unless gated. Offline learning uses frozen logs, which is safer but stale. KL constraints exist because unconstrained maximization of a proxy reward exploits misspecified regions of the reward model. PPO offers flexible credit assignment across long completions but brings variance, hyperparameter sensitivity, and infrastructure complexity. DPO simplifies training loops at the cost of less explicit control over exploration and sometimes weaker performance when preference data is narrow.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What failure modes appear if the reward model is trained on narrow comparison data?" category="Training">
+    The policy optimizes against a misspecified surrogate and may produce high reward text that humans dislike, including verbosity, hedging, or sycophancy if those correlated with positive labels in the dataset. Out-of-distribution prompts expose brittle generalization. Mitigations include broader sampling strategies, ensemble or uncertainty-aware rewards, periodic human audits, and combining reward training with hard constraints or rule checks.
+  </InterviewQuestion>
+  <InterviewQuestion question="When might you still choose PPO-style RLHF over DPO for a product iteration?" category="Methodology">
+    PPO can help when you need intermediate reward shaping, multi-step tool environments, or non-differentiable components where scalar rewards come from simulators or hybrid pipelines. If your team already invested in robust RL infrastructure and you have very large interactive budgets, PPO may squeeze incremental gains. If your goal is stable alignment updates from offline preference logs with smaller engineering surface area, DPO is often faster to iterate.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does KL regularization to a reference model affect the system architecture?" category="Architecture">
+    You must version and serve the frozen reference alongside checkpoints for loss computation or implicit regularization terms, doubling storage and sometimes compute during training. Inference systems rarely need the reference unless you deploy ensembles or monitor divergence metrics in production. Training jobs should log effective KL and early-stop when divergence blows up, and artifact pipelines should tie policy weights to the exact reference digest used during fine-tuning.
+  </InterviewQuestion>
+</InterviewQuestions>

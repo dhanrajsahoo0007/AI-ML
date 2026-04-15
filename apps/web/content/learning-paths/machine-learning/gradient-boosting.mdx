@@ -1,0 +1,28 @@
+---
+title: Gradient Boosting
+description: Additive trees fitted sequentially to negative gradients—powerful, tunable, and the conceptual core of XGBoost, LightGBM, and CatBoost.
+---
+
+Gradient boosting builds an additive model $F$ as a sum of weak learners (usually shallow trees). Each new tree is trained to predict the **pseudo-residuals**: the negative gradient of a differentiable loss $\ell$ with respect to the current model’s predictions. That is “gradient descent in function space”: you nudge predictions in the direction that most reduces loss for the training distribution, while tree depth and shrinkage control how aggressively you fit.
+
+Boosting typically achieves lower bias than bagging-style forests and is often the strongest classical tabular learner when tuned, but it is more sensitive to hyperparameters (number of estimators, learning rate, tree depth, subsampling) and to **target leakage** if you are not careful with preprocessing inside CV. Interview answers should connect boosting to residual fitting for squared error and to gradient steps for general losses like log-loss.
+
+Let $F_{m-1}(x)$ be the model after $m-1$ stages. The negative gradient for sample $i$ is:
+
+$$
+r_{im} = -\left.\frac{\partial \ell(y_i, \hat{y})}{\partial \hat{y}}\right|_{\hat{y} = F_{m-1}(x_i)}
+$$
+
+A tree $h_m$ is fit to targets $r_{im}$, then the update is $F_m(x) = F_{m-1}(x) + \eta \, h_m(x)$ with learning rate $\eta \in (0,1]$.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is the first boosting iteration with squared error equivalent to fitting residuals?" category="Loss Functions">
+    For squared error written as one half times the square of the prediction error, the derivative of the loss with respect to the prediction equals the prediction minus the true value, so the negative gradient is the true value minus the prediction: the residual. Each new tree approximates those residuals; shrinkage scales the step size for better generalization.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does stochastic gradient boosting differ from standard gradient boosting?" category="Training">
+    It subsamples rows (and sometimes columns) before each tree fit, similar to mini-batches. That adds noise and speeds training while often improving generalization by reducing overfitting to difficult outliers or specific patterns.
+  </InterviewQuestion>
+  <InterviewQuestion question="What failure modes should you watch for with gradient boosting?" category="Performance">
+    Overfitting if trees are too deep or learning rate is too high with many rounds without early stopping; sensitivity to noisy labels; and subtle leakage if feature engineering uses target statistics computed on the whole dataset. Mitigate with validation curves, early stopping on a holdout set, regularization (subsample, max depth, min leaf weight), and proper pipeline isolation inside cross-validation.
+  </InterviewQuestion>
+</InterviewQuestions>

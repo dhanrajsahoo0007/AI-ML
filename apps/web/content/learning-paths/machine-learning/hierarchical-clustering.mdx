@@ -1,0 +1,30 @@
+---
+title: Hierarchical Clustering
+description: Build a tree of nested clusters—either bottom-up (agglomerative) or top-down (divisive)—without fixing k upfront; strong fit for exploratory analysis and interview depth.
+---
+
+Hierarchical clustering produces a **dendrogram**: a tree where leaves are individual points and internal nodes represent merged groups. The most common variant is **agglomerative**: start with each point as its own cluster, then repeatedly merge the two clusters that are closest under a **linkage** rule (single, complete, average, Ward, and so on). The height at which two branches join reflects the dissimilarity at merge time, so you can “cut” the tree at a threshold to obtain a flat partition.
+
+In interviews you should connect **linkage** to geometry of merges: single linkage can create **chaining** along bridges of nearby points; complete linkage favors compact, roughly equal-diameter groups; Ward’s method merges clusters to minimize increase in total within-cluster variance and often behaves like a variance-aware cousin of k-means at the leaves. **Divisive** clustering splits the dataset recursively but is less common because splitting well is harder than merging greedily.
+
+Complexity is typically at least **$O(n^2)$** time and memory for naive implementations storing all pairwise distances, which limits scale on huge datasets. Strengths are interpretability, any-time choice of granularity, and no need to pick k before you see structure; weaknesses are cost and sensitivity to noise and linkage choice.
+
+**Average linkage** between clusters $A$ and $B$ uses mean pairwise distance:
+
+$$
+d_{\text{avg}}(A, B) = \frac{1}{|A|\,|B|} \sum_{\mathbf{x} \in A} \sum_{\mathbf{x}' \in B} d(\mathbf{x}, \mathbf{x}')
+$$
+
+**Ward’s linkage** merges the pair $(A, B)$ that minimizes the increase in total within-cluster sum of squares after merging.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the chaining effect, and which linkage causes it?" category="Fundamentals">
+    Chaining is when clusters elongate and connect through a bridge of points, producing one long cluster instead of intuitive groups. Single linkage is especially prone because cluster distance is the minimum inter-point distance, so a single close pair can merge distant blobs.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you get a flat clustering from a dendrogram?" category="Implementation">
+    Cut the tree horizontally at a chosen height or number of clusters. The height encodes merge dissimilarity, so the cut yields clusters that merged only below that dissimilarity threshold. You can also use inconsistency measures or domain-driven thresholds.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is hierarchical clustering expensive for large n?" category="Performance">
+    Standard agglomerative methods maintain and update an n-by-n distance structure (or equivalent), leading to quadratic memory and often quadratic or cubic time depending on implementation and linkage. That is fine for thousands of points but painful for millions without approximations or sampling.
+  </InterviewQuestion>
+</InterviewQuestions>

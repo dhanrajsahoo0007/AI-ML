@@ -1,0 +1,24 @@
+---
+title: Quality Metrics
+description: Faithfulness, relevance, and automated evaluation frameworks such as RAGAS for LLM and RAG quality measurement.
+---
+
+Quality for generative systems is multi-dimensional. Faithfulness measures whether claims are supported by provided context, which matters acutely for retrieval-augmented generation where models should not invent sources. Relevance asks whether the answer addresses the user intent, including follow-up disambiguation when the query is underspecified. Helpfulness and coherence capture polish: actionable steps, consistent tone, and non-contradictory reasoning. No single scalar replaces human judgment, but a balanced scorecard prevents teams from optimizing one metric while silently degrading others.
+
+Frameworks like RAGAS formalize reference-based and reference-free scores using smaller models or LLM judges: for example, context precision and recall for retrieval, answer groundedness against contexts, and answer relevance to the question. Automated scoring scales regression testing and release gates but inherits judge bias and can overfit to the evaluator's quirks. Ground-truth evaluation with curated labeled sets remains the anchor for calibration: you measure agreement between automated metrics and human ratings and track drift over time.
+
+Human-AI agreement rates quantify how often expert annotators align with model-assigned labels or scores. Low agreement signals ambiguous rubrics, underspecified tasks, or evaluator fatigue. Improving agreement usually means clearer guidelines, edge-case exemplars, adjudication for borderline items, and periodic rater calibration sessions rather than endlessly tuning the automated metric alone.
+
+Trade-offs include cost and latency of running evaluators on every production response versus sampling; reference-free metrics enable breadth but are noisier; reference-based metrics need maintained datasets that go stale as products evolve. The pragmatic path combines a frozen golden set for strict regression, periodic refresh of adversarial or user-mined examples, and lightweight online signals such as thumbs or implicit dwell time for triage.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How does RAGAS-style evaluation differ from a single end-to-end accuracy number on a Q&A benchmark?" category="Evaluation">
+    RAGAS-style metrics decompose the pipeline into retrieval quality and generation quality so you can localize failures, whereas a single accuracy collapses retrieval misses, grounding errors, and formatting issues into one opaque score. Decomposed metrics guide interventions such as better chunking versus prompt changes. They still require careful interpretation because automated subscores can correlate and because reference-free judges introduce their own variance.
+  </InterviewQuestion>
+  <InterviewQuestion question="What should you monitor alongside automated quality scores in production?" category="Metrics">
+    Monitor sampling rate, judge model version, score distributions for sudden shifts, correlation with human spot checks, and segment breakdowns by language or domain. Track input length and retrieval hit rate because metric changes may reflect cohort shifts rather than true quality moves. Alert on discontinuities after prompt or retriever deploys and on divergence between automated scores and human feedback aggregates.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you implement a regression gate using automated quality metrics without blocking good releases?" category="Implementation">
+    Maintain versioned golden sets with statistical thresholds rather than pointwise perfection, run metrics in CI with fixed judge seeds where applicable, and use two-tier gates: hard fail on large drops on core scenarios, soft warnings on secondary suites. Allow overrides with documented risk acceptance for time-sensitive fixes, and always pair metrics with a small human review sample for high-risk domains like medical or legal assistance.
+  </InterviewQuestion>
+</InterviewQuestions>

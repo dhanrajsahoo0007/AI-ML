@@ -1,0 +1,24 @@
+---
+title: Automated Retraining & Fine-tuning Triggers
+description: Design trigger logic for drift, schedules, and quality thresholds, orchestrate training and fine-tuning with LoRA and QLoRA, and validate before promoting new models.
+---
+
+Automated retraining starts with explicit trigger semantics. Schedule-based triggers are predictable and good for domains with seasonal patterns or stable label refresh cadences. Performance-based triggers fire when online metrics cross thresholds compared to a baseline window, which ties retraining to user-visible regressions but requires careful guardrails against noisy short-term spikes. Drift triggers compare input distributions, label priors, or embedding geometry between reference and recent traffic; they catch silent upstream pipeline changes even when accuracy has not yet moved.
+
+Orchestration ties those signals to idempotent training pipelines. A typical flow validates incoming data volume and schema, snapshots training inputs, launches a job with resource quotas, writes metrics and artifacts to experiment tracking, and opens a pull request or registry candidate rather than pushing straight to production. Data freshness constraints matter: stale features or lagging labels can make a technically successful training run worse than the incumbent. Fine-tuning large language models often uses parameter-efficient methods such as LoRA, which injects low-rank adapters into attention projections so most base weights stay frozen, or QLoRA, which quantizes the base model in low-bit formats while keeping adapter updates in higher precision to reduce VRAM and speed iteration.
+
+Validation gates before promotion should mirror production evaluation harnesses: held-out sets, business KPI proxies, safety suites, and latency measurements on target hardware. For adapters, verify compatibility with the exact base model revision and tokenizer bundle served in inference. Canary deployments compare error rates and tail latency against the champion model on a small traffic slice before full rollout.
+
+Trade-offs include trigger sensitivity versus alert fatigue. Over-triggered pipelines burn GPU budget and fragment the model lineage; under-triggered systems let slow rot accumulate until incidents force emergency retrains. LoRA and QLoRA reduce cost but may underfit when the task requires full-model capacity or deep adaptation; full fine-tunes are more expensive and risk catastrophic forgetting without careful regularization and replay strategies.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you combine drift detection with performance triggers?" category="Automation">
+    I would treat them as complementary signals in a rules engine. Drift without metric drop might only raise a ticket or schedule a low-priority retrain, while sustained metric regression triggers an urgent pipeline with tighter approval. I would require minimum sample sizes and time windows before acting to reduce false positives, and I would log every trigger decision with the statistics that caused it for postmortems. Human override should remain possible when domain knowledge explains benign drift.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you choose LoRA versus full fine-tuning for production LLM customization?" category="Architecture">
+    LoRA fits when the base model already encodes broad competence and you need style, format, or narrow domain adaptation with limited labeled data and tight GPU budgets. Full fine-tuning is more appropriate when the domain vocabulary or reasoning patterns diverge strongly from pretraining, or when adapter capacity limits quality after iterative evaluation. Architecture-wise, serving must load base weights once and hot-swap or compose adapters per tenant where product requirements demand isolation without duplicating full models.
+  </InterviewQuestion>
+  <InterviewQuestion question="What performance validations matter before swapping a production model?" category="Performance">
+    Beyond aggregate accuracy, I would examine slice metrics for high-risk cohorts, tail latency under concurrent load, token throughput and cost per request, and regression tests on a frozen prompt suite including tool-use scenarios. For generative models, I would run automated quality rubrics and human spot checks on worst-case prompts. Promotion should require no sustained degradation on canaries and explicit comparison of resource utilization so autoscaling policies remain valid.
+  </InterviewQuestion>
+</InterviewQuestions>

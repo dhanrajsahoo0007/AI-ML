@@ -1,0 +1,28 @@
+---
+title: DBSCAN
+description: Density-based clustering that discovers arbitrary shapes, labels noise, and avoids fixing k—common in geospatial and anomaly-aware interview questions.
+---
+
+DBSCAN (**Density-Based Spatial Clustering of Applications with Noise**) groups points that lie in dense regions of the feature space and marks sparse points as **noise**. You fix two hyperparameters: a neighborhood radius **$\varepsilon$** and a minimum neighbor count **MinPts**. A point is **core** if its $\varepsilon$-ball contains at least MinPts points (including itself); **border** points lie in a core point’s neighborhood but are not core; **noise** points are neither. Clusters are maximal connected sets of density-reachable core and border points.
+
+Interviewers like DBSCAN because it tests intuition about **non-convex clusters**, **varying density** failure modes, and the difference between **distance metrics** and **density**. You should explain that if local density changes a lot, a single $\varepsilon$ may merge separate regions or fragment one region; hierarchical DBSCAN (HDBSCAN) addresses some of this. Distance scaling and high-dimensional geometry (sparse neighborhoods) also matter.
+
+Strengths include not needing k, finding arbitrary shapes, and explicitly flagging outliers—useful for cleaning or anomaly workflows. Weaknesses include sensitivity to $\varepsilon$ and MinPts, variable-density data, and cost of neighborhood queries (often mitigated with spatial indexes for low to moderate dimension).
+
+**Density reachability (informal):** point $\mathbf{q}$ is **directly density-reachable** from core point $\mathbf{p}$ if $\mathbf{q}$ lies in the $\varepsilon$-neighborhood of $\mathbf{p}$. A cluster is built by transitively expanding from core points.
+
+$$
+N_\varepsilon(\mathbf{p}) = \{\mathbf{q} : d(\mathbf{p}, \mathbf{q}) \le \varepsilon\}, \quad \mathbf{p}\ \text{is core if}\ |N_\varepsilon(\mathbf{p})| \ge \texttt{MinPts}
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question="How does DBSCAN differ from k-means in assumptions and outputs?" category="Comparison">
+    k-means assumes roughly spherical clusters defined by centroids and requires k. DBSCAN defines clusters by local density, can find non-convex shapes, does not require k, and outputs an explicit noise label. DBSCAN does not optimize a simple global variance objective like k-means.
+  </InterviewQuestion>
+  <InterviewQuestion question="What happens if epsilon is too small or too large?" category="Hyperparameters">
+    Too small yields many tiny clusters and lots of noise. Too large merges separate groups into one cluster and erodes the notion of density. MinPts acts as a smoothing knob: larger values demand denser cores and reduce sensitivity to single tight pairs.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why can DBSCAN struggle in high dimensions?" category="Clustering">
+    Distance concentration makes epsilon-neighborhoods either empty or huge relative to the data manifold, so density becomes hard to interpret without careful metrics, embedding, or dimensionality reduction. Neighborhood queries also get expensive without structure.
+  </InterviewQuestion>
+</InterviewQuestions>

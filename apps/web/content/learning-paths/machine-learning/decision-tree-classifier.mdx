@@ -1,0 +1,42 @@
+---
+title: Decision Tree Classifier
+description: A recursive partition of feature space into regions, each assigned a majority class, learned by greedy impurity minimization.
+---
+
+A decision tree predicts by asking a sequence of **axis-aligned questions** (e.g., “Is $x_3 \le 2.7$?”) that recursively split the training data into **purer** subsets with respect to the label. Leaves typically predict the **majority class** (or class probabilities via empirical frequencies). Trees are **nonlinear**, handle **mixed** feature types reasonably, and produce **interpretable** rules—at least for shallow trees.
+
+Training is usually **greedy**: at each node, search splits that most reduce an **impurity** measure (Gini or entropy for classification). Greedy optimization is **not globally optimal**, but it is fast and works surprisingly well as a building block. Deep trees **low bias, high variance**—they memorize easily—so practitioners often constrain depth, minimum leaf size, or minimum gain, or ensemble many trees (random forests, boosting).
+
+Impurity guides which split is “best” at a node. **Entropy** connects to information theory; **Gini** measures misclassification probability under random labeling proportional to class frequencies in the node. Interviewers like trees for discussing **overfitting**, **interpretability vs stability**, and **why ensembles help**.
+
+**Entropy** at a node with class proportions $p_c$:
+
+$$
+H(\mathbf{p}) = - \sum_{c} p_c \log_2 p_c
+$$
+
+**Information gain** for a split $S$ that partitions a node into left/right subsets with weights $w_L, w_R$:
+
+$$
+\text{IG}(S) = H(\mathbf{p}) - \left( w_L H(\mathbf{p}_L) + w_R H(\mathbf{p}_R) \right)
+$$
+
+**Gini impurity**:
+
+$$
+G(\mathbf{p}) = 1 - \sum_{c} p_c^2
+$$
+
+Greedy training picks the split maximizing IG (or minimizing weighted Gini).
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why are deep decision trees prone to overfitting?" category="Bias-Variance">
+    Deep trees create many small leaves that can fit noise (idiosyncratic patterns in the training set). They have low bias but high variance: small data changes can change splits early in the tree and drastically alter predictions. Constraints and ensembles reduce this.
+  </InterviewQuestion>
+  <InterviewQuestion question="Gini vs entropy—does it matter much?" category="Split Criteria">
+    Both reward purer nodes and often yield similar trees in practice. Entropy can be slightly slower due to logs. Differences show up at the margin on some datasets, but model quality is more sensitive to depth constraints, min samples per leaf, and post-pruning than the exact impurity choice.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do trees handle categorical variables and missing values (conceptually)?" category="Implementation">
+    For categoricals, splits can partition subsets of categories (depending on implementation). For missing values, common strategies include surrogate splits, separate branches, or imputation; the key interview point is that trees can learn default directions for missingness if the implementation supports it, which can encode informative missing patterns (use with care).
+  </InterviewQuestion>
+</InterviewQuestions>

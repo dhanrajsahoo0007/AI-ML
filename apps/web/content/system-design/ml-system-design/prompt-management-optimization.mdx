@@ -1,0 +1,24 @@
+---
+title: Prompt Management & Optimization
+description: Systematic prompt engineering, programmatic optimization, and evaluation loops that improve quality while cutting tokens, latency, and recurring model spend.
+---
+
+Ad hoc tweaking in a playground does not scale. Mature teams treat prompts like hyperparameters: they define objectives (task success rate, constraint violations, latency), hold out evaluation sets with diverse edge cases, and change one axis at a time while tracking regressions. Systematic prompt engineering adds structure through rubrics, pairwise comparisons, and error clustering so improvements generalize beyond the examples that inspired a wording change. The goal is a repeatable workflow where every edit is tied to metrics and can be reverted without guesswork.
+
+Frameworks in the spirit of DSPy recast prompts as programs that compile into model-facing strings or demonstration sets given a training signal. Instead of manually rewriting instructions, you specify modules (signatures), provide a small set of labeled examples, and let an optimizer search over paraphrases, chain-of-thought scaffolding, or few-shot selections. This trades some upfront complexity for better coverage of the optimization landscape, especially when multiple components (retrieval, reasoning, formatting) must co-adapt. The approach still needs guardrails: overfitting to tiny dev sets is common if you do not maintain held-out tasks and periodic human review.
+
+Prompt compression targets redundant phrasing, duplicated policy text, and oversized few-shot blocks. Techniques include summarizing static policy into bullet constraints, moving reference material into retrieval rather than the system message, and using smaller models to rewrite verbose drafts under length caps. Each removal should be validated because aggressive shortening can drop implicit disambiguation that the model relied on, increasing format errors or safety failures even when headline accuracy looks fine on average.
+
+Evaluation-driven iteration closes the loop. Online signals (thumbs down, task completion, downstream parser success) feed dashboards; offline suites catch regressions before ship. The trade-off is measurement cost: rich human eval does not run on every commit, so you layer fast automated checks (schema validity, keyword constraints, embedding distance to reference answers) with slower periodic deep eval. The architecture should log prompts and outcomes at fine granularity so optimizers and analysts can attribute cost and quality changes to specific prompt versions.
+
+<InterviewQuestions>
+  <InterviewQuestion question="When would you prefer a DSPy-style optimizer over hand-written prompt iteration?" category="Optimization">
+    When you have enough labeled or scored examples to define a training objective, multiple composable modules whose prompts interact, and engineers who can invest in the optimizer setup and validation harness. Hand iteration stays better for tiny data, highly creative copy, or tasks where success is subjective and expensive to score automatically, provided you still track versions and run regression tests.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you reduce LLM cost through prompt changes without wrecking quality?" category="Cost">
+    Profile token usage per stage and remove duplicate instructions, shrink few-shot sets using clustering or influence-style selection, push long reference text into retrieval, and prefer concise system messages tested on a benchmark. Pair every cut with offline eval and spot checks on long-tail intents, because the cheapest prompt is not cheaper overall if it raises failures, retries, or human escalations.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does an evaluation-driven iteration cadence look like in production?" category="Evaluation">
+    Every prompt change runs automated regression tests and schema checks in CI. Shadow or canary traffic compares new prompts against the incumbent on live-shaped traffic with guardrail metrics. Promote only if quality and safety metrics meet thresholds, then monitor drift over days because short canaries can miss weekly seasonality. Keep a feedback channel so failures cluster into new benchmark cases.
+  </InterviewQuestion>
+</InterviewQuestions>

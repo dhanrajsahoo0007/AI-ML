@@ -1,0 +1,24 @@
+---
+title: Long-Term Vector Memory
+description: Persist and recall unstructured knowledge with embeddings, vector indexes, and hybrid retrieval patterns that scale while staying filterable and operationally observable.
+---
+
+Long-term vector memory stores text or multimodal segments as dense vectors so semantically similar queries retrieve relevant past content, documentation, or user-specific notes. Managed services such as Pinecone, open-source engines like Qdrant and Weaviate, or Postgres with pgvector each differ in operational model, filtering expressiveness, replication story, and cost curve. Architecture choices include whether vectors live beside operational OLTP data, in a dedicated search tier, or replicated for regional latency.
+
+Indexing strategies dominate recall-latency trade-offs. HNSW graphs offer strong query performance at the cost of higher memory footprint and sometimes slower index builds. IVF variants partition the space into clusters to reduce search scope, which helps very large corpora when parameters are tuned to your data distribution. Metadata filtering (tenant id, document acl, time range, language) should be pushed into the index where supported so you do not over-fetch vectors that fail security or freshness rules after the fact.
+
+Hybrid search combines dense similarity with lexical signals such as BM25, which helps on rare strings, SKUs, and exact identifiers that embeddings blur. Common patterns include running parallel dense and sparse retrievals then fusing scores, or using lexical prefiltering to shrink the candidate set. Memory retrieval for agents often adds reranking with a cross-encoder or a small LLM to reorder the top k before injection into the prompt, trading compute for precision.
+
+Operational concerns include embedding model versioning (re-embed when the encoder changes), staleness and deletion semantics, and monitoring hit quality with human labels or proxy metrics. Without those, vector memory becomes a slow drift problem where retrieved context is plausible but wrong.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you architect multi-tenant vector storage with access control?" category="Architecture">
+    Partition logically by tenant with mandatory metadata filters on every query, enforce ACLs at ingest so vectors inherit document-level permissions, and avoid cross-tenant shared namespaces without strong namespacing keys. Prefer databases that combine vector search with relational filters atomically. Audit query paths to ensure user-supplied filters cannot widen scope, and replicate indexes per region if latency requirements demand it.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you pick HNSW versus IVF for a billion-scale corpus?" category="Performance">
+    HNSW is attractive when you need low latency queries and can afford RAM for graph structures, and when incremental inserts are frequent. IVF shines when you can afford offline clustering and want to bound search to a small number of partitions, especially on hardware where memory is tighter. The decision should be validated with representative QPS, recall at k targets, and build-time constraints on your pipeline.
+  </InterviewQuestion>
+  <InterviewQuestion question="Describe a production retrieval pattern from query to ranked chunks in the prompt." category="Implementation">
+    Embed the query with the same model version used at ingest, apply metadata filters for tenant and freshness, retrieve a larger candidate set with ANN search, then rerank top candidates with a cross-encoder or lightweight model. Deduplicate near-duplicate chunks, respect a token budget when stitching snippets, and log retrieval ids with the final answer for debugging and feedback loops.
+  </InterviewQuestion>
+</InterviewQuestions>

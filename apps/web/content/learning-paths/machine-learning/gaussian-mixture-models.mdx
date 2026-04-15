@@ -1,0 +1,30 @@
+---
+title: Gaussian Mixture Models
+description: Soft clustering via a weighted sum of Gaussians, fit with EM; bridges classical statistics, generative modeling, and interview questions on likelihood and responsibilities.
+---
+
+A **Gaussian mixture model (GMM)** assumes data are generated from **K** multivariate Gaussian components, each with its own mean, covariance, and mixing weight. Every point gets a **soft assignment**: the posterior probability that it came from component k (called a **responsibility**). That is more flexible than k-means because components can capture elliptical correlations via full covariances and overlapping regions via probabilistic weights.
+
+Training usually uses **expectation–maximization (EM)**. The E-step computes responsibilities given current parameters; the M-step updates means, covariances, and mixing weights to maximize weighted log-likelihood. Interviewers probe **identifiability** (label switching is fine if you only care about density), **singular covariances** (need regularization or tied covariances on small n), and the link to k-means: spherical Gaussians with equal covariances and hard assignments relate to k-means-style behavior.
+
+GMMs are **generative**: they define a full density $p(\mathbf{x})$, which helps anomaly detection, semi-supervised setups, and downstream sampling. Trade-offs include more parameters to estimate, local maxima of likelihood, and the need to choose K—often via information criteria (AIC/BIC) or held-out likelihood.
+
+The mixture density is:
+
+$$
+p(\mathbf{x}) = \sum_{k=1}^{K} \pi_k \, \mathcal{N}(\mathbf{x} \mid \boldsymbol{\mu}_k, \boldsymbol{\Sigma}_k), \quad \pi_k \ge 0,\ \sum_{k=1}^{K} \pi_k = 1
+$$
+
+**EM objective:** maximize log-likelihood $\ell = \sum_{i=1}^{n} \log p(\mathbf{x}_i)$ by iterating E-step responsibilities $\gamma_{ik} = p(z_i=k \mid \mathbf{x}_i)$ and M-step weighted maximum-likelihood Gaussian updates.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How is GMM related to k-means?" category="Comparison">
+    k-means can be viewed as a limiting case with spherical, equal-variance Gaussians and “hard” assignments (each point belongs to one cluster). GMM allows soft assignments, different covariances per component, and a proper generative density.
+  </InterviewQuestion>
+  <InterviewQuestion question="What can go wrong when fitting a full-covariance GMM on small data?" category="Regularization">
+    Covariance matrices can become singular or ill-conditioned, blowing up the Gaussian density. Fixes include diagonal or tied covariances, Bayesian regularization (adding a prior on covariances), increasing data, or reducing dimensionality.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why use EM instead of directly optimizing the log-likelihood with gradient descent?" category="Optimization">
+    EM exploits the latent-variable structure to give stable, closed-form M-steps for Gaussian mixtures and monotonic log-likelihood improvement (each step does not decrease the objective). Gradient methods can work but may be slower or less stable without care; EM is the standard teaching reference for this model class.
+  </InterviewQuestion>
+</InterviewQuestions>

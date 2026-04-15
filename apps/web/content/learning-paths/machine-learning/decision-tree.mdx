@@ -1,0 +1,28 @@
+---
+title: Decision Tree
+description: Recursive partitioning with impurity-based splits—the interpretable foundation of tree ensembles.
+---
+
+A decision tree predicts by asking a sequence of axis-aligned questions about the features (for example, "Is age ≤ 35?"). Training greedily chooses splits that best separate the training points with respect to the target: for classification, splits typically maximize impurity reduction (using Gini index or entropy); for regression, they minimize squared error within child nodes. The result is a piecewise-constant function that is easy to visualize and explain, which is why trees are popular in regulated domains and as a teaching tool.
+
+Trees are nonparametric and can approximate complex interactions without manual feature crosses, but a single deep tree often overfits: it memorizes noise unless you constrain depth, minimum samples per leaf, or pruning. In interviews, emphasize the tradeoff between expressiveness and stability, and that trees are unstable to small data perturbations (high variance), which motivates ensembles like random forests and boosting.
+
+The split at node $t$ maximizes impurity decrease. For classification with proportion $p_c$ of class $c$ in node $t$, common impurities are Gini $G(t) = 1 - \sum_c p_c^2$ or entropy $H(t) = -\sum_c p_c \log p_c$. The best split $s$ into left $L$ and right $R$ maximizes:
+
+$$
+\Delta(t,s) = I(t) - \frac{n_L}{n_t} I(L) - \frac{n_R}{n_t} I(R)
+$$
+
+where $I$ is the chosen impurity, $n_t$ is the sample count in node $t$, and $n_L, n_R$ are counts in the children.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why can a deep decision tree overfit, and what regularization levers do you use?" category="Regularization">
+    Deep trees create many small leaves that can memorize idiosyncrasies of the training set. You limit capacity with max depth, minimum samples per leaf, maximum leaves, requiring a minimum impurity decrease to split, or post-pruning (cost-complexity). Stronger constraints increase bias but usually reduce variance and improve generalization when data is noisy.
+  </InterviewQuestion>
+  <InterviewQuestion question="Compare Gini impurity and entropy as split criteria." category="Split Criteria">
+    Both measure how "mixed" class proportions are in a node; pure nodes have Gini 0 and entropy 0. They usually produce similar trees in practice. Entropy uses a logarithmic weighting and can be slightly slower to compute; Gini is common in libraries like scikit-learn's DecisionTreeClassifier default. Neither is universally "better" — pick one convention and tune depth/leaf rules instead of obsessing over the impurity choice.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a regression tree pick splits?" category="Training">
+    It minimizes within-node squared error (or sometimes absolute error for robustness). Each candidate split partitions points into two groups; the prediction in a leaf is typically the mean (or median) of targets in that leaf. The split that most reduces residual sum of squares is chosen, analogous to impurity reduction in classification.
+  </InterviewQuestion>
+</InterviewQuestions>

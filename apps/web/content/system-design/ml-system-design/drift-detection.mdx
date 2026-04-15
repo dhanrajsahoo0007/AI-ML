@@ -1,0 +1,24 @@
+---
+title: Drift Detection
+description: Data, concept, and output drift for ML and LLM systems, PSI, embeddings monitoring, thresholds, and remediation.
+---
+
+Drift means the world changed faster than your training assumptions. Covariate shift appears when input distributions move: new slang, new document types in RAG corpora, or a marketing campaign that sends different user demographics. Concept drift is when the relationship between inputs and desired outputs changes even if inputs look similar, such as updated policies or seasonal intent. Output drift tracks changes in model predictions or scores over time and can reflect either upstream input shifts or internal regressions after deploys.
+
+Monitoring often starts with univariate statistical tests on engineered features, but text-heavy systems lean on distribution summaries such as vocabulary novelty rates, language mix, average token length, and embedding centroid shifts. Population stability index compares binned score distributions between a reference window and a current window; high PSI suggests redistribution of model confidence or inputs, though PSI is sensitive to binning choices and should be interpreted alongside business context.
+
+Embedding drift compares sample embeddings from production to a reference set using distances in vector space, nearest-neighbor overlap, or clustering stability. Alerts need thresholds tuned to avoid noise: use adaptive baselines, require persistence across multiple windows, and correlate with quality or error metrics before auto-remediation. Remediation strategies include refreshing training data, re-indexing retrieval corpora, recalibrating classifiers, rolling back prompts or models, and increasing human review rates for affected segments.
+
+LLM-specific drift includes retrieval corpus staleness, tool API behavior changes, and judge model upgrades that move evaluation scores without changing the product model. Tag incidents by suspected drift type so playbooks stay actionable.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you distinguish data drift from a bad model deployment using only monitoring signals?" category="Monitoring">
+    Correlate timelines: a deploy spike in errors with stable input statistics points to the release, while gradual embedding drift with rising perplexity-like proxies and stable code suggests upstream population change. Compare canary slices, check versioned artifacts such as index build ids, and if shadow traffic on the prior model worsens similarly, the environment drifted; if only the new model worsens, suspect the change itself.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are strengths and weaknesses of PSI for monitoring LLM scoring or retrieval ranker outputs?" category="Detection">
+    PSI is simple to operationalize and interpret as a coarse redistribution alarm when score distributions shift between reference and current periods. Weaknesses include sensitivity to binning, lack of localization for which subpopulations moved, and possible false alarms when benign seasonality repeats. For text, PSI on scalar proxies is indirect; pair it with embedding-based tests and qualitative sampling.
+  </InterviewQuestion>
+  <InterviewQuestion question="What operational steps follow a sustained high-severity drift alert in production?" category="Operations">
+    Page or ticket the owning team with linked dashboards, increase sampling for human review on affected segments, consider temporary traffic throttling or fallback to a safer model, open a incident record with hypothesized causes, and schedule remediation such as retraining, corpus refresh, or hotfix prompts. Communicate to stakeholders if user-visible quality changed, and after resolution add a new regression case to offline suites to catch recurrence.
+  </InterviewQuestion>
+</InterviewQuestions>

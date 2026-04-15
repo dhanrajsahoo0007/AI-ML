@@ -1,0 +1,28 @@
+---
+title: Bagging
+description: Bootstrap aggregating—train diverse models on resampled data and average predictions to reduce variance.
+---
+
+Bagging (Bootstrap AGGregatING) trains multiple base models independently on **bootstrap samples**: random draws with replacement from the training set, each sample the same size as the original data. Each model sees a slightly different dataset, so their errors are less than perfectly correlated. Averaging regression predictions or majority-voting classification predictions reduces variance, which is especially helpful for **high-variance, low-bias** learners like full-depth decision trees.
+
+Bagging does not aggressively reduce bias the way boosting does; it stabilizes unstable procedures. Random forest extends bagging trees with additional randomization at splits. Interview answers should mention the $1 - (1 - 1/n)^n \approx 1 - e^{-1}$ fraction of unique points per bootstrap sample and why OOB error works for forests.
+
+Given $B$ models $\hat{f}_1,\dots,\hat{f}_B$ trained on bootstrap samples $\mathcal{D}_b$, the bagged predictor for regression is:
+
+$$
+\hat{f}_{\text{bag}}(x) = \frac{1}{B}\sum_{b=1}^{B} \hat{f}_b(x)
+$$
+
+For classification, hard voting uses $\hat{y}(x) = \arg\max_c \sum_{b=1}^{B} \mathbb{1}[\hat{f}_b(x)=c]$; soft voting averages estimated class probabilities when available.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why does bagging help unstable models more than stable ones?" category="Bias-Variance">
+    Stable models (like linear regression with mild collinearity) have low variance; averaging nearly identical fits gains little. Unstable models (deep trees, high-degree polynomials) can swing with small data changes; bagging averages those swings, canceling variance while bias stays similar.
+  </InterviewQuestion>
+  <InterviewQuestion question="What fraction of training points are in-bag for each bootstrap sample of size n?" category="Fundamentals">
+    Each bootstrap draw picks one index uniformly at random from n training points. For a fixed point, one draw misses it with probability 1 minus 1 over n. After n independent draws, the chance it never appears is 1 minus 1 over n, raised to the n-th power, which approaches 1 over Euler’s number e as n grows. So about 63 percent of distinct points appear at least once in-bag; roughly 37 percent are out-of-bag on average, enabling OOB evaluation for tree ensembles.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does bagging differ from boosting?" category="Comparison">
+    Bagging trains models in parallel on resampled data and combines them with equal weight; boosting trains sequentially, each model targeting mistakes of the ensemble so far. Bagging mainly cuts variance; boosting often cuts bias and can achieve lower training error but needs careful tuning to control variance.
+  </InterviewQuestion>
+</InterviewQuestions>

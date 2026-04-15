@@ -1,0 +1,24 @@
+---
+title: Continuous Data & Knowledge Integration
+description: Keep retrieval indexes and knowledge bases fresh with incremental pipelines, embedding updates, change detection, and SLAs that balance cost against answer staleness.
+---
+
+RAG and agentic systems are only as current as the corpora they retrieve from. Continuous integration for knowledge means pipelines that ingest new documents, update structured records, and refresh vector indexes without taking the whole system offline. Architecture usually splits bulk backfills from incremental updates: message queues or change-data-capture streams carry create, update, and delete events from source systems into workers that normalize text, deduplicate by content hash, and enqueue embedding jobs.
+
+Document change detection compares source revision ids, content hashes, or extracted entity signatures so unchanged paragraphs do not force redundant embedding calls. Incremental indexing strategies include per-collection segment files with periodic compaction, dual-write to shadow indexes followed by atomic swap, or versioned index aliases in Elasticsearch-style clusters. Embedding update strategies range from full re-embed on any text change to selective re-embed when semantic diff exceeds a threshold, trading fidelity against API cost and latency during peak update windows.
+
+Stale data handling belongs in product policy as much as in engineering. Some answers should carry freshness timestamps or disclaimers when source-of-truth systems lag. Freshness SLAs define maximum acceptable lag per data class: regulatory filings might need sub-hour propagation while marketing blogs tolerate a day. Operational monitors track ingestion backlog depth, embedding queue age, and retrieval hit rates for newly added content to catch silent failures in connectors.
+
+Trade-offs include eventual consistency versus read-after-write expectations for internal tools. Stronger guarantees often require synchronous write paths that increase user-perceived latency on authoring flows. Another tension is global versus regional indexes: unified indexes simplify routing but may violate data residency; sharded indexes add routing complexity but align with compliance boundaries.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you design an incremental embedding pipeline at scale?" category="Architecture">
+    I would use a durable event log for document changes, idempotent workers that chunk text deterministically, and a batching layer that groups embedding requests to respect rate limits and GPU batch sizes. Embeddings would write to a vector store with metadata for source version and content hash so queries can filter by recency or tenant. I would support full reindex jobs behind feature flags using the same code path to avoid divergence between incremental and bulk modes.
+  </InterviewQuestion>
+  <InterviewQuestion question="What reliability patterns reduce user-visible stale answers?" category="Reliability">
+    I would expose document timestamps in retrieval results so the application layer can refuse to answer time-sensitive questions from old chunks, implement circuit breakers when connectors fail, and alert when median index lag exceeds SLA. Fallback paths might include live API lookup for authoritative records when the index is behind. Chaos testing on queue consumers catches poison messages that stall partitions.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you operationalize freshness SLAs with non-engineering stakeholders?" category="Operations">
+    I would translate SLAs into measurable dashboards: time from publish in the CMS to retrievable chunk, and percentage of queries satisfied by documents newer than a threshold. Incident response playbooks would define when to pause retrieval features or show warnings. Capacity planning ties SLA to cost by modeling embedding spend under peak publishing events such as product launches or earnings releases.
+  </InterviewQuestion>
+</InterviewQuestions>

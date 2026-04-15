@@ -1,0 +1,22 @@
+---
+title: Continuous Improvement Pipeline
+description: Closing the loop from production signals to retraining, experiments, and measurable learning velocity.
+---
+
+A continuous improvement pipeline treats model quality as a time series, not a milestone. Production logs capture errors, latency, user corrections, and business outcomes; those signals feed triage dashboards and automated detectors that answer whether a regression is data drift, a bad rollout, or an emerging adversarial pattern. Root cause analysis for failures often spans multiple teams: bad answers may trace to retrieval staleness, tokenizer changes, or upstream feature pipelines rather than weights alone, so incident tooling should link model version, data snapshot IDs, and dependency health in one traceable graph.
+
+Automated retraining triggers balance responsiveness against noise. Simple thresholds on accuracy proxies can oscillate if sample sizes are small; better approaches combine sequential tests on holdout slices, drift statistics on input embeddings, and guardrails that require human approval for high-risk domains. Quality regression detection should include canary comparisons and shadow evaluations before full traffic adoption. Integrating A/B experiments ties model changes to causal estimates of revenue or engagement instead of proxy metrics that moved without user value.
+
+Improvement velocity metrics make the pipeline legible to leadership: median time from flagged issue to patched model in production, percentage of regressions caught pre-release, and cost per incremental quality point on benchmark suites. Architecture-wise, separate training orchestration from serving CI so long-running GPU jobs do not block hotfixes, but unify metadata so every production model references the datasets, code commits, and evaluation reports that justified promotion. The trade-off is process overhead versus chaos: lightweight teams move fast until untracked experiments make incidents unrecoverable; heavy gates slow iteration unless automation removes manual toil.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What signals would you use to trigger an automated retrain versus opening a manual investigation?" category="Operations">
+    Automate when drift tests cross predefined thresholds on large, representative traffic, when rolling accuracy on labeled slices drops with statistical significance, and when dependencies such as a knowledge index refresh complete successfully. Prefer manual investigation for rare safety incidents, single-customer spikes, or ambiguous metric movement that could be instrumentation bugs. Always require human gates for regulated domains even if numbers look bad.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you integrate A/B tests into a continuous delivery flow for models without contaminating experiment readouts?" category="Architecture">
+    Assign stable experiment keys at the edge, route deterministically, log exposures with model version and feature flags, and power analyses using preregistered metrics. Ensure training data from experiments does not leak labels across arms when computing automated rewards. Provide kill switches that revert assignment instantly and isolate infrastructure so one arm’s autoscaling does not starve another.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you run root cause analysis for a sudden increase in toxic outputs?" category="Methodology">
+    Segment by geography, language, prompt topic, and model version to see if the spike correlates with a rollout or a traffic shift. Inspect retrieval corpora and tool outputs for poisoned documents, review recent data ingestion jobs, and compare token distributions against a baseline. Interview on-call changes to moderation filters, then design a corrective dataset or policy layer and validate on held-out toxic prompts before redeploying.
+  </InterviewQuestion>
+</InterviewQuestions>

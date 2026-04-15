@@ -1,0 +1,28 @@
+---
+title: K-Means Clustering
+description: Partition unlabeled data into k groups by minimizing within-cluster variance; fast, widely used, and a staple in ML interviews.
+---
+
+K-means partitions a dataset into **k** disjoint clusters by alternating two steps: assign each point to its nearest cluster center (centroid), then recompute each centroid as the mean of the points assigned to that cluster. The algorithm is greedy and typically stops when assignments no longer change or improvement falls below a threshold. Because it optimizes a sum of squared distances to centroids, it naturally prefers **spherical, similarly sized** clusters when distances are Euclidean.
+
+Interviewers often probe whether you know that k-means is **not guaranteed** to find the global optimum of its objective; random restarts and smarter initializations (for example k-means++) reduce the risk of poor local minima. You should also be ready to discuss **choosing k** (elbow method, silhouette score, domain knowledge), sensitivity to **scale** of features (standardization matters), and behavior with **outliers** (a few bad points can drag centroids).
+
+In practice k-means is fast and scales well, which is why it appears in pipelines from vector quantization to pre-clustering before finer models. Its main weaknesses are the need to specify k upfront and assumptions that clusters are roughly convex and isotropic in the chosen metric.
+
+$$
+\min_{\mathbf{C},\, \{\mathbf{c}_j\}_{j=1}^{k}} \sum_{j=1}^{k} \sum_{i : \mathbf{x}_i \in C_j} \|\mathbf{x}_i - \mathbf{c}_j\|_2^2
+$$
+
+Here $C_j$ is the set of points assigned to cluster $j$ and $\mathbf{c}_j = \frac{1}{|C_j|}\sum_{i \in C_j} \mathbf{x}_i$ is the centroid (mean) of that cluster at each assignment step.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is k-means sensitive to initialization, and what can you do about it?" category="Optimization">
+    The objective is non-convex in the discrete assignments, so Lloyd’s algorithm can converge to different local minima depending on starting centroids. Mitigations include multiple random restarts, k-means++ (spread initial centers across the data), or better feature scaling so geometry matches intuition.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose k if you do not know the number of clusters?" category="Hyperparameters">
+    There is no universally correct k without domain context. Common heuristics include the elbow on within-cluster sum of squares (WCSS), silhouette or Calinski–Harabasz scores, cross-validation in downstream tasks, or stability analysis. Ultimately you validate clusters by whether they are useful for the business or modeling goal.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you avoid k-means?" category="Clustering">
+    When clusters are non-convex (rings, crescents), highly imbalanced in size, or elongated along different axes; when you need soft cluster membership; or when outliers dominate squared-error geometry. In those cases density methods (DBSCAN), mixture models (GMM), or spectral methods may fit better.
+  </InterviewQuestion>
+</InterviewQuestions>

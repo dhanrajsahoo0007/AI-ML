@@ -1,0 +1,24 @@
+---
+title: Prompt Templates & Versioning
+description: Treat prompts as versioned artifacts with registries, interpolation contracts, and rollback paths so production LLM behavior stays auditable and reproducible.
+---
+
+Production LLM systems rarely hard-code a single string in application code. Instead they centralize prompts in a template layer that separates static instructions from dynamic slots (user input, retrieved documents, tool outputs, locale, and safety policies). Good template systems define a schema for variables, default values, escaping rules for nested content, and compile-time checks so missing keys fail in CI rather than at runtime. That contract becomes especially important when the same logical prompt is rendered for multiple models that differ in tokenizer quirks, stop sequences, and maximum context lengths.
+
+Version control for prompts is not identical to Git alone. You typically want immutable versions tagged with metadata: model family, temperature and decoding parameters, evaluation scores on a frozen benchmark, author, and the dataset snapshot used for regression tests. A prompt registry stores these artifacts and maps logical names (for example, support_ticket_summarizer_v3) to concrete template bodies and parameter bundles. Rollback means repointing a feature flag or configuration entry to a prior registry version without redeploying code, while still retaining the ability to correlate logs with the exact prompt hash that produced each response.
+
+Few-shot examples deserve first-class versioning because they are often the highest-leverage part of a template. Managing them as structured records (example text, label, weight, source dataset row id) lets you audit provenance, prune redundant demonstrations that inflate token cost, and detect leakage from evaluation sets into the prompt. Teams sometimes maintain parallel template branches for A/B experiments, but the architecture should enforce that only one branch is active per traffic slice and that analytics join on version identifiers.
+
+Trade-offs appear between flexibility and governance. Highly dynamic templates with arbitrary string concatenation are fast to iterate but brittle; rigid templating with typed slots is safer but can slow product teams. The operational sweet spot is usually declarative templates plus automated diff review, golden-output tests on representative inputs, and a clear deprecation policy so old versions do not linger in shadow traffic or cron jobs.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you structure a prompt registry so teams can iterate safely?" category="Management">
+    I would store immutable prompt versions with metadata such as model id, decoding parameters, benchmark results, and ownership. Production resolves a logical name to a pinned version via configuration or feature flags, with audit logs tying each response to the prompt hash. CI runs golden tests and schema checks on every change, and promotion requires review plus explicit activation rather than implicit latest pointers in code paths that matter for compliance.
+  </InterviewQuestion>
+  <InterviewQuestion question="What architectural boundaries belong between templates and application code?" category="Architecture">
+    Templates should own wording, slot ordering, and few-shot packs, while application code supplies validated values for slots and handles retries, timeouts, and observability. Crossing that boundary cleanly avoids scattering prompt fragments in strings across services and lets you swap models or languages without rewriting business logic. Shared libraries can render templates from a central store so microservices do not fork divergent copies of the same instruction text.
+  </InterviewQuestion>
+  <InterviewQuestion question="Describe a practical rollback strategy after a bad prompt deploy." category="Operations">
+    Keep the previous registry version hot and addressable by id. On elevated error rates or quality regressions detected by monitors, flip the configuration flag or traffic weight back to the last known-good version within minutes, without a full redeploy. Capture exemplar failing requests, diff template versions, and run offline replays against both versions to confirm the fix before attempting a forward roll again. Document the incident with the prompt version ids involved for postmortems.
+  </InterviewQuestion>
+</InterviewQuestions>

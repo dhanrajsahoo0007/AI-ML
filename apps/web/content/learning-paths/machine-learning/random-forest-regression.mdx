@@ -1,0 +1,30 @@
+---
+title: Random Forest Regression
+description: An ensemble of decorrelated regression trees trained on bootstrap samples with random feature subsets; strong default for tabular regression with nonlinear structure.
+---
+
+Random Forests combine many regression trees using **bagging** (bootstrap aggregation): each tree trains on a random sample with replacement of the training data, and the forest prediction is the **average** of leaf predictions across trees. To reduce correlation between trees, each split considers only a **random subset of features** (e.g., $\sqrt{p}$ or $p/3$ depending on convention and implementation). Lower correlation means averaging reduces variance more effectively.
+
+In interviews, emphasize **why averaging helps**: individual trees are noisy, but errors are somewhat independent across trees, so the mean smooths idiosyncratic mistakes. Random Forests typically need little tuning, handle nonlinearities and interactions well, and provide useful diagnostics like **out-of-bag (OOB) error** and **feature importance** (with the caveat that importance can be biased toward high-cardinality or correlated features).
+
+Tradeoffs: forests are less interpretable than a single tree, can be memory-heavy, and may plateau in performance compared to boosting on some competitive tabular benchmarks—though they remain an excellent baseline.
+
+Let $\hat{f}_1, \ldots, \hat{f}_B$ be $B$ tree predictors trained on bootstrap samples with random split feature subsets. The forest predictor is:
+
+$$
+\hat{F}(\mathbf{x}) = \frac{1}{B} \sum_{b=1}^{B} \hat{f}_b(\mathbf{x})
+$$
+
+Out-of-bag estimates approximate generalization error by evaluating each tree on points not included in its bootstrap sample.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why randomize features at each split instead of only randomizing the bootstrap sample?" category="Architecture">
+    Bagging alone can produce correlated trees if a few strong features dominate splits; correlated trees average poorly. Random feature subsets decorrelate trees so the ensemble variance reduction is closer to the ideal independent-errors-cancel effect.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you tune a Random Forest regressor?" category="Hyperparameters">
+    Main knobs are the number of trees (more trees monotonically reduce variance up to diminishing returns), max depth and leaf size constraints, and max features for split randomness. Use cross-validation on a validation metric; out-of-bag error can guide tuning when appropriate.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a limitation of default feature importance in tree ensembles?" category="Interpretability">
+    It can favor features with many unique values or strong correlation structures; correlated features may share importance inconsistently. Model-agnostic methods (permutation importance with careful handling of correlated groups, SHAP) are often preferred for serious interpretation.
+  </InterviewQuestion>
+</InterviewQuestions>

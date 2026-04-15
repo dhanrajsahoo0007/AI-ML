@@ -1,0 +1,24 @@
+---
+title: Ingestion Orchestration (ETL/ELT)
+description: Reliable, observable coordination of data movement using DAGs, idempotent tasks, and operational patterns for scale.
+---
+
+ETL and ELT orchestration schedules work that lands data in lakes, warehouses, and feature stores. Airflow remains common for cron-style DAGs with rich operator ecosystems; Dagster emphasizes software-defined assets and data-aware dependencies; Prefect and similar tools focus on dynamic workflows and developer ergonomics for Python-native tasks. The right choice depends on team skills, how strongly you want assets as first-class objects, and whether you need fine-grained per-run parameterization without redeploying DAG definitions.
+
+Idempotency is the backbone of reliable ingestion. Tasks should be safe to retry: write to partitioned staging locations, merge with deterministic keys, and use upsert semantics or merge statements that collapse duplicates. Backfills are routine after logic bugs or late-arriving facts; design partitions so you can reprocess bounded date ranges without rewriting entire tables. Exactly-once end-to-end semantics are rare outside managed streaming stacks; in batch land you usually aim for effectively-once behavior via idempotent sinks and deduplication keys.
+
+DAG design should reflect failure domains: separate extract, transform, and load stages so a transform bug does not force re-pulling terabytes from an external API. Keep fan-in and fan-out explicit to avoid hidden resource contention. Retry policies should distinguish transient network errors from data errors that will never succeed without code changes, surfacing the latter to alerting channels quickly.
+
+Operations benefit from SLA timers on critical paths, data quality checks as sensors or tasks, and observability into queue depth and executor saturation. Trade-offs include orchestrator operational overhead versus glue scripts, and centralization versus team autonomy when many micro-DAGs create cross-dependencies that are hard to visualize.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you make a daily warehouse load resilient to partial failures?" category="Reliability">
+    Stage raw extracts to durable storage before transforms so you can replay from the landing zone. Use transactional boundaries or partition swaps so consumers never see half-updated tables. Configure retries with exponential backoff for transient failures, circuit break on persistent upstream errors, and alert when quality checks fail thresholds so you can pause downstream jobs instead of propagating corrupt aggregates.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you split one large DAG into several smaller ones?" category="Architecture">
+    Split when domains have different owners, SLAs, or failure blast radius, or when independent scaling and deployment cadences matter. Shared dependencies can be modeled with external task sensors or dataset events, but avoid fragile chains of waiting sensors that hide circular dependencies. Smaller DAGs improve clarity at the cost of more cross-DAG coordination logic to maintain.
+  </InterviewQuestion>
+  <InterviewQuestion question="What runbook steps matter after a failed backfill?" category="Operations">
+    Verify which partitions were committed, reconcile row counts and checksums against expectations, recompute downstream incremental models in dependency order, and invalidate caches or feature materializations tied to those dates. Communicate to stakeholders if dashboards moved temporarily, document root cause, and add a regression test or quality assertion so the same logic bug cannot silently recur.
+  </InterviewQuestion>
+</InterviewQuestions>

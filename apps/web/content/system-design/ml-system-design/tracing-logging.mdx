@@ -1,0 +1,24 @@
+---
+title: Tracing & Logging
+description: Distributed tracing, structured logging, and observability platforms for LLM pipelines, tools, and retrieval.
+---
+
+Large language model applications behave like distributed systems even when they run in a single service: a request may fan out to embeddings, vector search, rerankers, tool executors, and multiple model calls. OpenTelemetry gives you vendor-neutral spans with parent-child relationships, baggage for tenant or experiment identifiers, and exporters that land in Jaeger, Honeycomb, Grafana Tempo, or cloud APM. For LLMs specifically, you instrument not only HTTP latency but semantic phases such as prompt templating, tokenizer calls, retrieval, and post-processing so on-call engineers can see where time and tokens accumulate rather than staring at one opaque wall clock.
+
+Logging prompts and completions is necessary for debugging and audit, but it is also a privacy and compliance minefield. Structured logs with redaction pipelines, field-level encryption, configurable sampling by risk tier, and retention policies aligned with legal holds reduce exposure compared to dumping raw transcripts into plaintext files. Tool call traces should capture arguments at a safe granularity, return payloads or hashes depending on sensitivity, and correlate with upstream span IDs so you can replay failures without losing causality. Retrieval traces benefit from logging query text or a stable hash, index version, top-k identifiers, and scores so you can distinguish ranking regressions from model regressions.
+
+Platforms such as Langfuse, LangSmith, and Arize Phoenix specialize in LLM observability: they combine traces with cost, latency, and evaluation scores, and often support dataset export for fine-tuning or regression suites. The trade-off is another data plane to secure and another bill line item versus building on generic tracing alone. Generic tracing is flexible and integrates with existing SRE dashboards; LLM-native products accelerate teams that want prompt versioning, annotation workflows, and scorecards without wiring everything by hand.
+
+The operational sweet spot is usually hybrid: OpenTelemetry for service-to-service propagation and SLO dashboards, plus selective enrichment spans or linked events for model-specific context, and a curated observability store for high-value sampled conversations. That keeps cardinality manageable while preserving enough signal to debug subtle failures like stale retrieval caches or non-deterministic tool ordering.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you instrument an LLM agent that calls external tools and a vector database while keeping traces useful for on-call?" category="Observability">
+    Create a root span per user request and child spans for each phase: retrieval, each tool invocation with sanitized arguments, the main completion call, and post-processing. Propagate trace context through async workers and queues, attach stable attributes such as model name, prompt template version, and index snapshot id, and cap payload sizes in span events while linking to secure blob storage for full payloads when needed. Use consistent span names and status codes so dashboards can aggregate error rates by component.
+  </InterviewQuestion>
+  <InterviewQuestion question="What architectural decisions matter when logging prompts and model outputs in a regulated environment?" category="Architecture">
+    Separate control plane from data plane logging, default to deny for full transcript storage, classify routes by data sensitivity, apply tokenization or hashing for high-risk fields, encrypt at rest with customer-managed keys where required, and tie retention to purpose such as debugging versus training. Provide user-facing consent flows if logs feed product improvement, and ensure access is role-based with break-glass procedures rather than broad shared admin accounts.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you adopt Langfuse, LangSmith, or Arize versus only generic OpenTelemetry backends?" category="Tooling">
+    Adopt an LLM-native platform when teams need prompt experiment tracking, human labels tied to traces, built-in cost and latency breakdown per model, and faster time-to-value than custom dashboards. Stay on generic backends when you have strict data residency constraints, already standardized on a single APM vendor, or need minimal third-party data movement and are willing to build evaluation and prompt analytics in-house.
+  </InterviewQuestion>
+</InterviewQuestions>

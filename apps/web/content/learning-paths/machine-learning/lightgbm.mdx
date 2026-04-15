@@ -1,0 +1,28 @@
+---
+title: LightGBM
+description: Gradient boosting with histogram-based learning, leaf-wise growth, and optimizations for large-scale tabular data.
+---
+
+LightGBM is a gradient boosting framework optimized for speed and memory on large datasets. It uses **histogram-based** binning of continuous features to find splits quickly, supports efficient categorical feature handling via many-to-one partitions, and grows trees **leaf-wise** (chooses the leaf that most reduces loss to expand) rather than level-wise. Leaf-wise growth can achieve lower loss with the same number of leaves but risks deeper, more specialized trees—so `num_leaves` and regularization matter.
+
+It also offers techniques like Gradient-based One-Side Sampling (GOSS) and Exclusive Feature Bundling (EFB) to downsample and compress sparse features during training. In interviews, explain when LightGBM shines (large $n$, many numeric features) and why you must tune depth-related parameters more carefully than with level-wise boosting.
+
+Histogram binning maps feature $j$ values to bin indices $b \in \{1,\dots,B\}$; split gain on histogram counts uses gradient/hessian sums $G_L, H_L$ in the left bin range:
+
+$$
+\text{Gain} = \frac{G_L^2}{H_L + \lambda} + \frac{G_R^2}{H_R + \lambda} - \frac{(G_L+G_R)^2}{H_L+H_R + \lambda} - \gamma
+$$
+
+where $G$ and $H$ are sums of first- and second-order derivatives in child regions, $\lambda$ is L2 on leaf weights, and $\gamma$ is a complexity penalty per additional leaf.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is leaf-wise tree growth both powerful and risky?" category="Architecture">
+    Leaf-wise expansion greedily splits the currently best leaf, which can reduce training loss faster than level-wise growth for a fixed number of leaves. Without constraints, it can chase noise and overfit. You control this with num_leaves, min_data_in_leaf, L1 and L2 lambda on leaf weights, feature subsampling, and early stopping.
+  </InterviewQuestion>
+  <InterviewQuestion question="What problem does GOSS aim to solve?" category="Optimization">
+    Large datasets make per-iteration gradient computations expensive. GOSS keeps instances with large gradients (under-sampled) and randomly samples instances with small gradients, reweighting to preserve the gradient distribution. That speeds training while focusing updates on hard examples.
+  </InterviewQuestion>
+  <InterviewQuestion question="When might you pick LightGBM over XGBoost or CatBoost?" category="Model Selection">
+    When training speed and memory on very large numeric tabular data dominate, LightGBM’s histogram and leaf-wise strategy often wins after tuning. If categorical features dominate and leakage-free target encoding matters, CatBoost can be easier; XGBoost remains a strong general default—benchmark on your validation protocol.
+  </InterviewQuestion>
+</InterviewQuestions>

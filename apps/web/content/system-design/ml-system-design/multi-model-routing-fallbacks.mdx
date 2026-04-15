@@ -1,0 +1,24 @@
+---
+title: Multi-Model Routing & Fallbacks
+description: Intelligent request routing across models with resilience patterns, cost controls, and experimentation-friendly traffic splits.
+---
+
+Production LLM applications rarely rely on a single model. Routers choose among options with different cost, latency, context limits, and capability profiles. Simple policies route by tenant tier, task type, or prompt length. More advanced routers train lightweight classifiers or use small models to predict which large model is needed, or they cascade: attempt a cheap model first and escalate only when confidence is low or validation fails.
+
+Fallback chains improve reliability when a provider returns 429 errors, when a regional endpoint fails health checks, or when output schema validation fails and a retry with a stricter model is warranted. Each hop should be bounded by deadlines so total latency does not exceed client timeouts. Circuit breakers stop hammering unhealthy backends and allow half-open probes to recover gracefully.
+
+Model cascades differ from pure fallbacks: they spend more compute only on hard inputs while keeping easy inputs cheap. A and B traffic splitting supports experimentation: route a percentage of users to a new prompt or model, compare metrics, and roll forward or back. Feature flags and consistent hashing by user id keep experiences stable across requests.
+
+Cost optimization intersects routing when you downgrade non-critical workloads to smaller models or shorten max tokens dynamically. The trade-off is engineering and observability complexity: more branches mean harder attribution of quality regressions unless you tag spans with router decisions and outcomes.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do circuit breakers interact with fallback chains in a multi-provider setup?" category="Reliability">
+    When error rates or latency against a provider exceed thresholds, the breaker opens and the router skips that provider for a cool-down period, sending traffic to the next backend in the chain. Half-open states send a trickle of probes to detect recovery without flooding a bad endpoint. Log each transition with reason codes so on-call can distinguish saturation from hard outages.
+  </InterviewQuestion>
+  <InterviewQuestion question="What signals would you use for a capability-based router between a small and large LLM?" category="Architecture">
+    Combine cheap heuristics such as token count, language detection, and tool requirement flags with a calibrated confidence score from the small model if you use a cascade. For RAG, router inputs may include retrieval score distributions. Always include safety bucketing so high-risk topics always route to the stronger model regardless of length heuristics.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you run an A/B test between two models without biasing metrics?" category="Cost">
+    Assign users or sessions with stable hashing to arms, keep prompts comparable, and log model identifiers with outcomes. Watch both quality metrics and spend per successful task, because a cheaper model might look good on latency while hurting conversion. Use sequential testing or frequentist power analysis to avoid peeking bias, and ensure fallback paths do not contaminate arms unless you stratify analysis.
+  </InterviewQuestion>
+</InterviewQuestions>

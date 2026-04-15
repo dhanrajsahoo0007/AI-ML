@@ -1,0 +1,28 @@
+---
+title: Stacking
+description: Train a meta-learner on base model predictions—learn how to combine heterogeneous models without hand-picked weights.
+---
+
+Stacking (stacked generalization) trains **multiple diverse base models** (different algorithms or feature views) on the same supervised task, then feeds their predictions as inputs to a **meta-model** that learns the optimal combination. The key implementation detail is **out-of-fold base predictions** during training: if you train the meta-learner on in-sample base outputs, it overfits to idiosyncrasies of the bases. Cross-fitting or out-of-fold generation preserves a honest mapping from raw features to meta-features.
+
+Stacking can outperform voting when bases make different errors, but it adds complexity, latency, and monitoring burden in production. Interviews reward mentioning leakage prevention, model diversity, and that the meta-learner is often simple (logistic regression, ridge) to avoid overfitting high-dimensional stacks.
+
+Let base models produce $\hat{g}_m(x)$ for $m=1,\dots,M$. The meta-feature vector is $z(x) = [\hat{g}_1(x),\dots,\hat{g}_M(x)]^\top$. A second-level model $h$ predicts:
+
+$$
+\hat{y}(x) = h\big(z(x)\big)
+$$
+
+For $K$-class classification, $z$ may concatenate class probability vectors, giving length $M \cdot K$ before $h$.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you prevent leakage when training a stacking meta-model?" category="Training">
+    Never fit the meta-learner on predictions from bases trained on the same rows they are predicting. Use K-fold cross-fitting: for each fold, train bases on other folds, predict the held-out fold, concatenate those OOF predictions, then fit the meta-learner on OOF meta-features. Retrain bases on full data only at the end for deployment, using the saved meta-learner.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why use a simple meta-learner instead of another deep tree?" category="Model Selection">
+    Meta-features are correlated and limited in number; a complex meta-model can overfit quickly. Linear models or shallow trees regularize the combination. You can still try deeper metas if data is huge and cross-validation supports it.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does stacking differ from blending?" category="Comparison">
+    Blending typically holds out a single validation split to generate base predictions for training the combiner; stacking uses full training data more efficiently via cross-fitting. Blending is simpler but higher variance if the holdout slice is unrepresentative.
+  </InterviewQuestion>
+</InterviewQuestions>

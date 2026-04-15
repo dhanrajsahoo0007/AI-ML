@@ -1,0 +1,36 @@
+---
+title: Support Vector Machines
+description: Maximum-margin linear separators with kernel tricks for nonlinear boundaries, framed as convex optimization.
+---
+
+A support vector machine (SVM) finds a **hyperplane** that separates classes with the **largest margin**—the gap between the boundary and the nearest training points (support vectors). Maximizing margin is a principled way to improve **generalization** in low- and moderate-dimensional settings where a linear boundary is appropriate. Only points on or inside the margin really matter for the solution, which often yields **sparse** influence in terms of support vectors.
+
+When data are not linearly separable, SVMs introduce **slack variables** for **soft margins**, allowing some misclassification while penalizing violations. For nonlinear boundaries, the **kernel trick** replaces explicit dot products $\phi(\mathbf{x})^\top \phi(\mathbf{z})$ with a **kernel** $K(\mathbf{x}, \mathbf{z})$ that implicitly maps inputs to a high (even infinite) dimensional feature space while keeping optimization finite-dimensional via the dual formulation.
+
+Interviewers often connect SVMs to **hinge loss + regularization** (like logistic regression but with a different loss), **kernels** (RBF, polynomial), and **hyperparameters** $C$ (margin vs violations) and $\gamma$ for RBF (smoothness vs locality).
+
+**Primal (linear soft-margin SVM)** minimizes:
+
+$$
+\min_{\mathbf{w}, b, \boldsymbol{\xi}} \frac{1}{2}\|\mathbf{w}\|^2 + C \sum_{i=1}^{n} \xi_i
+$$
+
+subject to $y_i(\mathbf{w}^\top \mathbf{x}_i + b) \ge 1 - \xi_i$ and $\xi_i \ge 0$.
+
+**Kernelized decision function** uses coefficients $\alpha_i$ from the dual:
+
+$$
+f(\mathbf{x}) = \sum_{i=1}^{n} \alpha_i y_i K(\mathbf{x}_i, \mathbf{x}) + b, \quad \hat{y}(\mathbf{x}) = \operatorname{sign}(f(\mathbf{x}))
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the margin, and why maximize it?" category="Fundamentals">
+    The margin is the distance between the separating hyperplane and the closest correctly classified points. A larger margin corresponds to a more robust separator under small perturbations of inputs, which ties to VC-style generalization intuition and tends to reduce overfitting compared to an arbitrary separating plane.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does the hyperparameter C control?" category="Hyperparameters">
+    C trades margin width against training violations. A large C penalizes slack heavily, pushing toward a harder fit (narrower margin, fewer errors). A small C allows more misclassifications or slack, encouraging a wider margin and often better generalization if noise is present.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the kernel trick, and why is RBF popular?" category="Architecture">
+    The kernel trick computes inner products in an implicit feature space via a kernel function without forming explicit high-dimensional feature vectors. The RBF (Gaussian) kernel induces smooth, local decision boundaries and is a flexible default, controlled by gamma (locality versus smoothness), though it can overfit and is costly on very large sample sizes.
+  </InterviewQuestion>
+</InterviewQuestions>

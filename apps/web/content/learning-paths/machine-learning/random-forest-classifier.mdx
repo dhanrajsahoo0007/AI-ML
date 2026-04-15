@@ -1,0 +1,34 @@
+---
+title: Random Forest Classifier
+description: An ensemble of decorrelated decision trees trained on bootstrap samples with random feature subsets at each split.
+---
+
+A random forest averages (or majority-votes) predictions from many **decision trees** trained on **bootstrap samples** of the data. At each split, only a **random subset of features** is considered. **Bagging** reduces variance by averaging high-variance models; **random feature subsets** reduce **correlation** between trees so the average is more effective than averaging identical, co-adapted trees.
+
+Random forests typically deliver strong **out-of-the-box** accuracy on tabular data, handle **nonlinearities** and **interactions**, and provide useful diagnostics like **out-of-bag (OOB) error** and **feature importance** (with caveats: importance can be biased toward high-cardinality or correlated features). They are less interpretable than a single tree, but more stable and accurate in many settings.
+
+Key hyperparameters include **number of trees** (more reduces variance until diminishing returns), **max features** per split (controls tree diversity), and **tree depth / leaf constraints** (limits overfitting per tree). Interviewers often contrast forests with **boosting** (bias vs variance, sequential vs parallel training).
+
+**Bagging predictor** averages $B$ tree classifiers $h_b$:
+
+$$
+\hat{y}(\mathbf{x}) = \operatorname*{arg\,max}_{c} \frac{1}{B} \sum_{b=1}^{B} \mathbb{1}\big[ h_b(\mathbf{x}) = c \big]
+$$
+
+For **probability estimates**, average predicted leaf proportions:
+
+$$
+\hat{P}(y=c \mid \mathbf{x}) = \frac{1}{B} \sum_{b=1}^{B} \hat{P}_b(y=c \mid \mathbf{x})
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why randomize features at each split instead of only bagging rows?" category="Ensemble">
+    Bagging alone can leave trees highly correlated if a few strong features dominate splits. Randomizing candidate features forces different trees to explore alternative splits, decorrelating errors so the ensemble average has lower variance and better generalization.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is out-of-bag (OOB) error, and why is it useful?" category="Evaluation">
+    Each bootstrap sample omits roughly 37 percent of points on average. For each tree, those OOB points were not used in training that tree, so you can evaluate the forest (or per-tree vote restricted appropriately) on OOB points as a free validation estimate without a separate holdout set (useful when data are limited, though not a perfect substitute for careful cross-validation).
+  </InterviewQuestion>
+  <InterviewQuestion question="Random forest vs gradient boosting on tabular data—how do you compare them?" category="Comparison">
+    Random forests train in parallel, are robust with fewer tuning iterations, and average high-variance trees. Boosting trains sequentially, fits residuals or gradients, and often achieves higher accuracy with tuning but can overfit without regularization or early stopping. Forests can be slower at inference if hundreds of deep trees are needed; boosting models can be compact.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,24 @@
+---
+title: Chain / Flow Orchestration
+description: Design multi-step LLM workflows with clear execution models, branching, parallelism, and failure semantics using graph-native orchestration and mature reliability patterns.
+---
+
+Single-shot completion APIs are rarely enough for agents, retrieval-augmented generation, tool use, or human-in-the-loop approvals. Orchestration frameworks such as LangChain and LangGraph help you express a flow as nodes (LLM calls, retrievers, validators, tools) and edges (data dependencies and control flow). The important architectural choice is whether your workload is a directed acyclic graph of deterministic stages or a richer cyclic graph that models re-planning, loops until a quality check passes, or stateful agents that revisit earlier steps with updated context.
+
+DAG-style pipelines are easier to reason about: topological execution, clear batching points, and straightforward retries at stage boundaries. Graph or state-machine models add conditional branches (route by intent, model capability, or validation outcome), parallel fan-out for independent subtasks, and merge points where partial results must be reconciled. LangGraph-style approaches make the state object explicit so you can persist checkpoints, implement human interrupts, and resume after failures without replaying expensive upstream work.
+
+Error handling should be first-class. Transient provider errors warrant exponential backoff with jitter and idempotent tool calls where possible. Business-level failures (tool returned empty, parser rejected JSON) need compensating paths: alternate models, simplified prompts, or graceful degradation messages. Without this, chains become fragile cascades where one weak link aborts the user experience. Logging each node with inputs, outputs, latency, and token counts makes postmortems feasible when a branch misroutes traffic.
+
+Parallel execution improves latency when subtasks are independent, but you must manage token and rate limits across concurrent LLM calls and avoid race conditions on shared mutable state. State machines help agents by constraining which transitions are legal, embedding guardrails before dangerous tools, and making cyclic behavior (reflect, critique, revise) explicit rather than implicit recursion. The trade-off is engineering overhead: graph frameworks add learning curve and operational complexity compared to a simple script, which is acceptable when flows are long-lived, team-owned, and safety-critical.
+
+<InterviewQuestions>
+  <InterviewQuestion question="When would you choose a cyclic graph over a strict DAG for LLM orchestration?" category="Architecture">
+    Choose a cyclic graph when the task needs iteration until a verifier passes, dynamic replanning based on tool feedback, or conversational repair loops. A DAG fits predictable ETL-like flows with fixed stages. Cycles require careful termination conditions, cycle budgets, and state snapshots so you do not run unbounded loops or duplicate side effects on retries.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make multi-step chains reliable in production?" category="Reliability">
+    Use timeouts, retries only for idempotent or safely repeatable steps, structured error types, and per-node fallbacks. Persist checkpoints or minimal state needed to resume, validate outputs before downstream nodes consume them, and circuit-break hot failing tools or models. Emit traces so you can see which hop failed and whether user-visible partial results should be rolled back or annotated.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you design conditional branching without unmaintainable nested logic?" category="Design">
+    Encode branch predicates as small pure functions over a typed state object, keep routing tables or policy objects separate from node implementations, and document invariants for each branch. Visual graph definitions or declarative configs help reviewers see all paths. Centralize side effects in named nodes so branches differ by data and control flow, not by copy-pasted LLM calls with tiny edits.
+  </InterviewQuestion>
+</InterviewQuestions>

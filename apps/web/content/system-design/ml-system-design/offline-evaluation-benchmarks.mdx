@@ -1,0 +1,24 @@
+---
+title: Offline Evaluation Benchmarks
+description: Golden datasets, benchmark suite design, contamination control, and statistical rigor for offline LLM evaluation.
+---
+
+Offline benchmarks are the controlled laboratory of LLM engineering. A serious suite combines broad capability checks with domain-specific scenarios drawn from real failures, edge cases for tool use and structured output, multilingual slices, and safety probes. Each case should carry metadata: difficulty, expected tools, required citations, or numeric tolerances for regression triage. Golden datasets curated by experts anchor automated metrics, but they rot as the product and user language evolve, so pipelines to mine new negatives from production with human approval loops are essential.
+
+Automated scoring spans exact match, fuzzy metrics, execution-based checks for code, LLM judges with fixed rubrics, and deterministic validators such as JSON schema conformance. Multi-dimensional evaluation prevents shipping a model that improves summarization while silently breaking JSON mode. Version every asset: prompts, judge prompts, and scoring code live in git with the same discipline as application logic.
+
+Test set contamination undermines leaderboard optimism and internal confidence. Hold out truly private sets, deduplicate near-duplicates against training corpora where possible, and segregate sets used for development tuning from those reserved for final gatekeeping. Leakage from web crawl overlap is hard to eliminate entirely; mitigations include dynamic evaluation refreshed from licensed or internal corpora and canary user sessions excluded from training.
+
+Statistical significance matters when differences are small. Use confidence intervals for win rates across paired comparisons, account for multiple testing when scanning many metrics, and prefer stratified reporting so aggregate lifts do not hide harm to tail demographics. The trade-off is evaluation runtime versus power: larger suites reduce variance but slow CI, so tiered suites with a fast smoke set and a nightly comprehensive job are standard.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you structure a benchmark suite so it catches both capability regressions and safety regressions?" category="Methodology">
+    Partition suites by risk and intent: core functional cases with deterministic checks, RAG grounding cases with retrieval fixtures, safety red-team prompts with policy expectations, and performance microbenchmarks for latency-sensitive templates. Run safety and high-risk suites on every release candidate even if smaller, and keep capability breadth in scheduled jobs if full runs are too slow for every commit.
+  </InterviewQuestion>
+  <InterviewQuestion question="What design choices reduce the risk of benchmark overfitting during iterative model development?" category="Design">
+    Maintain a frozen holdout set never used for hyperparameter or prompt iteration, rotate in fresh adversarial examples from production sampling, track performance on external public benchmarks only as a secondary signal, and monitor correlation between offline scores and online outcomes. Discourage cherry-picking cases that always pass and document any changes to the suite with reviewer sign-off.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you implement automated scoring in CI without making pipelines flaky or prohibitively slow?" category="Implementation">
+    Cache deterministic fixtures, parallelize shards across workers, pin judge models and seeds, retry only on known transient provider faults with caps, and separate quick gating jobs from exhaustive nightly jobs. Store artifacts such as diffs and score JSON for debugging. Fail builds on statistically meaningful drops using precomputed baselines rather than single-point noise.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,30 @@
+---
+title: Principal Component Analysis
+description: Orthogonal linear projections that capture maximum variance (or minimize reconstruction error); the workhorse of dimensionality reduction and a frequent linear-algebra interview topic.
+---
+
+**Principal component analysis (PCA)** finds a new orthonormal basis for your data where the first axis (first **principal component**) points in the direction of **maximum variance**, the second is orthogonal and captures the next most variance, and so on. Equivalently, for a fixed number of dimensions, PCA minimizes the **mean squared reconstruction error** when you project data onto a linear subspace and project back. That dual view—maximize retained variance versus minimize loss—is what many interview answers hinge on.
+
+Mechanically, for centered data matrix $\mathbf{X}$, PCA directions are eigenvectors of the **covariance** $\mathbf{S} = \frac{1}{n}\mathbf{X}^\top\mathbf{X}$ (up to scaling conventions), ordered by descending eigenvalues. In practice you often obtain them via the **SVD** of $\mathbf{X}$ for numerical stability. Interviewers like to ask about **centering**, **scaling** features when units differ, **interpretation** of loadings versus arbitrary rotations, and **information loss** when you truncate components.
+
+PCA is linear and global: it discovers directions of high variance even if the **signal** is not variance-aligned (for example a faint but predictive direction can be discarded). It is still invaluable for visualization, denoising, collinearity reduction before linear models, and as a preprocessing step—but it is not a clustering method and can obscure nonlinear structure that nonlinear embeddings might reveal.
+
+For centered data $\{\mathbf{x}_i\}_{i=1}^{n}$, PCA solves:
+
+$$
+\max_{\|\mathbf{w}\|_2 = 1}\ \mathbf{w}^\top \mathbf{S} \mathbf{w}, \quad \mathbf{S} = \frac{1}{n} \sum_{i=1}^{n} \mathbf{x}_i \mathbf{x}_i^\top
+$$
+
+Successive components solve the same problem subject to orthogonality to previous $\mathbf{w}$. The **reconstruction** view for rank-$k$ projection matrix $\mathbf{W}_k$ with orthonormal columns is $\min_{\mathbf{W}_k} \sum_i \|\mathbf{x}_i - \mathbf{W}_k\mathbf{W}_k^\top \mathbf{x}_i\|_2^2$.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Should you always standardize features before PCA?" category="Feature Engineering">
+    If features are on incomparable scales, yes—otherwise high-variance raw features dominate components arbitrarily. If all features are already comparable (same units, similar range), z-scoring may be optional but is still common for stability.
+  </InterviewQuestion>
+  <InterviewQuestion question="Is PCA the same as feature selection?" category="Fundamentals">
+    No. PCA performs linear combinations of all original features; each component loads on many variables unless sparse methods are used. Feature selection picks a subset of original variables; PCA changes the coordinate system.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose how many components to keep?" category="Dimensionality Reduction">
+    Use scree plots or cumulative explained variance thresholds, cross-validated downstream performance, rank estimates for noise (if modeling assumptions apply), or domain-driven limits (e.g., visualize in 2D/3D). There is no single universal cutoff without a task.
+  </InterviewQuestion>
+</InterviewQuestions>

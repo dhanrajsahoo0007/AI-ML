@@ -1,0 +1,32 @@
+---
+title: K-Nearest Neighbors
+description: A nonparametric instance-based classifier that labels a point by majority vote among its k closest training examples.
+---
+
+K-nearest neighbors (k-NN) is a **lazy** learner: it stores the training data and defers all real work until prediction time. To classify a new point, you find the **k closest** training points under a distance metric (often Euclidean) and take a **majority vote** (or average for regression). There is no explicit training phase beyond choosing $k$, the metric, and optionally weighting neighbors by inverse distance.
+
+The model’s inductive bias is **local smoothness**: nearby points should share labels. That makes k-NN powerful when decision regions are irregular but **locally consistent**, and when you have enough data for neighborhoods to be meaningful. It struggles in **high dimensions** (distance concentration), with **imbalanced classes** unless you adjust $k$ or weighting, and when **inference cost** matters because each query scans (or indexes) the training set.
+
+Choosing $k$ trades **bias** for **variance**: small $k$ follows the data closely (low bias, high variance); large $k$ smooths decisions (higher bias, lower variance). Feature **scaling** is critical because distance is dominated by large-magnitude features. Interviewers like k-NN because it cleanly illustrates **Curse of Dimensionality**, **inductive bias**, and **compute vs memory** tradeoffs.
+
+$$
+\hat{y}(\mathbf{x}) = \operatorname*{arg\,max}_{c} \sum_{i \in \mathcal{N}_k(\mathbf{x})} \mathbb{1}[y_i = c]
+$$
+
+Here $\mathcal{N}_k(\mathbf{x})$ is the set of indices of the $k$ nearest training points to $\mathbf{x}$. A common weighted variant uses distances $d(\mathbf{x}, \mathbf{x}_i)$:
+
+$$
+\hat{y}(\mathbf{x}) = \operatorname*{arg\,max}_{c} \sum_{i \in \mathcal{N}_k(\mathbf{x})} w_i \, \mathbb{1}[y_i = c], \quad w_i = \frac{1}{d(\mathbf{x}, \mathbf{x}_i) + \varepsilon}
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is feature scaling important for k-NN?" category="Feature Engineering">
+    k-NN relies on a distance metric. If one feature has a much larger scale than others, it dominates the distance, effectively ignoring other dimensions. Standardization or min–max scaling puts features on comparable footing so neighborhoods reflect all attributes.
+  </InterviewQuestion>
+  <InterviewQuestion question="What happens to k-NN as dimensionality grows?" category="Fundamentals">
+    Distances tend to concentrate—points become similarly far apart—so nearest neighbors become less informative unless data density grows exponentially. This is the curse of dimensionality, and it motivates dimensionality reduction, metric learning, or different algorithms.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the time complexity of prediction vs training?" category="Implementation">
+    Training is effectively constant time aside from storing each point (memorization), while naive prediction scans all training points and scales with the number of points times the number of features per query. Spatial data structures (for example kd-trees or ball trees) or approximate nearest neighbors reduce average query time at the cost of setup and accuracy tradeoffs.
+  </InterviewQuestion>
+</InterviewQuestions>

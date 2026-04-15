@@ -1,0 +1,24 @@
+---
+title: Bias & Toxicity Detection
+description: Measure fairness and toxicity with frameworks, classifiers, and intersectional analysis, then choose debiasing strategies that respect product constraints and statistical limitations.
+---
+
+Bias measurement begins with clarifying the decision or utterance being evaluated and the populations that matter for equity. Frameworks such as fairness indicators encourage reporting metrics across slices defined by legally protected or product-relevant attributes, while acknowledging that proxy variables are imperfect. Toxicity detection often combines general services like Perspective API with domain-specific fine-tuned classifiers because generic models miss coded language, reclaimed slurs in acceptable contexts, and multilingual harassment patterns.
+
+Fairness metrics attach to the task: demographic parity compares positive outcome rates across groups; equalized odds requires similar true positive and false positive rates; calibration asks whether predicted probabilities mean the same thing across groups. Generative systems add toxicity rate, stereotype reinforcement, and refusal inconsistency as operational metrics. Intersectional analysis looks beyond single-axis slices at combinations such as gender and geography, which can hide harms visible only when groups are small and variance is high.
+
+Debiasing techniques span data rebalancing, reweighting, adversarial debiasing during training, post-processing thresholds per group, and constrained optimization. For LLMs, mitigation also includes instruction tuning on refusal behaviors, curated counter-stereotypical demonstrations, and retrieval filters that block biased source documents. None of these remove societal bias entirely; they shift trade-offs between group error rates, overall accuracy, and transparency.
+
+Trade-offs include measurement burden versus statistical power: rare slices produce unstable estimates without large evaluation sets. Toxicity classifiers carry false positive costs that disproportionately affect dialects and marginalized communities if training data reflects majority norms. Teams should publish limitations, run human audits on classifier errors, and avoid using fairness metrics as a single pass or fail without context.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do demographic parity and equalized odds differ in practice?" category="Fairness">
+    Demographic parity asks that the proportion of positive predictions match across groups regardless of underlying base rates, which can force unequal true positive rates when prevalence differs. Equalized odds requires that true positives and false positives are comparable across groups, which is often closer to equalizing mistakes when the label is meaningful. Choosing between them depends on whether equal selection rates or equal error treatment aligns better with policy and whether base rate differences reflect legitimate signal or historical inequity in labels.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are pitfalls when deploying a toxicity classifier in production?" category="Detection">
+    Classifiers can inherit annotator bias, perform poorly on multilingual or informal text, and be gamed with obfuscation. Latency and availability affect user experience if moderation is synchronous. Threshold tuning must consider false positives that silence valid speech and false negatives that allow harm. I would monitor slice metrics, sample human review of borderline scores, and version the classifier with rollback paths when drift appears after internet language evolves.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you approach intersectional fairness evaluation?" category="Methodology">
+    I would predefine intersectional cells with minimum sample thresholds and use Bayesian or bootstrap confidence intervals to communicate uncertainty. Where counts are too small, I would combine careful qualitative review with synthetic stress tests rather than over-trusting point estimates. I would document which intersections are out of scope for quantitative claims due to data sparsity and work with domain experts to prioritize high-risk combinations for deeper study and mitigation design.
+  </InterviewQuestion>
+</InterviewQuestions>

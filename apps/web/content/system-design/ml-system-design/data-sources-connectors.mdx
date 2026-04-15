@@ -1,0 +1,24 @@
+---
+title: Data Sources & Connectors
+description: Patterns and trade-offs for integrating structured, unstructured, and streaming data into ML and analytics systems.
+---
+
+Production ML systems rarely sit on a single tidy table. They ingest operational databases, object stores full of documents, event streams, SaaS APIs, and ad hoc files. Connectors are the boundary between those heterogeneous sources and your pipelines. The architectural question is not only how to read data once, but how to keep it synchronized with acceptable lag, cost, and correctness guarantees.
+
+Common integration patterns include change data capture for relational systems, webhooks or push subscriptions for event-driven sources, and scheduled polling when APIs or legacy systems only expose pull semantics. CDC minimizes load on the primary database and captures inserts, updates, and deletes in order, which matters when downstream features depend on temporal consistency. Polling is simpler to reason about but amplifies cost and can miss rapid changes between polls unless you track high watermarks carefully. Webhooks reduce latency but require durable ingress, signature verification, and replay handling when delivery fails.
+
+Structured data usually arrives with explicit schemas; unstructured data such as PDFs, HTML, images, and chat logs requires parsing, normalization, and often enrichment before it is model-ready. Schema evolution is a first-class concern: additive columns are easy, but renames, type changes, and nested structure drift break naive consumers unless you version contracts, use compatibility checks in CI, and maintain transformation layers that can tolerate multiple schema generations during rollouts.
+
+Teams often land raw data in a data lake for flexibility and reserve a warehouse or curated marts for query performance and governance. Managed connector frameworks such as Airbyte and Fivetran accelerate time to value with prebuilt sources, scheduling, and monitoring, while custom connectors win when you need proprietary protocols, aggressive cost control, or tight coupling to internal security models. The trade-off is operational burden versus control: frameworks reduce engineering toil but can obscure failure modes, vendor-lock certain semantics, and charge per row or per connector in ways that do not scale for very high cardinality streams.
+
+<InterviewQuestions>
+  <InterviewQuestion question="When would you prefer CDC over nightly batch extracts from an OLTP database?" category="Architecture">
+    CDC is preferable when you need fresher features or analytics with lower load on the production database, when deletes matter for correctness, or when row-level ordering is important for downstream deduplication. Nightly batches are simpler and cheaper for low freshness requirements and small tables, but they stress the database with large scans and can miss intraday changes unless you add incremental logic anyway.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you integrate a SaaS API that rate-limits aggressively and returns paginated JSON?" category="Integration">
+    Use a durable queue or workflow engine so retries are idempotent, persist cursors or updated-at watermarks per object type, backoff with jitter on 429 responses, and shard work across workers respecting per-tenant limits. Normalize responses into a staging schema, validate against a contract, and log raw payloads briefly for forensic replay while respecting retention policies.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are the main trade-offs between buying a connector platform and building custom ingestion?" category="Trade-offs">
+    Purchased platforms reduce engineering time, ship monitoring and many sources, and centralize connector maintenance. Custom builds optimize for proprietary formats, strict latency or cost targets, and security constraints such as air-gapped deployments. The risk of platforms is opaque failure handling, pricing that grows with volume, and limited control over backpressure semantics; custom code trades faster iteration on features for ongoing maintenance every time an upstream API changes.
+  </InterviewQuestion>
+</InterviewQuestions>

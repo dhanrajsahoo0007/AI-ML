@@ -1,0 +1,24 @@
+---
+title: Online / Production Evaluation
+description: Shadow traffic, interleaving, live quality signals, and sampling strategies for evaluating LLMs under real load.
+---
+
+Offline benchmarks miss real user diversity, messy inputs, and interaction effects with live retrieval indexes. Online evaluation closes the loop by measuring behavior under production traffic, always subject to ethical constraints and privacy review. Shadow evaluation routes duplicate requests to a candidate model without showing outputs to users, preserving safety while collecting latency and automatic scores on mirrored inputs. It stresses capacity because you pay twice for shadowed traffic, so sampling and selective shadowing on low-risk cohorts are common mitigations.
+
+Interleaving and A/B tests expose users to variants with explicit assignment. Interleaving interleaves results from two rankers or answer generators in controlled ways for preference inference in search; for chat, paired designs are more typical than strict interleaving. Live quality scoring runs lightweight judges or classifiers on a sample of production transcripts, sometimes asynchronously to avoid adding tail latency. User satisfaction proxies include explicit thumbs, task completion downstream, edit distance when users revise outputs, and session continuation rates, each noisy but complementary.
+
+Production sampling must balance coverage with cost and privacy: stratify by language, paying customers, new features, and error codes; oversample failures; and cap retention. Real-time quality dashboards combine operational metrics with sampled judge scores and human review throughput so teams detect slow drifts such as index staleness or subtle prompt regressions.
+
+Trade-offs include experimentation risk to user trust, regulatory limits on using chats for evaluation without consent, and statistical challenges when metrics are highly skewed. Strong governance, clear opt-in for training versus evaluation use, and coordination with offline suites reduce blind spots.
+
+<InterviewQuestions>
+  <InterviewQuestion question="When is shadow evaluation preferable to a user-visible A/B test for a new LLM version?" category="Architecture">
+    Shadow is better when the candidate is immature, safety properties are unproven, or product requirements forbid changing user-visible outputs. It measures infrastructure compatibility, latency, and side-by-side scores without UX risk. It cannot measure true adoption, satisfaction, or downstream business metrics that require exposure, so plan a path to limited A/B after shadow confidence is high.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you design an interleaving or paired comparison experiment for two answer generators in a support copilot?" category="Methodology">
+    Randomize eligible sessions to receive either system A or B with stable assignment per ticket to avoid mixed experiences, or present blinded side-by-side drafts only to agents if policy allows, collecting preference clicks. Predefine primary metrics such as resolution time and agent preference, guardrail metrics for policy violations, and minimum sample sizes. Control for ticket difficulty with stratification or post-hoc regression on metadata such as product area.
+  </InterviewQuestion>
+  <InterviewQuestion question="What operational concerns matter most when running live LLM judges on production traffic?" category="Operations">
+    Cost and latency budgets, PII redaction before judging, judge model availability and version drift, sampling bias if only English is judged, alert fatigue from judge failures, and clear data retention policies. Provide kill switches, rate limits, and backpressure so judge outages never take down the primary serving path. Audit disagreement between judges and human spot checks regularly.
+  </InterviewQuestion>
+</InterviewQuestions>

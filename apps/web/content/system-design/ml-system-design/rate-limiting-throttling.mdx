@@ -1,0 +1,22 @@
+---
+title: Rate Limiting & Throttling
+description: Protecting inference infrastructure with principled limits, queues, and degradation strategies under overload.
+---
+
+Inference endpoints sit on the boundary between bursty human traffic and expensive accelerator time. Rate limiting answers who is allowed to consume scarce capacity and at what steady-state rate. Token bucket algorithms allow controlled bursts while preserving a long-term average, which maps well to conversational workloads where users send bursts of short messages. Sliding window counters approximate smoother enforcement over fixed wall-clock windows and reduce the cliff-edge behavior of naive fixed windows at the cost of more memory per key for fine-grained buckets.
+
+Per-user and per-tenant limits express fairness and commercial entitlements: free tiers receive lower sustained rates than enterprise contracts. Priority queues let you segregate interactive traffic from batch scoring, or elevate paid customers during congestion, but you must cap queue depth or worst-case latency explodes while memory grows unbounded. Admission control at the gateway is only the first layer; internal stages such as embedding services and vector databases need aligned budgets or a single abusive tenant can bypass external limits through fan-out.
+
+Backpressure propagates overload signals upstream: when the model server cannot accept more work, it should shed load predictably rather than accept everything and collapse. Patterns include fast rejection with Retry-After headers, load shedding based on queue wait time thresholds, and circuit breakers when downstream dependencies fail. Graceful degradation might reduce max output tokens, disable optional retrieval, or fall back to a smaller model tier. Queue-based load leveling with asynchronous workers smooths spikes but shifts the product semantics toward eventual responses, which only works if clients support polling or webhooks.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Compare token bucket and sliding window rate limiting for a public inference API." category="Reliability">
+    Token buckets naturally tolerate short bursts up to bucket capacity while enforcing an average refill rate, which feels responsive for humans. Sliding windows track usage across recent sub-windows to avoid the reset spike exploit of coarse fixed windows, giving fairer enforcement over time at higher storage cost. Many gateways combine both ideas or use approximate algorithms at very large cardinality.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where should rate limits be enforced in a system with an API gateway, a BFF, and a GPU model server?" category="Architecture">
+    Enforce coarse commercial limits at the edge gateway for early rejection and abuse protection, enforce semantic and auth-aware limits at the BFF where tenant identity is trusted, and enforce final capacity limits at the model server or sidecar proxy where you observe actual GPU queue depth. Each layer needs consistent error contracts and telemetry so operators see which stage throttled a request.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you prevent priority queues from starving low-priority work entirely?" category="Performance">
+    Use weighted fair queuing or guaranteed minimum service slices so background jobs still make progress, cap high-priority queue depth to avoid memory blowups, and apply aging policies that promote long-waiting low-priority tasks occasionally. Monitor p99 wait time per class and alert when low-priority starvation violates internal SLOs even if premium traffic looks healthy.
+  </InterviewQuestion>
+</InterviewQuestions>

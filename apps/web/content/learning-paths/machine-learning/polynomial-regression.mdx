@@ -1,0 +1,34 @@
+---
+title: Polynomial Regression
+description: Extend linear regression by using polynomial feature expansions so the model can fit curved relationships while staying linear in the parameters.
+---
+
+Polynomial regression is not a different learning algorithm from linear regression in the optimization sense: you **transform** the inputs (e.g., include $x, x^2, x^3, \ldots$) and then fit a linear model in that expanded feature space. A line in the augmented space can look like a curve in the original space. That gives you flexibility to capture nonlinearity without abandoning the simplicity of least squares—at least until the degree grows.
+
+The main interview story is **capacity versus generalization**. Higher polynomial degrees reduce training error but explode variance: the model can oscillate wildly between points (Runge-like behavior in bad cases) and overfit noise. With many raw features, full multivariate polynomial expansions also blow up dimensionality combinatorially, so practitioners often use selective terms, splines, kernels, or tree-based models instead of naive high-degree polynomials everywhere.
+
+A practical takeaway: always pair polynomial features with **regularization** and/or **cross-validation** on the degree, and watch **extrapolation**—polynomials can diverge quickly outside the training range.
+
+For a single input $x$, a degree-$d$ polynomial model is still linear in parameters $\beta$:
+
+$$
+y = \beta_0 + \beta_1 x + \beta_2 x^2 + \cdots + \beta_d x^d + \varepsilon
+$$
+
+In matrix form with design matrix $\mathbf{\Phi}$ whose columns are powers of $x$:
+
+$$
+\hat{\boldsymbol{\beta}} = \arg\min_{\boldsymbol{\beta}} \|\mathbf{y} - \mathbf{\Phi}\boldsymbol{\beta}\|_2^2
+$$
+
+<InterviewQuestions>
+  <InterviewQuestion question='Is polynomial regression a "nonlinear model"?' category="Fundamentals">
+    It is nonlinear in the original input variable, but it remains a linear model in the parameters once features are expanded. That matters because you still use linear regression machinery (closed form or convex loss), yet you can represent curves.
+  </InterviewQuestion>
+  <InterviewQuestion question="What goes wrong if you set the polynomial degree too high?" category="Bias-Variance">
+    You overfit: low training error, poor test error, unstable coefficients, and poor behavior on unseen inputs—especially near boundaries or outside the training domain where high-degree terms dominate.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does polynomial regression relate to kernels or splines?" category="Comparison">
+    All are ways to enrich feature geometry. Polynomial features explicitly map the input to a finite basis; kernels implicitly map to a (possibly infinite) feature space; splines use localized basis functions for smoothness and better control of global wiggliness than a single high-degree global polynomial.
+  </InterviewQuestion>
+</InterviewQuestions>
