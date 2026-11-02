@@ -28,12 +28,6 @@ Related deep-dives: [Prompt Engineering](/ai-system-design/genai-system-design/p
   <InterviewQuestion question="How do you reduce hallucinations in a production system?" category="Reliability" level="Mid">
     Ground answers in retrieved sources and require citations, instruct the model to say when it does not know, lower the temperature for factual tasks, constrain outputs with schemas, and add verification steps such as checking claims against sources or tools. Measure the hallucination rate on an evaluation set and monitor it in production.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you evaluate an LLM application?" category="Evaluation" level="Mid">
-    Build a test set from real use cases with expected outputs or rubrics. Use automatic checks where possible, such as exact match, schema validation and unit tests, LLM-as-judge with calibrated rubrics for open-ended quality, and human review for a sample. Track quality, safety, latency and cost per version, and confirm with online metrics and A/B tests.
-  </InterviewQuestion>
-  <InterviewQuestion question="What are the limitations of LLM-as-judge?" category="Evaluation" level="Senior">
-    Judges can prefer longer answers, the first option shown, or outputs from their own model family, and they can miss factual errors they also do not know. Mitigate with clear rubrics, pairwise comparisons with order swapped, reference answers, multiple judges, and regular calibration against human labels.
-  </InterviewQuestion>
   <InterviewQuestion question="What is perplexity and what does it not tell you?" category="Evaluation" level="Mid">
     Perplexity is the exponential of the average negative log-likelihood per token; lower means the model predicts the text better. It is useful for comparing language models on the same tokenizer and data, but it does not measure helpfulness, factual accuracy, instruction following or safety, so it says little about chat quality.
   </InterviewQuestion>
@@ -49,15 +43,6 @@ Related deep-dives: [Prompt Engineering](/ai-system-design/genai-system-design/p
   <InterviewQuestion question="How do you reduce LLM latency?" category="Cost & Latency" level="Mid">
     Stream tokens so users see output immediately, use smaller or quantized models where quality allows, shorten prompts to cut time to first token, cap output length, use prompt caching, run independent calls in parallel, and serve with an optimized inference engine using continuous batching and speculative decoding.
   </InterviewQuestion>
-  <InterviewQuestion question="What is prompt injection and how do you defend against it?" category="Safety" level="Mid">
-    Prompt injection is malicious instructions hidden in user input or retrieved content that try to override the system's instructions, for example to leak data or misuse tools. Defend with layered controls: separate and label untrusted content, limit tool permissions, require confirmation for sensitive actions, filter inputs and outputs, and red-team regularly. No single prompt fully prevents it.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is a jailbreak, and how is it different from prompt injection?" category="Safety" level="Mid">
-    A jailbreak is a user crafting input to get the model to violate its own safety policies, such as producing harmful content. Prompt injection is about untrusted data hijacking an application's instructions, often affecting third parties. Both are mitigated with safety training, input and output classifiers, and system-level controls.
-  </InterviewQuestion>
-  <InterviewQuestion question="How do you handle PII and sensitive data with LLMs?" category="Safety" level="Senior">
-    Minimize what is sent: detect and redact or tokenize PII before prompts where possible, use providers and deployments that meet your data-retention and compliance requirements, enforce access control on retrieved data, avoid logging raw sensitive content, and filter outputs for leaks. Document data flows for privacy review.
-  </InterviewQuestion>
   <InterviewQuestion question="What are embeddings, and how are they used with LLMs?" category="Fundamentals" level="Junior">
     Embeddings are vectors that represent text so that similar meanings are close together. They power semantic search, RAG retrieval, clustering, deduplication and recommendation. Embedding models are usually separate, smaller encoder models from the generator LLM.
   </InterviewQuestion>
@@ -66,9 +51,6 @@ Related deep-dives: [Prompt Engineering](/ai-system-design/genai-system-design/p
   </InterviewQuestion>
   <InterviewQuestion question="What are reasoning models and when do they help?" category="Fundamentals" level="Senior">
     Reasoning models are trained, often with reinforcement learning on verifiable tasks, to produce extended internal reasoning before answering. They help on multi-step math, coding, planning and analysis, but cost more tokens and time. For simple lookups or formatting tasks, a standard model is faster and cheaper.
-  </InterviewQuestion>
-  <InterviewQuestion question="How do you version and manage prompts in production?" category="Evaluation" level="Mid">
-    Treat prompts as code: keep them in version control or a prompt registry, tie each version to evaluation results, review changes, and deploy with the ability to roll back. Log which prompt and model version produced every response so issues can be traced.
   </InterviewQuestion>
   <InterviewQuestion question="Design a customer-support assistant powered by an LLM. What are the key components?" category="Adaptation" level="Senior">
     A retrieval layer over help articles and policies, tools for account lookups and actions with strict permissions, a conversation manager with memory and handoff to humans, guardrails for safety and PII, and an evaluation and monitoring system with task-specific test sets. Start with retrieval and read-only tools, measure resolution rate and accuracy, then add actions gradually with human approval where needed.

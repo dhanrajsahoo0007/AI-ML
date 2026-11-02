@@ -1,0 +1,957 @@
+# Company-reported questions adapted from Outcome School (Apache 2.0); see NOTICE.md. Answers are our own.
+- id: design-an-llm-as-judge-evaluation-what-are-its-known-biases
+  q: Design an LLM-as-judge evaluation. What are its known biases and how do you correct for them?
+  a: >
+    Use a strong judge model with a specific rubric per criterion, ask for brief reasoning before a
+    score, prefer binary checks or pairwise comparisons over loose 1–10 scales, and give it
+    reference answers or source documents when correctness matters.
+
+
+    Known biases: position bias (favoring the first answer), verbosity bias (favoring longer
+    answers), self-preference (favoring its own model family), sensitivity to formatting and
+    confident tone, and weak judgment on facts the judge itself does not know. Correct by swapping
+    answer order and averaging, length-controlling comparisons, using a different model family or
+    several judges, and above all calibrating against human labels on a sample and tracking
+    agreement over time.
+  topic: evaluation
+  level: Mid
+  companies:
+    - Perplexity
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  refs:
+    - title: LLM as a Judge
+      url: https://outcomeschool.com/blog/llm-as-a-judge
+  source: outcome-school
+- id: how-do-you-build-an-eval-set-when-there-is-no-labelled-groun
+  q: How do you build an eval set when there is no labelled ground truth and experts are expensive?
+  a: >
+    Start from real usage: sample production or pilot inputs, cluster them to cover the main intents
+    and edge cases, and add known failure cases. Write rubrics and reference answers for a small,
+    high-value core with experts, and use them to calibrate an LLM judge that scales to the rest.
+
+
+    Stretch expert time: let models draft answers and have experts edit rather than write, label
+    only disagreements between models or judges, use pairwise preferences, which are faster than
+    absolute labels, and create synthetic cases for rare scenarios with expert review. Grow the set
+    continuously from production failures.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Cohere
+    - Harvey
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: how-do-you-detect-and-measure-hallucinations-in-a-production
+  q: How do you detect and measure hallucinations in a production RAG system?
+  a: >
+    Offline, use a test set with source documents and break answers into claims; check each claim
+    against the retrieved context with an NLI model or calibrated LLM judge, and report the
+    unsupported-claim rate and correct abstentions on unanswerable questions.
+
+
+    In production, run the same faithfulness check on a sample of live answers, track citation
+    validity and the share of answers with uncited claims, monitor user feedback and corrections,
+    and send flagged answers to human review. Trend the rate by source, topic and model version.
+  topic: evaluation
+  level: Mid
+  companies:
+    - Anthropic
+    - Cursor
+    - OpenAI
+  related: /ai-system-design/genai-system-design/hallucination-mitigation
+  source: outcome-school
+- id: design-the-regression-gate-that-decides-whether-a-prompt-or
+  q: Design the regression gate that decides whether a prompt or model change ships.
+  a: >
+    Every change to a prompt, model, retrieval setting or tool runs a versioned evaluation suite in
+    CI with fixed settings and several samples per item. The gate compares against the current
+    production baseline on task metrics per slice, safety and policy tests, format validity, latency
+    and cost.
+
+
+    Ship only if primary metrics are not worse beyond noise (using confidence intervals), no
+    critical slice or safety test regresses, and cost and latency stay within budget. Large or risky
+    changes then go to a canary or A/B test with online metrics before full rollout, with automatic
+    rollback triggers.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/llmops-observability
+  source: outcome-school
+- id: why-do-benchmark-scores-improve-while-users-say-the-system-g
+  q: Why do benchmark scores improve while users say the system got worse? Enumerate the reasons.
+  a: >
+    The benchmark may not reflect real usage: different task mix, easier or cleaner inputs, or
+    single-turn tests while users have long conversations. Benchmarks can be contaminated or overfit
+    through repeated tuning. Automated judges may reward length or style changes that users dislike.
+
+
+    Real behavior may also have changed in ways no test measures: more verbose or more refusing
+    answers, slower responses, broken formatting, changed tool-use behavior, regressions in rare but
+    important slices, or loss of features users relied on. The fix is evaluation built from
+    production traffic and failures, with user-facing metrics alongside benchmarks.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Cognition
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: what-is-benchmark-contamination-and-how-do-you-guard-against
+  q: What is benchmark contamination and how do you guard against it?
+  a: >
+    Contamination is when benchmark questions or answers appear in training data, so scores reflect
+    memorization rather than ability. It happens easily because benchmarks are published on the web
+    that training corpora scrape.
+
+
+    Guard against it by deduplicating training data against benchmarks with n-gram or embedding
+    matching, keeping private held-out test sets, using benchmarks created after the training cutoff
+    or regularly refreshed, checking for suspicious gaps between public and private variants,
+    testing with paraphrased or perturbed questions, and reporting decontamination methods.
+  topic: evaluation
+  level: Mid
+  companies:
+    - Alibaba
+    - Scale AI
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  refs:
+    - title: LLM Evaluation
+      url: https://outcomeschool.com/blog/llm-evaluation
+  source: outcome-school
+- id: what-observability-does-a-production-llm-system-need-traces
+  q: "What observability does a production LLM system need: traces, spans, costs, feedback?"
+  a: >
+    End-to-end traces per request with spans for retrieval, each model call, tool calls and
+    guardrails, recording inputs, outputs (redacted where needed), prompt and model versions, token
+    counts, latency and cost. Aggregate metrics for latency percentiles, errors, cost per feature
+    and tenant, and cache hit rates.
+
+
+    Quality signals: user feedback, retries and edits, escalations, sampled LLM-judge scores and
+    human review queues, all linked back to traces. Alerts on cost spikes, error rates, latency and
+    quality drops, and dashboards broken down by version so regressions can be traced to a change.
+  topic: evaluation
+  level: Mid
+  companies: []
+  related: /ai-system-design/genai-system-design/llmops-observability
+  refs:
+    - title: AI Agent Observability
+      url: https://outcomeschool.com/blog/ai-agent-observability
+  source: outcome-school
+- id: how-do-you-manage-prompt-versioning-and-rollbacks-in-product
+  q: How do you manage prompt versioning and rollbacks in production?
+  a: >
+    Store prompts in version control or a prompt registry with ids, never as untracked strings, and
+    review changes like code. Tie each version to its evaluation results, deploy with feature flags
+    or gradual rollout, and log the prompt version with every request.
+
+
+    Rollback means switching the active version back, which should be instant and not require a code
+    deploy. Pin the model version along with the prompt, since a prompt tuned for one model can
+    behave differently on another.
+  topic: evaluation
+  level: Junior
+  companies: []
+  related: /ai-system-design/genai-system-design/llmops-observability
+  source: outcome-school
+- id: design-online-evaluation-what-do-you-log-what-do-you-sample
+  q: "Design online evaluation: what do you log, what do you sample, and what do you A/B?"
+  a: >
+    Log every request's trace, versions, latency, cost and implicit signals such as copies, edits,
+    retries, follow-up questions, escalations and abandonment, plus explicit ratings. Sample a
+    stratified slice of traffic, by intent, language and customer, for LLM-judge scoring and a
+    smaller slice for human review, with extra sampling of flagged or unusual cases.
+
+
+    A/B test changes that affect user experience: new models, prompts, retrieval and UI, measuring
+    task success and satisfaction proxies, guardrails such as safety and latency, and cost, with
+    enough duration and power to detect meaningful differences. Feed failures back into offline
+    evaluation sets.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Perplexity
+  related: /ai-system-design/genai-system-design/llmops-observability
+  source: outcome-school
+- id: how-would-you-evaluate-an-agent-as-opposed-to-a-single-model
+  q: How would you evaluate an agent, as opposed to a single model response?
+  a: >
+    Agents act over many steps in an environment, so evaluate the final outcome in a sandbox, such
+    as the correct database state or passing tests, rather than just text. Also grade the
+    trajectory: tool choice, argument accuracy, wasted steps, policy violations and recovery from
+    errors.
+
+
+    Run each task several times because agents are non-deterministic, and report consistency (for
+    example pass^k) along with success. Track steps, tokens, cost and latency, test safety cases
+    such as prompt injection, and grow the task suite from production failures. A single benchmark
+    number hides most of this.
+  topic: evaluation
+  level: Mid
+  companies:
+    - Cognition
+    - Moonshot AI
+    - Scale AI
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  refs:
+    - title: AI Agent Evaluation
+      url: https://outcomeschool.com/blog/ai-agent-evaluation
+  source: outcome-school
+- id: how-would-you-design-an-experiment-to-test-for-a-specific-em
+  q: >-
+    How would you design an experiment to test for a specific emergent capability or bias in a large
+    language model?
+  a: >
+    Define the capability or bias precisely and operationally, then build a targeted test set with
+    controlled variations: matched pairs that differ only in the factor of interest (for bias), and
+    difficulty levels that separate genuine capability from shortcuts. Include held-out, freshly
+    written items to avoid contamination.
+
+
+    Run it across model sizes and training checkpoints to see how the behavior scales, with multiple
+    samples and prompts to measure variance, and compare with appropriate baselines. Use statistical
+    tests and confidence intervals, check robustness to paraphrasing, and validate surprising
+    results with human review or mechanistic analysis.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: a-customer-says-the-model-got-worse-after-you-upgraded-model
+  q: >-
+    A customer says “the model got worse” after you upgraded model versions in their deployment. How
+    do you verify and respond?
+  a: >
+    Gather concrete examples and the customer's success criteria, then rerun their traffic or a
+    representative set on both versions with identical prompts and settings, and compare with their
+    metrics, judges calibrated to their preferences, and side-by-side human review. Check whether
+    differences are in quality, format, verbosity, refusals, latency or tool-use behavior.
+
+
+    Respond by pinning the old version for them if needed, adjusting prompts for the new model's
+    behavior, and sharing the evidence openly. Then add their cases to the regression suite so
+    future upgrades are tested against what they care about.
+  topic: evaluation
+  level: Mid
+  companies:
+    - OpenAI
+  related: /ai-system-design/genai-system-design/llmops-observability
+  source: outcome-school
+- id: an-enterprise-customer-reports-that-responses-from-your-depl
+  q: >-
+    An enterprise customer reports that responses from your deployed system have gotten slow. Walk
+    me through the diagnosis.
+  a: >
+    Quantify it first with traces: which endpoints, since when, and whether time to first token,
+    generation time or total time grew. Then break down the path: client and network, gateway and
+    rate limiting, retrieval and tool calls, queueing at the model, prefill length (prompts may have
+    grown) and output length.
+
+
+    Common causes are longer prompts or outputs, lost prefix-cache hits, rate-limit backoff, a slow
+    downstream tool, capacity or region changes, and model or configuration updates. Fix the cause,
+    communicate findings and the remediation, and add latency alerts per customer.
+  topic: evaluation
+  level: Mid
+  companies:
+    - OpenAI
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+  source: outcome-school
+- id: build-the-evaluation-harness-for-a-new-frontier-model-releas
+  q: Build the evaluation harness for a new frontier model release. What does it need to do?
+  a: >
+    It must cover capabilities (knowledge, reasoning, math, code, multilingual, long context, tool
+    use and agentic tasks, multimodal), safety (harmful content, jailbreak robustness, dangerous
+    capability thresholds), and product behavior (instruction following, refusals, formatting,
+    latency and cost). Each suite has versioned data, graders, decontamination checks and
+    statistical confidence.
+
+
+    Operationally it runs automatically on every checkpoint at scale, compares against previous
+    models with slice-level breakdowns, includes human evaluation and red-teaming for qualities
+    automation misses, and produces a release report that gates launch decisions. Results must be
+    reproducible.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Google DeepMind
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  refs:
+    - title: LLM Evaluation
+      url: https://outcomeschool.com/blog/llm-evaluation
+  source: outcome-school
+- id: do-1-million-seattle-ride-trips-suffice-to-build-an-accurate
+  q: >-
+    Do 1 million Seattle ride trips suffice to build an accurate ETA prediction model? How would you
+    decide?
+  a: >
+    It depends on coverage, not just volume. Check whether the trips cover the variety that matters:
+    times of day and week, seasons and weather, routes and neighborhoods, events and unusual
+    conditions. A million trips may still have thin coverage for rare but important cases.
+
+
+    Decide empirically with a learning curve: train on increasing subsets and measure error on a
+    time-based held-out set; if error is still falling as data grows, more data helps. Also check
+    error by segment, compare with simple baselines, and validate on later months to make sure the
+    model generalizes over time.
+  topic: evaluation
+  level: Mid
+  companies:
+    - Google DeepMind
+  related: /interviews/ml-system-design-interview
+  source: outcome-school
+- id: how-would-you-build-the-evaluation-system-for-a-meta-ai-assi
+  q: >-
+    How would you build the evaluation system for a Meta AI assistant before and after each model
+    release?
+  a: >
+    Before release: offline suites covering capability, safety, policy compliance and product
+    behavior across languages and surfaces, LLM judges calibrated to human raters, human
+    side-by-side comparisons against the previous model, and red-teaming. Gate on no regressions in
+    key slices, especially safety and high-traffic intents.
+
+
+    After release: staged rollout with A/B tests on engagement and satisfaction proxies, sampled
+    quality and safety review of live conversations, monitoring of reports, refusals and latency per
+    region, and fast rollback. Failures feed back into offline suites.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Meta
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  refs:
+    - title: LLM Evaluation
+      url: https://outcomeschool.com/blog/llm-evaluation
+  source: outcome-school
+- id: an-enterprise-customer-wants-to-deploy-your-rag-system-but-h
+  q: >-
+    An enterprise customer wants to deploy your RAG system but has no labelled data. How do you
+    evaluate it before and after launch?
+  a: >
+    Before launch: generate candidate questions from their documents with an LLM, have their experts
+    review and correct a sample, and collect real questions from a few pilot users. Evaluate
+    retrieval with judge-based relevance labels, answers with faithfulness and correctness checks,
+    and calibrate the judges against the experts' reviews.
+
+
+    After launch: monitor faithfulness on sampled traffic, citation validity, no-answer rates, user
+    feedback and escalations, and add real failures to the test set. Share the results with the
+    customer regularly so quality is visible.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Cohere
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+  source: outcome-school
+- id: qwen-ships-open-weights-that-top-public-leaderboards-as-the
+  q: >-
+    Qwen ships open weights that top public leaderboards. As the release engineer, how do you make
+    sure the benchmark numbers are trustworthy and not contaminated?
+  a: >
+    Decontaminate training data against every benchmark you report, using n-gram and embedding
+    matching, and document the method. Evaluate with standard public harnesses and settings so
+    others can reproduce results, report variance across seeds and prompts, and include benchmarks
+    released after the data cutoff and private held-out sets.
+
+
+    Cross-check with tests that are hard to game: perturbed and paraphrased versions of benchmark
+    questions, human preference evaluations and independent leaderboards. Large gaps between public
+    and private or perturbed scores are a red flag to investigate before release.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Alibaba
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  refs:
+    - title: LLM Evaluation
+      url: https://outcomeschool.com/blog/llm-evaluation
+  source: outcome-school
+- id: how-would-you-evaluate-an-indic-llm-properly-why-is-running
+  q: >-
+    How would you evaluate an Indic LLM properly? Why is running translated English benchmarks not
+    enough?
+  a: >
+    Translated English benchmarks carry English cultural context and phrasing, contain translation
+    errors and unnatural language, and miss what matters locally: code-mixing, transliterated text,
+    regional knowledge and dialects. A model can score well on them and still fail real users.
+
+
+    Evaluate with natively written tasks per language, including code-mixed and romanized input,
+    local knowledge and culturally grounded questions, speech-to-text-to-answer pipelines where
+    voice matters, and native-speaker human ratings of fluency and helpfulness. Track tokenizer
+    efficiency and cost per language too.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/tokenization
+  refs:
+    - title: LLM Evaluation
+      url: https://outcomeschool.com/blog/llm-evaluation
+  source: outcome-school
+- id: how-would-you-evaluate-a-meeting-summarisation-feature-befor
+  q: >-
+    How would you evaluate a meeting-summarisation feature before shipping it to a hundred million
+    users?
+  a: >
+    Build a diverse test set of meetings: different lengths, languages, numbers of speakers, accents
+    and transcript quality, including edge cases. Evaluate faithfulness (no invented decisions or
+    owners), coverage of key decisions and action items against human references, attribution of who
+    said what, and usefulness through human ratings.
+
+
+    Use LLM judges calibrated to human raters for scale, measure critical errors separately, test
+    privacy and sensitive-content handling, and roll out gradually with feedback and sampled review,
+    watching for regressions in specific meeting types before reaching a hundred million users.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Microsoft
+  related: /ai-system-design/genai-system-design/hallucination-mitigation
+  refs:
+    - title: LLM Evaluation
+      url: https://outcomeschool.com/blog/llm-evaluation
+  source: outcome-school
+- id: how-would-you-decide-an-llm-powered-assistant-is-ready-to-la
+  q: How would you decide an LLM-powered assistant is ready to launch to millions of customers?
+  a: >
+    Set launch criteria up front with product, legal and safety: task success rates on
+    representative tests, maximum rates of harmful, hallucinated or policy-violating outputs,
+    latency and cost targets, accessibility and locale coverage. Measure them with offline suites,
+    red-teaming and human evaluation.
+
+
+    Then validate in stages: internal dogfooding, a limited beta with monitoring, and A/B tests
+    showing customer benefit, with operational readiness such as monitoring, incident response,
+    rollback and support processes. Launch when the criteria hold at each stage, not when a demo
+    looks good.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Amazon
+  related: /ai-system-design/genai-system-design/llmops-observability
+  source: outcome-school
+- id: you-re-shipping-notification-summarization-to-hundreds-of-mi
+  q: >-
+    You're shipping notification summarization to hundreds of millions of users in 30+ locales, and
+    you cannot log user content. Design the evaluation and regression-detection story.
+  a: >
+    Without user content, evaluate offline on synthetic and licensed or donated data that mimics
+    real notifications in every locale, written or reviewed by native speakers and covering hard
+    cases such as sarcasm, names, numbers and sensitive news. Measure faithfulness and critical
+    misstatements, with human review per locale.
+
+
+    For regression detection in the field, rely on privacy-preserving signals: on-device evaluation
+    with aggregated, differentially private metrics, opt-in feedback reports, and user actions such
+    as disabling the feature. Gate every model update on the offline suites, and roll out gradually
+    by locale.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Apple
+  related: /ai-system-design/genai-system-design/hallucination-mitigation
+  source: outcome-school
+- id: how-do-you-monitor-a-deployed-ranking-model-for-drift-and-wh
+  q: How do you monitor a deployed ranking model for drift, and what triggers a retrain?
+  a: >
+    Monitor input feature distributions and score distributions against a baseline, online
+    engagement metrics such as click-through and conversion by segment, and offline metrics
+    recomputed on recent labeled data as feedback arrives. Watch for new items, users and markets
+    that the model handles poorly.
+
+
+    Retrain on a schedule matched to how fast behavior changes, often daily or weekly for ranking,
+    and trigger extra retraining when drift metrics cross thresholds or performance drops on recent
+    data. Every retrained model still passes offline checks and an online test before replacing the
+    current one.
+  topic: evaluation
+  level: Mid
+  companies:
+    - Consumer-Scale ML
+  related: /interviews/mlops-and-deployment
+  source: outcome-school
+- id: take-a-working-genai-agent-prototype-to-production-for-an-en
+  q: >-
+    Take a working GenAI agent prototype to production for an enterprise. What's your checklist
+    between demo and launch?
+  a: >
+    The checklist: an evaluation suite from real tasks with success and safety metrics; permissions
+    and authentication with the user's own access; guardrails for inputs, outputs and tool actions
+    with approvals; tracing and monitoring with cost tracking; error handling, retries and budgets;
+    prompt and model versioning with rollback.
+
+
+    Plus enterprise needs: data governance and residency, audit logs, security review including
+    prompt injection testing, load and latency testing, a human fallback, documentation and support
+    processes, and a staged rollout with defined success criteria. Most prototypes fail on
+    evaluation and permissions, so start there.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Databricks
+  related: /ai-system-design/genai-system-design/llmops-observability
+  source: outcome-school
+- id: your-annotators-have-no-ground-truth-the-tasks-are-subjectiv
+  q: >-
+    Your annotators have no ground truth: the tasks are subjective preference judgments. How do you
+    measure and improve label quality?
+  a: >
+    Measure agreement rather than accuracy: inter-annotator agreement, each annotator's agreement
+    with the consensus and with expert reviewers on a calibration set, and consistency on repeated
+    items. Low agreement may mean unclear guidelines rather than bad annotators.
+
+
+    Improve quality by refining guidelines with examples of hard cases, training and calibrating
+    annotators, using gold items with expert-agreed preferences to monitor them, collecting
+    rationales, routing disagreements to experts, and weighting annotators by reliability. Track how
+    label quality affects the trained model's results.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Scale AI
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: how-would-you-benchmark-an-llm-agent-s-tool-use-say-for-ente
+  q: >-
+    How would you benchmark an LLM agent's tool use, say, for enterprise workflows composing 10+
+    APIs?
+  a: >
+    Build sandboxed mock versions of the APIs with realistic data and errors, and a suite of tasks
+    requiring multi-step compositions of 10 or more calls, with known correct end states. Grade
+    outcomes by checking the final state of the mock systems, and grade trajectories for correct
+    tool selection, argument accuracy, ordering, redundant calls and error recovery.
+
+
+    Run each task several times to measure consistency, vary API behaviors such as timeouts and
+    pagination, include tasks that should be refused or escalated, and report cost and latency. Keep
+    a hidden test set to avoid overfitting.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Scale AI
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  refs:
+    - title: AI Agent Evaluation
+      url: https://outcomeschool.com/blog/ai-agent-evaluation
+  source: outcome-school
+- id: an-eval-pipeline-you-own-suddenly-reports-a-6-point-drop-for
+  q: >-
+    An eval pipeline you own suddenly reports a 6-point drop for a customer's model between Tuesday
+    and Wednesday. The model didn't change. Debug it.
+  a: >
+    If the model did not change, suspect the pipeline. Diff everything between the two runs:
+    evaluation data version and sampling, prompt templates, decoding settings, judge model or judge
+    prompt versions (a hosted judge may have been updated), grading code, dependencies, timeouts and
+    rate-limit errors counted as failures, and infrastructure differences.
+
+
+    Rerun Tuesday's exact configuration to reproduce the old score, then bisect changes. Check
+    whether the drop is concentrated in particular items or error types, inspect failed examples by
+    hand, and add pinned versions and checksums so evaluation runs are reproducible.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Scale AI
+  related: /ai-system-design/genai-system-design/llmops-observability
+  source: outcome-school
+- id: how-would-you-evaluate-answer-quality-for-an-answer-engine-c
+  q: >-
+    How would you evaluate answer quality for an answer engine, continuously and at scale, with both
+    automated and human signals?
+  a: >
+    Automated signals at scale: citation validity and claim support from a faithfulness checker,
+    answer relevance and completeness from calibrated judges, freshness for time-sensitive queries,
+    and format quality, run on stratified samples of live traffic daily. Human signals: expert
+    raters on side-by-side comparisons for a smaller sample, with clear guidelines.
+
+
+    Behavioral signals: follow-up questions, reformulations, citation clicks, copy events, thumbs
+    ratings and abandonment. Combine them in dashboards by query type, and use human ratings to keep
+    the automated judges calibrated.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Perplexity
+  related: /ai-system-design/genai-system-design/hallucination-mitigation
+  refs:
+    - title: LLM Evaluation
+      url: https://outcomeschool.com/blog/llm-evaluation
+    - title: LLM as a Judge
+      url: https://outcomeschool.com/blog/llm-as-a-judge
+  source: outcome-school
+- id: what-makes-a-perplexity-answer-great-vs-mediocre-where-does
+  q: >-
+    What makes a Perplexity answer great vs mediocre? Where does Perplexity lose to traditional
+    search, and where does it win? You clearly use it: what's broken, and what would you ship to fix
+    it?
+  a: >
+    A great answer directly addresses the question, is accurate and current, cites authoritative
+    sources for each key claim, is concise with the right depth, and helps with natural follow-ups.
+    A mediocre one cites weak or irrelevant sources, padding, outdated information or claims the
+    sources do not support.
+
+
+    Answer engines win on synthesis, comparisons and research questions; traditional search wins on
+    navigation, local results, shopping and very fresh or highly specific lookups where users want
+    the page itself. Bring a concrete product observation and a measurable fix, such as better
+    source ranking for a query type or clearer handling of conflicting sources.
+  topic: evaluation
+  level: Mid
+  companies:
+    - Perplexity
+  related: /ai-system-design/genai-system-design/search-ranking-system
+  source: outcome-school
+- id: how-do-you-evaluate-a-code-editing-model-before-shipping-it
+  q: >-
+    How do you evaluate a code-editing model before shipping it? Design the offline and online eval
+    story for tab or agent edits.
+  a: >
+    Offline: build suites from real edit sessions with the actual context available at that moment,
+    measuring exact or functional match of the next edit, whether code compiles and tests pass after
+    applying edits, latency, and the rate of harmful edits. For agent edits, use repository tasks
+    with hidden tests.
+
+
+    Online: A/B test acceptance rate, retained acceptance (suggestions kept rather than undone),
+    characters or edits saved, time to task completion, and latency, broken down by language and
+    file type. Tune the suggestion threshold so precision stays high, because bad suggestions erode
+    trust quickly.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Cursor
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: how-would-you-evaluate-an-autonomous-software-engineering-ag
+  q: >-
+    How would you evaluate an autonomous software engineering agent? Explain why SWE-bench pass
+    rates mislead.
+  a: >
+    Use repository-level tasks run in sandboxes, graded by hidden tests and reviewed by humans for
+    code quality, plus measures of cost, time, and how often it needs help. Run each task several
+    times and report consistency, test on held-out and private tasks, and run real pilots with
+    developers measuring merged pull requests and review effort.
+
+
+    SWE-bench-style pass rates mislead because tests can be weak, so patches pass without being
+    right; tasks may be contaminated; the task mix is narrow and mostly Python; harness and
+    scaffolding differences dominate comparisons; and a pass says nothing about maintainability,
+    collaboration or cost. Tool-agent benchmarks such as tau-bench add consistency over repeated
+    runs, which matters for real use.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Cognition
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  refs:
+    - title: AI Agent Evaluation
+      url: https://outcomeschool.com/blog/ai-agent-evaluation
+  source: outcome-school
+- id: the-space-of-possible-conversations-is-effectively-infinite
+  q: >-
+    The space of possible conversations is effectively infinite. How do you evaluate a
+    conversational agent before launch?
+  a: >
+    Cover the space systematically rather than exhaustively: build scenario suites from real
+    transcripts and policies, covering intents, edge cases, policy boundaries, emotional customers
+    and adversarial attempts, and run them with simulated users that have goals and personas, varied
+    by an LLM to generate many conversation paths.
+
+
+    Grade outcomes by checking backend state and policy compliance, use rubric judges for tone and
+    resolution, run each scenario many times to measure consistency, and add human review. After
+    launch, monitor live conversations and turn new failure patterns into scenarios.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Sierra
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  refs:
+    - title: AI Agent Evaluation
+      url: https://outcomeschool.com/blog/ai-agent-evaluation
+  source: outcome-school
+- id: your-agent-passes-92-of-eval-tasks-why-might-that-number-be
+  q: >-
+    Your agent passes 92% of eval tasks. Why might that number be misleading, and what would you
+    measure instead?
+  a: >
+    The test set may be easier than or different from real traffic, overfit through repeated tuning,
+    or dominated by common cases while rare high-impact cases fail. A single run hides
+    inconsistency: 92% per run can mean far lower odds of succeeding every time. The grader may be
+    lenient, and the 8% of failures may include severe ones such as policy violations.
+
+
+    Measure instead: success weighted by real traffic mix, pass^k consistency, severity-weighted
+    failure rates, policy violation rate, escalation appropriateness, cost and latency, and
+    production outcomes such as resolution and customer satisfaction.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Sierra
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: after-a-foundation-model-version-upgrade-your-production-age
+  q: >-
+    After a foundation-model version upgrade, your production agent's escalation rate doubles
+    overnight. Walk me through your response.
+  a: >
+    First limit impact: roll back to the previous model version or route traffic back while
+    investigating. Then compare traces before and after for the escalated conversations: is the new
+    model triggering escalation rules more often, refusing more, misreading tool results, following
+    instructions differently, or formatting tool calls in a way the harness rejects?
+
+
+    Rerun the evaluation suite on both versions to localize the regression, adjust prompts, tool
+    descriptions or escalation thresholds for the new model, re-validate, and re-roll out gradually.
+    Add the failing conversations to the regression suite and require evaluation before future
+    upgrades.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Sierra
+  related: /ai-system-design/genai-system-design/llmops-observability
+  source: outcome-school
+- id: a-new-frontier-model-is-released-and-scores-better-on-your-b
+  q: >-
+    A new frontier model is released and scores better on your benchmarks. What happens before it
+    reaches customers?
+  a: >
+    Benchmarks are only the first filter. Run the full product evaluation suites with your prompts
+    and workflows, check legal-specific quality such as citation accuracy and hallucination rates,
+    review side by side with domain experts, and test safety, data handling, latency and cost.
+
+
+    Then adapt prompts and tools to the new model's behavior, roll out to internal users and a small
+    set of customers, compare online metrics, and only then expand. Keep the ability to pin
+    customers on the previous model.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Harvey
+  related: /ai-system-design/genai-system-design/llmops-observability
+  source: outcome-school
+- id: design-the-evaluation-framework-for-an-enterprise-ai-assista
+  q: >-
+    Design the evaluation framework for an enterprise AI assistant when you cannot look at customer
+    data.
+  a: >
+    Evaluate on proxies you can see: realistic synthetic companies with generated documents,
+    permissions and questions; public or licensed corpora; and internal dogfooding on your own
+    company's data. These cover retrieval quality, answer faithfulness, permission enforcement and
+    action success.
+
+
+    In customer environments, use privacy-preserving telemetry: aggregate metrics such as citation
+    clicks, feedback rates, no-answer rates and latency, plus evaluations that run inside the
+    customer's tenant and report only scores. Offer customers tools to run evaluations and share
+    results voluntarily.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Glean
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: users-complain-that-characters-drift-out-of-persona-after-a
+  q: Users complain that characters drift out of persona after a long session. Diagnose it.
+  a: >
+    In long sessions, the persona definition gets diluted by thousands of tokens of conversation,
+    may be truncated or summarized away when context management kicks in, and the model gets pulled
+    toward the user's style or toward its generic assistant voice. Lost-in-the-middle effects and
+    summarization errors make it worse.
+
+
+    Diagnose by reviewing long-session transcripts against persona rubrics at different lengths. Fix
+    by pinning the persona definition in every context, re-injecting key traits periodically,
+    summarizing history without erasing persona-relevant facts, fine-tuning on long in-character
+    conversations, and evaluating persona consistency as a function of session length.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Character.AI
+  related: /ai-system-design/genai-system-design/agent-memory
+  source: outcome-school
+- id: engagement-metrics-and-wellbeing-metrics-disagree-how-do-you
+  q: Engagement metrics and wellbeing metrics disagree. How do you build a system that resolves that?
+  a: >
+    Treat wellbeing as a constraint, not a tie-breaker. Define wellbeing metrics explicitly with
+    experts, such as signs of distress, compulsive use patterns among minors and user-reported
+    satisfaction, and make them guardrails that experiments must not worsen even if engagement
+    rises.
+
+
+    Build the system so optimization targets long-term value, such as retention driven by
+    satisfaction rather than raw time spent, with safety classifiers, interventions for at-risk
+    users, time and break features, and human review of borderline effects. Report both metric
+    families together so decisions are visible.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Character.AI
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+  source: outcome-school
+- id: two-good-clinicians-write-different-notes-for-the-same-visit
+  q: >-
+    Two good clinicians write different notes for the same visit. So how do you evaluate note
+    quality at all?
+  a: >
+    Evaluate properties rather than matching a single reference: factual faithfulness to the
+    conversation (no invented or wrong facts), completeness of clinically important information,
+    correct attribution, appropriate organization for the specialty, and absence of critical errors
+    such as wrong medications or laterality.
+
+
+    Use clinician rubric ratings with multiple raters, measure agreement, compare against several
+    reference notes, check facts against the transcript automatically, and track critical-error
+    rates separately from style preferences. Ultimately, measure what clinicians accept and sign
+    after editing.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Abridge
+  related: /ai-system-design/genai-system-design/hallucination-mitigation
+  source: outcome-school
+- id: edit-rate-is-the-obvious-measure-of-clinician-trust-what-doe
+  q: >-
+    Edit rate is the obvious measure of clinician trust. What does it hide, and what would you
+    instrument instead?
+  a: >
+    Low edit rates can mean clinicians are too busy to review carefully, so errors pass unnoticed;
+    high edit rates can be style changes rather than corrections. Edit rate treats a typo fix the
+    same as fixing a wrong drug, and differs across clinicians' habits.
+
+
+    Instrument edit types and severity (factual corrections versus stylistic rewrites), which
+    sections get edited, time spent reviewing, critical-error detection on audited samples,
+    clinician-reported trust and burnout, and downstream outcomes such as billing or care
+    corrections. Audit samples where nothing was edited to see whether errors slipped through.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Abridge
+  related: /ai-system-design/genai-system-design/hallucination-mitigation
+  source: outcome-school
+- id: how-do-you-evaluate-a-manipulation-policy-when-every-trial-c
+  q: >-
+    How do you evaluate a manipulation policy when every trial costs robot time and every failure
+    has physical consequences?
+  a: >
+    Do most evaluation in simulation and on offline data first: validate on held-out demonstrations,
+    use simulation with domain randomization to screen candidates, and only promote promising
+    policies to real robots. Choose a fixed, representative set of physical test scenarios with
+    clear success criteria.
+
+
+    For real trials, use safety-limited settings (speed, force limits, protective setups), allocate
+    trials efficiently with statistical stopping rules, record everything for analysis, and track
+    failure modes, not just success rate. Correlate simulation results with real results over time
+    to learn how far simulation can be trusted.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Figure AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: you-ship-a-policy-to-300-robots-it-works-in-the-lab-and-degr
+  q: You ship a policy to 300 robots. It works in the lab and degrades in the field. Debug it.
+  a: >
+    It is likely distribution shift between lab and field: lighting, backgrounds, object variety,
+    wear and calibration differences between robots, latency and compute differences, or people and
+    clutter not seen in the lab. Use fleet telemetry to find where failures cluster: specific
+    robots, sites, times, tasks or objects.
+
+
+    Replay field logs in simulation or offline evaluation, compare sensor and action statistics with
+    lab data, and check calibration and firmware versions. Fix by collecting targeted field data and
+    retraining, adding domain randomization, recalibrating, and rolling out fixes gradually with
+    monitoring per site.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Figure AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: disengagement-rate-is-a-weak-safety-proxy-how-would-you-actu
+  q: >-
+    Disengagement rate is a weak safety proxy. How would you actually measure whether the Driver is
+    safe enough to ship?
+  a: >
+    Disengagement rate depends on driver behavior, routes and policies, and does not capture how
+    severe events would have been. Measure safety through a combination: collisions and near-misses
+    by severity per mile, compared with human-driver baselines in the same areas and conditions;
+    counterfactual simulation of disengagement events to see whether a crash would have occurred;
+    and large scenario-based simulation suites covering rare dangerous situations.
+
+
+    Add structured scenario testing on closed courses, analysis by operating domain (weather, road
+    type, time of day), and statistical confidence about rare events, which needs very large mileage
+    or strong simulation. Combine it all into a safety case argued before release.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Tesla
+    - Waymo
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: how-do-you-build-a-simulator-you-would-trust-to-gate-a-relea
+  q: How do you build a simulator you would trust to gate a release?
+  a: >
+    Validate it against reality: replay logged real-world drives and check that the simulated
+    sensors, other agents and vehicle dynamics reproduce what actually happened, and measure how
+    well simulated outcomes predict real outcomes for past releases. Model other road users
+    realistically with learned behavior models, including reactive responses.
+
+
+    Cover the scenario space with logged scenarios, mutations of them and synthetic rare events,
+    track the simulator's known gaps, and use it as one of several gates alongside closed-course and
+    limited road testing. Trust grows when simulation results consistently predict real-world
+    performance.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Waymo
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: two-days-before-a-release-decision-simulation-shows-a-15-inc
+  q: >-
+    Two days before a release decision, simulation shows a 15% increase in hard-braking events in
+    one scenario cluster. Walk me through what you do.
+  a: >
+    Treat it as real until shown otherwise. Inspect the scenarios: are the hard brakes justified
+    responses to genuine hazards, or unnecessary braking that creates rear-end risk? Check whether
+    the change is statistically significant and whether that cluster matters for the operating
+    domain.
+
+
+    Trace it to the code or model change responsible, reproduce on logged real-world data, and
+    assess risk with safety engineers. If the cause is understood and benign, document it; if not,
+    delay the release or ship without that change, rather than letting the deadline decide.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Waymo
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: how-do-you-evaluate-an-llm-workflow-before-and-after-giving
+  q: How do you evaluate an LLM workflow before and after giving it access to production operations?
+  a: >
+    Before production access: evaluate in a sandbox or on read-only replicas with historical tasks,
+    compare proposed actions with what experts actually did, test permissions, edge cases and
+    adversarial inputs, and run in shadow mode where the workflow proposes actions that humans
+    execute.
+
+
+    After access: start with human approval on every action, track approval and edit rates, errors
+    and incidents, expand autonomy only for action types with consistently high accuracy, keep audit
+    logs and rollback, and continue sampling and reviewing outcomes.
+  topic: evaluation
+  level: Senior
+  companies:
+    - Palantir
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
