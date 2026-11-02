@@ -51,15 +51,6 @@ Study the deep-dives first, then drill here:
   <InterviewQuestion question="Why did decoder-only models become the standard for LLMs?" category="Architecture Variants" level="Mid">
     One stack and one objective are simple to scale, and next-token prediction turns every token of text into a training signal. At scale they show in-context learning, and instruction tuning lets them handle almost any task as generation, so a single model can replace many task-specific ones.
   </InterviewQuestion>
-  <InterviewQuestion question="Explain prefill and decode phases of LLM inference." category="Inference & Efficiency" level="Mid">
-    Prefill processes the whole prompt in parallel to fill the KV cache and produce the first token; it is compute-bound and determines time to first token. Decode generates one token per step, re-reading weights and the cache, so it is memory-bandwidth-bound and determines tokens per second.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is PagedAttention?" category="Inference & Efficiency" level="Senior">
-    A KV cache layout from vLLM that stores each sequence's cache in fixed-size blocks allocated on demand, like virtual memory pages. It nearly eliminates fragmentation and lets requests share common prefixes, so servers fit many more concurrent sequences and achieve higher throughput.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is speculative decoding?" category="Inference & Efficiency" level="Senior">
-    A small draft model proposes several tokens ahead, and the large model verifies them all in one forward pass, accepting the longest prefix it agrees with. Because verification is parallel, the large model produces several tokens per pass when the draft is good, reducing latency without changing the output distribution when standard acceptance rules are used.
-  </InterviewQuestion>
   <InterviewQuestion question="Why do MoE models need load balancing?" category="Scaling" level="Senior">
     Routers tend to favor experts that are already slightly better, which then get more training and become even more favored, collapsing onto a few experts. An auxiliary balancing loss and per-expert capacity limits keep tokens spread out so all experts learn and hardware stays evenly loaded.
   </InterviewQuestion>
