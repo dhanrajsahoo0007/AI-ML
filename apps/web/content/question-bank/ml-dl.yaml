@@ -1,0 +1,828 @@
+# Company-reported questions adapted from Outcome School (Apache 2.0); see NOTICE.md. Answers are our own.
+- id: compute-the-kl-divergence-given-different-random-variables
+  q: Compute the KL divergence given different random variables.
+  a: >
+    KL divergence from Q to P is the sum over outcomes of P(x) × log(P(x) / Q(x)), or the integral
+    for continuous variables. Example: for coins with P(heads) = 0.5 and Q(heads) = 0.9, KL(P‖Q) =
+    0.5 log(0.5/0.9) + 0.5 log(0.5/0.1) ≈ 0.51 nats.
+
+
+    Know its properties: it is always non-negative, zero only when the distributions match, not
+    symmetric (KL(P‖Q) differs from KL(Q‖P)), and infinite if Q assigns zero probability where P
+    does not. For two Gaussians there is a closed form based on their means and variances.
+  topic: ml
+  level: Mid
+  companies:
+    - OpenAI
+  related: /interviews/statistics-and-probability
+  source: outcome-school
+- id: if-the-accuracy-of-a-classifier-is-1-what-is-the-lower-upper
+  q: >-
+    If the accuracy of a classifier is 1, what is the lower/upper bound on the loss function for a
+    single training example?
+  a: >
+    Accuracy of 1 means the predicted class is always correct, so with cross-entropy the true class
+    has the highest probability. For binary classification that probability is above 0.5, so the
+    per-example loss is above 0 (approached as the probability nears 1) and below −log(0.5) ≈ 0.69.
+    With K classes, the true class's probability can be as low as just above 1/K, so the upper bound
+    is just under log K.
+
+
+    The point is that accuracy and loss measure different things: a perfectly accurate classifier
+    can still be poorly calibrated and have meaningful loss.
+  topic: ml
+  level: Mid
+  companies:
+    - OpenAI
+  related: /interviews/model-evaluation-metrics
+  refs:
+    - title: Math Behind Cross-Entropy Loss
+      url: https://outcomeschool.com/blog/math-behind-cross-entropy-loss
+  source: outcome-school
+- id: we-have-two-models-85-and-82-accuracy-which-do-you-pick
+  q: We have two models, 85% and 82% accuracy. Which do you pick?
+  a: >
+    It depends. First check whether the 3-point difference is statistically meaningful given the
+    test set size, and whether accuracy is the right metric: with class imbalance or unequal error
+    costs, precision, recall or business cost may favor the other model.
+
+
+    Then consider latency, cost, interpretability, robustness across segments, calibration and
+    maintenance. Pick the model that best serves the business goal, and confirm with an online test
+    if the stakes justify it.
+  topic: ml
+  level: Junior
+  companies:
+    - OpenAI
+  related: /interviews/model-evaluation-metrics
+  source: outcome-school
+- id: what-are-the-assumptions-of-linear-regression
+  q: What are the assumptions of linear regression?
+  a: >
+    A linear relationship between features and target; independent errors; constant error variance
+    (homoscedasticity); normally distributed errors for valid inference such as confidence
+    intervals; and no perfect multicollinearity among features.
+
+
+    Check them with residual plots against fitted values, Q-Q plots, autocorrelation tests for time
+    data and variance inflation factors. Violations do not always ruin predictions, but they make
+    coefficients and p-values unreliable.
+  topic: ml
+  level: Junior
+  companies:
+    - Google DeepMind
+  related: /interviews/statistics-and-probability
+  source: outcome-school
+- id: distinguish-regularization-from-validation-when-is-each-the
+  q: "Distinguish regularization from validation: when is each the right tool?"
+  a: >
+    Regularization changes how the model is trained, adding a penalty such as L1, L2 or dropout that
+    discourages complexity, to reduce overfitting. Validation measures how well a trained model
+    generalizes, using held-out data or cross-validation, to choose among models and
+    hyperparameters, including the regularization strength itself.
+
+
+    Use regularization when the model is overfitting and you want a simpler solution; use validation
+    always, to detect overfitting and decide how much regularization helps. They work together:
+    validation picks the regularization amount.
+  topic: ml
+  level: Mid
+  companies:
+    - Google DeepMind
+  related: /interviews/ml-fundamentals
+  refs:
+    - title: "Regularization in Machine Learning: L1 vs L2"
+      url: https://outcomeschool.com/blog/regularization-in-machine-learning
+  source: outcome-school
+- id: derive-the-gradient-of-cross-entropy-loss-with-softmax-input
+  q: >-
+    Derive the gradient of cross-entropy loss with softmax inputs, and explain why we fuse them
+    numerically.
+  a: >
+    With logits z, softmax probabilities p_i = exp(z_i) / Σ_j exp(z_j) and a one-hot target y, the
+    loss is L = −Σ_i y_i log p_i. The derivative of p_i with respect to z_k is p_i(δ_ik − p_k), and
+    the chain rule gives ∂L/∂z_k = p_k − y_k: predicted probability minus target.
+
+
+    They are fused because computing softmax and then log separately is numerically unstable:
+    exponentials overflow for large logits and log of tiny probabilities underflows. A fused
+    log-softmax uses the log-sum-exp trick (subtracting the maximum logit) and yields the simple,
+    stable gradient p − y.
+  topic: dl
+  level: Senior
+  companies:
+    - Google DeepMind
+  related: /interviews/deep-learning
+  refs:
+    - title: Math Behind Cross-Entropy Loss
+      url: https://outcomeschool.com/blog/math-behind-cross-entropy-loss
+    - title: Math Behind Backpropagation
+      url: https://outcomeschool.com/blog/math-behind-backpropagation
+  source: outcome-school
+- id: explain-the-svd-and-give-two-places-it-shows-up-in-modern-de
+  q: Explain the SVD and give two places it shows up in modern deep learning.
+  a: >
+    Singular value decomposition factors any matrix A into U Σ Vᵀ, where U and V have orthonormal
+    columns and Σ is diagonal with non-negative singular values in decreasing order. Keeping the top
+    k singular values gives the best rank-k approximation of A.
+
+
+    In deep learning it appears in low-rank adaptation and compression (LoRA's premise that weight
+    updates are low rank, and SVD-based initialization or compression of weight matrices), in
+    analyzing and pruning layers, in spectral normalization that controls the largest singular value
+    for training stability, and in PCA for embeddings.
+  topic: dl
+  level: Senior
+  companies:
+    - Google DeepMind
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  source: outcome-school
+- id: on-average-how-many-fair-coin-flips-until-you-see-two-heads
+  q: On average, how many fair coin flips until you see two heads in a row? Walk me through it.
+  a: >
+    Six. Let E be the expected number of flips from the start and F the expected number after just
+    seeing one head. From the start, one flip leads to F with probability 1/2 or back to the start
+    with probability 1/2: E = 1 + F/2 + E/2. After a head, one flip finishes with probability 1/2 or
+    resets: F = 1 + E/2.
+
+
+    Substituting: E = 1 + (1 + E/2)/2 + E/2, so E/4 = 3/2 and E = 6.
+  topic: ml
+  level: Mid
+  companies:
+    - Google DeepMind
+  related: /interviews/statistics-and-probability
+  source: outcome-school
+- id: when-would-you-choose-q-learning-over-policy-gradients-and-v
+  q: When would you choose Q-learning over policy gradients, and vice versa?
+  a: >
+    Q-learning learns action values and acts greedily; it is sample-efficient through off-policy
+    learning and experience replay and works well with small discrete action spaces, as in classic
+    games. It struggles with continuous or huge action spaces and can be unstable with function
+    approximation.
+
+
+    Policy gradients optimize the policy directly, handle continuous and large action spaces and
+    stochastic policies naturally, and are what LLM RL uses (PPO, GRPO), at the cost of higher
+    variance and lower sample efficiency, usually reduced with baselines or critics. Actor-critic
+    methods combine the two.
+  topic: ml
+  level: Senior
+  companies:
+    - Google DeepMind
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  source: outcome-school
+- id: you-have-a-binary-loan-approval-classifier-and-limited-acces
+  q: >-
+    You have a binary loan-approval classifier and limited access to feature weights. How do you
+    explain a rejection?
+  a: >
+    Use model-agnostic explanations that only need predictions: SHAP or LIME estimates of which
+    features pushed this applicant toward rejection, and counterfactual explanations such as
+    "approved if income were X higher or debt Y lower", which are actionable and often required for
+    adverse-action notices.
+
+
+    Make sure explanations are faithful and stable, use features the applicant can understand, avoid
+    exposing protected attributes, and check fairness across groups. In regulated lending, an
+    inherently interpretable model may be preferable to explaining a black box.
+  topic: ml
+  level: Senior
+  companies:
+    - Google DeepMind
+  related: /interviews/model-evaluation-metrics
+  source: outcome-school
+- id: your-ads-ctr-model-shows-a-2-offline-auc-gain-but-the-online
+  q: >-
+    Your ads CTR model shows a 2% offline AUC gain, but the online A/B is revenue-neutral with worse
+    calibration. What is going on, and what do you do?
+  a: >
+    AUC measures ranking, but ads auctions use predicted click probabilities directly to compute
+    bids and prices, so calibration errors distort the auction: overpredicting for some ads shifts
+    allocation and pricing even if ranking improved. Offline gains may also come from segments with
+    little revenue, or from feature leakage that does not hold online.
+
+
+    Recalibrate the model (Platt or isotonic calibration, per segment if needed) and check
+    calibration by segment and position, compare offline metrics such as log loss and normalized
+    entropy that reflect calibration, check for training-serving skew, and rerun the A/B test with
+    revenue and advertiser value as the primary metrics.
+  topic: ml
+  level: Senior
+  companies:
+    - Meta
+  related: /interviews/ab-testing-and-experimentation
+  source: outcome-school
+- id: what-is-the-closed-form-solution-of-linear-regression-and-wh
+  q: >-
+    What is the closed-form solution of linear regression, and when do you use gradient descent
+    instead?
+  a: >
+    The normal equation gives w = (XᵀX)⁻¹Xᵀy, which minimizes squared error exactly; with L2
+    regularization it becomes (XᵀX + λI)⁻¹Xᵀy.
+
+
+    Use gradient descent when there are many features, since inverting a d×d matrix costs about d³;
+    when data is too large for memory or arrives in streams; or when XᵀX is ill-conditioned. In
+    practice, solvers use QR or SVD decompositions rather than explicit inversion for stability.
+  topic: ml
+  level: Mid
+  companies:
+    - Amazon
+  related: /interviews/ml-fundamentals
+  refs:
+    - title: Math Behind Gradient Descent
+      url: https://outcomeschool.com/blog/math-behind-gradient-descent
+  source: outcome-school
+- id: what-are-the-differences-between-l1-and-l2-regularization-in
+  q: What are the differences between L1 and L2 regularization in logistic regression?
+  a: >
+    L1 adds the sum of absolute weights to the loss, pushing many weights exactly to zero, which
+    performs feature selection and gives sparse, interpretable models. L2 adds the sum of squared
+    weights, shrinking weights smoothly without zeroing them, handling correlated features more
+    gracefully by spreading weight among them.
+
+
+    In logistic regression both reduce overfitting; L1 suits high-dimensional data with few relevant
+    features, L2 is a good default, and elastic net combines them. Both require standardized
+    features so the penalty treats features fairly.
+  topic: ml
+  level: Junior
+  companies:
+    - Amazon
+  related: /interviews/ml-fundamentals
+  refs:
+    - title: "Regularization in Machine Learning: L1 vs L2"
+      url: https://outcomeschool.com/blog/regularization-in-machine-learning
+  source: outcome-school
+- id: write-the-loss-function-for-logistic-regression-and-prove-it
+  q: Write the loss function for logistic regression and prove it has a global minimum.
+  a: >
+    With p_i = σ(wᵀx_i), the loss is L(w) = −Σ_i [y_i log p_i + (1 − y_i) log(1 − p_i)]. Its
+    gradient is Xᵀ(p − y) and its Hessian is XᵀSX, where S is diagonal with entries p_i(1 − p_i),
+    which are positive.
+
+
+    For any vector v, vᵀXᵀSXv = Σ_i p_i(1 − p_i)(x_iᵀv)² ≥ 0, so the Hessian is positive
+    semi-definite and the loss is convex: any local minimum is global. A unique finite minimum
+    exists when the data is not perfectly separable and X has full column rank; if the data is
+    separable, the loss keeps decreasing as weights grow, which L2 regularization fixes by making
+    the objective strictly convex.
+  topic: ml
+  level: Senior
+  companies:
+    - Amazon
+  related: /interviews/ml-fundamentals
+  refs:
+    - title: Math Behind Cross-Entropy Loss
+      url: https://outcomeschool.com/blog/math-behind-cross-entropy-loss
+    - title: Linear Regression vs Logistic Regression
+      url: https://outcomeschool.com/blog/linear-regression-vs-logistic-regression
+  source: outcome-school
+- id: how-is-kl-divergence-loss-different-from-cross-entropy-loss
+  q: How is KL divergence loss different from cross-entropy loss? And from contrastive loss?
+  a: >
+    Cross-entropy H(P, Q) equals the entropy of P plus KL(P‖Q). With fixed targets, such as one-hot
+    labels, the entropy term is constant, so minimizing cross-entropy and minimizing KL give the
+    same gradients; KL is used when the target is itself a distribution, such as in distillation or
+    keeping a policy close to a reference model.
+
+
+    Contrastive losses such as InfoNCE are different: they compare a positive pair against
+    negatives, pulling matching embeddings together and pushing others apart, which learns
+    representations rather than matching a target distribution, as in CLIP or sentence embeddings.
+  topic: ml
+  level: Mid
+  companies:
+    - Amazon
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  refs:
+    - title: Math Behind Cross-Entropy Loss
+      url: https://outcomeschool.com/blog/math-behind-cross-entropy-loss
+    - title: What is Contrastive Learning?
+      url: https://outcomeschool.com/blog/contrastive-learning
+  source: outcome-school
+- id: how-do-bagging-and-boosting-differ-what-is-the-computational
+  q: >-
+    How do bagging and boosting differ? What is the computational difference between XGBoost and
+    Random Forest?
+  a: >
+    Bagging trains models independently on bootstrap samples and averages them, mainly reducing
+    variance; boosting trains models sequentially, each correcting the previous ensemble's errors,
+    mainly reducing bias.
+
+
+    Computationally, a random forest's trees can be built fully in parallel, are deep, and each
+    split considers a random subset of features. XGBoost builds shallow trees one after another, so
+    trees cannot be parallelized across the ensemble, but each tree's split finding is parallelized
+    over features using pre-sorted or histogram-based data, with second-order gradients,
+    regularization and handling of missing values. Random forests are easier to tune; XGBoost
+    usually reaches higher accuracy with tuning.
+  topic: ml
+  level: Mid
+  companies:
+    - Amazon
+  related: /interviews/ml-fundamentals
+  source: outcome-school
+- id: explain-the-bias-variance-trade-off-cross-validation-and-the
+  q: Explain the bias-variance trade-off, cross-validation, and the curse of dimensionality.
+  a: >
+    Bias is error from overly simple assumptions, causing underfitting; variance is error from
+    sensitivity to the specific training data, causing overfitting. Expected error decomposes into
+    bias squared plus variance plus irreducible noise, and increasing model complexity typically
+    lowers bias while raising variance, so you look for the complexity with the lowest total error.
+
+
+    Cross-validation estimates that error on unseen data by training on k−1 folds and validating on
+    the remaining fold, rotating, which guides model selection. The curse of dimensionality means
+    that as features grow, data becomes sparse, distances become less meaningful and far more data
+    is needed, which increases variance unless you reduce dimensions or regularize.
+  topic: ml
+  level: Junior
+  companies:
+    - Amazon
+    - Google DeepMind
+  related: /interviews/ml-fundamentals
+  source: outcome-school
+- id: how-do-gru-cells-work-and-how-do-they-address-the-vanishing
+  q: >-
+    How do GRU cells work, and how do they address the vanishing gradient problem? How does a BiLSTM
+    work?
+  a: >
+    A GRU has an update gate that decides how much of the previous hidden state to keep versus
+    replace, and a reset gate that decides how much past state to use when computing the candidate
+    new state. The new hidden state is an interpolation between the old state and the candidate,
+    controlled by the update gate.
+
+
+    Because the update gate can keep the state almost unchanged, information and gradients can flow
+    across many time steps through that near-identity path, which reduces vanishing gradients
+    compared with plain RNNs. A BiLSTM runs one LSTM forward and one backward over the sequence and
+    concatenates their states, so each position sees both past and future context.
+  topic: dl
+  level: Mid
+  companies:
+    - Amazon
+  related: /interviews/deep-learning
+  refs:
+    - title: Recurrent Neural Network (RNN)
+      url: https://outcomeschool.com/blog/recurrent-neural-network
+  source: outcome-school
+- id: what-is-attention-in-machine-learning-models-what-happens-in
+  q: >-
+    What is Attention in machine learning models? What happens in a neural network if you remove all
+    the hidden layers?
+  a: >
+    Attention lets a model compute, for each position, a weighted combination of other positions'
+    information, with weights based on learned relevance between a query and keys. It lets models
+    focus on the relevant parts of the input and connect distant elements directly.
+
+
+    If you remove all hidden layers, the network becomes a linear model applied to the inputs, such
+    as linear or logistic regression, depending on the output layer. It can only learn linear
+    decision boundaries, losing the ability to represent complex non-linear functions.
+  topic: dl
+  level: Junior
+  companies:
+    - Amazon
+  related: /ai-system-design/genai-system-design/self-attention-explained
+  refs:
+    - title: Math behind Attention - Q, K, and V
+      url: https://outcomeschool.com/blog/math-behind-attention-qkv
+  source: outcome-school
+- id: discuss-precision-recall-and-f1-when-would-you-prioritise-on
+  q: "Discuss precision, recall and F1: when would you prioritise one over the others?"
+  a: >
+    Precision is the share of predicted positives that are correct; recall is the share of actual
+    positives found; F1 is their harmonic mean, high only when both are high.
+
+
+    Prioritize precision when false positives are costly, such as flagging legitimate transactions
+    or spam filters deleting real email. Prioritize recall when misses are costly, such as disease
+    screening or safety-critical detection. Use F1 when both matter similarly, and tune the
+    threshold to the business cost of each error.
+  topic: ml
+  level: Junior
+  companies:
+    - Amazon
+  related: /interviews/model-evaluation-metrics
+  refs:
+    - title: Precision vs Recall
+      url: https://outcomeschool.com/blog/precision-vs-recall
+  source: outcome-school
+- id: how-do-you-handle-data-imbalance-collinearity-feature-select
+  q: How do you handle data imbalance, collinearity, feature selection and regularization?
+  a: >
+    Imbalance: use appropriate metrics, class weights, resampling such as SMOTE or undersampling,
+    and threshold tuning. Collinearity: detect with correlation matrices and variance inflation
+    factors, then drop or combine correlated features, use PCA, or use L2 regularization, which
+    handles them stably.
+
+
+    Feature selection: filter methods such as mutual information, wrapper methods such as recursive
+    feature elimination, and embedded methods such as L1 or tree importances, validated with
+    cross-validation. Regularization: tune L1, L2 or elastic net strength on validation data to
+    balance fit and complexity.
+  topic: ml
+  level: Mid
+  companies:
+    - Amazon
+  related: /interviews/feature-engineering-and-data-prep
+  refs:
+    - title: Feature Engineering in Machine Learning
+      url: https://outcomeschool.com/blog/feature-engineering
+    - title: "Regularization in Machine Learning: L1 vs L2"
+      url: https://outcomeschool.com/blog/regularization-in-machine-learning
+  source: outcome-school
+- id: explain-how-you-would-design-and-evaluate-an-a-b-test-what-i
+  q: >-
+    Explain how you would design and evaluate an A/B test. What is a p-value and how do you
+    interpret it here?
+  a: >
+    Define the hypothesis and primary metric, guardrail metrics and the randomization unit; size the
+    test from the baseline, minimum detectable effect, significance level and power; run it for the
+    planned duration covering weekly cycles; check sample ratio and data quality; then analyze the
+    effect with confidence intervals.
+
+
+    The p-value is the probability of seeing a difference at least as large as observed if there
+    were truly no effect. A p-value of 0.02 means such a result would be unusual under no effect,
+    but it does not say the probability the change works, nor how big the effect is, which is why
+    you also report the effect size and interval.
+  topic: ml
+  level: Mid
+  companies:
+    - Amazon
+  related: /interviews/ab-testing-and-experimentation
+  source: outcome-school
+- id: what-is-maximum-likelihood-estimation-and-how-does-it-differ
+  q: What is Maximum Likelihood Estimation and how does it differ from Bayesian inference?
+  a: >
+    Maximum likelihood estimation picks the parameter values that make the observed data most
+    probable, giving a single point estimate. Bayesian inference treats parameters as random,
+    combines a prior with the likelihood to get a full posterior distribution, and reports
+    uncertainty through it.
+
+
+    MAP estimation sits between them: the posterior's mode, equivalent to MLE plus a penalty from
+    the prior, such as L2 regularization corresponding to a Gaussian prior. With lots of data, the
+    prior matters less and MLE and Bayesian answers converge.
+  topic: ml
+  level: Mid
+  companies:
+    - Amazon
+  related: /interviews/statistics-and-probability
+  source: outcome-school
+- id: explain-strategies-to-combat-overfitting-in-tree-based-class
+  q: Explain strategies to combat overfitting in tree-based classification models.
+  a: >
+    For single trees: limit maximum depth, require a minimum number of samples per split or leaf,
+    prune after growing using validation data or cost-complexity pruning, and limit the number of
+    leaves.
+
+
+    For ensembles: use bagging and random feature subsets (random forests), and for boosting use a
+    small learning rate with early stopping, row and column subsampling, regularization on leaf
+    weights and shallow trees. Validate with cross-validation and remove leaky or noisy features.
+  topic: ml
+  level: Mid
+  companies:
+    - NVIDIA
+  related: /interviews/ml-fundamentals
+  source: outcome-school
+- id: summarize-the-differences-and-benefits-of-the-adam-optimizer
+  q: >-
+    Summarize the differences and benefits of the Adam optimizer compared with other methods for
+    neural-network image classification.
+  a: >
+    Plain SGD uses one learning rate for all parameters; momentum adds a moving average of gradients
+    to smooth and speed up progress. Adam combines momentum with per-parameter adaptive step sizes
+    from a moving average of squared gradients, plus bias correction, so it converges quickly with
+    little tuning and handles sparse or differently scaled gradients well.
+
+
+    For image classification, Adam or AdamW trains fast and is robust, while well-tuned SGD with
+    momentum and a learning-rate schedule has historically reached slightly better generalization on
+    some benchmarks. AdamW's decoupled weight decay narrows that gap and is the common default for
+    transformers.
+  topic: dl
+  level: Mid
+  companies:
+    - NVIDIA
+  related: /interviews/deep-learning
+  source: outcome-school
+- id: a-network-confuses-pugs-and-pit-bulls-and-some-training-labe
+  q: >-
+    A network confuses pugs and pit bulls and some training labels are wrong. How do you modify the
+    model and the data?
+  a: >
+    Data: audit and clean labels for the confused classes, using confident-learning methods or
+    disagreement between models to find likely mislabels, collect more varied examples of both
+    breeds, and add targeted augmentation. Check the confusion is not driven by background or
+    dataset biases.
+
+
+    Model: use a stronger pretrained backbone and fine-tune, increase input resolution so facial
+    features are visible, use loss functions robust to label noise or label smoothing, and evaluate
+    with per-class metrics and the confusion matrix on a clean test set.
+  topic: dl
+  level: Senior
+  companies:
+    - NVIDIA
+  related: /interviews/computer-vision
+  source: outcome-school
+- id: how-do-you-evaluate-a-clustering-model-s-effectiveness-witho
+  q: How do you evaluate a clustering model's effectiveness without pre-labelled groups?
+  a: >
+    Use internal metrics: silhouette score, Davies-Bouldin index and within-cluster versus
+    between-cluster distances, measuring compactness and separation. Check stability by re-running
+    on bootstrap samples or with different seeds and measuring how consistent the clusters are.
+
+
+    Most importantly, judge usefulness: inspect clusters for interpretability with domain experts,
+    check that they lead to different actions or outcomes, and if possible validate against
+    downstream metrics such as campaign performance per segment.
+  topic: ml
+  level: Mid
+  companies:
+    - NVIDIA
+  related: /interviews/model-evaluation-metrics
+  source: outcome-school
+- id: how-would-you-design-the-neural-network-architecture-for-mul
+  q: >-
+    How would you design the neural network architecture for multi-camera 3D object detection
+    without lidar?
+  a: >
+    Encode each camera image with a shared backbone, then lift image features into a unified 3D or
+    bird's-eye-view representation, either by predicting depth distributions and projecting
+    features, or with transformer queries in BEV space that attend to image features using camera
+    geometry. Fuse across time by aligning previous BEV features with ego-motion.
+
+
+    Detection heads then predict 3D boxes, velocities and attributes in BEV. Train with
+    lidar-derived or auto-labeled 3D ground truth, and evaluate depth accuracy especially at long
+    range, since camera-only depth is the main weakness.
+  topic: dl
+  level: Senior
+  companies:
+    - Tesla
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: how-do-you-handle-extreme-class-imbalance-in-rare-event-dete
+  q: >-
+    How do you handle extreme class imbalance in rare-event detection (e.g. a child running into the
+    road)?
+  a: >
+    Mine and upweight the rare cases: fleet triggers and similarity search to find more examples,
+    targeted data collection, simulation and synthetic data for dangerous scenarios, and
+    oversampling or loss weighting such as focal loss during training.
+
+
+    Evaluate on curated rare-event test sets with recall at very low false-positive rates, never on
+    overall accuracy, set thresholds by safety requirements, and add redundancy with other sensors
+    or models. Safety-critical recall matters more than average metrics.
+  topic: ml
+  level: Senior
+  companies:
+    - Tesla
+  related: /interviews/feature-engineering-and-data-prep
+  source: outcome-school
+- id: explain-how-you-would-auto-label-a-fleet-dataset-and-what-qu
+  q: Explain how you would auto-label a fleet dataset and what quality controls you would put on it.
+  a: >
+    Use large offline models that would be too slow for the car, with access to the full clip
+    including the future, multiple sensors and multiple passes, to produce high-quality labels such
+    as 3D boxes and tracks. Combine model ensembles, temporal consistency and geometric constraints
+    to refine labels.
+
+
+    Quality controls: compare against human-labeled audit samples, measure label accuracy by class
+    and distance, flag low-confidence or inconsistent labels for human review, monitor how label
+    changes affect trained models, and version labeling pipelines so issues can be traced and fixed.
+  topic: dl
+  level: Senior
+  companies:
+    - Tesla
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: how-would-you-detect-and-handle-distribution-shift-between-f
+  q: How would you detect and handle distribution shift between fleet data and your training set?
+  a: >
+    Detect: compare feature and embedding distributions between fleet data and the training set,
+    monitor model confidence and disagreement between models on fleet data, and track performance on
+    freshly labeled samples by region, weather, time and vehicle type.
+
+
+    Handle: collect and label data from under-represented conditions, rebalance training sets, use
+    domain adaptation or augmentation for known shifts such as weather or camera changes, and add
+    the new conditions to evaluation suites so regressions are caught.
+  topic: ml
+  level: Senior
+  companies:
+    - Tesla
+  related: /interviews/mlops-and-deployment
+  source: outcome-school
+- id: your-offline-metric-improved-but-the-online-a-b-did-not-enum
+  q: >-
+    Your offline metric improved but the online A/B did not. Enumerate the reasons this happens and
+    how you would tell them apart.
+  a: >
+    Possible reasons: the offline metric does not match the business goal; offline data reflects the
+    old model's exposure (feedback loop and position bias); training-serving skew in features;
+    leakage in offline evaluation; the gain is concentrated in segments that matter little; novelty
+    or learning effects online; an underpowered or flawed test; or latency changes that hurt
+    engagement.
+
+
+    Tell them apart by checking feature parity between training and serving logs, recomputing
+    offline metrics on fresh data collected under the new model, analyzing online results by segment
+    and over time, verifying test setup with A/A tests and sample ratio checks, and comparing
+    latency.
+  topic: ml
+  level: Senior
+  companies:
+    - Consumer-Scale ML
+  related: /interviews/ab-testing-and-experimentation
+  source: outcome-school
+- id: explain-position-bias-in-ranking-data-and-how-you-would-debi
+  q: Explain position bias in ranking data and how you would debias training.
+  a: >
+    Items shown in higher positions get more clicks regardless of relevance, so training on raw
+    clicks teaches the model to repeat past rankings and underrates good items shown lower.
+
+
+    Debias by estimating position propensities with randomized experiments such as swapping adjacent
+    results, then weighting training examples by inverse propensity; by adding position as a feature
+    during training and fixing it at serving; by click models that separate examination from
+    relevance; and by using small amounts of exploration traffic for unbiased data.
+  topic: ml
+  level: Senior
+  companies:
+    - Consumer-Scale ML
+  related: /ai-system-design/genai-system-design/recommendation-systems
+  source: outcome-school
+- id: how-do-you-design-a-feature-store-and-what-causes-training-s
+  q: How do you design a feature store, and what causes training/serving skew?
+  a: >
+    Define features once in a registry with transformation code, owners and versions. An offline
+    store keeps historical values for building point-in-time-correct training sets, an online store
+    serves the latest values with low latency, and a materialization pipeline (batch and streaming)
+    keeps both fed from the same definitions.
+
+
+    Training-serving skew comes from different code paths for training and serving, different data
+    freshness, time-zone or default-value differences, leakage of future data into training
+    features, and schema changes upstream. Prevent it with shared definitions, point-in-time joins,
+    logging served features and comparing them with training data.
+  topic: ml
+  level: Senior
+  companies:
+    - Consumer-Scale ML
+  related: /interviews/feature-engineering-and-data-prep
+  source: outcome-school
+- id: turn-a-conversation-into-billable-diagnosis-codes-what-is-th
+  q: >-
+    Turn a conversation into billable diagnosis codes. What is the accuracy bar, and how do you
+    build to it?
+  a: >
+    The bar is high: codes drive billing and compliance, so errors cause denied claims or audit
+    risk. Aim for accuracy comparable to professional coders on common codes, with very high
+    precision on what is auto-suggested, and route uncertain cases to coders.
+
+
+    Build it by extracting documented diagnoses and their supporting evidence from the note, mapping
+    to codes with a model plus coding rules and code hierarchies, checking documentation
+    requirements and specificity, and showing evidence for each code. Evaluate against certified
+    coders' labels, measure per-code precision and recall, and monitor denials after deployment.
+  topic: ml
+  level: Senior
+  companies:
+    - Abridge
+  related: /ai-system-design/genai-system-design/kg-healthcare-case-study
+  source: outcome-school
+- id: behaviour-cloning-on-teleoperation-data-has-a-well-known-fai
+  q: >-
+    Behaviour cloning on teleoperation data has a well-known failure mode. What is it, and what do
+    you do about it on a real humanoid?
+  a: >
+    Compounding errors from covariate shift: the policy only saw states along expert trajectories,
+    so small mistakes take it into states never seen in training, where it makes bigger mistakes and
+    drifts further off.
+
+
+    On a real humanoid, collect demonstrations that include recoveries from perturbed states, use
+    interactive corrections such as DAgger-style data where operators take over when the policy
+    drifts, use action chunking and diverse data to make policies more robust, and add RL
+    fine-tuning or safety controllers to handle deviations.
+  topic: dl
+  level: Senior
+  companies:
+    - Figure AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: a-whole-body-controller-trained-entirely-in-simulation-has-t
+  q: >-
+    A whole-body controller trained entirely in simulation has to run on real hardware. What
+    transfers, what does not, and how do you close the gap?
+  a: >
+    Gross dynamics and learned behaviors such as balance strategies often transfer if simulation is
+    reasonably accurate. What does not transfer well: exact friction and contact behavior, actuator
+    dynamics and delays, sensor noise, latency, and mass and calibration differences between the
+    model and the real robot.
+
+
+    Close the gap with domain randomization of physics parameters, accurate actuator models learned
+    from real data, system identification, adding real latency and noise in simulation, observation
+    designs that avoid simulator-specific signals, and fine-tuning or adaptation on real hardware
+    with safety limits.
+  topic: dl
+  level: Senior
+  companies:
+    - Figure AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: where-does-reinforcement-learning-fit-on-top-of-imitation-le
+  q: >-
+    Where does reinforcement learning fit on top of imitation learning for manipulation, and what
+    makes the reward the hard part?
+  a: >
+    Imitation learning gets a policy to roughly competent behavior from demonstrations; RL then
+    improves it beyond the demonstrations: higher success rates, faster or more robust execution,
+    and recovery from situations demonstrations did not cover, usually in simulation or with careful
+    real-world fine-tuning.
+
+
+    The reward is hard because manipulation success is hard to measure automatically in the real
+    world (did the object end up correctly placed?), sparse rewards make learning slow, and dense
+    shaped rewards are easy for the policy to exploit. Solutions include learned reward models from
+    success labels, vision-based success detectors, and simulation where success can be computed
+    exactly.
+  topic: dl
+  level: Senior
+  companies:
+    - Figure AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  source: outcome-school
+- id: modular-perception-prediction-and-planning-or-end-to-end-lea
+  q: >-
+    Modular perception, prediction and planning, or end-to-end learned driving? Make the case, then
+    tell me what you would actually build.
+  a: >
+    Modular stacks are interpretable, testable component by component and easier to validate for
+    safety, but errors compound across interfaces and hand-designed intermediate representations
+    lose information. End-to-end learning optimizes the whole system toward driving outcomes and can
+    exploit richer signals, but is harder to debug, verify and validate for safety cases.
+
+
+    A practical build is a hybrid: learned components with rich learned interfaces between
+    perception, prediction and planning, trained jointly where possible, plus explicit safety
+    layers, interpretable intermediate outputs for validation and rule-based checks on the final
+    plan.
+  topic: dl
+  level: Senior
+  companies:
+    - Waymo
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: design-the-output-representation-for-a-behaviour-prediction
+  q: >-
+    Design the output representation for a behaviour prediction model. What metrics would you gate
+    it on?
+  a: >
+    Predict multiple possible future trajectories per agent over a time horizon, each with a
+    probability, to capture multimodal intentions such as turning or going straight, possibly with
+    uncertainty per waypoint, plus interactions between agents through joint predictions for key
+    pairs.
+
+
+    Gate on metrics such as minimum average and final displacement error across the top-k
+    trajectories, miss rate, probability calibration, and performance on safety-relevant slices such
+    as pedestrians and cut-ins, and finally on closed-loop planning metrics, since prediction
+    quality matters only through how it affects driving.
+  topic: dl
+  level: Senior
+  companies:
+    - Waymo
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: where-do-vision-language-models-and-foundation-models-genuin
+  q: >-
+    Where do vision-language models and foundation models genuinely help in an autonomy stack, and
+    where are they a liability?
+  a: >
+    They help offline and at the edges: auto-labeling and data mining of rare scenarios, semantic
+    understanding of unusual situations such as construction zones or hand signals, scene
+    descriptions for search, simulation generation and long-tail reasoning, and as teachers for
+    smaller onboard models.
+
+
+    They are a liability in the real-time safety loop if used directly: high latency, heavy compute,
+    non-deterministic outputs, possible hallucinations and difficulty verifying behavior for a
+    safety case. Using them with strict bounds, monitoring and fallbacks, or distilling their
+    knowledge into verifiable onboard models, keeps the benefits.
+  topic: dl
+  level: Senior
+  companies:
+    - Waymo
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
