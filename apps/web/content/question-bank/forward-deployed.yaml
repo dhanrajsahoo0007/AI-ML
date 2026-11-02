@@ -1,0 +1,472 @@
+# Company-reported questions adapted from Outcome School (Apache 2.0); see NOTICE.md. Answers are our own.
+- id: an-enterprise-customer-says-claude-hallucinates-too-much-in
+  q: >-
+    An enterprise customer says “Claude hallucinates too much” in their RAG-based knowledge
+    assistant. You're the applied engineer on the account. What happens in the first 48 hours?
+  a: >
+    Hour 0–4: meet the stakeholders, collect concrete examples of bad answers and the questions
+    behind them, and get access to traces. Hour 4–24: label 50–100 failures by cause: wrong or
+    missing retrieval, stale or conflicting documents, prompt issues, the model ignoring context, or
+    users asking things the knowledge base cannot answer. Usually most "hallucinations" are
+    retrieval and content problems.
+
+
+    Hour 24–48: fix the biggest category (for example better chunking, hybrid search and re-ranking,
+    or stricter grounding and citation instructions with an "I don't know" path), add a faithfulness
+    check, build an evaluation set with their experts, and present measured before-and-after results
+    with a plan for the next fixes.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: how-would-you-make-complex-ai-research-findings-accessible-t
+  q: How would you make complex AI research findings accessible to a non-technical audience?
+  a: >
+    Start with why it matters to the audience: the decision or change it enables. Explain the core
+    idea with a concrete example or analogy, show one clear visual, give the key result in plain
+    numbers, and state honestly what it does not show.
+
+
+    Avoid jargon or define it immediately, keep one main message, invite questions, and check
+    understanding by asking the audience how they would use the finding.
+  topic: forward-deployed
+  level: Junior
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: an-enterprise-customer-says-we-want-ai-to-automate-our-claim
+  q: >-
+    An enterprise customer says: “We want AI to automate our claims processing.” You're the engineer
+    in the room. What do the first two weeks look like?
+  a: >
+    Days 1–3: shadow claims handlers, map the workflow end to end (intake, document extraction,
+    validation, coverage checks, decisions, communication), gather volumes, error costs and data
+    access, and agree on metrics such as handling time and accuracy on key fields. Days 4–7: pick
+    the highest-value, lowest-risk step, often document extraction and triage, collect real claims
+    and build an evaluation set with experienced handlers.
+
+
+    Days 8–14: build a thin slice in their environment, such as extracting fields from real claim
+    documents with human review, measure against the evaluation set, address security and
+    integration needs, and present results with a roadmap toward automating decisions only where
+    accuracy is proven.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - OpenAI
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: you-have-four-hours-to-build-and-demo-a-working-ai-powered-p
+  q: You have four hours to build and demo a working AI-powered product. How do you spend them?
+  a: >
+    Spend about 20 minutes choosing a narrow, high-impact use case and defining what a great demo
+    shows. Spend 2.5 hours building the core flow end to end with a hosted model and simple tools:
+    real input, AI step, useful output, using existing libraries and AI coding assistants. Spend 45
+    minutes testing with real examples and fixing the worst failures, and the last 25 minutes on a
+    clear demo script and a short slide on what is next.
+
+
+    Cut authentication, scalability, polish and edge features; keep one path that works reliably
+    every time.
+  topic: forward-deployed
+  level: Mid
+  companies:
+    - xAI
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: a-state-agency-wants-to-move-a-paper-and-call-centre-welfare
+  q: >-
+    A state agency wants to move a paper-and-call-centre welfare-scheme service onto a multilingual
+    assistant, on-prem for data residency. How do you scope and ship it?
+  a: >
+    Scope with the agency and citizens: which schemes and tasks (eligibility questions, application
+    help, status checks), which languages and channels (phone, WhatsApp, kiosks), volumes, and what
+    must stay with human officers. Agree on metrics such as resolution rate and wait time, and on
+    accessibility for low-literacy users.
+
+
+    Ship in phases on-premise: start with FAQ and eligibility guidance via RAG over official
+    documents in the main languages with voice support, add status checks through the agency's
+    systems with verification, then guided applications. Keep humans for complex cases, evaluate
+    with native speakers and real citizens, and train agency staff to operate it.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: a-customer-s-llm-chatbot-on-8-gpus-is-too-slow-and-too-expen
+  q: >-
+    A customer's LLM chatbot on 8 GPUs is “too slow and too expensive.” You have one week with them.
+    What do you do?
+  a: >
+    Day 1–2: profile real traffic: prompt and output lengths, concurrency, latency breakdown, GPU
+    utilization and the serving engine configuration. Common findings are low batch occupancy, no
+    continuous batching, no prefix caching, an oversized model or unquantized weights, and long
+    prompts.
+
+
+    Day 3–5: switch to an optimized engine with continuous batching and paged KV cache, enable
+    prefix caching, quantize to FP8 or INT8 with quality checks, shorten prompts, and test a smaller
+    model for common requests. Days 6–7: measure tokens per second, latency and cost per
+    conversation against their evaluation set, and hand over a tuned configuration and
+    recommendations.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - NVIDIA
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+    - title: LLM Inference Optimization
+      url: https://www.youtube.com/watch?v=jV2sCj4lHYk
+    - title: LLM Inference Optimization
+      url: https://outcomeschool.com/blog/llm-inference-optimization
+  source: outcome-school
+- id: a-customer-insists-on-fine-tuning-an-open-model-on-their-sup
+  q: >-
+    A customer insists on fine-tuning an open model on their support tickets because “we want our
+    own model.” You think RAG solves it. What do you do?
+  a: >
+    Understand why they want their own model: control, privacy, cost, independence from vendors.
+    Then run a fair comparison on their own evaluation set built from real tickets: RAG over their
+    knowledge base and resolved tickets versus a fine-tuned model, measuring accuracy, freshness,
+    cost and maintenance.
+
+
+    Usually RAG wins for knowledge that changes, while fine-tuning can add tone and format. Often
+    the answer satisfies both: an open model they host and control, with RAG for knowledge and light
+    fine-tuning for style, and evaluation they own.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Databricks
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  source: outcome-school
+- id: an-agent-you-shipped-four-months-ago-runs-on-a-base-model-be
+  q: >-
+    An agent you shipped four months ago runs on a base model being deprecated in 60 days. How do
+    you swap the model without regressing quality, and what had to be in place beforehand?
+  a: >
+    What needed to be in place: a versioned evaluation suite from real usage, traces of production
+    traffic, prompts and tool definitions separated from the model choice, a model selection layer,
+    and a canary or shadow rollout path with monitoring.
+
+
+    The swap: run the evaluation suite on candidate models, adjust prompts and tool descriptions
+    where behavior differs, compare quality, cost and latency, shadow the new model on live traffic,
+    roll out gradually with automatic rollback triggers, and complete it well before the deprecation
+    date.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Databricks
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: a-prospective-customer-runs-their-workload-on-h100s-talk-me
+  q: >-
+    A prospective customer runs their workload on H100s. Talk me through when you would tell them
+    not to move.
+  a: >
+    Tell them not to move when their workload does not benefit from the new hardware's strengths: if
+    they are throughput-oriented with large batches and do not need very low per-user latency, if
+    they rely on models, sizes or features the platform does not support, if their models are custom
+    or change often, or if they need very long contexts that strain limited on-chip memory.
+
+
+    Also when migration costs, such as engineering effort, retraining or dependency changes,
+    outweigh the savings. Be honest: recommending the right fit builds trust, and a pilot on their
+    real workload settles the question with numbers.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Groq
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  source: outcome-school
+- id: a-customer-wants-to-migrate-from-a-proprietary-frontier-mode
+  q: >-
+    A customer wants to migrate from a proprietary frontier-model API to an open model. How do you
+    run that engagement?
+  a: >
+    Start with goals (cost, control, privacy, latency) and an evaluation set from their real traffic
+    with their success criteria. Benchmark candidate open models with their prompts, adapt prompts
+    for each model, and consider fine-tuning or distilling from their proprietary model's outputs,
+    if the provider's terms allow it, to close gaps.
+
+
+    Plan deployment (dedicated endpoints or self-hosting, sizing and cost), run shadow traffic and a
+    staged rollout, keep the proprietary model as a fallback for hard cases, and report quality and
+    cost against the original baseline.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Together AI
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: an-enterprise-wants-a-document-q-a-assistant-over-2m-interna
+  q: >-
+    An enterprise wants a document-Q&A assistant over 2M internal documents, pilot in four weeks,
+    and their security team forbids data leaving their VPC. Scope and design it.
+  a: >
+    Deploy everything inside their VPC: an open-weight or VPC-hosted model, ingestion with
+    connectors and permission sync, parsing and chunking, a vector plus keyword index, and the chat
+    application, all on their infrastructure. Week 1: security review, environment setup and a
+    representative document subset. Week 2: ingestion and retrieval with permission filtering, and
+    an evaluation set with their experts.
+
+
+    Week 3: generation with citations and abstention, faithfulness checks, and a pilot UI for a
+    small user group. Week 4: iterate on failures, scale ingestion toward the full 2M documents, set
+    up monitoring and present measured results with a production plan.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Scale AI
+  related: /ai-system-design/genai-system-design/conversational-assistant-design
+  source: outcome-school
+- id: a-robotics-customer-asks-for-50-000-hours-of-manipulation-de
+  q: >-
+    A robotics customer asks for 50,000 hours of manipulation demonstrations across 12 tasks and
+    three embodiments. Design the collection pipeline, and tell me what makes one demonstration
+    worth keeping.
+  a: >
+    Build a collection pipeline with standardized teleoperation rigs per embodiment, task protocols
+    with variation plans (objects, positions, lighting, distractors), operator training and
+    certification, synchronized recording of cameras, proprioception and actions, automated
+    validation, success labeling and segmentation, and versioned delivery with metadata.
+
+
+    A demonstration is worth keeping when it succeeds or is a labeled useful recovery, is smooth and
+    consistent rather than hesitant, has complete, synchronized sensor data, and adds diversity to
+    the dataset rather than repeating easy cases. Measure value by training policies on subsets and
+    checking which data improves success.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Scale AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: you-have-two-days-in-our-codebase-and-no-assigned-task-what
+  q: >-
+    You have two days in our codebase and no assigned task. What do you build, and how do you spend
+    the time?
+  a: >
+    Spend the first few hours understanding the product and codebase: run it, read the architecture,
+    use AI tools to navigate, and look for real user pain points or rough edges. Pick a scoped
+    feature or improvement that users would notice and that you can finish well in the time, and
+    confirm it is not already being built.
+
+
+    Build it end to end with tests, use AI assistance effectively but verify everything, keep notes
+    on decisions, and finish with a clean demo and a short write-up of what you built, why,
+    trade-offs and what you would do next. Finishing something solid beats a sprawling half-done
+    project.
+  topic: forward-deployed
+  level: Mid
+  companies:
+    - Cursor
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: as-a-deployed-engineer-you-are-rolling-devin-into-a-2-000-en
+  q: >-
+    As a Deployed Engineer, you are rolling Devin into a 2,000-engineer organisation. What do the
+    first ninety days look like?
+  a: >
+    Days 1–30: meet engineering leadership to agree on goals and metrics (merged pull requests,
+    cycle time, backlog burned down), complete security review and repository access, and pick two
+    or three pilot teams with well-scoped work such as migrations, test coverage, dependency
+    upgrades and small bugs. Set up the playbooks, repository setup and knowledge the agent needs,
+    and review every output closely.
+
+
+    Days 31–60: measure pilot results such as merge rate, review effort and time saved, refine task
+    selection and prompts, train champions in each team, and integrate with their ticketing and CI.
+    Days 61–90: expand to more teams using the playbooks that worked, run a large batch initiative
+    such as a codebase-wide migration to show scale, and report measured impact with a plan for the
+    next phase.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Cognition
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: in-our-build-session-you-get-two-hours-and-any-ai-tools-you
+  q: >-
+    In our build session you get two hours and any AI tools you want. How do you decide what to
+    build and how do you spend the time?
+  a: >
+    Spend the first 10–15 minutes clarifying the problem and choosing a narrow scope with a clear
+    success criterion. Build the core path quickly with AI tools, focusing on the parts that show
+    judgment, such as agent design, guardrails and evaluation, and test with realistic examples
+    including adversarial ones.
+
+
+    Reserve the last 20 minutes for fixing the worst failures and preparing to explain your choices:
+    what you built, where you put guardrails and why, how you would evaluate it, and what you would
+    do with more time.
+  topic: forward-deployed
+  level: Mid
+  companies:
+    - Sierra
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: estimate-the-cost-and-turnaround-of-running-your-diligence-w
+  q: >-
+    Estimate the cost and turnaround of running your diligence workflow over a 5,000-document data
+    room, and tell me which lever you'd pull first.
+  a: >
+    Suppose 5,000 documents averaging 30 pages, about 15,000 tokens each, 75M tokens in total.
+    Answering an 18-question checklist with targeted retrieval might send around 4,000 tokens per
+    question per document, roughly 360M input tokens plus 30M output tokens. At illustrative prices
+    of a few dollars per million input tokens, that is around 1,000–2,000 dollars, and with enough
+    parallelism under rate limits, a few hours of wall-clock time.
+
+
+    The first lever is retrieval precision: sending only relevant clauses per question cuts tokens
+    several-fold. Then prompt caching of shared instructions, batching questions per document, and a
+    smaller model for simple questions with a stronger model only for complex or low-confidence
+    ones.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Harvey
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  source: outcome-school
+- id: a-partner-reports-that-harvey-missed-a-change-of-control-cla
+  q: >-
+    A partner reports that Harvey missed a change-of-control clause in a contract it reviewed. Debug
+    it.
+  a: >
+    Get the document and the exact question, then trace the run: was the clause parsed correctly
+    (scanned pages, unusual formatting), was it chunked intact, was it retrieved for the question,
+    was it ranked high enough to reach the model, and did the model read it but misjudge it, for
+    example because it used non-standard wording or relied on a defined term elsewhere?
+
+
+    Fix the identified stage: parsing, chunking around clauses, query expansion for alternative
+    phrasings such as "assignment" or "merger", definition expansion, or prompt and verification
+    changes. Add the document to the evaluation set, check for similar misses across past reviews,
+    and report back to the partner with the cause and fix.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Harvey
+  related: /ai-system-design/genai-system-design/advanced-rag
+  source: outcome-school
+- id: a-hospital-group-schedules-and-confirms-outpatient-appointme
+  q: >-
+    A hospital group schedules and confirms outpatient appointments by phone, manually, with three
+    staff on a rota. Design what we would build for them.
+  a: >
+    Build a voice agent for outbound confirmation calls and inbound scheduling requests, integrated
+    with their scheduling system through supported APIs. It verifies patient identity, confirms,
+    reschedules or cancels appointments within rules (available slots, provider constraints), sends
+    confirmations by SMS, and hands off to staff for complex cases or clinical questions.
+
+
+    Address compliance and privacy for health data, multilingual support, accessibility, call
+    recording consent and audit logs. Pilot with one clinic, measure confirmation rates, no-show
+    reduction, staff time saved and patient satisfaction, then expand.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - ElevenLabs
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: a-contact-centre-wants-to-replace-its-ivr-with-voice-agents
+  q: A contact centre wants to replace its IVR with voice agents. Run the engagement.
+  a: >
+    Analyze call data to find the top intents by volume and their resolution paths, and define
+    metrics such as containment, resolution, handle time and customer satisfaction. Start with a few
+    high-volume, well-defined intents, integrate with backend systems for account actions, and
+    design clean handoffs to human agents with context.
+
+
+    Build an evaluation suite of simulated and recorded calls, pilot on a slice of traffic with A/B
+    comparison against the IVR, monitor latency, errors and escalations, and expand intent coverage
+    and languages based on results. Train staff and update operations for the new handoff flow.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - ElevenLabs
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: a-freight-rail-operator-loses-tens-of-millions-a-year-to-unp
+  q: >-
+    A freight rail operator loses tens of millions a year to unplanned locomotive downtime.
+    Decompose this into an engineering plan.
+  a: >
+    Decompose: which failures cause the most downtime and cost (by component and locomotive type),
+    what data exists (sensor telemetry, maintenance logs, inspections, parts records), and what
+    decisions could change (inspection schedules, part replacement, routing around risky units).
+
+
+    Plan: integrate data into a unified view per locomotive, build failure-prediction models for the
+    top failure modes, deliver ranked maintenance recommendations to planners in their tools, run a
+    pilot on part of the fleet comparing downtime with a control group, and expand once savings are
+    measured. Include data quality work and change management with maintenance teams.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Palantir
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: design-a-system-to-improve-traffic-in-nyc
+  q: Design a system to improve traffic in NYC.
+  a: >
+    Clarify the goal (travel time, safety, emissions, bus reliability) and the levers available
+    (signal timing, lane rules, transit priority, enforcement, information to drivers). Gather data
+    from traffic sensors, cameras, GPS probes, transit feeds and events.
+
+
+    Build models that predict congestion and simulate interventions, then pilot changes such as
+    adaptive signal timing on a corridor or bus priority at key intersections, measured against
+    comparable control areas. Present results to city stakeholders and scale what works, considering
+    equity across neighborhoods.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Palantir
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school
+- id: design-an-application-to-catalog-and-log-species-while-explo
+  q: Design an application to catalog and log species while exploring an unfamiliar environment.
+  a: >
+    A mobile app that works offline: users capture photos or audio, an on-device vision or audio
+    model suggests likely species with confidence, and users confirm or correct. Each observation
+    records location, time and media, stored locally and synced when online.
+
+
+    Add a larger cloud model and expert review for uncertain identifications, maps of observations,
+    and a feedback loop that uses confirmed observations to improve the models. Handle battery and
+    storage limits, privacy for sensitive species locations, and evaluation of identification
+    accuracy by region.
+  topic: forward-deployed
+  level: Mid
+  companies:
+    - Palantir
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: a-customer-executive-says-the-ai-keeps-getting-things-wrong
+  q: >-
+    A customer executive says “the AI keeps getting things wrong” and wants to cancel the pilot.
+    Walk me through your next 48 hours.
+  a: >
+    Listen first and get specific examples, then within a day collect and categorize failures: data
+    issues, retrieval, model errors, workflow fit or mismatched expectations. Quickly fix the
+    largest category, add safeguards such as human review where errors are costly, and communicate
+    what you found and what changed.
+
+
+    Within 48 hours, return with measured improvement on their cases, an agreed definition of
+    success with an evaluation set they trust, and a short plan with milestones. Be honest about
+    what the AI can and cannot do, and propose narrowing scope to where it reliably adds value if
+    needed.
+  topic: forward-deployed
+  level: Senior
+  companies:
+    - Palantir
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+  source: outcome-school

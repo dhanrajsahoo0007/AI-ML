@@ -1,0 +1,511 @@
+# Company-reported questions adapted from Outcome School (Apache 2.0); see NOTICE.md. Answers are our own.
+- id: how-do-vision-language-models-get-images-into-an-llm-project
+  q: >-
+    How do vision-language models get images into an LLM: projector, cross-attention, or native
+    tokens?
+  a: >
+    A vision encoder, usually a ViT, turns the image into patch embeddings. Three common ways
+    connect them to the LLM. A projector, a small MLP, maps patch embeddings into the LLM's
+    embedding space and inserts them as tokens, as in LLaVA: simple and strong, but image tokens
+    consume context. Cross-attention layers inside the LLM attend to image features, often after a
+    resampler compresses them to a few dozen tokens, as in Flamingo: keeps context short but needs
+    more training. Native multimodal models tokenize images and train on interleaved data from the
+    start, so one model reads, and can produce, both modalities.
+
+
+    For video, the same encoders run on sampled frames, tokens are compressed over time by pooling
+    or merging, and temporal positions are added so the model can reason about order and motion.
+  topic: multimodal
+  level: Mid
+  companies:
+    - Alibaba
+    - Meta
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  refs:
+    - title: Multimodal AI
+      url: https://outcomeschool.com/blog/multimodal-ai
+    - title: Decoding Vision Transformer (ViT)
+      url: https://outcomeschool.com/blog/decoding-vision-transformer-vit
+    - title: How does a Vision-Language Model (VLM) work?
+      url: https://outcomeschool.com/blog/vision-language-model-vlm
+  source: outcome-school
+- id: what-changes-when-you-move-from-images-to-video
+  q: What changes when you move from images to video?
+  a: >
+    Token counts explode: even a few frames per second over a minute yields thousands of frames, so
+    you need frame sampling, temporal pooling, token merging and smaller per-frame budgets. The
+    model must understand time: order, motion, cause and effect, so temporal position encodings and
+    training on video-text data matter.
+
+
+    Practical issues grow too: long-context cost, audio and transcript alignment, choosing which
+    moments to look at closely, and evaluation of temporal reasoning rather than single-frame
+    recognition.
+  topic: multimodal
+  level: Mid
+  companies:
+    - Meta
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: budget-the-latency-for-a-real-time-voice-agent-vad-asr-llm-t
+  q: >-
+    Budget the latency for a real-time voice agent: VAD, ASR, LLM, TTS, network. Where does the time
+    go?
+  a: >
+    A typical budget: endpointing after the user stops, 200–500 ms; streaming ASR finalization,
+    50–200 ms; LLM time to first token, 200–600 ms; TTS time to first audio, 100–300 ms; network and
+    audio buffering, 50–150 ms each way. That totals about 0.7–1.5 seconds, and good systems aim for
+    under a second.
+
+
+    Most time goes to endpointing and the LLM. Cut it with semantic turn detection instead of fixed
+    silence timeouts, streaming everything, a fast model for the first response, speakable chunking
+    so TTS starts on the first clause, co-located services, and pre-generated filler or
+    acknowledgments for long operations.
+
+
+    Time to first audio is a different problem from an LLM's time to first token: speech needs at
+    least a phrase of text to sound natural, the TTS model needs context for prosody, and playback
+    can only start once audio can keep streaming faster than real time without gaps. So text
+    chunking, TTS start-up latency and buffering matter as much as LLM speed.
+  topic: multimodal
+  level: Senior
+  companies:
+    - ElevenLabs
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  refs:
+    - title: Design a Real-Time Voice AI Agent
+      url: https://outcomeschool.com/blog/design-a-real-time-voice-ai-agent
+    - title: How do you build a latency budget for a voice AI agent?
+      url: https://outcomeschool.com/blog/voice-agent-latency-budget
+    - title: How does the voice-to-voice latency of a voice agent get measured?
+      url: https://outcomeschool.com/blog/voice-to-voice-latency
+    - title: Why does the time-to-first-audio matter more than total response time?
+      url: https://outcomeschool.com/blog/time-to-first-audio
+    - title: How does speculative LLM generation start replying before the user finishes?
+      url: https://outcomeschool.com/blog/speculative-generation-in-voice-agents
+    - title: How do filler phrases hide latency in a voice agent?
+      url: https://outcomeschool.com/blog/filler-phrases-in-voice-agents
+  source: outcome-school
+- id: design-barge-in-interruption-handling-for-a-voice-agent
+  q: Design barge-in / interruption handling for a voice agent.
+  a: >
+    Keep listening while the agent speaks, with echo cancellation so the agent's own voice is not
+    detected as the user. When VAD detects user speech above a threshold for a short window, stop
+    audio playback immediately, cancel in-flight LLM generation and TTS, and start transcribing the
+    new input.
+
+
+    Handle false triggers such as coughs, background noise and short acknowledgments like "mm-hmm"
+    with a classifier that distinguishes backchannels from real interruptions. Keep track of what
+    the user actually heard before the interruption, so the conversation history reflects only the
+    delivered part of the response.
+  topic: multimodal
+  level: Senior
+  companies:
+    - ElevenLabs
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  refs:
+    - title: Design a Real-Time Voice AI Agent
+      url: https://outcomeschool.com/blog/design-a-real-time-voice-ai-agent
+    - title: What is turn-taking in a voice AI agent?
+      url: https://outcomeschool.com/blog/what-is-turn-taking-in-a-voice-ai-agent
+    - title: What is barge-in in a voice AI agent?
+      url: https://outcomeschool.com/blog/what-is-barge-in-in-a-voice-ai-agent
+  source: outcome-school
+- id: cascaded-asr-llm-tts-versus-native-speech-to-speech-argue-bo
+  q: "Cascaded ASR+LLM+TTS versus native speech-to-speech: argue both sides."
+  a: >
+    Cascaded: each component can be chosen, upgraded and evaluated separately; transcripts give
+    logs, compliance records and easy debugging; any text LLM with tools and retrieval can be used;
+    text normalization and safety filters are straightforward. Downsides are added latency from
+    three stages and loss of tone, emotion and timing in the text bottleneck.
+
+
+    Native speech-to-speech: lower latency, natural turn-taking, and preserved prosody, emotion and
+    non-verbal cues, which makes conversations feel human. Downsides are less control and
+    transparency, harder evaluation and safety filtering, weaker tool use in some models, and fewer
+    choices of model. Enterprises with compliance needs lean cascaded; expressive consumer
+    companions lean native, and hybrids are common.
+  topic: multimodal
+  level: Senior
+  companies:
+    - ElevenLabs
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  refs:
+    - title: Design a Real-Time Voice AI Agent
+      url: https://outcomeschool.com/blog/design-a-real-time-voice-ai-agent
+    - title: "Cascaded vs Speech-to-Speech: How to choose the right voice agent architecture?"
+      url: https://outcomeschool.com/blog/cascaded-vs-speech-to-speech
+  source: outcome-school
+- id: how-do-you-evaluate-asr-quality-beyond-wer-and-tts-quality-w
+  q: >-
+    How do you evaluate ASR quality beyond WER, and TTS quality when there is no single correct
+    output?
+  a: >
+    For ASR, go beyond WER with entity and keyword error rates for critical terms such as names,
+    numbers and medications, error rates by accent, noise level and domain, punctuation and
+    formatting accuracy, streaming latency and stability of partial results, and task-level impact,
+    such as whether the downstream answer or note was correct.
+
+
+    For TTS, use human listening tests, such as mean opinion scores or side-by-side preferences with
+    clear criteria, plus automatic proxies: intelligibility by transcribing the output with ASR,
+    speaker similarity, prosody and pronunciation checks on hard text such as numbers and names, and
+    latency. Targeted test sets catch normalization errors.
+  topic: multimodal
+  level: Senior
+  companies:
+    - ElevenLabs
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: how-do-you-handle-code-switching-and-accents-in-a-production
+  q: How do you handle code-switching and accents in a production ASR system?
+  a: >
+    Train or fine-tune on audio that matches real users: many accents, recording conditions and
+    natural code-switched speech, with transcription conventions that allow mixed languages and
+    scripts in one utterance. Avoid forcing a single language per utterance; use multilingual
+    tokenizers and models that can switch mid-sentence.
+
+
+    Add language-aware decoding and contextual biasing for domain terms, test separately on each
+    accent and code-mixing pattern, collect failure examples from production with consent, and
+    retrain regularly. Measure WER and critical-term accuracy per segment, not just overall.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Abridge
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: explain-streaming-tts-chunking-and-jitter-buffer-sizing
+  q: Explain streaming TTS chunking and jitter-buffer sizing.
+  a: >
+    Chunking: split the LLM's streamed text at natural boundaries such as clauses or sentences, with
+    a minimum length so prosody sounds natural, and send each chunk to TTS as soon as it is ready;
+    smaller chunks reduce time to first audio but can sound choppy.
+
+
+    The jitter buffer holds a little audio before playback so network or generation delays do not
+    cause gaps. Size it from the variance of chunk arrival times: too small and audio stutters, too
+    large and latency grows. Adaptive buffers that grow when jitter rises and shrink when it is
+    stable balance the two.
+  topic: multimodal
+  level: Senior
+  companies:
+    - ElevenLabs
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  refs:
+    - title: How does sentence chunking feed LLM output into TTS faster?
+      url: https://outcomeschool.com/blog/sentence-chunking-for-tts
+    - title: How does a TTS model start speaking before the full sentence arrives?
+      url: https://outcomeschool.com/blog/streaming-tts
+  source: outcome-school
+- id: design-a-diarisation-system-and-explain-how-you-attribute-ro
+  q: Design a diarisation system and explain how you attribute roles, not just clusters.
+  a: >
+    Segment speech with VAD, extract speaker embeddings for short windows, and cluster them into
+    speakers, handling overlapping speech with models that detect it. End-to-end neural diarization
+    models can replace or refine the clustering. Align speaker segments with the ASR words.
+
+
+    Roles, such as clinician versus patient or agent versus customer, need extra signals: enrolled
+    voice profiles for known speakers like the clinician, conversational cues such as who asks
+    questions or uses medical terms, channel information in calls, and an LLM pass over the
+    transcript to assign roles. Evaluate diarization error rate and role-attribution accuracy
+    separately.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Abridge
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: how-would-you-build-multimodal-retrieval-over-images-video-a
+  q: How would you build multimodal retrieval over images, video and text in one index?
+  a: >
+    Use a shared embedding space, such as a CLIP-style model for images and text, applied to video
+    keyframes, plus text derived from media: captions from a vision-language model, OCR and speech
+    transcripts. Index every item, image, video segment and text chunk, in one vector index with
+    metadata for type, source, timestamps and permissions.
+
+
+    At query time, embed the text or image query, search the index with hybrid text search over
+    captions and transcripts, and re-rank with a multimodal model. Return video results as
+    timestamped segments, and evaluate recall per modality and query type.
+  topic: multimodal
+  level: Senior
+  companies: []
+  related: /ai-system-design/genai-system-design/vector-databases
+  refs:
+    - title: How do Image Embeddings work?
+      url: https://outcomeschool.com/blog/how-do-image-embeddings-work
+  source: outcome-school
+- id: qwen2-5-vl-uses-a-native-dynamic-resolution-vit-with-window
+  q: >-
+    Qwen2.5-VL uses a native dynamic-resolution ViT with window attention and multimodal RoPE. Why
+    native resolution instead of fixed tiling, and what does MRoPE encode?
+  a: >
+    Fixed tiling resizes or cuts images into fixed-size tiles, which distorts aspect ratios, wastes
+    tokens on small images and loses detail on large or text-heavy ones. Native dynamic resolution
+    processes images at roughly their real size and aspect ratio, so token count scales with
+    content, and window attention in the ViT keeps the cost of large images manageable.
+
+
+    Multimodal RoPE splits rotary position encoding into components for time, height and width, so
+    each visual token carries its 2D position in the image, and, for video, its time step aligned to
+    real time. This helps with spatial grounding, reading layouts and temporal reasoning.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Alibaba
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  refs:
+    - title: Decoding Vision Transformer (ViT)
+      url: https://outcomeschool.com/blog/decoding-vision-transformer-vit
+  source: outcome-school
+- id: build-a-voice-activity-detector-from-scratch-how-do-you-make
+  q: >-
+    Build a Voice Activity Detector from scratch. How do you make it robust for phone-quality
+    Indian-language audio?
+  a: >
+    Compute short-frame features such as log-mel spectrograms, train a small neural classifier (a
+    compact CNN or recurrent network) to label each frame as speech or not, and smooth decisions
+    with hangover and minimum-duration rules to avoid flicker. Keep it tiny so it runs in real time
+    on cheap hardware.
+
+
+    For phone-quality Indian-language audio, train on narrowband 8 kHz telephone audio, many
+    languages and dialects, and realistic noise such as traffic, crowds, TV and fans, with
+    augmentation for codecs, packet loss and low volume. Tune thresholds on held-out real calls, and
+    measure missed speech and false triggers separately.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  refs:
+    - title: Design a Real-Time Voice AI Agent
+      url: https://outcomeschool.com/blog/design-a-real-time-voice-ai-agent
+  source: outcome-school
+- id: whisper-transcribes-hinglish-poorly-often-forcing-output-int
+  q: >-
+    Whisper transcribes Hinglish poorly, often forcing output into one language or hallucinating.
+    Why, and how would you build an ASR that handles code-mixed speech?
+  a: >
+    Whisper's training data has relatively little natural code-mixed Hindi-English, and its decoding
+    conditions on a single language token per segment, so it tends to force output into one language
+    or translate. When uncertain, its autoregressive decoder can hallucinate fluent text that was
+    never spoken, especially on noisy or low-resource audio.
+
+
+    Build a code-mixed ASR by collecting and transcribing real Hinglish speech with consistent
+    conventions (for example English words in Latin script and Hindi in Devanagari, or a chosen
+    romanization), fine-tuning a multilingual model with mixed-language targets, using a tokenizer
+    that covers both scripts, adding language-model or contextual biasing for common mixed phrases,
+    and suppressing hallucination with VAD and confidence checks.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: bulbul-style-tts-has-to-speak-code-mixed-mixed-script-text-n
+  q: >-
+    Bulbul-style TTS has to speak code-mixed, mixed-script text naturally. What are the hard parts
+    of text normalization and prosody for Indian-language TTS?
+  a: >
+    Text normalization must detect which language each word belongs to, even when English words are
+    written in Devanagari or Hindi words in Latin script, then expand numbers, dates, currency,
+    abbreviations and units in the right language and convention, such as lakh and crore.
+    Transliteration and pronunciation for out-of-vocabulary names is hard.
+
+
+    Prosody must sound like a natural bilingual speaker: consistent voice across language switches,
+    correct stress and intonation for each language, and natural rhythm at switch points, rather
+    than switching to a different-sounding voice mid-sentence. Training on real code-mixed speech
+    and evaluating with native listeners are essential.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: how-would-you-fuse-camera-radar-and-imu-inputs-into-a-single
+  q: >-
+    How would you fuse camera, radar and IMU inputs into a single perception stack, and where would
+    you fuse them?
+  a: >
+    The IMU feeds ego-motion estimation and time alignment of all sensors, so other measurements are
+    compensated for the vehicle's movement. Cameras give rich semantics, radar gives direct range
+    and velocity robust to weather, and fusion can be early (raw data combined), mid (learned
+    features combined, often in a bird's-eye-view space) or late (separate detections combined).
+
+
+    Mid-level fusion in a shared bird's-eye-view representation is common for learned perception,
+    because it keeps rich information while handling different sensor geometries. Add temporal
+    fusion across frames, careful calibration and time synchronization, and graceful degradation
+    when a sensor fails.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Tesla
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: your-chat-agent-is-moving-to-the-phone-what-actually-changes
+  q: Your chat agent is moving to the phone. What actually changes?
+  a: >
+    Latency becomes critical, because silence on a call feels broken, so every stage needs streaming
+    and a sub-second budget. Turn-taking, interruptions, background noise, accents and phone-quality
+    audio all affect understanding, and ASR errors flow into the LLM.
+
+
+    Responses must be short and spoken-friendly, with no markdown, lists or links, and spelled-out
+    numbers and confirmations for important details such as dates and amounts. Authentication,
+    transfers to humans, call recording consent and telephony integration add new requirements, and
+    evaluation needs simulated calls with audio, not just text.
+  topic: multimodal
+  level: Mid
+  companies:
+    - Sierra
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  refs:
+    - title: Design a Real-Time Voice AI Agent
+      url: https://outcomeschool.com/blog/design-a-real-time-voice-ai-agent
+  source: outcome-school
+- id: text-normalisation-is-where-tts-quality-actually-dies-in-pro
+  q: Text normalisation is where TTS quality actually dies in production. Walk me through it.
+  a: >
+    Real text is full of things that must be expanded before speaking: numbers that can be years,
+    amounts, phone numbers or ordinals; dates and times in many formats; currencies and units;
+    abbreviations and acronyms that may be spelled out or pronounced as words; URLs, emails and
+    symbols; and names and foreign words. Each depends on context and locale, and a wrong guess is
+    very audible.
+
+
+    Production systems combine rule-based normalizers with learned models for ambiguous cases, use
+    an LLM to rewrite text into a speakable form for complex inputs, maintain custom pronunciation
+    dictionaries per customer, and test with large suites of tricky inputs per language.
+  topic: multimodal
+  level: Senior
+  companies:
+    - ElevenLabs
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: design-the-dubbing-pipeline-an-english-video-becomes-spanish
+  q: "Design the dubbing pipeline: an English video becomes Spanish, same speakers, same timing."
+  a: >
+    Separate the dialogue from music and effects, transcribe with timestamps and diarize speakers,
+    and translate with timing constraints so each Spanish line fits the original segment length,
+    adjusting phrasing rather than only speed. Clone each speaker's voice, with consent, and
+    synthesize Spanish speech that matches their emotion and pacing.
+
+
+    Align timing to the original segments, optionally adjust lip sync, then remix with the
+    background track. Add human review for translation quality and timing, and evaluate naturalness,
+    speaker similarity, sync and translation accuracy.
+  topic: multimodal
+  level: Senior
+  companies:
+    - ElevenLabs
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: our-audio-is-a-clinic-room-two-or-three-speakers-background
+  q: >-
+    Our audio is a clinic room: two or three speakers, background noise, accents, and a vocabulary
+    full of drug names. How would you build and improve the ASR for that?
+  a: >
+    Start with a strong multilingual ASR model and fine-tune it on de-identified clinic recordings
+    with accurate transcripts covering many accents, specialties and room conditions. Add
+    diarization tuned for clinical conversations, noise-robust front-end processing, and contextual
+    biasing with medical vocabularies and the patient's chart, used carefully.
+
+
+    Improve continuously: measure WER and, more importantly, error rates on medications, doses and
+    clinical terms by specialty and accent, mine clinician corrections as training signal with
+    consent, and evaluate downstream note accuracy rather than transcription alone.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Abridge
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: what-is-a-vision-language-action-model-and-how-is-it-differe
+  q: What is a vision-language-action model, and how is it different from an LLM with tools?
+  a: >
+    A vision-language-action model takes camera images and a language instruction and directly
+    outputs robot actions, such as joint or end-effector commands, often at high frequency. It is
+    trained on robot demonstrations, usually starting from a pre-trained vision-language model so it
+    inherits visual and semantic knowledge.
+
+
+    An LLM with tools plans in language and calls predefined skills or APIs, such as "pick up the
+    cup", relying on separate controllers to execute them. A VLA learns the low-level control
+    itself, which handles continuous, contact-rich manipulation and novel objects better, but needs
+    large amounts of robot data and careful safety layers.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Figure AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: helix-splits-into-a-large-slow-model-and-a-small-fast-one-wh
+  q: >-
+    Helix splits into a large slow model and a small fast one. Why not run a single end-to-end
+    network?
+  a: >
+    A large vision-language model provides scene understanding and language grounding but can only
+    run a few times per second on onboard compute. Whole-body control needs much faster updates for
+    balance, contact and smooth motion. Splitting lets the slow model produce a high-level latent
+    plan or goal, and a small fast policy turns it, together with current sensor data, into actions
+    at high frequency.
+
+
+    A single end-to-end network would have to be either small enough to run fast, losing
+    understanding, or large and too slow for control. The split mirrors fast and slow thinking:
+    deliberate understanding at low rate, reflexive control at high rate.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Figure AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: explain-action-chunking-why-predict-a-sequence-of-future-act
+  q: Explain action chunking. Why predict a sequence of future actions instead of the next one?
+  a: >
+    Action chunking has the policy predict the next several actions at once and execute them, often
+    re-predicting frequently and blending overlapping chunks, as in ACT. Predicting single actions
+    makes errors compound step by step and produces jittery motion, and human demonstrations contain
+    pauses and multi-step patterns that single-step prediction models poorly.
+
+
+    Chunks capture temporally consistent motions, reduce the effective decision horizon, cope better
+    with non-Markovian demonstration behavior, and let a slower model drive a fast controller. The
+    trade-off is slower reaction to surprises within a chunk, which frequent re-planning and
+    blending mitigate.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Figure AI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school
+- id: why-carry-lidar-radar-and-cameras-rather-than-cameras-alone
+  q: Why carry lidar, radar and cameras rather than cameras alone? Where would you fuse them?
+  a: >
+    Each sensor fails differently. Cameras give rich color and semantics but estimate depth
+    indirectly and struggle in glare, darkness and bad weather. Lidar gives precise 3D geometry day
+    and night. Radar measures range and relative velocity directly and works through rain, fog and
+    dust. Redundancy across different physics makes the system robust to any single sensor's failure
+    modes, which is central to a safety case.
+
+
+    Fuse them at the learned feature level in a shared bird's-eye-view or 3D representation so the
+    model can combine strengths, with late-fusion checks as an independent safety layer, careful
+    calibration and time sync, and the ability to keep driving safely, or stop, when one sensor
+    degrades.
+  topic: multimodal
+  level: Senior
+  companies:
+    - Waymo
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  source: outcome-school

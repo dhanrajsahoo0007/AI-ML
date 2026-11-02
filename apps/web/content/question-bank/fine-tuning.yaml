@@ -1,0 +1,863 @@
+# Company-reported questions adapted from Outcome School (Apache 2.0); see NOTICE.md. Answers are our own.
+- id: walk-me-through-rlhf-end-to-end-reward-model-policy-optimisa
+  q: "Walk me through RLHF end to end: reward model, policy optimisation, KL penalty."
+  a: >
+    Start from a supervised fine-tuned model. Collect prompts, sample several responses, and have
+    people rank or compare them. Train a reward model, usually the LLM with a scalar head, to
+    predict which response people prefer.
+
+
+    Then optimize the policy with reinforcement learning, classically PPO: generate responses, score
+    them with the reward model, and update the policy to increase reward. A KL penalty against the
+    original SFT model is subtracted from the reward so the policy does not drift into odd text that
+    exploits the reward model, and a value network estimates expected reward to reduce variance.
+  topic: fine-tuning
+  level: Mid
+  companies: []
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: Reinforcement Learning from Human Feedback (RLHF)
+      url: https://outcomeschool.com/blog/reinforcement-learning-from-human-feedback-rlhf
+    - title: Proximal Policy Optimization (PPO)
+      url: https://outcomeschool.com/blog/proximal-policy-optimization-ppo
+  source: outcome-school
+- id: what-is-dpo-and-why-did-it-displace-ppo-based-rlhf-at-many-l
+  q: What is DPO and why did it displace PPO-based RLHF at many labs? When is online RL still better?
+  a: >
+    Direct Preference Optimization shows that the KL-regularized RLHF objective has a closed-form
+    optimal policy, which lets you train directly on preference pairs with a simple
+    classification-style loss: raise the likelihood of the chosen response relative to the rejected
+    one, compared with a frozen reference model. No reward model, no sampling during training and no
+    RL loop.
+
+
+    It displaced PPO in many pipelines because it is simpler, cheaper and more stable. Online RL is
+    still better when you can generate fresh samples and score them during training, such as with
+    verifiable rewards for math and code, when exploration matters, or when a reusable reward model
+    is valuable; DPO is limited to the preference data you already have.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Hugging Face
+    - Scale AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: Direct Preference Optimization (DPO)
+      url: https://outcomeschool.com/blog/direct-preference-optimization-dpo
+  source: outcome-school
+- id: explain-grpo-and-why-dropping-the-value-network-matters-at-s
+  q: Explain GRPO and why dropping the value network matters at scale.
+  a: >
+    Group Relative Policy Optimization, introduced in DeepSeekMath, samples a group of responses for
+    each prompt, scores them, and uses each response's reward minus the group mean, divided by the
+    group's standard deviation, as its advantage. The policy update is PPO-like with clipping and a
+    KL term, but there is no learned value function.
+
+
+    PPO needs a value network roughly the size of the policy, which doubles memory and compute and
+    is hard to train well for long reasoning outputs. Dropping it saves that cost, and the group
+    baseline works well when rewards are verifiable, which made large-scale RL on reasoning
+    practical.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - DeepSeek
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: Group Relative Policy Optimization (GRPO)
+      url: https://outcomeschool.com/blog/group-relative-policy-optimization-grpo
+  source: outcome-school
+- id: explain-the-lora-decomposition-mathematically-why-does-it-wo
+  q: >-
+    Explain the LoRA decomposition mathematically. Why does it work, and how do you choose the rank
+    r?
+  a: >
+    LoRA freezes a weight matrix W of size d×k and learns an update ΔW = BA, where B is d×r and A is
+    r×k with rank r much smaller than d and k, scaled by α/r. The forward pass becomes Wx + BAx, B
+    starts at zero so training starts from the base model, and only A and B are trained, r(d+k)
+    parameters instead of dk.
+
+
+    It works because the weight changes needed to adapt a pre-trained model to a task appear to have
+    low intrinsic rank. Choose r by task: small ranks such as 8–16 suffice for style and format,
+    larger ranks such as 64 or more help when learning new domain knowledge or complex skills; also
+    choose which layers to adapt, since applying LoRA to all linear layers often matters more than
+    raising r. Tune on a validation set.
+  topic: fine-tuning
+  level: Senior
+  companies: []
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: LoRA - Low-Rank Adaptation of LLMs
+      url: https://outcomeschool.com/blog/lora-low-rank-adaptation-of-llms
+  source: outcome-school
+- id: how-does-qlora-achieve-its-memory-reduction-and-what-are-the
+  q: How does QLoRA achieve its memory reduction, and what are the quantization trade-offs?
+  a: >
+    QLoRA stores the frozen base model in 4-bit NormalFloat, a format suited to normally distributed
+    weights, with double quantization of the scaling constants, and dequantizes on the fly in the
+    forward pass. Only small LoRA adapters train in 16-bit, and paged optimizers move optimizer
+    state to CPU memory during spikes. A 65B model became trainable on a single 48 GB GPU.
+
+
+    Trade-offs: 4-bit weights add a little quantization error, dequantization slows training, and
+    merging adapters back into a 4-bit model for serving needs care, often merging into a
+    higher-precision copy. Quality is usually close to 16-bit LoRA, but check on your task.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Hugging Face
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: "AI Engineering Explained: LLM, RAG, MCP, Agent, Fine-Tuning, Quantization"
+      url: https://www.youtube.com/watch?v=lnfWvX66FUk
+    - title: How does Model Quantization work?
+      url: https://outcomeschool.com/blog/how-does-model-quantization-work
+  source: outcome-school
+- id: compare-lora-prefix-tuning-prompt-tuning-and-full-fine-tunin
+  q: Compare LoRA, prefix tuning, prompt tuning and full fine-tuning. When would you choose each?
+  a: >
+    Full fine-tuning updates every weight: highest quality ceiling, most memory and storage, and
+    most forgetting risk; use it with lots of data or large behavior changes. LoRA learns low-rank
+    weight updates: near full-tuning quality on most tasks at a fraction of the cost, with small
+    swappable adapters; it is the default.
+
+
+    Prefix tuning learns key and value vectors prepended at every layer, and prompt tuning learns
+    soft prompt embeddings only at the input. Both are tiny and cheap to store per task, but less
+    expressive and more sensitive to hyperparameters, working best on large models and simpler
+    tasks.
+  topic: fine-tuning
+  level: Mid
+  companies:
+    - Apple
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: How does fine-tuning work?
+      url: https://outcomeschool.com/blog/how-does-fine-tuning-work
+    - title: How does Prefix Tuning work?
+      url: https://outcomeschool.com/blog/how-does-prefix-tuning-work
+  source: outcome-school
+- id: what-is-catastrophic-forgetting-and-how-do-you-mitigate-it-d
+  q: What is catastrophic forgetting and how do you mitigate it during fine-tuning?
+  a: >
+    Catastrophic forgetting is when fine-tuning on a narrow task overwrites general abilities, so
+    target accuracy rises while performance on everything else, such as instruction following,
+    reasoning or other languages, falls.
+
+
+    Mitigate with parameter-efficient methods such as LoRA, lower learning rates and fewer epochs,
+    mixing general instruction data into the fine-tuning set (replay), regularizing toward the
+    original weights, and evaluating on a broad benchmark suite alongside the task metric so
+    regressions are caught before release.
+  topic: fine-tuning
+  level: Mid
+  companies:
+    - Mistral AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: Continual Learning in LLMs
+      url: https://outcomeschool.com/blog/continual-learning-in-llms
+  source: outcome-school
+- id: prompting-rag-or-fine-tuning-give-me-your-decision-framework
+  q: "Prompting, RAG or fine-tuning: give me your decision framework with cost and latency attached."
+  a: >
+    Start with prompting: lowest cost to build, no training, but long prompts raise per-request cost
+    and latency. Add RAG when the model needs knowledge it lacks, especially private, fresh or
+    citable information: moderate build cost for ingestion and retrieval, added latency of tens to
+    hundreds of milliseconds, and cost grows with retrieved tokens.
+
+
+    Fine-tune when you need consistent behavior, format or domain style that prompting cannot reach,
+    or to replace a large prompted model with a small tuned one at high volume: upfront data and
+    training cost, but often the lowest cost and latency per request. Use LoRA unless you have large
+    data and need deep changes. Combine them freely: RAG for knowledge, fine-tuning for behavior.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Cohere
+    - Databricks
+    - Glean
+    - Microsoft
+    - Mistral AI
+    - OpenAI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: "AI Engineering Explained: LLM, RAG, MCP, Agent, Fine-Tuning, Quantization"
+      url: https://www.youtube.com/watch?v=lnfWvX66FUk
+    - title: How does fine-tuning work?
+      url: https://outcomeschool.com/blog/how-does-fine-tuning-work
+  source: outcome-school
+- id: do-the-gpu-memory-maths-for-full-fine-tuning-a-7b-model-in-b
+  q: Do the GPU memory maths for full fine-tuning a 7B model in bf16 with Adam. Now with LoRA.
+  a: >
+    Full fine-tuning with mixed precision and Adam needs about 16 bytes per parameter: 2 for bf16
+    weights, 2 for gradients, 4 for fp32 master weights and 8 for Adam's two moments. For 7B that is
+    about 112 GB before activations, so it needs multiple GPUs with sharding such as ZeRO or FSDP.
+
+
+    With LoRA, the frozen bf16 weights take about 14 GB, and adapters of tens of millions of
+    parameters need well under 1 GB including gradients and optimizer state. Add activations,
+    reduced with gradient checkpointing, and it fits on a single 24–40 GB GPU. QLoRA shrinks the
+    base to about 4–5 GB.
+  topic: fine-tuning
+  level: Mid
+  companies:
+    - Hugging Face
+    - Mistral AI
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: what-is-rlvr-rl-with-verifiable-rewards-and-where-does-it-be
+  q: What is RLVR (RL with verifiable rewards) and where does it beat a learned reward model?
+  a: >
+    Reinforcement learning with verifiable rewards scores outputs with a program instead of a
+    learned model: a math answer matches the reference, code passes unit tests, output matches a
+    format or constraint. The policy is trained with RL, often GRPO, on those rewards.
+
+
+    It beats a learned reward model where correctness can be checked automatically, such as math,
+    code, logic puzzles and structured tasks, because the reward is cheap, consistent and much
+    harder to hack than a neural reward model, so training can run longer and scale further. Learned
+    reward models are still needed for open-ended qualities such as helpfulness and style.
+  topic: fine-tuning
+  level: Mid
+  companies:
+    - Alibaba
+    - Sarvam AI
+    - Scale AI
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: Group Relative Policy Optimization (GRPO)
+      url: https://outcomeschool.com/blog/group-relative-policy-optimization-grpo
+  source: outcome-school
+- id: explain-reward-hacking-in-rlhf-and-how-labs-address-it
+  q: Explain reward hacking in RLHF and how labs address it.
+  a: >
+    Reward hacking is when the policy finds ways to score highly on the reward model or checker
+    without actually doing what people want: longer and more flattering answers, confident but wrong
+    claims a reward model likes, gaming test cases, or exploiting quirks in an environment.
+
+
+    Labs counter it with a KL penalty to stay close to the reference model, reward-model ensembles
+    and regular retraining on new policy outputs, length and style controls, verifiable rewards
+    where possible, adversarial and held-out evaluations, monitoring for suspicious reward jumps,
+    and human review of samples. Early stopping when reward rises but held-out quality does not is
+    common.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Scale AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: Reinforcement Learning from Human Feedback (RLHF)
+      url: https://outcomeschool.com/blog/reinforcement-learning-from-human-feedback-rlhf
+  source: outcome-school
+- id: what-is-distillation-and-how-do-you-build-a-strong-small-mod
+  q: What is distillation, and how do you build a strong small model from a large one?
+  a: >
+    Distillation trains a small student to imitate a large teacher. With access to the teacher's
+    probabilities, the student matches its full output distribution, which carries more information
+    than hard labels; with only generated text, the student is fine-tuned on large amounts of
+    teacher outputs.
+
+
+    To build a strong small model: generate diverse, high-quality prompts covering the target tasks,
+    collect teacher responses including reasoning where useful, filter for correctness, train the
+    student with SFT and logit matching where possible, and add on-policy distillation, where the
+    student generates and the teacher scores or corrects its outputs, to fix the student's own
+    mistakes. Evaluate against the teacher on held-out tasks.
+  topic: fine-tuning
+  level: Mid
+  companies:
+    - Alibaba
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  refs:
+    - title: How does Knowledge Distillation work?
+      url: https://outcomeschool.com/blog/how-does-knowledge-distillation-work
+  source: outcome-school
+- id: how-do-scaling-laws-influence-the-safety-evaluation-of-large
+  q: How do scaling laws influence the safety evaluation of large models?
+  a: >
+    Scaling laws predict that loss improves smoothly with compute, which lets labs forecast how
+    capable a larger model will be before training it. But specific capabilities, including risky
+    ones, can appear abruptly, so smooth loss curves do not guarantee no surprises.
+
+
+    In practice that means evaluating dangerous capabilities on smaller models and intermediate
+    checkpoints to extrapolate trends, setting capability thresholds that trigger stronger
+    safeguards before deployment, as in responsible scaling policies, investing in strong
+    elicitation so evaluations do not underestimate a model, and re-evaluating as scale or
+    post-training changes.
+  topic: safety
+  level: Senior
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: your-pretraining-loss-suddenly-diverges-at-step-300k-of-a-lo
+  q: Your pretraining loss suddenly diverges at step 300k of a long run. Diagnose and fix it.
+  a: >
+    First rule out data and hardware: inspect the batches just before the spike for corrupted,
+    duplicated or unusual data, and check for faulty nodes, NaNs or silent data corruption. Then
+    check training dynamics: gradient norm spikes, growing attention logits or activation
+    magnitudes, optimizer state issues, a learning-rate schedule event, or low-precision overflow.
+
+
+    Fix by rolling back to a checkpoint before the spike and skipping the bad data, lowering the
+    learning rate, tightening gradient clipping, adding stabilizers such as QK-normalization, z-loss
+    on logits or higher precision in sensitive operations, and adjusting Adam's epsilon or beta2.
+    Keep monitoring so the next spike is caught early.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Google DeepMind
+    - xAI
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: design-the-training-setup-for-a-model-that-doesn-t-fit-on-on
+  q: >-
+    Design the training setup for a model that doesn't fit on one accelerator, say 70B parameters on
+    a pod.
+  a: >
+    A 70B model with Adam needs over 1 TB of weight, gradient and optimizer state, so shard it. Use
+    fully sharded data parallelism (ZeRO-3 or FSDP) across the pod, add tensor parallelism inside
+    each fast-interconnect group to split large matrices, and pipeline parallelism if per-device
+    memory is still too tight. Use bf16 with fp32 master weights, activation checkpointing and fused
+    kernels.
+
+
+    Size the global batch for stable training, overlap communication with computation, checkpoint
+    frequently with fast restarts for hardware failures, and monitor throughput (model FLOPs
+    utilization), loss and gradient norms. On TPU pods the same ideas map onto sharding annotations
+    over a device mesh.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Google DeepMind
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: walk-me-through-a-post-training-recipe-to-turn-a-pretrained
+  q: >-
+    Walk me through a post-training recipe to turn a pretrained base model into a personalised
+    assistant.
+  a: >
+    Supervised fine-tuning on high-quality instruction and conversation data teaches format and
+    helpfulness. Preference tuning with RLHF or DPO on comparisons improves quality and tone, and
+    verifiable-reward RL improves reasoning and tool use where checkable. Safety tuning and red-team
+    data shape refusals.
+
+
+    Personalization then comes mostly from context, not per-user weights: long-term memory of
+    preferences and facts retrieved into the prompt, user-editable custom instructions, and possibly
+    lightweight per-user adapters where privacy and cost allow. Evaluate personalization with
+    multi-session tests and privacy checks.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Meta
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: Decoding InstructGPT
+      url: https://outcomeschool.com/blog/decoding-instructgpt
+    - title: Reinforcement Learning from Human Feedback (RLHF)
+      url: https://outcomeschool.com/blog/reinforcement-learning-from-human-feedback-rlhf
+  source: outcome-school
+- id: you-re-training-on-tens-of-thousands-of-gpus-and-hardware-fa
+  q: >-
+    You're training on tens of thousands of GPUs and hardware fails constantly. How do you keep
+    goodput high?
+  a: >
+    At that scale something fails every few hours, so goodput, the share of time spent on useful
+    training, depends on recovering fast. Checkpoint frequently with asynchronous saves to fast
+    storage, detect failures quickly with health checks and heartbeats, keep hot spare nodes to swap
+    in, and restart automatically from the latest checkpoint.
+
+
+    Prevent failures where possible with burn-in tests, monitoring of thermals, ECC errors and link
+    errors, and draining suspicious nodes. Detect silent data corruption and stragglers, and design
+    parallelism so a single failure only requires restarting the job, not rebuilding data pipelines.
+    Track goodput as a first-class metric.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - xAI
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: design-a-deduplication-pipeline-for-a-web-scale-pretraining
+  q: >-
+    Design a deduplication pipeline for a web-scale pretraining corpus. It has to run as a streaming
+    process.
+  a: >
+    Normalize text first, then deduplicate at several levels. Exact duplicates are removed by
+    hashing normalized documents; near-duplicates are found with MinHash over word shingles and
+    locality-sensitive hashing to bucket similar documents; repeated boilerplate lines or paragraphs
+    are removed within and across documents.
+
+
+    As a streaming process, keep the LSH buckets and hash signatures in a sharded key-value store,
+    and process documents in order, checking each against existing signatures before inserting.
+    Measure the effect by training small ablation models on deduplicated versus raw samples, and
+    watch for over-deduplication removing legitimately repeated content such as licenses or common
+    code.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - xAI
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: r1-zero-was-trained-with-rl-and-essentially-no-sft-first-wha
+  q: >-
+    R1-Zero was trained with RL and essentially no SFT first. What did that show, and why did full
+    R1 add SFT back?
+  a: >
+    R1-Zero applied large-scale RL with GRPO and simple rule-based rewards for answer correctness
+    and format directly to a base model. Long chains of thought, self-verification and reflection
+    emerged on their own, and reasoning benchmarks improved dramatically, showing that RL alone can
+    elicit strong reasoning from a capable base model.
+
+
+    But its outputs had poor readability and mixed languages. The full R1 added a small cold-start
+    SFT set of clean reasoning examples before RL, a language-consistency reward, and later SFT and
+    RL stages on broader data, giving readable, general-purpose behavior while keeping the reasoning
+    gains.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - DeepSeek
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: Large Reasoning Models (LRMs)
+      url: https://outcomeschool.com/blog/large-reasoning-models
+  source: outcome-school
+- id: fp8-training-at-671b-scale-is-hard-what-actually-breaks-in-l
+  q: >-
+    FP8 training at 671B scale is hard. What actually breaks in low precision, and how do you make
+    it stable?
+  a: >
+    FP8 has very little range and precision, so outliers in activations, weights or gradients either
+    overflow or get crushed to zero, and accumulating many products in low precision loses accuracy.
+    At large scale these errors compound into divergence.
+
+
+    DeepSeek-V3's approach: fine-grained scaling, with separate scale factors for small tiles of
+    activations and blocks of weights so one outlier does not ruin a whole tensor; accumulating
+    matmul results in higher precision at regular intervals; keeping sensitive components such as
+    embeddings, the output head, normalization and attention in higher precision; and storing
+    optimizer state in higher precision. They validated against BF16 training at smaller scale
+    first.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - DeepSeek
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  source: outcome-school
+- id: how-do-you-build-a-training-dataset-without-triggering-model
+  q: >-
+    How do you build a training dataset without triggering model collapse when much of your data is
+    synthetic?
+  a: >
+    Model collapse happens when models are trained repeatedly on their own outputs, losing the tails
+    of the distribution and amplifying errors. Avoid it by always keeping a large share of real
+    human data, accumulating data across generations rather than replacing real data with synthetic
+    data, and generating synthetic data from strong, diverse sources.
+
+
+    Filter synthetic data hard: verify correctness with checkers, tests or stronger models,
+    deduplicate, and measure diversity. Use synthetic data where it is verifiable or targeted, such
+    as math, code and specific skills, track the provenance of every sample, and evaluate on
+    real-world held-out data to catch narrowing.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - DeepSeek
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: dualpipe-overlaps-computation-and-communication-in-training
+  q: >-
+    DualPipe overlaps computation and communication in training. Why is that overlap the whole game
+    at this scale, and what is the trade-off?
+  a: >
+    In large MoE training with expert parallelism, every layer needs all-to-all communication to
+    send tokens to experts on other GPUs, and across nodes that communication can take as long as
+    the computation. If GPUs wait for communication, a large share of expensive hardware sits idle.
+
+
+    DualPipe is a bidirectional pipeline schedule that feeds micro-batches from both ends and pairs
+    the forward and backward chunks so one chunk's computation runs while another's communication is
+    in flight, which hides most communication and shrinks pipeline bubbles. The trade-off is extra
+    memory, including keeping additional parameter copies, and a more complex schedule to implement
+    and debug.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - DeepSeek
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: deepseek-claims-frontier-class-results-at-a-fraction-of-the
+  q: >-
+    DeepSeek claims frontier-class results at a fraction of the usual training cost. If an
+    interviewer asks “how is that even possible,” what is your structured answer?
+  a: >
+    Structure it as architecture, numerics, systems and accounting. Architecture: a sparse MoE with
+    about 37B active of 671B parameters and multi-head latent attention, so each token costs far
+    less compute and memory. Numerics: FP8 training. Systems: DualPipe and custom communication
+    kernels that overlap all-to-all traffic with compute, keeping GPU utilization high. Data and
+    objectives: high-quality data and multi-token prediction for denser training signal.
+
+
+    Accounting: the widely quoted figure covers the GPU hours of the final training run, about 2.8
+    million H800 hours, not research, ablations, failed runs, data or salaries. So the efficiency is
+    real and comes from many compounding engineering choices, but the full cost of developing the
+    model is higher than the headline number.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - DeepSeek
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  source: outcome-school
+- id: training-a-trillion-parameter-model-attention-logits-can-blo
+  q: >-
+    Training a trillion-parameter model, attention logits can blow up and destabilise the run. What
+    is going on, and how does something like MuonClip address it?
+  a: >
+    If query and key projection weights grow during training, attention logits, the query-key dot
+    products, become huge, the softmax saturates and gradients spike, which can destabilize or
+    diverge the run. Aggressive optimizers such as Muon make this more likely at large scale.
+
+
+    MuonClip combines the Muon optimizer with QK-Clip: after each update, if the maximum attention
+    logit for a head exceeds a threshold, the query and key weights for that head are rescaled down
+    so logits stay bounded. It targets the cause directly without changing the architecture, and
+    Moonshot reported training Kimi K2 without loss spikes this way.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Moonshot AI
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: kimi-k1-5-scaled-rl-for-reasoning-without-a-process-reward-m
+  q: >-
+    Kimi K1.5 scaled RL for reasoning without a process reward model or tree search. Why
+    deliberately keep the RL recipe that simple?
+  a: >
+    Process reward models and tree search are expensive, hard to train well and easy to hack, and
+    they complicate scaling. Kimi K1.5's bet was that long-context RL, letting the model produce
+    very long chains of thought with outcome-based rewards, lets the model learn planning,
+    reflection and correction on its own.
+
+
+    A simple recipe is easier to scale, debug and make efficient, with fewer components that can
+    fail or be exploited. Their results suggested that context length and outcome rewards, rather
+    than elaborate search machinery, drive much of the reasoning improvement.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Moonshot AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  source: outcome-school
+- id: why-does-long-horizon-agentic-rl-need-a-disaggregated-asynch
+  q: >-
+    Why does long-horizon agentic RL need a disaggregated, asynchronous design (as in the slime
+    framework) rather than colocated-synchronous?
+  a: >
+    Agentic rollouts are long and vary wildly in length because they involve many tool calls,
+    environment waits and multi-turn interaction. In a colocated synchronous design, training waits
+    for the slowest rollout in each batch and GPUs sit idle, and generation and training compete for
+    the same hardware.
+
+
+    Disaggregating rollout workers (inference engines interacting with environments) from trainers,
+    and running them asynchronously with a buffer of completed trajectories, keeps both busy and
+    scales each independently. The costs are slightly off-policy data, which needs correction or
+    freshness limits, and more complex orchestration, as frameworks such as slime handle.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: glm-4-5-s-post-training-trains-expert-models-per-domain-then
+  q: >-
+    GLM-4.5's post-training trains expert models per domain then unifies with self-distillation.
+    Walk through why you would train specialists and then merge them.
+  a: >
+    Training one model on every skill at once forces trade-offs: data mixtures compete, and RL for
+    reasoning, agents and chat need different rewards and hyperparameters. Training separate expert
+    models per domain lets each reach its best performance with tailored data and RL.
+
+
+    Self-distillation then unifies them: the experts generate high-quality responses in their
+    domains, and a single general model is fine-tuned on that combined data, possibly followed by
+    joint RL. The final model inherits most of each specialist's strength without serving many
+    models.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: DeepSeek-V4 Architecture Explained
+      url: https://outcomeschool.com/blog/decoding-deepseek-v4
+    - title: How does Knowledge Distillation work?
+      url: https://outcomeschool.com/blog/how-does-knowledge-distillation-work
+  source: outcome-school
+- id: qwen3-uses-strong-to-weak-distillation-bootstrapping-smaller
+  q: >-
+    Qwen3 uses strong-to-weak distillation, bootstrapping smaller models from flagship ones. How
+    does that work and why is it cheaper?
+  a: >
+    The flagship model goes through the expensive full pipeline of reasoning SFT and large-scale RL.
+    Smaller models then learn from it: first off-policy, training on the teacher's responses in both
+    thinking and non-thinking modes, then on-policy, where the student generates responses and is
+    trained to match the teacher's output probabilities on them, correcting its own mistakes.
+
+
+    It is cheaper because the small models skip their own multi-stage RL; matching a strong
+    teacher's distributions transfers the gains with far fewer GPU hours, and Qwen reported better
+    results than running RL directly on the small models.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Alibaba
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  refs:
+    - title: How does Knowledge Distillation work?
+      url: https://outcomeschool.com/blog/how-does-knowledge-distillation-work
+  source: outcome-school
+- id: sarvam-m-ships-hybrid-think-non-think-modes-and-was-post-tra
+  q: >-
+    Sarvam-M ships hybrid think/non-think modes and was post-trained with SFT then RLVR. How would
+    you build that, and why RLVR over vanilla RLHF?
+  a: >
+    Build it in stages: supervised fine-tuning on a mix of examples with and without reasoning
+    traces, marked by a mode flag, including data in the target languages, then RL with verifiable
+    rewards on math, code and instruction-following tasks where answers can be checked, with
+    mode-specific prompts.
+
+
+    RLVR is preferred over vanilla RLHF for these skills because rewards are programmatic, cheap and
+    hard to hack, so training can run longer and improve correctness rather than style. Learned
+    preference rewards can still be added for open-ended chat quality.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: Large Reasoning Models (LRMs)
+      url: https://outcomeschool.com/blog/large-reasoning-models
+    - title: Group Relative Policy Optimization (GRPO)
+      url: https://outcomeschool.com/blog/group-relative-policy-optimization-grpo
+  source: outcome-school
+- id: a-regional-government-wants-an-assistant-in-a-low-resource-l
+  q: >-
+    A regional government wants an assistant in a low-resource language with only a few thousand
+    sentences of clean text. How do you adapt a model to it?
+  a: >
+    Start from a strong multilingual model, ideally one that has seen related languages, and check
+    its tokenizer: if the script splits badly, extend the vocabulary with new tokens initialized
+    from their sub-pieces. Do continued pre-training on all available text in the language plus
+    related languages, then instruction-tune with a small set of high-quality examples written by
+    native speakers.
+
+
+    Expand data carefully: translate instruction data from a high-resource language and have
+    speakers review it, use back-translation, and collect more through the deployment with consent.
+    Evaluate with native speakers on tasks the government actually needs, and use retrieval over
+    local documents for factual knowledge.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: How does fine-tuning work?
+      url: https://outcomeschool.com/blog/how-does-fine-tuning-work
+    - title: LoRA - Low-Rank Adaptation of LLMs
+      url: https://outcomeschool.com/blog/lora-low-rank-adaptation-of-llms
+  source: outcome-school
+- id: you-have-one-on-device-base-model-but-a-dozen-features-summa
+  q: >-
+    You have one on-device base model but a dozen features: summarization, rewriting, reply
+    suggestions, tone adjustment. How do you specialise without shipping a dozen models?
+  a: >
+    Ship one frozen base model and a small LoRA adapter per feature, each fine-tuned for
+    summarization, rewriting, replies or tone. Adapters are a few megabytes, so all of them fit on
+    device, and the runtime loads the right adapter for each request on top of the shared base.
+
+
+    Train adapters with the quantized base they will run on, evaluate each feature separately plus
+    check the base's general quality, and update adapters independently without re-shipping the base
+    model.
+  topic: fine-tuning
+  level: Mid
+  companies:
+    - Apple
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: LoRA - Low-Rank Adaptation of LLMs
+      url: https://outcomeschool.com/blog/lora-low-rank-adaptation-of-llms
+  source: outcome-school
+- id: how-would-you-improve-an-on-device-model-using-signals-from
+  q: >-
+    How would you improve an on-device model using signals from user devices without collecting user
+    content?
+  a: >
+    Keep raw content on device and only share privacy-protected aggregates. Options include
+    federated learning, where devices compute updates locally and send them through secure
+    aggregation with differential privacy noise, and differentially private telemetry, where devices
+    report noisy signals such as which of several candidate synthetic examples best matches their
+    local data.
+
+
+    Use those aggregate signals to choose or generate better synthetic training data, tune models
+    centrally, and evaluate quality, with strict privacy budgets, opt-in consent and review. Measure
+    improvements on public and synthetic evaluation sets since real user data is never collected.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Apple
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+  source: outcome-school
+- id: a-customer-s-distributed-training-job-on-your-gpu-cluster-ge
+  q: >-
+    A customer's distributed training job on your GPU cluster gets 55% scaling efficiency at 64
+    nodes. Debug it.
+  a: >
+    Profile one step at 8, 16 and 64 nodes to see what grows. Usual suspects: communication not
+    overlapped with compute (check NCCL settings, gradient bucket sizes and whether all-reduce runs
+    during backward), the network itself (InfiniBand or RoCE misconfiguration, wrong topology
+    mapping, a slow link or switch), per-GPU batch too small at scale so compute is too short to
+    hide communication, and data loading or storage that cannot keep up.
+
+
+    Also look for stragglers (one slow node holds back all), synchronization points such as logging
+    or checkpointing, and CPU bottlenecks. Run NCCL bandwidth tests across all nodes, fix topology
+    and bucket sizes, increase per-GPU work or use sharded or hybrid parallelism, and re-measure
+    scaling efficiency.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Together AI
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: fine-tune-an-8b-model-on-a-single-24-gb-gpu-walk-me-through
+  q: >-
+    Fine-tune an 8B model on a single 24 GB GPU. Walk me through the memory maths and the exact
+    stack you'd use.
+  a: >
+    Full fine-tuning would need about 16 bytes per parameter, roughly 128 GB, so use QLoRA: the 8B
+    base in 4-bit NF4 is about 5 GB, LoRA adapters on all linear layers at rank 16 add tens of
+    millions of parameters, under 1 GB with gradients and optimizer state, and activations fit with
+    gradient checkpointing, a sequence length around 2–4K and a micro-batch of 1–4 with gradient
+    accumulation.
+
+
+    Stack: Hugging Face transformers with PEFT and bitsandbytes (or a faster wrapper such as
+    Unsloth), TRL's SFT trainer, FlashAttention, bf16 compute, paged 8-bit AdamW, and the model's
+    correct chat template. Evaluate against the base model and merge the adapter into a 16-bit copy
+    for serving.
+  topic: fine-tuning
+  level: Mid
+  companies:
+    - Hugging Face
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: LoRA - Low-Rank Adaptation of LLMs
+      url: https://outcomeschool.com/blog/lora-low-rank-adaptation-of-llms
+    - title: How does fine-tuning work?
+      url: https://outcomeschool.com/blog/how-does-fine-tuning-work
+  source: outcome-school
+- id: you-re-building-a-web-scale-pretraining-corpus-fineweb-style
+  q: >-
+    You're building a web-scale pretraining corpus (FineWeb-style). Walk me through the pipeline and
+    how you decide whether each filter earns its place.
+  a: >
+    Start from web crawl dumps: URL filtering for spam and adult sites, text extraction from HTML
+    with a good extractor, language identification, quality filtering with heuristics (length,
+    repetition, punctuation and stop-word ratios) and model-based classifiers, near-duplicate
+    removal with MinHash, and removal of personal data.
+
+
+    Decide whether each filter earns its place empirically: train small ablation models on data with
+    and without the filter, at equal token counts, and compare on a fixed set of benchmarks; keep
+    filters that improve results, and watch for filters that remove too much useful diversity. This
+    is how the FineWeb team made and documented its choices.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Hugging Face
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: compare-sft-rlhf-dpo-and-rlvr-for-improving-an-instruction-t
+  q: >-
+    Compare SFT, RLHF, DPO and RLVR for improving an instruction-tuned model. What data does each
+    need, and when would you pick which?
+  a: >
+    SFT needs high-quality prompt and response demonstrations and teaches format and new behaviors
+    directly; pick it to add skills or styles. RLHF needs preference comparisons to train a reward
+    model plus an online RL setup; pick it for open-ended quality with a reusable reward model and
+    the infrastructure to run it.
+
+
+    DPO needs preference pairs only and is simple and stable offline; pick it for alignment and tone
+    improvements with limited infrastructure. RLVR needs prompts with programmatically checkable
+    answers and an RL setup; pick it for reasoning, math, code and tool use where correctness can be
+    verified. Most modern pipelines combine them in that order.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Scale AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: Reinforcement Learning from Human Feedback (RLHF)
+      url: https://outcomeschool.com/blog/reinforcement-learning-from-human-feedback-rlhf
+    - title: Direct Preference Optimization (DPO)
+      url: https://outcomeschool.com/blog/direct-preference-optimization-dpo
+    - title: Group Relative Policy Optimization (GRPO)
+      url: https://outcomeschool.com/blog/group-relative-policy-optimization-grpo
+  source: outcome-school
+- id: we-sell-rl-environments-design-one-for-book-a-multi-city-tri
+  q: >-
+    We sell RL environments. Design one for “book a multi-city trip in a web travel app”, specify
+    the reward, and tell me how you stop the policy hacking it.
+  a: >
+    Build a realistic sandboxed travel web app with seeded inventory, prices, randomized layouts and
+    edge cases such as sold-out flights and date conflicts, plus a task generator that creates trips
+    with constraints like cities, dates, budget and preferences. The agent acts through browser
+    actions.
+
+
+    Reward: check the backend state after the episode, crediting bookings that satisfy every
+    constraint and penalizing extra or wrong bookings, constraint violations and excessive cost or
+    steps. Prevent hacking by grading backend state rather than page text, hiding the checker,
+    randomizing tasks and layouts, blocking shortcuts such as editing the database or reading hidden
+    fields, and reviewing high-reward trajectories for exploits.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Scale AI
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school
+- id: you-are-training-an-agent-model-with-end-to-end-rl-in-your-o
+  q: >-
+    You are training an agent model with end-to-end RL in your own harness. Walk through the
+    environment and reward design.
+  a: >
+    The environment is your actual harness in sandboxes: real repositories in containers, the same
+    tools the product uses, and tasks drawn from realistic issues with hidden tests or reference
+    solutions. Rollouts run asynchronously at scale because episodes are long and vary in length.
+
+
+    Rewards come mainly from verifiable outcomes such as hidden tests passing, plus penalties for
+    breaking other tests, excessive steps or cost, and unsafe actions, possibly with a small learned
+    or rubric reward for code quality. Guard against reward hacking such as editing tests or
+    special-casing outputs, and evaluate on held-out task sets before deploying the trained model.
+  topic: fine-tuning
+  level: Senior
+  companies:
+    - Cognition
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+  source: outcome-school

@@ -2,7 +2,8 @@
 
 import React, { useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ListCollapse, Plus, Search } from "lucide-react";
+import Link from "next/link";
+import { ArrowUpRight, ListCollapse, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Level = "Junior" | "Mid" | "Senior";
@@ -11,6 +12,9 @@ interface InterviewQuestionProps {
   question: string;
   category?: string;
   level?: Level;
+  companies?: string[];
+  related?: { href: string; title: string };
+  refs?: { title: string; url: string }[];
   children: React.ReactNode;
 }
 
@@ -38,6 +42,8 @@ function chipClass(active: boolean) {
 }
 
 interface InterviewQuestionsProps {
+  title?: string;
+  footer?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -46,6 +52,9 @@ function QuestionItem({
   question,
   category,
   level,
+  companies,
+  related,
+  refs,
   children,
   isOpen,
   onToggle,
@@ -79,6 +88,11 @@ function QuestionItem({
               {level && <span className="text-primary">{level}</span>}
             </span>
           )}
+          {companies && companies.length > 0 && (
+            <span className="mt-1.5 block text-[13px] text-muted-foreground">
+              Asked at {companies.join(", ")}
+            </span>
+          )}
         </div>
         <motion.span
           animate={{ rotate: isOpen ? 45 : 0 }}
@@ -102,6 +116,37 @@ function QuestionItem({
               <div className="text-[15px] leading-relaxed text-ink-2 [&>*+*]:mt-3">
                 {children}
               </div>
+              {(related || (refs && refs.length > 0)) && (
+                <div className="mt-4 space-y-1.5 border-t border-hairline pt-3 text-[13px]">
+                  {related && (
+                    <p>
+                      <span className="text-muted-foreground">Deep-dive: </span>
+                      <Link href={related.href} className="text-primary underline underline-offset-2">
+                        {related.title}
+                      </Link>
+                    </p>
+                  )}
+                  {refs && refs.length > 0 && (
+                    <p className="text-muted-foreground">
+                      Further reading (Outcome School):{" "}
+                      {refs.map((r, i) => (
+                        <span key={r.url}>
+                          {i > 0 && " · "}
+                          <a
+                            href={r.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-0.5 text-ink-2 underline underline-offset-2 hover:text-primary"
+                          >
+                            {r.title}
+                            <ArrowUpRight aria-hidden className="size-3" />
+                          </a>
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -114,7 +159,7 @@ export function InterviewQuestion(_props: InterviewQuestionProps) {
   return null;
 }
 
-export function InterviewQuestions({ children }: InterviewQuestionsProps) {
+export function InterviewQuestions({ title, footer, children }: InterviewQuestionsProps) {
   const questions = React.Children.toArray(children).filter(
     (child): child is React.ReactElement<InterviewQuestionProps> =>
       React.isValidElement(child)
@@ -124,11 +169,12 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [activeLevel, setActiveLevel] = useState<Level | null>(null);
   const [query, setQuery] = useState("");
+  const [activeCompany, setActiveCompany] = useState("");
 
   const searchIndex = useMemo(
     () =>
       questions.map((q) =>
-        `${q.props.question} ${q.props.category ?? ""} ${nodeText(q.props.children)}`.toLowerCase()
+        `${q.props.question} ${q.props.category ?? ""} ${(q.props.companies ?? []).join(" ")} ${nodeText(q.props.children)}`.toLowerCase()
       ),
     [questions]
   );
@@ -137,6 +183,13 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
     () => LEVELS.filter((l) => questions.some((q) => q.props.level === l)),
     [questions]
   );
+
+  const companyOptions = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const q of questions)
+      for (const c of q.props.companies ?? []) seen.set(c, (seen.get(c) ?? 0) + 1);
+    return Array.from(seen.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [questions]);
 
   const tags = useMemo(() => {
     const seen = new Map<string, number>();
@@ -155,9 +208,10 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
         ({ q, originalIndex }) =>
           (!activeTag || q.props.category === activeTag) &&
           (!activeLevel || q.props.level === activeLevel) &&
+          (!activeCompany || (q.props.companies ?? []).includes(activeCompany)) &&
           terms.every((t) => searchIndex[originalIndex].includes(t))
       );
-  }, [questions, activeTag, activeLevel, query, searchIndex]);
+  }, [questions, activeTag, activeLevel, activeCompany, query, searchIndex]);
 
   const isFiltered = filtered.length !== questions.length;
 
@@ -196,7 +250,7 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4 border-b border-ink pb-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            Interview questions
+            {title ?? "Interview questions"}
           </p>
           <p className="mt-1 font-display text-2xl text-ink">
             {filtered.length}
@@ -226,6 +280,26 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
             placeholder="Search questions and answers"
             className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted-foreground"
           />
+        </label>
+      )}
+
+      {companyOptions.length > 1 && (
+        <label className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="mr-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            Company
+          </span>
+          <select
+            value={activeCompany}
+            onChange={(e) => setActiveCompany(e.target.value)}
+            className="rounded-full border border-hairline bg-paper px-3 py-1 text-[13px] text-ink-2 outline-none focus:border-ink"
+          >
+            <option value="">Any company</option>
+            {companyOptions.map(([name, count]) => (
+              <option key={name} value={name}>
+                {name} ({count})
+              </option>
+            ))}
+          </select>
         </label>
       )}
 
@@ -289,6 +363,9 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
                 question={q.props.question}
                 category={q.props.category}
                 level={q.props.level}
+                companies={q.props.companies}
+                related={q.props.related}
+                refs={q.props.refs}
                 isOpen={openSet.has(originalIndex)}
                 onToggle={() => toggleOne(originalIndex)}
               >
@@ -303,6 +380,9 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
           </p>
         )}
       </div>
+      {footer && (
+        <div className="mt-6 text-xs leading-relaxed text-muted-foreground">{footer}</div>
+      )}
     </section>
   );
 }

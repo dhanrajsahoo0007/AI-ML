@@ -7,7 +7,7 @@ area: Data Science
 
 Good features and clean data usually matter more than model choice, and interviewers know it. Expect questions on encoding categorical variables, handling messy data, building time-aware features without leakage, and keeping training and serving features consistent.
 
-Related: [ML fundamentals](/interviews/ml-fundamentals) · [Python & pandas](/interviews/python-and-pandas)
+Related: [ML fundamentals](/interviews/ml-fundamentals) · [Model evaluation metrics](/interviews/model-evaluation-metrics)
 
 <InterviewQuestions>
   <InterviewQuestion question="What is feature engineering and why does it matter?" category="Fundamentals" level="Junior">
@@ -32,7 +32,7 @@ Related: [ML fundamentals](/interviews/ml-fundamentals) · [Python & pandas](/in
     Extract hour, day of week, month, holidays and weekend flags; use cyclical encoding with sine and cosine for periodic values such as hour; and compute durations such as time since signup or since the last purchase. Make sure the reference time is the prediction time, not today.
   </InterviewQuestion>
   <InterviewQuestion question="How do you build aggregate features without leakage?" category="Time Features" level="Senior">
-    Compute aggregates such as "purchases in the last 30 days" using only data available before each example's prediction time, which is called point-in-time correctness. In SQL or pandas, join on time windows ending at the event timestamp. Feature stores with point-in-time joins enforce this automatically for training data.
+    Compute aggregates such as "purchases in the last 30 days" using only data available before each example's prediction time, which is called point-in-time correctness. In the feature pipeline, join on time windows that end at the event timestamp. Feature stores with point-in-time joins enforce this automatically for training data.
   </InterviewQuestion>
   <InterviewQuestion question="What are lag and rolling features in time series?" category="Time Features" level="Mid">
     Lag features use the target or other variables from previous time steps, such as last week's sales. Rolling features summarize recent windows, such as a 7-day mean or standard deviation. They capture trends and seasonality, but every window must end before the time being predicted.
@@ -57,12 +57,6 @@ Related: [ML fundamentals](/interviews/ml-fundamentals) · [Python & pandas](/in
   </InterviewQuestion>
   <InterviewQuestion question="How do you handle highly correlated features?" category="Selection" level="Mid">
     They can make linear model coefficients unstable and split importance between them. Drop one of each highly correlated pair, combine them, use PCA, or rely on regularization such as ridge. For pure prediction with trees, correlation matters less, but interpretation still suffers.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is training-serving skew?" category="Production" level="Senior">
-    A difference between how features are computed for training and for live predictions, such as different code paths, time zones, default values or data freshness. Models then see different inputs in production than they learned from and degrade silently. Prevent it by sharing feature code, using a feature store, logging served features and comparing distributions.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is a feature store?" category="Production" level="Senior">
-    A system that manages feature definitions and values for both training and serving: an offline store with history for building point-in-time-correct training sets, and an online low-latency store for live inference, both fed by the same transformation logic. It reduces duplication, skew and leakage and lets teams reuse features.
   </InterviewQuestion>
   <InterviewQuestion question="How do you validate data quality in a pipeline?" category="Data Quality" level="Mid">
     Define expectations and check them automatically on every run: schema and types, null rates, value ranges, uniqueness of keys, allowed categories, row counts and freshness, and distribution shifts compared with past runs. Fail or alert on violations before bad data reaches models or dashboards.

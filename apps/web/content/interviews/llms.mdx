@@ -22,35 +22,11 @@ Related deep-dives: [Prompt Engineering](/ai-system-design/genai-system-design/p
   <InterviewQuestion question="Greedy decoding vs beam search vs sampling: when do you use each?" category="Decoding" level="Mid">
     Greedy picks the most likely token each step, which is fast but can be repetitive. Beam search keeps several candidate sequences and suits tasks with one right answer such as translation. Sampling with temperature and top-p gives more natural, diverse text and is the default for chat models.
   </InterviewQuestion>
-  <InterviewQuestion question="When should you use prompting, RAG or fine-tuning?" category="Adaptation" level="Mid">
-    Start with prompting, since it is cheapest and fastest to iterate. Use RAG when the model needs knowledge it does not have, especially private or frequently changing information, or when citations are needed. Use fine-tuning to change behavior, format or style consistently, to specialize a smaller cheaper model, or when prompts become too long. They are often combined.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is LoRA and why is it popular?" category="Adaptation" level="Mid">
-    Low-Rank Adaptation freezes the pretrained weights and learns small low-rank matrices added to selected layers, so only a tiny fraction of parameters is trained. It cuts memory and compute for fine-tuning, produces small adapter files that can be swapped per task, and usually matches full fine-tuning quality for many tasks.
-  </InterviewQuestion>
-  <InterviewQuestion question="What does QLoRA add on top of LoRA?" category="Adaptation" level="Senior">
-    QLoRA keeps the frozen base model in 4-bit quantized form while training LoRA adapters in higher precision, with techniques such as a 4-bit NormalFloat data type and paged optimizers. This makes it possible to fine-tune very large models on a single GPU with little loss in quality.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is catastrophic forgetting in fine-tuning and how do you reduce it?" category="Adaptation" level="Senior">
-    Fine-tuning on a narrow dataset can overwrite general abilities the model had. Reduce it with parameter-efficient methods such as LoRA, lower learning rates and fewer epochs, mixing some general instruction data into the fine-tuning set, and evaluating on general benchmarks alongside the target task.
-  </InterviewQuestion>
-  <InterviewQuestion question="Explain RLHF." category="Alignment" level="Mid">
-    Reinforcement learning from human feedback starts from a supervised fine-tuned model. People compare pairs of model responses, a reward model is trained to predict their preferences, and the language model is optimized with reinforcement learning, often PPO, to maximize that reward while a KL penalty keeps it close to the original model.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is DPO and why has it become common?" category="Alignment" level="Senior">
-    Direct Preference Optimization trains the model directly on preference pairs with a classification-style loss derived from the RLHF objective, without training a separate reward model or running reinforcement learning. It is simpler, more stable and cheaper, and achieves comparable results in many settings.
-  </InterviewQuestion>
   <InterviewQuestion question="What are hallucinations and why do LLMs produce them?" category="Reliability" level="Junior">
     Hallucinations are fluent but false or unsupported statements. Models are trained to produce plausible continuations, not to verify facts, and they have no built-in signal for what they do not know, so gaps get filled with likely-sounding text. Outdated training data and ambiguous prompts make it worse.
   </InterviewQuestion>
   <InterviewQuestion question="How do you reduce hallucinations in a production system?" category="Reliability" level="Mid">
     Ground answers in retrieved sources and require citations, instruct the model to say when it does not know, lower the temperature for factual tasks, constrain outputs with schemas, and add verification steps such as checking claims against sources or tools. Measure the hallucination rate on an evaluation set and monitor it in production.
-  </InterviewQuestion>
-  <InterviewQuestion question="How do you evaluate an LLM application?" category="Evaluation" level="Mid">
-    Build a test set from real use cases with expected outputs or rubrics. Use automatic checks where possible, such as exact match, schema validation and unit tests, LLM-as-judge with calibrated rubrics for open-ended quality, and human review for a sample. Track quality, safety, latency and cost per version, and confirm with online metrics and A/B tests.
-  </InterviewQuestion>
-  <InterviewQuestion question="What are the limitations of LLM-as-judge?" category="Evaluation" level="Senior">
-    Judges can prefer longer answers, the first option shown, or outputs from their own model family, and they can miss factual errors they also do not know. Mitigate with clear rubrics, pairwise comparisons with order swapped, reference answers, multiple judges, and regular calibration against human labels.
   </InterviewQuestion>
   <InterviewQuestion question="What is perplexity and what does it not tell you?" category="Evaluation" level="Mid">
     Perplexity is the exponential of the average negative log-likelihood per token; lower means the model predicts the text better. It is useful for comparing language models on the same tokenizer and data, but it does not measure helpfulness, factual accuracy, instruction following or safety, so it says little about chat quality.
@@ -67,35 +43,14 @@ Related deep-dives: [Prompt Engineering](/ai-system-design/genai-system-design/p
   <InterviewQuestion question="How do you reduce LLM latency?" category="Cost & Latency" level="Mid">
     Stream tokens so users see output immediately, use smaller or quantized models where quality allows, shorten prompts to cut time to first token, cap output length, use prompt caching, run independent calls in parallel, and serve with an optimized inference engine using continuous batching and speculative decoding.
   </InterviewQuestion>
-  <InterviewQuestion question="What is quantization and what are its trade-offs?" category="Cost & Latency" level="Mid">
-    Quantization stores weights, and sometimes activations, in lower precision such as 8-bit or 4-bit instead of 16-bit. It shrinks memory and speeds up inference, letting bigger models run on smaller hardware. The cost is some accuracy loss, which grows at lower bit widths and on sensitive tasks, so it must be evaluated per use case.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is prompt caching?" category="Cost & Latency" level="Senior">
-    When many requests share the same prompt prefix, such as a long system prompt or document, the server can reuse the computed key-value cache for that prefix instead of recomputing it. This lowers latency and cost for repeated prefixes. To benefit, put stable content first and variable content last.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is prompt injection and how do you defend against it?" category="Safety" level="Mid">
-    Prompt injection is malicious instructions hidden in user input or retrieved content that try to override the system's instructions, for example to leak data or misuse tools. Defend with layered controls: separate and label untrusted content, limit tool permissions, require confirmation for sensitive actions, filter inputs and outputs, and red-team regularly. No single prompt fully prevents it.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is a jailbreak, and how is it different from prompt injection?" category="Safety" level="Mid">
-    A jailbreak is a user crafting input to get the model to violate its own safety policies, such as producing harmful content. Prompt injection is about untrusted data hijacking an application's instructions, often affecting third parties. Both are mitigated with safety training, input and output classifiers, and system-level controls.
-  </InterviewQuestion>
-  <InterviewQuestion question="How do you handle PII and sensitive data with LLMs?" category="Safety" level="Senior">
-    Minimize what is sent: detect and redact or tokenize PII before prompts where possible, use providers and deployments that meet your data-retention and compliance requirements, enforce access control on retrieved data, avoid logging raw sensitive content, and filter outputs for leaks. Document data flows for privacy review.
-  </InterviewQuestion>
   <InterviewQuestion question="What are embeddings, and how are they used with LLMs?" category="Fundamentals" level="Junior">
     Embeddings are vectors that represent text so that similar meanings are close together. They power semantic search, RAG retrieval, clustering, deduplication and recommendation. Embedding models are usually separate, smaller encoder models from the generator LLM.
   </InterviewQuestion>
   <InterviewQuestion question="Open-weight vs proprietary API models: how do you choose?" category="Adaptation" level="Senior">
     APIs give top quality and no infrastructure work but cost per token and send data to a provider. Open-weight models give control, data locality, the ability to fine-tune deeply and potentially lower cost at high volume, but need serving expertise and hardware. Decide on quality needed, privacy requirements, volume, latency and team capability, and keep the application able to switch.
   </InterviewQuestion>
-  <InterviewQuestion question="What is model distillation for LLMs?" category="Adaptation" level="Senior">
-    A large teacher model generates outputs, or probability distributions, on many prompts, and a smaller student model is trained to imitate them. The student can approach the teacher's quality on the target tasks at a fraction of the cost, which is common for high-volume production features.
-  </InterviewQuestion>
   <InterviewQuestion question="What are reasoning models and when do they help?" category="Fundamentals" level="Senior">
     Reasoning models are trained, often with reinforcement learning on verifiable tasks, to produce extended internal reasoning before answering. They help on multi-step math, coding, planning and analysis, but cost more tokens and time. For simple lookups or formatting tasks, a standard model is faster and cheaper.
-  </InterviewQuestion>
-  <InterviewQuestion question="How do you version and manage prompts in production?" category="Evaluation" level="Mid">
-    Treat prompts as code: keep them in version control or a prompt registry, tie each version to evaluation results, review changes, and deploy with the ability to roll back. Log which prompt and model version produced every response so issues can be traced.
   </InterviewQuestion>
   <InterviewQuestion question="Design a customer-support assistant powered by an LLM. What are the key components?" category="Adaptation" level="Senior">
     A retrieval layer over help articles and policies, tools for account lookups and actions with strict permissions, a conversation manager with memory and handoff to humans, guardrails for safety and PII, and an evaluation and monitoring system with task-specific test sets. Start with retrieval and read-only tools, measure resolution rate and accuracy, then add actions gradually with human approval where needed.

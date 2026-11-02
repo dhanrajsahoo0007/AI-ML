@@ -19,20 +19,8 @@ Related deep-dives: [Harness Engineering](/ai-system-design/genai-system-design/
   <InterviewQuestion question="Workflow vs agent: when should you not use an agent?" category="Design" level="Mid">
     If the steps are known in advance, a fixed workflow of LLM calls and code is cheaper, faster, more predictable and easier to test. Agents are worth their cost and risk when the path depends on intermediate results and cannot be scripted, such as open-ended research or debugging. Many good systems are mostly workflows with an agentic step where needed.
   </InterviewQuestion>
-  <InterviewQuestion question="How does function calling or tool use work?" category="Tools" level="Junior">
-    Tools are described to the model with a name, description and JSON schema for arguments. The model outputs a structured call when it decides a tool is needed, the application validates and executes it, and returns the result to the model as a new message. The model then continues reasoning with that observation.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is the Model Context Protocol (MCP)?" category="Tools" level="Mid">
-    MCP is an open protocol for connecting AI applications to tools and data sources through a standard client-server interface. A server exposes tools, resources and prompts; any MCP-compatible client can discover and use them. It reduces one-off integrations so the same tools work across different agent applications.
-  </InterviewQuestion>
-  <InterviewQuestion question="What makes a good tool definition for an agent?" category="Tools" level="Mid">
-    A clear name and description stating when to use it and when not to, a small, strict schema with well-named arguments and examples, predictable and compact outputs, informative error messages the model can act on, and idempotent behavior where possible. Fewer, well-designed tools beat many overlapping ones.
-  </InterviewQuestion>
   <InterviewQuestion question="Explain ReAct and plan-and-execute patterns." category="Design" level="Mid">
     ReAct interleaves reasoning, an action and an observation at every step, adapting continuously. Plan-and-execute first produces a full plan, then executes the steps, possibly with a cheaper model, and re-plans when something fails. ReAct is flexible for exploratory tasks; plan-and-execute is more efficient and easier to monitor for longer structured tasks.
-  </InterviewQuestion>
-  <InterviewQuestion question="How do agents handle memory?" category="Memory" level="Mid">
-    Short-term memory is the conversation and step history in the context window, often summarized as it grows. Long-term memory stores facts, preferences or past episodes in a database or vector store and retrieves relevant items when needed. Good designs decide explicitly what to write, when to retrieve, and how to forget or correct stale memories.
   </InterviewQuestion>
   <InterviewQuestion question="How do you prevent the context from growing without bound in long agent runs?" category="Memory" level="Senior">
     Summarize or compress older steps, keep only essential tool outputs, store large artifacts outside the context and pass references, and retrieve details when needed. Sub-agents can handle subtasks in their own context and return short results. Track tokens per step to catch growth early.
@@ -40,32 +28,14 @@ Related deep-dives: [Harness Engineering](/ai-system-design/genai-system-design/
   <InterviewQuestion question="When would you use a multi-agent system?" category="Design" level="Senior">
     When a task splits naturally into parts that benefit from separate contexts, tools or instructions, such as parallel research on several sub-questions, or a writer and reviewer pair. Multi-agent systems add coordination overhead, cost and new failure modes, so a single well-tooled agent should be the default until evaluation shows a clear benefit.
   </InterviewQuestion>
-  <InterviewQuestion question="What are common multi-agent orchestration patterns?" category="Design" level="Senior">
-    An orchestrator or supervisor that delegates to specialist workers and combines their results; sequential pipelines where each agent hands off to the next; parallel fan-out and merge; and debate or reviewer patterns where one agent critiques another. The handoff format and shared state must be well defined.
-  </InterviewQuestion>
   <InterviewQuestion question="How do you make agents reliable?" category="Reliability" level="Mid">
     Give them focused context and good tools, validate every tool call, verify results with tests or checks and feed errors back, set step and cost budgets, add human approval for risky actions, and keep detailed traces. Then measure success on an evaluation suite and iterate on the failures.
   </InterviewQuestion>
   <InterviewQuestion question="What are the main failure modes of agents?" category="Reliability" level="Mid">
     Looping or repeating actions, choosing the wrong tool or arguments, losing track of the goal in long contexts, stopping too early or never stopping, hallucinating tool results, being hijacked by injected instructions in tool outputs, and taking harmful actions. Each maps to a harness control: budgets, validation, summaries, stop criteria, sandboxing and permissions.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you secure an agent that can take actions?" category="Safety" level="Senior">
-    Apply least privilege with scoped, short-lived credentials, allow-list actions, sandbox code execution, require human confirmation for irreversible or external actions, treat all tool outputs and retrieved content as untrusted, filter for data exfiltration, and log every action for audit. Test with prompt-injection and abuse scenarios.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is indirect prompt injection, and why is it dangerous for agents?" category="Safety" level="Senior">
-    It is when instructions are hidden in content the agent reads, such as a web page, email or document, rather than typed by the user. Because agents can act, a successful injection can cause data leaks or unwanted actions on the user's behalf. Defenses include isolating untrusted content, restricting what actions can follow from it, and requiring confirmation.
-  </InterviewQuestion>
-  <InterviewQuestion question="How do you evaluate an agent?" category="Evaluation" level="Mid">
-    Use a versioned set of realistic tasks run in a sandbox, graded mainly by checking the final state or outcome, plus trajectory checks for tool use and policy, and calibrated LLM judges for open-ended parts. Run each task several times, report success and consistency, and track cost, latency and safety. Production failures become new test cases.
-  </InterviewQuestion>
   <InterviewQuestion question="What metrics would you track for an agent in production?" category="Evaluation" level="Mid">
     Task completion rate, escalation to humans, user feedback, tool error rates, steps and tokens per task, cost per successful task, latency, guardrail triggers and sampled human review scores, broken down by task type and version.
-  </InterviewQuestion>
-  <InterviewQuestion question="How do you handle tool errors and timeouts?" category="Reliability" level="Junior">
-    Retry transient failures with backoff, return clear error messages to the model so it can correct arguments or choose another path, cap retries, and fall back gracefully or escalate to a human when the task cannot continue. Idempotent tools make retries safe.
-  </InterviewQuestion>
-  <InterviewQuestion question="How do human-in-the-loop checkpoints fit into agent design?" category="Safety" level="Mid">
-    Pause for approval before high-impact actions, such as payments, deletions, sending messages or deploying code, and when the agent's confidence is low or policies are unclear. Show the human a clear summary of the proposed action and its context, and record the decision. Over time, low-risk actions can be automated as evaluation builds trust.
   </InterviewQuestion>
   <InterviewQuestion question="How would you design a research agent that writes reports from web sources?" category="Design" level="Senior">
     Plan sub-questions, search and fetch sources in parallel, extract relevant passages with citations, deduplicate and check source quality, then synthesize a report where every claim cites a source, followed by a verification pass for unsupported claims. Bound the run with time and cost budgets, and evaluate on questions with known answers and human ratings of report quality.
@@ -104,3 +74,9 @@ Related deep-dives: [Harness Engineering](/ai-system-design/genai-system-design/
     Trace every run end to end: prompts, model outputs, tool calls with arguments and results, latency and cost per step, and the final outcome. Group traces by task type and failure category, replay failing traces against new versions, and alert on spikes in errors, loops or cost.
   </InterviewQuestion>
 </InterviewQuestions>
+
+## Asked at top AI companies
+
+These questions are reported from interviews at AI labs, big tech and AI startups. Use the company filter to focus on a target employer.
+
+<BankQuestions topic="agents" />

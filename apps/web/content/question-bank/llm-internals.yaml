@@ -1,0 +1,1143 @@
+# Company-reported questions adapted from Outcome School (Apache 2.0); see NOTICE.md. Answers are our own.
+- id: explain-scaled-dot-product-attention-and-why-the-1-sqrt-d-k
+  q: Explain scaled dot-product attention and why the 1/sqrt(d_k) scaling factor matters.
+  a: >
+    Each token is projected into a query, a key and a value. Attention computes softmax(QKᵀ /
+    √d_k)·V: every query is compared with every key by dot product, the scores are turned into
+    weights with a softmax, and the output is the weighted sum of the values.
+
+
+    The scale matters because the dot product of two random d_k-dimensional vectors has variance
+    that grows with d_k. Without dividing by √d_k, scores become large, the softmax saturates into a
+    near one-hot distribution, and its gradients become tiny, so training slows or stalls. Scaling
+    keeps the score variance near one.
+  topic: llm-internals
+  level: Junior
+  companies: []
+  related: /ai-system-design/genai-system-design/self-attention-explained
+  refs:
+    - title: Math behind √dₖ Scaling Factor in Attention
+      url: https://outcomeschool.com/blog/scaling-dot-product-attention
+    - title: Math behind Attention - Q, K, and V
+      url: https://outcomeschool.com/blog/math-behind-attention-qkv
+  source: outcome-school
+- id: what-is-the-kv-cache-and-what-are-its-memory-implications-at
+  q: What is the KV cache, and what are its memory implications at scale? Derive the formula.
+  a: >
+    During generation each new token attends to all previous tokens, which needs their keys and
+    values in every layer. The KV cache stores them once so each decode step only computes the
+    newest token's projections, turning repeated quadratic work into a cheap append.
+
+
+    Memory per sequence is 2 (keys and values) × layers × KV heads × head dimension × sequence
+    length × bytes per value. For 32 layers, 32 heads of size 128 and 16-bit values that is about
+    0.5 MB per token, or roughly 4.3 GB for one 8K-token sequence. Multiply by batch size and it
+    often exceeds the model weights, which is why GQA, MLA, paging and cache quantization exist.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Amazon
+    - Apple
+    - Character.AI
+    - Mistral AI
+    - NVIDIA
+    - OpenAI
+    - Together AI
+    - xAI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+    - title: What is KV Cache in LLMs?
+      url: https://outcomeschool.com/blog/kv-cache-in-llms
+    - title: KV Cache Compression
+      url: https://outcomeschool.com/blog/kv-cache-compression
+  source: outcome-school
+- id: what-are-multi-query-attention-mqa-and-grouped-query-attenti
+  q: >-
+    What are Multi-Query Attention (MQA) and Grouped-Query Attention (GQA), and what do they trade
+    away?
+  a: >
+    Multi-query attention shares a single key head and value head across all query heads;
+    grouped-query attention shares one key and value head per group of query heads. Both shrink the
+    KV cache by the ratio of query heads to KV heads, which speeds up memory-bound decoding and
+    allows larger batches and longer contexts.
+
+
+    What they trade away is some expressiveness: fewer distinct key and value projections. MQA loses
+    more quality and can train less stably; GQA keeps quality close to full multi-head attention,
+    which is why most large open models use it. Existing multi-head checkpoints can be converted by
+    averaging heads and briefly uptraining.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Meta
+    - Mistral AI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+    - title: Grouped Query Attention
+      url: https://outcomeschool.com/blog/grouped-query-attention
+  source: outcome-school
+- id: what-is-multi-head-latent-attention-mla-and-why-did-deepseek
+  q: What is Multi-head Latent Attention (MLA) and why did DeepSeek introduce it?
+  a: >
+    Multi-head latent attention compresses each token's keys and values into one small latent vector
+    and caches only that latent. At attention time, per-head keys and values are reconstructed
+    through up-projections, which can be folded into the query and output projections so the full
+    keys and values never need to be materialized. Rotary position information is carried in a small
+    separate decoupled key, because RoPE does not commute with the compression.
+
+
+    DeepSeek introduced it in DeepSeek-V2 to cut KV cache memory dramatically, which they reported
+    as a reduction of over 90% versus their earlier model, while keeping or improving quality.
+    Compared with GQA, which reduces cache by sharing heads, MLA keeps every head's keys distinct in
+    a compressed space, so it saves similar or more memory with less quality loss, at the cost of
+    extra projection compute and a more complex implementation.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - DeepSeek
+    - Moonshot AI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+    - title: KV Cache Compression
+      url: https://outcomeschool.com/blog/kv-cache-compression
+    - title: Grouped Query Attention
+      url: https://outcomeschool.com/blog/grouped-query-attention
+  source: outcome-school
+- id: explain-flashattention-it-does-not-reduce-flops-so-why-is-it
+  q: Explain FlashAttention. It does not reduce FLOPs, so why is it faster?
+  a: >
+    Attention on modern GPUs is limited by memory traffic, not arithmetic. The standard
+    implementation writes the full n×n score matrix to slow high-bandwidth memory, reads it back for
+    the softmax, writes the probabilities and reads them again to multiply by V.
+
+
+    FlashAttention tiles Q, K and V into blocks that fit in fast on-chip SRAM, computes the softmax
+    incrementally with running maximum and sum statistics, and accumulates the output without ever
+    storing the full matrix. The math and FLOPs are the same and the result is exact, but far fewer
+    bytes move through slow memory, so it runs faster and uses memory linear in sequence length. In
+    the backward pass it recomputes attention from saved statistics instead of storing the matrix.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Together AI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+    - title: Decoding Flash Attention in LLMs
+      url: https://outcomeschool.com/blog/decoding-flash-attention
+  source: outcome-school
+- id: how-does-byte-pair-encoding-work-and-what-are-its-failure-mo
+  q: >-
+    How does Byte Pair Encoding work, and what are its failure modes (numbers, code, non-Latin
+    scripts)?
+  a: >
+    BPE starts from characters or bytes and repeatedly merges the most frequent adjacent pair in the
+    training corpus into a new token until the vocabulary reaches its target size. Encoding new text
+    applies the learned merges in order, so common words become single tokens and rare words split
+    into pieces.
+
+
+    Failure modes come from that frequency bias. Numbers split inconsistently, which hurts
+    arithmetic unless digits are split individually. Code whitespace and indentation can tokenize
+    poorly. Non-Latin and low-resource scripts get split into many tiny pieces, so the same sentence
+    costs several times more tokens, which raises cost, latency and context usage for those
+    languages.
+  topic: llm-internals
+  level: Junior
+  companies:
+    - Alibaba
+    - Hugging Face
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/tokenization
+  refs:
+    - title: Byte Pair Encoding
+      url: https://outcomeschool.com/blog/bpe-in-llms
+    - title: Tokenization in Large Language Models (LLMs)
+      url: https://www.youtube.com/watch?v=sK2s9I84EVI
+    - title: Tokenization in LLMs
+      url: https://outcomeschool.com/blog/tokenization-in-llms
+  source: outcome-school
+- id: what-is-positional-encoding-in-transformers-and-how-has-it-e
+  q: >-
+    What is positional encoding in transformers, and how has it evolved (sinusoidal → learned → RoPE
+    → ALiBi)?
+  a: >
+    Self-attention is order-blind, so position must be injected. The original Transformer added
+    fixed sinusoidal vectors of different frequencies to the embeddings. BERT and GPT-2 learned one
+    embedding per position, which is simple but cannot handle positions beyond the table.
+
+
+    Later work moved to relative positions. RoPE rotates queries and keys by a position-dependent
+    angle so attention scores depend on relative distance, and it is the default in most modern
+    LLMs. ALiBi adds no embeddings at all and instead penalizes attention scores in proportion to
+    distance, which extrapolates well to longer inputs than seen in training.
+  topic: llm-internals
+  level: Junior
+  companies: []
+  related: /ai-system-design/genai-system-design/positional-encodings
+  refs:
+    - title: Positional Embeddings in LLMs
+      url: https://outcomeschool.substack.com/p/positional-embeddings-in-llms
+    - title: Math Behind RoPE (Rotary Position Embedding)
+      url: https://outcomeschool.com/blog/math-behind-rope-rotary-position-embedding
+  source: outcome-school
+- id: explain-rope-and-how-position-interpolation-yarn-extend-cont
+  q: Explain RoPE and how position interpolation / YaRN extend context beyond the trained length.
+  a: >
+    RoPE splits query and key vectors into pairs of dimensions and rotates each pair by an angle
+    equal to the position times a pair-specific frequency. The dot product of a rotated query and
+    key then depends only on their position difference, so attention sees relative distance.
+
+
+    Beyond the trained length the model meets rotation angles it never saw. Position interpolation
+    rescales positions so a longer sequence maps into the trained range. NTK-aware scaling and YaRN
+    rescale frequencies unevenly, stretching low frequencies more than high ones so fine local
+    detail survives, and YaRN also adjusts attention temperature. A short fine-tune on long
+    documents then adapts the model, followed by long-context retrieval tests at many depths.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Alibaba
+    - Meta
+    - Moonshot AI
+  related: /ai-system-design/genai-system-design/positional-encodings
+  refs:
+    - title: Math Behind RoPE (Rotary Position Embedding)
+      url: https://outcomeschool.com/blog/math-behind-rope-rotary-position-embedding
+  source: outcome-school
+- id: what-do-the-chinchilla-scaling-laws-say-and-how-do-they-diff
+  q: What do the Chinchilla scaling laws say, and how do they differ from earlier scaling intuitions?
+  a: >
+    Chinchilla found that for a fixed training compute budget, model size and training tokens should
+    grow in roughly equal proportion, at about 20 tokens per parameter. A 70B model trained on 1.4
+    trillion tokens beat the 280B Gopher trained with the same compute.
+
+
+    Earlier work by Kaplan and colleagues suggested putting most extra compute into bigger models
+    with relatively little extra data, so many large models were undertrained. In practice, teams
+    now often train past the Chinchilla ratio on purpose, because a smaller model trained longer is
+    cheaper to serve over its lifetime.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: what-is-a-mixture-of-experts-architecture-and-how-does-it-sc
+  q: What is a mixture-of-experts architecture and how does it scale capacity without scaling FLOPs?
+  a: >
+    An MoE layer replaces the single feed-forward network in a transformer block with many expert
+    networks plus a small router. For each token the router picks the top-k experts, often one or
+    two, runs only those and mixes their outputs by the router weights.
+
+
+    Total parameters, and therefore capacity, grow with the number of experts, but compute per token
+    depends only on the experts actually used. The costs are memory, since every expert must be
+    loaded, load balancing so experts get used evenly, and all-to-all communication when experts sit
+    on different GPUs.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Alibaba
+    - Cohere
+    - DeepSeek
+    - Mistral AI
+    - Moonshot AI
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  refs:
+    - title: Mixture of Experts Explained
+      url: https://outcomeschool.com/blog/mixture-of-experts
+  source: outcome-school
+- id: explain-the-difference-between-pre-training-supervised-fine
+  q: Explain the difference between pre-training, supervised fine-tuning and preference optimisation.
+  a: >
+    Pre-training teaches language and world knowledge through next-token prediction on trillions of
+    tokens, producing a base model that continues text but does not reliably follow instructions.
+    Supervised fine-tuning trains on curated prompt and response pairs so the model follows
+    instructions and adopts a format.
+
+
+    Preference optimization then aligns outputs with what people prefer, using comparisons between
+    responses: RLHF trains a reward model and optimizes against it with reinforcement learning,
+    while DPO optimizes directly on preference pairs. Each stage uses far less data than the one
+    before but shapes behavior strongly.
+  topic: fine-tuning
+  level: Junior
+  companies:
+    - Meta
+    - Scale AI
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  refs:
+    - title: Decoding InstructGPT
+      url: https://outcomeschool.com/blog/decoding-instructgpt
+    - title: Reinforcement Learning from Human Feedback (RLHF)
+      url: https://outcomeschool.com/blog/reinforcement-learning-from-human-feedback-rlhf
+  source: outcome-school
+- id: compare-greedy-beam-search-top-k-top-p-and-temperature-sampl
+  q: Compare greedy, beam search, top-k, top-p and temperature sampling. When does each fail?
+  a: >
+    Greedy decoding always takes the most likely token; it is fast and deterministic but can be
+    repetitive and miss better overall sequences. Beam search keeps several candidate sequences and
+    suits tasks with one right answer such as translation, but in open-ended generation it produces
+    bland, repetitive text.
+
+
+    Sampling methods add diversity. Temperature rescales logits: low values become near-greedy, high
+    values become random and incoherent. Top-k samples from the k most likely tokens, which fails
+    when the distribution is very flat or very peaked because k is fixed. Top-p samples from the
+    smallest set whose probability exceeds p, adapting to the distribution, but very high p still
+    admits unlikely tokens. Factual tasks favor low temperature; creative tasks favor moderate
+    temperature with top-p.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Apple
+    - Google DeepMind
+    - Perplexity
+  related: /ai-system-design/genai-system-design/transformer-architecture
+  refs:
+    - title: How does Temperature control LLM output?
+      url: https://outcomeschool.com/blog/how-does-temperature-control-llm-output
+    - title: How do Top-k and Top-p Sampling work?
+      url: https://outcomeschool.com/blog/how-do-top-k-and-top-p-sampling-work
+  source: outcome-school
+- id: what-is-the-lost-in-the-middle-problem-in-long-contexts-and
+  q: What is the lost-in-the-middle problem in long contexts and how do you address it?
+  a: >
+    Studies found that models use information at the beginning and end of a long prompt more
+    reliably than information in the middle, so accuracy dips when the key fact is buried
+    mid-context, even in models that advertise long windows.
+
+
+    Mitigations: retrieve fewer, better-ranked passages instead of stuffing the context, put the
+    most relevant material at the start or end, repeat the question after long documents, and
+    evaluate with tests that place the answer at many depths. Long-context training with information
+    at varied positions also helps.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Moonshot AI
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+  refs:
+    - title: The Lost in the Middle Problem in LLMs
+      url: https://outcomeschool.com/blog/lost-in-the-middle-problem-in-llms
+  source: outcome-school
+- id: why-is-layernorm-placed-pre-block-in-modern-transformers-and
+  q: Why is LayerNorm placed pre-block in modern transformers, and what is RMSNorm?
+  a: >
+    The original Transformer normalized after adding the residual (Post-LN). Modern LLMs normalize
+    the input to each sub-layer before it runs (Pre-LN), which leaves a clean identity path through
+    the residual stream. Gradients then flow well through very deep stacks and training needs less
+    delicate learning-rate warm-up.
+
+
+    RMSNorm is a simpler normalization that divides each vector by its root mean square and applies
+    a learned gain, without subtracting the mean or adding a bias. It is cheaper and works about as
+    well as LayerNorm, so models such as Llama use it.
+  topic: llm-internals
+  level: Mid
+  companies: []
+  related: /ai-system-design/genai-system-design/transformer-architecture
+  refs:
+    - title: RMSNorm (Root Mean Square Layer Normalization)
+      url: https://outcomeschool.com/blog/rmsnorm-root-mean-square-layer-normalization
+  source: outcome-school
+- id: explain-swiglu-and-why-gated-activations-replaced-relu-gelu
+  q: Explain SwiGLU and why gated activations replaced ReLU/GELU in modern LLM MLP blocks.
+  a: >
+    SwiGLU replaces the feed-forward block's single activation with a gated product: one linear
+    projection goes through a Swish (SiLU) activation and is multiplied element-wise by a second
+    linear projection, and the result is projected back down. The gate lets the network control, per
+    dimension, how much information passes.
+
+
+    Gated variants gave consistently better quality per unit of compute in experiments, so modern
+    LLMs adopted them. Because there are three weight matrices instead of two, the hidden size is
+    usually reduced to about two-thirds of the classic 4x width to keep parameter count similar.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Meta
+  related: /ai-system-design/genai-system-design/transformer-architecture
+  refs:
+    - title: Feed-Forward Networks in LLMs
+      url: https://outcomeschool.com/blog/feed-forward-networks-in-llms
+  source: outcome-school
+- id: walk-me-through-what-happens-tensor-by-tensor-in-one-forward
+  q: >-
+    Walk me through what happens, tensor by tensor, in one forward pass of a decoder-only
+    transformer.
+  a: >
+    Token ids of shape (batch, seq) are looked up in the embedding table to give (batch, seq,
+    d_model). In each layer, the hidden states are normalized, projected into Q, K and V, reshaped
+    to (batch, heads, seq, head_dim), and rotary position embeddings are applied to Q and K. Scores
+    QKᵀ/√d have shape (batch, heads, seq, seq); the causal mask sets future positions to minus
+    infinity, a softmax gives weights, and multiplying by V gives (batch, heads, seq, head_dim),
+    which is merged back to d_model and projected by the output matrix.
+
+
+    That result is added to the residual stream, normalized again, passed through the feed-forward
+    block that expands to the hidden size and back, and added to the residual again. After the last
+    layer a final norm is applied and the vectors are projected to vocabulary size, giving logits of
+    shape (batch, seq, vocab); training applies cross-entropy at every position, while generation
+    takes the last position's logits.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/transformer-architecture
+  refs:
+    - title: Decoding Transformer Architecture
+      url: https://outcomeschool.com/blog/decoding-transformer-architecture
+  source: outcome-school
+- id: what-are-the-key-components-of-a-transformer-model-and-why-d
+  q: What are the key components of a Transformer model and why does each matter?
+  a: >
+    Token embeddings turn ids into vectors, and positional information gives order. Each block has
+    self-attention, which lets tokens exchange information, and a feed-forward network, which
+    transforms each token on its own and holds most of the parameters. Residual connections and
+    normalization wrap both sub-layers so deep stacks train stably.
+
+
+    Masks control what each token may attend to, and a final projection with softmax turns vectors
+    into next-token probabilities. Every piece has a job: remove positions and order is lost, remove
+    residuals and depth becomes untrainable, remove attention and tokens cannot use context.
+  topic: llm-internals
+  level: Junior
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/transformer-architecture
+  refs:
+    - title: Decoding Transformer Architecture
+      url: https://outcomeschool.com/blog/decoding-transformer-architecture
+  source: outcome-school
+- id: explain-attention-free-transformer-architectures-and-their-t
+  q: Explain attention-free transformer architectures and their trade-offs.
+  a: >
+    Attention-free designs replace quadratic attention with mechanisms whose cost grows linearly
+    with sequence length: state-space models such as Mamba with input-dependent selective state
+    updates, linear-attention and recurrent variants such as RWKV and RetNet, and long convolutions
+    such as Hyena. They process tokens with a fixed-size state, so inference memory does not grow
+    with context and generation is constant time per token.
+
+
+    The trade-off is recall: compressing history into a fixed state makes exact retrieval of
+    arbitrary earlier tokens, copying and in-context lookup harder than with attention. Hybrids that
+    mix a few attention layers with many linear or state-space layers are a popular compromise,
+    getting most of the efficiency while keeping strong recall.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/efficient-attention
+  source: outcome-school
+- id: walk-me-through-matrix-manipulations-relevant-to-llm-archite
+  q: Walk me through matrix manipulations relevant to LLM architectures.
+  a: >
+    Almost everything is matrix multiplication. Projections multiply hidden states (tokens ×
+    d_model) by weight matrices to produce Q, K and V. Multi-head attention reshapes and transposes
+    those to (heads × tokens × head_dim) so each head runs as a batched matrix multiply: QKᵀ gives a
+    tokens × tokens score matrix per head, and multiplying the softmaxed scores by V gives the head
+    outputs, which are concatenated and multiplied by an output matrix.
+
+
+    The feed-forward block is two or three more large multiplications. Knowing shapes lets you
+    reason about cost: a matmul of (m×k)(k×n) costs about 2mkn FLOPs, which is why parameters times
+    tokens drives compute, and why the tokens × tokens attention matrix dominates at long context.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/self-attention-explained
+  refs:
+    - title: Math behind Attention - Q, K, and V
+      url: https://outcomeschool.com/blog/math-behind-attention-qkv
+    - title: How Does Matrix Multiplication Work in Neural Networks?
+      url: https://outcomeschool.com/blog/matrix-multiplication-in-neural-networks
+  source: outcome-school
+- id: explain-self-attention-what-is-its-computational-complexity
+  q: >-
+    Explain self-attention. What is its computational complexity, and what are your options when
+    contexts get long?
+  a: >
+    Self-attention lets every token compute a relevance-weighted mix of every other token's values,
+    using query-key dot products and a softmax. Each of n tokens compares with n keys, so compute is
+    O(n²·d) and a naive implementation stores an n×n matrix per head.
+
+
+    For long contexts the options are: FlashAttention to make exact attention memory-efficient;
+    sliding-window or sparse attention to limit which pairs are computed; GQA, MLA or cache
+    quantization to shrink the KV cache; linear-attention or state-space hybrids; and system-level
+    choices such as retrieval to keep prompts short. Each trades some combination of exactness,
+    recall and engineering complexity.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - OpenAI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+    - title: Self Attention in Transformers
+      url: https://outcomeschool.com/blog/self-attention-in-transformers
+    - title: How does Sliding Window Attention work?
+      url: https://outcomeschool.com/blog/how-does-sliding-window-attention-work
+  source: outcome-school
+- id: what-is-the-relationship-between-cross-entropy-kl-divergence
+  q: >-
+    What is the relationship between cross-entropy, KL divergence and perplexity, and why is
+    cross-entropy the training loss for language models?
+  a: >
+    Cross-entropy between the true data distribution and the model equals the data's own entropy
+    plus the KL divergence from data to model. Since the data entropy is fixed, minimizing
+    cross-entropy is the same as minimizing KL divergence, which is the same as maximizing the
+    likelihood of the training text.
+
+
+    Perplexity is the exponential of the average cross-entropy per token, roughly how many equally
+    likely choices the model is torn between. Cross-entropy is the training loss because it is the
+    negative log-likelihood of next-token prediction: it is smooth, has simple gradients with a
+    softmax, and directly rewards putting probability on what actually comes next.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - OpenAI
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  refs:
+    - title: Math Behind Cross-Entropy Loss
+      url: https://outcomeschool.com/blog/math-behind-cross-entropy-loss
+  source: outcome-school
+- id: what-is-the-effect-of-adjusting-an-llm-s-context-window-size
+  q: What is the effect of adjusting an LLM's context window size?
+  a: >
+    A larger window lets the model use more history, documents or code in one request, but attention
+    compute grows roughly with the square of the length, the KV cache grows linearly, and time to
+    first token rises with longer prompts. Costs per request go up accordingly.
+
+
+    Quality does not automatically improve: models often use the middle of long contexts poorly, and
+    extending a model beyond its trained length needs position-encoding rescaling and fine-tuning.
+    Shrinking the window cuts cost and latency but forces truncation, summarization or retrieval to
+    fit what matters.
+  topic: llm-internals
+  level: Junior
+  companies:
+    - OpenAI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+    - title: Context Window in LLMs
+      url: >-
+        https://www.linkedin.com/posts/amit-shekhar-iitbhu_the-context-window-is-the-llms-working-memory-activity-7437754426175672320-MH9c
+    - title: Why is the context window limited in LLMs?
+      url: https://www.youtube.com/watch?v=CGIhxIaOg3M&lc
+  source: outcome-school
+- id: explain-the-architectural-choices-in-a-llama-class-model-why
+  q: >-
+    Explain the architectural choices in a Llama-class model: why grouped-query attention, RoPE and
+    SwiGLU instead of the vanilla 2017 Transformer?
+  a: >
+    Llama-class models keep the decoder-only transformer but swap in improvements found after 2017.
+    RoPE gives relative position information that extends better than learned absolute embeddings.
+    Grouped-query attention cuts the KV cache so large models serve long contexts and big batches
+    cheaply. SwiGLU feed-forward layers give better quality per FLOP than ReLU.
+
+
+    They also use Pre-normalization with RMSNorm for stable deep training, drop bias terms, and
+    train on far more tokens than the original Transformer. None of these change the basic idea;
+    each removes a known bottleneck in quality, stability or inference cost.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Meta
+  related: /ai-system-design/genai-system-design/transformer-architecture
+  refs:
+    - title: Grouped Query Attention
+      url: https://outcomeschool.com/blog/grouped-query-attention
+    - title: Math Behind RoPE (Rotary Position Embedding)
+      url: https://outcomeschool.com/blog/math-behind-rope-rotary-position-embedding
+    - title: Feed-Forward Networks in LLMs
+      url: https://outcomeschool.com/blog/feed-forward-networks-in-llms
+  source: outcome-school
+- id: what-breaks-when-you-scale-llm-training-from-8-gpus-to-thous
+  q: >-
+    What breaks when you scale LLM training from 8 GPUs to thousands, and how do modern stacks deal
+    with it?
+  a: >
+    At 8 GPUs, data parallelism over one fast node works. At thousands, the model and optimizer no
+    longer fit per GPU, communication across nodes becomes a bottleneck, hardware failures happen
+    daily, and very large global batches change optimization behavior. Small numerical issues such
+    as loss spikes become run-killers.
+
+
+    Modern stacks combine sharded data parallelism (ZeRO or FSDP), tensor parallelism within a node,
+    pipeline parallelism across nodes and, for MoE, expert parallelism, overlapping communication
+    with compute. They add frequent asynchronous checkpointing and automatic restart, careful
+    learning-rate and batch-size schedules, bf16 or FP8 with stability tricks, and monitoring to
+    catch spikes and bad nodes early.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Meta
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: mistral-7b-shipped-with-grouped-query-attention-and-sliding
+  q: >-
+    Mistral 7B shipped with grouped-query attention and sliding-window attention. What does each buy
+    you, and what does each cost?
+  a: >
+    Grouped-query attention shares key and value heads across groups of query heads, shrinking the
+    KV cache and speeding up decoding at little quality cost. Sliding-window attention lets each
+    token attend only to a fixed window of recent tokens (4,096 in Mistral 7B), so attention cost
+    and cache size stop growing with sequence length, and a rolling buffer can store just the
+    window.
+
+
+    The cost of GQA is a small loss of expressiveness. The cost of sliding windows is that distant
+    tokens are reachable only indirectly through stacked layers, so precise recall of far-away
+    details can suffer compared with full attention.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Mistral AI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+    - title: Grouped Query Attention
+      url: https://outcomeschool.com/blog/grouped-query-attention
+    - title: How does Sliding Window Attention work?
+      url: https://outcomeschool.com/blog/how-does-sliding-window-attention-work
+  source: outcome-school
+- id: explain-how-a-mixtral-style-sparse-mixture-of-experts-model
+  q: >-
+    Explain how a Mixtral-style sparse mixture-of-experts model works. Why does a ~47B-parameter
+    model run at roughly the cost of a ~13B one?
+  a: >
+    Mixtral has 8 expert feed-forward networks per layer and a router that sends each token to its
+    top 2 experts, combining their outputs by router weight. Attention and embeddings are shared;
+    only the feed-forward layers are duplicated.
+
+
+    Adding up all experts gives about 47B parameters, but each token passes through shared layers
+    plus only 2 of 8 experts, roughly 13B active parameters, so compute per token is close to a 13B
+    dense model. Memory still has to hold all 47B, which is the main cost.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Mistral AI
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  refs:
+    - title: Mixture of Experts Explained
+      url: https://outcomeschool.com/blog/mixture-of-experts
+  source: outcome-school
+- id: our-flagship-is-a-sparse-moe-with-10x-more-total-than-active
+  q: >-
+    Our flagship is a sparse MoE with ~10x more total than active parameters. Why is that
+    architecture a good fit for private enterprise deployment, and where does it hurt?
+  a: >
+    For private deployments, compute per token sets throughput and latency, and an MoE with 10x
+    fewer active than total parameters delivers big-model quality at small-model compute, so a
+    customer gets more quality per GPU-hour.
+
+
+    It hurts on memory: every expert must sit in GPU memory, so the minimum hardware footprint
+    matches the total parameter count, which is hard on small on-premise clusters. Expert
+    parallelism adds all-to-all communication, load varies between batches, and fine-tuning and
+    quantization are trickier. The fit is best where customers have enough memory but care about
+    throughput.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Cohere
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  refs:
+    - title: Mixture of Experts Explained
+      url: https://outcomeschool.com/blog/mixture-of-experts
+  source: outcome-school
+- id: walk-me-through-deepseekmoe-how-is-it-different-from-a-stand
+  q: Walk me through DeepSeekMoE. How is it different from a standard top-2 MoE like Mixtral?
+  a: >
+    DeepSeekMoE makes two changes. Fine-grained expert segmentation splits each expert into several
+    smaller ones and routes each token to more of them, so the same compute buys far more possible
+    combinations and experts can specialize more narrowly. Shared expert isolation adds one or more
+    always-active experts that capture common knowledge, so routed experts do not all relearn it.
+
+
+    Mixtral routes each token to 2 of 8 large experts with no shared expert. DeepSeekMoE routes to
+    many small experts plus shared ones, which their papers report gives better quality for the same
+    active compute.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - DeepSeek
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  refs:
+    - title: Mixture of Experts Explained
+      url: https://outcomeschool.com/blog/mixture-of-experts
+    - title: DeepSeek-V4 Architecture Explained
+      url: https://outcomeschool.com/blog/decoding-deepseek-v4
+  source: outcome-school
+- id: deepseek-v3-uses-auxiliary-loss-free-load-balancing-what-was
+  q: >-
+    DeepSeek-V3 uses auxiliary-loss-free load balancing. What was wrong with the auxiliary loss, and
+    how does the bias trick work?
+  a: >
+    The usual auxiliary balancing loss pushes the router toward even expert usage, but it competes
+    with the language-modeling objective: set it strong and quality drops, set it weak and experts
+    collapse.
+
+
+    DeepSeek-V3 instead adds a per-expert bias to the routing scores used only for choosing the
+    top-k experts, not for weighting their outputs. After each step, the bias of overloaded experts
+    is decreased and of underloaded experts increased by a small fixed amount. Balance is steered
+    without adding a gradient that fights the main loss; a very small sequence-level balance loss is
+    kept only as a safeguard.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - DeepSeek
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  source: outcome-school
+- id: what-is-multi-token-prediction-mtp-and-why-train-with-it
+  q: What is multi-token prediction (MTP) and why train with it?
+  a: >
+    Multi-token prediction trains the model to predict several future tokens at each position, not
+    just the next one. In DeepSeek-V3's version, small extra modules sequentially predict the
+    following tokens while sharing the embedding and output head with the main model.
+
+
+    It densifies the training signal and encourages representations that plan ahead, which was
+    reported to improve quality. At inference the extra modules can be dropped, or reused as a
+    built-in draft model for speculative decoding, letting the model propose several tokens per step
+    and verify them, which speeds up generation.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - DeepSeek
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+  refs:
+    - title: DeepSeek-V4 Architecture Explained
+      url: https://outcomeschool.com/blog/decoding-deepseek-v4
+  source: outcome-school
+- id: implement-top-k-moe-routing-with-a-shared-expert-in-pytorch
+  q: >-
+    Implement top-k MoE routing with a shared expert in PyTorch, and point out the efficiency and
+    correctness traps.
+  a: >
+    Compute router logits with a linear layer over the token's hidden state, take a softmax (or
+    sigmoid) over experts, pick the top-k with torch.topk and renormalize their weights. Group
+    tokens by chosen expert, run each expert's feed-forward network on its tokens in a batch,
+    scatter the weighted outputs back, and add the shared expert's output, which runs on every
+    token.
+
+
+    The traps: looping over tokens instead of batching by expert; ignoring capacity limits so one
+    expert gets most tokens; forgetting to renormalize top-k weights; computing the softmax in low
+    precision, which causes instability; losing gradients to the router; and silently dropping
+    tokens on overflow. Add a balancing mechanism and check expert load statistics.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - DeepSeek
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  refs:
+    - title: Mixture of Experts Explained
+      url: https://outcomeschool.com/blog/mixture-of-experts
+  source: outcome-school
+- id: kimi-s-headline-feature-is-very-long-context-when-you-push-f
+  q: >-
+    Kimi's headline feature is very long context. When you push from 8K to hundreds of thousands of
+    tokens, what actually breaks first, and why?
+  a: >
+    Memory breaks first: the KV cache grows linearly with length and at hundreds of thousands of
+    tokens one sequence can need tens of gigabytes, which limits batch size and throughput. Prefill
+    compute grows quadratically, so time to first token balloons.
+
+
+    Quality is the next problem: positions beyond the trained length are out of distribution for
+    RoPE until rescaled, and models degrade at using information in the middle of very long inputs.
+    Fixes include cache compression such as MLA or GQA, FlashAttention and context-parallel prefill,
+    sparse or windowed attention, RoPE rescaling with long-context training, and evaluation at many
+    depths.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Moonshot AI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+    - title: The Lost in the Middle Problem in LLMs
+      url: https://outcomeschool.com/blog/lost-in-the-middle-problem-in-llms
+    - title: Why is the context window limited in LLMs?
+      url: https://www.youtube.com/watch?v=CGIhxIaOg3M&lc
+  source: outcome-school
+- id: kimi-k2-is-a-1t-parameter-moe-with-32b-active-per-token-and
+  q: >-
+    Kimi K2 is a 1T-parameter MoE with ~32B active per token and hundreds of experts. Explain the
+    routing and the systems cost of training it.
+  a: >
+    Each token is routed by a learned router to a small subset of hundreds of fine-grained experts,
+    typically alongside a shared expert, so only about 32B of the 1T parameters run per token.
+    Quality benefits from the huge total capacity while per-token compute stays near a 32B dense
+    model.
+
+
+    The systems cost is in memory and communication. Storing a trillion parameters plus optimizer
+    state needs aggressive sharding across many GPUs; expert parallelism requires all-to-all token
+    exchanges every MoE layer, which must be overlapped with compute; load balancing must keep
+    hundreds of experts busy; and training stability at that scale needs careful optimizer and
+    precision choices.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Moonshot AI
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  refs:
+    - title: Mixture of Experts Explained
+      url: https://outcomeschool.com/blog/mixture-of-experts
+  source: outcome-school
+- id: glm-s-original-pre-training-objective-is-autoregressive-blan
+  q: >-
+    GLM's original pre-training objective is autoregressive blank infilling. How does it differ from
+    BERT and GPT, and why did the team argue it unifies understanding and generation?
+  a: >
+    GLM masks random spans of the input and trains the model to regenerate each span
+    autoregressively, while the unmasked context is visible bidirectionally. Two-dimensional
+    position encodings tell the model where a span sits in the original text and the position within
+    the span.
+
+
+    BERT fills single masked tokens independently and cannot generate fluently; GPT generates left
+    to right but sees only past context. By varying span lengths, from short blanks to whole
+    document endings, one objective trains both understanding (bidirectional context) and generation
+    (autoregressive spans), which is why the team argued it unifies the two.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/encoder-decoder-families
+  refs:
+    - title: Encoder vs Decoder in Transformers
+      url: https://outcomeschool.com/blog/encoder-vs-decoder-in-transformers
+  source: outcome-school
+- id: glm-4-5-is-an-moe-with-355b-total-but-32b-active-parameters
+  q: >-
+    GLM-4.5 is an MoE with 355B total but 32B active parameters. Explain the economics: what does
+    that split buy you and what does it cost?
+  a: >
+    The 355B total gives the model large capacity for knowledge and skills, while the 32B active
+    parameters set compute per token, so it runs roughly at the cost of a 32B dense model in FLOPs
+    and approaches the quality of much larger dense models.
+
+
+    The cost is memory and systems complexity: all 355B parameters must be stored, needing multiple
+    GPUs even for inference, plus expert parallelism, all-to-all communication and load balancing.
+    It is attractive for high-throughput serving where memory is available, less so for small or
+    on-device deployments.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  refs:
+    - title: Mixture of Experts Explained
+      url: https://outcomeschool.com/blog/mixture-of-experts
+  source: outcome-school
+- id: implement-a-top-k-moe-router-in-pytorch-then-contrast-auxili
+  q: >-
+    Implement a top-k MoE router in PyTorch. Then contrast auxiliary-loss load balancing with a
+    loss-free approach.
+  a: >
+    The router is a linear layer from hidden size to number of experts. Take a softmax, select the
+    top-k experts with torch.topk, renormalize their weights, dispatch tokens grouped by expert, and
+    combine the weighted expert outputs.
+
+
+    For balancing, the auxiliary-loss approach adds a term proportional to the product of each
+    expert's token fraction and average router probability, encouraging uniform use but adding a
+    gradient that can hurt quality. The loss-free approach keeps a per-expert bias used only for
+    top-k selection and nudges it after each step toward balance, steering load without interfering
+    with the main objective.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  refs:
+    - title: Mixture of Experts Explained
+      url: https://outcomeschool.com/blog/mixture-of-experts
+  source: outcome-school
+- id: glm-has-been-bilingual-chinese-english-since-glm-130b-what-c
+  q: >-
+    GLM has been bilingual Chinese/English since GLM-130B. What changes in tokenization, data and
+    evaluation when a model must serve both languages well?
+  a: >
+    The tokenizer must cover both scripts efficiently, so the vocabulary is trained on balanced
+    bilingual data; otherwise Chinese text costs far more tokens per sentence than English. The
+    pre-training mixture must balance the two languages and include parallel and code-switched text
+    so knowledge transfers across them.
+
+
+    Evaluation has to be done separately per language with native benchmarks, not translated ones,
+    and include cross-lingual tasks and checks that one language did not regress while the other
+    improved.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/tokenization
+  source: outcome-school
+- id: qwen-uses-byte-level-bpe-with-a-151k-vocabulary-augmented-fo
+  q: >-
+    Qwen uses byte-level BPE with a ~151K vocabulary, augmented for multilingual coverage and with
+    digits split into single characters. Why those choices, and what are the trade-offs?
+  a: >
+    Byte-level BPE guarantees any input can be encoded without unknown tokens. A large vocabulary of
+    about 151K, enriched for many languages, shortens sequences for non-English text, cutting cost
+    and latency and leaving more room in the context. Splitting digits into single tokens makes
+    numbers consistent, which helps arithmetic.
+
+
+    The trade-offs: a large vocabulary means bigger embedding and output matrices and rarer,
+    less-trained tokens, and single-digit splitting makes numbers longer in tokens.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Alibaba
+  related: /ai-system-design/genai-system-design/tokenization
+  refs:
+    - title: Byte Pair Encoding
+      url: https://outcomeschool.com/blog/bpe-in-llms
+  source: outcome-school
+- id: qwen3-unifies-a-thinking-mode-and-a-non-thinking-mode-in-one
+  q: >-
+    Qwen3 unifies a thinking mode and a non-thinking mode in one model with a caller-settable
+    thinking budget. How would you train that, and how would you serve it?
+  a: >
+    Training: first build strong long reasoning through supervised data and reinforcement learning
+    on verifiable tasks, then fine-tune on a mix of examples with and without reasoning traces, each
+    marked by a control flag in the prompt, so one model learns both behaviors. A thinking budget
+    can be supported by training with truncated reasoning that still ends in a good answer.
+
+
+    Serving: expose the mode and budget as request parameters, stop reasoning when the budget is
+    reached and force the answer, route simple requests to non-thinking mode for latency, and bill
+    and rate-limit by total tokens, since thinking requests have long and variable outputs.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Alibaba
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+  refs:
+    - title: Large Reasoning Models (LRMs)
+      url: https://outcomeschool.com/blog/large-reasoning-models
+    - title: DeepSeek-V4 Architecture Explained
+      url: https://outcomeschool.com/blog/decoding-deepseek-v4
+  source: outcome-school
+- id: qwen-ships-both-dense-and-moe-models-30b-with-3b-active-235b
+  q: >-
+    Qwen ships both dense and MoE models (30B with ~3B active; 235B with ~22B active). When would
+    you pick the 30B-A3B MoE over a 32B dense?
+  a: >
+    Pick the 30B-A3B MoE when throughput and latency per token matter and you have memory for all
+    30B parameters: with only about 3B active, it generates much faster and cheaper than a 32B dense
+    model, with quality between a small and a large dense model.
+
+
+    Pick the 32B dense model when you need the best quality at that size, when memory is tight
+    relative to compute, or when simpler fine-tuning, quantization and serving matter. Dense models
+    are also more predictable under heavy batching.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Alibaba
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  refs:
+    - title: Mixture of Experts Explained
+      url: https://outcomeschool.com/blog/mixture-of-experts
+  source: outcome-school
+- id: qwen2-5-extends-context-to-128k-and-1m-for-turbo-using-yarn
+  q: >-
+    Qwen2.5 extends context to 128K (and ~1M for Turbo) using YaRN plus Dual Chunk Attention, mostly
+    training-free. Explain how, and why post-hoc extension is attractive.
+  a: >
+    YaRN rescales RoPE frequencies so positions beyond the trained length map onto angles the model
+    has seen, preserving high-frequency local detail. Dual Chunk Attention splits a long sequence
+    into chunks and remaps relative positions between chunks so no query-key distance exceeds what
+    the model saw in training.
+
+
+    Together they let a model trained at shorter lengths work at much longer contexts with little or
+    no extra training. Post-hoc extension is attractive because long-context pre-training is
+    expensive, and it keeps short-context quality intact.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Alibaba
+  related: /ai-system-design/genai-system-design/positional-encodings
+  refs:
+    - title: Math Behind RoPE (Rotary Position Embedding)
+      url: https://outcomeschool.com/blog/math-behind-rope-rotary-position-embedding
+  source: outcome-school
+- id: why-is-tokenization-the-first-bottleneck-for-indian-language
+  q: >-
+    Why is tokenization the first bottleneck for Indian-language LLMs, and how does a low-fertility
+    tokenizer change the economics?
+  a: >
+    Tokenizers trained mostly on English split Indian-language text into many tiny pieces, a high
+    fertility of tokens per word. The same sentence then costs several times more tokens, which
+    multiplies inference cost and latency, uses up the context window faster, and gives the model
+    weaker units to learn from.
+
+
+    A low-fertility tokenizer trained with good coverage of Indic scripts brings tokens per word
+    close to English, which directly cuts serving cost, fits more content in context, and improves
+    training efficiency. That is why it is the first thing to fix before scaling a model for these
+    languages.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Sarvam AI
+  related: /ai-system-design/genai-system-design/tokenization
+  refs:
+    - title: Byte Pair Encoding
+      url: https://outcomeschool.com/blog/bpe-in-llms
+    - title: Tokenization in Large Language Models (LLMs)
+      url: https://www.youtube.com/watch?v=sK2s9I84EVI
+    - title: Tokenization in LLMs
+      url: https://outcomeschool.com/blog/tokenization-in-llms
+  source: outcome-school
+- id: why-did-transformers-displace-rnns-for-language-modelling-an
+  q: >-
+    Why did transformers displace RNNs for language modelling, and what exactly does the KV cache
+    buy you at inference time?
+  a: >
+    RNNs process tokens one at a time, so training cannot parallelize across the sequence, and
+    information from early tokens fades over long distances. Transformers process all positions in
+    parallel during training and connect any two tokens in one attention step, so they train much
+    faster on GPUs, scale better and handle long-range dependencies.
+
+
+    At inference, the KV cache stores every past token's keys and values for each layer, so
+    generating a new token only computes that token's projections and attends to the cache, instead
+    of reprocessing the whole sequence. It trades memory for a large reduction in compute per step.
+  topic: llm-internals
+  level: Junior
+  companies:
+    - Amazon
+  related: /ai-system-design/genai-system-design/transformer-architecture
+  refs:
+    - title: How do RNNs and Transformers differ?
+      url: https://outcomeschool.com/blog/how-do-rnns-and-transformers-differ
+    - title: What is KV Cache in LLMs?
+      url: https://outcomeschool.com/blog/kv-cache-in-llms
+  source: outcome-school
+- id: walk-me-through-what-actually-happens-when-someone-calls-aut
+  q: >-
+    Walk me through what actually happens when someone calls AutoModelForCausalLM.from_pretrained(…,
+    device_map=“auto”, torch_dtype=“auto”).
+  a: >
+    The library resolves the model id, downloads or reads the config, which names the architecture
+    class, and the weight files, usually sharded safetensors with an index. torch_dtype="auto" picks
+    the dtype stored in the config so weights load in, say, bf16 rather than fp32. With
+    device_map="auto", the model is first created with empty weights, then Accelerate measures
+    available GPU, CPU and disk memory and assigns layers to devices to fit.
+
+
+    Each weight shard is then loaded directly onto its assigned device, and hooks are added so
+    activations move between devices during the forward pass. Layers offloaded to CPU or disk work
+    but are slow, so placement is worth checking after loading.
+  topic: llm-internals
+  level: Senior
+  companies:
+    - Hugging Face
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+  source: outcome-school
+- id: compare-bpe-wordpiece-and-unigram-tokenization-why-is-tokeni
+  q: >-
+    Compare BPE, WordPiece and Unigram tokenization. Why is `tokenizers` written in Rust, and what
+    tokenizer bugs bite people in practice?
+  a: >
+    BPE merges the most frequent adjacent pair repeatedly. WordPiece merges the pair that most
+    increases training-data likelihood and marks word-internal pieces. Unigram starts from a large
+    vocabulary and prunes tokens that matter least to a unigram language model, and can sample
+    alternative segmentations.
+
+
+    The tokenizers library is written in Rust for speed: tokenizing large datasets is a real
+    bottleneck, and Rust gives fast, parallel, memory-safe code with Python bindings. Common bugs
+    include mismatched tokenizer and model versions, missing or doubled special tokens, wrong chat
+    templates, whitespace and normalization differences between training and inference, and offset
+    mappings breaking on unusual Unicode.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Hugging Face
+  related: /ai-system-design/genai-system-design/tokenization
+  refs:
+    - title: Byte Pair Encoding
+      url: https://outcomeschool.com/blog/bpe-in-llms
+    - title: Tokenization in Large Language Models (LLMs)
+      url: https://www.youtube.com/watch?v=sK2s9I84EVI
+    - title: Tokenization in LLMs
+      url: https://outcomeschool.com/blog/tokenization-in-llms
+  source: outcome-school
+- id: what-problem-do-chat-templates-solve-and-what-goes-wrong-whe
+  q: What problem do chat templates solve, and what goes wrong when they're ignored?
+  a: >
+    Chat models are trained on conversations serialized in a specific format, with special tokens
+    marking system, user and assistant turns and the end of each message. The chat template
+    reproduces exactly that format when you send a list of messages.
+
+
+    Ignoring it, for example by concatenating plain text or using another model's format, puts the
+    input out of distribution: the model may ignore the system prompt, continue the user's message,
+    never emit the end-of-turn token, or degrade noticeably. Fine-tuning with the wrong template
+    bakes in these problems.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Hugging Face
+  related: /ai-system-design/genai-system-design/tokenization
+  source: outcome-school
+- id: a-community-contributor-opens-a-pr-adding-a-new-model-archit
+  q: >-
+    A community contributor opens a PR adding a new model architecture to `transformers`. You're the
+    reviewing maintainer: what do you check, and how do you handle the interaction?
+  a: >
+    Technically, check that outputs match the reference implementation numerically on the same
+    weights and inputs, that the code follows the library's conventions and reuses existing
+    components, that tests cover forward passes, generation, saving and loading, and different
+    dtypes and devices, and that the configuration, tokenizer and documentation are complete with
+    weights hosted correctly.
+
+
+    On the human side, thank them, review promptly, explain the reasons behind requested changes,
+    point to examples, help with failing tests, and keep the tone welcoming so they stay involved as
+    a contributor.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Hugging Face
+  related: /ai-system-design/genai-system-design/transformer-architecture
+  source: outcome-school
+- id: a-conversation-runs-past-the-context-window-what-do-you-keep
+  q: A conversation runs past the context window. What do you keep, and how do you decide?
+  a: >
+    Always keep the system prompt and the most recent turns verbatim, because they carry the
+    instructions and immediate context. Older turns are summarized into a running summary, and
+    important facts such as names, preferences or decisions are extracted into a memory store and
+    retrieved when relevant.
+
+
+    Decide by measured importance rather than recency alone: keep content the user refers back to,
+    drop filler, and test summarization quality on long conversations. If a character or persona
+    definition exists, keep it fixed so the voice stays consistent.
+  topic: llm-internals
+  level: Mid
+  companies:
+    - Character.AI
+  related: /ai-system-design/genai-system-design/agent-memory
+  refs:
+    - title: How does context compaction work?
+      url: https://outcomeschool.com/blog/how-does-context-compaction-work
+    - title: AI Agent Memory
+      url: https://outcomeschool.com/blog/ai-agent-memory
+  source: outcome-school
