@@ -1,19 +1,109 @@
 ---
 title: ML fundamentals interview
-description: Short questions that map to day-one ML interviews.
-icon: book-open
+description: The core machine learning questions every ML, data science and AI interview starts with, from bias-variance to trees, metrics and leakage.
+icon: graduation-cap
+area: ML & AI
 ---
 
-<details className="group rounded-lg border border-border bg-card px-4 py-2 my-3">
-  <summary className="cursor-pointer font-medium">Explain the bias–variance tradeoff in plain language.</summary>
-  <div className="mt-2 text-muted-foreground">
-    High bias tends to underfit (too simple to capture signal). High variance tends to overfit (captures noise). The goal is a model that generalizes: enough capacity for the signal, plus regularization, data, and evaluation discipline to control variance.
-  </div>
-</details>
+Almost every ML or data science interview opens here. Interviewers check that you can explain the classic trade-offs in plain words, pick a sensible model and metric for a problem, and spot data problems such as leakage and imbalance. Answers should be short, correct and tied to practice.
 
-<details className="group rounded-lg border border-border bg-card px-4 py-2 my-3">
-  <summary className="cursor-pointer font-medium">What is data leakage and why is it dangerous?</summary>
-  <div className="mt-2 text-muted-foreground">
-    Leakage happens when information from the label or future appears in features during training, inflating offline metrics. It is dangerous because production performance collapses once that signal disappears.
-  </div>
-</details>
+Related reading: the [Machine learning path](/learning-paths/machine-learning) and the [model evaluation metrics](/interviews/model-evaluation-metrics) bank.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between supervised, unsupervised and reinforcement learning?" category="Fundamentals" level="Junior">
+    Supervised learning trains on labeled examples to predict a target, such as price or spam. Unsupervised learning finds structure in unlabeled data, such as clusters or lower-dimensional representations. Reinforcement learning trains an agent to take actions in an environment to maximize cumulative reward, learning from trial and error rather than labels.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain the bias-variance trade-off." category="Bias-Variance" level="Junior">
+    Bias is error from wrong or overly simple assumptions, which causes underfitting; variance is error from sensitivity to the particular training sample, which causes overfitting. More complex models usually lower bias and raise variance. The goal is the complexity that minimizes total error on unseen data, found with validation, regularization and more data.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you detect and fix overfitting?" category="Bias-Variance" level="Junior">
+    Overfitting shows up as low training error but much higher validation error. Fixes include more or cleaner data, simpler models, regularization (L1, L2, dropout), early stopping, cross-validation for model selection, feature selection, and ensembling methods such as bagging that reduce variance.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between L1 and L2 regularization?" category="Bias-Variance" level="Junior">
+    Both add a penalty on weight size to the loss. L1 penalizes absolute values and pushes many weights to exactly zero, which performs feature selection. L2 penalizes squared values and shrinks weights smoothly without zeroing them, which handles correlated features more gracefully. Elastic net combines both.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does L1 produce sparse weights?" category="Bias-Variance" level="Mid">
+    The L1 penalty has a constant gradient magnitude regardless of how small a weight is, so it keeps pushing small weights all the way to zero. Geometrically, the L1 constraint region is a diamond with corners on the axes, and the loss contours tend to touch it at a corner, where some weights are exactly zero. The L2 region is round, so solutions rarely land exactly on an axis.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is cross-validation and when would you use it?" category="Evaluation" level="Junior">
+    Cross-validation splits data into k folds, trains on k minus 1 and validates on the remaining one, rotating through all folds and averaging the score. It gives a more reliable estimate than a single split when data is limited and is used for model and hyperparameter selection. For time series, use forward-chaining splits so the model never trains on the future.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is data leakage? Give examples." category="Data" level="Mid">
+    Leakage is when training uses information that would not be available at prediction time, so offline scores look great but production fails. Examples include features computed from the target, scaling or imputing with statistics from the full dataset before splitting, random splits on time-dependent data, and duplicate records across train and test. Prevent it with time-aware splits and fitting all preprocessing on training data only.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle class imbalance?" category="Data" level="Mid">
+    First choose metrics that reflect the minority class, such as precision, recall, F1 or PR-AUC instead of accuracy. Then consider class weights in the loss, resampling (oversampling the minority, undersampling the majority, or synthetic methods like SMOTE), and adjusting the decision threshold to the business cost of each error type. Always evaluate on the real class distribution.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you deal with missing values?" category="Data" level="Junior">
+    Understand why they are missing first. Options are dropping rows or columns when missingness is rare and random, imputing with mean, median, mode or a model, adding a "was missing" indicator because missingness itself can be informative, or using models such as gradient-boosted trees that handle missing values natively. Fit imputers on training data only.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why and when should you scale features?" category="Data" level="Junior">
+    Distance-based and gradient-based models, such as k-NN, SVMs, k-means, linear models with regularization and neural networks, are sensitive to feature scale, so features with large ranges dominate. Standardization or min-max scaling fixes that. Tree-based models split on thresholds and do not need scaling.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain how linear regression works and its key assumptions." category="Models" level="Junior">
+    Linear regression fits a weighted sum of features to predict a continuous target, usually by minimizing squared error, which has a closed-form solution or can be solved with gradient descent. Classical assumptions are a linear relationship, independent errors, constant error variance and, for inference, normally distributed errors, plus limited multicollinearity among features.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is logistic regression a classification model if it has 'regression' in its name?" category="Models" level="Junior">
+    It regresses the log-odds of the positive class as a linear function of the features, then applies the sigmoid to turn that into a probability. A threshold on the probability gives a class. It is trained with log loss rather than squared error, and its coefficients are interpretable as changes in log-odds.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a decision tree decide where to split?" category="Models" level="Junior">
+    At each node it tries candidate features and thresholds and picks the split that most reduces impurity in the child nodes, measured with Gini impurity or entropy for classification and variance or squared error for regression. It repeats recursively until a stopping rule such as maximum depth or minimum samples per leaf.
+  </InterviewQuestion>
+  <InterviewQuestion question="Compare bagging and boosting." category="Models" level="Mid">
+    Bagging trains many models independently on bootstrap samples and averages them, which mainly reduces variance; random forests are the classic example. Boosting trains models sequentially, each focusing on the errors of the previous ones, which mainly reduces bias; gradient boosting and AdaBoost are examples. Boosting is often more accurate on tabular data but more sensitive to noise and tuning.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do random forests use random feature subsets at each split?" category="Models" level="Mid">
+    Bootstrap samples alone still produce similar trees because strong features dominate the top splits. Limiting each split to a random subset of features decorrelates the trees, and averaging less correlated models reduces variance much more than averaging similar ones.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does gradient boosting work?" category="Models" level="Mid">
+    It builds an additive model of shallow trees. Each new tree is fit to the negative gradient of the loss with respect to the current predictions, which for squared error is simply the residuals. Its predictions are added with a small learning rate, and the process repeats. Libraries such as XGBoost, LightGBM and CatBoost add regularization, efficient split finding and handling of categorical features.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do gradient-boosted trees often beat neural networks on tabular data?" category="Models" level="Senior">
+    Tabular features are heterogeneous, often irregular in their effect, and datasets are moderate in size. Trees handle mixed scales, missing values and sharp thresholds naturally and are robust to uninformative features, while neural networks need more data, careful preprocessing and tuning to match them. Neural networks win when there is a lot of data or rich unstructured inputs such as text and images.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain how an SVM works and what the kernel trick does." category="Models" level="Mid">
+    A support vector machine finds the decision boundary with the largest margin between classes, depending only on the closest points, the support vectors. Soft margins allow some violations, controlled by C. The kernel trick replaces dot products with a kernel function, letting the SVM find nonlinear boundaries as if features were mapped into a higher-dimensional space without computing that mapping explicitly.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is k-nearest neighbors, and what are its weaknesses?" category="Models" level="Junior">
+    k-NN predicts by looking at the k closest training examples and voting or averaging their labels. It needs no training, but prediction is slow on large datasets, it needs feature scaling, and it suffers from the curse of dimensionality, where distances become less meaningful as the number of features grows.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is Naive Bayes 'naive', and why does it still work?" category="Models" level="Mid">
+    It assumes features are conditionally independent given the class, which is rarely true. It still works well for tasks like text classification because it only needs the correct class to have the highest score, not calibrated probabilities, and it is fast, needs little data and is robust to many irrelevant features.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does k-means clustering work and how do you choose k?" category="Unsupervised" level="Junior">
+    k-means picks k centroids, assigns each point to the nearest one, recomputes centroids as the mean of their points, and repeats until assignments stop changing. It assumes roughly spherical clusters of similar size and is sensitive to initialization, so k-means++ is used. Choose k with the elbow method, silhouette score, or most importantly what is useful for the business problem.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is PCA and when would you use it?" category="Unsupervised" level="Mid">
+    Principal component analysis finds orthogonal directions of maximum variance and projects the data onto the top few, reducing dimensionality while keeping as much variance as possible. It is used for visualization, noise reduction, speeding up models and handling multicollinearity. It is linear and unsupervised, so the kept components are not guaranteed to be the most predictive, and features should be standardized first.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the curse of dimensionality?" category="Fundamentals" level="Mid">
+    As the number of features grows, data becomes sparse in the space, distances between points become similar, and the amount of data needed to cover the space grows exponentially. Distance-based methods degrade and models overfit more easily. Remedies include feature selection, dimensionality reduction and models with strong regularization.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain gradient descent and its variants." category="Fundamentals" level="Junior">
+    Gradient descent updates parameters in the direction opposite to the gradient of the loss, scaled by a learning rate. Batch gradient descent uses all data per step, stochastic uses one example, and mini-batch uses a small batch, which is the standard trade-off between noise and efficiency. Momentum, RMSProp and Adam adapt the step to speed up and stabilize convergence.
+  </InterviewQuestion>
+  <InterviewQuestion question="What happens if the learning rate is too high or too low?" category="Fundamentals" level="Junior">
+    Too high and the loss oscillates or diverges because steps overshoot minima. Too low and training is very slow and can stall in poor regions. Learning-rate schedules, such as warm-up followed by decay, and adaptive optimizers help, and a learning-rate range test can find a good starting value.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between parametric and non-parametric models?" category="Fundamentals" level="Mid">
+    Parametric models have a fixed number of parameters regardless of data size, such as linear and logistic regression, so they are fast and data-efficient but limited by their assumptions. Non-parametric models grow in complexity with the data, such as k-NN and decision trees, so they are more flexible but need more data and can be slower.
+  </InterviewQuestion>
+  <InterviewQuestion question="Generative vs discriminative models: what is the difference?" category="Fundamentals" level="Mid">
+    Discriminative models learn the boundary or the conditional probability of the label given the features directly, such as logistic regression. Generative models learn how the data is generated, the joint distribution of features and labels, such as Naive Bayes, and can produce new samples. Discriminative models usually classify better with enough data; generative ones can work with less data and handle missing features.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose between models for a new problem?" category="Fundamentals" level="Mid">
+    Start from the problem: data size and type, latency and interpretability needs, and the metric that matters. Build a simple baseline first, such as a heuristic or logistic regression, then try stronger models such as gradient-boosted trees for tabular data or pretrained networks for text and images. Compare with proper validation and pick the simplest model that meets the target.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is feature importance and how can it mislead you?" category="Evaluation" level="Senior">
+    It estimates how much each feature contributes to a model's predictions, using impurity-based scores, permutation importance or SHAP values. It can mislead when features are correlated, because importance is split or arbitrarily assigned between them, when impurity-based scores favor high-cardinality features, and because importance shows association with predictions, not causation.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you explain a model's prediction to a business stakeholder?" category="Evaluation" level="Mid">
+    Use global explanations to show which factors matter overall, and local explanations such as SHAP to show why one prediction came out the way it did, translated into plain language. Pair them with concrete examples and the model's measured accuracy and limitations. For high-stakes decisions, an inherently interpretable model may be the better choice.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is concept drift and how do you handle it?" category="Data" level="Senior">
+    Concept drift is a change over time in the relationship between features and target, as opposed to data drift, a change in the feature distribution alone. It shows up as declining live performance. Handle it by monitoring input distributions and performance against delayed labels, retraining on recent data on a schedule or trigger, and weighting recent data more heavily.
+  </InterviewQuestion>
+  <InterviewQuestion question="Walk through how you would approach an end-to-end ML project." category="Fundamentals" level="Senior">
+    Clarify the business goal and translate it into a measurable ML objective and success metric. Explore the data, check quality and leakage risks, and build a simple baseline. Engineer features, train and compare models with proper validation, and analyze errors. Then deploy with monitoring for data drift and performance, set up retraining, and confirm business impact with an online experiment.
+  </InterviewQuestion>
+</InterviewQuestions>

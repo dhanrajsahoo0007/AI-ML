@@ -1,0 +1,106 @@
+---
+title: GenAI & RAG interview
+description: Retrieval-augmented generation, embeddings, vector search, chunking, re-ranking and GenAI system questions asked for AI engineer roles.
+icon: database
+area: ML & AI
+---
+
+RAG is the most common GenAI system interviewers ask about. Expect to design a document Q&A system end to end, then defend your choices on chunking, retrieval, ranking, grounding and evaluation, and explain how you would improve accuracy.
+
+Related deep-dives: [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) · [Advanced RAG](/ai-system-design/genai-system-design/advanced-rag) · [Knowledge Graph Systems](/ai-system-design/genai-system-design/knowledge-graph-systems)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is RAG and what problem does it solve?" category="Fundamentals" level="Junior">
+    Retrieval-augmented generation retrieves relevant passages from a knowledge source at query time and puts them in the prompt so the model answers from them. It addresses outdated or missing knowledge, private data, and hallucination, and enables citations and per-user access control without retraining.
+  </InterviewQuestion>
+  <InterviewQuestion question="Describe the ingestion pipeline of a RAG system." category="Architecture" level="Junior">
+    Collect documents from sources, parse them into clean text while keeping structure such as headings and tables, split into chunks, attach metadata such as source, date and permissions, embed each chunk, and write vectors and metadata to an index. Incremental updates and deletions keep the index in sync with the sources.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do embeddings enable semantic search?" category="Retrieval" level="Junior">
+    An embedding model maps text to vectors so that texts with similar meaning have nearby vectors. The query is embedded the same way, and the nearest document vectors by cosine similarity or dot product are retrieved, which finds relevant passages even when they use different words from the query.
+  </InterviewQuestion>
+  <InterviewQuestion question="Cosine similarity vs dot product vs Euclidean distance: which do you use?" category="Retrieval" level="Mid">
+    Use the metric the embedding model was trained with. Cosine similarity ignores vector length and compares direction; dot product includes length, which some models use to encode importance; Euclidean distance is equivalent to cosine for normalized vectors. Many models output normalized vectors, making these choices rank-equivalent.
+  </InterviewQuestion>
+  <InterviewQuestion question="What chunking strategies do you know?" category="Ingestion" level="Mid">
+    Fixed-size chunks with overlap, recursive splitting on separators such as paragraphs and sentences, structure-aware chunking by headings or sections, semantic chunking that splits where topic similarity drops, and parent-child setups that match on small chunks but return their larger parent section. The right one depends on document structure and is chosen with a retrieval evaluation.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do approximate nearest-neighbor indexes like HNSW work?" category="Retrieval" level="Mid">
+    HNSW builds a layered graph where each vector links to its near neighbors, with sparse upper layers for long jumps and dense lower layers for precision. A search starts at the top, greedily moves toward the query, and descends layer by layer. It returns near-exact neighbors in milliseconds over millions of vectors, trading a little recall and memory for speed.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why combine keyword search with vector search?" category="Retrieval" level="Mid">
+    Vector search captures meaning but can miss exact terms such as product codes, error strings, names and rare jargon. BM25 keyword search catches those exactly. Hybrid search runs both and merges results, often with reciprocal rank fusion, improving recall on real enterprise data.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is re-ranking and why is it worth the latency?" category="Retrieval" level="Mid">
+    After retrieving many candidates cheaply, a cross-encoder or LLM re-ranker reads the query with each candidate and scores relevance precisely, keeping only the best few. It often gives the largest single accuracy gain because the generator sees fewer, more relevant passages, for tens to hundreds of milliseconds of extra latency.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle conversational follow-up questions in RAG?" category="Architecture" level="Mid">
+    Rewrite the follow-up into a standalone query using the conversation history, for example turning "what about the premium plan?" into "what is the refund policy for the premium plan?", then retrieve with that. Keep the history in the generation prompt so the answer stays coherent.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make a RAG system cite its sources reliably?" category="Generation" level="Mid">
+    Give each retrieved chunk an id, instruct the model to cite ids for each claim, and have the application render them as links. Then validate: check that cited ids exist in the context and, for important use cases, verify that each cited passage supports its claim with a separate check.
+  </InterviewQuestion>
+  <InterviewQuestion question="What should the system do when retrieval finds nothing relevant?" category="Generation" level="Junior">
+    Say so clearly instead of guessing, and offer next steps such as rephrasing or contacting a human. Detect this with a relevance threshold from the retriever or re-ranker, or by asking the model to answer "not found in the provided documents" when the context lacks the answer.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you evaluate retrieval quality?" category="Evaluation" level="Mid">
+    Build a set of questions with the passages that answer them. Measure recall at k (is a relevant passage in the top k?), precision at k, MRR (how high the first relevant result ranks) and nDCG (graded relevance with position discounting). Evaluate retrieval separately from answer generation so problems can be localized.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are faithfulness and answer relevance in RAG evaluation?" category="Evaluation" level="Mid">
+    Faithfulness measures whether every claim in the answer is supported by the retrieved context, catching hallucinations. Answer relevance measures whether the answer actually addresses the question. Tools such as RAGAS estimate both with LLM graders, alongside context precision and recall.
+  </InterviewQuestion>
+  <InterviewQuestion question="RAG answers are often wrong. How do you find the cause?" category="Debugging" level="Senior">
+    Sample failures and check whether the correct passage was retrieved. If not, it is retrieval: look at parsing, chunking, query rewriting, hybrid search and metadata filters. If retrieved but ranked low, add or tune re-ranking. If present in the prompt but answered wrongly, fix the prompt, context ordering or model choice. Categorize failures and fix the biggest bucket first.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you enforce document permissions in RAG?" category="Architecture" level="Mid">
+    Store access-control metadata with each chunk, synced from the source systems, and filter at query time by the user's identity and groups so unauthorized chunks are never retrieved. Test with users of different roles. Post-filtering the generated answer is not safe because the model already saw the content.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you keep a RAG index fresh?" category="Ingestion" level="Mid">
+    Use change notifications or scheduled diffs from sources to re-ingest updated documents and delete removed ones, track document versions and content hashes to skip unchanged files, and monitor index lag. Re-embed everything when the embedding model changes, since old and new vectors are not comparable.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle tables, images and PDFs in RAG?" category="Ingestion" level="Senior">
+    Use layout-aware parsers that extract tables as structured text or markdown, keep captions and headings with their content, and use OCR for scanned pages. For charts and images, generate text descriptions with a vision model or use multimodal embeddings. For heavily structured data, store it in a database and answer with text-to-SQL instead of chunks.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is HyDE?" category="Retrieval" level="Senior">
+    Hypothetical Document Embeddings: the LLM writes a hypothetical answer to the query, and that text is embedded and used for search, because a full answer often resembles relevant documents more than a short question. It helps vague queries but adds an LLM call and can bias retrieval toward the model's assumptions.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is GraphRAG and when is it useful?" category="Retrieval" level="Senior">
+    GraphRAG builds a knowledge graph of entities and relationships from the corpus and uses it to retrieve connected facts, and in Microsoft's version, summaries of graph communities. It helps multi-hop questions and corpus-wide questions such as "what are the main themes?", which chunk retrieval answers poorly, at a high indexing cost.
+  </InterviewQuestion>
+  <InterviewQuestion question="Long context windows are growing. Is RAG still needed?" category="Fundamentals" level="Senior">
+    Yes for most real systems. Corpora are usually far larger than any context, long prompts cost more and add latency for every query, models use information in the middle of long contexts less reliably, and RAG provides access control and citations. Long context complements RAG by letting you include more retrieved material when useful.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose an embedding model?" category="Retrieval" level="Mid">
+    Compare candidates on your own retrieval evaluation set, using public leaderboards such as MTEB only to shortlist. Consider language and domain coverage, maximum input length, vector dimension and storage cost, latency, licensing and hosting. Fine-tuning an embedding model on your domain's query-passage pairs can give large gains.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is semantic caching for LLM applications?" category="Cost" level="Senior">
+    Store previous question embeddings and answers, and when a new question is semantically very close to a cached one, return the cached answer instead of calling the model. It cuts cost and latency for repetitive traffic, but needs a careful similarity threshold, invalidation when source data changes, and must respect per-user permissions.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design a RAG system for 10 million internal documents with strict access control." category="Architecture" level="Senior">
+    Ingest from source systems with connectors that also sync permissions, parse with layout-aware tools, chunk by structure, and embed into a sharded vector index plus a keyword index, with ACL metadata on every chunk. At query time, rewrite the question, run hybrid search filtered by the user's permissions, re-rank, and generate a cited answer. Add incremental re-indexing, caching, an evaluation set per department, and monitoring of retrieval quality and latency.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are common GenAI product risks beyond hallucination?" category="Fundamentals" level="Mid">
+    Prompt injection through retrieved content, leaking confidential data across users, outdated answers from stale indexes, biased or harmful outputs, copyright issues with generated content, runaway costs, and over-reliance by users on unverified answers. Each needs a specific control and monitoring.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you add multimodal inputs to a RAG system?" category="Architecture" level="Senior">
+    Use multimodal embedding models that place images and text in a shared space, or convert images to text descriptions and captions with a vision-language model and index those. At query time, retrieve across modalities and pass images or their descriptions to a multimodal generator. Evaluate retrieval separately for each modality.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is reciprocal rank fusion?" category="Retrieval" level="Mid">
+    A simple way to merge ranked lists from different retrievers: each document scores the sum of 1 divided by a constant plus its rank in each list. It needs no score calibration between systems, rewards documents ranked well by several retrievers, and is the common default for hybrid search.
+  </InterviewQuestion>
+  <InterviewQuestion question="How large should top-k be for retrieval?" category="Retrieval" level="Junior">
+    Large enough that the right passage is usually included, small enough not to flood the prompt with noise. A common pattern is to retrieve 20 to 100 candidates, re-rank, and pass the best 3 to 10 to the model, tuning both numbers on a retrieval evaluation set.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the 'lost in the middle' problem?" category="Generation" level="Mid">
+    Models tend to use information at the beginning and end of a long context more reliably than information in the middle. In RAG this means stuffing many chunks can bury the relevant one. Re-ranking, keeping fewer chunks, and placing the most relevant ones at the start or end help.
+  </InterviewQuestion>
+  <InterviewQuestion question="Should you fine-tune the generator, the retriever or neither?" category="Fundamentals" level="Senior">
+    Usually neither at first: fix parsing, chunking, hybrid search and re-ranking. If retrieval misses domain-specific matches, fine-tune the embedding model on query-passage pairs. Fine-tune the generator only for consistent format, tone or domain reasoning that prompting cannot achieve. Measure each step separately.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you test a RAG system for prompt injection through documents?" category="Generation" level="Senior">
+    Plant documents containing instructions, such as requests to ignore rules or reveal data, in a test index, and check that answers do not follow them. Defend by delimiting retrieved content as untrusted data, restricting tools available after retrieval, and filtering outputs. Include these cases in the regression suite.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does a production RAG monitoring dashboard show?" category="Evaluation" level="Mid">
+    Query volume and latency per stage, the share of queries with no relevant context, retrieval scores, citation rates, user feedback, sampled faithfulness scores from an LLM judge, cost per query, and index freshness. Breaking these down by source and user group helps find problems quickly.
+  </InterviewQuestion>
+</InterviewQuestions>

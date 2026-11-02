@@ -105,6 +105,7 @@ export async function getTopLevelMeta(
       icon: data.icon as string | undefined,
       categories: data.categories as string[] | undefined,
       groups: data.groups as ContentGroupDef[] | undefined,
+      area: data.area as string | undefined,
     });
   }
   return metas;

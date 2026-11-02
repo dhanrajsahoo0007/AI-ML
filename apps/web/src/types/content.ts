@@ -17,6 +17,7 @@ export interface ContentMeta {
   icon?: string;
   categories?: string[];
   groups?: ContentGroupDef[];
+  area?: string;
 }
 
 export interface BreadcrumbItem {
