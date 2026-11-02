@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { ArrowUpRight, ListCollapse, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CompanyChip, type CompanyTag } from "@/components/company-logo";
 
 type Level = "Junior" | "Mid" | "Senior";
 
@@ -12,7 +13,7 @@ interface InterviewQuestionProps {
   question: string;
   category?: string;
   level?: Level;
-  companies?: string[];
+  companies?: CompanyTag[];
   related?: { href: string; title: string };
   refs?: { title: string; url: string }[];
   children: React.ReactNode;
@@ -21,6 +22,9 @@ interface InterviewQuestionProps {
 const LEVELS: Level[] = ["Junior", "Mid", "Senior"];
 // Show the search box only on banks large enough to need it.
 const SEARCH_THRESHOLD = 10;
+// Company tags shown on a question before "+N more", and company filters before "Show all".
+const TAGS_SHOWN = 6;
+const COMPANY_FILTERS_SHOWN = 10;
 
 // Plain text of an answer, so search can match answer bodies as well as questions.
 function nodeText(node: React.ReactNode): string {
@@ -44,6 +48,8 @@ function chipClass(active: boolean) {
 interface InterviewQuestionsProps {
   title?: string;
   footer?: React.ReactNode;
+  /** Company slug chosen outside the list (the companies page); replaces the company chips. */
+  company?: string;
   children: React.ReactNode;
 }
 
@@ -89,8 +95,16 @@ function QuestionItem({
             </span>
           )}
           {companies && companies.length > 0 && (
-            <span className="mt-1.5 block text-[13px] text-muted-foreground">
-              Asked at {companies.join(", ")}
+            <span className="mt-2.5 flex flex-wrap items-center gap-1.5">
+              <span className="mr-0.5 text-[12.5px] text-muted-foreground">Asked at</span>
+              {companies.slice(0, TAGS_SHOWN).map((c) => (
+                <CompanyChip key={c.slug} company={c} />
+              ))}
+              {companies.length > TAGS_SHOWN && (
+                <span className="text-[12.5px] text-muted-foreground">
+                  +{companies.length - TAGS_SHOWN} more
+                </span>
+              )}
             </span>
           )}
         </div>
@@ -159,7 +173,7 @@ export function InterviewQuestion(_props: InterviewQuestionProps) {
   return null;
 }
 
-export function InterviewQuestions({ title, footer, children }: InterviewQuestionsProps) {
+export function InterviewQuestions({ title, footer, company, children }: InterviewQuestionsProps) {
   const questions = React.Children.toArray(children).filter(
     (child): child is React.ReactElement<InterviewQuestionProps> =>
       React.isValidElement(child)
@@ -169,12 +183,14 @@ export function InterviewQuestions({ title, footer, children }: InterviewQuestio
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [activeLevel, setActiveLevel] = useState<Level | null>(null);
   const [query, setQuery] = useState("");
-  const [activeCompany, setActiveCompany] = useState("");
+  const [chosenCompany, setActiveCompany] = useState("");
+  const activeCompany = company ?? chosenCompany;
+  const [showAllCompanies, setShowAllCompanies] = useState(false);
 
   const searchIndex = useMemo(
     () =>
       questions.map((q) =>
-        `${q.props.question} ${q.props.category ?? ""} ${(q.props.companies ?? []).join(" ")} ${nodeText(q.props.children)}`.toLowerCase()
+        `${q.props.question} ${q.props.category ?? ""} ${(q.props.companies ?? []).map((c) => c.name).join(" ")} ${nodeText(q.props.children)}`.toLowerCase()
       ),
     [questions]
   );
@@ -184,21 +200,30 @@ export function InterviewQuestions({ title, footer, children }: InterviewQuestio
     [questions]
   );
 
+  // Companies by how many questions they tag, most first.
   const companyOptions = useMemo(() => {
-    const seen = new Map<string, number>();
+    const seen = new Map<string, { company: CompanyTag; count: number }>();
     for (const q of questions)
-      for (const c of q.props.companies ?? []) seen.set(c, (seen.get(c) ?? 0) + 1);
-    return Array.from(seen.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+      for (const c of q.props.companies ?? []) {
+        const entry = seen.get(c.slug) ?? { company: c, count: 0 };
+        entry.count += 1;
+        seen.set(c.slug, entry);
+      }
+    return Array.from(seen.values()).sort(
+      (a, b) => b.count - a.count || a.company.name.localeCompare(b.company.name)
+    );
   }, [questions]);
 
+  // Topic counts follow the company filter, so they match what a click on the chip shows.
   const tags = useMemo(() => {
     const seen = new Map<string, number>();
     for (const q of questions) {
+      if (activeCompany && !(q.props.companies ?? []).some((c) => c.slug === activeCompany)) continue;
       const cat = q.props.category;
       if (cat) seen.set(cat, (seen.get(cat) ?? 0) + 1);
     }
     return Array.from(seen.entries()).map(([name, count]) => ({ name, count }));
-  }, [questions]);
+  }, [questions, activeCompany]);
 
   const filtered = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -208,7 +233,7 @@ export function InterviewQuestions({ title, footer, children }: InterviewQuestio
         ({ q, originalIndex }) =>
           (!activeTag || q.props.category === activeTag) &&
           (!activeLevel || q.props.level === activeLevel) &&
-          (!activeCompany || (q.props.companies ?? []).includes(activeCompany)) &&
+          (!activeCompany || (q.props.companies ?? []).some((c) => c.slug === activeCompany)) &&
           terms.every((t) => searchIndex[originalIndex].includes(t))
       );
   }, [questions, activeTag, activeLevel, activeCompany, query, searchIndex]);
@@ -283,24 +308,37 @@ export function InterviewQuestions({ title, footer, children }: InterviewQuestio
         </label>
       )}
 
-      {companyOptions.length > 1 && (
-        <label className="mb-3 flex flex-wrap items-center gap-2">
+      {company === undefined && companyOptions.length > 1 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           <span className="mr-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
             Company
           </span>
-          <select
-            value={activeCompany}
-            onChange={(e) => setActiveCompany(e.target.value)}
-            className="rounded-full border border-hairline bg-paper px-3 py-1 text-[13px] text-ink-2 outline-none focus:border-ink"
-          >
-            <option value="">Any company</option>
-            {companyOptions.map(([name, count]) => (
-              <option key={name} value={name}>
-                {name} ({count})
-              </option>
-            ))}
-          </select>
-        </label>
+          <button onClick={() => setActiveCompany("")} className={chipClass(activeCompany === "")}>
+            Any
+          </button>
+          {(showAllCompanies
+            ? companyOptions
+            : companyOptions.filter(
+                (o, i) => i < COMPANY_FILTERS_SHOWN || o.company.slug === activeCompany
+              )
+          ).map(({ company, count }) => (
+            <CompanyChip
+              key={company.slug}
+              company={company}
+              count={count}
+              active={activeCompany === company.slug}
+              onClick={() => setActiveCompany(activeCompany === company.slug ? "" : company.slug)}
+            />
+          ))}
+          {companyOptions.length > COMPANY_FILTERS_SHOWN && (
+            <button
+              onClick={() => setShowAllCompanies(!showAllCompanies)}
+              className="text-[13px] text-primary underline underline-offset-2"
+            >
+              {showAllCompanies ? "Show fewer" : `Show all ${companyOptions.length}`}
+            </button>
+          )}
+        </div>
       )}
 
       {levels.length > 1 && (

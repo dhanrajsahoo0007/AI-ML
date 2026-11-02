@@ -5,6 +5,7 @@ import { Stats } from "@/components/home/stats";
 import { CtaBanner } from "@/components/home/cta-banner";
 import { getCatalog } from "@/lib/get-catalog";
 import { getContentSlugs } from "@/lib/mdx-doc";
+import { getCategories } from "@/lib/question-bank";
 import type { ContentSection } from "@/types/content";
 
 export const revalidate = 60;
@@ -23,14 +24,14 @@ export default async function HomePage() {
 
   const sections: ContentSection[] = [
     "learning-paths",
-    "interviews",
     "system-design",
     "ai-system-design",
   ];
   const slugCounts = await Promise.all(
     sections.map((s) => getContentSlugs(s).then((arr) => arr.length))
   );
-  const totalTopics = slugCounts.reduce((a, b) => a + b, 0);
+  const interviewTopics = getCategories().reduce((n, c) => n + c.subsections.length, 0);
+  const totalTopics = slugCounts.reduce((a, b) => a + b, interviewTopics);
 
   return (
     <>

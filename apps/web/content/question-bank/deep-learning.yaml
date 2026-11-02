@@ -1,0 +1,708 @@
+# Interview questions for this category. Entries with `source: outcome-school` are adapted from
+# Outcome School (Apache 2.0); see NOTICE.md. All answers are written by Origins AI Learn.
+- id: derive-the-gradient-of-cross-entropy-loss-with-softmax-input
+  q: Derive the gradient of cross-entropy loss with softmax inputs, and explain why we fuse them numerically.
+  a: |
+    With logits z, softmax probabilities p_i = exp(z_i) / Σ_j exp(z_j) and a one-hot target y, the loss is L = −Σ_i y_i log p_i. The derivative of p_i with respect to z_k is p_i(δ_ik − p_k), and the chain rule gives ∂L/∂z_k = p_k − y_k: predicted probability minus target.
+
+    They are fused because computing softmax and then log separately is numerically unstable: exponentials overflow for large logits and log of tiny probabilities underflows. A fused log-softmax uses the log-sum-exp trick (subtracting the maximum logit) and yields the simple, stable gradient p − y.
+  level: Senior
+  category: deep-learning
+  subcategory: training
+  companies:
+  - Google DeepMind
+  related: /learning-paths/deep-learning
+  refs:
+  - title: Math Behind Cross-Entropy Loss
+    url: https://outcomeschool.com/blog/math-behind-cross-entropy-loss
+  - title: Math Behind Backpropagation
+    url: https://outcomeschool.com/blog/math-behind-backpropagation
+  source: outcome-school
+- id: summarize-the-differences-and-benefits-of-the-adam-optimizer
+  q: Summarize the differences and benefits of the Adam optimizer compared with other methods for neural-network image classification.
+  a: |
+    Plain SGD uses one learning rate for all parameters; momentum adds a moving average of gradients to smooth and speed up progress. Adam combines momentum with per-parameter adaptive step sizes from a moving average of squared gradients, plus bias correction, so it converges quickly with little tuning and handles sparse or differently scaled gradients well.
+
+    For image classification, Adam or AdamW trains fast and is robust, while well-tuned SGD with momentum and a learning-rate schedule has historically reached slightly better generalization on some benchmarks. AdamW's decoupled weight decay narrows that gap and is the common default for transformers.
+  level: Mid
+  category: deep-learning
+  subcategory: training
+  companies:
+  - NVIDIA
+  related: /learning-paths/deep-learning
+  source: outcome-school
+- id: how-does-backpropagation-work
+  q: How does backpropagation work?
+  a: |
+    After a forward pass computes the loss, backpropagation applies the chain rule from the output back to the input, computing the gradient of the loss with respect to every weight layer by layer and reusing intermediate results. An optimizer then updates the weights using those gradients. Automatic differentiation frameworks do this for any computation graph.
+  level: Junior
+  category: deep-learning
+  subcategory: training
+- id: why-do-neural-networks-need-non-linear-activation-functions
+  q: Why do neural networks need non-linear activation functions?
+  a: |
+    Without non-linearities, a stack of linear layers collapses into a single linear transformation, so depth adds nothing. Non-linear activations let networks represent complex functions, and with enough units a network with one hidden layer can approximate any continuous function.
+  level: Junior
+  category: deep-learning
+  subcategory: training
+- id: compare-sigmoid-tanh-relu-and-gelu
+  q: Compare sigmoid, tanh, ReLU and GELU.
+  a: |
+    Sigmoid squashes to between 0 and 1 and tanh to between minus 1 and 1; both saturate, so gradients vanish for large inputs. ReLU outputs max of zero and x, is cheap and does not saturate for positive inputs, but units can "die" if they only receive negative inputs. GELU is a smooth ReLU-like function used in transformers. Leaky ReLU and similar variants keep a small gradient for negative inputs.
+  level: Junior
+  category: deep-learning
+  subcategory: training
+- id: what-causes-vanishing-and-exploding-gradients-and-how-do-you
+  q: What causes vanishing and exploding gradients, and how do you fix them?
+  a: |
+    Backpropagation multiplies many per-layer derivatives; if they are mostly smaller than one, gradients shrink toward zero in early layers, and if larger than one, they blow up. Fixes include ReLU-family activations, careful initialization such as He or Xavier, normalization layers, residual connections, gradient clipping, and gated architectures like LSTMs for sequences.
+  level: Mid
+  category: deep-learning
+  subcategory: training
+- id: why-does-weight-initialization-matter
+  q: Why does weight initialization matter?
+  a: |
+    If weights are too small, signals and gradients shrink layer after layer; too large, they explode. Initializing all weights to the same value makes neurons learn identical features. Schemes such as Xavier (for tanh) and He (for ReLU) scale random initial weights to the layer size so activation variance stays roughly constant through depth.
+  level: Mid
+  category: deep-learning
+  subcategory: training
+- id: what-does-batch-normalization-do-and-why-does-it-help
+  q: What does batch normalization do and why does it help?
+  a: |
+    It normalizes each feature's activations over the mini-batch to zero mean and unit variance, then applies a learned scale and shift. It allows higher learning rates, makes training less sensitive to initialization and has a mild regularizing effect. At inference it uses running averages of the statistics. It works poorly with very small batches, where layer normalization is preferred.
+  level: Mid
+  category: deep-learning
+  subcategory: training
+- id: batch-norm-vs-layer-norm-when-do-you-use-each
+  q: 'Batch norm vs layer norm: when do you use each?'
+  a: |
+    Batch norm normalizes across the batch for each feature, which suits CNNs with reasonable batch sizes. Layer norm normalizes across features within each example, so it does not depend on batch size or sequence length, which suits transformers, RNNs and small or variable batches.
+  level: Mid
+  category: deep-learning
+  subcategory: training
+- id: how-does-dropout-work-and-why-is-it-turned-off-at-inference
+  q: How does dropout work and why is it turned off at inference?
+  a: |
+    During training, dropout randomly zeroes a fraction of activations, which prevents units from co-adapting and acts like training an ensemble of sub-networks. At inference all units are used, and activations are scaled (usually during training, called inverted dropout) so expected values match. Keeping dropout on at inference would add noise to predictions.
+  level: Junior
+  category: deep-learning
+  subcategory: training
+- id: what-is-adamw-and-how-does-it-differ-from-adam-with-l2-regul
+  q: What is AdamW and how does it differ from Adam with L2 regularization?
+  a: |
+    In Adam, adding an L2 penalty to the loss puts it inside the adaptive gradient scaling, so parameters with large gradient history get less regularization than intended. AdamW decouples weight decay, applying it directly to the weights separately from the adaptive update, which gives more consistent regularization and better generalization. It is the standard optimizer for training transformers.
+  level: Senior
+  category: deep-learning
+  subcategory: training
+- id: why-use-learning-rate-warm-up-and-decay-schedules
+  q: Why use learning-rate warm-up and decay schedules?
+  a: |
+    Early in training, weights and optimizer statistics are poorly estimated, so large steps can destabilize the model; warm-up raises the learning rate gradually. Later, decaying the rate, for example with cosine or step schedules, lets the model settle into a good minimum instead of bouncing around it.
+  level: Mid
+  category: deep-learning
+  subcategory: training
+- id: what-is-gradient-clipping-and-when-is-it-needed
+  q: What is gradient clipping and when is it needed?
+  a: |
+    It caps the gradient norm or values before the update so a single bad batch cannot produce a huge step. It is common for RNNs and transformers, where occasional exploding gradients can wreck training, and is cheap insurance in large-scale training.
+  level: Mid
+  category: deep-learning
+  subcategory: training
+- id: what-is-transfer-learning-and-how-do-you-fine-tune-a-pretrai
+  q: What is transfer learning and how do you fine-tune a pretrained model?
+  a: |
+    Transfer learning reuses a model trained on a large dataset as the starting point for a related task. Typically you replace the output head, train it first with the backbone frozen, then unfreeze some or all layers and continue with a small learning rate. It needs far less data and compute than training from scratch.
+  level: Junior
+  category: deep-learning
+  subcategory: training
+- id: what-is-the-role-of-the-softmax-and-cross-entropy-loss-in-cl
+  q: What is the role of the softmax and cross-entropy loss in classification?
+  a: |
+    Softmax turns raw scores into a probability distribution over classes. Cross-entropy measures how much probability the model assigns to the correct class, heavily penalizing confident wrong predictions. Combined, their gradient with respect to the logits is simply predicted probabilities minus the one-hot target, which makes training stable.
+  level: Junior
+  category: deep-learning
+  subcategory: training
+- id: what-is-label-smoothing-and-why-use-it
+  q: What is label smoothing and why use it?
+  a: |
+    Label smoothing replaces hard one-hot targets with slightly softened ones, for example 0.9 for the true class and the rest spread across other classes. It discourages the model from becoming overconfident, improving calibration and sometimes generalization, at the cost of slightly less informative logits for tasks like distillation.
+  level: Senior
+  category: deep-learning
+  subcategory: training
+- id: what-is-knowledge-distillation
+  q: What is knowledge distillation?
+  a: |
+    A small student model is trained to match the outputs, often the softened probability distributions, of a larger teacher model in addition to the true labels. The soft targets carry information about how classes relate, so the student learns more than from labels alone, giving a cheaper model with much of the teacher's accuracy.
+  level: Mid
+  category: deep-learning
+  subcategory: training
+- id: your-network-s-training-loss-is-not-decreasing-how-do-you-de
+  q: Your network's training loss is not decreasing. How do you debug it?
+  a: |
+    First try to overfit a tiny batch; if that fails, there is a bug. Check data and labels, input normalization, the loss function and output activation pairing, and that gradients are non-zero and finite. Then try lowering the learning rate, check initialization, and log activation and gradient statistics per layer to find dead or exploding layers.
+  level: Mid
+  category: deep-learning
+  subcategory: training
+- id: training-accuracy-is-high-but-validation-accuracy-is-low-wha
+  q: Training accuracy is high but validation accuracy is low. What do you do?
+  a: |
+    That is overfitting, or a mismatch between training and validation data. Check for leakage and distribution differences first. Then add data or augmentation, regularize with dropout and weight decay, use early stopping, reduce model size, or use a pretrained model and fine-tune it.
+  level: Junior
+  category: deep-learning
+  subcategory: training
+- id: what-is-data-augmentation-and-why-does-it-work
+  q: What is data augmentation and why does it work?
+  a: |
+    It creates modified copies of training examples, such as crops, flips and color changes for images or back-translation and synonym swaps for text, that keep the label the same. It teaches the model invariances and effectively enlarges the dataset, reducing overfitting.
+  level: Junior
+  category: deep-learning
+  subcategory: training
+- id: how-does-mixed-precision-training-work
+  q: How does mixed-precision training work?
+  a: |
+    Most computation runs in 16-bit floating point (fp16 or bf16) for speed and memory savings, while a 32-bit master copy of the weights is kept for accurate updates. With fp16, loss scaling multiplies the loss before backpropagation to stop small gradients from underflowing; bf16 has a wider range and usually does not need it.
+  level: Senior
+  category: deep-learning
+  subcategory: training
+- id: why-are-larger-batch-sizes-not-always-better
+  q: Why are larger batch sizes not always better?
+  a: |
+    Larger batches give smoother gradient estimates and better hardware use, but beyond a point they need proportionally higher learning rates and warm-up to train well, they reduce the number of updates per epoch, and very large batches can generalize worse. Memory also limits batch size; gradient accumulation simulates larger batches when needed.
+  level: Senior
+  category: deep-learning
+  subcategory: training
+- id: how-do-you-make-a-neural-network-smaller-and-faster-for-depl
+  q: How do you make a neural network smaller and faster for deployment?
+  a: |
+    Quantize weights and activations to 8-bit or lower, prune unimportant weights or channels, distill into a smaller student, use efficient architectures, and compile the model with an inference runtime that fuses operations. Measure accuracy after each step, because the right combination depends on the hardware and latency target.
+  level: Senior
+  category: deep-learning
+  subcategory: training
+- id: how-do-gru-cells-work-and-how-do-they-address-the-vanishing
+  q: How do GRU cells work, and how do they address the vanishing gradient problem? How does a BiLSTM work?
+  a: |
+    A GRU has an update gate that decides how much of the previous hidden state to keep versus replace, and a reset gate that decides how much past state to use when computing the candidate new state. The new hidden state is an interpolation between the old state and the candidate, controlled by the update gate.
+
+    Because the update gate can keep the state almost unchanged, information and gradients can flow across many time steps through that near-identity path, which reduces vanishing gradients compared with plain RNNs. A BiLSTM runs one LSTM forward and one backward over the sequence and concatenates their states, so each position sees both past and future context.
+  level: Mid
+  category: deep-learning
+  subcategory: architectures
+  companies:
+  - Amazon
+  related: /learning-paths/deep-learning
+  refs:
+  - title: Recurrent Neural Network (RNN)
+    url: https://outcomeschool.com/blog/recurrent-neural-network
+  source: outcome-school
+- id: what-is-attention-in-machine-learning-models-what-happens-in
+  q: What is Attention in machine learning models? What happens in a neural network if you remove all the hidden layers?
+  a: |
+    Attention lets a model compute, for each position, a weighted combination of other positions' information, with weights based on learned relevance between a query and keys. It lets models focus on the relevant parts of the input and connect distant elements directly.
+
+    If you remove all hidden layers, the network becomes a linear model applied to the inputs, such as linear or logistic regression, depending on the output layer. It can only learn linear decision boundaries, losing the ability to represent complex non-linear functions.
+  level: Junior
+  category: deep-learning
+  subcategory: architectures
+  companies:
+  - Amazon
+  related: /ai-system-design/genai-system-design/self-attention-explained
+  refs:
+  - title: Math behind Attention - Q, K, and V
+    url: https://outcomeschool.com/blog/math-behind-attention-qkv
+  source: outcome-school
+- id: how-do-lstms-address-the-problems-of-plain-rnns
+  q: How do LSTMs address the problems of plain RNNs?
+  a: |
+    Plain RNNs struggle to keep information over long sequences because gradients vanish through repeated multiplication. LSTMs add a cell state with input, forget and output gates that control what is written, kept and exposed, providing a path where information and gradients can flow over many steps. GRUs are a simpler gated alternative.
+  level: Mid
+  category: deep-learning
+  subcategory: architectures
+- id: why-have-transformers-largely-replaced-rnns
+  q: Why have transformers largely replaced RNNs?
+  a: |
+    Transformers process all positions in parallel during training, which is far faster on modern hardware, and connect any two positions with one attention step, which handles long-range dependencies better. They also scale more predictably with data and compute. RNNs remain useful for some streaming and low-memory settings.
+  level: Mid
+  category: deep-learning
+  subcategory: architectures
+- id: what-is-an-autoencoder-and-what-is-a-variational-autoencoder
+  q: What is an autoencoder, and what is a variational autoencoder?
+  a: |
+    An autoencoder compresses input into a low-dimensional code and reconstructs it, learning useful representations for denoising, compression or anomaly detection. A variational autoencoder makes the code a probability distribution and regularizes it toward a prior, so you can sample new codes and generate new data with a smooth latent space.
+  level: Mid
+  category: deep-learning
+  subcategory: architectures
+- id: how-do-gans-work-and-why-are-they-hard-to-train
+  q: How do GANs work and why are they hard to train?
+  a: |
+    A generator creates samples from noise and a discriminator tries to tell them from real data; they train against each other until generated samples look real. Training is unstable because it is a two-player game: one side can overpower the other, gradients can vanish, and the generator can collapse to a few modes. Techniques such as Wasserstein losses and spectral normalization help.
+  level: Senior
+  category: deep-learning
+  subcategory: architectures
+- id: how-do-diffusion-models-generate-images
+  q: How do diffusion models generate images?
+  a: |
+    During training, noise is added to images over many steps, and a network learns to predict and remove the noise at each step. Generation starts from pure noise and repeatedly denoises it, optionally guided by text through conditioning such as classifier-free guidance. Latent diffusion runs this process in a compressed latent space to save compute.
+  level: Senior
+  category: deep-learning
+  subcategory: architectures
+- id: a-network-confuses-pugs-and-pit-bulls-and-some-training-labe
+  q: A network confuses pugs and pit bulls and some training labels are wrong. How do you modify the model and the data?
+  a: |
+    Data: audit and clean labels for the confused classes, using confident-learning methods or disagreement between models to find likely mislabels, collect more varied examples of both breeds, and add targeted augmentation. Check the confusion is not driven by background or dataset biases.
+
+    Model: use a stronger pretrained backbone and fine-tune, increase input resolution so facial features are visible, use loss functions robust to label noise or label smoothing, and evaluate with per-class metrics and the confusion matrix on a clean test set.
+  level: Senior
+  category: deep-learning
+  subcategory: computer-vision
+  companies:
+  - NVIDIA
+  related: /learning-paths/deep-learning
+  source: outcome-school
+- id: why-are-convolutions-better-than-fully-connected-layers-for
+  q: Why are convolutions better than fully connected layers for images?
+  a: |
+    Convolutions share small filters across all positions, giving locality, translation equivariance and far fewer parameters. A fully connected layer on a large image would need millions of weights per neuron, overfit easily, and ignore spatial structure.
+  level: Junior
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-do-padding-stride-and-pooling-do
+  q: What do padding, stride and pooling do?
+  a: |
+    Padding adds border pixels so filters can cover edges and output size can be preserved. Stride sets how far the filter moves each step, reducing resolution when larger than one. Pooling summarizes local regions, typically with max or average, to downsample and add some translation invariance.
+  level: Junior
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-is-a-receptive-field
+  q: What is a receptive field?
+  a: |
+    The region of the input image that influences a particular neuron. It grows with depth, kernel size, stride and pooling, so deeper layers "see" larger parts of the image and capture more global patterns. Dilated convolutions enlarge it without extra parameters.
+  level: Junior
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-is-a-1x1-convolution-used-for
+  q: What is a 1x1 convolution used for?
+  a: |
+    It mixes information across channels at each pixel without looking at neighbors, acting like a per-pixel fully connected layer. It is used to reduce or expand the number of channels cheaply, as in bottleneck blocks of ResNet and Inception, and to add non-linearity.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: walk-through-the-evolution-from-alexnet-to-resnet
+  q: Walk through the evolution from AlexNet to ResNet.
+  a: |
+    AlexNet showed deep CNNs trained on GPUs with ReLU and dropout could win ImageNet. VGG used stacks of small 3x3 filters to go deeper. Inception used parallel filters of different sizes with 1x1 bottlenecks for efficiency. ResNet added residual connections, making networks of a hundred-plus layers trainable and setting a new standard backbone.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-are-depthwise-separable-convolutions
+  q: What are depthwise separable convolutions?
+  a: |
+    They split a standard convolution into a depthwise convolution, one filter per input channel, and a pointwise 1x1 convolution that mixes channels. This cuts computation and parameters dramatically with small accuracy loss, which is why mobile architectures such as MobileNet use them.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: how-does-a-vision-transformer-work
+  q: How does a Vision Transformer work?
+  a: |
+    It splits the image into fixed-size patches, flattens and projects each into a token embedding, adds position embeddings and a classification token, and processes them with a standard transformer encoder. It has weaker built-in image assumptions than CNNs, so it needs more data or pre-training, but scales very well.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: cnn-vs-vision-transformer-when-would-you-choose-each
+  q: 'CNN vs Vision Transformer: when would you choose each?'
+  a: |
+    CNNs are data-efficient, fast and strong for small to medium datasets and edge devices. ViTs excel with large-scale pre-training and transfer, capture global context, and integrate naturally with multimodal transformers. Hybrid and modern convolutional designs narrow the gap, so the choice often depends on available pretrained models, data size and deployment constraints.
+  level: Senior
+  category: deep-learning
+  subcategory: computer-vision
+- id: classification-vs-detection-vs-segmentation-what-is-the-diff
+  q: 'Classification vs detection vs segmentation: what is the difference?'
+  a: |
+    Classification assigns a label to the whole image. Object detection finds objects and returns a bounding box and label for each. Semantic segmentation labels every pixel with a class, instance segmentation separates individual objects of the same class, and panoptic segmentation combines both.
+  level: Junior
+  category: deep-learning
+  subcategory: computer-vision
+- id: two-stage-vs-one-stage-object-detectors-what-is-the-trade-of
+  q: 'Two-stage vs one-stage object detectors: what is the trade-off?'
+  a: |
+    Two-stage detectors such as Faster R-CNN first propose candidate regions and then classify and refine them, which is accurate but slower. One-stage detectors such as YOLO and SSD predict boxes and classes directly over a dense grid, which is much faster and suits real-time use, with accuracy that has caught up substantially.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-are-anchor-boxes
+  q: What are anchor boxes?
+  a: |
+    Predefined boxes of various sizes and aspect ratios placed across the image; the detector predicts offsets from each anchor and whether it contains an object. They make learning box regression easier. Anchor-free detectors instead predict object centers or keypoints directly, avoiding anchor tuning.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-is-non-maximum-suppression
+  q: What is non-maximum suppression?
+  a: |
+    Detectors often predict several overlapping boxes for the same object. NMS keeps the highest-scoring box and removes others that overlap it beyond an IoU threshold, repeating for remaining boxes. Transformer detectors such as DETR avoid NMS by predicting a set of unique objects directly.
+  level: Junior
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-is-iou-and-how-is-map-calculated
+  q: What is IoU and how is mAP calculated?
+  a: |
+    Intersection over union is the overlap area between a predicted and true box divided by their combined area. A prediction counts as correct if its IoU exceeds a threshold. Average precision is the area under the precision-recall curve for one class; mAP averages it over classes, and COCO-style mAP also averages over IoU thresholds from 0.5 to 0.95.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: how-does-u-net-work-for-segmentation
+  q: How does U-Net work for segmentation?
+  a: |
+    U-Net has an encoder that downsamples to capture context and a decoder that upsamples back to full resolution, with skip connections that copy high-resolution encoder features to the matching decoder level. The skips recover fine spatial detail, making it very effective for medical and other segmentation tasks with limited data.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: which-losses-are-used-for-segmentation-and-why-dice-loss
+  q: Which losses are used for segmentation, and why Dice loss?
+  a: |
+    Pixel-wise cross-entropy is standard. Dice loss directly optimizes overlap between predicted and true masks, which handles heavy class imbalance, such as a small lesion in a large image, better than cross-entropy. They are often combined, and focal loss is another option for imbalance.
+  level: Senior
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-data-augmentations-are-common-for-vision-and-what-are-t
+  q: What data augmentations are common for vision, and what are the risks?
+  a: |
+    Random crops, flips, rotations, scaling, color jitter, blur, and mixing methods such as MixUp and CutMix. They teach invariances and reduce overfitting. Risks arise when an augmentation changes the label, such as flipping digits or text, or rotating medical images where orientation matters, so augmentations must fit the domain.
+  level: Junior
+  category: deep-learning
+  subcategory: computer-vision
+- id: how-does-transfer-learning-work-for-vision-tasks
+  q: How does transfer learning work for vision tasks?
+  a: |
+    Start from a backbone pretrained on a large dataset such as ImageNet, replace the head for your classes, train the head with the backbone frozen, then fine-tune deeper layers with a small learning rate. Early layers' edge and texture features transfer well across domains; later layers may need more adaptation.
+  level: Junior
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-is-clip-and-why-was-it-important
+  q: What is CLIP and why was it important?
+  a: |
+    CLIP trains an image encoder and a text encoder together on hundreds of millions of image-caption pairs with a contrastive loss, so matching images and texts get similar embeddings. It enables zero-shot classification by comparing an image with text prompts for each class, and its embeddings power image search and text-to-image models.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: how-do-diffusion-models-generate-images-from-text
+  q: How do diffusion models generate images from text?
+  a: |
+    A network is trained to remove noise from images step by step, conditioned on a text embedding. Generation starts from random noise and iteratively denoises toward an image matching the prompt. Latent diffusion runs this in a compressed latent space for efficiency, and classifier-free guidance strengthens adherence to the text.
+  level: Senior
+  category: deep-learning
+  subcategory: computer-vision
+- id: how-would-you-handle-a-small-labeled-image-dataset
+  q: How would you handle a small labeled image dataset?
+  a: |
+    Use a strong pretrained backbone and fine-tune, apply domain-appropriate augmentation, consider self-supervised pre-training on unlabeled in-domain images, use few-shot approaches or CLIP-style zero-shot baselines, and invest in labeling the most informative examples through active learning. Validate carefully to avoid overfitting.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-is-self-supervised-learning-in-vision
+  q: What is self-supervised learning in vision?
+  a: |
+    Learning representations from unlabeled images using pretext tasks: contrastive methods such as SimCLR and MoCo pull together augmented views of the same image and push apart others, while masked image modeling such as MAE reconstructs hidden patches. The resulting backbones transfer well with few labels.
+  level: Senior
+  category: deep-learning
+  subcategory: computer-vision
+- id: how-do-you-deploy-a-vision-model-on-an-edge-device
+  q: How do you deploy a vision model on an edge device?
+  a: |
+    Choose an efficient architecture, quantize to 8-bit integers, prune or distill if needed, and compile with the device's runtime, such as TensorRT, Core ML or TFLite. Measure latency, memory and accuracy on the actual device and representative inputs, including lighting and camera differences.
+  level: Senior
+  category: deep-learning
+  subcategory: computer-vision
+- id: your-model-works-in-testing-but-fails-on-real-camera-images
+  q: Your model works in testing but fails on real camera images. Why?
+  a: |
+    Likely distribution shift: different cameras, resolution, lighting, angles, compression or backgrounds from the training data, or preprocessing that differs between training and production such as color channel order or normalization. Collect and label production samples, align preprocessing, add targeted augmentation and retrain.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: how-would-you-design-a-defect-detection-system-for-a-factory
+  q: How would you design a defect detection system for a factory line?
+  a: |
+    Clarify defect types, required recall and line speed. Capture images with controlled lighting, label defects, and handle rarity with anomaly detection trained on good parts when defects are scarce, or a detector or segmenter when enough examples exist. Deploy on edge hardware near the line, tune thresholds to the cost of missed defects versus false rejects, and keep a human review loop that feeds new labels back.
+  level: Senior
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-is-batch-normalization-s-role-in-cnns
+  q: What is batch normalization's role in CNNs?
+  a: |
+    It normalizes activations per channel over the batch, stabilizing and speeding up training, allowing higher learning rates and reducing sensitivity to initialization. At inference it uses running statistics. With very small batches, group or layer normalization is used instead.
+  level: Junior
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-is-the-difference-between-semantic-and-instance-segment
+  q: What is the difference between semantic and instance segmentation?
+  a: |
+    Semantic segmentation labels each pixel with a class but does not distinguish separate objects of the same class. Instance segmentation separates individual objects, giving each its own mask, as in Mask R-CNN. Panoptic segmentation combines both for countable objects and background regions.
+  level: Junior
+  category: deep-learning
+  subcategory: computer-vision
+- id: how-does-mask-r-cnn-extend-faster-r-cnn
+  q: How does Mask R-CNN extend Faster R-CNN?
+  a: |
+    It adds a parallel branch that predicts a pixel-level mask for each detected region, alongside the class and box branches, and replaces RoI pooling with RoIAlign to keep precise spatial alignment. This turns a detector into an instance segmentation model.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: how-does-detr-approach-object-detection-differently
+  q: How does DETR approach object detection differently?
+  a: |
+    DETR uses a CNN backbone and a transformer encoder-decoder that outputs a fixed set of object predictions, trained with bipartite matching between predictions and ground truth. It removes hand-designed components such as anchors and non-maximum suppression, at the cost of slower training in its original form.
+  level: Senior
+  category: deep-learning
+  subcategory: computer-vision
+- id: how-do-you-handle-class-imbalance-in-object-detection
+  q: How do you handle class imbalance in object detection?
+  a: |
+    Detectors see far more background than objects. Focal loss, introduced with RetinaNet, down-weights easy background examples so training focuses on hard ones. Sampling strategies, class-balanced loss weights and targeted data collection for rare classes also help.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-is-image-embedding-search-and-how-would-you-build-it
+  q: What is image embedding search and how would you build it?
+  a: |
+    Embed images with a pretrained model such as CLIP or a fine-tuned backbone, store vectors in an approximate nearest-neighbor index, and query with an image or text embedding. Evaluate with recall at k on labeled similar pairs, and fine-tune the encoder on domain data if generic embeddings miss important distinctions.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: why-do-convolutional-networks-work-well-for-images
+  q: Why do convolutional networks work well for images?
+  a: |
+    Convolutions apply the same small filters across the whole image, which builds in locality and translation equivariance and drastically reduces parameters compared with fully connected layers. Stacking layers grows the receptive field, so early layers detect edges and textures and later layers detect parts and objects. Pooling or strides add some translation invariance.
+  level: Junior
+  category: deep-learning
+  subcategory: computer-vision
+- id: how-do-you-calculate-the-output-size-of-a-convolution-layer
+  q: How do you calculate the output size of a convolution layer?
+  a: |
+    For input size W, kernel size K, padding P and stride S, the output size is (W minus K plus 2P) divided by S, plus 1, rounded down. The number of output channels equals the number of filters, and each filter has K times K times input-channel weights plus a bias.
+  level: Junior
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-problem-do-residual-connections-solve-in-resnet
+  q: What problem do residual connections solve in ResNet?
+  a: |
+    Very deep plain networks trained worse than shallower ones, not because of overfitting but because optimization became hard. Residual connections let each block learn a correction added to its input, so an identity mapping is easy and gradients flow directly backward through the skip paths. This made networks with over a hundred layers trainable.
+  level: Mid
+  category: deep-learning
+  subcategory: computer-vision
+- id: what-are-common-text-preprocessing-steps-and-which-still-mat
+  q: What are common text preprocessing steps, and which still matter with transformers?
+  a: |
+    Classic pipelines lowercase text, remove punctuation and stop words, and apply stemming or lemmatization. With transformers, most of this is unnecessary or harmful because the model's own tokenizer and context handle it; what still matters is cleaning noise such as markup, normalizing Unicode, handling very long documents, and deduplicating data.
+  level: Junior
+  category: deep-learning
+  subcategory: nlp
+- id: stemming-vs-lemmatization-what-is-the-difference
+  q: 'Stemming vs lemmatization: what is the difference?'
+  a: |
+    Stemming chops word endings with rules, so "studies" may become "studi"; it is fast but crude. Lemmatization uses vocabulary and grammar to return the dictionary form, "study", which is more accurate but slower. Both reduce vocabulary size for classic models.
+  level: Junior
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-tf-idf-and-when-is-it-still-useful
+  q: What is TF-IDF and when is it still useful?
+  a: |
+    TF-IDF weights a word by how often it appears in a document times how rare it is across the corpus, so distinctive words score high. It is still a strong, cheap baseline for search, keyword extraction and text classification with linear models, and BM25, a refinement of it, powers keyword search in hybrid RAG systems.
+  level: Junior
+  category: deep-learning
+  subcategory: nlp
+- id: what-are-the-limitations-of-bag-of-words-representations
+  q: What are the limitations of bag-of-words representations?
+  a: |
+    They ignore word order and context, so "dog bites man" equals "man bites dog", produce very large sparse vectors, and treat synonyms as unrelated words. They cannot capture meaning that depends on context, such as negation or ambiguous words.
+  level: Junior
+  category: deep-learning
+  subcategory: nlp
+- id: how-does-word2vec-learn-word-embeddings
+  q: How does Word2Vec learn word embeddings?
+  a: |
+    It trains a shallow network on a prediction task: skip-gram predicts surrounding words from a center word, and CBOW predicts the center word from its neighbors. Negative sampling makes training efficient. Words used in similar contexts end up with similar vectors, capturing relationships such as king minus man plus woman being close to queen.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: how-do-glove-and-fasttext-differ-from-word2vec
+  q: How do GloVe and FastText differ from Word2Vec?
+  a: |
+    GloVe learns vectors by factorizing global word co-occurrence statistics rather than predicting local context windows. FastText represents words as bags of character n-grams, so it can build vectors for rare and unseen words and handles morphology well.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-the-difference-between-static-and-contextual-embeddi
+  q: What is the difference between static and contextual embeddings?
+  a: |
+    Static embeddings such as Word2Vec give each word one vector regardless of context, so "bank" has the same vector in river and money senses. Contextual embeddings from models such as ELMo, BERT and GPT compute a different vector for each occurrence based on the surrounding words, resolving ambiguity.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: how-did-sequence-to-sequence-models-with-attention-change-ma
+  q: How did sequence-to-sequence models with attention change machine translation?
+  a: |
+    Early encoder-decoder RNNs squeezed the whole source sentence into one fixed vector, which lost information for long sentences. Attention let the decoder look back at all encoder states and focus on the relevant source words at each step, greatly improving long-sentence translation and leading directly to the transformer.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-named-entity-recognition-and-how-is-it-modeled
+  q: What is named entity recognition and how is it modeled?
+  a: |
+    NER finds and classifies spans of text such as people, organizations, locations and dates. It is usually modeled as token classification with BIO tags (begin, inside, outside), historically with CRFs or BiLSTM-CRFs and now with fine-tuned transformer encoders or LLM extraction with structured outputs.
+  level: Junior
+  category: deep-learning
+  subcategory: nlp
+- id: how-would-you-build-a-text-classifier-today
+  q: How would you build a text classifier today?
+  a: |
+    Start with a TF-IDF plus logistic regression baseline. If more accuracy is needed, fine-tune a pretrained encoder such as a BERT-family model, which is fast and cheap at inference. If labeled data is scarce, try zero-shot or few-shot classification with an LLM, possibly using it to label data for training a smaller model.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: extractive-vs-abstractive-summarization-what-is-the-differen
+  q: 'Extractive vs abstractive summarization: what is the difference?'
+  a: |
+    Extractive summarization selects important sentences from the source verbatim, so it is faithful but can be choppy. Abstractive summarization generates new text that paraphrases and condenses the source, which reads better but can introduce errors or hallucinations, so faithfulness must be checked.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: how-does-sentiment-analysis-handle-negation-and-sarcasm
+  q: How does sentiment analysis handle negation and sarcasm?
+  a: |
+    Bag-of-words models struggle with negation ("not good") and sarcasm because they ignore context. Contextual transformer models handle negation well since they see word order, but sarcasm remains hard because it often depends on world knowledge or tone. Domain-specific fine-tuning data and LLMs with context help.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-bleu-and-what-are-its-limitations
+  q: What is BLEU and what are its limitations?
+  a: |
+    BLEU measures n-gram precision overlap between a generated text and reference translations, with a brevity penalty. It is cheap and useful for comparing systems on the same data, but it ignores meaning, penalizes valid paraphrases, and correlates poorly with human judgment for individual sentences or open-ended generation.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-rouge-and-where-is-it-used
+  q: What is ROUGE and where is it used?
+  a: |
+    ROUGE measures overlap of n-grams or longest common subsequences between generated and reference text, emphasizing recall. It is used for summarization. Like BLEU, it rewards surface overlap rather than meaning or factual accuracy, so modern evaluations add embedding-based metrics, faithfulness checks or LLM judges.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: how-do-you-evaluate-open-ended-text-generation
+  q: How do you evaluate open-ended text generation?
+  a: |
+    Combine automatic checks for constraints such as format and length, reference-based metrics when references exist, model-based metrics such as embedding similarity or LLM-as-judge with rubrics calibrated to humans, and human evaluation for quality dimensions such as fluency, faithfulness and helpfulness. Use pairwise comparisons between systems where possible.
+  level: Senior
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-a-language-model-s-perplexity
+  q: What is a language model's perplexity?
+  a: |
+    It is the exponential of the average negative log-likelihood per token on held-out text, roughly how many choices the model is "confused" between at each step. Lower is better, but it only compares models using the same tokenization and says little about usefulness for downstream tasks.
+  level: Junior
+  category: deep-learning
+  subcategory: nlp
+- id: how-do-you-handle-out-of-vocabulary-words
+  q: How do you handle out-of-vocabulary words?
+  a: |
+    Word-level models map them to an unknown token, losing information. Sub-word tokenizers such as BPE and WordPiece, and character-level models, avoid the problem by splitting rare words into known pieces, which is why modern models effectively have no out-of-vocabulary words.
+  level: Junior
+  category: deep-learning
+  subcategory: nlp
+- id: how-would-you-approach-nlp-for-a-low-resource-language
+  q: How would you approach NLP for a low-resource language?
+  a: |
+    Use multilingual pretrained models that include the language, transfer from related languages, augment data with translation and back-translation, use LLMs to generate or label data carefully, and check that the tokenizer does not split the language's text excessively. Evaluate with native speakers, since automatic metrics may be unreliable.
+  level: Senior
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-topic-modeling-and-how-does-lda-work
+  q: What is topic modeling, and how does LDA work?
+  a: |
+    Topic modeling discovers themes in a document collection without labels. LDA assumes each document is a mixture of topics and each topic a distribution over words, and infers these distributions from word co-occurrence. Modern alternatives cluster sentence embeddings and label clusters with keywords or an LLM.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-coreference-resolution-and-why-does-it-matter
+  q: What is coreference resolution and why does it matter?
+  a: |
+    Coreference resolution links expressions that refer to the same entity, such as "Marie Curie", "she" and "the physicist". It matters for information extraction, summarization and question answering, where facts about an entity are spread across sentences using different references.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: how-do-you-detect-and-handle-toxic-or-biased-language-in-nlp
+  q: How do you detect and handle toxic or biased language in NLP systems?
+  a: |
+    Use classifiers trained for toxicity and policy categories on inputs and outputs, test models with bias benchmarks and counterfactual examples that swap demographic terms, curate training data, and monitor production with human review. Be careful that toxicity classifiers themselves can be biased against dialects or identity terms.
+  level: Senior
+  category: deep-learning
+  subcategory: nlp
+- id: fine-tuning-bert-vs-prompting-an-llm-for-an-nlp-task-how-do
+  q: 'Fine-tuning BERT vs prompting an LLM for an NLP task: how do you decide?'
+  a: |
+    A fine-tuned encoder is usually cheaper, faster and more accurate for a fixed, high-volume classification or extraction task with enough labeled data. An LLM is faster to start with, needs little or no labeled data and handles varied or generative tasks. A common pattern is to prototype with an LLM, use it to label data, then fine-tune a small model for production.
+  level: Senior
+  category: deep-learning
+  subcategory: nlp
+- id: how-does-semantic-search-differ-from-keyword-search
+  q: How does semantic search differ from keyword search?
+  a: |
+    Keyword search matches exact words, weighting rare ones higher. Semantic search embeds queries and documents into vectors and finds matches by meaning, so it handles synonyms and paraphrases. Keyword search is still better for exact identifiers, so production systems often combine both.
+  level: Junior
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-the-role-of-the-cls-token-in-bert
+  q: What is the role of the [CLS] token in BERT?
+  a: |
+    It is a special token prepended to every input whose final hidden state is used as a summary representation of the sequence for classification tasks. During pre-training it was used for next sentence prediction; during fine-tuning a classification head is trained on top of it. Mean-pooling all token vectors is often a better sentence embedding without specific training.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-a-crf-layer-and-why-was-it-used-on-top-of-bilstms-fo
+  q: What is a CRF layer and why was it used on top of BiLSTMs for tagging?
+  a: |
+    A conditional random field models dependencies between neighboring output labels, for example that an "inside" tag must follow a "begin" tag of the same type. Predicting each token independently can produce invalid tag sequences; a CRF chooses the best overall sequence. With strong transformer encoders, a CRF adds less but can still help in structured tagging.
+  level: Senior
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-the-difference-between-precision-recall-and-f1-in-nl
+  q: What is the difference between precision, recall and F1 in NLP tasks like NER?
+  a: |
+    Precision is the share of predicted entities that are correct, recall the share of true entities found, and F1 their harmonic mean. For NER they are usually computed at the entity level with exact span and type matching, so a partially correct span counts as wrong.
+  level: Junior
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-text-normalization-for-speech-or-noisy-text
+  q: What is text normalization for speech or noisy text?
+  a: |
+    Converting non-standard text into a consistent form, such as expanding numbers and abbreviations, fixing casing and spelling, and handling emojis or slang. It matters for search, speech systems and classic NLP pipelines where inconsistent forms fragment the vocabulary.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: how-does-question-answering-work-with-extractive-models
+  q: How does question answering work with extractive models?
+  a: |
+    Given a question and a passage, an encoder such as BERT predicts the start and end token positions of the answer span within the passage. It is accurate and grounded but cannot answer beyond the passage text, which is why generative models with retrieval are now more common for open questions.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: what-is-zero-shot-classification-with-nli-models
+  q: What is zero-shot classification with NLI models?
+  a: |
+    A model trained on natural language inference judges whether a text entails a hypothesis such as 'This text is about sports'. Scoring a hypothesis per candidate label gives zero-shot classification without task-specific training. LLM prompting now covers many of the same cases.
+  level: Senior
+  category: deep-learning
+  subcategory: nlp
+- id: what-are-sentence-embeddings-and-how-are-they-trained
+  q: What are sentence embeddings and how are they trained?
+  a: |
+    Vectors representing whole sentences so similar meanings are close. Models such as Sentence-BERT fine-tune encoders with siamese or contrastive training on pairs, such as paraphrases or question-answer pairs, so cosine similarity reflects semantic similarity. They power semantic search and clustering.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
+- id: how-do-you-handle-long-documents-that-exceed-a-model-s-input
+  q: How do you handle long documents that exceed a model's input limit?
+  a: |
+    Split into chunks and process each, then aggregate, for example by voting for classification or map-reduce style summarization. Alternatively retrieve only relevant sections, use models with longer context, or use hierarchical models that encode chunks and then combine their representations.
+  level: Mid
+  category: deep-learning
+  subcategory: nlp
