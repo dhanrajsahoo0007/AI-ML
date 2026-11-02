@@ -2,13 +2,30 @@
 
 import React, { useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ListCollapse, Plus } from "lucide-react";
+import { ListCollapse, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+type Level = "Junior" | "Mid" | "Senior";
 
 interface InterviewQuestionProps {
   question: string;
   category?: string;
+  level?: Level;
   children: React.ReactNode;
+}
+
+const LEVELS: Level[] = ["Junior", "Mid", "Senior"];
+// Show the search box only on banks large enough to need it.
+const SEARCH_THRESHOLD = 10;
+
+// Plain text of an answer, so search can match answer bodies as well as questions.
+function nodeText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join(" ");
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    return nodeText(node.props.children);
+  }
+  return "";
 }
 
 function chipClass(active: boolean) {
@@ -28,6 +45,7 @@ function QuestionItem({
   index,
   question,
   category,
+  level,
   children,
   isOpen,
   onToggle,
@@ -55,9 +73,10 @@ function QuestionItem({
           <p className="font-display text-lg leading-snug text-ink transition-colors group-hover:text-primary">
             {question}
           </p>
-          {category && (
-            <span className="mt-2 inline-block text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              {category}
+          {(category || level) && (
+            <span className="mt-2 flex flex-wrap items-center gap-x-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              {category && <span>{category}</span>}
+              {level && <span className="text-primary">{level}</span>}
             </span>
           )}
         </div>
@@ -103,6 +122,21 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
 
   const [openSet, setOpenSet] = useState<Set<number>>(() => new Set());
   const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [activeLevel, setActiveLevel] = useState<Level | null>(null);
+  const [query, setQuery] = useState("");
+
+  const searchIndex = useMemo(
+    () =>
+      questions.map((q) =>
+        `${q.props.question} ${q.props.category ?? ""} ${nodeText(q.props.children)}`.toLowerCase()
+      ),
+    [questions]
+  );
+
+  const levels = useMemo(
+    () => LEVELS.filter((l) => questions.some((q) => q.props.level === l)),
+    [questions]
+  );
 
   const tags = useMemo(() => {
     const seen = new Map<string, number>();
@@ -114,11 +148,18 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
   }, [questions]);
 
   const filtered = useMemo(() => {
-    if (!activeTag) return questions.map((q, i) => ({ q, originalIndex: i }));
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
     return questions
       .map((q, i) => ({ q, originalIndex: i }))
-      .filter(({ q }) => q.props.category === activeTag);
-  }, [questions, activeTag]);
+      .filter(
+        ({ q, originalIndex }) =>
+          (!activeTag || q.props.category === activeTag) &&
+          (!activeLevel || q.props.level === activeLevel) &&
+          terms.every((t) => searchIndex[originalIndex].includes(t))
+      );
+  }, [questions, activeTag, activeLevel, query, searchIndex]);
+
+  const isFiltered = filtered.length !== questions.length;
 
   const allFilteredOpen = filtered.length > 0 && filtered.every(({ originalIndex }) => openSet.has(originalIndex));
 
@@ -159,7 +200,7 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
           </p>
           <p className="mt-1 font-display text-2xl text-ink">
             {filtered.length}
-            {activeTag && (
+            {isFiltered && (
               <span className="text-muted-foreground"> / {questions.length}</span>
             )}{" "}
             <span className="text-muted-foreground">questions</span>
@@ -173,6 +214,43 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
           {allFilteredOpen ? "Collapse all" : "Expand all"}
         </button>
       </div>
+
+      {questions.length >= SEARCH_THRESHOLD && (
+        <label className="mb-4 flex items-center gap-2.5 rounded-full border border-hairline bg-paper px-4 py-2.5 focus-within:border-ink">
+          <Search aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+          <span className="sr-only">Search questions</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search questions and answers"
+            className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted-foreground"
+          />
+        </label>
+      )}
+
+      {levels.length > 1 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="mr-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            Level
+          </span>
+          <button
+            onClick={() => setActiveLevel(null)}
+            className={chipClass(activeLevel === null)}
+          >
+            Any
+          </button>
+          {levels.map((l) => (
+            <button
+              key={l}
+              onClick={() => setActiveLevel(activeLevel === l ? null : l)}
+              className={chipClass(activeLevel === l)}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      )}
 
       {tags.length > 1 && (
         <div className="mb-6 flex flex-wrap gap-2">
@@ -210,6 +288,7 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
                 index={originalIndex + 1}
                 question={q.props.question}
                 category={q.props.category}
+                level={q.props.level}
                 isOpen={openSet.has(originalIndex)}
                 onToggle={() => toggleOne(originalIndex)}
               >
@@ -218,6 +297,11 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
             </motion.div>
           ))}
         </AnimatePresence>
+        {filtered.length === 0 && (
+          <p className="py-10 text-center text-sm text-muted-foreground">
+            No questions match. Try a different search or filter.
+          </p>
+        )}
       </div>
     </section>
   );

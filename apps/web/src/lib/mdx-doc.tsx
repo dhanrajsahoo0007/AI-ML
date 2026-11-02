@@ -4,10 +4,12 @@ import path from "node:path";
 import matter from "gray-matter";
 import type { ReactElement } from "react";
 import { compileMDX } from "next-mdx-remote/rsc";
+import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
+import { Pre, Figure } from "@/components/mdx/code-block";
 import type { ContentSection, ContentMeta, ContentGroupDef } from "@/types/content";
 
 export type { ContentSection };
@@ -42,7 +44,7 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
     options: {
       parseFrontmatter: false,
       mdxOptions: {
-        remarkPlugins: [remarkMath],
+        remarkPlugins: [remarkGfm, remarkMath],
         rehypePlugins: [rehypeKatex],
       },
     },
@@ -52,6 +54,8 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
       ModelCard,
       InterviewQuestions,
       InterviewQuestion,
+      Figure,
+      pre: Pre,
     },
   });
   return {

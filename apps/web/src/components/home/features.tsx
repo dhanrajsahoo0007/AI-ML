@@ -19,7 +19,7 @@ export function Features() {
       className="bg-paper-2/50"
     >
       <FadeIn>
-        <div className="grid gap-px overflow-hidden rounded-xl border border-hairline bg-hairline md:grid-cols-3">
+        <div className="grid gap-px overflow-hidden rounded-xl border border-hairline bg-hairline md:grid-cols-2 lg:grid-cols-4">
           {features.items.map((feature, i) => {
             const Icon = getIconComponent(feature.icon);
             return (
