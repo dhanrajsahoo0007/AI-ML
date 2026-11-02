@@ -1,0 +1,209 @@
+---
+title: SQL for data science interview
+description: SQL questions and patterns asked in data science and analytics interviews, covering joins, aggregation, window functions, CTEs, funnels, retention and query performance.
+icon: code2
+area: Data Science
+---
+
+SQL rounds test whether you can turn a business question into a correct query under time pressure. Interviewers care about joins and aggregation logic, window functions, handling NULLs and duplicates, and explaining your approach. Practice writing queries by hand and talking through edge cases.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the order of execution of a SQL query?" category="Fundamentals" level="Junior">
+    Logically: FROM and JOINs, then WHERE, GROUP BY, HAVING, SELECT (including window functions), DISTINCT, ORDER BY, and finally LIMIT. This is why you cannot use a SELECT alias in WHERE, and why filtering on aggregates needs HAVING.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between WHERE and HAVING?" category="Fundamentals" level="Junior">
+    WHERE filters rows before grouping and cannot use aggregate functions. HAVING filters groups after aggregation and can use them, for example keeping only customers with more than five orders.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain the different types of joins." category="Joins" level="Junior">
+    INNER JOIN keeps rows with matches in both tables. LEFT JOIN keeps all rows from the left table, with NULLs where the right has no match; RIGHT JOIN is the mirror. FULL OUTER JOIN keeps all rows from both. CROSS JOIN produces every combination. A self join joins a table to itself, for example employees to their managers.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why can a join produce more rows than expected?" category="Joins" level="Mid">
+    If the join key is not unique on one or both sides, each matching pair produces a row, so rows multiply. This fan-out silently inflates sums and counts. Check key uniqueness, aggregate before joining, or use COUNT(DISTINCT ...) where appropriate.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you find customers who have never placed an order?" category="Joins" level="Junior">
+    Use an anti-join: a LEFT JOIN and keep rows where the right side is NULL, or NOT EXISTS.
+
+```sql
+SELECT c.customer_id
+FROM customers c
+LEFT JOIN orders o ON o.customer_id = c.customer_id
+WHERE o.order_id IS NULL;
+```
+
+    Avoid NOT IN when the subquery can return NULLs, because the whole condition then returns no rows.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do NULLs behave in comparisons and aggregates?" category="Fundamentals" level="Mid">
+    Any comparison with NULL, including NULL = NULL, is unknown, so use IS NULL or IS NOT NULL. COUNT(*) counts all rows, while COUNT(column) skips NULLs; SUM and AVG ignore NULLs, so AVG is over non-null values only. COALESCE replaces NULLs with a default.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are window functions and how do they differ from GROUP BY?" category="Window Functions" level="Mid">
+    Window functions compute values across a set of rows related to the current row, defined by OVER with PARTITION BY and ORDER BY, without collapsing rows. GROUP BY returns one row per group; window functions keep every row and add the computed value, such as a running total or a rank within each group.
+  </InterviewQuestion>
+  <InterviewQuestion question="ROW_NUMBER vs RANK vs DENSE_RANK: what is the difference?" category="Window Functions" level="Junior">
+    ROW_NUMBER gives unique sequential numbers even for ties. RANK gives ties the same rank and then skips numbers, such as 1, 1, 3. DENSE_RANK gives ties the same rank without gaps, such as 1, 1, 2.
+  </InterviewQuestion>
+  <InterviewQuestion question="Find the top 3 products by revenue in each category." category="Window Functions" level="Mid">
+    Aggregate revenue per product, rank within each category, then filter.
+
+```sql
+WITH product_revenue AS (
+  SELECT category, product_id, SUM(price * quantity) AS revenue
+  FROM order_items
+  GROUP BY category, product_id
+),
+ranked AS (
+  SELECT *, DENSE_RANK() OVER (PARTITION BY category ORDER BY revenue DESC) AS rnk
+  FROM product_revenue
+)
+SELECT category, product_id, revenue
+FROM ranked
+WHERE rnk <= 3;
+```
+
+    Choose ROW_NUMBER instead if exactly three rows per category are required even with ties.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you compute a running total and a 7-day moving average?" category="Window Functions" level="Mid">
+    Use window frames ordered by date.
+
+```sql
+SELECT day,
+       revenue,
+       SUM(revenue) OVER (ORDER BY day) AS running_total,
+       AVG(revenue) OVER (ORDER BY day ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS ma_7d
+FROM daily_revenue;
+```
+
+    This assumes one row per day; fill missing days first if there can be gaps.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do LAG and LEAD work? Give a use case." category="Window Functions" level="Mid">
+    LAG returns a value from a previous row and LEAD from a following row within the window ordering. A common use is day-over-day or month-over-month change, such as revenue minus LAG(revenue) over months, or the time between a user's consecutive events.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you remove duplicate rows but keep the latest record per key?" category="Data Cleaning" level="Mid">
+    Number rows per key ordered by timestamp descending and keep the first.
+
+```sql
+SELECT *
+FROM (
+  SELECT *, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY updated_at DESC) AS rn
+  FROM user_profiles
+) t
+WHERE rn = 1;
+```
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a CTE and when would you use one over a subquery?" category="Fundamentals" level="Junior">
+    A common table expression, defined with WITH, names an intermediate result for the rest of the query. CTEs make multi-step logic readable and reusable within the query. Subqueries work too; performance is usually similar in modern engines, so choose for clarity. Recursive CTEs handle hierarchies such as org charts.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you calculate a conversion funnel from an events table?" category="Analytics Patterns" level="Mid">
+    For each user, find whether and when they reached each step, then count users per step, requiring each step to happen after the previous one.
+
+```sql
+WITH steps AS (
+  SELECT user_id,
+         MIN(CASE WHEN event = 'view_product' THEN ts END) AS viewed,
+         MIN(CASE WHEN event = 'add_to_cart' THEN ts END) AS carted,
+         MIN(CASE WHEN event = 'purchase' THEN ts END) AS purchased
+  FROM events
+  GROUP BY user_id
+)
+SELECT COUNT(viewed) AS viewed,
+       COUNT(CASE WHEN carted > viewed THEN 1 END) AS carted,
+       COUNT(CASE WHEN purchased > carted AND carted > viewed THEN 1 END) AS purchased
+FROM steps;
+```
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you compute monthly user retention cohorts?" category="Analytics Patterns" level="Senior">
+    Assign each user a cohort month from their first activity, compute the month offset of each later activity from that cohort, then count distinct users per cohort and offset and divide by the cohort size.
+
+```sql
+WITH first_seen AS (
+  SELECT user_id, DATE_TRUNC('month', MIN(ts)) AS cohort
+  FROM events GROUP BY user_id
+),
+activity AS (
+  SELECT DISTINCT e.user_id, f.cohort,
+         DATE_TRUNC('month', e.ts) AS active_month
+  FROM events e JOIN first_seen f USING (user_id)
+)
+SELECT cohort,
+       (EXTRACT(YEAR FROM active_month) - EXTRACT(YEAR FROM cohort)) * 12
+         + EXTRACT(MONTH FROM active_month) - EXTRACT(MONTH FROM cohort) AS month_offset,
+       COUNT(*) AS active_users
+FROM activity
+GROUP BY 1, 2
+ORDER BY 1, 2;
+```
+
+    Divide by each cohort's month-0 count to get retention rates.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you find users active on at least 3 consecutive days?" category="Analytics Patterns" level="Senior">
+    Use the "gaps and islands" trick: for each user's distinct active days, subtract a row number from the date. Consecutive days share the same difference, forming a group; count days per group and keep groups of 3 or more.
+
+```sql
+WITH days AS (
+  SELECT DISTINCT user_id, CAST(ts AS DATE) AS d FROM events
+),
+grp AS (
+  SELECT user_id, d,
+         d - CAST(ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY d) AS INT) AS island
+  FROM days
+)
+SELECT DISTINCT user_id
+FROM grp
+GROUP BY user_id, island
+HAVING COUNT(*) >= 3;
+```
+
+    Date arithmetic syntax varies by database.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you calculate the median in SQL?" category="Aggregation" level="Mid">
+    Many databases provide PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY value) or a MEDIAN function. Without them, number the rows and count them with window functions, then average the middle one or two rows.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you pivot rows into columns?" category="Aggregation" level="Mid">
+    Use conditional aggregation, which works everywhere: for example SUM(CASE WHEN month = 'Jan' THEN revenue END) AS jan for each column. Some databases also offer a PIVOT operator.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between UNION and UNION ALL?" category="Fundamentals" level="Junior">
+    UNION combines results and removes duplicates, which requires extra work. UNION ALL keeps all rows including duplicates and is faster. Use UNION ALL unless you specifically need de-duplication.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you find the second-highest salary?" category="Aggregation" level="Junior">
+    Rank salaries with DENSE_RANK ordered descending and select rank 2, which handles ties and generalizes to the nth highest. Alternatively, select the maximum salary below the overall maximum. Return NULL when no second value exists if the question requires it.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does COUNT(DISTINCT user_id) cost at scale, and what are alternatives?" category="Performance" level="Senior">
+    Exact distinct counts need to track every unique value, which is memory- and shuffle-heavy on big data. Approximate functions based on HyperLogLog, such as APPROX_COUNT_DISTINCT, give small errors with far less cost and can be merged across partitions, which suits dashboards.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do indexes speed up queries, and what do they cost?" category="Performance" level="Mid">
+    An index, usually a B-tree, lets the database find matching rows without scanning the whole table, speeding up filters, joins and sorts on indexed columns. Indexes take storage and slow down inserts and updates, and functions applied to a column in the WHERE clause can prevent their use.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you optimize a slow query?" category="Performance" level="Senior">
+    Read the execution plan to find full scans, expensive joins or sorts. Filter early, select only needed columns, make sure join and filter columns are indexed or the table is partitioned or clustered on them, avoid functions on indexed columns, aggregate before joining large tables, and check for accidental fan-out. In warehouses, partition pruning and clustering matter most.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are fact and dimension tables?" category="Data Modeling" level="Mid">
+    In a star schema, fact tables store measurable events, such as orders or clicks, with foreign keys and numeric measures. Dimension tables store descriptive attributes, such as customers, products and dates. Analysts join facts to dimensions to slice metrics.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a slowly changing dimension?" category="Data Modeling" level="Senior">
+    A dimension whose attributes change over time, such as a customer's address. Type 1 overwrites the old value; Type 2 adds a new row with validity dates so history is preserved, letting you analyze facts with the attributes that were true at the time.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between DELETE, TRUNCATE and DROP?" category="Fundamentals" level="Junior">
+    DELETE removes selected rows and can be filtered and rolled back. TRUNCATE removes all rows quickly without row-by-row logging, keeping the table structure. DROP removes the table itself, including its structure.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you compute the percentage of total within groups?" category="Window Functions" level="Mid">
+    Divide each row's value by a windowed sum: revenue divided by SUM(revenue) OVER (PARTITION BY region), multiplied by 100. Cast to a decimal type first to avoid integer division.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a correlated subquery?" category="Fundamentals" level="Mid">
+    A subquery that references columns from the outer query, so it is logically evaluated per outer row, for example finding employees who earn more than their department's average. It can be slow on large tables; rewriting with a join or a window function is often faster.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle time zones and dates correctly in analytics queries?" category="Data Cleaning" level="Mid">
+    Store timestamps in UTC, convert to the business's reporting time zone before truncating to days, and be explicit about date boundaries. Watch daylight-saving transitions and late-arriving events, and define "day" consistently across metrics.
+  </InterviewQuestion>
+  <InterviewQuestion question="Given a table of daily active users, how do you find days where DAU dropped more than 20% from the previous day?" category="Analytics Patterns" level="Mid">
+    Use LAG to get the previous day's DAU and filter where the drop exceeds 20%.
+
+```sql
+SELECT day, dau, prev_dau
+FROM (
+  SELECT day, dau, LAG(dau) OVER (ORDER BY day) AS prev_dau
+  FROM daily_active_users
+) t
+WHERE prev_dau IS NOT NULL
+  AND dau < 0.8 * prev_dau;
+```
+  </InterviewQuestion>
+</InterviewQuestions>
