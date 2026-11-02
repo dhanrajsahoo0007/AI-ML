@@ -1,0 +1,103 @@
+---
+title: MLOps & deployment interview
+description: Questions on taking models to production, covering pipelines, serving patterns, feature stores, monitoring, drift, retraining, CI/CD for ML and reproducibility.
+icon: rocket
+area: Production & Career
+---
+
+MLOps rounds check whether your models survive contact with production. Expect questions on serving patterns, training-serving skew, monitoring without labels, retraining strategies and how to roll out models safely.
+
+Related: [ML System Design](/system-design/ml-system-design) · [LLMOps and Observability](/ai-system-design/genai-system-design/llmops-observability) · [LLM Serving](/ai-system-design/genai-system-design/llm-serving-inference)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is MLOps and why is it needed?" category="Fundamentals" level="Junior">
+    MLOps is the set of practices for building, deploying, monitoring and maintaining ML systems reliably, combining ML, DevOps and data engineering. It is needed because models depend on changing data, degrade silently, and must be reproducible, testable and updatable like any other production software.
+  </InterviewQuestion>
+  <InterviewQuestion question="Batch vs online (real-time) inference: when do you use each?" category="Serving" level="Junior">
+    Batch inference scores large datasets on a schedule and stores results, which is cheap and simple, suited to daily recommendations or risk scores. Online inference serves predictions on request with low latency, needed when inputs are only known at request time, such as fraud checks or search ranking. Streaming inference sits in between, scoring events as they arrive.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you deploy a model as a real-time service?" category="Serving" level="Mid">
+    Package the model and its preprocessing in a container with a versioned artifact, expose an API, load features from an online store, and deploy behind a load balancer with autoscaling. Add health checks, request logging, latency and error metrics, and a canary or shadow rollout before full traffic.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are shadow, canary and blue-green deployments?" category="Deployment" level="Mid">
+    Shadow deployment sends real traffic to the new model without using its predictions, to compare outputs and performance safely. Canary sends a small share of real traffic to the new model and expands if metrics hold. Blue-green runs two full environments and switches traffic at once, allowing instant rollback.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is training-serving skew and how do you prevent it?" category="Data" level="Mid">
+    A mismatch between features or preprocessing at training time and at serving time, which degrades live performance. Prevent it by sharing transformation code between pipelines, using a feature store, logging served features and comparing their distributions with training data, and testing the full pipeline end to end.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a feature store and what problems does it solve?" category="Data" level="Mid">
+    A system that defines features once and serves them both offline, with history for point-in-time-correct training sets, and online, with low latency for inference. It reduces duplicated work, training-serving skew and leakage, and lets teams discover and reuse features.
+  </InterviewQuestion>
+  <InterviewQuestion question="What should you monitor for a deployed model?" category="Monitoring" level="Junior">
+    Operational metrics such as latency, throughput, errors and resource use; data quality such as missing values and schema changes; input drift; prediction distribution shifts; model performance once labels arrive; and business KPIs the model affects.
+  </InterviewQuestion>
+  <InterviewQuestion question="Data drift vs concept drift: how do you detect each?" category="Monitoring" level="Mid">
+    Data drift is a change in input distributions, detected with statistics such as population stability index, KL divergence or Kolmogorov-Smirnov tests against a training baseline. Concept drift is a change in the relationship between inputs and the target, detected through falling performance on fresh labels or proxy outcomes.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you monitor model quality when labels arrive late?" category="Monitoring" level="Senior">
+    Track input and prediction drift as early warnings, use proxy metrics that arrive sooner and correlate with the true outcome, evaluate matured cohorts as labels arrive, and sample predictions for human labeling. Alert on sustained deviations rather than single blips.
+  </InterviewQuestion>
+  <InterviewQuestion question="When and how should you retrain a model?" category="Retraining" level="Mid">
+    Retrain on a schedule matched to how fast data changes, or when monitoring shows drift or performance decline. Automate the pipeline: pull fresh data, validate it, train, evaluate against the current model on recent holdout data, and promote only if better, with a rollback path.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does CI/CD look like for ML?" category="Deployment" level="Senior">
+    Continuous integration tests code, data schemas and feature logic, and runs training on small samples. Continuous training retrains models from pipelines. Continuous delivery packages models with metadata, runs evaluation gates against baselines and fairness checks, and deploys through canary or shadow stages with monitoring and automatic rollback.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make ML experiments reproducible?" category="Fundamentals" level="Mid">
+    Version code, data and configuration together; record random seeds, library versions and hardware; track experiments with parameters, metrics and artifacts in a tool such as MLflow; and build environments from locked dependencies or containers.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a model registry?" category="Deployment" level="Junior">
+    A central store of model versions with their metadata: training data and code versions, metrics, lineage, approval status and deployment stage. It supports promotion workflows, auditing and rollback to a previous version.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you reduce model inference latency?" category="Serving" level="Mid">
+    Use smaller or distilled models, quantization, compiled runtimes such as ONNX Runtime or TensorRT, batching where possible, caching frequent predictions, precomputing features, and placing the model close to the data or users. Profile to find whether the model, feature fetching or the network dominates.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you test ML systems?" category="Fundamentals" level="Senior">
+    Unit tests for feature and preprocessing code, data validation tests for schemas and ranges, model tests for minimum performance on key slices and invariance or directional expectations, integration tests for the full pipeline, and load tests for serving. Regression tests compare new models against the current one before release.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the role of orchestration tools like Airflow or Kubeflow?" category="Fundamentals" level="Junior">
+    They schedule and run multi-step pipelines such as data extraction, validation, feature computation, training and evaluation as directed graphs, with retries, dependencies, logging and monitoring, so pipelines run reliably and repeatably.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you serve many models efficiently?" category="Serving" level="Senior">
+    Use multi-model serving that loads models on demand and shares hardware, group small models on shared instances, use autoscaling per model based on traffic, and for LLMs serve many fine-tuned adapters on one base model. Track per-model latency and cost.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between a model's offline and online evaluation?" category="Monitoring" level="Junior">
+    Offline evaluation measures performance on held-out historical data before deployment. Online evaluation measures real impact with live users through A/B tests and monitoring. Offline metrics filter candidates; online results decide whether a model actually helps.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle a model incident in production?" category="Monitoring" level="Senior">
+    Detect it through alerts, assess impact, and mitigate quickly by rolling back to the previous model, switching to a fallback such as rules, or disabling the feature. Then find the root cause in data, code or model, add tests and monitoring to catch it next time, and document the incident.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are feedback loops in production ML?" category="Data" level="Senior">
+    When a model's predictions influence the data it is later trained on, such as recommendations shaping what users click, or fraud blocks removing labels. They can reinforce bias and hide errors. Mitigate with exploration, randomized holdouts, logging propensities and careful training data design.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you deploy a model to mobile or edge devices?" category="Serving" level="Mid">
+    Choose a compact architecture, quantize and possibly prune it, convert to the target runtime such as Core ML or TFLite, test accuracy and latency on real devices, and ship updates through app releases or a model download service with versioning and fallbacks.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you control the cost of ML infrastructure?" category="Fundamentals" level="Mid">
+    Right-size instances, autoscale serving, use spot or preemptible instances for training with checkpointing, batch predictions where real-time is not needed, cache features and predictions, and track cost per model and per prediction against business value.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is model governance?" category="Deployment" level="Senior">
+    The policies and records that make models accountable: documentation such as model cards, lineage of data and code, approval workflows, bias and risk assessments, access control, audit logs and monitoring obligations. It is especially important in regulated industries.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why might a model that performed well offline fail in production?" category="Monitoring" level="Mid">
+    Training-serving skew, data leakage that inflated offline scores, distribution shift between historical and live data, a mismatch between the offline metric and the business goal, latency constraints forcing simplifications, or feedback effects once the model influences behavior.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is A/B testing of models versus shadow testing?" category="Deployment" level="Junior">
+    Shadow testing runs the new model on live traffic without affecting users, comparing predictions and performance safely. A/B testing exposes real users to the new model's decisions to measure its actual effect on business metrics. Shadow first for safety, then A/B for impact.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you version data for ML?" category="Data" level="Mid">
+    Snapshot or reference immutable data versions with tools such as DVC, lakeFS or table formats with time travel such as Delta Lake and Iceberg, and record the data version used for each training run, so models can be reproduced and audited.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does deploying LLMs differ from deploying classic ML models?" category="Serving" level="Senior">
+    LLMs are much larger, so serving needs GPUs, batching and KV cache management; outputs are open-ended, so monitoring relies on sampled evaluation and feedback; behavior changes with prompts and retrieval as well as weights; and cost per token, safety guardrails and provider model updates add new operational concerns.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a fallback strategy for ML services?" category="Serving" level="Junior">
+    A safe default when the model is unavailable, too slow or uncertain: cached predictions, a simpler model, business rules or a human queue. It keeps the product working during incidents and is triggered by timeouts, errors or confidence thresholds.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you decide whether a model is ready for production?" category="Deployment" level="Mid">
+    It beats the current baseline on agreed offline metrics including key segments, passes fairness, robustness and data-quality checks, meets latency and cost budgets, has monitoring and rollback in place, and has stakeholder sign-off. Final confirmation comes from a controlled online rollout.
+  </InterviewQuestion>
+  <InterviewQuestion question="Design an end-to-end ML platform for a mid-size company." category="Fundamentals" level="Senior">
+    A data layer with versioned storage and validation, a feature store, orchestrated training pipelines with experiment tracking, a model registry with approval workflows, serving for batch and real-time with canary rollouts, monitoring for drift and performance, and shared tooling and templates so teams follow the same path. Start with the pieces that remove the biggest current pain.
+  </InterviewQuestion>
+</InterviewQuestions>
