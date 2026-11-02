@@ -1,0 +1,759 @@
+# Company-reported questions adapted from Outcome School (Apache 2.0); see NOTICE.md. Answers are our own.
+- id: explain-the-react-pattern-and-what-it-solves-over-chain-of-t
+  q: Explain the ReAct pattern and what it solves over chain-of-thought alone.
+  a: >
+    ReAct interleaves reasoning steps with actions: the model thinks about what it needs, calls a
+    tool such as search or a calculator, reads the observation, and continues until it can answer.
+
+
+    Chain-of-thought alone reasons entirely from the model's internal knowledge, so errors and
+    missing or outdated facts compound with no way to check them. ReAct grounds each step in real
+    observations, reduces hallucination on knowledge-heavy tasks, lets the model gather information
+    it does not have, and leaves an inspectable trace of what it did.
+  topic: agents
+  level: Junior
+  companies: []
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+  refs:
+    - title: ReAct Agent
+      url: https://outcomeschool.com/blog/react-agent
+    - title: How does Chain-of-Thought (CoT) Prompting work?
+      url: https://outcomeschool.com/blog/how-does-chain-of-thought-prompting-work
+  source: outcome-school
+- id: how-do-you-handle-tool-call-errors-timeouts-and-retries-in-a
+  q: How do you handle tool-call errors, timeouts and retries in an agentic loop?
+  a: >
+    Validate arguments before execution and return precise, actionable error messages to the model
+    so it can correct them. Retry transient failures such as timeouts and rate limits with
+    exponential backoff and jitter, in code rather than by asking the model, and cap retries.
+
+
+    Make tools idempotent, or use idempotency keys for writes, so retries cannot double-charge or
+    double-create. Set timeouts per tool, count errors against the step budget, and when a tool
+    keeps failing, let the agent take another path, return a partial result, or escalate to a human.
+    Log every failure for evaluation.
+  topic: agents
+  level: Mid
+  companies:
+    - Cognition
+    - OpenAI
+  related: /ai-system-design/genai-system-design/harness-engineering
+  refs:
+    - title: AI Agent Loop
+      url: https://outcomeschool.com/blog/ai-agent-loop
+  source: outcome-school
+- id: what-is-the-difference-between-structured-output-and-functio
+  q: What is the difference between structured output and function calling?
+  a: >
+    Structured output constrains the model's response to a given schema, such as JSON with specific
+    fields, and your code consumes that result directly, for example for data extraction or
+    classification.
+
+
+    Function calling gives the model a set of tools with schemas and lets it decide whether to call
+    one, which one and with what arguments. Your code executes the call and returns the result, and
+    the model continues. Both rely on schema-constrained generation, but function calling adds tool
+    selection and a multi-turn execution loop.
+  topic: agents
+  level: Junior
+  companies:
+    - Apple
+    - Mistral AI
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+  refs:
+    - title: How does Function Calling work in LLMs?
+      url: https://outcomeschool.com/blog/how-does-function-calling-work-in-llms
+  source: outcome-school
+- id: what-is-mcp-model-context-protocol-and-how-does-it-differ-fr
+  q: What is MCP (Model Context Protocol) and how does it differ from traditional function calling?
+  a: >
+    MCP is an open protocol for connecting AI applications to tools and data. MCP servers expose
+    tools, resources and prompts through a standard interface; clients inside host applications
+    discover them at runtime and relay calls.
+
+
+    Traditional function calling is the model-level mechanism: the application hard-codes tool
+    schemas into each request and executes calls itself. MCP sits above it as an integration
+    standard, so a tool written once as an MCP server can be used by any compatible application
+    without custom glue. The model still uses function calling; MCP standardizes where tools come
+    from and how they are invoked.
+  topic: agents
+  level: Mid
+  companies:
+    - Microsoft
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+  refs:
+    - title: "AI Engineering Explained: LLM, RAG, MCP, Agent, Fine-Tuning, Quantization"
+      url: https://www.youtube.com/watch?v=lnfWvX66FUk
+    - title: What is MCP (Model Context Protocol)?
+      url: https://outcomeschool.com/blog/what-is-mcp-model-context-protocol
+  source: outcome-school
+- id: how-many-tools-is-too-many-how-do-you-design-tool-schemas-an
+  q: How many tools is too many? How do you design tool schemas an LLM can actually use correctly?
+  a: >
+    There is no fixed number, but accuracy drops as tools overlap and their descriptions crowd the
+    context; dozens of similar tools reliably cause wrong choices. Keep the set small per task,
+    group related operations, and load tools dynamically by task or let the agent search a tool
+    catalog when there are many.
+
+
+    Good schemas have a specific name, a description that says when and when not to use the tool,
+    few required parameters with clear types and enums, examples, compact structured outputs, and
+    errors that tell the model how to fix the call. Measure tool-selection and argument accuracy on
+    an evaluation set and fix the worst tools first.
+  topic: agents
+  level: Mid
+  companies:
+    - Anthropic
+    - Cognition
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+  refs:
+    - title: "AI Engineering Explained: LLM, RAG, MCP, Agent, Fine-Tuning, Quantization"
+      url: https://www.youtube.com/watch?v=lnfWvX66FUk
+  source: outcome-school
+- id: how-does-multi-agent-orchestration-work-and-when-does-it-bre
+  q: How does multi-agent orchestration work, and when does it break down?
+  a: >
+    Usually a lead agent decomposes the task and delegates sub-tasks to worker agents with focused
+    prompts, tools and contexts, then combines their structured results; other patterns are
+    sequential pipelines, parallel fan-out, hand-offs between specialists, and critic or debate
+    loops.
+
+
+    It breaks down when agents make conflicting decisions without shared context, when hand-offs
+    lose important details, when roles overlap and work is duplicated, when errors propagate through
+    a pipeline, when agents loop talking to each other, and when nobody verifies the final result.
+    It also multiplies token cost, so it should beat a single-agent baseline on evaluation before
+    being adopted.
+  topic: agents
+  level: Senior
+  companies:
+    - Cognition
+  related: /ai-system-design/genai-system-design/multi-agent-systems
+  refs:
+    - title: Multi-Agent Systems
+      url: https://outcomeschool.com/blog/multi-agent-systems
+    - title: AI Orchestration
+      url: https://outcomeschool.com/blog/ai-orchestration
+  source: outcome-school
+- id: design-memory-for-a-long-running-agent-what-do-you-store-whe
+  q: "Design memory for a long-running agent: what do you store, where, and how do you retrieve it?"
+  a: >
+    Keep three layers. Working memory in the context: the goal, the current plan, recent steps and
+    key observations, with older steps summarized. Task state outside the context: a structured
+    scratchpad or files with progress, decisions and artifacts, referenced by id instead of pasted
+    in. Long-term memory in a database or vector store: facts, preferences and lessons from past
+    runs, each with timestamps and source.
+
+
+    Retrieve long-term memories by relevance, recency and importance at the start of each task or
+    step, and keep write rules explicit: store confirmed facts and outcomes, not guesses; replace
+    conflicting old facts; and let users inspect and delete memory.
+  topic: agents
+  level: Senior
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/agent-memory
+  refs:
+    - title: AI Agent Memory
+      url: https://outcomeschool.com/blog/ai-agent-memory
+    - title: How does ChatGPT remember you?
+      url: https://outcomeschool.com/blog/how-does-chatgpt-remember-you
+  source: outcome-school
+- id: how-does-an-agent-decide-when-to-call-a-tool-versus-answer-f
+  q: How does an agent decide when to call a tool versus answer from its own knowledge?
+  a: >
+    The model decides based on its instructions, the tool descriptions and its training: if the
+    question needs fresh, private, exact or computed information, a well-described tool should be
+    chosen; if it is general knowledge, it answers directly.
+
+
+    You shape that decision: describe in the system prompt and tool descriptions when tools are
+    required, such as always checking order status with the tool and never guessing, force a tool
+    call for certain intents, and evaluate tool-use precision and recall on labeled examples.
+    Over-calling wastes latency and cost; under-calling produces hallucinated answers.
+  topic: agents
+  level: Mid
+  companies: []
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+  refs:
+    - title: How does Function Calling work in LLMs?
+      url: https://outcomeschool.com/blog/how-does-function-calling-work-in-llms
+  source: outcome-school
+- id: what-makes-an-agent-loop-terminate-correctly-how-do-you-boun
+  q: What makes an agent loop terminate correctly? How do you bound cost and steps?
+  a: >
+    Give the agent explicit success criteria and a way to finish, such as a final-answer tool, plus
+    checks in code that confirm completion when possible, like tests passing. Detect lack of
+    progress: repeated identical calls, cycling between states, or no new information after several
+    steps.
+
+
+    Bound everything in the harness, not the prompt: maximum steps, tokens, wall-clock time and
+    dollars per task, and per-tool call limits. When a limit is hit, stop cleanly with a partial
+    result and an explanation, or escalate to a human, and log these cases for evaluation.
+  topic: agents
+  level: Mid
+  companies: []
+  related: /ai-system-design/genai-system-design/agent-architectures
+  refs:
+    - title: AI Agent Loop
+      url: https://outcomeschool.com/blog/ai-agent-loop
+    - title: Fix an infinite loop in an AI agent
+      url: >-
+        https://www.linkedin.com/posts/pallavi-shekhar_ai-aiagents-machinelearning-share-7440257380707364864-5Ycc
+  source: outcome-school
+- id: how-do-you-make-an-agent-s-actions-reversible-or-at-least-au
+  q: How do you make an agent's actions reversible, or at least auditable, in a production system?
+  a: >
+    Prefer reversible designs: drafts instead of sends, soft deletes, staging environments, feature
+    branches and pull requests instead of direct commits, and transactions that can be rolled back.
+    For each action, record the inverse operation where one exists.
+
+
+    Make everything auditable: log every tool call with the user, agent version, inputs, outputs,
+    approvals and timestamps in append-only storage, linked to the full trace. Use idempotency keys
+    so retries are safe, require approval for irreversible actions, and give operators tools to
+    review and undo an agent's recent actions.
+  topic: agents
+  level: Senior
+  companies:
+    - Palantir
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+  source: outcome-school
+- id: design-human-in-the-loop-approval-for-an-agent-that-takes-co
+  q: Design human-in-the-loop approval for an agent that takes consequential actions.
+  a: >
+    Classify actions by risk in code: read-only and reversible actions run automatically;
+    consequential ones such as payments, deletions, external messages, production changes or amounts
+    above a threshold require approval. The agent proposes the action with a clear summary, the
+    exact parameters, its reasoning and the expected effect, and pauses.
+
+
+    The approver sees a concise review screen, can approve, edit or reject, and the decision is
+    logged. Handle timeouts, approvals from the right role, and expiry if the world changed. Track
+    approval rates and edits to find actions that can safely be automated later, and never let the
+    model itself decide that approval is unnecessary.
+  topic: agents
+  level: Senior
+  companies:
+    - OpenAI
+    - Palantir
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+  source: outcome-school
+- id: your-agent-drifts-after-a-long-run-and-confidently-works-on
+  q: Your agent drifts after a long run and confidently works on the wrong thing. Diagnose it.
+  a: >
+    Read the trace to find where the goal was lost. Typical causes: the original task scrolled out
+    of or got buried in a long context, a summarization step dropped key constraints, a misleading
+    tool result or injected content redirected it, an early wrong assumption was never re-checked,
+    or the plan was never updated after new information.
+
+
+    Fixes: pin the goal and constraints at the top of every step's context, keep an explicit plan
+    and progress file that is re-read and updated, summarize carefully and test summaries, add
+    periodic self-checks against the original task, verify with external signals such as tests, and
+    split long work into sub-tasks with fresh contexts.
+  topic: agents
+  level: Senior
+  companies:
+    - Cognition
+  related: /ai-system-design/genai-system-design/agent-memory
+  source: outcome-school
+- id: what-matters-more-for-an-agentic-coding-tool-like-claude-cod
+  q: >-
+    What matters more for an agentic coding tool like Claude Code: the model or the harness? Design
+    the loop.
+  a: >
+    Both matter, but given a capable model, the harness often decides whether the product is
+    reliable. The model supplies reasoning and code; the harness supplies the right context,
+    well-designed tools, an execution environment, feedback from tests and linters, permissions and
+    stopping rules.
+
+
+    The loop: gather context (task, repo conventions, relevant files via search), plan, act with
+    tools to read, edit and run commands, observe results such as test failures, and iterate until
+    checks pass or the budget runs out, then summarize changes for review. Strong models with poor
+    harnesses flail; good harnesses make the same model far more dependable.
+  topic: agents
+  level: Senior
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/harness-engineering
+  refs:
+    - title: How does Claude Code work?
+      url: https://outcomeschool.com/blog/how-does-claude-code-work
+    - title: Harness Engineering in AI
+      url: https://outcomeschool.com/blog/harness-engineering-in-ai
+  source: outcome-school
+- id: design-the-tool-surface-for-a-coding-agent-which-tools-exist
+  q: >-
+    Design the tool surface for a coding agent: which tools exist, what their schemas look like, and
+    how results come back.
+  a: >
+    A small, composable set: search (by text and by file name), read file with line ranges, edit
+    file with exact string replacement or patch, create file, run a shell command or tests in a
+    sandbox, and possibly list directories and fetch documentation. Each schema has a few typed
+    parameters, such as path, old and new strings, command and timeout.
+
+
+    Results come back compact and structured: file contents with line numbers, edit confirmations or
+    precise errors when a match is not unique, and command output truncated with exit codes. Long
+    outputs are summarized or paged, and risky commands require approval.
+  topic: agents
+  level: Senior
+  companies:
+    - Anthropic
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+  refs:
+    - title: How does Claude Code work?
+      url: https://outcomeschool.com/blog/how-does-claude-code-work
+  source: outcome-school
+- id: you-re-dropped-into-an-unfamiliar-multi-file-codebase-with-a
+  q: >-
+    You're dropped into an unfamiliar multi-file codebase with a failing behaviour and an LLM
+    assistant available. Walk me through how you'd fix it.
+  a: >
+    Reproduce the failing behavior first with a test or command. Use the assistant to orient: ask it
+    to summarize the architecture and find where the behavior is implemented, but verify by reading
+    the code and running it. Narrow down with logging, a debugger or by bisecting recent changes.
+
+
+    Form a hypothesis, make the smallest fix, and let the assistant help write it and a regression
+    test, reviewing every line. Run the full test suite, check for side effects, and explain the
+    root cause. The skill being tested is directing and verifying the assistant, not accepting its
+    output blindly.
+  topic: agents
+  level: Mid
+  companies:
+    - Meta
+  related: /ai-system-design/genai-system-design/harness-engineering
+  source: outcome-school
+- id: how-does-function-calling-actually-work-with-an-llm-and-how
+  q: >-
+    How does function calling actually work with an LLM, and how do you make it reliable enough for
+    production agents?
+  a: >
+    You send tool names, descriptions and JSON schemas with the request. The model was trained to
+    emit a structured tool call when appropriate; many APIs constrain decoding so arguments match
+    the schema. Your code parses the call, executes it and sends the result back as a tool message,
+    and the model continues or answers.
+
+
+    For production reliability: keep tools few and well described, validate arguments and return
+    actionable errors, retry transient failures in code, make writes idempotent, bound steps and
+    cost, require approval for consequential actions, log full traces, and measure tool-selection
+    and argument accuracy plus end-to-end task success on an evaluation set before shipping.
+  topic: agents
+  level: Mid
+  companies:
+    - Mistral AI
+    - OpenAI
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+  refs:
+    - title: How does Function Calling work in LLMs?
+      url: https://outcomeschool.com/blog/how-does-function-calling-work-in-llms
+    - title: AI Agent Loop
+      url: https://outcomeschool.com/blog/ai-agent-loop
+  source: outcome-school
+- id: design-an-agent-that-automates-an-enterprise-workflow-say-dr
+  q: >-
+    Design an agent that automates an enterprise workflow, say, drafting RFP responses from internal
+    documents and a CRM. What does “enter-prise-grade” add?
+  a: >
+    Break the workflow down: parse the RFP into questions, retrieve answers from approved content
+    libraries, past responses and product docs with permission-aware RAG, pull customer context from
+    the CRM, draft each answer with citations, flag gaps and low-confidence items for subject-matter
+    experts, and assemble the response in the required format for review.
+
+
+    Enterprise-grade adds: per-user permissions and data residency, audit trails, approval workflows
+    before anything is sent, consistent tone and compliance rules, evaluation on past RFPs with
+    expert ratings, reliability on long documents, monitoring and cost controls, and integration
+    with existing tools rather than a separate chat window.
+  topic: agents
+  level: Senior
+  companies:
+    - Cohere
+  related: /ai-system-design/genai-system-design/conversational-assistant-design
+  source: outcome-school
+- id: autoglm-and-cogagent-operate-real-guis-from-screenshots-over
+  q: >-
+    AutoGLM and CogAgent operate real GUIs from screenshots over tens of steps. Design the agent:
+    perception, action space, and error recovery for a 50-step task.
+  a: >
+    Perception: a vision-language model reads screenshots, ideally at high resolution, plus the
+    accessibility tree or DOM when available, and grounds elements to coordinates or element ids.
+    Action space: a small set such as click, type, scroll, select, go back and wait, with targets
+    referenced by element ids where possible rather than raw pixels.
+
+
+    For a 50-step task, keep an explicit plan and progress state, verify each action's effect from
+    the next screenshot, detect being stuck or on an unexpected screen, and recover by backtracking,
+    retrying or re-planning. Checkpoint progress, require confirmation before irreversible steps,
+    and train or evaluate on many recorded trajectories with success measured on the final state.
+  topic: agents
+  level: Senior
+  companies:
+    - Zhipu AI
+  related: /ai-system-design/genai-system-design/agent-architectures
+  refs:
+    - title: How do Computer-Use Agents work?
+      url: https://outcomeschool.com/blog/how-do-computer-use-agents-work
+  source: outcome-school
+- id: design-an-agent-that-operates-a-web-browser-to-complete-mult
+  q: >-
+    Design an agent that operates a web browser to complete multi-step tasks. How do you make it
+    reliable enough to ship?
+  a: >
+    Combine a model with browser tools: navigate, click, type, scroll and read, using the
+    accessibility tree or simplified DOM plus screenshots for perception. Keep a plan and state,
+    verify each step's outcome, handle pop-ups, logins, pagination and slow loads, and recover from
+    errors by retrying or re-planning.
+
+
+    To ship it: run in an isolated browser with scoped credentials, treat page content as untrusted
+    to resist prompt injection, require confirmation before purchases or submissions, set step and
+    time budgets, log every action with screenshots, and evaluate on a large suite of realistic
+    tasks, measuring end-state success across repeated runs.
+  topic: agents
+  level: Senior
+  companies:
+    - Amazon
+  related: /ai-system-design/genai-system-design/agent-architectures
+  refs:
+    - title: How do Computer-Use Agents work?
+      url: https://outcomeschool.com/blog/how-do-computer-use-agents-work
+    - title: How do Browser Agents work?
+      url: https://outcomeschool.com/blog/how-do-browser-agents-work
+  source: outcome-school
+- id: your-on-device-model-must-emit-valid-schema-conforming-tool
+  q: >-
+    Your on-device model must emit valid, schema-conforming tool calls. How do you guarantee
+    validity rather than hope for it?
+  a: >
+    Use constrained decoding: compile the JSON schema into a grammar or state machine, and at each
+    step mask out tokens that would make the output invalid, so the model can only produce
+    schema-conforming calls. That guarantees validity by construction rather than hoping the model
+    complies.
+
+
+    Pair it with fine-tuning on tool-call examples so the model's preferred tokens rarely hit the
+    mask, which keeps quality high, and keep schemas simple, since complex grammars slow decoding.
+    Semantic correctness, such as a valid but wrong date, still needs validation in code.
+  topic: agents
+  level: Senior
+  companies:
+    - Apple
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+  refs:
+    - title: How does Function Calling work in LLMs?
+      url: https://outcomeschool.com/blog/how-does-function-calling-work-in-llms
+  source: outcome-school
+- id: design-the-harness-for-an-agent-that-makes-multi-file-change
+  q: >-
+    Design the harness for an agent that makes multi-file changes from a natural-language task. How
+    do you keep it from wrecking a codebase?
+  a: >
+    Run the agent on a separate branch or working copy in a sandbox. Give it code search and symbol
+    lookup to find relevant files, require a plan before editing, and use precise edit tools that
+    fail on ambiguous matches. After edits, automatically run the formatter, type checker, linter
+    and relevant tests, and feed failures back.
+
+
+    Protect the codebase: scope which paths it may touch, cap the size of the change, block
+    destructive commands, checkpoint so changes can be reverted, and finish with a clean diff and
+    summary for human review rather than direct commits to the main branch. Evaluate on historical
+    tasks with known correct changes.
+  topic: agents
+  level: Senior
+  companies:
+    - Cursor
+  related: /ai-system-design/genai-system-design/harness-engineering
+  refs:
+    - title: How does Cursor work?
+      url: https://outcomeschool.com/blog/how-does-cursor-work
+    - title: Harness Engineering in AI
+      url: https://outcomeschool.com/blog/harness-engineering-in-ai
+  source: outcome-school
+- id: design-an-agentic-ai-system-that-can-autonomously-adapt-to-n
+  q: Design an agentic AI system that can autonomously adapt to new tasks.
+  a: >
+    Combine a general agent loop with ways to acquire new capability: tool and skill discovery
+    (searching a catalog of tools or documentation), procedural memory that stores successful
+    approaches and instructions for reuse, retrieval of similar past tasks, and the ability to write
+    and test small helper scripts.
+
+
+    Adaptation must be measured and bounded: evaluate new skills on test tasks before trusting them,
+    keep a human approval step for new tools or permissions, version learned procedures so bad ones
+    can be rolled back, and track success rates on new task types over time.
+  topic: agents
+  level: Senior
+  companies:
+    - Cursor
+  related: /ai-system-design/genai-system-design/agent-memory
+  source: outcome-school
+- id: you-have-eight-hours-to-build-a-coding-agent-from-scratch-de
+  q: >-
+    You have eight hours to build a coding agent from scratch. Describe what you build and, more
+    importantly, what you cut.
+  a: >
+    Build the core loop that matters: a strong hosted model, four tools (search, read, edit, run
+    tests or shell in a sandbox), a simple ReAct loop with a step budget, and feedback from test
+    output. Add a small evaluation set of 10–20 real tasks early so every change is measured, and
+    log full traces.
+
+
+    Cut multi-agent orchestration, fancy UIs, long-term memory, custom models, many tools and broad
+    integrations. Use remaining time on what the evaluation shows is failing, usually context
+    gathering and edit reliability.
+  topic: agents
+  level: Mid
+  companies:
+    - Cognition
+  related: /ai-system-design/genai-system-design/harness-engineering
+  source: outcome-school
+- id: cognition-published-an-argument-against-multi-agent-systems
+  q: >-
+    Cognition published an argument against multi-agent systems and later published what actually
+    works. Reconcile those two positions.
+  a: >
+    The argument against multi-agent systems was about context: when several agents act in parallel
+    without sharing full context, they make conflicting implicit decisions and the combined result
+    is incoherent, so a single agent with continuous context is more reliable.
+
+
+    Approaches that work keep that principle: one agent owns decisions and holds the full context,
+    while helpers do narrow, well-scoped jobs, such as searching or summarizing, that return
+    information rather than making independent changes, or run in sequence with full context passed
+    along. The two positions agree that the danger is fragmented context and conflicting decisions,
+    not multiple model calls as such.
+  topic: agents
+  level: Senior
+  companies:
+    - Cognition
+  related: /ai-system-design/genai-system-design/multi-agent-systems
+  refs:
+    - title: Multi-Agent Systems
+      url: https://outcomeschool.com/blog/multi-agent-systems
+    - title: AI SubAgents
+      url: https://outcomeschool.com/blog/ai-subagents
+  source: outcome-school
+- id: your-agent-spends-over-half-its-first-turn-just-finding-the
+  q: Your agent spends over half its first turn just finding the relevant code. How do you fix that?
+  a: >
+    Give it better context up front: a fast code-search tool and a precomputed index with
+    embeddings, symbol graphs and file summaries, plus a repository map of key modules and
+    conventions. Retrieve likely relevant files from the task text before the first model call and
+    include them, so the agent starts close to the answer.
+
+
+    Also parallelize exploration, for example several searches or a fast helper that returns file
+    candidates, cache repo knowledge across sessions, and measure time-to-relevant-file as a metric.
+    Fine-tuning a small retrieval or ranking model on past tasks and the files they touched can help
+    further.
+  topic: agents
+  level: Senior
+  companies:
+    - Cognition
+  related: /ai-system-design/genai-system-design/advanced-rag
+  refs:
+    - title: How does Claude Code work?
+      url: https://outcomeschool.com/blog/how-does-claude-code-work
+  source: outcome-school
+- id: design-a-customer-facing-agent-for-an-airline-that-can-cance
+  q: >-
+    Design a customer-facing agent for an airline that can cancel and rebook flights. How do you
+    keep it from violating fare policy?
+  a: >
+    Put fare policy in code, not in the prompt. The agent can only act through tools such as
+    get_booking, get_eligible_options and rebook_flight that call the airline's systems, and those
+    tools compute eligibility, fees and refund amounts from the fare rules; the model never
+    calculates or approves money on its own.
+
+
+    The agent explains options, collects the customer's choice and confirms before executing. Add
+    authentication, limits, human handoff for exceptions, logging, and an evaluation suite of policy
+    scenarios, including customers pushing for exceptions, measured on final booking state and
+    policy compliance across repeated runs.
+  topic: agents
+  level: Senior
+  companies:
+    - Sierra
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+  refs:
+    - title: How do LLM guardrails work?
+      url: https://outcomeschool.com/blog/how-do-llm-guardrails-work
+  source: outcome-school
+- id: llms-are-non-deterministic-but-a-refund-over-200-must-never
+  q: >-
+    LLMs are non-deterministic, but a refund over $200 must never be auto-approved. Where's the line
+    between prompting and code?
+  a: >
+    Anything that must always hold is enforced in code. The refund tool itself checks the amount
+    and, above 200 dollars, cannot complete without a human approval token, whatever the model says.
+    The prompt explains the policy so the model behaves helpfully, but the guarantee comes from the
+    tool.
+
+
+    The line: prompts guide judgment, tone and conversation flow; code enforces invariants,
+    permissions, limits and calculations. Test the invariant directly, including adversarial
+    conversations that try to talk the agent into approving.
+  topic: agents
+  level: Mid
+  companies:
+    - Sierra
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+  refs:
+    - title: How do LLM guardrails work?
+      url: https://outcomeschool.com/blog/how-do-llm-guardrails-work
+  source: outcome-school
+- id: design-the-human-handoff-path-for-a-customer-service-agent-w
+  q: >-
+    Design the human-handoff path for a customer-service agent. When should it escalate, and what
+    does a good handoff look like?
+  a: >
+    Escalate when the customer asks for a human, when the request is outside policy or the agent's
+    tools, when confidence is low or the agent is going in circles, when the customer is upset, and
+    for sensitive matters such as safety, legal or large financial issues. Some triggers are rules
+    in code; others come from classifiers.
+
+
+    A good handoff routes to the right queue, passes a concise summary with the customer's goal,
+    steps already taken, relevant account data and why it escalated, so the customer never repeats
+    themselves, sets expectations about wait time, and logs the case to improve the agent.
+  topic: agents
+  level: Mid
+  companies:
+    - Sierra
+  related: /ai-system-design/genai-system-design/conversational-assistant-design
+  source: outcome-school
+- id: design-an-agent-that-takes-a-draft-nda-and-returns-a-redline
+  q: >-
+    Design an agent that takes a draft NDA and returns a redlined Word document reflecting the
+    firm's playbook, not a chat response.
+  a: >
+    Parse the Word document into clauses while preserving structure and formatting. Classify each
+    clause against the firm's playbook (preferred positions, fallbacks, unacceptable terms),
+    retrieve the relevant playbook rules and precedent language, and have the model propose specific
+    edits with reasons.
+
+
+    Apply edits as real tracked changes and comments through a document library, not as regenerated
+    text, so lawyers see exact insertions and deletions. Validate that only intended text changed,
+    flag clauses that need attorney judgment, and evaluate against redlines lawyers made on past
+    NDAs, measuring missed issues and unnecessary changes.
+  topic: agents
+  level: Senior
+  companies:
+    - Harvey
+  related: /ai-system-design/genai-system-design/agent-architectures
+  source: outcome-school
+- id: design-an-agent-that-takes-actions-in-enterprise-tools-file
+  q: >-
+    Design an agent that takes actions in enterprise tools (file a Jira ticket, draft an email) on a
+    user's behalf. How do you handle permissions and evaluate it?
+  a: >
+    Execute every action with the user's own delegated credentials through OAuth, so the agent can
+    never do more than the user could. Scope tools narrowly, show a preview and require confirmation
+    for writes such as filing tickets or sending email, and log everything.
+
+
+    Evaluate with a suite of realistic requests in sandbox instances of each tool, checking the
+    resulting tickets or drafts against expectations, plus permission tests with users who lack
+    access. Track production completion, edit and undo rates as quality signals.
+  topic: agents
+  level: Senior
+  companies:
+    - Glean
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+  source: outcome-school
+- id: design-agent-orchestration-across-dozens-of-connected-saas-s
+  q: >-
+    Design agent orchestration across dozens of connected SaaS systems. Where is authorization
+    enforced, and why can it not live in the model?
+  a: >
+    Use a tool layer, often MCP servers or connectors per system, behind an orchestration service
+    that selects relevant tools per request, manages state and calls them on the user's behalf.
+    Authorization is enforced in that layer and in each target system: every call uses the user's
+    delegated token and is checked against policies before execution.
+
+
+    It cannot live in the model because the model can be wrong, manipulated by prompt injection, or
+    confused about who the user is; it has no reliable notion of identity. Permissions must be
+    deterministic and auditable, so the model only proposes actions, and code decides whether they
+    are allowed.
+  topic: agents
+  level: Senior
+  companies:
+    - Glean
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+  refs:
+    - title: AI Orchestration
+      url: https://outcomeschool.com/blog/ai-orchestration
+  source: outcome-school
+- id: design-a-service-that-turns-the-conversation-into-draft-orde
+  q: >-
+    Design a service that turns the conversation into draft orders: labs, imaging, referrals,
+    prescriptions, via tool calls against the EHR.
+  a: >
+    From the visit transcript, extract candidate orders (labs, imaging, referrals, prescriptions)
+    with structured fields, map them to standard codes and the hospital's order catalog through EHR
+    APIs such as FHIR, and check the patient's chart for allergies, interactions and duplicates with
+    deterministic rules.
+
+
+    Create orders only as drafts or pending orders that the clinician reviews, edits and signs;
+    nothing is placed automatically. Show the transcript evidence for each suggestion, log
+    everything, and evaluate precision and recall of extracted orders against clinician-signed
+    orders, with special attention to dangerous errors such as wrong dose or wrong patient.
+  topic: agents
+  level: Senior
+  companies:
+    - Abridge
+  related: /ai-system-design/genai-system-design/kg-healthcare-case-study
+  refs:
+    - title: How does Function Calling work in LLMs?
+      url: https://outcomeschool.com/blog/how-does-function-calling-work-in-llms
+  source: outcome-school
+- id: what-is-an-ontology-in-the-palantir-sense-and-why-put-llm-ag
+  q: >-
+    What is an ontology in the Palantir sense, and why put LLM agents on top of one instead of on
+    raw tables and documents?
+  a: >
+    In Palantir's sense, an ontology is an operational semantic layer that maps an organization's
+    data into business objects (orders, suppliers, assets), their properties and links, plus
+    governed actions that change them, all with permissions attached.
+
+
+    Agents on top of an ontology work with meaningful objects and approved actions instead of
+    guessing at raw table schemas and document text. That makes queries more accurate, actions safer
+    because they go through validated, permissioned operations, and results explainable in business
+    terms.
+  topic: agents
+  level: Senior
+  companies:
+    - Palantir
+  related: /ai-system-design/genai-system-design/knowledge-graph-systems
+  source: outcome-school
+- id: design-an-llm-agent-that-files-and-updates-work-orders-in-a
+  q: >-
+    Design an LLM agent that files and updates work orders in a customer's ERP: real writes to a
+    production system. How do you make that safe?
+  a: >
+    Expose only specific, validated actions such as create_work_order and update_status through the
+    ERP's API, with schemas, business-rule validation in code and the acting user's permissions. Use
+    idempotency keys and transactions, start with drafts that a person approves, and allow
+    auto-execution only for low-risk updates once trust is established.
+
+
+    Make it safe to operate: run against a test instance first, rate-limit writes, log every change
+    with before and after values so it can be reverted, monitor for anomalies, and evaluate on
+    historical requests with known correct outcomes before production rollout.
+  topic: agents
+  level: Senior
+  companies:
+    - Palantir
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+  source: outcome-school

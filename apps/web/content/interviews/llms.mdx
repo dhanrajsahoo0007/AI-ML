@@ -22,24 +22,6 @@ Related deep-dives: [Prompt Engineering](/ai-system-design/genai-system-design/p
   <InterviewQuestion question="Greedy decoding vs beam search vs sampling: when do you use each?" category="Decoding" level="Mid">
     Greedy picks the most likely token each step, which is fast but can be repetitive. Beam search keeps several candidate sequences and suits tasks with one right answer such as translation. Sampling with temperature and top-p gives more natural, diverse text and is the default for chat models.
   </InterviewQuestion>
-  <InterviewQuestion question="When should you use prompting, RAG or fine-tuning?" category="Adaptation" level="Mid">
-    Start with prompting, since it is cheapest and fastest to iterate. Use RAG when the model needs knowledge it does not have, especially private or frequently changing information, or when citations are needed. Use fine-tuning to change behavior, format or style consistently, to specialize a smaller cheaper model, or when prompts become too long. They are often combined.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is LoRA and why is it popular?" category="Adaptation" level="Mid">
-    Low-Rank Adaptation freezes the pretrained weights and learns small low-rank matrices added to selected layers, so only a tiny fraction of parameters is trained. It cuts memory and compute for fine-tuning, produces small adapter files that can be swapped per task, and usually matches full fine-tuning quality for many tasks.
-  </InterviewQuestion>
-  <InterviewQuestion question="What does QLoRA add on top of LoRA?" category="Adaptation" level="Senior">
-    QLoRA keeps the frozen base model in 4-bit quantized form while training LoRA adapters in higher precision, with techniques such as a 4-bit NormalFloat data type and paged optimizers. This makes it possible to fine-tune very large models on a single GPU with little loss in quality.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is catastrophic forgetting in fine-tuning and how do you reduce it?" category="Adaptation" level="Senior">
-    Fine-tuning on a narrow dataset can overwrite general abilities the model had. Reduce it with parameter-efficient methods such as LoRA, lower learning rates and fewer epochs, mixing some general instruction data into the fine-tuning set, and evaluating on general benchmarks alongside the target task.
-  </InterviewQuestion>
-  <InterviewQuestion question="Explain RLHF." category="Alignment" level="Mid">
-    Reinforcement learning from human feedback starts from a supervised fine-tuned model. People compare pairs of model responses, a reward model is trained to predict their preferences, and the language model is optimized with reinforcement learning, often PPO, to maximize that reward while a KL penalty keeps it close to the original model.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is DPO and why has it become common?" category="Alignment" level="Senior">
-    Direct Preference Optimization trains the model directly on preference pairs with a classification-style loss derived from the RLHF objective, without training a separate reward model or running reinforcement learning. It is simpler, more stable and cheaper, and achieves comparable results in many settings.
-  </InterviewQuestion>
   <InterviewQuestion question="What are hallucinations and why do LLMs produce them?" category="Reliability" level="Junior">
     Hallucinations are fluent but false or unsupported statements. Models are trained to produce plausible continuations, not to verify facts, and they have no built-in signal for what they do not know, so gaps get filled with likely-sounding text. Outdated training data and ambiguous prompts make it worse.
   </InterviewQuestion>
@@ -81,9 +63,6 @@ Related deep-dives: [Prompt Engineering](/ai-system-design/genai-system-design/p
   </InterviewQuestion>
   <InterviewQuestion question="Open-weight vs proprietary API models: how do you choose?" category="Adaptation" level="Senior">
     APIs give top quality and no infrastructure work but cost per token and send data to a provider. Open-weight models give control, data locality, the ability to fine-tune deeply and potentially lower cost at high volume, but need serving expertise and hardware. Decide on quality needed, privacy requirements, volume, latency and team capability, and keep the application able to switch.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is model distillation for LLMs?" category="Adaptation" level="Senior">
-    A large teacher model generates outputs, or probability distributions, on many prompts, and a smaller student model is trained to imitate them. The student can approach the teacher's quality on the target tasks at a fraction of the cost, which is common for high-volume production features.
   </InterviewQuestion>
   <InterviewQuestion question="What are reasoning models and when do they help?" category="Fundamentals" level="Senior">
     Reasoning models are trained, often with reinforcement learning on verifiable tasks, to produce extended internal reasoning before answering. They help on multi-step math, coding, planning and analysis, but cost more tokens and time. For simple lookups or formatting tasks, a standard model is faster and cheaper.
