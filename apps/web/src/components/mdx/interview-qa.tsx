@@ -2,13 +2,22 @@
 
 import React, { useState, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ListCollapse, MessageSquareText } from "lucide-react";
+import { ListCollapse, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface InterviewQuestionProps {
   question: string;
   category?: string;
   children: React.ReactNode;
+}
+
+function chipClass(active: boolean) {
+  return cn(
+    "rounded-full border px-3 py-1 text-[13px] transition-colors",
+    active
+      ? "border-ink bg-ink text-paper"
+      : "border-hairline bg-paper text-ink-2 hover:border-ink/40"
+  );
 }
 
 interface InterviewQuestionsProps {
@@ -30,35 +39,34 @@ function QuestionItem({
   return (
     <div
       className={cn(
-        "group rounded-xl border transition-all duration-200",
-        isOpen
-          ? "border-primary/30 bg-primary/[0.03] shadow-sm"
-          : "border-border/60 hover:border-border"
+        "border-b border-hairline transition-colors duration-200",
+        isOpen && "bg-paper-2/50"
       )}
     >
       <button
         onClick={onToggle}
-        className="flex w-full items-start gap-3 px-4 py-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:rounded-xl sm:px-5"
+        aria-expanded={isOpen}
+        className="group flex w-full items-start gap-4 px-1 py-5 text-left sm:gap-6 sm:px-3"
       >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xs font-bold text-primary">
-          {index}
+        <span className="w-6 shrink-0 pt-1.5 font-mono text-xs text-primary">
+          {String(index).padStart(2, "0")}
         </span>
-        <div className="flex-1 min-w-0 pt-0.5">
-          <p className="text-sm font-semibold leading-snug text-foreground sm:text-[15px]">
+        <div className="min-w-0 flex-1">
+          <p className="font-display text-lg leading-snug text-ink transition-colors group-hover:text-primary">
             {question}
           </p>
           {category && (
-            <span className="mt-1.5 inline-block rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <span className="mt-2 inline-block text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               {category}
             </span>
           )}
         </div>
         <motion.span
-          animate={{ rotate: isOpen ? 180 : 0 }}
+          animate={{ rotate: isOpen ? 45 : 0 }}
           transition={{ duration: 0.2 }}
-          className="mt-0.5 shrink-0 text-muted-foreground"
+          className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full border border-hairline text-ink transition-colors group-hover:border-ink"
         >
-          <ChevronDown className="h-4 w-4" />
+          <Plus className="size-3.5" />
         </motion.span>
       </button>
 
@@ -71,8 +79,8 @@ function QuestionItem({
             transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
             className="overflow-hidden"
           >
-            <div className="border-t border-border/40 px-4 py-4 sm:px-5 sm:pl-[3.75rem]">
-              <div className="text-sm leading-relaxed text-muted-foreground [&>p]:mb-0">
+            <div className="pr-4 pb-6 pl-11 sm:pr-14 sm:pl-[3.75rem]">
+              <div className="text-[15px] leading-relaxed text-ink-2 [&>*+*]:mt-3">
                 {children}
               </div>
             </div>
@@ -143,39 +151,34 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
   }, []);
 
   return (
-    <section className="not-prose mt-10">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-            <MessageSquareText className="h-4 w-4 text-primary" />
-          </span>
-          <h2 className="text-lg font-bold tracking-tight sm:text-xl">
-            Interview Questions
-          </h2>
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+    <section className="mt-10">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-4 border-b border-ink pb-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            Interview questions
+          </p>
+          <p className="mt-1 font-display text-2xl text-ink">
             {filtered.length}
-            {activeTag && <span className="text-muted-foreground/60">/{questions.length}</span>}
-          </span>
+            {activeTag && (
+              <span className="text-muted-foreground"> / {questions.length}</span>
+            )}{" "}
+            <span className="text-muted-foreground">questions</span>
+          </p>
         </div>
         <button
           onClick={toggleAll}
-          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="inline-flex items-center gap-1.5 rounded-full border border-ink/20 px-3.5 py-1.5 text-xs font-medium text-ink transition-colors hover:border-ink hover:bg-ink hover:text-paper"
         >
-          <ListCollapse className="h-3.5 w-3.5" />
+          <ListCollapse className="size-3.5" />
           {allFilteredOpen ? "Collapse all" : "Expand all"}
         </button>
       </div>
 
       {tags.length > 1 && (
-        <div className="mb-4 flex flex-wrap gap-1.5">
+        <div className="mb-6 flex flex-wrap gap-2">
           <button
             onClick={() => setActiveTag(null)}
-            className={cn(
-              "rounded-lg px-2.5 py-1 text-xs font-medium transition-all duration-150",
-              activeTag === null
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
+            className={chipClass(activeTag === null)}
           >
             All
           </button>
@@ -183,21 +186,16 @@ export function InterviewQuestions({ children }: InterviewQuestionsProps) {
             <button
               key={name}
               onClick={() => setActiveTag(activeTag === name ? null : name)}
-              className={cn(
-                "rounded-lg px-2.5 py-1 text-xs font-medium transition-all duration-150",
-                activeTag === name
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
+              className={chipClass(activeTag === name)}
             >
               {name}
-              <span className="ml-1 opacity-60">{count}</span>
+              <span className="ml-1.5 opacity-60">{count}</span>
             </button>
           ))}
         </div>
       )}
 
-      <div className="flex flex-col gap-2.5">
+      <div className="flex flex-col">
         <AnimatePresence initial={false}>
           {filtered.map(({ q, originalIndex }) => (
             <motion.div

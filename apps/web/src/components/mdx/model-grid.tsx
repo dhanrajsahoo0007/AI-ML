@@ -1,5 +1,6 @@
 import * as React from "react";
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { resolveIcon, resolveCategoryIcon } from "@/lib/icons";
 
 export function ModelCategory({
@@ -14,18 +15,17 @@ export function ModelCategory({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mb-16 mt-16 first:mt-0">
-      <div className="mb-8 text-center">
-        <h2 className="text-2xl font-bold tracking-tight flex items-center justify-center gap-3 mb-2 sm:text-3xl">
-          <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+    <div className="mt-16 mb-16 first:mt-0">
+      <div className="mb-8">
+        <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          <span className="flex size-8 items-center justify-center rounded-lg bg-paper-2 text-primary [&_svg]:size-4">
             {resolveCategoryIcon(icon)}
           </span>
-          <span>{title}</span>
-        </h2>
+          Category
+        </div>
+        <h2 className="!mt-4 !border-0 !pt-0">{title}</h2>
         {subtitle && (
-          <p className="text-muted-foreground text-base max-w-2xl mx-auto mt-2">
-            {subtitle}
-          </p>
+          <p className="mt-3 max-w-2xl text-muted-foreground">{subtitle}</p>
         )}
       </div>
       {children}
@@ -35,7 +35,7 @@ export function ModelCategory({
 
 export function ModelGrid({ children }: { children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-hairline bg-hairline md:grid-cols-2">
       {children}
     </div>
   );
@@ -53,20 +53,25 @@ export function ModelCard({
   href: string;
 }) {
   return (
-    <Link href={href} className="group block h-full">
-      <div className="h-full rounded-xl border border-border/60 bg-card/50 backdrop-blur-sm text-card-foreground transition-all duration-300 hover:shadow-lg hover:border-primary/30 hover:-translate-y-0.5 flex flex-col p-6">
-        <div className="flex items-start gap-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-transform duration-300 group-hover:scale-110">
-            {resolveIcon(icon)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold leading-snug">{title}</h3>
-            <p className="text-muted-foreground text-sm mt-1 leading-relaxed">
-              {description}
-            </p>
-          </div>
-        </div>
+    <Link
+      href={href}
+      className="group flex h-full flex-col bg-paper p-6 !no-underline transition-colors duration-300 hover:bg-accent-soft/50"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-primary [&_svg]:size-4">
+          {resolveIcon(icon)}
+        </span>
+        <ArrowRight
+          aria-hidden
+          className="size-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1 group-hover:text-ink"
+        />
       </div>
+      <h3 className="!mt-5 font-display text-lg leading-snug text-ink">
+        {title}
+      </h3>
+      <p className="!mt-2 text-[15px] leading-relaxed text-muted-foreground">
+        {description}
+      </p>
     </Link>
   );
 }

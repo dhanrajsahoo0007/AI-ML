@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
+import type { BreadcrumbItem } from "@/types/content";
 import { ArticleLayout } from "@/components/article-layout";
 import { getContentSlugs, loadMdxDoc } from "@/lib/mdx-doc";
 
@@ -22,7 +23,7 @@ export default async function SystemDesignPage({
 
   const doc = await loadMdxDoc("system-design", slug);
 
-  const crumbs = [
+  const crumbs: BreadcrumbItem[] = [
     { label: "Home", href: "/" },
     { label: "ML System Design", href: "/system-design" },
   ];

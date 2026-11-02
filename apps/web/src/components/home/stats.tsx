@@ -1,7 +1,7 @@
 "use client";
 
-import { FadeIn } from "@/components/motion/fade-in";
 import { AnimatedCounter } from "@/components/motion/animated-counter";
+import { Container } from "@/components/ui/editorial";
 
 interface StatsProps {
   modules: number;
@@ -10,34 +10,31 @@ interface StatsProps {
 }
 
 export function Stats({ modules, paths, topics }: StatsProps) {
+  const stats = [
+    { value: modules, suffix: "+", label: "Modules" },
+    { value: paths, suffix: "", label: "Learning paths" },
+    { value: topics, suffix: "", label: "Topics written up" },
+  ];
+
   return (
-    <section className="py-16 sm:py-24">
-      <FadeIn>
-        <div className="flex flex-col items-center justify-center gap-8 rounded-2xl bg-muted/30 px-8 py-12 sm:flex-row sm:gap-16">
-          <div className="text-center">
-            <AnimatedCounter
-              to={modules}
-              suffix="+"
-              className="text-4xl font-bold"
-            />
-            <p className="mt-1 text-sm text-muted-foreground">Modules</p>
-          </div>
-          <div className="hidden h-8 w-px bg-border/60 sm:block" />
-          <div className="text-center">
-            <AnimatedCounter to={paths} className="text-4xl font-bold" />
-            <p className="mt-1 text-sm text-muted-foreground">
-              Learning Paths
-            </p>
-          </div>
-          <div className="hidden h-8 w-px bg-border/60 sm:block" />
-          <div className="text-center">
-            <AnimatedCounter to={topics} className="text-4xl font-bold" />
-            <p className="mt-1 text-sm text-muted-foreground">
-              Content Areas
-            </p>
-          </div>
-        </div>
-      </FadeIn>
+    <section className="border-y border-hairline bg-ink text-paper">
+      <Container>
+        <dl className="grid divide-y divide-paper/10 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          {stats.map((stat) => (
+            <div
+              key={stat.label}
+              className="flex flex-col-reverse py-10 sm:px-8 sm:py-14 sm:first:pl-0"
+            >
+              <dt className="mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-paper/70">
+                {stat.label}
+              </dt>
+              <dd className="font-display text-5xl sm:text-6xl">
+                <AnimatedCounter to={stat.value} suffix={stat.suffix} />
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </Container>
     </section>
   );
 }

@@ -1,20 +1,19 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { Toaster } from "sonner";
-import { ThemeProvider } from "@/components/theme-provider";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { siteConfig } from "@/config/site";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-sans",
+const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
+const display = Plus_Jakarta_Sans({
+  variable: "--font-display-face",
   subsets: ["latin"],
 });
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const mono = JetBrains_Mono({
+  variable: "--font-mono-code",
   subsets: ["latin"],
 });
 
@@ -42,24 +41,23 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
-      >
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
+    <html
+      lang="en"
+      className={`${inter.variable} ${display.variable} ${mono.variable}`}
+    >
+      <body className="flex min-h-dvh flex-col font-sans">
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:rounded-full focus:bg-ink focus:px-4 focus:py-2 focus:text-sm focus:text-paper"
         >
-          <SiteHeader />
-          <div className="min-h-[calc(100vh-3.5rem)] w-full">
-            {children}
-          </div>
-          <SiteFooter />
-          <Toaster richColors position="bottom-right" />
-          <div className="grain-overlay" />
-        </ThemeProvider>
+          Skip to content
+        </a>
+        <SiteHeader />
+        <main id="main" className="w-full flex-1">
+          {children}
+        </main>
+        <SiteFooter />
+        <Toaster theme="light" position="bottom-right" />
       </body>
     </html>
   );

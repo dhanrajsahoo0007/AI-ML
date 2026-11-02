@@ -29,14 +29,17 @@ export function ContentShell({ navTree, children }: ContentShellProps) {
       <div className="md:hidden">
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
           <SheetTrigger
-            className="fixed bottom-4 left-4 z-40 flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/90 shadow-lg backdrop-blur-sm transition-colors hover:bg-muted"
+            className="fixed bottom-4 left-4 z-40 inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-paper shadow-[0_18px_40px_-24px_rgba(17,17,17,0.6)] transition-colors hover:bg-primary"
             aria-label="Open navigation"
           >
-            <Menu className="h-5 w-5" />
+            <Menu className="size-4" />
+            Contents
           </SheetTrigger>
-          <SheetContent side="left" className="w-[280px] p-0 sm:max-w-[320px]">
-            <SheetHeader className="border-b border-border/40 px-4 py-3">
-              <SheetTitle>Navigate</SheetTitle>
+          <SheetContent side="left" className="w-[300px] bg-paper-2 p-0 sm:max-w-[340px]">
+            <SheetHeader className="border-b border-hairline px-4 py-3">
+              <SheetTitle className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Contents
+              </SheetTitle>
             </SheetHeader>
             <ContentSidebar
               navTree={navTree}
@@ -101,18 +104,18 @@ function DesktopShell({
     <div className="flex h-full w-full">
       {/* Sidebar */}
       <div
-        className="relative shrink-0 border-r border-border/40 bg-muted/20 transition-[width] duration-200 ease-in-out"
+        className="relative shrink-0 border-r border-hairline bg-paper-2/50 transition-[width] duration-200 ease-in-out"
         style={{ width: collapsed ? 0 : width, overflow: "hidden" }}
       >
         {!collapsed && (
           <div className="flex h-full flex-col" style={{ width }}>
-            <div className="flex items-center justify-between border-b border-border/40 px-3 py-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Navigate
+            <div className="flex h-11 items-center justify-between border-b border-hairline px-4">
+              <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                Contents
               </span>
               <button
                 onClick={() => setCollapsed(true)}
-                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-paper hover:text-ink"
                 aria-label="Collapse sidebar"
               >
                 <PanelLeftClose className="h-4 w-4" />
@@ -127,9 +130,12 @@ function DesktopShell({
       {!collapsed && (
         <div
           onMouseDown={handleMouseDown}
-          className="group relative z-10 flex w-1.5 shrink-0 cursor-col-resize items-center justify-center hover:bg-primary/10 active:bg-primary/20"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          className="group relative z-10 -ml-px flex w-1.5 shrink-0 cursor-col-resize items-center justify-center"
         >
-          <div className="h-8 w-0.5 rounded-full bg-border transition-colors group-hover:bg-primary/40 group-active:bg-primary/60" />
+          <div className="h-full w-px bg-transparent transition-colors group-hover:bg-primary group-active:bg-primary" />
         </div>
       )}
 
@@ -138,7 +144,7 @@ function DesktopShell({
         {collapsed && (
           <button
             onClick={() => setCollapsed(false)}
-            className="fixed left-2 top-16 z-30 rounded-md border border-border/60 bg-background/80 p-1.5 text-muted-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-muted hover:text-foreground"
+            className="fixed left-3 top-20 z-30 rounded-full border border-hairline bg-paper p-2 text-muted-foreground transition-colors hover:border-ink hover:text-ink"
             aria-label="Expand sidebar"
           >
             <PanelLeft className="h-4 w-4" />

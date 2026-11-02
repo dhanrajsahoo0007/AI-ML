@@ -22,44 +22,50 @@ export function TopicCard({
   const IconComp = icon ? getIconComponent(icon) : null;
 
   return (
-    <div className="group relative flex flex-col rounded-xl border border-border/60 bg-card/50 backdrop-blur-sm transition-all duration-300 hover:border-primary/30 hover:shadow-lg">
-      <Link href={href} className="flex flex-1 flex-col p-5">
-        <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-          {IconComp ? (
-            <IconComp className="h-5 w-5 text-primary" />
-          ) : (
-            <span className="text-lg">{icon}</span>
-          )}
-        </div>
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-        <div className="mt-3 flex items-center text-sm font-medium text-primary">
-          <span className="transition-transform group-hover:translate-x-1">
-            Read guide
-          </span>
-          <ArrowRight className="ml-1 h-4 w-4 opacity-0 -translate-x-2 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
-        </div>
-      </Link>
+    <Link
+      href={href}
+      className="group flex h-full flex-col rounded-xl border border-hairline bg-paper p-6 transition-all duration-300 hover:-translate-y-0.5 hover:border-ink/30 hover:shadow-[0_18px_40px_-24px_rgba(17,17,17,0.35)] sm:p-7"
+    >
+      <div className="flex size-10 items-center justify-center rounded-lg bg-paper-2 text-primary">
+        {IconComp ? (
+          <IconComp aria-hidden className="size-5" />
+        ) : (
+          <span className="text-lg">{icon}</span>
+        )}
+      </div>
+
+      <h2 className="mt-6 font-display text-2xl leading-tight">{title}</h2>
+      <p className="mt-3 flex-1 text-[15px] leading-relaxed text-muted-foreground">
+        {description}
+      </p>
 
       {categories && categories.length > 0 && (
-        <div className="border-t border-border/40 px-5 py-3">
-          {childCount != null && (
-            <p className="mb-2 text-xs font-medium text-muted-foreground">
-              {childCount} topics across {categories.length} categories
-            </p>
-          )}
-          <div className="flex flex-wrap gap-1.5">
-            {categories.map((cat) => (
-              <span
-                key={cat}
-                className="rounded-md border border-border/50 bg-muted/40 px-2 py-0.5 text-xs"
-              >
-                {cat}
-              </span>
-            ))}
-          </div>
+        <div className="mt-6 flex flex-wrap gap-1.5">
+          {categories.map((cat) => (
+            <span
+              key={cat}
+              className="rounded-full border border-hairline px-2.5 py-0.5 text-xs text-ink-2"
+            >
+              {cat}
+            </span>
+          ))}
         </div>
       )}
-    </div>
+
+      <div className="mt-6 flex items-center justify-between border-t border-hairline pt-5 text-sm">
+        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          {childCount != null && categories
+            ? `${childCount} topics · ${categories.length} categories`
+            : "Guide"}
+        </span>
+        <span className="inline-flex items-center gap-1.5 font-medium text-ink">
+          Read
+          <ArrowRight
+            aria-hidden
+            className="size-4 transition-transform duration-200 group-hover:translate-x-1"
+          />
+        </span>
+      </div>
+    </Link>
   );
 }

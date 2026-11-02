@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
+import type { BreadcrumbItem } from "@/types/content";
 import { ArticleLayout } from "@/components/article-layout";
 import { getContentSlugs, loadMdxDoc } from "@/lib/mdx-doc";
 
@@ -22,7 +23,7 @@ export default async function LearningPathPage({
 
   const doc = await loadMdxDoc("learning-paths", slug);
 
-  const crumbs = [
+  const crumbs: BreadcrumbItem[] = [
     { label: "Home", href: "/" },
     { label: "Learning Paths", href: "/learning-paths" },
   ];

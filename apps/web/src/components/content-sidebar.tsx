@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronDown, ChevronRight, Circle } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
 import type {
@@ -23,7 +23,7 @@ export function ContentSidebar({ navTree, onNavigate }: ContentSidebarProps) {
 
   return (
     <nav className="flex h-full flex-col overflow-y-auto pb-8">
-      <div className="space-y-1 px-2 pt-2">
+      <div className="space-y-4 px-3 pt-3">
         {navTree.map((section) => (
           <SidebarSection
             key={section.key}
@@ -56,36 +56,36 @@ function SidebarSection({
   const SectionIcon = getIconComponent(section.icon);
 
   return (
-    <div className="mb-3">
+    <div>
       <button
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
         className={cn(
-          "flex w-full items-center gap-3 rounded-xl px-4 py-3 text-base font-bold tracking-tight transition-all",
+          "flex w-full items-center gap-2.5 border-b px-2 py-2.5 text-left font-display text-base transition-colors",
           isActive
-            ? "bg-gradient-to-r from-gray-900 to-gray-800 text-white shadow-md dark:from-gray-100 dark:to-gray-200 dark:text-gray-900"
-            : "bg-gradient-to-r from-gray-800/80 to-gray-700/70 text-gray-200 shadow-sm hover:from-gray-800 hover:to-gray-700 hover:text-white dark:from-gray-200/80 dark:to-gray-300/70 dark:text-gray-700 dark:hover:from-gray-200 dark:hover:to-gray-300 dark:hover:text-gray-900"
+            ? "border-ink text-ink"
+            : "border-hairline text-ink-2 hover:text-ink"
         )}
       >
         {SectionIcon && (
           <SectionIcon
             className={cn(
-              "h-5 w-5 shrink-0",
-              isActive
-                ? "text-emerald-400 dark:text-emerald-600"
-                : "text-gray-400 dark:text-gray-500"
+              "size-4 shrink-0",
+              isActive ? "text-primary" : "text-muted-foreground"
             )}
           />
         )}
-        <span className="flex-1 text-left">{section.label}</span>
-        {open ? (
-          <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
-        ) : (
-          <ChevronRight className="h-4 w-4 shrink-0 opacity-60" />
-        )}
+        <span className="flex-1">{section.label}</span>
+        <ChevronDown
+          className={cn(
+            "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
+            !open && "-rotate-90"
+          )}
+        />
       </button>
 
       {open && (
-        <div className="ml-3 mt-1.5 border-l-2 border-border/40 pl-1">
+        <div className="mt-2">
           {section.groups.map((group) => {
             const isSoleGroup = section.groups.length === 1;
             const hasChildren =
@@ -183,33 +183,33 @@ function SidebarGroup({
     <div className="my-1">
       <button
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
         className={cn(
-          "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-all",
-          isGroupActive
-            ? "bg-gradient-to-r from-gray-800/60 to-gray-700/40 text-white shadow-sm dark:from-gray-200/60 dark:to-gray-300/40 dark:text-gray-900"
-            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
+          isGroupActive ? "text-ink" : "text-ink-2 hover:text-ink"
         )}
       >
         {GroupIcon && (
           <GroupIcon
             className={cn(
-              "h-[18px] w-[18px] shrink-0",
-              isGroupActive ? "text-emerald-400 dark:text-emerald-600" : "text-primary/60"
+              "size-4 shrink-0",
+              isGroupActive ? "text-primary" : "text-muted-foreground"
             )}
           />
         )}
-        <span className="flex-1 truncate text-[15px] font-semibold">
+        <span className="flex-1 truncate text-sm font-semibold">
           {group.title}
         </span>
-        {open ? (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-50" />
-        )}
+        <ChevronDown
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform duration-200",
+            !open && "-rotate-90"
+          )}
+        />
       </button>
 
       {open && (
-        <div className="ml-3 mt-0.5 border-l border-border/30 pl-1.5">
+        <div className="ml-4 border-l border-hairline">
           {group.categories?.map((cat) => (
             <SidebarCategory
               key={cat.title}
@@ -253,26 +253,19 @@ function SidebarCategory({
     <div className="mt-2 first:mt-0.5">
       <button
         onClick={() => setOpen(!open)}
-        className={cn(
-          "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors",
-          hasActive
-            ? "bg-primary/5"
-            : "hover:bg-muted/40"
-        )}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left"
       >
         <ChevronRight
           className={cn(
-            "h-3 w-3 shrink-0 transition-transform duration-200",
-            open && "rotate-90",
-            hasActive ? "text-primary/70" : "text-muted-foreground/40"
+            "size-3 shrink-0 text-muted-foreground transition-transform duration-200",
+            open && "rotate-90"
           )}
         />
         <span
           className={cn(
-            "text-xs font-bold uppercase tracking-wider",
-            hasActive
-              ? "text-primary"
-              : "text-muted-foreground/70"
+            "text-xs font-semibold uppercase tracking-[0.08em]",
+            hasActive ? "text-primary" : "text-muted-foreground hover:text-ink"
           )}
         >
           {category.title}
@@ -280,7 +273,7 @@ function SidebarCategory({
       </button>
 
       {open && (
-        <div className="ml-3 border-l border-border/30 pl-2">
+        <div className="ml-4 border-l border-hairline">
           {category.items.map((item) => (
             <NavLink
               key={item.slug}
@@ -315,31 +308,20 @@ function NavLink({
     <Link
       href={href}
       onClick={onNavigate}
+      aria-current={active ? "page" : undefined}
       className={cn(
-        "group flex items-center gap-2 rounded-md transition-colors",
-        size === "group"
-          ? "px-2.5 py-2 text-sm"
-          : "px-2.5 py-1.5 text-[13px]",
+        "-ml-px flex items-center gap-2.5 border-l-2 transition-colors",
+        size === "group" ? "px-2 py-2 text-sm" : "px-3 py-1.5 text-sm",
         active
-          ? "bg-primary/10 font-medium text-primary"
-          : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+          ? "border-primary bg-accent-soft/60 font-medium text-ink"
+          : "border-transparent text-muted-foreground hover:border-ink/30 hover:text-ink"
       )}
     >
-      {Icon ? (
+      {Icon && (
         <Icon
           className={cn(
-            "shrink-0",
-            size === "group" ? "h-4 w-4" : "h-3.5 w-3.5",
-            active ? "text-primary" : "text-primary/60"
-          )}
-        />
-      ) : (
-        <Circle
-          className={cn(
-            "h-1.5 w-1.5 shrink-0",
-            active
-              ? "fill-primary text-primary"
-              : "fill-muted-foreground/30 text-muted-foreground/30"
+            "size-4 shrink-0",
+            active ? "text-primary" : "text-muted-foreground"
           )}
         />
       )}
