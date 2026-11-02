@@ -47,6 +47,7 @@ const sectionDefs: {
   { key: "interviews", label: "Interviews", href: "/interviews", icon: "brain" },
   { key: "system-design", label: "ML System Design", href: "/system-design", icon: "layers" },
   { key: "ai-system-design", label: "AI System Design", href: "/ai-system-design", icon: "sparkles" },
+  { key: "companies", label: "Company-wise", href: "/companies", icon: "users" },
 ];
 
 function extractCategoryMapping(

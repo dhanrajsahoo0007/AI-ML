@@ -9,6 +9,7 @@ export const siteConfig = {
     { href: "/interviews", label: "Interviews" },
     { href: "/system-design", label: "ML System Design" },
     { href: "/ai-system-design", label: "AI System Design" },
+    { href: "/companies", label: "Companies" },
   ],
   hero: {
     badge: "One place for AI, data science and ML interview prep",

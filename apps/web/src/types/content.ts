@@ -2,7 +2,8 @@ export type ContentSection =
   | "learning-paths"
   | "interviews"
   | "system-design"
-  | "ai-system-design";
+  | "ai-system-design"
+  | "companies";
 
 export interface ContentGroupDef {
   name: string;
