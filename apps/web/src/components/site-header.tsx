@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
@@ -15,6 +16,7 @@ import { siteConfig } from "@/config/site";
 
 export function SiteHeader() {
   const pathname = usePathname();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-hairline/80 bg-paper/85 backdrop-blur-md">
@@ -56,7 +58,7 @@ export function SiteHeader() {
         </div>
 
         <div className="md:hidden">
-          <Sheet>
+          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger
               className="inline-flex size-10 items-center justify-center rounded-full text-ink transition-colors hover:bg-paper-2"
               aria-label="Open menu"
@@ -80,6 +82,7 @@ export function SiteHeader() {
                       <Link
                         key={item.href}
                         href={item.href}
+                        onClick={() => setMenuOpen(false)}
                         className={cn(
                           "font-display text-3xl transition-colors",
                           isActive
