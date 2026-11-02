@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
@@ -15,6 +16,7 @@ import { siteConfig } from "@/config/site";
 
 export function SiteHeader() {
   const pathname = usePathname();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-hairline/80 bg-paper/85 backdrop-blur-md">
@@ -23,12 +25,12 @@ export function SiteHeader() {
           <span className="font-display text-xl whitespace-nowrap sm:text-2xl">
             {siteConfig.name}
           </span>
-          <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground lg:inline">
+          <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground xl:inline">
             {siteConfig.tagline}
           </span>
         </Link>
 
-        <div className="hidden items-center gap-8 md:flex">
+        <div className="hidden items-center gap-7 lg:flex">
           {siteConfig.nav.map((item) => {
             const isActive = pathname.startsWith(item.href);
             return (
@@ -49,14 +51,14 @@ export function SiteHeader() {
           })}
           <Link
             href={siteConfig.hero.primaryCta.href}
-            className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-colors hover:bg-primary"
+            className="hidden rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-colors hover:bg-primary xl:inline-flex"
           >
             Start learning
           </Link>
         </div>
 
-        <div className="md:hidden">
-          <Sheet>
+        <div className="lg:hidden">
+          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger
               className="inline-flex size-10 items-center justify-center rounded-full text-ink transition-colors hover:bg-paper-2"
               aria-label="Open menu"
@@ -80,6 +82,7 @@ export function SiteHeader() {
                       <Link
                         key={item.href}
                         href={item.href}
+                        onClick={() => setMenuOpen(false)}
                         className={cn(
                           "font-display text-3xl transition-colors",
                           isActive

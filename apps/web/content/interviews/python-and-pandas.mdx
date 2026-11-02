@@ -1,0 +1,146 @@
+---
+title: Python & pandas interview
+description: Python and pandas questions for data science interviews, covering core language behavior, data structures, groupby, merges, missing data, performance and common coding tasks.
+icon: code2
+area: Data Science
+---
+
+Python rounds for data roles mix language fundamentals with practical pandas work: reshaping, joining and aggregating data correctly and efficiently. Expect live coding on small datasets and questions about why code is slow or subtly wrong.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a list and a tuple?" category="Python" level="Junior">
+    Lists are mutable and tuples are immutable. Tuples can be dictionary keys or set members if their contents are hashable, are slightly faster and signal fixed structure, such as a coordinate. Lists suit collections that change.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do dictionaries and sets achieve fast lookups?" category="Python" level="Junior">
+    They are hash tables: a key's hash determines where it is stored, so membership tests and lookups are on average constant time, compared with linear time for searching a list. Keys must be hashable, meaning immutable in practice.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the mutable default argument pitfall?" category="Python" level="Mid">
+    Default values are evaluated once when the function is defined, so a default list or dict is shared across calls and accumulates changes. Use None as the default and create a new object inside the function.
+
+```python
+def add_item(item, items=None):
+    if items is None:
+        items = []
+    items.append(item)
+    return items
+```
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between a shallow and a deep copy?" category="Python" level="Mid">
+    A shallow copy creates a new outer container but shares the inner objects, so changing a nested list affects both. A deep copy recursively copies everything. In pandas, df.copy() is deep by default for the data, while assigning a DataFrame to another name copies nothing.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are generators and why use them?" category="Python" level="Mid">
+    Generators produce values lazily with yield, one at a time, instead of building a full list in memory. They are ideal for streaming large files or infinite sequences. Generator expressions use parentheses, such as sum(x * x for x in values).
+  </InterviewQuestion>
+  <InterviewQuestion question="What are list comprehensions, and when should you avoid them?" category="Python" level="Junior">
+    A concise way to build a list from an iterable with an optional filter, such as squares of even numbers. Avoid them when the logic is long or has side effects, where a regular loop is clearer, and use a generator expression when you only need to iterate once.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does the GIL mean for data science code?" category="Python" level="Senior">
+    CPython's global interpreter lock lets only one thread run Python bytecode at a time, so threads do not speed up CPU-bound pure-Python code. NumPy and pandas release the GIL in many native operations, threads still help for I/O-bound work, and multiprocessing or distributed tools are used for CPU-bound parallelism.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are *args and **kwargs?" category="Python" level="Junior">
+    They let a function accept a variable number of positional arguments, collected as a tuple, and keyword arguments, collected as a dict. They are also used to forward arguments to another function.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are decorators?" category="Python" level="Mid">
+    Functions that take a function and return a modified one, applied with the @ syntax. They add behavior such as logging, timing, caching (functools.lru_cache) or retries without changing the wrapped function's code.
+  </InterviewQuestion>
+  <InterviewQuestion question="Series vs DataFrame: what is the difference?" category="pandas Basics" level="Junior">
+    A Series is a one-dimensional labeled array; a DataFrame is a two-dimensional table of columns, each a Series, sharing an index. Selecting one column of a DataFrame returns a Series.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between loc and iloc?" category="pandas Basics" level="Junior">
+    loc selects by label (index values and column names), and its slices include the end label. iloc selects by integer position, and its slices exclude the end, like Python lists. Using the right one avoids bugs when the index is not a simple range.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle missing data in pandas?" category="Data Cleaning" level="Junior">
+    Find it with isna().sum(), drop with dropna() using subset or thresholds, and fill with fillna() using constants, statistics or forward and backward fill for time series. Consider adding indicator columns, and remember that some dtypes, such as integers, need nullable types to hold missing values.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain groupby with a split-apply-combine example." category="Aggregation" level="Junior">
+    groupby splits rows into groups by key, applies a function to each, and combines the results.
+
+```python
+summary = (
+    orders.groupby("customer_id")
+    .agg(total_spent=("amount", "sum"),
+         orders=("order_id", "count"),
+         last_order=("order_date", "max"))
+    .reset_index()
+)
+```
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between agg, transform and apply after groupby?" category="Aggregation" level="Mid">
+    agg reduces each group to summary values, one row per group. transform returns a result the same shape as the original, which is useful for adding group-level values to every row, such as each order's share of its customer's total. apply is the most flexible, running arbitrary functions per group, but it is the slowest.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you merge DataFrames and avoid common mistakes?" category="Joins" level="Mid">
+    Use pd.merge or df.merge with on, how ("inner", "left", "right", "outer") and suffixes. Check key uniqueness first, because duplicate keys multiply rows; the validate argument, such as validate="many_to_one", raises an error when the relationship is not what you expect, and indicator=True shows which side each row came from.
+  </InterviewQuestion>
+  <InterviewQuestion question="merge vs join vs concat: when do you use each?" category="Joins" level="Junior">
+    merge joins on columns like SQL. join is a convenience for joining on the index. concat stacks DataFrames vertically (adding rows) or horizontally (adding columns aligned by index).
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you reshape data with pivot_table and melt?" category="Reshaping" level="Mid">
+    pivot_table turns long data into wide, aggregating duplicates, for example revenue by month as columns. melt turns wide data into long, making column names into a variable column, which many plotting and modeling tools prefer.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is iterating over rows with iterrows slow, and what should you do instead?" category="Performance" level="Mid">
+    iterrows creates a Series per row and runs Python code per element, which is orders of magnitude slower than vectorized operations implemented in C. Use column arithmetic, NumPy functions, np.where or np.select for conditions, map with dictionaries, and built-in string and datetime accessors.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you add a column based on multiple conditions efficiently?" category="Performance" level="Mid">
+    Use np.select with a list of conditions and choices, which is vectorized.
+
+```python
+import numpy as np
+
+conditions = [df["amount"] >= 1000, df["amount"] >= 100]
+choices = ["high", "medium"]
+df["tier"] = np.select(conditions, choices, default="low")
+```
+  </InterviewQuestion>
+  <InterviewQuestion question="What is SettingWithCopyWarning and how do you avoid it?" category="pandas Basics" level="Mid">
+    It warns that you may be modifying a temporary copy produced by chained indexing, such as df[df.a > 0]["b"] = 1, so the change might not reach the original DataFrame. Use a single loc call, df.loc[df.a > 0, "b"] = 1, or call .copy() explicitly when you want an independent subset. Newer pandas versions move to copy-on-write semantics that remove this ambiguity.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you reduce memory usage of a large DataFrame?" category="Performance" level="Senior">
+    Downcast numeric types, convert low-cardinality strings to the category dtype, read only needed columns with usecols, parse dates explicitly, process files in chunks, and store data in columnar formats such as Parquet. For data larger than memory, use tools such as Polars, DuckDB, Dask or Spark.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you work with time series in pandas?" category="Time Series" level="Mid">
+    Convert to datetime with pd.to_datetime, set a DatetimeIndex, then use resample for frequency changes, rolling for moving windows, shift for lags, and the dt accessor for components such as day of week. Be careful with time zones using tz_localize and tz_convert.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you compute a 7-day rolling average per user?" category="Time Series" level="Mid">
+    Sort by user and date, then use a time-based rolling window within each group.
+
+```python
+df = df.sort_values(["user_id", "date"])
+df["spend_7d_avg"] = (
+    df.groupby("user_id")
+      .rolling("7D", on="date")["spend"]
+      .mean()
+      .reset_index(level=0, drop=True)
+)
+```
+
+    A time-based window handles missing days correctly, unlike a fixed count of rows.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you find and remove duplicate rows?" category="Data Cleaning" level="Junior">
+    duplicated() flags duplicates and drop_duplicates() removes them, with subset to define which columns identify a duplicate and keep to choose the first or last occurrence. Sort first if you want to keep, for example, the latest record.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is vectorization and why is NumPy fast?" category="Performance" level="Mid">
+    Vectorization applies an operation to whole arrays at once instead of looping in Python. NumPy stores data in contiguous typed arrays and runs loops in optimized compiled code, often using CPU SIMD instructions, so it is far faster than Python loops over objects.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is broadcasting in NumPy?" category="Performance" level="Mid">
+    Rules that let arrays of different shapes combine in arithmetic by virtually stretching dimensions of size one, without copying data. For example, subtracting a row vector of column means from a matrix centers every column.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you write a function to compute the top N most frequent items in a list?" category="Python" level="Junior">
+    Use collections.Counter, which counts in linear time and provides most_common.
+
+```python
+from collections import Counter
+
+def top_n(items, n):
+    return Counter(items).most_common(n)
+```
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you test data processing code?" category="Python" level="Senior">
+    Write unit tests with small, hand-built DataFrames that cover edge cases such as empty inputs, missing values and duplicate keys, using pandas testing helpers to compare outputs. Add data validation checks on real pipelines, such as schema, ranges, uniqueness and row-count expectations, with tools like Great Expectations or pandera.
+  </InterviewQuestion>
+  <InterviewQuestion question="pandas vs Polars vs Spark: when would you use each?" category="Performance" level="Senior">
+    pandas is the default for data that fits comfortably in memory and has the largest ecosystem. Polars is a faster, multi-threaded DataFrame library with lazy query optimization, good for larger single-machine workloads. Spark distributes work across a cluster for data far beyond one machine, at the cost of more overhead and complexity.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you avoid data leakage when preprocessing with pandas and scikit-learn?" category="Data Cleaning" level="Mid">
+    Split data first, then fit scalers, imputers and encoders on the training set only and apply them to validation and test data. scikit-learn Pipelines and ColumnTransformer enforce this, including inside cross-validation, so statistics never come from held-out data.
+  </InterviewQuestion>
+</InterviewQuestions>

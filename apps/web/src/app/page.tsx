@@ -25,6 +25,7 @@ export default async function HomePage() {
     "learning-paths",
     "interviews",
     "system-design",
+    "ai-system-design",
   ];
   const slugCounts = await Promise.all(
     sections.map((s) => getContentSlugs(s).then((arr) => arr.length))

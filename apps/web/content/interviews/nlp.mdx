@@ -1,0 +1,106 @@
+---
+title: NLP interview
+description: Natural language processing questions from text preprocessing and word embeddings to sequence models, transformers, evaluation metrics and applied NLP tasks.
+icon: file-text
+area: ML & AI
+---
+
+NLP interviews mix classic foundations (tokenization, TF-IDF, word embeddings, sequence models) with modern transformer practice. Expect to explain how representations evolved, choose an approach for a text task, and pick the right evaluation metric.
+
+Related: [Tokenization](/ai-system-design/genai-system-design/tokenization) · [Model Families](/ai-system-design/genai-system-design/encoder-decoder-families) · [transformers & attention](/interviews/transformers-and-attention)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What are common text preprocessing steps, and which still matter with transformers?" category="Fundamentals" level="Junior">
+    Classic pipelines lowercase text, remove punctuation and stop words, and apply stemming or lemmatization. With transformers, most of this is unnecessary or harmful because the model's own tokenizer and context handle it; what still matters is cleaning noise such as markup, normalizing Unicode, handling very long documents, and deduplicating data.
+  </InterviewQuestion>
+  <InterviewQuestion question="Stemming vs lemmatization: what is the difference?" category="Fundamentals" level="Junior">
+    Stemming chops word endings with rules, so "studies" may become "studi"; it is fast but crude. Lemmatization uses vocabulary and grammar to return the dictionary form, "study", which is more accurate but slower. Both reduce vocabulary size for classic models.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is TF-IDF and when is it still useful?" category="Representations" level="Junior">
+    TF-IDF weights a word by how often it appears in a document times how rare it is across the corpus, so distinctive words score high. It is still a strong, cheap baseline for search, keyword extraction and text classification with linear models, and BM25, a refinement of it, powers keyword search in hybrid RAG systems.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are the limitations of bag-of-words representations?" category="Representations" level="Junior">
+    They ignore word order and context, so "dog bites man" equals "man bites dog", produce very large sparse vectors, and treat synonyms as unrelated words. They cannot capture meaning that depends on context, such as negation or ambiguous words.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does Word2Vec learn word embeddings?" category="Representations" level="Mid">
+    It trains a shallow network on a prediction task: skip-gram predicts surrounding words from a center word, and CBOW predicts the center word from its neighbors. Negative sampling makes training efficient. Words used in similar contexts end up with similar vectors, capturing relationships such as king minus man plus woman being close to queen.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do GloVe and FastText differ from Word2Vec?" category="Representations" level="Mid">
+    GloVe learns vectors by factorizing global word co-occurrence statistics rather than predicting local context windows. FastText represents words as bags of character n-grams, so it can build vectors for rare and unseen words and handles morphology well.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between static and contextual embeddings?" category="Representations" level="Mid">
+    Static embeddings such as Word2Vec give each word one vector regardless of context, so "bank" has the same vector in river and money senses. Contextual embeddings from models such as ELMo, BERT and GPT compute a different vector for each occurrence based on the surrounding words, resolving ambiguity.
+  </InterviewQuestion>
+  <InterviewQuestion question="How did sequence-to-sequence models with attention change machine translation?" category="Sequence Models" level="Mid">
+    Early encoder-decoder RNNs squeezed the whole source sentence into one fixed vector, which lost information for long sentences. Attention let the decoder look back at all encoder states and focus on the relevant source words at each step, greatly improving long-sentence translation and leading directly to the transformer.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is named entity recognition and how is it modeled?" category="Tasks" level="Junior">
+    NER finds and classifies spans of text such as people, organizations, locations and dates. It is usually modeled as token classification with BIO tags (begin, inside, outside), historically with CRFs or BiLSTM-CRFs and now with fine-tuned transformer encoders or LLM extraction with structured outputs.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you build a text classifier today?" category="Tasks" level="Mid">
+    Start with a TF-IDF plus logistic regression baseline. If more accuracy is needed, fine-tune a pretrained encoder such as a BERT-family model, which is fast and cheap at inference. If labeled data is scarce, try zero-shot or few-shot classification with an LLM, possibly using it to label data for training a smaller model.
+  </InterviewQuestion>
+  <InterviewQuestion question="Extractive vs abstractive summarization: what is the difference?" category="Tasks" level="Mid">
+    Extractive summarization selects important sentences from the source verbatim, so it is faithful but can be choppy. Abstractive summarization generates new text that paraphrases and condenses the source, which reads better but can introduce errors or hallucinations, so faithfulness must be checked.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does sentiment analysis handle negation and sarcasm?" category="Tasks" level="Mid">
+    Bag-of-words models struggle with negation ("not good") and sarcasm because they ignore context. Contextual transformer models handle negation well since they see word order, but sarcasm remains hard because it often depends on world knowledge or tone. Domain-specific fine-tuning data and LLMs with context help.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is BLEU and what are its limitations?" category="Evaluation" level="Mid">
+    BLEU measures n-gram precision overlap between a generated text and reference translations, with a brevity penalty. It is cheap and useful for comparing systems on the same data, but it ignores meaning, penalizes valid paraphrases, and correlates poorly with human judgment for individual sentences or open-ended generation.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is ROUGE and where is it used?" category="Evaluation" level="Mid">
+    ROUGE measures overlap of n-grams or longest common subsequences between generated and reference text, emphasizing recall. It is used for summarization. Like BLEU, it rewards surface overlap rather than meaning or factual accuracy, so modern evaluations add embedding-based metrics, faithfulness checks or LLM judges.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you evaluate open-ended text generation?" category="Evaluation" level="Senior">
+    Combine automatic checks for constraints such as format and length, reference-based metrics when references exist, model-based metrics such as embedding similarity or LLM-as-judge with rubrics calibrated to humans, and human evaluation for quality dimensions such as fluency, faithfulness and helpfulness. Use pairwise comparisons between systems where possible.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a language model's perplexity?" category="Evaluation" level="Junior">
+    It is the exponential of the average negative log-likelihood per token on held-out text, roughly how many choices the model is "confused" between at each step. Lower is better, but it only compares models using the same tokenization and says little about usefulness for downstream tasks.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle out-of-vocabulary words?" category="Fundamentals" level="Junior">
+    Word-level models map them to an unknown token, losing information. Sub-word tokenizers such as BPE and WordPiece, and character-level models, avoid the problem by splitting rare words into known pieces, which is why modern models effectively have no out-of-vocabulary words.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you approach NLP for a low-resource language?" category="Tasks" level="Senior">
+    Use multilingual pretrained models that include the language, transfer from related languages, augment data with translation and back-translation, use LLMs to generate or label data carefully, and check that the tokenizer does not split the language's text excessively. Evaluate with native speakers, since automatic metrics may be unreliable.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is topic modeling, and how does LDA work?" category="Tasks" level="Mid">
+    Topic modeling discovers themes in a document collection without labels. LDA assumes each document is a mixture of topics and each topic a distribution over words, and infers these distributions from word co-occurrence. Modern alternatives cluster sentence embeddings and label clusters with keywords or an LLM.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is coreference resolution and why does it matter?" category="Tasks" level="Mid">
+    Coreference resolution links expressions that refer to the same entity, such as "Marie Curie", "she" and "the physicist". It matters for information extraction, summarization and question answering, where facts about an entity are spread across sentences using different references.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you detect and handle toxic or biased language in NLP systems?" category="Tasks" level="Senior">
+    Use classifiers trained for toxicity and policy categories on inputs and outputs, test models with bias benchmarks and counterfactual examples that swap demographic terms, curate training data, and monitor production with human review. Be careful that toxicity classifiers themselves can be biased against dialects or identity terms.
+  </InterviewQuestion>
+  <InterviewQuestion question="Fine-tuning BERT vs prompting an LLM for an NLP task: how do you decide?" category="Tasks" level="Senior">
+    A fine-tuned encoder is usually cheaper, faster and more accurate for a fixed, high-volume classification or extraction task with enough labeled data. An LLM is faster to start with, needs little or no labeled data and handles varied or generative tasks. A common pattern is to prototype with an LLM, use it to label data, then fine-tune a small model for production.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does semantic search differ from keyword search?" category="Representations" level="Junior">
+    Keyword search matches exact words, weighting rare ones higher. Semantic search embeds queries and documents into vectors and finds matches by meaning, so it handles synonyms and paraphrases. Keyword search is still better for exact identifiers, so production systems often combine both.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the role of the [CLS] token in BERT?" category="Sequence Models" level="Mid">
+    It is a special token prepended to every input whose final hidden state is used as a summary representation of the sequence for classification tasks. During pre-training it was used for next sentence prediction; during fine-tuning a classification head is trained on top of it. Mean-pooling all token vectors is often a better sentence embedding without specific training.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a CRF layer and why was it used on top of BiLSTMs for tagging?" category="Sequence Models" level="Senior">
+    A conditional random field models dependencies between neighboring output labels, for example that an "inside" tag must follow a "begin" tag of the same type. Predicting each token independently can produce invalid tag sequences; a CRF chooses the best overall sequence. With strong transformer encoders, a CRF adds less but can still help in structured tagging.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between precision, recall and F1 in NLP tasks like NER?" category="Evaluation" level="Junior">
+    Precision is the share of predicted entities that are correct, recall the share of true entities found, and F1 their harmonic mean. For NER they are usually computed at the entity level with exact span and type matching, so a partially correct span counts as wrong.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is text normalization for speech or noisy text?" category="Fundamentals" level="Mid">
+    Converting non-standard text into a consistent form, such as expanding numbers and abbreviations, fixing casing and spelling, and handling emojis or slang. It matters for search, speech systems and classic NLP pipelines where inconsistent forms fragment the vocabulary.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does question answering work with extractive models?" category="Tasks" level="Mid">
+    Given a question and a passage, an encoder such as BERT predicts the start and end token positions of the answer span within the passage. It is accurate and grounded but cannot answer beyond the passage text, which is why generative models with retrieval are now more common for open questions.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is zero-shot classification with NLI models?" category="Tasks" level="Senior">
+    A model trained on natural language inference judges whether a text entails a hypothesis such as 'This text is about sports'. Scoring a hypothesis per candidate label gives zero-shot classification without task-specific training. LLM prompting now covers many of the same cases.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are sentence embeddings and how are they trained?" category="Representations" level="Mid">
+    Vectors representing whole sentences so similar meanings are close. Models such as Sentence-BERT fine-tune encoders with siamese or contrastive training on pairs, such as paraphrases or question-answer pairs, so cosine similarity reflects semantic similarity. They power semantic search and clustering.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle long documents that exceed a model's input limit?" category="Tasks" level="Mid">
+    Split into chunks and process each, then aggregate, for example by voting for classification or map-reduce style summarization. Alternatively retrieve only relevant sections, use models with longer context, or use hierarchical models that encode chunks and then combine their representations.
+  </InterviewQuestion>
+</InterviewQuestions>

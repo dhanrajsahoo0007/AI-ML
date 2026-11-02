@@ -1,0 +1,147 @@
+---
+title: Transformers & attention interview
+description: The full set of commonly asked transformer questions, from attention math to KV caches, MoE and training at scale.
+icon: cpu
+area: ML & AI
+---
+
+Transformer questions show up in almost every ML engineer, applied scientist and LLM engineer interview. Junior rounds check that you can explain the blocks and the attention formula. Senior rounds push into cost: KV cache size, why decoding is memory-bound, FlashAttention, GQA, MoE and training parallelism.
+
+Study the deep-dives first, then drill here:
+[Transformer Architecture](/ai-system-design/genai-system-design/transformer-architecture) ·
+[Self-Attention](/ai-system-design/genai-system-design/self-attention-explained) ·
+[Positional Encodings](/ai-system-design/genai-system-design/positional-encodings) ·
+[Tokenization](/ai-system-design/genai-system-design/tokenization) ·
+[Model Families](/ai-system-design/genai-system-design/encoder-decoder-families) ·
+[Efficient Attention](/ai-system-design/genai-system-design/efficient-attention) ·
+[Mixture of Experts](/ai-system-design/genai-system-design/mixture-of-experts) ·
+[Scaling and Training](/ai-system-design/genai-system-design/scaling-laws-and-training)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What problem did the transformer solve compared with RNNs and LSTMs?" category="Fundamentals" level="Junior">
+    RNNs process tokens one at a time, so training cannot be parallelized across a sequence, and information from early tokens fades over long distances. The transformer replaces recurrence with attention, so every position is processed in parallel during training and any two tokens are connected in a single step. That made it far faster to train at scale and better at long-range dependencies.
+  </InterviewQuestion>
+  <InterviewQuestion question="Name the components of a transformer block." category="Fundamentals" level="Junior">
+    A multi-head self-attention sub-layer and a position-wise feed-forward network, each wrapped in a residual connection and layer normalization. Decoder blocks in encoder-decoder models add a cross-attention sub-layer that attends to the encoder output, and they use a causal mask in self-attention.
+  </InterviewQuestion>
+  <InterviewQuestion question="Write the scaled dot-product attention formula and explain each term." category="Attention" level="Junior">
+    Attention equals softmax of Q times K transposed divided by the square root of d_k, multiplied by V. Q holds the queries, what each token looks for; K holds the keys, what each token can be matched on; V holds the values, what each token passes on. The product of Q and K transposed scores every pair of tokens, the scale keeps those scores in a healthy range, the softmax turns them into weights, and multiplying by V produces a weighted blend of values for every token.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why divide by the square root of d_k?" category="Attention" level="Junior">
+    Dot products of random vectors have variance that grows with dimension, so for large key sizes the scores become large and the softmax becomes nearly one-hot. A saturated softmax has tiny gradients, which slows training. Scaling by the square root of the key dimension keeps the variance close to one.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do we need multi-head attention?" category="Attention" level="Junior">
+    One attention head can express only one relevance pattern per token. Several heads, each with its own projections in a smaller subspace, can capture different relationships at once, such as syntax, coreference and position. The total cost is similar to one full-width head because the width is split across heads.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between self-attention and cross-attention?" category="Attention" level="Junior">
+    In self-attention, queries, keys and values all come from the same sequence. In cross-attention, queries come from one sequence and keys and values from another, for example the decoder attending to the encoder's output in translation, or text attending to image features in a multimodal model.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a causal mask and why is it needed?" category="Attention" level="Junior">
+    It sets the attention scores for future positions to minus infinity before the softmax, so each token can only attend to itself and earlier tokens. This lets a decoder be trained on next-token prediction for every position in one parallel pass without seeing the answers.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do transformers need positional encodings?" category="Positions & Tokens" level="Junior">
+    Self-attention is a weighted sum over a set, so it is invariant to token order. Without positional information, sentences with the same words in different orders would produce the same representations. Positional encodings add order, either to the input vectors or inside attention.
+  </InterviewQuestion>
+  <InterviewQuestion question="Compare sinusoidal, learned, RoPE and ALiBi positional encodings." category="Positions & Tokens" level="Mid">
+    Sinusoidal encodings are fixed waves added to embeddings and need no parameters. Learned absolute embeddings are a trainable vector per position but cannot handle positions beyond the table. RoPE rotates queries and keys by a position-dependent angle so attention depends on relative distance, and it is the default in most modern LLMs. ALiBi adds a distance-based penalty to attention scores and extrapolates well to longer sequences than seen in training.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does RoPE encode relative position?" category="Positions & Tokens" level="Mid">
+    It rotates each pair of dimensions in a token's query and key by an angle equal to its position times a fixed frequency. The dot product of a rotated query and a rotated key depends only on the difference of their angles, so attention scores depend on relative distance even though each token is rotated by its absolute position.
+  </InterviewQuestion>
+  <InterviewQuestion question="How are context windows extended for RoPE models?" category="Positions & Tokens" level="Senior">
+    By rescaling the rotary frequencies so longer positions map onto angles the model saw in training, using position interpolation, NTK-aware scaling or YaRN, followed by a short fine-tune on long documents. You then evaluate with long-context retrieval tests at different depths and check that short-context quality is unchanged.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is BPE tokenization?" category="Positions & Tokens" level="Junior">
+    Byte-pair encoding builds a sub-word vocabulary by starting from characters or bytes and repeatedly merging the most frequent adjacent pair into a new token until the vocabulary reaches a target size. Common words become single tokens and rare words split into pieces, so nothing is out of vocabulary.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do LLMs struggle with tasks like counting letters or exact arithmetic?" category="Positions & Tokens" level="Mid">
+    They operate on sub-word tokens, so individual letters and digits are often hidden inside larger tokens, and numbers are split inconsistently. The model must infer spelling and digit structure indirectly. Spelling a word out first, or using tools for arithmetic, avoids the problem.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does the feed-forward network in a transformer block do?" category="Fundamentals" level="Mid">
+    It is a two-layer MLP applied to each token independently, typically expanding to about four times the model dimension and back. Attention mixes information across tokens; the feed-forward network transforms each token's representation. It holds most of a standard block's parameters, and research suggests it stores much of the model's factual knowledge.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why are residual connections important in transformers?" category="Fundamentals" level="Junior">
+    They add each sub-layer's input to its output, giving gradients a direct path through deep stacks and letting each layer learn an incremental update. Without them, training networks with dozens of layers would be unstable because gradients would vanish or explode.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between Pre-LN and Post-LN, and why do modern LLMs use Pre-LN?" category="Fundamentals" level="Mid">
+    Post-LN, as in the original paper, normalizes after adding the residual; Pre-LN normalizes the input to each sub-layer before it runs. Pre-LN keeps a clean residual path, so gradients behave better in deep models and training needs less careful learning-rate warm-up. Most large models use Pre-LN, often with RMSNorm.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is RMSNorm and why use it instead of LayerNorm?" category="Fundamentals" level="Mid">
+    RMSNorm scales each vector by its root mean square and a learned gain, without subtracting the mean or adding a bias. It is cheaper and works about as well as LayerNorm in practice, so many modern LLMs such as Llama use it.
+  </InterviewQuestion>
+  <InterviewQuestion question="Compare encoder-only, decoder-only and encoder-decoder transformers." category="Architecture Variants" level="Junior">
+    Encoder-only models such as BERT use bidirectional attention and masked-token training, and excel at classification and embeddings. Decoder-only models such as GPT use causal attention and next-token training, and are the basis of most chat LLMs. Encoder-decoder models such as T5 read the input bidirectionally and generate with a causal decoder via cross-attention, which suits translation and summarization.
+  </InterviewQuestion>
+  <InterviewQuestion question="How is BERT pre-trained?" category="Architecture Variants" level="Junior">
+    With masked language modeling, where about 15% of tokens are selected and the model predicts them from both directions, and originally with next sentence prediction, which classifies whether two sentences are consecutive. Later work such as RoBERTa showed that dropping next sentence prediction and training longer improves results.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is span corruption in T5?" category="Architecture Variants" level="Mid">
+    Random spans of the input are replaced with sentinel tokens, and the decoder is trained to output the missing spans in order. It teaches the model to reconstruct multi-token gaps and fits T5's text-to-text framing.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why did decoder-only models become the standard for LLMs?" category="Architecture Variants" level="Mid">
+    One stack and one objective are simple to scale, and next-token prediction turns every token of text into a training signal. At scale they show in-context learning, and instruction tuning lets them handle almost any task as generation, so a single model can replace many task-specific ones.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the computational complexity of self-attention?" category="Inference & Efficiency" level="Junior">
+    Quadratic in sequence length: each of n tokens compares against n keys, so time scales with n squared times the model dimension, and a naive implementation stores an n-by-n matrix per head. Projections and feed-forward layers scale linearly in n, so attention dominates at long context.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the KV cache?" category="Inference & Efficiency" level="Junior">
+    During generation, the keys and values for all previous tokens are stored for every layer so each new step only computes the newest token's projections. It turns quadratic recomputation into linear work per step, at the cost of memory that grows with sequence length, batch size, layers and KV heads.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you calculate KV cache memory?" category="Inference & Efficiency" level="Mid">
+    Two (keys and values) times number of layers times number of KV heads times head dimension times sequence length times batch size times bytes per value. For example, 32 layers, 32 heads of size 128, 16-bit values and 8K tokens is about 4.3 GB per sequence.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain prefill and decode phases of LLM inference." category="Inference & Efficiency" level="Mid">
+    Prefill processes the whole prompt in parallel to fill the KV cache and produce the first token; it is compute-bound and determines time to first token. Decode generates one token per step, re-reading weights and the cache, so it is memory-bandwidth-bound and determines tokens per second.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are MQA and GQA?" category="Inference & Efficiency" level="Mid">
+    Multi-query attention shares a single key and value head across all query heads; grouped-query attention shares one key and value head per group of query heads. Both shrink the KV cache and speed up decoding. GQA keeps quality close to full multi-head attention, which is why most large modern models use it.
+  </InterviewQuestion>
+  <InterviewQuestion question="What does FlashAttention do?" category="Inference & Efficiency" level="Mid">
+    It computes exact attention in tiles that fit in fast on-chip memory, using an online softmax, so the full n-by-n score matrix is never written to slow GPU memory. This reduces memory from quadratic to linear in sequence length and speeds attention up, because memory traffic was the bottleneck.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is PagedAttention?" category="Inference & Efficiency" level="Senior">
+    A KV cache layout from vLLM that stores each sequence's cache in fixed-size blocks allocated on demand, like virtual memory pages. It nearly eliminates fragmentation and lets requests share common prefixes, so servers fit many more concurrent sequences and achieve higher throughput.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is speculative decoding?" category="Inference & Efficiency" level="Senior">
+    A small draft model proposes several tokens ahead, and the large model verifies them all in one forward pass, accepting the longest prefix it agrees with. Because verification is parallel, the large model produces several tokens per pass when the draft is good, reducing latency without changing the output distribution when standard acceptance rules are used.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are temperature, top-k and top-p sampling?" category="Inference & Efficiency" level="Junior">
+    Temperature divides the logits before the softmax: low values make the distribution sharper and more deterministic, high values flatten it. Top-k samples only from the k most likely tokens. Top-p, or nucleus sampling, samples from the smallest set of tokens whose cumulative probability exceeds p. They control the trade-off between consistency and diversity.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a mixture-of-experts transformer?" category="Scaling" level="Mid">
+    A model whose feed-forward layers are replaced by many expert networks and a router that sends each token to a few experts. It has many total parameters but only a fraction active per token, giving more capacity per unit of compute, at the cost of memory, load balancing and communication overhead.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do MoE models need load balancing?" category="Scaling" level="Senior">
+    Routers tend to favor experts that are already slightly better, which then get more training and become even more favored, collapsing onto a few experts. An auxiliary balancing loss and per-expert capacity limits keep tokens spread out so all experts learn and hardware stays evenly loaded.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are scaling laws?" category="Scaling" level="Mid">
+    Empirical findings that language model loss decreases as a smooth power law as parameters, training tokens and compute increase. They let teams predict the loss of a large run from small ones and choose model size and data size for a budget.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the Chinchilla-optimal ratio?" category="Scaling" level="Mid">
+    About 20 training tokens per parameter for compute-optimal training, meaning parameters and data should grow together. Chinchilla, at 70 billion parameters and 1.4 trillion tokens, outperformed the larger Gopher trained with the same compute.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you estimate training compute for an LLM?" category="Scaling" level="Mid">
+    About 6 floating-point operations per parameter per training token, 2 for the forward pass and 4 for the backward pass. A 7-billion-parameter model on 2 trillion tokens needs about 8.4e22 operations.
+  </InterviewQuestion>
+  <InterviewQuestion question="Explain data, tensor and pipeline parallelism." category="Scaling" level="Senior">
+    Data parallelism replicates the model and splits batches, averaging gradients, with ZeRO or FSDP sharding the states to save memory. Tensor parallelism splits individual weight matrices across GPUs, usually inside one server because it needs fast links. Pipeline parallelism places groups of layers on different GPUs and streams micro-batches through them. Large training runs combine all three.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between pre-training, SFT and RLHF?" category="Training" level="Junior">
+    Pre-training teaches language and knowledge through next-token prediction on huge corpora. Supervised fine-tuning teaches the model to follow instructions using curated examples. RLHF, or alternatives like DPO, aligns outputs with human preferences using comparisons between responses.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is teacher forcing used when training decoders?" category="Training" level="Mid">
+    During training, the decoder is fed the ground-truth previous tokens rather than its own predictions, which lets all positions be trained in parallel and stabilizes learning. The downside is exposure bias: at inference the model conditions on its own possibly wrong outputs, a situation it saw less during training.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is weight tying between input embeddings and the output layer?" category="Training" level="Mid">
+    Using the same matrix for the token embedding lookup and the final projection to vocabulary logits. It reduces parameters, which matters for large vocabularies, and often improves quality because both directions share one representation of each token.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is dropout's role in transformers, and why do many large LLMs train without it?" category="Training" level="Senior">
+    Dropout regularizes by randomly zeroing activations, which helps when data is limited relative to model size. Large LLMs are often trained for about one pass over trillions of tokens, so overfitting is not the main risk and dropout mainly slows learning. Fine-tuning on small datasets is where dropout or other regularization becomes useful again.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do Vision Transformers apply attention to images?" category="Architecture Variants" level="Mid">
+    They split an image into fixed-size patches, flatten and linearly project each patch into a token, add position embeddings and a classification token, and run a standard transformer encoder. With enough data they match or beat convolutional networks, though they have weaker built-in assumptions about locality.
+  </InterviewQuestion>
+  <InterviewQuestion question="Where are most parameters in a transformer, and where is most compute at long context?" category="Scaling" level="Senior">
+    In a standard block the feed-forward network holds about two-thirds of the parameters, attention projections about one-third. At short context, compute follows parameters. At long context, the quadratic attention term and the KV cache dominate, which is why long-context work focuses on attention efficiency.
+  </InterviewQuestion>
+</InterviewQuestions>

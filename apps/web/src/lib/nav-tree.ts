@@ -46,6 +46,7 @@ const sectionDefs: {
   { key: "learning-paths", label: "Learning Paths", href: "/learning-paths", icon: "book-open" },
   { key: "interviews", label: "Interviews", href: "/interviews", icon: "brain" },
   { key: "system-design", label: "ML System Design", href: "/system-design", icon: "layers" },
+  { key: "ai-system-design", label: "AI System Design", href: "/ai-system-design", icon: "sparkles" },
 ];
 
 function extractCategoryMapping(

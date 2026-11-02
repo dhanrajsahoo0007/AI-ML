@@ -8,12 +8,13 @@ export const siteConfig = {
     { href: "/learning-paths", label: "Learning Paths" },
     { href: "/interviews", label: "Interviews" },
     { href: "/system-design", label: "ML System Design" },
+    { href: "/ai-system-design", label: "AI System Design" },
   ],
   hero: {
-    badge: "From zero to GenAI, LLMs, and agents — with interview depth",
+    badge: "One place for AI, data science and ML interview prep",
     headline: ["Master AI.", "From Scratch."],
     description:
-      "A structured path through **machine learning**, **deep learning**, **generative AI**, **LLMs**, and **agentic AI** — with interview prep and ML system design so you see how ideas land in real systems.",
+      "A structured path through **machine learning**, **data science**, **transformers**, **LLMs**, **RAG**, and **agentic AI**, with question banks and AI system design deep-dives so you can explain how ideas land in real systems.",
     primaryCta: { label: "Start Learning", href: "/learning-paths" },
     secondaryCta: { label: "Explore Interviews", href: "/interviews" },
   },
@@ -47,7 +48,7 @@ export const siteConfig = {
   features: {
     title: "Everything you need",
     subtitle:
-      "Three pillars that cover concepts, practice, and real-world architecture.",
+      "Four pillars that cover concepts, practice, and real-world architecture.",
     items: [
       {
         href: "/learning-paths",
@@ -61,7 +62,7 @@ export const siteConfig = {
         icon: "brain",
         title: "Interview Prep",
         description:
-          "Question-first pages with collapsible answers so you can drill without spoiling yourself.",
+          "Question banks for AI, data science and ML interviews, filterable by topic and difficulty.",
       },
       {
         href: "/system-design",
@@ -69,6 +70,13 @@ export const siteConfig = {
         title: "ML System Design",
         description:
           "Serving, data movement, and reliability patterns you will see in real production systems.",
+      },
+      {
+        href: "/ai-system-design",
+        icon: "sparkles",
+        title: "AI System Design",
+        description:
+          "Transformers, RAG, knowledge graphs, agents and recommenders, explained with architecture diagrams.",
       },
     ],
   },

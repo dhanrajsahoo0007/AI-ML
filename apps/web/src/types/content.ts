@@ -1,4 +1,8 @@
-export type ContentSection = "learning-paths" | "interviews" | "system-design";
+export type ContentSection =
+  | "learning-paths"
+  | "interviews"
+  | "system-design"
+  | "ai-system-design";
 
 export interface ContentGroupDef {
   name: string;
@@ -13,6 +17,7 @@ export interface ContentMeta {
   icon?: string;
   categories?: string[];
   groups?: ContentGroupDef[];
+  area?: string;
 }
 
 export interface BreadcrumbItem {

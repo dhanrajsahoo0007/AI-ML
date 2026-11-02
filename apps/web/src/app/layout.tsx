@@ -43,6 +43,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      data-scroll-behavior="smooth"
       className={`${inter.variable} ${display.variable} ${mono.variable}`}
     >
       <body className="flex min-h-dvh flex-col font-sans">

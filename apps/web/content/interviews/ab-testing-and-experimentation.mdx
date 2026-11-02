@@ -1,0 +1,103 @@
+---
+title: A/B testing & experimentation interview
+description: Experiment design questions for data science and product analytics interviews, covering metrics, sample size, randomization, pitfalls like peeking and novelty effects, and advanced methods.
+icon: flask
+area: Data Science
+---
+
+Product data science interviews almost always include an experimentation case: "We changed the checkout button; design the test and tell us whether to ship." Interviewers look for a clear hypothesis, well-chosen metrics, correct sizing and analysis, and awareness of the many ways experiments go wrong.
+
+Related: [statistics & probability](/interviews/statistics-and-probability) · [Recommendation Systems](/ai-system-design/genai-system-design/recommendation-systems)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Walk through how you would design an A/B test." category="Design" level="Junior">
+    State the hypothesis and the decision it informs. Choose a primary metric, guardrail metrics and the randomization unit. Compute the sample size from the baseline, minimum detectable effect, significance level and power, and fix the duration, covering whole weekly cycles. Run it, check data quality and sample ratio, analyze the pre-registered metrics, and decide based on effect size, confidence intervals and guardrails.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose the primary metric?" category="Metrics" level="Mid">
+    It should reflect the goal of the change, be sensitive enough to move within the test duration, and be hard to game. Often a short-term proxy is used for a long-term goal, such as purchases for revenue or sessions for retention, so its link to the long-term outcome should be validated. Define it precisely before the test starts.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are guardrail metrics?" category="Metrics" level="Junior">
+    Metrics that must not get worse even if the primary metric improves, such as page latency, error rates, unsubscribes, refunds or revenue. They protect against shipping changes that win locally but harm the business or users.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the minimum detectable effect and how do you choose it?" category="Design" level="Mid">
+    The smallest true effect the test is powered to detect reliably. Choose it from business value: the smallest improvement worth the cost of shipping and maintaining the change. Smaller MDEs need much larger samples, roughly four times the sample to halve the MDE.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose the randomization unit?" category="Design" level="Mid">
+    Randomize at the level where the treatment is experienced and where units do not influence each other: usually users, sometimes sessions, devices, stores or regions. User-level is common for consistency of experience. If the analysis unit differs from the randomization unit, such as randomizing users but measuring per page view, variance must be computed accordingly, for example with the delta method.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a sample ratio mismatch and why does it matter?" category="Pitfalls" level="Mid">
+    When the observed split between groups differs significantly from the intended split, such as 50.8 vs 49.2 with millions of users, detected with a chi-square test. It signals a bug in assignment, logging, filtering or redirects, so results are untrustworthy until the cause is found.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is peeking and why is it a problem?" category="Pitfalls" level="Mid">
+    Checking results repeatedly and stopping as soon as the p-value crosses 0.05. Each look is another chance for a false positive, so the real false positive rate can be far above 5%. Fix the duration in advance, or use sequential testing methods designed for continuous monitoring.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are novelty and primacy effects?" category="Pitfalls" level="Mid">
+    A novelty effect is a temporary lift because users try something new; a primacy or change-aversion effect is a temporary drop because users dislike change. Both fade over time. Run tests long enough, look at effects over time and by new versus returning users, and consider holdouts to measure long-term impact.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is network interference and how do you handle it?" category="Pitfalls" level="Senior">
+    When treated users affect control users, such as in social networks, marketplaces with shared supply, or ride-sharing, violating the assumption that units are independent. Handle it with cluster randomization by group or region, switchback tests that alternate treatment over time, or marketplace-specific designs that randomize one side.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a switchback experiment?" category="Design" level="Senior">
+    Treatment and control alternate over time windows within the same unit, such as a city every hour, randomized by window. It is used when users share resources and cannot be cleanly split, as in delivery or ride-sharing marketplaces. Analysis must account for carryover between windows and time correlation.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is CUPED and why use it?" category="Analysis" level="Senior">
+    Controlled-experiment Using Pre-Experiment Data adjusts each user's metric using a correlated pre-experiment covariate, typically the same metric before the test. It removes variance that is unrelated to the treatment, often substantially, so tests reach significance with fewer users or less time without biasing the estimate.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you analyze a ratio metric like click-through rate per session?" category="Analysis" level="Senior">
+    When the numerator and denominator are both random and the randomization unit is the user, simple binomial formulas underestimate variance because sessions from the same user are correlated. Use the delta method or bootstrap at the user level to get correct standard errors.
+  </InterviewQuestion>
+  <InterviewQuestion question="The test shows no significant difference. What do you conclude?" category="Analysis" level="Mid">
+    Not that there is no effect, only that the test could not detect one at its power. Check the confidence interval: if it rules out effects that matter, the change likely has little impact; if it is wide, the test was underpowered. Also check for implementation problems, sample ratio mismatch, and segment effects that cancel out.
+  </InterviewQuestion>
+  <InterviewQuestion question="The primary metric improved but a guardrail got worse. Do you ship?" category="Decision" level="Senior">
+    It depends on the size and importance of each change. Quantify both in business terms with confidence intervals, understand the mechanism, and consult stakeholders on the trade-off. Often the right move is to iterate on the design to keep the gain without the harm, or to ship to a subset where the trade-off is favorable.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why should you be careful with segment analysis after a test?" category="Pitfalls" level="Mid">
+    Slicing results by many segments is multiple testing: some segments will look significant by chance. Pre-register important segments, correct for multiple comparisons, and treat surprising segment findings as hypotheses for a follow-up test rather than conclusions.
+  </InterviewQuestion>
+  <InterviewQuestion question="How long should an experiment run?" category="Design" level="Junior">
+    Until it reaches the pre-computed sample size, and at least one or two full weekly cycles to cover day-of-week effects. Longer if novelty effects are expected or the metric is slow, such as retention. Do not stop early because results look good.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is an A/A test and why run one?" category="Design" level="Junior">
+    An experiment where both groups get the same experience. It validates the experimentation system: assignment, logging and statistics should show no significant differences beyond the expected false positive rate. It also measures metric variance for sizing future tests.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are multi-armed bandits and when would you use them instead of A/B tests?" category="Advanced" level="Senior">
+    Bandits shift traffic toward better-performing variants during the experiment, balancing exploration and exploitation, which reduces the cost of showing losing variants. They suit short-lived decisions, many variants and continuous optimization such as headlines or artwork. A/B tests are better when you need unbiased effect estimates, care about long-term or multiple metrics, or must make a clean ship decision.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you measure long-term effects of a change?" category="Advanced" level="Senior">
+    Keep a long-running holdout group that does not get the change, track retention and other slow metrics over months, and use surrogate metrics that have been validated to predict long-term outcomes. Re-check effects periodically, since short-term lifts can fade.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a holdout group?" category="Advanced" level="Mid">
+    A small share of users excluded from a set of launched features for an extended period. Comparing them with everyone else measures the cumulative, long-term impact of many changes together, which individual short tests cannot capture.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why might offline model metrics disagree with A/B test results for an ML model?" category="Advanced" level="Senior">
+    Offline data reflects the previous system's exposure and biases, offline metrics such as AUC may not align with the business metric, there can be training-serving skew in features, and users react to the new behavior in ways historical data cannot show. That is why online experiments are the final judge for ML launches.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you test a change to a recommendation algorithm?" category="Case" level="Senior">
+    Randomize at the user level, define a primary metric tied to long-term value such as engaged time or retention proxies, plus guardrails for diversity, latency and complaints. Check for interference if recommendations affect supply. Run long enough to see past novelty, use variance reduction such as CUPED, and consider interleaving for faster, more sensitive ranking comparisons before a full test.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is interleaving in ranking experiments?" category="Advanced" level="Senior">
+    Instead of showing each user one ranker's results, results from two rankers are merged into a single list and user clicks are credited to the ranker that contributed each item. Because each user compares both, interleaving detects preference differences with far fewer users than a standard A/B test. It is used as a fast screening step.
+  </InterviewQuestion>
+  <InterviewQuestion question="A test shows a 20% conversion lift, far more than expected. What do you do?" category="Case" level="Mid">
+    Be skeptical and check for errors first: sample ratio mismatch, logging bugs, bot traffic, metric definitions, and whether the treatment broke tracking in the control or treatment. Look at the effect over time and across segments. Twyman's law applies: any figure that looks interesting or different is usually wrong. Rerun if needed before celebrating.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you test a new pricing page when you can't randomize prices fairly?" category="Case" level="Senior">
+    Options include testing the page design rather than prices, randomizing by region or time with switchbacks, running quasi-experiments such as difference-in-differences across markets, or limited tests with clear legal and ethical review. Be explicit about the assumptions each design needs.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between statistical and practical significance in experiments?" category="Decision" level="Junior">
+    Statistical significance means the observed effect is unlikely to be due to chance. Practical significance means the effect is large enough to matter for the business. With large samples, tiny effects become statistically significant, so decisions should use effect sizes and confidence intervals compared with the minimum effect worth shipping.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle experiments with heavy-tailed metrics like revenue?" category="Analysis" level="Senior">
+    A few big spenders dominate variance, making tests noisy. Use winsorizing or capping at a high percentile, log transforms, variance reduction such as CUPED, longer tests, or non-parametric methods and bootstrap intervals. Report the capping rule and check that conclusions hold with and without it.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is sequential testing?" category="Advanced" level="Senior">
+    Statistical methods that allow results to be monitored continuously and stopped early while controlling the false positive rate, using adjusted boundaries such as alpha spending or always-valid p-values. They let teams stop clearly winning or harmful tests sooner without the inflated error rates of naive peeking.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you prioritize which experiments to run?" category="Decision" level="Mid">
+    Estimate expected impact, confidence in the idea, and cost to build and test, for example with an ICE-style score, and consider traffic limits since tests compete for users. Favor experiments that inform big decisions or test risky assumptions early.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you avoid interactions between concurrent experiments?" category="Pitfalls" level="Senior">
+    Use an experimentation platform with layers or namespaces so experiments that touch the same surface are mutually exclusive, while unrelated ones overlap safely. Monitor for interaction effects in important pairs, and coordinate launches on shared components.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,0 +1,106 @@
+---
+title: Computer vision interview
+description: Computer vision questions on CNNs, classic architectures, detection, segmentation, vision transformers, multimodal models, augmentation and metrics.
+icon: eye
+area: ML & AI
+---
+
+Vision interviews check your grasp of convolutional building blocks, the progression of key architectures, and the main tasks: classification, detection and segmentation. Modern rounds add vision transformers, CLIP-style multimodal models and practical deployment questions.
+
+Related: [Deep learning interview](/interviews/deep-learning) · [Self-Attention](/ai-system-design/genai-system-design/self-attention-explained)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why are convolutions better than fully connected layers for images?" category="Fundamentals" level="Junior">
+    Convolutions share small filters across all positions, giving locality, translation equivariance and far fewer parameters. A fully connected layer on a large image would need millions of weights per neuron, overfit easily, and ignore spatial structure.
+  </InterviewQuestion>
+  <InterviewQuestion question="What do padding, stride and pooling do?" category="Fundamentals" level="Junior">
+    Padding adds border pixels so filters can cover edges and output size can be preserved. Stride sets how far the filter moves each step, reducing resolution when larger than one. Pooling summarizes local regions, typically with max or average, to downsample and add some translation invariance.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a receptive field?" category="Fundamentals" level="Junior">
+    The region of the input image that influences a particular neuron. It grows with depth, kernel size, stride and pooling, so deeper layers "see" larger parts of the image and capture more global patterns. Dilated convolutions enlarge it without extra parameters.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a 1x1 convolution used for?" category="Fundamentals" level="Mid">
+    It mixes information across channels at each pixel without looking at neighbors, acting like a per-pixel fully connected layer. It is used to reduce or expand the number of channels cheaply, as in bottleneck blocks of ResNet and Inception, and to add non-linearity.
+  </InterviewQuestion>
+  <InterviewQuestion question="Walk through the evolution from AlexNet to ResNet." category="Architectures" level="Mid">
+    AlexNet showed deep CNNs trained on GPUs with ReLU and dropout could win ImageNet. VGG used stacks of small 3x3 filters to go deeper. Inception used parallel filters of different sizes with 1x1 bottlenecks for efficiency. ResNet added residual connections, making networks of a hundred-plus layers trainable and setting a new standard backbone.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are depthwise separable convolutions?" category="Architectures" level="Mid">
+    They split a standard convolution into a depthwise convolution, one filter per input channel, and a pointwise 1x1 convolution that mixes channels. This cuts computation and parameters dramatically with small accuracy loss, which is why mobile architectures such as MobileNet use them.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does a Vision Transformer work?" category="Architectures" level="Mid">
+    It splits the image into fixed-size patches, flattens and projects each into a token embedding, adds position embeddings and a classification token, and processes them with a standard transformer encoder. It has weaker built-in image assumptions than CNNs, so it needs more data or pre-training, but scales very well.
+  </InterviewQuestion>
+  <InterviewQuestion question="CNN vs Vision Transformer: when would you choose each?" category="Architectures" level="Senior">
+    CNNs are data-efficient, fast and strong for small to medium datasets and edge devices. ViTs excel with large-scale pre-training and transfer, capture global context, and integrate naturally with multimodal transformers. Hybrid and modern convolutional designs narrow the gap, so the choice often depends on available pretrained models, data size and deployment constraints.
+  </InterviewQuestion>
+  <InterviewQuestion question="Classification vs detection vs segmentation: what is the difference?" category="Tasks" level="Junior">
+    Classification assigns a label to the whole image. Object detection finds objects and returns a bounding box and label for each. Semantic segmentation labels every pixel with a class, instance segmentation separates individual objects of the same class, and panoptic segmentation combines both.
+  </InterviewQuestion>
+  <InterviewQuestion question="Two-stage vs one-stage object detectors: what is the trade-off?" category="Tasks" level="Mid">
+    Two-stage detectors such as Faster R-CNN first propose candidate regions and then classify and refine them, which is accurate but slower. One-stage detectors such as YOLO and SSD predict boxes and classes directly over a dense grid, which is much faster and suits real-time use, with accuracy that has caught up substantially.
+  </InterviewQuestion>
+  <InterviewQuestion question="What are anchor boxes?" category="Tasks" level="Mid">
+    Predefined boxes of various sizes and aspect ratios placed across the image; the detector predicts offsets from each anchor and whether it contains an object. They make learning box regression easier. Anchor-free detectors instead predict object centers or keypoints directly, avoiding anchor tuning.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is non-maximum suppression?" category="Tasks" level="Junior">
+    Detectors often predict several overlapping boxes for the same object. NMS keeps the highest-scoring box and removes others that overlap it beyond an IoU threshold, repeating for remaining boxes. Transformer detectors such as DETR avoid NMS by predicting a set of unique objects directly.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is IoU and how is mAP calculated?" category="Evaluation" level="Mid">
+    Intersection over union is the overlap area between a predicted and true box divided by their combined area. A prediction counts as correct if its IoU exceeds a threshold. Average precision is the area under the precision-recall curve for one class; mAP averages it over classes, and COCO-style mAP also averages over IoU thresholds from 0.5 to 0.95.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does U-Net work for segmentation?" category="Tasks" level="Mid">
+    U-Net has an encoder that downsamples to capture context and a decoder that upsamples back to full resolution, with skip connections that copy high-resolution encoder features to the matching decoder level. The skips recover fine spatial detail, making it very effective for medical and other segmentation tasks with limited data.
+  </InterviewQuestion>
+  <InterviewQuestion question="Which losses are used for segmentation, and why Dice loss?" category="Evaluation" level="Senior">
+    Pixel-wise cross-entropy is standard. Dice loss directly optimizes overlap between predicted and true masks, which handles heavy class imbalance, such as a small lesion in a large image, better than cross-entropy. They are often combined, and focal loss is another option for imbalance.
+  </InterviewQuestion>
+  <InterviewQuestion question="What data augmentations are common for vision, and what are the risks?" category="Training" level="Junior">
+    Random crops, flips, rotations, scaling, color jitter, blur, and mixing methods such as MixUp and CutMix. They teach invariances and reduce overfitting. Risks arise when an augmentation changes the label, such as flipping digits or text, or rotating medical images where orientation matters, so augmentations must fit the domain.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does transfer learning work for vision tasks?" category="Training" level="Junior">
+    Start from a backbone pretrained on a large dataset such as ImageNet, replace the head for your classes, train the head with the backbone frozen, then fine-tune deeper layers with a small learning rate. Early layers' edge and texture features transfer well across domains; later layers may need more adaptation.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is CLIP and why was it important?" category="Multimodal" level="Mid">
+    CLIP trains an image encoder and a text encoder together on hundreds of millions of image-caption pairs with a contrastive loss, so matching images and texts get similar embeddings. It enables zero-shot classification by comparing an image with text prompts for each class, and its embeddings power image search and text-to-image models.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do vision-language models like those behind multimodal chat assistants work?" category="Multimodal" level="Senior">
+    A vision encoder, often a ViT, turns the image into patch embeddings, a projection or adapter maps them into the language model's token space, and the LLM processes image tokens alongside text tokens. Training aligns the two with image-text data and then instruction-tunes on visual question answering and conversation data.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do diffusion models generate images from text?" category="Multimodal" level="Senior">
+    A network is trained to remove noise from images step by step, conditioned on a text embedding. Generation starts from random noise and iteratively denoises toward an image matching the prompt. Latent diffusion runs this in a compressed latent space for efficiency, and classifier-free guidance strengthens adherence to the text.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you handle a small labeled image dataset?" category="Training" level="Mid">
+    Use a strong pretrained backbone and fine-tune, apply domain-appropriate augmentation, consider self-supervised pre-training on unlabeled in-domain images, use few-shot approaches or CLIP-style zero-shot baselines, and invest in labeling the most informative examples through active learning. Validate carefully to avoid overfitting.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is self-supervised learning in vision?" category="Training" level="Senior">
+    Learning representations from unlabeled images using pretext tasks: contrastive methods such as SimCLR and MoCo pull together augmented views of the same image and push apart others, while masked image modeling such as MAE reconstructs hidden patches. The resulting backbones transfer well with few labels.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you deploy a vision model on an edge device?" category="Deployment" level="Senior">
+    Choose an efficient architecture, quantize to 8-bit integers, prune or distill if needed, and compile with the device's runtime, such as TensorRT, Core ML or TFLite. Measure latency, memory and accuracy on the actual device and representative inputs, including lighting and camera differences.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your model works in testing but fails on real camera images. Why?" category="Deployment" level="Mid">
+    Likely distribution shift: different cameras, resolution, lighting, angles, compression or backgrounds from the training data, or preprocessing that differs between training and production such as color channel order or normalization. Collect and label production samples, align preprocessing, add targeted augmentation and retrain.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you design a defect detection system for a factory line?" category="Deployment" level="Senior">
+    Clarify defect types, required recall and line speed. Capture images with controlled lighting, label defects, and handle rarity with anomaly detection trained on good parts when defects are scarce, or a detector or segmenter when enough examples exist. Deploy on edge hardware near the line, tune thresholds to the cost of missed defects versus false rejects, and keep a human review loop that feeds new labels back.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is batch normalization's role in CNNs?" category="Fundamentals" level="Junior">
+    It normalizes activations per channel over the batch, stabilizing and speeding up training, allowing higher learning rates and reducing sensitivity to initialization. At inference it uses running statistics. With very small batches, group or layer normalization is used instead.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the difference between semantic and instance segmentation?" category="Tasks" level="Junior">
+    Semantic segmentation labels each pixel with a class but does not distinguish separate objects of the same class. Instance segmentation separates individual objects, giving each its own mask, as in Mask R-CNN. Panoptic segmentation combines both for countable objects and background regions.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does Mask R-CNN extend Faster R-CNN?" category="Tasks" level="Mid">
+    It adds a parallel branch that predicts a pixel-level mask for each detected region, alongside the class and box branches, and replaces RoI pooling with RoIAlign to keep precise spatial alignment. This turns a detector into an instance segmentation model.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does DETR approach object detection differently?" category="Tasks" level="Senior">
+    DETR uses a CNN backbone and a transformer encoder-decoder that outputs a fixed set of object predictions, trained with bipartite matching between predictions and ground truth. It removes hand-designed components such as anchors and non-maximum suppression, at the cost of slower training in its original form.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you handle class imbalance in object detection?" category="Training" level="Mid">
+    Detectors see far more background than objects. Focal loss, introduced with RetinaNet, down-weights easy background examples so training focuses on hard ones. Sampling strategies, class-balanced loss weights and targeted data collection for rare classes also help.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is image embedding search and how would you build it?" category="Multimodal" level="Mid">
+    Embed images with a pretrained model such as CLIP or a fine-tuned backbone, store vectors in an approximate nearest-neighbor index, and query with an image or text embedding. Evaluate with recall at k on labeled similar pairs, and fine-tune the encoder on domain data if generic embeddings miss important distinctions.
+  </InterviewQuestion>
+</InterviewQuestions>
