@@ -1,54 +1,86 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { useIsDark } from "@/components/theme";
 
 // Ported from dhanraj-portfolio/components/Mermaid.tsx so diagrams share the editorial theme.
 
-// Shared styling for every flowchart: mark key nodes with `:::accent`.
-const ACCENT =
-  "\nclassDef accent fill:#1e3a8a,stroke:#1e3a8a,color:#faf9f6,font-weight:500";
+type Mode = "light" | "dark";
 
-let initialized = false;
+const PALETTES = {
+  light: {
+    accent: { fill: "#1e3a8a", text: "#faf9f6" },
+    vars: {
+      background: "#faf9f6",
+      primaryColor: "#faf9f6",
+      primaryTextColor: "#111111",
+      primaryBorderColor: "#bdb9b0",
+      secondaryColor: "#e8ecf6",
+      tertiaryColor: "#f2f0eb",
+      lineColor: "#8a8780",
+      textColor: "#2b2b2b",
+      clusterBkg: "#f2f0eb",
+      clusterBorder: "#dcd9d2",
+      edgeLabelBackground: "#faf9f6",
+      actorBkg: "#faf9f6",
+      actorBorder: "#bdb9b0",
+      signalColor: "#6b6b6b",
+      noteBkgColor: "#e8ecf6",
+      noteBorderColor: "#1e3a8a",
+    },
+  },
+  dark: {
+    accent: { fill: "#93b1f5", text: "#141413" },
+    vars: {
+      background: "#141413",
+      primaryColor: "#1d1c1a",
+      primaryTextColor: "#f2f0eb",
+      primaryBorderColor: "#4a4843",
+      secondaryColor: "#1b2440",
+      tertiaryColor: "#1d1c1a",
+      lineColor: "#8a8780",
+      textColor: "#d4d1ca",
+      clusterBkg: "#1a1918",
+      clusterBorder: "#3a3935",
+      edgeLabelBackground: "#141413",
+      actorBkg: "#1d1c1a",
+      actorBorder: "#4a4843",
+      signalColor: "#b5b2ab",
+      noteBkgColor: "#1b2440",
+      noteBorderColor: "#93b1f5",
+    },
+  },
+} as const;
+
+// Shared styling for every flowchart: mark key nodes with `:::accent`.
+function accentClass(mode: Mode) {
+  const { fill, text } = PALETTES[mode].accent;
+  return `\nclassDef accent fill:${fill},stroke:${fill},color:${text},font-weight:500`;
+}
+
+let initializedFor: Mode | null = null;
 // Mermaid's render() keeps shared state and hangs when called concurrently, so renders run one at a time.
 let queue: Promise<unknown> = Promise.resolve();
 
-function renderQueued(id: string, source: string) {
-  const job = queue.then(async () => (await getMermaid()).render(id, source));
+function renderQueued(id: string, source: string, mode: Mode) {
+  const job = queue.then(async () => (await getMermaid(mode)).render(id, source));
   queue = job.catch(() => undefined);
   return job;
 }
 
-async function getMermaid() {
+async function getMermaid(mode: Mode) {
   const mermaid = (await import("mermaid")).default;
-  if (!initialized) {
+  if (initializedFor !== mode) {
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: "strict",
       theme: "base",
       fontFamily: "var(--font-inter), ui-sans-serif, system-ui, sans-serif",
-      themeVariables: {
-        fontSize: "14px",
-        background: "#faf9f6",
-        primaryColor: "#faf9f6",
-        primaryTextColor: "#111111",
-        primaryBorderColor: "#bdb9b0",
-        secondaryColor: "#e8ecf6",
-        tertiaryColor: "#f2f0eb",
-        lineColor: "#8a8780",
-        textColor: "#2b2b2b",
-        clusterBkg: "#f2f0eb",
-        clusterBorder: "#dcd9d2",
-        edgeLabelBackground: "#faf9f6",
-        actorBkg: "#faf9f6",
-        actorBorder: "#bdb9b0",
-        signalColor: "#6b6b6b",
-        noteBkgColor: "#e8ecf6",
-        noteBorderColor: "#1e3a8a",
-      },
+      themeVariables: { fontSize: "14px", darkMode: mode === "dark", ...PALETTES[mode].vars },
       flowchart: { curve: "basis", padding: 14, nodeSpacing: 36, rankSpacing: 48 },
       sequence: { mirrorActors: false, actorMargin: 40 },
     });
-    initialized = true;
+    initializedFor = mode;
   }
   return mermaid;
 }
@@ -67,6 +99,7 @@ export function Mermaid({
   const [visible, setVisible] = useState(false);
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const mode: Mode = useIsDark() ? "dark" : "light";
 
   // Only load and render Mermaid once the figure is near the viewport.
   useEffect(() => {
@@ -84,14 +117,14 @@ export function Mermaid({
     if (!visible) return;
     let cancelled = false;
     const trimmed = chart.trim();
-    const source = /^(flowchart|graph)\b/.test(trimmed) ? trimmed + ACCENT : trimmed;
-    renderQueued(id, source)
+    const source = /^(flowchart|graph)\b/.test(trimmed) ? trimmed + accentClass(mode) : trimmed;
+    renderQueued(`${id}${mode}`, source, mode)
       .then(({ svg }) => !cancelled && setSvg(svg))
       .catch(() => !cancelled && setError(true));
     return () => {
       cancelled = true;
     };
-  }, [visible, chart, id]);
+  }, [visible, chart, id, mode]);
 
   return (
     <figure className="my-8" data-mermaid={svg ? "ok" : error ? "error" : "pending"}>

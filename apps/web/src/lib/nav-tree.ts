@@ -7,6 +7,7 @@ import {
   getTopLevelMeta,
   partitionSlugs,
 } from "@/lib/mdx-doc";
+import { getCategories } from "@/lib/question-bank";
 import type { ContentSection } from "@/types/content";
 
 export interface NavItem {
@@ -47,7 +48,7 @@ const sectionDefs: {
   { key: "interviews", label: "Interviews", href: "/interviews", icon: "brain" },
   { key: "system-design", label: "ML System Design", href: "/system-design", icon: "layers" },
   { key: "ai-system-design", label: "AI System Design", href: "/ai-system-design", icon: "sparkles" },
-  { key: "companies", label: "Company-wise", href: "/companies", icon: "users" },
+  { key: "companies", label: "Companies", href: "/companies", icon: "users" },
 ];
 
 function extractCategoryMapping(
@@ -91,9 +92,26 @@ interface FrontmatterGroup {
   categories: string[];
 }
 
+// Interview questions live in the question library: one group per category, one item per subsection.
+function buildInterviewGroups(): NavGroup[] {
+  return getCategories().map((c) => ({
+    slug: c.slug,
+    title: c.title,
+    href: `/interviews/${c.slug}`,
+    icon: c.icon,
+    items: c.subsections.map((s) => ({
+      slug: s.slug,
+      title: s.title,
+      href: `/interviews/${c.slug}/${s.slug}`,
+    })),
+  }));
+}
+
 async function buildGroupsForSection(
   section: ContentSection
 ): Promise<NavGroup[]> {
+  if (section === "interviews") return buildInterviewGroups();
+  if (section === "companies") return [];
   const allSlugs = await getContentSlugs(section);
   const metas = await getTopLevelMeta(section);
   const { topLevel, children } = partitionSlugs(allSlugs);

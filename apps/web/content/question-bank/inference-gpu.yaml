@@ -1,1307 +1,1056 @@
-# Company-reported questions adapted from Outcome School (Apache 2.0); see NOTICE.md. Answers are our own.
-- id: explain-the-prefill-and-decode-phases-why-is-prefill-compute
-  q: >-
-    Explain the prefill and decode phases. Why is prefill compute-bound and decode
-    memory-bandwidth-bound?
-  a: >
-    Prefill processes the whole prompt in one forward pass to build the KV cache and produce the
-    first token. Many tokens share each weight read, so the work is large matrix-matrix
-    multiplication with high arithmetic intensity, and the GPU's compute units are the limit.
-
-
-    Decode then generates one token per step per sequence. Each step re-reads all weights and the
-    growing KV cache but does only about two FLOPs per parameter per sequence, so arithmetic
-    intensity is low and memory bandwidth is the limit. That is why prefill sets time to first token
-    and decode sets tokens per second, and why batching helps decode most.
-  topic: inference-gpu
-  level: Mid
-  companies:
-    - Moonshot AI
-    - NVIDIA
-    - Together AI
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: "Prefill vs Decode: LLM Inference Optimization"
-      url: https://outcomeschool.com/blog/prefill-vs-decode-llm-inference-optimization
-  source: outcome-school
+# Interview questions for this category. Entries with `source: outcome-school` are adapted from
+# Outcome School (Apache 2.0); see NOTICE.md. All answers are written by Origins AI Learn.
 - id: what-is-continuous-in-flight-batching-and-why-did-it-replace
   q: What is continuous (in-flight) batching and why did it replace static batching?
-  a: >
-    Static batching groups requests, runs them together, and waits for the longest one to finish
-    before starting the next batch, so slots sit idle as short responses finish and new requests
-    queue.
+  a: |
+    Static batching groups requests, runs them together, and waits for the longest one to finish before starting the next batch, so slots sit idle as short responses finish and new requests queue.
 
-
-    Continuous batching schedules at the level of each decode iteration: finished sequences leave
-    immediately and waiting ones join the running batch on the next step. GPUs stay full despite
-    very different output lengths, which raises throughput several-fold and cuts queueing delay, so
-    every major serving engine uses it.
-  topic: inference-gpu
+    Continuous batching schedules at the level of each decode iteration: finished sequences leave immediately and waiting ones join the running batch on the next step. GPUs stay full despite very different output lengths, which raises throughput several-fold and cuts queueing delay, so every major serving engine uses it.
   level: Mid
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Anthropic
-    - Mistral AI
-    - NVIDIA
-    - Together AI
-    - xAI
+  - Anthropic
+  - Mistral AI
+  - NVIDIA
+  - Together AI
+  - xAI
   related: /ai-system-design/genai-system-design/llm-serving-inference
   refs:
-    - title: Continuous Batching in LLMs
-      url: https://outcomeschool.com/blog/continuous-batching-in-llms
-  source: outcome-school
-- id: how-does-pagedattention-work-and-what-problem-of-kv-cache-fr
-  q: How does PagedAttention work, and what problem of KV-cache fragmentation does it solve?
-  a: >
-    Without paging, servers reserve a contiguous KV cache region sized for each request's maximum
-    length. Most of it goes unused, and free memory fragments into gaps too small to use, so far
-    fewer requests fit.
-
-
-    PagedAttention stores each sequence's cache in small fixed-size blocks allocated on demand,
-    tracked by a block table like virtual memory pages, and the attention kernel reads through that
-    table. Waste drops to the last partial block, memory can be shared between sequences with the
-    same prefix through copy-on-write, and many more sequences fit, which raises batch size and
-    throughput.
-  topic: inference-gpu
-  level: Mid
-  companies:
-    - NVIDIA
-    - Together AI
-  related: /ai-system-design/genai-system-design/llm-serving-inference
-  refs:
-    - title: Paged Attention in LLMs
-      url: https://outcomeschool.com/blog/paged-attention-in-llms
-    - title: How does vLLM work?
-      url: https://outcomeschool.com/blog/how-does-vllm-work
-  source: outcome-school
-- id: what-is-speculative-decoding-why-is-output-quality-preserved
-  q: What is speculative decoding? Why is output quality preserved, and when does it not help?
-  a: >
-    A cheap draft model, or extra heads on the main model, proposes several tokens. The large target
-    model scores all of them in one forward pass and accepts drafted tokens according to a
-    rejection-sampling rule; at the first rejection it samples a corrected token. Because acceptance
-    uses the target model's probabilities, the output distribution is mathematically the same as
-    sampling from the target alone.
-
-
-    It helps when decoding is memory-bound and the draft is often right, giving several tokens per
-    expensive pass. It helps little or hurts at high batch sizes, where the GPU is already
-    compute-bound, when the draft rarely agrees with the target (for example creative,
-    high-temperature text), or when the draft itself is too slow.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - NVIDIA
-    - Together AI
-  related: /ai-system-design/genai-system-design/llm-serving-inference
-  refs:
-    - title: Speculative Decoding
-      url: https://outcomeschool.com/blog/speculative-decoding
-  source: outcome-school
-- id: explain-prefix-caching-prompt-caching-when-should-you-use-it
-  q: >-
-    Explain prefix caching / prompt caching. When should you use it, and what invalidates a cached
-    prefix?
-  a: >
-    Requests that start with the same tokens, such as a long system prompt, tool definitions, a
-    shared document or earlier conversation turns, can reuse the KV cache computed for that prefix
-    instead of recomputing it. That cuts time to first token and cost, often dramatically for long
-    shared prefixes.
-
-
-    Use it when large stable prefixes repeat across requests, and structure prompts so stable
-    content comes first and variable content last. Any change to an earlier token invalidates
-    everything after it, including a different system prompt, reordered tools, a timestamp near the
-    top, or a different model or tokenizer version. Cached entries are also evicted under memory
-    pressure or expire after a time limit.
-  topic: inference-gpu
-  level: Mid
-  companies:
-    - Character.AI
-    - Moonshot AI
-  related: /ai-system-design/genai-system-design/cost-latency-optimization
-  refs:
-    - title: How does Prompt Caching work?
-      url: https://outcomeschool.com/blog/how-does-prompt-caching-work
-  source: outcome-school
-- id: compare-fp16-bf16-fp8-int8-int4-and-fp4-for-serving-what-bre
-  q: Compare FP16, BF16, FP8, INT8, INT4 and FP4 for serving. What breaks at each step down?
-  a: >
-    FP16 and BF16 use 2 bytes; BF16 has FP32's range, so it avoids overflow and is the default
-    reference. FP8 halves memory and doubles compute on supporting GPUs, with small accuracy loss
-    given per-tensor or per-block scaling; the main risk is outliers and range. INT8 weight or
-    weight-and-activation quantization is mature and nearly lossless with good calibration, though
-    activation outliers need handling such as SmoothQuant.
-
-
-    INT4 weight-only (GPTQ, AWQ) cuts memory 4x and speeds up memory-bound decode, but loses more
-    accuracy, especially on reasoning, long context and small models, and needs group-wise scales.
-    FP4 on newest hardware pushes further with micro-scaled blocks, and quality becomes sensitive to
-    calibration and model. Each step down shrinks memory and raises speed while increasing the risk
-    to rare-token behavior, math and multilingual quality, so evaluate per task.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Apple
-    - Character.AI
-    - Mistral AI
-    - NVIDIA
-    - Together AI
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: How does Model Quantization work?
-      url: https://outcomeschool.com/blog/how-does-model-quantization-work
-  source: outcome-school
-- id: compare-tensor-pipeline-data-sequence-and-expert-parallelism
-  q: Compare tensor, pipeline, data, sequence and expert parallelism. When do you combine them?
-  a: >
-    Data parallelism replicates the model and splits requests or batches; it scales throughput but
-    needs the model to fit per replica. Tensor parallelism splits each layer's matrices across GPUs,
-    cutting memory and latency per GPU but requiring all-reduces every layer, so it stays inside a
-    fast NVLink node. Pipeline parallelism assigns layer ranges to different GPUs and passes
-    activations between them, tolerating slower links but adding bubbles and latency.
-
-
-    Sequence or context parallelism splits long sequences across GPUs for attention and activations.
-    Expert parallelism places MoE experts on different GPUs and routes tokens with all-to-all
-    communication. Large deployments combine them: tensor parallelism within a node, pipeline or
-    expert parallelism across nodes, and data parallel replicas for throughput.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Amazon
-    - Google DeepMind
-    - Meta
-    - NVIDIA
-  related: /ai-system-design/genai-system-design/scaling-laws-and-training
-  source: outcome-school
-- id: estimate-the-gpu-memory-needed-to-serve-a-70b-model-weights
-  q: >-
-    Estimate the GPU memory needed to serve a 70B model: weights, KV cache, activations,
-    fragmentation.
-  a: >
-    Weights: 70B parameters × 2 bytes = 140 GB in BF16, 70 GB in 8-bit, about 35–40 GB in 4-bit. KV
-    cache for a Llama-style 70B with GQA (80 layers, 8 KV heads of size 128, 2 bytes): about 0.33 MB
-    per token, so 64 concurrent sequences averaging 4K tokens is about 85 GB.
-
-
-    Activations during decode are small, a few GB, while prefill of long prompts needs more. Add
-    framework overhead, CUDA graphs and fragmentation of roughly 10–20%. So BF16 serving at moderate
-    concurrency needs around 240–260 GB, for example four 80 GB GPUs with tensor parallelism, while
-    4-bit weights can serve modest loads on one or two GPUs.
-  topic: inference-gpu
-  level: Mid
-  companies:
-    - NVIDIA
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: What is KV Cache in LLMs?
-      url: https://outcomeschool.com/blog/kv-cache-in-llms
-    - title: Paged Attention in LLMs
-      url: https://outcomeschool.com/blog/paged-attention-in-llms
+  - title: Continuous Batching in LLMs
+    url: https://outcomeschool.com/blog/continuous-batching-in-llms
   source: outcome-school
 - id: what-are-ttft-tpot-itl-and-throughput-and-how-do-they-trade
   q: What are TTFT, TPOT, ITL and throughput, and how do they trade against each other?
-  a: >
-    Time to first token is how long until output starts, driven by queueing and prefill. Time per
-    output token and inter-token latency measure the gap between subsequent tokens, driven by decode
-    speed. Throughput is total tokens per second across all users.
+  a: |
+    Time to first token is how long until output starts, driven by queueing and prefill. Time per output token and inter-token latency measure the gap between subsequent tokens, driven by decode speed. Throughput is total tokens per second across all users.
 
-
-    They trade against each other through batching: larger batches raise throughput and lower cost
-    per token but slow each user's decode and can delay new requests' prefill. Long prompts admitted
-    mid-batch stall other users' token streams unless chunked prefill or prefill-decode
-    disaggregation is used. Operators set targets for each and tune batch size and scheduling to
-    meet them.
-  topic: inference-gpu
+    They trade against each other through batching: larger batches raise throughput and lower cost per token but slow each user's decode and can delay new requests' prefill. Long prompts admitted mid-batch stall other users' token streams unless chunked prefill or prefill-decode disaggregation is used. Operators set targets for each and tune batch size and scheduling to meet them.
   level: Junior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Apple
-    - Microsoft
-    - Perplexity
+  - Apple
+  - Microsoft
+  - Perplexity
   related: /ai-system-design/genai-system-design/llm-serving-inference
   refs:
-    - title: "Prefill vs Decode: LLM Inference Optimization"
-      url: https://outcomeschool.com/blog/prefill-vs-decode-llm-inference-optimization
-    - title: The First-Token Latency Problem in LLMs
-      url: https://www.youtube.com/watch?v=XD8DD4cEHu0
-  source: outcome-school
-- id: do-the-roofline-maths-how-many-tokens-sec-can-one-h100-produ
-  q: "Do the roofline maths: how many tokens/sec can one H100 produce for a 70B model at batch size 1?"
-  a: >
-    At batch 1, decode reads every weight once per token and does about 2 FLOPs per parameter, far
-    below the H100's ridge point of roughly 300 FLOPs per byte, so it is bandwidth-bound. A 70B
-    model in BF16 is 140 GB and does not fit in 80 GB, so on one H100 it must be quantized: at 8-bit
-    (70 GB), the ceiling is 3.35 TB/s ÷ 70 GB ≈ 48 tokens per second; at 4-bit (about 35 GB), about
-    95.
-
-
-    Real numbers land at perhaps 60–80% of these bounds after KV cache reads, dequantization and
-    kernel overheads. Compute is not the constraint: 48 tokens per second × 140 GFLOPs is only about
-    7 TFLOPS, under 1% of peak.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - NVIDIA
-    - Together AI
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: "Prefill vs Decode: LLM Inference Optimization"
-      url: https://outcomeschool.com/blog/prefill-vs-decode-llm-inference-optimization
+  - title: 'Prefill vs Decode: LLM Inference Optimization'
+    url: https://outcomeschool.com/blog/prefill-vs-decode-llm-inference-optimization
+  - title: The First-Token Latency Problem in LLMs
+    url: https://www.youtube.com/watch?v=XD8DD4cEHu0
   source: outcome-school
 - id: when-would-you-choose-vllm-vs-sglang-vs-tensorrt-llm-vs-a-cu
   q: When would you choose vLLM vs SGLang vs TensorRT-LLM vs a custom stack?
-  a: >
-    vLLM is a strong default: broad model support, PagedAttention, continuous batching, many
-    quantization formats and an active community, good for most open-model serving. SGLang adds
-    RadixAttention for aggressive prefix sharing and a structured-generation runtime, which shines
-    for agentic, multi-call and constrained-output workloads with lots of shared context.
+  a: |
+    vLLM is a strong default: broad model support, PagedAttention, continuous batching, many quantization formats and an active community, good for most open-model serving. SGLang adds RadixAttention for aggressive prefix sharing and a structured-generation runtime, which shines for agentic, multi-call and constrained-output workloads with lots of shared context.
 
-
-    TensorRT-LLM gives the best raw performance on NVIDIA GPUs through compiled, fused kernels and
-    FP8 support, at the cost of build steps and less flexibility. A custom stack is justified only
-    at very large scale or with unusual hardware or architectures, where a few percent efficiency is
-    worth a team's full-time effort. Benchmark candidates on your real prompt and output lengths
-    before choosing.
-  topic: inference-gpu
+    TensorRT-LLM gives the best raw performance on NVIDIA GPUs through compiled, fused kernels and FP8 support, at the cost of build steps and less flexibility. A custom stack is justified only at very large scale or with unusual hardware or architectures, where a few percent efficiency is worth a team's full-time effort. Benchmark candidates on your real prompt and output lengths before choosing.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - NVIDIA
-    - Together AI
+  - NVIDIA
+  - Together AI
   related: /ai-system-design/genai-system-design/llm-serving-inference
   refs:
-    - title: How does vLLM work?
-      url: https://outcomeschool.com/blog/how-does-vllm-work
-    - title: How does SGLang work?
-      url: https://outcomeschool.com/blog/how-does-sglang-work
-    - title: How does TensorRT-LLM work?
-      url: https://outcomeschool.com/blog/how-does-tensorrt-llm-work
-  source: outcome-school
-- id: how-would-you-cut-llm-serving-cost-by-10x-enumerate-every-le
-  q: How would you cut LLM serving cost by 10x? Enumerate every lever and rank them.
-  a: >
-    Rank levers by impact per effort. First, avoid work: cache responses and prompt prefixes, trim
-    prompts and outputs, and route easy requests to smaller models. Second, use a smaller model:
-    distill or fine-tune a small model for high-volume tasks, often the single biggest win. Third,
-    squeeze the serving engine: continuous batching at higher batch sizes, paged KV cache,
-    quantization to FP8 or INT4, and speculative decoding.
-
-
-    Then optimize the platform: right-size and autoscale GPUs, use cheaper hardware or spot capacity
-    for offline work, batch APIs for non-interactive jobs, and MoE models for better quality per
-    FLOP. Measure cost per successful task with quality evaluations at each step, because several of
-    these levers trade quality for cost.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Amazon
-    - Cursor
-    - Microsoft
-    - NVIDIA
-  related: /ai-system-design/genai-system-design/cost-latency-optimization
-  refs:
-    - title: LLM Inference Optimization
-      url: https://www.youtube.com/watch?v=jV2sCj4lHYk
-    - title: LLM Inference Optimization
-      url: https://outcomeschool.com/blog/llm-inference-optimization
+  - title: How does vLLM work?
+    url: https://outcomeschool.com/blog/how-does-vllm-work
+  - title: How does SGLang work?
+    url: https://outcomeschool.com/blog/how-does-sglang-work
+  - title: How does TensorRT-LLM work?
+    url: https://outcomeschool.com/blog/how-does-tensorrt-llm-work
   source: outcome-school
 - id: your-p99-latency-doubled-after-a-deploy-with-no-model-change
   q: Your p99 latency doubled after a deploy with no model change. Walk through the diagnosis.
-  a: >
-    First split the latency: queue time, time to first token and decode time, by route and replica.
-    Compare traffic before and after the deploy, since prompt lengths or output lengths may have
-    changed; a longer system prompt or missing prefix-cache hits inflate prefill.
+  a: |
+    First split the latency: queue time, time to first token and decode time, by route and replica. Compare traffic before and after the deploy, since prompt lengths or output lengths may have changed; a longer system prompt or missing prefix-cache hits inflate prefill.
 
-
-    Then check engine configuration changes such as max batch size, chunked prefill, scheduler
-    policy, KV cache memory fraction or a disabled CUDA graph, plus dependency versions (drivers,
-    kernels, tokenizer). Look for capacity issues such as fewer replicas, uneven load balancing or
-    autoscaling limits, and for preemption or recomputation when KV memory fills. Roll back if it is
-    severe, reproduce with a replay benchmark, and bisect the deploy diff.
-  topic: inference-gpu
+    Then check engine configuration changes such as max batch size, chunked prefill, scheduler policy, KV cache memory fraction or a disabled CUDA graph, plus dependency versions (drivers, kernels, tokenizer). Look for capacity issues such as fewer replicas, uneven load balancing or autoscaling limits, and for preemption or recomputation when KV memory fills. Roll back if it is severe, reproduce with a replay benchmark, and bisect the deploy diff.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Amazon
-    - Databricks
-    - OpenAI
-    - Perplexity
+  - Amazon
+  - Databricks
+  - OpenAI
+  - Perplexity
   related: /ai-system-design/genai-system-design/llmops-observability
   refs:
-    - title: The First-Token Latency Problem in LLMs
-      url: https://www.youtube.com/watch?v=XD8DD4cEHu0
+  - title: The First-Token Latency Problem in LLMs
+    url: https://www.youtube.com/watch?v=XD8DD4cEHu0
   source: outcome-school
 - id: what-is-chunked-prefill-and-why-does-it-improve-tail-latency
   q: What is chunked prefill, and why does it improve tail latency under mixed traffic?
-  a: >
-    Chunked prefill splits a long prompt's prefill into fixed-size chunks and schedules them
-    alongside ongoing decode steps, instead of running the whole prefill at once.
+  a: |
+    Chunked prefill splits a long prompt's prefill into fixed-size chunks and schedules them alongside ongoing decode steps, instead of running the whole prefill at once.
 
-
-    Without it, a single long prompt arriving in a busy batch stalls every other sequence's decode
-    for the duration of its prefill, creating big latency spikes for other users. Mixing chunks of
-    prefill with decode keeps per-step time bounded and predictable, which tightens p99 inter-token
-    latency and improves GPU utilization, at the cost of a slightly longer time to first token for
-    the long request.
-  topic: inference-gpu
+    Without it, a single long prompt arriving in a busy batch stalls every other sequence's decode for the duration of its prefill, creating big latency spikes for other users. Mixing chunks of prefill with decode keeps per-step time bounded and predictable, which tightens p99 inter-token latency and improves GPU utilization, at the cost of a slightly longer time to first token for the long request.
   level: Senior
-  companies: []
+  category: inference-gpu
+  subcategory: serving-batching
   related: /ai-system-design/genai-system-design/llm-serving-inference
   source: outcome-school
 - id: explain-disaggregated-prefill-decode-serving-and-when-it-pay
   q: Explain disaggregated prefill/decode serving and when it pays for itself.
-  a: >
-    Disaggregation runs prefill and decode on separate GPU pools. Prefill nodes process prompts and
-    transfer the resulting KV cache to decode nodes over a fast interconnect, and decode nodes
-    generate tokens. Each pool can be sized, batched and even built on different hardware for its
-    own bottleneck: compute for prefill, memory bandwidth and capacity for decode.
+  a: |
+    Disaggregation runs prefill and decode on separate GPU pools. Prefill nodes process prompts and transfer the resulting KV cache to decode nodes over a fast interconnect, and decode nodes generate tokens. Each pool can be sized, batched and even built on different hardware for its own bottleneck: compute for prefill, memory bandwidth and capacity for decode.
 
-
-    It pays off at large scale with long prompts and strict latency targets, where prefill
-    interference hurts decode latency and utilization. It costs network bandwidth for KV transfer,
-    more complex scheduling and capacity planning, and adds latency for short prompts, so smaller
-    deployments usually do better with chunked prefill on a shared pool.
-  topic: inference-gpu
+    It pays off at large scale with long prompts and strict latency targets, where prefill interference hurts decode latency and utilization. It costs network bandwidth for KV transfer, more complex scheduling and capacity planning, and adds latency for short prompts, so smaller deployments usually do better with chunked prefill on a shared pool.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Groq
-    - Moonshot AI
+  - Groq
+  - Moonshot AI
   related: /ai-system-design/genai-system-design/llm-serving-inference
   refs:
-    - title: Prefill-Decode Disaggregation in LLM Inference
-      url: https://outcomeschool.com/blog/prefill-decode-disaggregation
+  - title: Prefill-Decode Disaggregation in LLM Inference
+    url: https://outcomeschool.com/blog/prefill-decode-disaggregation
   source: outcome-school
 - id: design-a-batched-inference-system-where-100-requests-take-th
   q: Design a batched inference system where 100 requests take the same time as 1.
-  a: >
-    Decode at small batch is memory-bound: each step reads all weights regardless of how many
-    sequences use them, so going from 1 to 100 sequences barely changes step time until the batch
-    approaches the compute roof. The design exploits that.
+  a: |
+    Decode at small batch is memory-bound: each step reads all weights regardless of how many sequences use them, so going from 1 to 100 sequences barely changes step time until the batch approaches the compute roof. The design exploits that.
 
-
-    Use continuous batching so requests join and leave each step, a paged KV cache with enough
-    memory for 100 concurrent contexts, prefix caching for shared prompts, chunked prefill so
-    arrivals do not stall the batch, and kernels that keep efficiency high at batch 100. Measure
-    that per-step latency stays flat as batch grows, and cap batch size where latency targets would
-    break.
-  topic: inference-gpu
+    Use continuous batching so requests join and leave each step, a paged KV cache with enough memory for 100 concurrent contexts, prefix caching for shared prompts, chunked prefill so arrivals do not stall the batch, and kernels that keep efficiency high at batch 100. Measure that per-step latency stays flat as batch grows, and cap batch size where latency targets would break.
   level: Mid
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Anthropic
+  - Anthropic
   related: /ai-system-design/genai-system-design/gpu-performance-for-llms
   refs:
-    - title: Continuous Batching in LLMs
-      url: https://outcomeschool.com/blog/continuous-batching-in-llms
+  - title: Continuous Batching in LLMs
+    url: https://outcomeschool.com/blog/continuous-batching-in-llms
   source: outcome-school
 - id: design-the-serving-stack-for-a-claude-scale-llm-api-maximise
-  q: >-
-    Design the serving stack for a Claude-scale LLM API. Maximise GPU utilisation without wrecking
-    p99 latency.
-  a: >
-    Put an API gateway in front for authentication, token-based rate limits and quotas, then a
-    router that is aware of models, tenants and cached prefixes. Run inference engines with
-    continuous batching, paged KV cache, prefix caching and speculative decoding, using tensor
-    parallelism inside nodes and disaggregated prefill and decode pools at scale. Separate
-    interactive and batch traffic into priority classes.
+  q: Design the serving stack for a Claude-scale LLM API. Maximise GPU utilisation without wrecking p99 latency.
+  a: |
+    Put an API gateway in front for authentication, token-based rate limits and quotas, then a router that is aware of models, tenants and cached prefixes. Run inference engines with continuous batching, paged KV cache, prefix caching and speculative decoding, using tensor parallelism inside nodes and disaggregated prefill and decode pools at scale. Separate interactive and batch traffic into priority classes.
 
-
-    To protect p99 while keeping GPUs busy, cap per-replica batch size and KV memory by latency
-    SLOs, use chunked prefill, admission control and load shedding for low-priority traffic, and
-    autoscale on queue depth and tokens per second. Track TTFT, inter-token latency, utilization and
-    cost per token by model and tenant, with fast rollback for engine changes.
-  topic: inference-gpu
+    To protect p99 while keeping GPUs busy, cap per-replica batch size and KV memory by latency SLOs, use chunked prefill, admission control and load shedding for low-priority traffic, and autoscale on queue depth and tokens per second. Track TTFT, inter-token latency, utilization and cost per token by model and tenant, with fast rollback for engine changes.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Anthropic
+  - Anthropic
   related: /ai-system-design/genai-system-design/llm-serving-inference
   refs:
-    - title: LLM Inference Optimization
-      url: https://outcomeschool.com/blog/llm-inference-optimization
+  - title: LLM Inference Optimization
+    url: https://outcomeschool.com/blog/llm-inference-optimization
   source: outcome-school
 - id: you-need-to-serve-a-llama-class-70b-model-to-hundreds-of-mil
-  q: >-
-    You need to serve a Llama-class 70B+ model to hundreds of millions of assistant users. What does
-    the serving stack look like and where does the money go?
-  a: >
-    The stack is a global API layer with routing to regional GPU clusters, each running many
-    replicas of an optimized engine (continuous batching, paged KV cache, FP8 or INT8 weights,
-    prefix caching, speculative decoding) with tensor parallelism inside 8-GPU nodes. Conversation
-    state, safety filters, retrieval and tool calls run as separate services around the model.
+  q: You need to serve a Llama-class 70B+ model to hundreds of millions of assistant users. What does the serving stack look like and where does the money go?
+  a: |
+    The stack is a global API layer with routing to regional GPU clusters, each running many replicas of an optimized engine (continuous batching, paged KV cache, FP8 or INT8 weights, prefix caching, speculative decoding) with tensor parallelism inside 8-GPU nodes. Conversation state, safety filters, retrieval and tool calls run as separate services around the model.
 
-
-    Most money goes to GPU hours for decode, which is memory-bandwidth-bound, then prefill of long
-    conversation histories, then idle headroom kept for peak traffic. Biggest savings come from
-    routing simple turns to smaller models, prefix caching of history, quantization, high batch
-    occupancy, and shifting non-urgent work to off-peak capacity.
-  topic: inference-gpu
+    Most money goes to GPU hours for decode, which is memory-bandwidth-bound, then prefill of long conversation histories, then idle headroom kept for peak traffic. Biggest savings come from routing simple turns to smaller models, prefix caching of history, quantization, high batch occupancy, and shifting non-urgent work to off-peak capacity.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Meta
+  - Meta
   related: /ai-system-design/genai-system-design/llm-serving-inference
   refs:
-    - title: LLM Inference Optimization
-      url: https://outcomeschool.com/blog/llm-inference-optimization
-  source: outcome-school
-- id: estimate-the-kv-cache-memory-to-serve-a-70b-class-model-at-1
-  q: >-
-    Estimate the KV-cache memory to serve a 70B-class model at 128k context. What do you do when it
-    doesn't fit?
-  a: >
-    For a Llama-style 70B with GQA (80 layers, 8 KV heads, head dimension 128, 2 bytes): 2 × 80 × 8
-    × 128 × 2 bytes ≈ 0.33 MB per token, so 128K tokens is about 42 GB for a single sequence, more
-    than half of an 80 GB GPU and on top of 140 GB of BF16 weights. Without GQA it would be 8x
-    larger.
-
-
-    When it does not fit: shard across more GPUs with tensor or context parallelism, quantize the
-    cache to 8 or 4 bits, use paged memory so only used blocks are allocated, offload cold blocks to
-    CPU memory, limit concurrency of long requests, and consider architectures such as MLA or
-    sliding windows for future models. Retrieval to shorten prompts is often the cheapest fix.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - xAI
-  related: /ai-system-design/genai-system-design/efficient-attention
-  refs:
-    - title: What is KV Cache in LLMs?
-      url: https://outcomeschool.com/blog/kv-cache-in-llms
-    - title: KV Cache Compression
-      url: https://outcomeschool.com/blog/kv-cache-compression
-  source: outcome-school
-- id: design-a-rate-limiter-for-an-llm-api-where-cost-scales-with
-  q: Design a rate limiter for an LLM API where cost scales with tokens, not requests.
-  a: >
-    Limit tokens, not requests: use a token bucket per tenant and model that is debited by estimated
-    input tokens plus requested maximum output tokens on admission, then corrected with actual usage
-    when the response finishes. Keep separate limits for input and output tokens and for concurrent
-    requests, since long generations hold GPU capacity.
-
-
-    Store counters in a fast shared store such as Redis with atomic operations, return clear headers
-    with remaining budget and retry-after on 429s, and add priority tiers and burst allowances.
-    Protect the backend with a global admission controller that sheds low-priority load when queues
-    grow, independent of per-tenant limits.
-  topic: inference-gpu
-  level: Mid
-  companies:
-    - xAI
-  related: /ai-system-design/genai-system-design/llm-serving-inference
-  source: outcome-school
-- id: estimate-the-kv-cache-memory-for-serving-mistral-7b-and-desi
-  q: >-
-    Estimate the KV-cache memory for serving Mistral 7B, and design the rolling-buffer cache that
-    sliding-window attention enables.
-  a: >
-    Mistral 7B has 32 layers and 8 KV heads of dimension 128, so at 2 bytes the cache is 2 × 32 × 8
-    × 128 × 2 ≈ 128 KB per token. With a 4,096-token sliding window, a sequence never needs more
-    than about 512 MB of cache, however long it gets.
-
-
-    Because each layer only attends to the last 4,096 positions, the cache can be a fixed-size
-    circular buffer per sequence: position i is written to slot i mod 4096, overwriting the entry
-    that just fell out of the window. Memory per sequence becomes constant, and the attention kernel
-    reads the buffer with positions reconstructed from the write index.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Mistral AI
-  related: /ai-system-design/genai-system-design/efficient-attention
-  refs:
-    - title: What is KV Cache in LLMs?
-      url: https://outcomeschool.com/blog/kv-cache-in-llms
-    - title: How does Sliding Window Attention work?
-      url: https://outcomeschool.com/blog/how-does-sliding-window-attention-work
-  source: outcome-school
-- id: you-need-to-quantize-a-model-for-a-customer-s-hardware-how-d
-  q: >-
-    You need to quantize a model for a customer's hardware. How do you choose a scheme, and how do
-    you prove quality hasn't regressed?
-  a: >
-    Start from the hardware: which formats it accelerates (FP8, INT8, INT4), memory capacity and
-    whether the workload is memory-bound decode or compute-bound prefill. Pick candidates
-    accordingly, for example FP8 on newest GPUs, INT8 weight-and-activation for broad support, or
-    4-bit weight-only with AWQ or GPTQ when memory is tight, and calibrate on data that matches the
-    customer's domain.
-
-
-    Prove quality with the customer's own evaluation set plus general benchmarks, comparing against
-    the full-precision model on task metrics, long-context and multilingual behavior, and output
-    agreement. Check speed and memory gains on the real hardware, and keep the unquantized model as
-    a fallback for any task that regresses.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Mistral AI
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: How does Model Quantization work?
-      url: https://outcomeschool.com/blog/how-does-model-quantization-work
-  source: outcome-school
-- id: sketch-how-you-would-serve-a-671b-parameter-moe-model-with-l
-  q: >-
-    Sketch how you would serve a 671B-parameter MoE model with low latency under GPU-memory
-    constraints.
-  a: >
-    A 671B MoE with about 37B active per token needs memory for all weights, roughly 671 GB in FP8,
-    so it spans multiple 8-GPU nodes. Use expert parallelism to spread experts across GPUs, tensor
-    or data parallelism for the attention layers, MLA to keep the KV cache small, and FP8 weights to
-    cut memory and bandwidth.
-
-
-    For low latency, place hot experts redundantly to avoid stragglers, overlap all-to-all
-    communication with compute, use prefill and decode disaggregation so long prompts do not stall
-    decoding, and add speculative decoding through multi-token prediction heads. Batch enough tokens
-    per step to keep experts busy, and monitor per-expert load.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - DeepSeek
-  related: /ai-system-design/genai-system-design/mixture-of-experts
-  refs:
-    - title: LLM Inference Optimization
-      url: https://outcomeschool.com/blog/llm-inference-optimization
-  source: outcome-school
-- id: a-chat-assistant-re-sends-a-long-conversation-history-on-eve
-  q: >-
-    A chat assistant re-sends a long conversation history on every turn. How do you avoid
-    recomputing all of it, and what are the pitfalls?
-  a: >
-    Use prefix caching: keep each conversation's KV cache after a turn, and when the next request
-    arrives with the same history plus a new message, reuse the cached prefix and only prefill the
-    new tokens. Route follow-up turns to the replica that holds the cache, and spill cold caches to
-    CPU memory or SSD instead of discarding them.
-
-
-    Pitfalls: any change to earlier tokens (an edited system prompt, timestamps, reordered tools, a
-    different template) invalidates the cache; memory pressure evicts caches unpredictably; sticky
-    routing can unbalance load; and very long histories should still be summarized or truncated,
-    because caching saves compute but not context-window space.
-  topic: inference-gpu
-  level: Mid
-  companies:
-    - Moonshot AI
-  related: /ai-system-design/genai-system-design/cost-latency-optimization
-  refs:
-    - title: How does Prompt Caching work?
-      url: https://outcomeschool.com/blog/how-does-prompt-caching-work
-  source: outcome-school
-- id: how-do-you-deploy-a-capable-assistant-on-cost-sensitive-or-o
-  q: >-
-    How do you deploy a capable assistant on cost-sensitive or on-device hardware without a
-    datacentre GPU? Walk through the efficiency toolkit.
-  a: >
-    Start with a small, strong model, often distilled from a larger one for your tasks. Quantize to
-    8 or 4 bits with good calibration, use efficient runtimes such as llama.cpp, ONNX Runtime, Core
-    ML or TensorRT for the target chip, and keep context short with retrieval instead of huge
-    prompts.
-
-
-    Add speculative decoding with a tiny draft model, cache prompts, and route only hard requests to
-    a cloud model if connectivity allows. Measure on the real device for latency, memory, battery
-    and heat, and evaluate quality on your own tasks, because quantization and small models degrade
-    unevenly.
-  topic: inference-gpu
-  level: Mid
-  companies:
-    - Sarvam AI
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: How does Model Quantization work?
-      url: https://outcomeschool.com/blog/how-does-model-quantization-work
-    - title: Small Language Models (SLMs)
-      url: https://outcomeschool.com/blog/small-language-models-slms
+  - title: LLM Inference Optimization
+    url: https://outcomeschool.com/blog/llm-inference-optimization
   source: outcome-school
 - id: a-copilot-chat-feature-has-a-p95-budget-of-3-seconds-to-firs
-  q: >-
-    A Copilot chat feature has a p95 budget of 3 seconds to first useful content. Where does the
-    time go, and how do you cut it?
-  a: >
-    Break the path down: client and network, authentication, context gathering (retrieval,
-    permissions, document fetching), prompt assembly, safety checks, queueing at the model, prefill,
-    and first tokens. Instrument each span at p95, not averages; retrieval and long prompts are
-    usually the biggest items.
+  q: A Copilot chat feature has a p95 budget of 3 seconds to first useful content. Where does the time go, and how do you cut it?
+  a: |
+    Break the path down: client and network, authentication, context gathering (retrieval, permissions, document fetching), prompt assembly, safety checks, queueing at the model, prefill, and first tokens. Instrument each span at p95, not averages; retrieval and long prompts are usually the biggest items.
 
-
-    Cut it by running retrieval and safety checks in parallel, caching user and tenant context,
-    shrinking the prompt with better retrieval and prefix caching of the stable system prompt, using
-    a smaller or faster model for the first response, streaming immediately, and reserving capacity
-    or priority for interactive traffic. Show useful partial content, such as a plan or citation
-    list, while the answer generates.
-  topic: inference-gpu
+    Cut it by running retrieval and safety checks in parallel, caching user and tenant context, shrinking the prompt with better retrieval and prefix caching of the stable system prompt, using a smaller or faster model for the first response, streaming immediately, and reserving capacity or priority for interactive traffic. Show useful partial content, such as a plan or citation list, while the answer generates.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Microsoft
+  - Microsoft
   related: /ai-system-design/genai-system-design/cost-latency-optimization
   refs:
-    - title: The First-Token Latency Problem in LLMs
-      url: https://www.youtube.com/watch?v=XD8DD4cEHu0
-    - title: "Prefill vs Decode: LLM Inference Optimization"
-      url: https://outcomeschool.com/blog/prefill-vs-decode-llm-inference-optimization
-  source: outcome-school
-- id: estimate-the-annual-serving-cost-of-adding-an-llm-summary-fe
-  q: >-
-    Estimate the annual serving cost of adding an LLM summary feature for 100 million weekly active
-    users, and how you'd cut it by 10x.
-  a: >
-    Assume 100M weekly users each request 5 summaries a week, 500M per week or about 26B per year.
-    With 2,000 input tokens and 200 output tokens each, that is 52 trillion input and 5.2 trillion
-    output tokens a year. At illustrative prices of 0.50 dollars per million input and 1.50 per
-    million output tokens, that is about 26 million plus 8 million, roughly 34 million dollars a
-    year; recompute with real prices and usage.
-
-
-    To cut 10x: generate summaries once per document and cache them for all viewers, which may
-    remove most calls; use a small distilled model; trim inputs to the relevant sections; batch
-    generation off-peak at discounted rates; and only summarize on demand when users open the
-    feature.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Microsoft
-  related: /ai-system-design/genai-system-design/cost-latency-optimization
-  refs:
-    - title: LLM Inference Optimization
-      url: https://www.youtube.com/watch?v=jV2sCj4lHYk
-    - title: LLM Inference Optimization
-      url: https://outcomeschool.com/blog/llm-inference-optimization
-  source: outcome-school
-- id: a-customer-s-bedrock-hosted-workload-costs-too-much-cut-infe
-  q: >-
-    A customer's Bedrock-hosted workload costs too much. Cut inference cost dramatically without
-    unacceptable quality loss.
-  a: >
-    Start by measuring cost per request type: input versus output tokens, which models, and how
-    often prompts repeat. Then apply levers in order: trim prompts and cap outputs, enable prompt
-    caching for repeated prefixes, route simple requests to smaller or cheaper models, and use batch
-    inference for non-interactive work.
-
-
-    If volume is high and the task is stable, fine-tune or distill a smaller model, or move to
-    provisioned throughput if utilization is predictable. Validate every change with the customer's
-    evaluation set and agree on the acceptable quality threshold before switching models.
-  topic: inference-gpu
-  level: Mid
-  companies:
-    - Amazon
-  related: /ai-system-design/genai-system-design/cost-latency-optimization
-  refs:
-    - title: LLM Inference Optimization
-      url: https://www.youtube.com/watch?v=jV2sCj4lHYk
-    - title: LLM Inference Optimization
-      url: https://outcomeschool.com/blog/llm-inference-optimization
-  source: outcome-school
-- id: you-need-to-run-a-3b-parameter-language-model-on-a-phone-wit
-  q: >-
-    You need to run a ~3B-parameter language model on a phone with tight memory and power budgets.
-    What changes versus serving the same model in a datacenter?
-  a: >
-    Memory and power, not peak FLOPs, become the limits. A 3B model in 16-bit is 6 GB, too much for
-    a phone sharing memory with apps, so weights are quantized to 4 bits or less (about 1.5 GB) with
-    careful calibration and sometimes quantization-aware training. Decode is bound by the phone's
-    much lower memory bandwidth, so tokens per second is low and must be planned for.
-
-
-    Other changes: use the phone's neural engine or GPU through its native runtime, keep context
-    short and the KV cache small or quantized, avoid sustained bursts that cause thermal throttling,
-    load the model lazily and share it across features with adapters, and fall back to a server
-    model for heavy requests.
-  topic: inference-gpu
-  level: Mid
-  companies:
-    - Apple
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: Cloud vs On-Device Model Deployment
-      url: https://outcomeschool.com/blog/cloud-vs-on-device-model-deployment
-    - title: How does Model Quantization work?
-      url: https://outcomeschool.com/blog/how-does-model-quantization-work
-  source: outcome-school
-- id: explain-post-training-quantization-versus-quantization-aware
-  q: >-
-    Explain post-training quantization versus quantization-aware training. What breaks when you push
-    weights to 2–4 bits, and how do you recover quality?
-  a: >
-    Post-training quantization converts a trained model's weights, and sometimes activations, to
-    lower precision using a small calibration set, with methods such as GPTQ or AWQ that minimize
-    the error layer by layer. It is cheap and fast. Quantization-aware training simulates low
-    precision during training or fine-tuning so the model learns weights that tolerate it,
-    recovering more quality at extra training cost.
-
-
-    At 2–4 bits, outlier weights and activations dominate the error, small models and fine-grained
-    skills such as math, code and multilingual text degrade first, and errors accumulate over long
-    generations. Recover quality with group-wise scales, keeping sensitive layers in higher
-    precision, outlier handling, QAT or LoRA fine-tuning on the quantized model, and distillation
-    from the full-precision model.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Apple
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: How does Model Quantization work?
-      url: https://outcomeschool.com/blog/how-does-model-quantization-work
-  source: outcome-school
-- id: estimate-the-kv-cache-memory-for-a-3b-on-device-model-at-4k
-  q: >-
-    Estimate the KV-cache memory for a 3B on-device model at 4k context, and name the levers that
-    shrink it.
-  a: >
-    Take a typical 3B design with 28 layers, 8 KV heads of dimension 128 and 16-bit values: 2 × 28 ×
-    8 × 128 × 2 bytes ≈ 115 KB per token, so 4K tokens is about 470 MB per sequence, significant
-    next to 1.5 GB of 4-bit weights on a phone.
-
-
-    Levers: fewer KV heads through GQA or MQA, quantizing the cache to 8 or 4 bits, sharing KV
-    across layers, a shorter context or sliding-window attention, keeping only one active sequence,
-    and summarizing or retrieving instead of holding long histories.
-  topic: inference-gpu
-  level: Mid
-  companies:
-    - Apple
-  related: /ai-system-design/genai-system-design/efficient-attention
-  refs:
-    - title: What is KV Cache in LLMs?
-      url: https://outcomeschool.com/blog/kv-cache-in-llms
-    - title: KV Cache Compression
-      url: https://outcomeschool.com/blog/kv-cache-compression
+  - title: The First-Token Latency Problem in LLMs
+    url: https://www.youtube.com/watch?v=XD8DD4cEHu0
+  - title: 'Prefill vs Decode: LLM Inference Optimization'
+    url: https://outcomeschool.com/blog/prefill-vs-decode-llm-inference-optimization
   source: outcome-school
 - id: time-to-first-token-for-your-on-device-feature-is-1-8-s-walk
-  q: >-
-    Time-to-first-token for your on-device feature is 1.8 s. Walk me through diagnosing and fixing
-    it.
-  a: >
-    Profile the timeline: model loading or warm-up, tokenization, prompt assembly, prefill of the
-    prompt and the first decode step. On device, slow TTFT usually comes from loading weights from
-    storage on first use, a long prompt that makes prefill expensive, running on the wrong compute
-    unit, or thermal throttling.
+  q: Time-to-first-token for your on-device feature is 1.8 s. Walk me through diagnosing and fixing it.
+  a: |
+    Profile the timeline: model loading or warm-up, tokenization, prompt assembly, prefill of the prompt and the first decode step. On device, slow TTFT usually comes from loading weights from storage on first use, a long prompt that makes prefill expensive, running on the wrong compute unit, or thermal throttling.
 
-
-    Fixes: keep the model resident or preload it before the user needs it, shorten the prompt and
-    cache the prefill of the fixed system prompt, make sure prefill runs on the neural engine or GPU
-    with efficient kernels, use a smaller model for the first response, and stream the first tokens
-    immediately.
-  topic: inference-gpu
+    Fixes: keep the model resident or preload it before the user needs it, shorten the prompt and cache the prefill of the fixed system prompt, make sure prefill runs on the neural engine or GPU with efficient kernels, use a smaller model for the first response, and stream the first tokens immediately.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Apple
+  - Apple
   related: /ai-system-design/genai-system-design/gpu-performance-for-llms
   refs:
-    - title: The First-Token Latency Problem in LLMs
-      url: https://www.youtube.com/watch?v=XD8DD4cEHu0
-  source: outcome-school
-- id: you-want-to-serve-a-70b-parameter-model-on-a-single-80-gb-gp
-  q: >-
-    You want to serve a 70B-parameter model on a single 80 GB GPU. Walk me through whether it fits
-    and what single-stream tokens/sec you'd expect.
-  a: >
-    In BF16 the weights alone are 140 GB, so it does not fit. In 8-bit they are about 70 GB, leaving
-    about 10 GB for KV cache and runtime, so it fits for short contexts and small batches. In 4-bit
-    they are about 35–40 GB, leaving room for a reasonable KV cache.
-
-
-    Single-stream decode is bandwidth-bound: about 3.35 TB/s ÷ 70 GB ≈ 48 tokens per second at
-    8-bit, roughly double at 4-bit, before overheads that typically cost 20–40%. Quality should be
-    checked after quantization, and two GPUs in BF16 give similar speed with no quantization loss.
-  topic: inference-gpu
-  level: Mid
-  companies:
-    - NVIDIA
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: How does Model Quantization work?
-      url: https://outcomeschool.com/blog/how-does-model-quantization-work
-    - title: What is KV Cache in LLMs?
-      url: https://outcomeschool.com/blog/kv-cache-in-llms
+  - title: The First-Token Latency Problem in LLMs
+    url: https://www.youtube.com/watch?v=XD8DD4cEHu0
   source: outcome-school
 - id: what-does-tensorrt-tensorrt-llm-actually-do-to-a-model-to-ma
-  q: >-
-    What does TensorRT / TensorRT-LLM actually do to a model to make it faster, and when will it not
-    help?
-  a: >
-    It compiles the model into an optimized engine for a specific GPU: fusing layers and
-    element-wise operations into fewer kernels, choosing the fastest kernel implementations for each
-    shape, using lower precision such as FP8 or INT8 with calibrated scales, and optimizing memory
-    layout. TensorRT-LLM adds LLM-specific pieces: in-flight batching, paged KV cache, optimized
-    attention kernels, multi-GPU parallelism and speculative decoding.
+  q: What does TensorRT / TensorRT-LLM actually do to a model to make it faster, and when will it not help?
+  a: |
+    It compiles the model into an optimized engine for a specific GPU: fusing layers and element-wise operations into fewer kernels, choosing the fastest kernel implementations for each shape, using lower precision such as FP8 or INT8 with calibrated scales, and optimizing memory layout. TensorRT-LLM adds LLM-specific pieces: in-flight batching, paged KV cache, optimized attention kernels, multi-GPU parallelism and speculative decoding.
 
-
-    It will not help much when the bottleneck is elsewhere, such as tokenization, network, retrieval
-    or CPU-side orchestration, when shapes are highly dynamic, when the model uses unsupported
-    custom operations, or when you are already bandwidth-limited on a well-optimized engine. It also
-    costs build time and flexibility.
-  topic: inference-gpu
+    It will not help much when the bottleneck is elsewhere, such as tokenization, network, retrieval or CPU-side orchestration, when shapes are highly dynamic, when the model uses unsupported custom operations, or when you are already bandwidth-limited on a well-optimized engine. It also costs build time and flexibility.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - NVIDIA
+  - NVIDIA
   related: /ai-system-design/genai-system-design/llm-serving-inference
   refs:
-    - title: How does TensorRT-LLM work?
-      url: https://outcomeschool.com/blog/how-does-tensorrt-llm-work
-  source: outcome-school
-- id: design-the-parallelism-strategy-for-serving-a-405b-parameter
-  q: >-
-    Design the parallelism strategy for serving a 405B-parameter dense model. TP, PP, EP: what goes
-    where and why?
-  a: >
-    A 405B dense model is about 810 GB in BF16 or 405 GB in FP8, so it needs at least one 8-GPU node
-    of 80 GB GPUs in FP8, or two nodes in BF16. Use tensor parallelism across the 8 GPUs in a node,
-    where NVLink handles the per-layer all-reduces, and pipeline parallelism across nodes if needed,
-    since pipeline traffic tolerates slower links.
-
-
-    Expert parallelism does not apply to a dense model. Add data-parallel replicas for throughput,
-    keep KV cache headroom per replica for the target concurrency, and use FP8 to fit in one node
-    where quality allows, because avoiding cross-node pipeline stages cuts latency.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - NVIDIA
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  source: outcome-school
-- id: the-onboard-compute-budget-is-fixed-walk-me-through-quantizi
-  q: >-
-    The onboard compute budget is fixed. Walk me through quantizing and pruning a vision model
-    without losing recall on small objects.
-  a: >
-    Start with a per-slice evaluation that tracks recall on small and distant objects separately,
-    since aggregate metrics hide their degradation. Quantize with calibration data that includes
-    many small-object scenes, keep the early high-resolution layers and detection heads in higher
-    precision where they are most sensitive, and use quantization-aware training to recover
-    accuracy.
-
-
-    Prune structurally (channels or blocks) so the hardware actually speeds up, prefer pruning from
-    later, redundant layers, and fine-tune after pruning, ideally with distillation from the full
-    model. Measure latency on the real onboard chip and stop at the point where small-object recall
-    drops below the safety threshold.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Tesla
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: How does Model Quantization work?
-      url: https://outcomeschool.com/blog/how-does-model-quantization-work
-  source: outcome-school
-- id: an-lpu-has-no-hbm-at-all-just-on-die-sram-redo-the-decode-ro
-  q: >-
-    An LPU has no HBM at all, just on-die SRAM. Redo the decode roofline argument for that machine
-    and tell me what changes.
-  a: >
-    On a GPU, decode is bound by reading weights from HBM at a few TB/s. With weights resident in
-    on-chip SRAM, each chip reads its share of weights at far higher bandwidth, so the memory roof
-    rises dramatically and single-stream decode can be much faster, especially at small batch sizes
-    where GPUs struggle.
-
-
-    The new constraint is capacity: each chip holds only hundreds of megabytes, so a large model is
-    spread across hundreds of chips, and performance depends on the interconnect passing activations
-    between chips and on the compiler's static schedule. KV cache also has to live in SRAM or be
-    limited, which constrains context length and concurrency.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Groq
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: How does an LPU work?
-      url: https://outcomeschool.com/blog/how-does-an-lpu-work
-  source: outcome-school
-- id: a-70b-dense-model-at-8-bit-weights-chips-with-230-mb-of-sram
-  q: >-
-    A 70B dense model at 8-bit weights, chips with ~230 MB of SRAM each. Walk me through the
-    deployment and the unit economics.
-  a: >
-    70B parameters at 8 bits is 70 GB; with about 230 MB of SRAM per chip, that needs over 300 chips
-    just for weights, plus more for KV cache and activations, so a deployment is a pipeline of
-    hundreds of chips across many racks, each holding a slice of layers.
-
-
-    Unit economics depend on keeping that fixed hardware busy: the capital cost is spread over
-    tokens served, so high utilization, many concurrent streams flowing through the pipeline, and
-    very fast per-stream speed are what make cost per million tokens competitive. Low traffic makes
-    it expensive, because all those chips are needed regardless of load.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Groq
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: How does an LPU work?
-      url: https://outcomeschool.com/blog/how-does-an-lpu-work
-  source: outcome-school
-- id: on-a-gpu-you-batch-to-amortise-weight-reads-what-is-the-batc
-  q: >-
-    On a GPU you batch to amortise weight reads. What is the batching calculus on an SRAM-only
-    machine, and how should that change how we price?
-  a: >
-    On a GPU, batching amortizes slow HBM weight reads across many sequences, so cost per token
-    falls steeply with batch size while per-user speed falls slowly. On an SRAM-only, pipelined
-    machine, weight reads are already cheap, so per-stream speed is high even at small batch;
-    throughput comes from keeping many sequences in flight through the pipeline stages rather than
-    from large batches on one chip.
-
-
-    Pricing should therefore reward what the machine is good at: premium pricing for low-latency,
-    high-speed streams, and capacity-based pricing that keeps the pipeline full, rather than
-    discounts tied to big batch sizes. Context length and KV memory are the scarce resources and may
-    deserve their own pricing.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Groq
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: How does an LPU work?
-      url: https://outcomeschool.com/blog/how-does-an-lpu-work
+  - title: How does TensorRT-LLM work?
+    url: https://outcomeschool.com/blog/how-does-tensorrt-llm-work
   source: outcome-school
 - id: determinism-is-the-headline-claim-what-does-it-actually-buy
-  q: >-
-    Determinism is the headline claim. What does it actually buy at p99, and why does it matter
-    especially for agentic workloads?
-  a: >
-    A statically scheduled machine executes the same program with the same timing every time,
-    without dynamic scheduling, cache misses or contention, so latency per token is nearly constant.
-    That shrinks the gap between median and p99 latency, which is what users and SLAs feel.
+  q: Determinism is the headline claim. What does it actually buy at p99, and why does it matter especially for agentic workloads?
+  a: |
+    A statically scheduled machine executes the same program with the same timing every time, without dynamic scheduling, cache misses or contention, so latency per token is nearly constant. That shrinks the gap between median and p99 latency, which is what users and SLAs feel.
 
-
-    Agentic workloads chain many model calls in sequence, so the end-to-end time is roughly the sum
-    of each call's latency, and tail latencies compound across steps. Predictable per-call latency
-    makes multi-step agents faster at the tail and easier to budget, and deterministic outputs also
-    help reproducibility and debugging.
-  topic: inference-gpu
+    Agentic workloads chain many model calls in sequence, so the end-to-end time is roughly the sum of each call's latency, and tail latencies compound across steps. Predictable per-call latency makes multi-step agents faster at the tail and easier to budget, and deterministic outputs also help reproducibility and debugging.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Groq
+  - Groq
   related: /ai-system-design/genai-system-design/llm-serving-inference
   refs:
-    - title: How does an LPU work?
-      url: https://outcomeschool.com/blog/how-does-an-lpu-work
-  source: outcome-school
-- id: how-would-you-serve-a-large-mixture-of-experts-model-on-a-st
-  q: >-
-    How would you serve a large mixture-of-experts model on a statically scheduled fabric when
-    expert selection is data-dependent?
-  a: >
-    Static schedules dislike data-dependent routing, so make routing fit a fixed plan: place every
-    expert on dedicated chips, compute routing at each layer, and send tokens through a fixed-size
-    exchange with capacity limits so communication volume is known in advance. Overflow tokens are
-    dropped to a fallback path or rerouted within bounded slots.
-
-
-    Alternatives are to replicate popular experts, batch tokens per expert in fixed-size tiles, or
-    run all experts on every token for the small parts of the model where sparsity does not pay. The
-    trade-off is some wasted compute and capacity padding in exchange for predictable latency.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Groq
-  related: /ai-system-design/genai-system-design/mixture-of-experts
+  - title: How does an LPU work?
+    url: https://outcomeschool.com/blog/how-does-an-lpu-work
   source: outcome-school
 - id: tell-me-about-a-performance-optimisation-you-shipped-give-me
-  q: >-
-    Tell me about a performance optimisation you shipped. Give me the numbers, and tell me why I
-    should believe them.
-  a: >
-    Use a real story with numbers: the metric (p99 latency, tokens per second, cost per million
-    tokens), the baseline, the bottleneck you found and how (profiler traces, roofline analysis),
-    the change, and the measured result. For example, a fused attention kernel or a scheduler change
-    that moved a metric by a stated percentage.
+  q: Tell me about a performance optimisation you shipped. Give me the numbers, and tell me why I should believe them.
+  a: |
+    Use a real story with numbers: the metric (p99 latency, tokens per second, cost per million tokens), the baseline, the bottleneck you found and how (profiler traces, roofline analysis), the change, and the measured result. For example, a fused attention kernel or a scheduler change that moved a metric by a stated percentage.
 
-
-    Make it believable by explaining the measurement: representative workload and traffic mix,
-    repeated runs with variance, both median and tail, verification that quality did not change, and
-    how the result held in production after rollout. Admit what did not work and what limits
-    remained.
-  topic: inference-gpu
+    Make it believable by explaining the measurement: representative workload and traffic mix, repeated runs with variance, both median and tail, verification that quality did not change, and how the result held in production after rollout. Admit what did not work and what limits remained.
   level: Mid
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Groq
+  - Groq
   related: /ai-system-design/genai-system-design/gpu-performance-for-llms
   source: outcome-school
 - id: design-the-scheduler-for-a-continuous-batching-inference-eng
   q: Design the scheduler for a continuous-batching inference engine.
-  a: >
-    Each iteration, the scheduler chooses which sequences run: all running decodes plus as many
-    waiting requests' prefill chunks as fit within a token budget per step and the available KV
-    cache blocks. It admits requests by priority and arrival time, reserves or allocates cache
-    blocks on demand, and preempts low-priority sequences when memory runs out, either swapping
-    their cache to CPU or recomputing later.
+  a: |
+    Each iteration, the scheduler chooses which sequences run: all running decodes plus as many waiting requests' prefill chunks as fit within a token budget per step and the available KV cache blocks. It admits requests by priority and arrival time, reserves or allocates cache blocks on demand, and preempts low-priority sequences when memory runs out, either swapping their cache to CPU or recomputing later.
 
-
-    Key policies: a per-step token budget to bound latency, chunked prefill to mix prefill with
-    decode, prefix-cache-aware admission, fairness across tenants, and SLO-aware ordering so
-    interactive requests meet time-to-first-token targets. Expose metrics on queue time, preemptions
-    and cache utilization to tune it.
-  topic: inference-gpu
+    Key policies: a per-step token budget to bound latency, chunked prefill to mix prefill with decode, prefix-cache-aware admission, fairness across tenants, and SLO-aware ordering so interactive requests meet time-to-first-token targets. Expose metrics on queue time, preemptions and cache utilization to tune it.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Together AI
+  - Together AI
   related: /ai-system-design/genai-system-design/llm-serving-inference
   refs:
-    - title: Continuous Batching in LLMs
-      url: https://outcomeschool.com/blog/continuous-batching-in-llms
-    - title: How does vLLM work?
-      url: https://outcomeschool.com/blog/how-does-vllm-work
-  source: outcome-school
-- id: explain-speculative-decoding-when-does-it-help-when-does-it
-  q: >-
-    Explain speculative decoding. When does it help, when does it hurt, and why adapt the speculator
-    to live traffic?
-  a: >
-    A draft model proposes several tokens; the target model verifies them in one pass and keeps the
-    accepted prefix, preserving the target's output distribution. It helps at low and moderate batch
-    sizes where decoding is memory-bound and the draft agrees with the target often.
-
-
-    It hurts at high batch sizes, where verification work competes with compute that is already
-    saturated, and when acceptance rates are low, for example with off-domain prompts or high
-    temperature. Adapting the speculator to live traffic, by training or tuning the draft on recent
-    production prompts, keeps acceptance high as usage shifts, which is where most of the speedup
-    comes from.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Together AI
-  related: /ai-system-design/genai-system-design/llm-serving-inference
-  refs:
-    - title: Speculative Decoding
-      url: https://outcomeschool.com/blog/speculative-decoding
-    - title: N-gram Speculation in LLMs
-      url: https://outcomeschool.com/blog/n-gram-speculation-in-llms
-  source: outcome-school
-- id: price-a-dedicated-endpoint-estimate-cost-per-million-output
-  q: >-
-    Price a dedicated endpoint: estimate cost per million output tokens for a 70B model, and explain
-    the throughput-latency trade.
-  a: >
-    Suppose a 70B model on 4 GPUs at an illustrative 2 dollars per GPU-hour, 8 dollars an hour in
-    total. If the endpoint sustains 2,000 output tokens per second across many concurrent users at
-    high batch, it produces 7.2 million tokens an hour, about 1.1 dollars per million output tokens
-    before input-processing cost and margin. At 400 tokens per second, the same hardware costs about
-    5.6 dollars per million.
-
-
-    That is the trade-off: higher batch and concurrency lower cost per token but slow each user's
-    stream and raise latency. A dedicated endpoint should be priced by the hour or by guaranteed
-    throughput, with utilization assumptions explicit, because idle hours still cost money.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Together AI
-  related: /ai-system-design/genai-system-design/cost-latency-optimization
-  source: outcome-school
-- id: serving-a-custom-completion-model-to-millions-of-dau-walk-me
-  q: >-
-    Serving a custom completion model to millions of DAU: walk me through the inference-cost model
-    and your top three levers.
-  a: >
-    Code completion fires on keystrokes, so requests are many, prompts are long (surrounding code)
-    and outputs short, and latency must be very low. Cost is dominated by prefill of large contexts
-    and by the number of requests. Model it as requests per user per day × prompt tokens × prefill
-    cost plus short decode, on GPUs sized for peak typing hours.
-
-
-    Top three levers: cut requests with debouncing, client-side caching and cancelling stale
-    requests; cut prefill with prefix caching of file context across consecutive requests and
-    smarter context selection; and use a small, specialized model with speculative decoding for
-    edits. Measure acceptance rate per dollar, not just cost per request.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Cursor
-  related: /ai-system-design/genai-system-design/cost-latency-optimization
-  refs:
-    - title: LLM Inference Optimization
-      url: https://www.youtube.com/watch?v=jV2sCj4lHYk
-    - title: How does Cursor work?
-      url: https://outcomeschool.com/blog/how-does-cursor-work
+  - title: Continuous Batching in LLMs
+    url: https://outcomeschool.com/blog/continuous-batching-in-llms
+  - title: How does vLLM work?
+    url: https://outcomeschool.com/blog/how-does-vllm-work
   source: outcome-school
 - id: walk-me-through-the-latency-budget-of-a-query-query-understa
-  q: >-
-    Walk me through the latency budget of a query: query understanding → retrieval → rerank → LLM
-    answer. Where do you spend and where do you cut?
-  a: >
-    A typical budget: query understanding and rewriting 50–150 ms (or near zero with a small
-    classifier), retrieval across indexes 50–200 ms with permission filtering, re-ranking 50–300 ms
-    depending on candidates and model, then the LLM's time to first token, often 300 ms to over a
-    second depending on prompt length, followed by streaming.
+  q: 'Walk me through the latency budget of a query: query understanding → retrieval → rerank → LLM answer. Where do you spend and where do you cut?'
+  a: |
+    A typical budget: query understanding and rewriting 50–150 ms (or near zero with a small classifier), retrieval across indexes 50–200 ms with permission filtering, re-ranking 50–300 ms depending on candidates and model, then the LLM's time to first token, often 300 ms to over a second depending on prompt length, followed by streaming.
 
-
-    Spend where quality comes from, usually retrieval recall and re-ranking. Cut by running
-    rewriting and retrieval in parallel, caching popular queries and permission lookups, re-ranking
-    fewer candidates with a smaller model, sending fewer and shorter passages to the LLM, and
-    streaming the answer immediately with citations attached as they are known.
-  topic: inference-gpu
+    Spend where quality comes from, usually retrieval recall and re-ranking. Cut by running rewriting and retrieval in parallel, caching popular queries and permission lookups, re-ranking fewer candidates with a smaller model, sending fewer and shorter passages to the LLM, and streaming the answer immediately with citations attached as they are known.
   level: Mid
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Glean
+  - Glean
   related: /ai-system-design/genai-system-design/advanced-rag
   source: outcome-school
-- id: our-serving-cost-is-dominated-by-kv-cache-not-weights-get-it
-  q: >-
-    Our serving cost is dominated by KV cache, not weights. Get it down by an order of magnitude and
-    tell me what you give up.
-  a: >
-    Attack bytes per token of cache: move to MQA or fewer KV heads, share KV across adjacent layers,
-    interleave local sliding-window attention layers with a few global layers so most layers cache
-    only a short window, and quantize the cache to 8 bits. Combined, these can cut cache memory by
-    well over an order of magnitude, and Character.AI has publicly described using this kind of
-    combination.
-
-
-    You give up some quality on long-range recall and exact retrieval from early in the
-    conversation, some training work to adopt the new architecture, and a little precision. Validate
-    on long-dialogue evaluations to make sure persona consistency and recall hold.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Character.AI
-  related: /ai-system-design/genai-system-design/efficient-attention
-  refs:
-    - title: KV Cache Compression
-      url: https://outcomeschool.com/blog/kv-cache-compression
-  source: outcome-school
-- id: dialogues-here-average-around-180-messages-design-the-cache
-  q: Dialogues here average around 180 messages. Design the cache that sits between turns.
-  a: >
-    Keep each active conversation's KV cache between turns so the next turn only prefills the new
-    message. Use a tiered store: GPU memory for active chats, host memory and then SSD for idle
-    ones, with eviction by recency and expected return time, and route each user back to the server
-    that holds their cache.
-
-
-    Because conversations are long, keep the cache compact (small KV architecture, quantized cache),
-    cache the shared character definition prefix once for all users of that character, and
-    periodically summarize or trim very old turns. Measure cache hit rate, prefill saved and the
-    latency cost of restoring caches from slower tiers.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Character.AI
-  related: /ai-system-design/genai-system-design/cost-latency-optimization
-  refs:
-    - title: How does Prompt Caching work?
-      url: https://outcomeschool.com/blog/how-does-prompt-caching-work
-  source: outcome-school
-- id: you-train-natively-in-int8-rather-than-doing-post-training-q
-  q: You train natively in int8 rather than doing post-training quantization. Defend that.
-  a: >
-    If the model will be served in int8 anyway, training in int8 means the weights are learned to
-    work at that precision, so there is no gap between the model you evaluated and the model you
-    serve, and no quality lost to post-hoc rounding. It also speeds up training and cuts memory,
-    which lowers cost at scale.
-
-
-    The risks are training instability and the engineering effort of low-precision kernels, scaling
-    and optimizer handling. The defense is that, for a product where serving cost dominates,
-    matching training and serving precision gives the best quality per serving dollar.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Character.AI
-  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
-  refs:
-    - title: How does Model Quantization work?
-      url: https://outcomeschool.com/blog/how-does-model-quantization-work
-  source: outcome-school
-- id: estimate-what-one-message-costs-us-to-serve-and-tell-me-whic
-  q: Estimate what one message costs us to serve, and tell me which lever moves it most.
-  a: >
-    Cost per message is GPU time per message × GPU price. GPU time is the prefill of new tokens (or
-    the whole history if the cache was lost) plus decoding the reply. With a warm cache, a 100-token
-    message and a 100-token reply on a system that sustains, say, 5,000 output tokens per second per
-    8-GPU node at 16 dollars an hour costs about 16 ÷ 3,600 ÷ 5,000 × 100 ≈ 0.009 cents for decode,
-    plus a small prefill share.
-
-
-    The lever that moves it most is usually cache hits: losing the cache means re-prefilling a long
-    history every turn, which can multiply cost several times. After that come KV cache size, which
-    sets batch size and therefore throughput, and output length.
-  topic: inference-gpu
-  level: Senior
-  companies:
-    - Character.AI
-  related: /ai-system-design/genai-system-design/cost-latency-optimization
-  source: outcome-school
 - id: serving-real-time-tts-is-a-different-capacity-problem-from-s
-  q: >-
-    Serving real-time TTS is a different capacity problem from serving a text LLM. Why, and how do
-    you plan capacity?
-  a: >
-    Text LLM users tolerate some delay and read at their own pace, but audio must be generated
-    faster than real time continuously, or playback stutters. The key metrics are time to first
-    audio and the real-time factor (generation time divided by audio duration), and every active
-    stream needs a steady share of compute for its whole duration.
+  q: Serving real-time TTS is a different capacity problem from serving a text LLM. Why, and how do you plan capacity?
+  a: |
+    Text LLM users tolerate some delay and read at their own pace, but audio must be generated faster than real time continuously, or playback stutters. The key metrics are time to first audio and the real-time factor (generation time divided by audio duration), and every active stream needs a steady share of compute for its whole duration.
 
-
-    Plan capacity in concurrent streams rather than requests: measure how many streams one GPU
-    sustains at a safe real-time factor for each voice model, keep headroom for peaks because you
-    cannot queue audio mid-sentence, separate low-latency conversational traffic from batch
-    narration, and autoscale ahead of traffic patterns.
-  topic: inference-gpu
+    Plan capacity in concurrent streams rather than requests: measure how many streams one GPU sustains at a safe real-time factor for each voice model, keep headroom for peaks because you cannot queue audio mid-sentence, separate low-latency conversational traffic from batch narration, and autoscale ahead of traffic patterns.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - ElevenLabs
+  - ElevenLabs
   related: /ai-system-design/genai-system-design/llm-serving-inference
   source: outcome-school
 - id: the-note-should-be-ready-before-the-clinician-leaves-the-roo
-  q: >-
-    The note should be ready before the clinician leaves the room. Build me the latency budget, and
-    tell me where the money goes.
-  a: >
-    Stream audio to speech recognition during the visit, so transcription is nearly done when the
-    conversation ends. Then the remaining budget, perhaps 30–60 seconds, covers finalizing the
-    transcript, speaker roles, extracting clinical facts and generating the structured note with an
-    LLM, plus validation checks.
+  q: The note should be ready before the clinician leaves the room. Build me the latency budget, and tell me where the money goes.
+  a: |
+    Stream audio to speech recognition during the visit, so transcription is nearly done when the conversation ends. Then the remaining budget, perhaps 30–60 seconds, covers finalizing the transcript, speaker roles, extracting clinical facts and generating the structured note with an LLM, plus validation checks.
 
-
-    Most money goes to long-audio ASR and to LLM processing of long transcripts. Save by streaming
-    ASR on efficient models, incremental summarization during the visit so the final step processes
-    less, smaller fine-tuned models for extraction, and reserving the largest model for the final
-    note.
-  topic: inference-gpu
+    Most money goes to long-audio ASR and to LLM processing of long transcripts. Save by streaming ASR on efficient models, incremental summarization during the visit so the final step processes less, smaller fine-tuned models for extraction, and reserving the largest model for the final note.
   level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
   companies:
-    - Abridge
+  - Abridge
   related: /ai-system-design/genai-system-design/cost-latency-optimization
   source: outcome-school
-- id: a-colleague-wants-to-move-the-semantic-layer-to-the-cloud-so
-  q: >-
-    A colleague wants to move the semantic layer to the cloud so you can use a much bigger model.
-    Walk me through the latency budget.
-  a: >
-    Add network round-trip time, which on a wireless link varies from tens to hundreds of
-    milliseconds and occasionally drops out, plus cloud queueing and inference time, compared with
-    the onboard model's fixed latency. For a robot, the semantic layer's output feeds planning and
-    control loops, so worst-case latency and connectivity loss matter more than average.
+- id: how-do-you-reduce-llm-latency
+  q: How do you reduce LLM latency?
+  a: |
+    Stream tokens so users see output immediately, use smaller or quantized models where quality allows, shorten prompts to cut time to first token, cap output length, use prompt caching, run independent calls in parallel, and serve with an optimized inference engine using continuous batching and speculative decoding.
+  level: Mid
+  category: inference-gpu
+  subcategory: serving-batching
+- id: how-does-pagedattention-work-and-what-problem-of-kv-cache-fr
+  q: How does PagedAttention work, and what problem of KV-cache fragmentation does it solve?
+  a: |
+    Without paging, servers reserve a contiguous KV cache region sized for each request's maximum length. Most of it goes unused, and free memory fragments into gaps too small to use, so far fewer requests fit.
 
-
-    A practical split keeps safety-critical, time-sensitive perception and control onboard, and uses
-    the bigger cloud model asynchronously for slower, high-level reasoning that tolerates delay,
-    with a fallback when the connection is lost.
-  topic: inference-gpu
-  level: Senior
+    PagedAttention stores each sequence's cache in small fixed-size blocks allocated on demand, tracked by a block table like virtual memory pages, and the attention kernel reads through that table. Waste drops to the last partial block, memory can be shared between sequences with the same prefix through copy-on-write, and many more sequences fit, which raises batch size and throughput.
+  level: Mid
+  category: inference-gpu
+  subcategory: kv-cache-attention
   companies:
-    - Figure AI
+  - NVIDIA
+  - Together AI
   related: /ai-system-design/genai-system-design/llm-serving-inference
+  refs:
+  - title: Paged Attention in LLMs
+    url: https://outcomeschool.com/blog/paged-attention-in-llms
+  - title: How does vLLM work?
+    url: https://outcomeschool.com/blog/how-does-vllm-work
+  source: outcome-school
+- id: estimate-the-gpu-memory-needed-to-serve-a-70b-model-weights
+  q: 'Estimate the GPU memory needed to serve a 70B model: weights, KV cache, activations, fragmentation.'
+  a: |
+    Weights: 70B parameters × 2 bytes = 140 GB in BF16, 70 GB in 8-bit, about 35–40 GB in 4-bit. KV cache for a Llama-style 70B with GQA (80 layers, 8 KV heads of size 128, 2 bytes): about 0.33 MB per token, so 64 concurrent sequences averaging 4K tokens is about 85 GB.
+
+    Activations during decode are small, a few GB, while prefill of long prompts needs more. Add framework overhead, CUDA graphs and fragmentation of roughly 10–20%. So BF16 serving at moderate concurrency needs around 240–260 GB, for example four 80 GB GPUs with tensor parallelism, while 4-bit weights can serve modest loads on one or two GPUs.
+  level: Mid
+  category: inference-gpu
+  subcategory: kv-cache-attention
+  companies:
+  - NVIDIA
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: What is KV Cache in LLMs?
+    url: https://outcomeschool.com/blog/kv-cache-in-llms
+  - title: Paged Attention in LLMs
+    url: https://outcomeschool.com/blog/paged-attention-in-llms
+  source: outcome-school
+- id: estimate-the-kv-cache-memory-to-serve-a-70b-class-model-at-1
+  q: Estimate the KV-cache memory to serve a 70B-class model at 128k context. What do you do when it doesn't fit?
+  a: |
+    For a Llama-style 70B with GQA (80 layers, 8 KV heads, head dimension 128, 2 bytes): 2 × 80 × 8 × 128 × 2 bytes ≈ 0.33 MB per token, so 128K tokens is about 42 GB for a single sequence, more than half of an 80 GB GPU and on top of 140 GB of BF16 weights. Without GQA it would be 8x larger.
+
+    When it does not fit: shard across more GPUs with tensor or context parallelism, quantize the cache to 8 or 4 bits, use paged memory so only used blocks are allocated, offload cold blocks to CPU memory, limit concurrency of long requests, and consider architectures such as MLA or sliding windows for future models. Retrieval to shorten prompts is often the cheapest fix.
+  level: Senior
+  category: inference-gpu
+  subcategory: kv-cache-attention
+  companies:
+  - xAI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+  - title: What is KV Cache in LLMs?
+    url: https://outcomeschool.com/blog/kv-cache-in-llms
+  - title: KV Cache Compression
+    url: https://outcomeschool.com/blog/kv-cache-compression
+  source: outcome-school
+- id: estimate-the-kv-cache-memory-for-serving-mistral-7b-and-desi
+  q: Estimate the KV-cache memory for serving Mistral 7B, and design the rolling-buffer cache that sliding-window attention enables.
+  a: |
+    Mistral 7B has 32 layers and 8 KV heads of dimension 128, so at 2 bytes the cache is 2 × 32 × 8 × 128 × 2 ≈ 128 KB per token. With a 4,096-token sliding window, a sequence never needs more than about 512 MB of cache, however long it gets.
+
+    Because each layer only attends to the last 4,096 positions, the cache can be a fixed-size circular buffer per sequence: position i is written to slot i mod 4096, overwriting the entry that just fell out of the window. Memory per sequence becomes constant, and the attention kernel reads the buffer with positions reconstructed from the write index.
+  level: Senior
+  category: inference-gpu
+  subcategory: kv-cache-attention
+  companies:
+  - Mistral AI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+  - title: What is KV Cache in LLMs?
+    url: https://outcomeschool.com/blog/kv-cache-in-llms
+  - title: How does Sliding Window Attention work?
+    url: https://outcomeschool.com/blog/how-does-sliding-window-attention-work
+  source: outcome-school
+- id: estimate-the-kv-cache-memory-for-a-3b-on-device-model-at-4k
+  q: Estimate the KV-cache memory for a 3B on-device model at 4k context, and name the levers that shrink it.
+  a: |
+    Take a typical 3B design with 28 layers, 8 KV heads of dimension 128 and 16-bit values: 2 × 28 × 8 × 128 × 2 bytes ≈ 115 KB per token, so 4K tokens is about 470 MB per sequence, significant next to 1.5 GB of 4-bit weights on a phone.
+
+    Levers: fewer KV heads through GQA or MQA, quantizing the cache to 8 or 4 bits, sharing KV across layers, a shorter context or sliding-window attention, keeping only one active sequence, and summarizing or retrieving instead of holding long histories.
+  level: Mid
+  category: inference-gpu
+  subcategory: kv-cache-attention
+  companies:
+  - Apple
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+  - title: What is KV Cache in LLMs?
+    url: https://outcomeschool.com/blog/kv-cache-in-llms
+  - title: KV Cache Compression
+    url: https://outcomeschool.com/blog/kv-cache-compression
+  source: outcome-school
+- id: our-serving-cost-is-dominated-by-kv-cache-not-weights-get-it
+  q: Our serving cost is dominated by KV cache, not weights. Get it down by an order of magnitude and tell me what you give up.
+  a: |
+    Attack bytes per token of cache: move to MQA or fewer KV heads, share KV across adjacent layers, interleave local sliding-window attention layers with a few global layers so most layers cache only a short window, and quantize the cache to 8 bits. Combined, these can cut cache memory by well over an order of magnitude, and Character.AI has publicly described using this kind of combination.
+
+    You give up some quality on long-range recall and exact retrieval from early in the conversation, some training work to adopt the new architecture, and a little precision. Validate on long-dialogue evaluations to make sure persona consistency and recall hold.
+  level: Senior
+  category: inference-gpu
+  subcategory: kv-cache-attention
+  companies:
+  - Character.AI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+  - title: KV Cache Compression
+    url: https://outcomeschool.com/blog/kv-cache-compression
+  source: outcome-school
+- id: what-is-the-kv-cache-and-what-are-its-memory-implications-at
+  q: What is the KV cache, and what are its memory implications at scale? Derive the formula.
+  a: |
+    During generation each new token attends to all previous tokens, which needs their keys and values in every layer. The KV cache stores them once so each decode step only computes the newest token's projections, turning repeated quadratic work into a cheap append.
+
+    Memory per sequence is 2 (keys and values) × layers × KV heads × head dimension × sequence length × bytes per value. For 32 layers, 32 heads of size 128 and 16-bit values that is about 0.5 MB per token, or roughly 4.3 GB for one 8K-token sequence. Multiply by batch size and it often exceeds the model weights, which is why GQA, MLA, paging and cache quantization exist.
+  level: Mid
+  category: inference-gpu
+  subcategory: kv-cache-attention
+  companies:
+  - Amazon
+  - Apple
+  - Character.AI
+  - Mistral AI
+  - NVIDIA
+  - OpenAI
+  - Together AI
+  - xAI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+  - title: What is KV Cache in LLMs?
+    url: https://outcomeschool.com/blog/kv-cache-in-llms
+  - title: KV Cache Compression
+    url: https://outcomeschool.com/blog/kv-cache-compression
+  source: outcome-school
+- id: explain-flashattention-it-does-not-reduce-flops-so-why-is-it
+  q: Explain FlashAttention. It does not reduce FLOPs, so why is it faster?
+  a: |
+    Attention on modern GPUs is limited by memory traffic, not arithmetic. The standard implementation writes the full n×n score matrix to slow high-bandwidth memory, reads it back for the softmax, writes the probabilities and reads them again to multiply by V.
+
+    FlashAttention tiles Q, K and V into blocks that fit in fast on-chip SRAM, computes the softmax incrementally with running maximum and sum statistics, and accumulates the output without ever storing the full matrix. The math and FLOPs are the same and the result is exact, but far fewer bytes move through slow memory, so it runs faster and uses memory linear in sequence length. In the backward pass it recomputes attention from saved statistics instead of storing the matrix.
+  level: Mid
+  category: inference-gpu
+  subcategory: kv-cache-attention
+  companies:
+  - Together AI
+  related: /ai-system-design/genai-system-design/efficient-attention
+  refs:
+  - title: Decoding Flash Attention in LLMs
+    url: https://outcomeschool.com/blog/decoding-flash-attention
+  source: outcome-school
+- id: compare-fp16-bf16-fp8-int8-int4-and-fp4-for-serving-what-bre
+  q: Compare FP16, BF16, FP8, INT8, INT4 and FP4 for serving. What breaks at each step down?
+  a: |
+    FP16 and BF16 use 2 bytes; BF16 has FP32's range, so it avoids overflow and is the default reference. FP8 halves memory and doubles compute on supporting GPUs, with small accuracy loss given per-tensor or per-block scaling; the main risk is outliers and range. INT8 weight or weight-and-activation quantization is mature and nearly lossless with good calibration, though activation outliers need handling such as SmoothQuant.
+
+    INT4 weight-only (GPTQ, AWQ) cuts memory 4x and speeds up memory-bound decode, but loses more accuracy, especially on reasoning, long context and small models, and needs group-wise scales. FP4 on newest hardware pushes further with micro-scaled blocks, and quality becomes sensitive to calibration and model. Each step down shrinks memory and raises speed while increasing the risk to rare-token behavior, math and multilingual quality, so evaluate per task.
+  level: Senior
+  category: inference-gpu
+  subcategory: quantization
+  companies:
+  - Apple
+  - Character.AI
+  - Mistral AI
+  - NVIDIA
+  - Together AI
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: How does Model Quantization work?
+    url: https://outcomeschool.com/blog/how-does-model-quantization-work
+  source: outcome-school
+- id: you-need-to-quantize-a-model-for-a-customer-s-hardware-how-d
+  q: You need to quantize a model for a customer's hardware. How do you choose a scheme, and how do you prove quality hasn't regressed?
+  a: |
+    Start from the hardware: which formats it accelerates (FP8, INT8, INT4), memory capacity and whether the workload is memory-bound decode or compute-bound prefill. Pick candidates accordingly, for example FP8 on newest GPUs, INT8 weight-and-activation for broad support, or 4-bit weight-only with AWQ or GPTQ when memory is tight, and calibrate on data that matches the customer's domain.
+
+    Prove quality with the customer's own evaluation set plus general benchmarks, comparing against the full-precision model on task metrics, long-context and multilingual behavior, and output agreement. Check speed and memory gains on the real hardware, and keep the unquantized model as a fallback for any task that regresses.
+  level: Senior
+  category: inference-gpu
+  subcategory: quantization
+  companies:
+  - Mistral AI
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: How does Model Quantization work?
+    url: https://outcomeschool.com/blog/how-does-model-quantization-work
+  source: outcome-school
+- id: how-do-you-deploy-a-capable-assistant-on-cost-sensitive-or-o
+  q: How do you deploy a capable assistant on cost-sensitive or on-device hardware without a datacentre GPU? Walk through the efficiency toolkit.
+  a: |
+    Start with a small, strong model, often distilled from a larger one for your tasks. Quantize to 8 or 4 bits with good calibration, use efficient runtimes such as llama.cpp, ONNX Runtime, Core ML or TensorRT for the target chip, and keep context short with retrieval instead of huge prompts.
+
+    Add speculative decoding with a tiny draft model, cache prompts, and route only hard requests to a cloud model if connectivity allows. Measure on the real device for latency, memory, battery and heat, and evaluate quality on your own tasks, because quantization and small models degrade unevenly.
+  level: Mid
+  category: inference-gpu
+  subcategory: quantization
+  companies:
+  - Sarvam AI
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: How does Model Quantization work?
+    url: https://outcomeschool.com/blog/how-does-model-quantization-work
+  - title: Small Language Models (SLMs)
+    url: https://outcomeschool.com/blog/small-language-models-slms
+  source: outcome-school
+- id: you-need-to-run-a-3b-parameter-language-model-on-a-phone-wit
+  q: You need to run a ~3B-parameter language model on a phone with tight memory and power budgets. What changes versus serving the same model in a datacenter?
+  a: |
+    Memory and power, not peak FLOPs, become the limits. A 3B model in 16-bit is 6 GB, too much for a phone sharing memory with apps, so weights are quantized to 4 bits or less (about 1.5 GB) with careful calibration and sometimes quantization-aware training. Decode is bound by the phone's much lower memory bandwidth, so tokens per second is low and must be planned for.
+
+    Other changes: use the phone's neural engine or GPU through its native runtime, keep context short and the KV cache small or quantized, avoid sustained bursts that cause thermal throttling, load the model lazily and share it across features with adapters, and fall back to a server model for heavy requests.
+  level: Mid
+  category: inference-gpu
+  subcategory: quantization
+  companies:
+  - Apple
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: Cloud vs On-Device Model Deployment
+    url: https://outcomeschool.com/blog/cloud-vs-on-device-model-deployment
+  - title: How does Model Quantization work?
+    url: https://outcomeschool.com/blog/how-does-model-quantization-work
+  source: outcome-school
+- id: explain-post-training-quantization-versus-quantization-aware
+  q: Explain post-training quantization versus quantization-aware training. What breaks when you push weights to 2–4 bits, and how do you recover quality?
+  a: |
+    Post-training quantization converts a trained model's weights, and sometimes activations, to lower precision using a small calibration set, with methods such as GPTQ or AWQ that minimize the error layer by layer. It is cheap and fast. Quantization-aware training simulates low precision during training or fine-tuning so the model learns weights that tolerate it, recovering more quality at extra training cost.
+
+    At 2–4 bits, outlier weights and activations dominate the error, small models and fine-grained skills such as math, code and multilingual text degrade first, and errors accumulate over long generations. Recover quality with group-wise scales, keeping sensitive layers in higher precision, outlier handling, QAT or LoRA fine-tuning on the quantized model, and distillation from the full-precision model.
+  level: Senior
+  category: inference-gpu
+  subcategory: quantization
+  companies:
+  - Apple
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: How does Model Quantization work?
+    url: https://outcomeschool.com/blog/how-does-model-quantization-work
+  source: outcome-school
+- id: you-want-to-serve-a-70b-parameter-model-on-a-single-80-gb-gp
+  q: You want to serve a 70B-parameter model on a single 80 GB GPU. Walk me through whether it fits and what single-stream tokens/sec you'd expect.
+  a: |
+    In BF16 the weights alone are 140 GB, so it does not fit. In 8-bit they are about 70 GB, leaving about 10 GB for KV cache and runtime, so it fits for short contexts and small batches. In 4-bit they are about 35–40 GB, leaving room for a reasonable KV cache.
+
+    Single-stream decode is bandwidth-bound: about 3.35 TB/s ÷ 70 GB ≈ 48 tokens per second at 8-bit, roughly double at 4-bit, before overheads that typically cost 20–40%. Quality should be checked after quantization, and two GPUs in BF16 give similar speed with no quantization loss.
+  level: Mid
+  category: inference-gpu
+  subcategory: quantization
+  companies:
+  - NVIDIA
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: How does Model Quantization work?
+    url: https://outcomeschool.com/blog/how-does-model-quantization-work
+  - title: What is KV Cache in LLMs?
+    url: https://outcomeschool.com/blog/kv-cache-in-llms
+  source: outcome-school
+- id: the-onboard-compute-budget-is-fixed-walk-me-through-quantizi
+  q: The onboard compute budget is fixed. Walk me through quantizing and pruning a vision model without losing recall on small objects.
+  a: |
+    Start with a per-slice evaluation that tracks recall on small and distant objects separately, since aggregate metrics hide their degradation. Quantize with calibration data that includes many small-object scenes, keep the early high-resolution layers and detection heads in higher precision where they are most sensitive, and use quantization-aware training to recover accuracy.
+
+    Prune structurally (channels or blocks) so the hardware actually speeds up, prefer pruning from later, redundant layers, and fine-tune after pruning, ideally with distillation from the full model. Measure latency on the real onboard chip and stop at the point where small-object recall drops below the safety threshold.
+  level: Senior
+  category: inference-gpu
+  subcategory: quantization
+  companies:
+  - Tesla
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: How does Model Quantization work?
+    url: https://outcomeschool.com/blog/how-does-model-quantization-work
+  source: outcome-school
+- id: a-70b-dense-model-at-8-bit-weights-chips-with-230-mb-of-sram
+  q: A 70B dense model at 8-bit weights, chips with ~230 MB of SRAM each. Walk me through the deployment and the unit economics.
+  a: |
+    70B parameters at 8 bits is 70 GB; with about 230 MB of SRAM per chip, that needs over 300 chips just for weights, plus more for KV cache and activations, so a deployment is a pipeline of hundreds of chips across many racks, each holding a slice of layers.
+
+    Unit economics depend on keeping that fixed hardware busy: the capital cost is spread over tokens served, so high utilization, many concurrent streams flowing through the pipeline, and very fast per-stream speed are what make cost per million tokens competitive. Low traffic makes it expensive, because all those chips are needed regardless of load.
+  level: Senior
+  category: inference-gpu
+  subcategory: quantization
+  companies:
+  - Groq
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: How does an LPU work?
+    url: https://outcomeschool.com/blog/how-does-an-lpu-work
+  source: outcome-school
+- id: you-train-natively-in-int8-rather-than-doing-post-training-q
+  q: You train natively in int8 rather than doing post-training quantization. Defend that.
+  a: |
+    If the model will be served in int8 anyway, training in int8 means the weights are learned to work at that precision, so there is no gap between the model you evaluated and the model you serve, and no quality lost to post-hoc rounding. It also speeds up training and cuts memory, which lowers cost at scale.
+
+    The risks are training instability and the engineering effort of low-precision kernels, scaling and optimizer handling. The defense is that, for a product where serving cost dominates, matching training and serving precision gives the best quality per serving dollar.
+  level: Senior
+  category: inference-gpu
+  subcategory: quantization
+  companies:
+  - Character.AI
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: How does Model Quantization work?
+    url: https://outcomeschool.com/blog/how-does-model-quantization-work
+  source: outcome-school
+- id: what-is-speculative-decoding-why-is-output-quality-preserved
+  q: What is speculative decoding? Why is output quality preserved, and when does it not help?
+  a: |
+    A cheap draft model, or extra heads on the main model, proposes several tokens. The large target model scores all of them in one forward pass and accepts drafted tokens according to a rejection-sampling rule; at the first rejection it samples a corrected token. Because acceptance uses the target model's probabilities, the output distribution is mathematically the same as sampling from the target alone.
+
+    It helps when decoding is memory-bound and the draft is often right, giving several tokens per expensive pass. It helps little or hurts at high batch sizes, where the GPU is already compute-bound, when the draft rarely agrees with the target (for example creative, high-temperature text), or when the draft itself is too slow.
+  level: Senior
+  category: inference-gpu
+  subcategory: decoding-speedups
+  companies:
+  - NVIDIA
+  - Together AI
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+  refs:
+  - title: Speculative Decoding
+    url: https://outcomeschool.com/blog/speculative-decoding
+  source: outcome-school
+- id: explain-prefix-caching-prompt-caching-when-should-you-use-it
+  q: Explain prefix caching / prompt caching. When should you use it, and what invalidates a cached prefix?
+  a: |
+    Requests that start with the same tokens, such as a long system prompt, tool definitions, a shared document or earlier conversation turns, can reuse the KV cache computed for that prefix instead of recomputing it. That cuts time to first token and cost, often dramatically for long shared prefixes.
+
+    Use it when large stable prefixes repeat across requests, and structure prompts so stable content comes first and variable content last. Any change to an earlier token invalidates everything after it, including a different system prompt, reordered tools, a timestamp near the top, or a different model or tokenizer version. Cached entries are also evicted under memory pressure or expire after a time limit.
+  level: Mid
+  category: inference-gpu
+  subcategory: decoding-speedups
+  companies:
+  - Character.AI
+  - Moonshot AI
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  refs:
+  - title: How does Prompt Caching work?
+    url: https://outcomeschool.com/blog/how-does-prompt-caching-work
+  source: outcome-school
+- id: a-chat-assistant-re-sends-a-long-conversation-history-on-eve
+  q: A chat assistant re-sends a long conversation history on every turn. How do you avoid recomputing all of it, and what are the pitfalls?
+  a: |
+    Use prefix caching: keep each conversation's KV cache after a turn, and when the next request arrives with the same history plus a new message, reuse the cached prefix and only prefill the new tokens. Route follow-up turns to the replica that holds the cache, and spill cold caches to CPU memory or SSD instead of discarding them.
+
+    Pitfalls: any change to earlier tokens (an edited system prompt, timestamps, reordered tools, a different template) invalidates the cache; memory pressure evicts caches unpredictably; sticky routing can unbalance load; and very long histories should still be summarized or truncated, because caching saves compute but not context-window space.
+  level: Mid
+  category: inference-gpu
+  subcategory: decoding-speedups
+  companies:
+  - Moonshot AI
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  refs:
+  - title: How does Prompt Caching work?
+    url: https://outcomeschool.com/blog/how-does-prompt-caching-work
+  source: outcome-school
+- id: explain-speculative-decoding-when-does-it-help-when-does-it
+  q: Explain speculative decoding. When does it help, when does it hurt, and why adapt the speculator to live traffic?
+  a: |
+    A draft model proposes several tokens; the target model verifies them in one pass and keeps the accepted prefix, preserving the target's output distribution. It helps at low and moderate batch sizes where decoding is memory-bound and the draft agrees with the target often.
+
+    It hurts at high batch sizes, where verification work competes with compute that is already saturated, and when acceptance rates are low, for example with off-domain prompts or high temperature. Adapting the speculator to live traffic, by training or tuning the draft on recent production prompts, keeps acceptance high as usage shifts, which is where most of the speedup comes from.
+  level: Senior
+  category: inference-gpu
+  subcategory: decoding-speedups
+  companies:
+  - Together AI
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+  refs:
+  - title: Speculative Decoding
+    url: https://outcomeschool.com/blog/speculative-decoding
+  - title: N-gram Speculation in LLMs
+    url: https://outcomeschool.com/blog/n-gram-speculation-in-llms
+  source: outcome-school
+- id: explain-the-prefill-and-decode-phases-why-is-prefill-compute
+  q: Explain the prefill and decode phases. Why is prefill compute-bound and decode memory-bandwidth-bound?
+  a: |
+    Prefill processes the whole prompt in one forward pass to build the KV cache and produce the first token. Many tokens share each weight read, so the work is large matrix-matrix multiplication with high arithmetic intensity, and the GPU's compute units are the limit.
+
+    Decode then generates one token per step per sequence. Each step re-reads all weights and the growing KV cache but does only about two FLOPs per parameter per sequence, so arithmetic intensity is low and memory bandwidth is the limit. That is why prefill sets time to first token and decode sets tokens per second, and why batching helps decode most.
+  level: Mid
+  category: inference-gpu
+  subcategory: gpu-performance
+  companies:
+  - Moonshot AI
+  - NVIDIA
+  - Together AI
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: 'Prefill vs Decode: LLM Inference Optimization'
+    url: https://outcomeschool.com/blog/prefill-vs-decode-llm-inference-optimization
+  source: outcome-school
+- id: do-the-roofline-maths-how-many-tokens-sec-can-one-h100-produ
+  q: 'Do the roofline maths: how many tokens/sec can one H100 produce for a 70B model at batch size 1?'
+  a: |
+    At batch 1, decode reads every weight once per token and does about 2 FLOPs per parameter, far below the H100's ridge point of roughly 300 FLOPs per byte, so it is bandwidth-bound. A 70B model in BF16 is 140 GB and does not fit in 80 GB, so on one H100 it must be quantized: at 8-bit (70 GB), the ceiling is 3.35 TB/s ÷ 70 GB ≈ 48 tokens per second; at 4-bit (about 35 GB), about 95.
+
+    Real numbers land at perhaps 60–80% of these bounds after KV cache reads, dequantization and kernel overheads. Compute is not the constraint: 48 tokens per second × 140 GFLOPs is only about 7 TFLOPS, under 1% of peak.
+  level: Senior
+  category: inference-gpu
+  subcategory: gpu-performance
+  companies:
+  - NVIDIA
+  - Together AI
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: 'Prefill vs Decode: LLM Inference Optimization'
+    url: https://outcomeschool.com/blog/prefill-vs-decode-llm-inference-optimization
+  source: outcome-school
+- id: an-lpu-has-no-hbm-at-all-just-on-die-sram-redo-the-decode-ro
+  q: An LPU has no HBM at all, just on-die SRAM. Redo the decode roofline argument for that machine and tell me what changes.
+  a: |
+    On a GPU, decode is bound by reading weights from HBM at a few TB/s. With weights resident in on-chip SRAM, each chip reads its share of weights at far higher bandwidth, so the memory roof rises dramatically and single-stream decode can be much faster, especially at small batch sizes where GPUs struggle.
+
+    The new constraint is capacity: each chip holds only hundreds of megabytes, so a large model is spread across hundreds of chips, and performance depends on the interconnect passing activations between chips and on the compiler's static schedule. KV cache also has to live in SRAM or be limited, which constrains context length and concurrency.
+  level: Senior
+  category: inference-gpu
+  subcategory: gpu-performance
+  companies:
+  - Groq
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: How does an LPU work?
+    url: https://outcomeschool.com/blog/how-does-an-lpu-work
+  source: outcome-school
+- id: on-a-gpu-you-batch-to-amortise-weight-reads-what-is-the-batc
+  q: On a GPU you batch to amortise weight reads. What is the batching calculus on an SRAM-only machine, and how should that change how we price?
+  a: |
+    On a GPU, batching amortizes slow HBM weight reads across many sequences, so cost per token falls steeply with batch size while per-user speed falls slowly. On an SRAM-only, pipelined machine, weight reads are already cheap, so per-stream speed is high even at small batch; throughput comes from keeping many sequences in flight through the pipeline stages rather than from large batches on one chip.
+
+    Pricing should therefore reward what the machine is good at: premium pricing for low-latency, high-speed streams, and capacity-based pricing that keeps the pipeline full, rather than discounts tied to big batch sizes. Context length and KV memory are the scarce resources and may deserve their own pricing.
+  level: Senior
+  category: inference-gpu
+  subcategory: gpu-performance
+  companies:
+  - Groq
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  refs:
+  - title: How does an LPU work?
+    url: https://outcomeschool.com/blog/how-does-an-lpu-work
   source: outcome-school
 - id: budget-the-compute-and-latency-for-the-onboard-stack-what-br
   q: Budget the compute and latency for the onboard stack. What breaks when a model gets bigger?
-  a: >
-    The onboard stack runs sensor preprocessing, perception, prediction and planning in a loop that
-    must finish within a fixed cycle, for example around 100 ms end to end, within a fixed power and
-    compute envelope shared by all models. Each stage gets a latency budget with headroom for
-    worst-case scenes such as dense traffic.
+  a: |
+    The onboard stack runs sensor preprocessing, perception, prediction and planning in a loop that must finish within a fixed cycle, for example around 100 ms end to end, within a fixed power and compute envelope shared by all models. Each stage gets a latency budget with headroom for worst-case scenes such as dense traffic.
 
-
-    When a model grows, it eats into other stages' budgets, worst-case latency rises in crowded
-    scenes, memory and power limits are hit, and thermal throttling can make latency unpredictable.
-    Bigger models must be paired with quantization, pruning or distillation, and validated against
-    worst-case timing, not averages, before they ship.
-  topic: inference-gpu
+    When a model grows, it eats into other stages' budgets, worst-case latency rises in crowded scenes, memory and power limits are hit, and thermal throttling can make latency unpredictable. Bigger models must be paired with quantization, pruning or distillation, and validated against worst-case timing, not averages, before they ship.
   level: Senior
+  category: inference-gpu
+  subcategory: gpu-performance
   companies:
-    - Waymo
+  - Waymo
   related: /ai-system-design/genai-system-design/gpu-performance-for-llms
   source: outcome-school
+- id: we-pair-lpx-decode-accelerators-with-nvidia-gpus-doing-prefi
+  q: We pair LPX decode accelerators with NVIDIA GPUs doing prefill and attention. Design the serving path across those two machines.
+  a: |
+    Disaggregate the phases: GPUs handle prefill and attention-heavy work, where their compute and memory capacity shine, and decode accelerators handle the per-token feed-forward or full decode work at high speed. The serving path moves KV cache or intermediate activations between the two over a fast interconnect, with a scheduler that pairs requests to devices.
+
+    Design concerns: transfer bandwidth and latency per token, which can erase the gains if too large; batching and pipelining across both machines so neither idles; failure handling when one side is unavailable; and capacity planning for the ratio of prefill to decode load. Measure end-to-end tokens per second and tail latency against GPU-only serving.
+  level: Senior
+  category: inference-gpu
+  subcategory: gpu-performance
+  companies:
+  - Groq
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+  refs:
+  - title: Prefill-Decode Disaggregation in LLM Inference
+    url: https://outcomeschool.com/blog/prefill-decode-disaggregation
+  - title: How does an LPU work?
+    url: https://outcomeschool.com/blog/how-does-an-lpu-work
+  source: outcome-school
+- id: design-the-training-setup-for-a-model-that-doesn-t-fit-on-on
+  q: Design the training setup for a model that doesn't fit on one accelerator, say 70B parameters on a pod.
+  a: |
+    A 70B model with Adam needs over 1 TB of weight, gradient and optimizer state, so shard it. Use fully sharded data parallelism (ZeRO-3 or FSDP) across the pod, add tensor parallelism inside each fast-interconnect group to split large matrices, and pipeline parallelism if per-device memory is still too tight. Use bf16 with fp32 master weights, activation checkpointing and fused kernels.
+
+    Size the global batch for stable training, overlap communication with computation, checkpoint frequently with fast restarts for hardware failures, and monitor throughput (model FLOPs utilization), loss and gradient norms. On TPU pods the same ideas map onto sharding annotations over a device mesh.
+  level: Senior
+  category: inference-gpu
+  subcategory: distributed
+  companies:
+  - Google DeepMind
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: you-re-training-on-tens-of-thousands-of-gpus-and-hardware-fa
+  q: You're training on tens of thousands of GPUs and hardware fails constantly. How do you keep goodput high?
+  a: |
+    At that scale something fails every few hours, so goodput, the share of time spent on useful training, depends on recovering fast. Checkpoint frequently with asynchronous saves to fast storage, detect failures quickly with health checks and heartbeats, keep hot spare nodes to swap in, and restart automatically from the latest checkpoint.
+
+    Prevent failures where possible with burn-in tests, monitoring of thermals, ECC errors and link errors, and draining suspicious nodes. Detect silent data corruption and stragglers, and design parallelism so a single failure only requires restarting the job, not rebuilding data pipelines. Track goodput as a first-class metric.
+  level: Senior
+  category: inference-gpu
+  subcategory: distributed
+  companies:
+  - xAI
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: dualpipe-overlaps-computation-and-communication-in-training
+  q: DualPipe overlaps computation and communication in training. Why is that overlap the whole game at this scale, and what is the trade-off?
+  a: |
+    In large MoE training with expert parallelism, every layer needs all-to-all communication to send tokens to experts on other GPUs, and across nodes that communication can take as long as the computation. If GPUs wait for communication, a large share of expensive hardware sits idle.
+
+    DualPipe is a bidirectional pipeline schedule that feeds micro-batches from both ends and pairs the forward and backward chunks so one chunk's computation runs while another's communication is in flight, which hides most communication and shrinks pipeline bubbles. The trade-off is extra memory, including keeping additional parameter copies, and a more complex schedule to implement and debug.
+  level: Senior
+  category: inference-gpu
+  subcategory: distributed
+  companies:
+  - DeepSeek
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: a-customer-s-distributed-training-job-on-your-gpu-cluster-ge
+  q: A customer's distributed training job on your GPU cluster gets 55% scaling efficiency at 64 nodes. Debug it.
+  a: |
+    Profile one step at 8, 16 and 64 nodes to see what grows. Usual suspects: communication not overlapped with compute (check NCCL settings, gradient bucket sizes and whether all-reduce runs during backward), the network itself (InfiniBand or RoCE misconfiguration, wrong topology mapping, a slow link or switch), per-GPU batch too small at scale so compute is too short to hide communication, and data loading or storage that cannot keep up.
+
+    Also look for stragglers (one slow node holds back all), synchronization points such as logging or checkpointing, and CPU bottlenecks. Run NCCL bandwidth tests across all nodes, fix topology and bucket sizes, increase per-GPU work or use sharded or hybrid parallelism, and re-measure scaling efficiency.
+  level: Senior
+  category: inference-gpu
+  subcategory: distributed
+  companies:
+  - Together AI
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: compare-tensor-pipeline-data-sequence-and-expert-parallelism
+  q: Compare tensor, pipeline, data, sequence and expert parallelism. When do you combine them?
+  a: |
+    Data parallelism replicates the model and splits requests or batches; it scales throughput but needs the model to fit per replica. Tensor parallelism splits each layer's matrices across GPUs, cutting memory and latency per GPU but requiring all-reduces every layer, so it stays inside a fast NVLink node. Pipeline parallelism assigns layer ranges to different GPUs and passes activations between them, tolerating slower links but adding bubbles and latency.
+
+    Sequence or context parallelism splits long sequences across GPUs for attention and activations. Expert parallelism places MoE experts on different GPUs and routes tokens with all-to-all communication. Large deployments combine them: tensor parallelism within a node, pipeline or expert parallelism across nodes, and data parallel replicas for throughput.
+  level: Senior
+  category: inference-gpu
+  subcategory: distributed
+  companies:
+  - Amazon
+  - Google DeepMind
+  - Meta
+  - NVIDIA
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: sketch-how-you-would-serve-a-671b-parameter-moe-model-with-l
+  q: Sketch how you would serve a 671B-parameter MoE model with low latency under GPU-memory constraints.
+  a: |
+    A 671B MoE with about 37B active per token needs memory for all weights, roughly 671 GB in FP8, so it spans multiple 8-GPU nodes. Use expert parallelism to spread experts across GPUs, tensor or data parallelism for the attention layers, MLA to keep the KV cache small, and FP8 weights to cut memory and bandwidth.
+
+    For low latency, place hot experts redundantly to avoid stragglers, overlap all-to-all communication with compute, use prefill and decode disaggregation so long prompts do not stall decoding, and add speculative decoding through multi-token prediction heads. Batch enough tokens per step to keep experts busy, and monitor per-expert load.
+  level: Senior
+  category: inference-gpu
+  subcategory: distributed
+  companies:
+  - DeepSeek
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  refs:
+  - title: LLM Inference Optimization
+    url: https://outcomeschool.com/blog/llm-inference-optimization
+  source: outcome-school
+- id: design-the-parallelism-strategy-for-serving-a-405b-parameter
+  q: 'Design the parallelism strategy for serving a 405B-parameter dense model. TP, PP, EP: what goes where and why?'
+  a: |
+    A 405B dense model is about 810 GB in BF16 or 405 GB in FP8, so it needs at least one 8-GPU node of 80 GB GPUs in FP8, or two nodes in BF16. Use tensor parallelism across the 8 GPUs in a node, where NVLink handles the per-layer all-reduces, and pipeline parallelism across nodes if needed, since pipeline traffic tolerates slower links.
+
+    Expert parallelism does not apply to a dense model. Add data-parallel replicas for throughput, keep KV cache headroom per replica for the target concurrency, and use FP8 to fit in one node where quality allows, because avoiding cross-node pipeline stages cuts latency.
+  level: Senior
+  category: inference-gpu
+  subcategory: distributed
+  companies:
+  - NVIDIA
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+  source: outcome-school
+- id: how-would-you-serve-a-large-mixture-of-experts-model-on-a-st
+  q: How would you serve a large mixture-of-experts model on a statically scheduled fabric when expert selection is data-dependent?
+  a: |
+    Static schedules dislike data-dependent routing, so make routing fit a fixed plan: place every expert on dedicated chips, compute routing at each layer, and send tokens through a fixed-size exchange with capacity limits so communication volume is known in advance. Overflow tokens are dropped to a fallback path or rerouted within bounded slots.
+
+    Alternatives are to replicate popular experts, batch tokens per expert in fixed-size tiles, or run all experts on every token for the small parts of the model where sparsity does not pay. The trade-off is some wasted compute and capacity padding in exchange for predictable latency.
+  level: Senior
+  category: inference-gpu
+  subcategory: distributed
+  companies:
+  - Groq
+  related: /ai-system-design/genai-system-design/mixture-of-experts
+  source: outcome-school
+- id: what-breaks-when-you-scale-llm-training-from-8-gpus-to-thous
+  q: What breaks when you scale LLM training from 8 GPUs to thousands, and how do modern stacks deal with it?
+  a: |
+    At 8 GPUs, data parallelism over one fast node works. At thousands, the model and optimizer no longer fit per GPU, communication across nodes becomes a bottleneck, hardware failures happen daily, and very large global batches change optimization behavior. Small numerical issues such as loss spikes become run-killers.
+
+    Modern stacks combine sharded data parallelism (ZeRO or FSDP), tensor parallelism within a node, pipeline parallelism across nodes and, for MoE, expert parallelism, overlapping communication with compute. They add frequent asynchronous checkpointing and automatic restart, careful learning-rate and batch-size schedules, bf16 or FP8 with stability tricks, and monitoring to catch spikes and bad nodes early.
+  level: Senior
+  category: inference-gpu
+  subcategory: distributed
+  companies:
+  - Meta
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+  source: outcome-school
+- id: explain-data-tensor-and-pipeline-parallelism
+  q: Explain data, tensor and pipeline parallelism.
+  a: |
+    Data parallelism replicates the model and splits batches, averaging gradients, with ZeRO or FSDP sharding the states to save memory. Tensor parallelism splits individual weight matrices across GPUs, usually inside one server because it needs fast links. Pipeline parallelism places groups of layers on different GPUs and streams micro-batches through them. Large training runs combine all three.
+  level: Senior
+  category: inference-gpu
+  subcategory: distributed
+- id: how-would-you-cut-llm-serving-cost-by-10x-enumerate-every-le
+  q: How would you cut LLM serving cost by 10x? Enumerate every lever and rank them.
+  a: |
+    Rank levers by impact per effort. First, avoid work: cache responses and prompt prefixes, trim prompts and outputs, and route easy requests to smaller models. Second, use a smaller model: distill or fine-tune a small model for high-volume tasks, often the single biggest win. Third, squeeze the serving engine: continuous batching at higher batch sizes, paged KV cache, quantization to FP8 or INT4, and speculative decoding.
+
+    Then optimize the platform: right-size and autoscale GPUs, use cheaper hardware or spot capacity for offline work, batch APIs for non-interactive jobs, and MoE models for better quality per FLOP. Measure cost per successful task with quality evaluations at each step, because several of these levers trade quality for cost.
+  level: Senior
+  category: inference-gpu
+  subcategory: cost-optimization
+  companies:
+  - Amazon
+  - Cursor
+  - Microsoft
+  - NVIDIA
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  refs:
+  - title: LLM Inference Optimization
+    url: https://www.youtube.com/watch?v=jV2sCj4lHYk
+  - title: LLM Inference Optimization
+    url: https://outcomeschool.com/blog/llm-inference-optimization
+  source: outcome-school
+- id: design-a-rate-limiter-for-an-llm-api-where-cost-scales-with
+  q: Design a rate limiter for an LLM API where cost scales with tokens, not requests.
+  a: |
+    Limit tokens, not requests: use a token bucket per tenant and model that is debited by estimated input tokens plus requested maximum output tokens on admission, then corrected with actual usage when the response finishes. Keep separate limits for input and output tokens and for concurrent requests, since long generations hold GPU capacity.
+
+    Store counters in a fast shared store such as Redis with atomic operations, return clear headers with remaining budget and retry-after on 429s, and add priority tiers and burst allowances. Protect the backend with a global admission controller that sheds low-priority load when queues grow, independent of per-tenant limits.
+  level: Mid
+  category: inference-gpu
+  subcategory: cost-optimization
+  companies:
+  - xAI
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+  source: outcome-school
+- id: estimate-the-annual-serving-cost-of-adding-an-llm-summary-fe
+  q: Estimate the annual serving cost of adding an LLM summary feature for 100 million weekly active users, and how you'd cut it by 10x.
+  a: |
+    Assume 100M weekly users each request 5 summaries a week, 500M per week or about 26B per year. With 2,000 input tokens and 200 output tokens each, that is 52 trillion input and 5.2 trillion output tokens a year. At illustrative prices of 0.50 dollars per million input and 1.50 per million output tokens, that is about 26 million plus 8 million, roughly 34 million dollars a year; recompute with real prices and usage.
+
+    To cut 10x: generate summaries once per document and cache them for all viewers, which may remove most calls; use a small distilled model; trim inputs to the relevant sections; batch generation off-peak at discounted rates; and only summarize on demand when users open the feature.
+  level: Senior
+  category: inference-gpu
+  subcategory: cost-optimization
+  companies:
+  - Microsoft
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  refs:
+  - title: LLM Inference Optimization
+    url: https://www.youtube.com/watch?v=jV2sCj4lHYk
+  - title: LLM Inference Optimization
+    url: https://outcomeschool.com/blog/llm-inference-optimization
+  source: outcome-school
+- id: a-customer-s-bedrock-hosted-workload-costs-too-much-cut-infe
+  q: A customer's Bedrock-hosted workload costs too much. Cut inference cost dramatically without unacceptable quality loss.
+  a: |
+    Start by measuring cost per request type: input versus output tokens, which models, and how often prompts repeat. Then apply levers in order: trim prompts and cap outputs, enable prompt caching for repeated prefixes, route simple requests to smaller or cheaper models, and use batch inference for non-interactive work.
+
+    If volume is high and the task is stable, fine-tune or distill a smaller model, or move to provisioned throughput if utilization is predictable. Validate every change with the customer's evaluation set and agree on the acceptable quality threshold before switching models.
+  level: Mid
+  category: inference-gpu
+  subcategory: cost-optimization
+  companies:
+  - Amazon
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  refs:
+  - title: LLM Inference Optimization
+    url: https://www.youtube.com/watch?v=jV2sCj4lHYk
+  - title: LLM Inference Optimization
+    url: https://outcomeschool.com/blog/llm-inference-optimization
+  source: outcome-school
+- id: price-a-dedicated-endpoint-estimate-cost-per-million-output
+  q: 'Price a dedicated endpoint: estimate cost per million output tokens for a 70B model, and explain the throughput-latency trade.'
+  a: |
+    Suppose a 70B model on 4 GPUs at an illustrative 2 dollars per GPU-hour, 8 dollars an hour in total. If the endpoint sustains 2,000 output tokens per second across many concurrent users at high batch, it produces 7.2 million tokens an hour, about 1.1 dollars per million output tokens before input-processing cost and margin. At 400 tokens per second, the same hardware costs about 5.6 dollars per million.
+
+    That is the trade-off: higher batch and concurrency lower cost per token but slow each user's stream and raise latency. A dedicated endpoint should be priced by the hour or by guaranteed throughput, with utilization assumptions explicit, because idle hours still cost money.
+  level: Senior
+  category: inference-gpu
+  subcategory: cost-optimization
+  companies:
+  - Together AI
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  source: outcome-school
+- id: serving-a-custom-completion-model-to-millions-of-dau-walk-me
+  q: 'Serving a custom completion model to millions of DAU: walk me through the inference-cost model and your top three levers.'
+  a: |
+    Code completion fires on keystrokes, so requests are many, prompts are long (surrounding code) and outputs short, and latency must be very low. Cost is dominated by prefill of large contexts and by the number of requests. Model it as requests per user per day × prompt tokens × prefill cost plus short decode, on GPUs sized for peak typing hours.
+
+    Top three levers: cut requests with debouncing, client-side caching and cancelling stale requests; cut prefill with prefix caching of file context across consecutive requests and smarter context selection; and use a small, specialized model with speculative decoding for edits. Measure acceptance rate per dollar, not just cost per request.
+  level: Senior
+  category: inference-gpu
+  subcategory: cost-optimization
+  companies:
+  - Cursor
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  refs:
+  - title: LLM Inference Optimization
+    url: https://www.youtube.com/watch?v=jV2sCj4lHYk
+  - title: How does Cursor work?
+    url: https://outcomeschool.com/blog/how-does-cursor-work
+  source: outcome-school
+- id: dialogues-here-average-around-180-messages-design-the-cache
+  q: Dialogues here average around 180 messages. Design the cache that sits between turns.
+  a: |
+    Keep each active conversation's KV cache between turns so the next turn only prefills the new message. Use a tiered store: GPU memory for active chats, host memory and then SSD for idle ones, with eviction by recency and expected return time, and route each user back to the server that holds their cache.
+
+    Because conversations are long, keep the cache compact (small KV architecture, quantized cache), cache the shared character definition prefix once for all users of that character, and periodically summarize or trim very old turns. Measure cache hit rate, prefill saved and the latency cost of restoring caches from slower tiers.
+  level: Senior
+  category: inference-gpu
+  subcategory: cost-optimization
+  companies:
+  - Character.AI
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  refs:
+  - title: How does Prompt Caching work?
+    url: https://outcomeschool.com/blog/how-does-prompt-caching-work
+  source: outcome-school
+- id: estimate-what-one-message-costs-us-to-serve-and-tell-me-whic
+  q: Estimate what one message costs us to serve, and tell me which lever moves it most.
+  a: |
+    Cost per message is GPU time per message × GPU price. GPU time is the prefill of new tokens (or the whole history if the cache was lost) plus decoding the reply. With a warm cache, a 100-token message and a 100-token reply on a system that sustains, say, 5,000 output tokens per second per 8-GPU node at 16 dollars an hour costs about 16 ÷ 3,600 ÷ 5,000 × 100 ≈ 0.009 cents for decode, plus a small prefill share.
+
+    The lever that moves it most is usually cache hits: losing the cache means re-prefilling a long history every turn, which can multiply cost several times. After that come KV cache size, which sets batch size and therefore throughput, and output length.
+  level: Senior
+  category: inference-gpu
+  subcategory: cost-optimization
+  companies:
+  - Character.AI
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+  source: outcome-school
+- id: a-colleague-wants-to-move-the-semantic-layer-to-the-cloud-so
+  q: A colleague wants to move the semantic layer to the cloud so you can use a much bigger model. Walk me through the latency budget.
+  a: |
+    Add network round-trip time, which on a wireless link varies from tens to hundreds of milliseconds and occasionally drops out, plus cloud queueing and inference time, compared with the onboard model's fixed latency. For a robot, the semantic layer's output feeds planning and control loops, so worst-case latency and connectivity loss matter more than average.
+
+    A practical split keeps safety-critical, time-sensitive perception and control onboard, and uses the bigger cloud model asynchronously for slower, high-level reasoning that tolerates delay, with a fallback when the connection is lost.
+  level: Senior
+  category: inference-gpu
+  subcategory: cost-optimization
+  companies:
+  - Figure AI
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+  source: outcome-school
+- id: what-is-semantic-caching-for-llm-applications
+  q: What is semantic caching for LLM applications?
+  a: |
+    Store previous question embeddings and answers, and when a new question is semantically very close to a cached one, return the cached answer instead of calling the model. It cuts cost and latency for repetitive traffic, but needs a careful similarity threshold, invalidation when source data changes, and must respect per-user permissions.
+  level: Senior
+  category: inference-gpu
+  subcategory: cost-optimization
+- id: how-do-you-reduce-the-cost-of-an-llm-application
+  q: How do you reduce the cost of an LLM application?
+  a: |
+    Route easy requests to smaller, cheaper models and reserve large ones for hard cases, shorten prompts and outputs, cache responses and shared prompt prefixes, retrieve only the most relevant context, batch offline work, and fine-tune or distill a small model for high-volume tasks. Track cost per successful task, not just per call.
+  level: Mid
+  category: inference-gpu
+  subcategory: cost-optimization

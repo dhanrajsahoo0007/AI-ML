@@ -1,622 +1,611 @@
-# Company-reported questions adapted from Outcome School (Apache 2.0); see NOTICE.md. Answers are our own.
+# Interview questions for this category. Entries with `source: outcome-school` are adapted from
+# Outcome School (Apache 2.0); see NOTICE.md. All answers are written by Origins AI Learn.
+- id: design-permission-aware-retrieval-users-must-never-see-conte
+  q: 'Design permission-aware retrieval: users must never see content they can''t access in the source system.'
+  a: |
+    Ingest permissions with the content: connectors sync each document's access-control list, including group memberships, and store them as metadata on every chunk. At query time, resolve the user's identity and groups and apply them as a filter inside the search, so unauthorized chunks are never retrieved, rather than filtering after generation.
+
+    Keep permissions fresh with change notifications and periodic full syncs, fail closed when permission data is stale or missing, apply the same filters to caches and memory, and run automated tests with users of different roles. For highly sensitive sources, check permissions again against the source system just before returning content.
+  level: Senior
+  category: rag
+  subcategory: rag-fundamentals
+  companies:
+  - Databricks
+  - Glean
+  - Microsoft
+  - Palantir
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+  source: outcome-school
+- id: for-a-long-context-assistant-when-is-a-1m-token-context-wind
+  q: For a long-context assistant, when is a 1M-token context window the right tool, and when should you use retrieval instead?
+  a: |
+    A huge context window is right when the task needs to reason over a whole body of material at once, such as analyzing one large codebase or a long contract end to end, when the material is used once, and when retrieval would likely miss cross-references.
+
+    Retrieval is better when the corpus is larger than any window, when the same knowledge serves many queries, when cost and latency per query matter, when permissions and citations are required, and when the relevant part is a small fraction of the material. Combining both, retrieving a generous but focused context, is often best.
+  level: Mid
+  category: rag
+  subcategory: rag-fundamentals
+  companies:
+  - Moonshot AI
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+  refs:
+  - title: The Lost in the Middle Problem in LLMs
+    url: https://outcomeschool.com/blog/lost-in-the-middle-problem-in-llms
+  source: outcome-school
+- id: long-context-windows-keep-getting-cheaper-why-not-drop-retri
+  q: Long context windows keep getting cheaper. Why not drop retrieval and stuff the whole repo into context for every request?
+  a: |
+    Most repositories are far larger than any window, and stuffing a whole repo into every request means paying prefill cost and latency for millions of tokens on every keystroke-driven call, even with caching. Models also use the middle of very long contexts less reliably, so irrelevant code can distract them and lower quality.
+
+    Retrieval selects the few files and symbols that matter, keeps latency low and costs predictable, and scales as the repo grows. Long context still helps by letting you include more retrieved material, larger files and full call chains, so the best systems combine good retrieval with generous context.
+  level: Mid
+  category: rag
+  subcategory: rag-fundamentals
+  companies:
+  - Cursor
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+  refs:
+  - title: The Lost in the Middle Problem in LLMs
+    url: https://outcomeschool.com/blog/lost-in-the-middle-problem-in-llms
+  - title: How does Cursor work?
+    url: https://outcomeschool.com/blog/how-does-cursor-work
+  source: outcome-school
+- id: when-would-you-put-a-whole-contract-in-the-context-window-in
+  q: When would you put a whole contract in the context window instead of retrieving over it? Defend the answer with numbers.
+  a: |
+    A 100-page contract is roughly 50,000–75,000 tokens, which fits comfortably in modern windows. If a lawyer asks a handful of questions about one contract, full-context processing costs perhaps tens of cents per question at typical prices, gives the model every cross-reference and definition, and avoids retrieval misses, which matter a lot in legal work where missing a clause is costly.
+
+    Retrieval wins when reviewing thousands of contracts, when the same documents are queried thousands of times, when latency must be low, or when documents exceed the window. Prefix caching also changes the math: repeated questions over one contract reuse the cached prefill, making full-context answers much cheaper.
+  level: Senior
+  category: rag
+  subcategory: rag-fundamentals
+  companies:
+  - Harvey
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+  refs:
+  - title: The Lost in the Middle Problem in LLMs
+    url: https://outcomeschool.com/blog/lost-in-the-middle-problem-in-llms
+  source: outcome-school
+- id: why-is-rag-the-right-architecture-for-an-enterprise-assistan
+  q: Why is RAG the right architecture for an enterprise assistant instead of fine-tuning on the company's data? Where does RAG break?
+  a: |
+    Enterprise knowledge changes constantly, is spread across permissioned systems, and answers must be traceable. RAG reads current content at query time, enforces each user's permissions, cites sources, and updates by re-indexing, while fine-tuning bakes in a snapshot, cannot enforce per-user access, does not cite, and memorizes facts unreliably.
+
+    RAG breaks on questions needing aggregation or computation over many records, which need structured queries; on poor parsing and chunking; when the right document is not retrieved; on contradictory or stale content; and on multi-hop questions without iterative retrieval. Fine-tuning can still help with style or domain language on top of RAG.
+  level: Mid
+  category: rag
+  subcategory: rag-fundamentals
+  companies:
+  - Glean
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+  refs:
+  - title: 'AI Engineering Explained: LLM, RAG, MCP, Agent, Fine-Tuning, Quantization'
+    url: https://www.youtube.com/watch?v=lnfWvX66FUk
+  source: outcome-school
+- id: what-is-rag-and-what-problem-does-it-solve
+  q: What is RAG and what problem does it solve?
+  a: |
+    Retrieval-augmented generation retrieves relevant passages from a knowledge source at query time and puts them in the prompt so the model answers from them. It addresses outdated or missing knowledge, private data, and hallucination, and enables citations and per-user access control without retraining.
+  level: Junior
+  category: rag
+  subcategory: rag-fundamentals
+- id: what-should-the-system-do-when-retrieval-finds-nothing-relev
+  q: What should the system do when retrieval finds nothing relevant?
+  a: |
+    Say so clearly instead of guessing, and offer next steps such as rephrasing or contacting a human. Detect this with a relevance threshold from the retriever or re-ranker, or by asking the model to answer "not found in the provided documents" when the context lacks the answer.
+  level: Junior
+  category: rag
+  subcategory: rag-fundamentals
+- id: design-a-rag-system-for-10-million-internal-documents-with-s
+  q: Design a RAG system for 10 million internal documents with strict access control.
+  a: |
+    Ingest from source systems with connectors that also sync permissions, parse with layout-aware tools, chunk by structure, and embed into a sharded vector index plus a keyword index, with ACL metadata on every chunk. At query time, rewrite the question, run hybrid search filtered by the user's permissions, re-rank, and generate a cited answer. Add incremental re-indexing, caching, an evaluation set per department, and monitoring of retrieval quality and latency.
+  level: Senior
+  category: rag
+  subcategory: rag-fundamentals
+- id: how-large-should-top-k-be-for-retrieval
+  q: How large should top-k be for retrieval?
+  a: |
+    Large enough that the right passage is usually included, small enough not to flood the prompt with noise. A common pattern is to retrieve 20 to 100 candidates, re-rank, and pass the best 3 to 10 to the model, tuning both numbers on a retrieval evaluation set.
+  level: Junior
+  category: rag
+  subcategory: rag-fundamentals
+- id: should-you-fine-tune-the-generator-the-retriever-or-neither
+  q: Should you fine-tune the generator, the retriever or neither?
+  a: |
+    Usually neither at first: fix parsing, chunking, hybrid search and re-ranking. If retrieval misses domain-specific matches, fine-tune the embedding model on query-passage pairs. Fine-tune the generator only for consistent format, tone or domain reasoning that prompting cannot achieve. Measure each step separately.
+  level: Senior
+  category: rag
+  subcategory: rag-fundamentals
 - id: what-chunking-strategy-would-you-use-for-a-large-technical-d
   q: What chunking strategy would you use for a large technical documentation corpus, and why?
-  a: >
-    Chunk along the documentation's own structure: split by headings and sections, keep code blocks,
-    tables and their explanations together, and prepend each chunk with its page title and heading
-    path so it makes sense on its own. Aim for a few hundred tokens with small overlap, and never
-    split inside a code sample.
+  a: |
+    Chunk along the documentation's own structure: split by headings and sections, keep code blocks, tables and their explanations together, and prepend each chunk with its page title and heading path so it makes sense on its own. Aim for a few hundred tokens with small overlap, and never split inside a code sample.
 
-
-    Store small chunks for precise matching but return the parent section for context, attach
-    metadata such as product, version and doc type for filtering, and pick final sizes by measuring
-    recall at k on a set of real questions rather than by intuition.
-  topic: rag
+    Store small chunks for precise matching but return the parent section for context, attach metadata such as product, version and doc type for filtering, and pick final sizes by measuring recall at k on a set of real questions rather than by intuition.
   level: Mid
+  category: rag
+  subcategory: chunking-ingestion
   companies:
-    - Glean
+  - Glean
   related: /ai-system-design/genai-system-design/rag-fundamentals
   refs:
-    - title: Chunking Strategies for RAG
-      url: https://outcomeschool.com/blog/chunking-strategies-for-rag
-  source: outcome-school
-- id: how-do-you-choose-between-a-sparse-retriever-bm25-and-a-dens
-  q: >-
-    How do you choose between a sparse retriever (BM25) and a dense retriever? When do you need
-    both?
-  a: >
-    BM25 matches exact terms and excels at identifiers, error codes, product names and rare jargon,
-    needs no training and is explainable. Dense retrieval matches meaning, handles paraphrases and
-    natural-language questions, and works across wording differences, but can miss exact tokens and
-    needs a good embedding model for the domain.
-
-
-    You need both when queries mix the two, which is most enterprise and technical search. Run them
-    in parallel and merge with reciprocal rank fusion, then re-rank. Measure each alone and combined
-    on your query set to confirm the gain.
-  topic: rag
-  level: Mid
-  companies:
-    - Glean
-    - Microsoft
-    - Perplexity
-  related: /ai-system-design/genai-system-design/advanced-rag
-  refs:
-    - title: How does Hybrid Search work?
-      url: https://outcomeschool.com/blog/how-does-hybrid-search-work
-  source: outcome-school
-- id: what-is-a-reranker-when-should-you-use-one-and-what-does-a-c
-  q: What is a reranker, when should you use one, and what does a cross-encoder cost you?
-  a: >
-    A re-ranker rescores a candidate list from the first-stage retriever with a more accurate model.
-    A cross-encoder reads the query and each passage together, so it captures fine-grained relevance
-    that separate embeddings miss.
-
-
-    Use one when the right passage is usually retrieved but not ranked near the top, or when you can
-    only fit a few passages in the prompt. The cost is latency and compute that grow with the number
-    of candidates, since every pair needs a forward pass: typically tens to hundreds of milliseconds
-    for 50–100 candidates. Limit candidates, use a smaller model, or batch on GPU.
-  topic: rag
-  level: Mid
-  companies:
-    - Cohere
-    - Microsoft
-    - Perplexity
-  related: /ai-system-design/genai-system-design/advanced-rag
-  refs:
-    - title: How does a Reranker work?
-      url: https://outcomeschool.com/blog/how-does-a-reranker-work
-  source: outcome-school
-- id: how-would-you-evaluate-the-quality-of-a-rag-pipeline-retriev
-  q: "How would you evaluate the quality of a RAG pipeline: retrieval and generation separately?"
-  a: >
-    Build a test set of real questions with reference answers and the passages that support them.
-    Evaluate retrieval on its own with recall at k, MRR and nDCG: did the right evidence reach the
-    prompt, and how high was it ranked?
-
-
-    Evaluate generation separately on faithfulness (every claim supported by the retrieved context),
-    answer relevance and correctness against references, using LLM judges calibrated against human
-    labels, as in RAGAS. Include unanswerable questions to test abstention, track results per
-    question type, and run the suite on every change.
-  topic: rag
-  level: Mid
-  companies:
-    - Cohere
-  related: /ai-system-design/genai-system-design/rag-fundamentals
-  refs:
-    - title: LLM Evaluation
-      url: https://outcomeschool.com/blog/llm-evaluation
-  source: outcome-school
-- id: what-is-hyde-hypothetical-document-embeddings-and-when-does
-  q: >-
-    What is HyDE (hypothetical document embeddings) and when does it outperform standard dense
-    retrieval?
-  a: >
-    HyDE asks an LLM to write a hypothetical answer to the query, embeds that answer and searches
-    with it. A full fake answer often looks more like the real relevant documents than a short
-    question does, so it lands closer in embedding space.
-
-
-    It helps most for short, vague or abstract queries, zero-shot domains without a tuned retriever,
-    and questions phrased very differently from the documents. It hurts when the generated answer is
-    confidently wrong and steers retrieval astray, and it adds an LLM call of latency, so test it on
-    your own queries.
-  topic: rag
-  level: Mid
-  companies: []
-  related: /ai-system-design/genai-system-design/advanced-rag
-  refs:
-    - title: How does HyDE work in RAG?
-      url: https://outcomeschool.com/blog/how-does-hyde-work
-  source: outcome-school
-- id: how-does-agentic-rag-differ-from-standard-rag-and-when-is-th
-  q: How does agentic RAG differ from standard RAG, and when is the extra complexity justified?
-  a: >
-    Standard RAG runs one fixed pipeline: retrieve once, then generate. Agentic RAG gives an LLM
-    search tools and lets it decide whether to search, which sources to query, how to rewrite
-    queries and when it has enough, looping over several retrievals and possibly structured lookups.
-
-
-    The extra latency, cost and unpredictability are justified for complex, multi-hop or
-    research-style questions across several sources, where one retrieval cannot gather the evidence.
-    For high-volume, predictable questions, a fixed pipeline with good ranking is cheaper, faster
-    and easier to evaluate.
-  topic: rag
-  level: Mid
-  companies: []
-  related: /ai-system-design/genai-system-design/advanced-rag
-  refs:
-    - title: Agentic RAG
-      url: https://outcomeschool.com/blog/agentic-rag
-  source: outcome-school
-- id: what-causes-semantic-drift-in-embedding-search-and-how-do-yo
-  q: What causes semantic drift in embedding search and how do you detect it?
-  a: >
-    Semantic drift is when retrieval quality degrades because queries, documents or the embedding
-    space change: new product names and jargon the model never saw, a shift in what users ask, a mix
-    of vectors from different embedding model versions, or growing corpora where near-duplicates
-    crowd out the right results.
-
-
-    Detect it by monitoring retrieval scores and the share of low-similarity or "no relevant
-    context" queries, tracking query topic distributions, sampling queries for human or LLM-judge
-    relevance checks, and re-running a fixed evaluation set regularly. Fix with re-embedding
-    everything when changing models, hybrid search for new terms, and fine-tuning embeddings on
-    fresh data.
-  topic: rag
-  level: Senior
-  companies:
-    - Cohere
-  related: /ai-system-design/genai-system-design/vector-databases
-  source: outcome-school
-- id: design-permission-aware-retrieval-users-must-never-see-conte
-  q: >-
-    Design permission-aware retrieval: users must never see content they can't access in the source
-    system.
-  a: >
-    Ingest permissions with the content: connectors sync each document's access-control list,
-    including group memberships, and store them as metadata on every chunk. At query time, resolve
-    the user's identity and groups and apply them as a filter inside the search, so unauthorized
-    chunks are never retrieved, rather than filtering after generation.
-
-
-    Keep permissions fresh with change notifications and periodic full syncs, fail closed when
-    permission data is stale or missing, apply the same filters to caches and memory, and run
-    automated tests with users of different roles. For highly sensitive sources, check permissions
-    again against the source system just before returning content.
-  topic: rag
-  level: Senior
-  companies:
-    - Databricks
-    - Glean
-    - Microsoft
-    - Palantir
-  related: /ai-system-design/genai-system-design/rag-fundamentals
-  source: outcome-school
-- id: compare-hnsw-ivf-pq-and-flat-indexes-how-do-you-pick-and-wha
-  q: Compare HNSW, IVF-PQ and flat indexes. How do you pick, and what does recall@k cost in latency?
-  a: >
-    Flat search compares the query with every vector: exact, simple, fine up to roughly a million
-    vectors or for building ground truth. HNSW is a layered proximity graph with high recall and low
-    latency but large memory use and slower builds. IVF-PQ clusters vectors and compresses them with
-    product quantization, so it scales to billions cheaply at some recall loss.
-
-
-    Pick by size, memory budget and recall target. Higher recall costs latency: in HNSW, raising
-    efSearch explores more of the graph; in IVF, raising nprobe searches more clusters. Measure
-    recall at k against exact search alongside p95 latency and choose the cheapest setting that
-    meets the recall target.
-  topic: rag
-  level: Mid
-  companies: []
-  related: /ai-system-design/genai-system-design/vector-databases
-  refs:
-    - title: How does Approximate Nearest Neighbor (ANN) search work?
-      url: https://outcomeschool.com/blog/how-does-approximate-nearest-neighbor-ann-search-work
-    - title: How does a Vector Database work?
-      url: https://outcomeschool.com/blog/how-does-a-vector-database-work
+  - title: Chunking Strategies for RAG
+    url: https://outcomeschool.com/blog/chunking-strategies-for-rag
   source: outcome-school
 - id: how-do-you-handle-tables-figures-and-multi-column-pdfs-in-a
   q: How do you handle tables, figures and multi-column PDFs in a retrieval pipeline?
-  a: >
-    Use layout-aware parsing that detects reading order across columns, headers and footers,
-    extracts tables as structured text such as markdown or HTML with their captions, and keeps
-    figure captions with surrounding text. Scanned pages need OCR.
+  a: |
+    Use layout-aware parsing that detects reading order across columns, headers and footers, extracts tables as structured text such as markdown or HTML with their captions, and keeps figure captions with surrounding text. Scanned pages need OCR.
 
-
-    Chunk tables as whole units with their title and column headers, or convert each row into a
-    self-contained sentence for retrieval. For figures and charts, generate text descriptions with a
-    vision-language model or use multimodal embeddings. Evaluate parsing quality on a sample,
-    because broken reading order silently corrupts everything downstream.
-  topic: rag
+    Chunk tables as whole units with their title and column headers, or convert each row into a self-contained sentence for retrieval. For figures and charts, generate text descriptions with a vision-language model or use multimodal embeddings. Evaluate parsing quality on a sample, because broken reading order silently corrupts everything downstream.
   level: Mid
-  companies: []
+  category: rag
+  subcategory: chunking-ingestion
   related: /ai-system-design/genai-system-design/rag-fundamentals
   source: outcome-school
 - id: how-do-you-keep-an-index-fresh-when-the-underlying-corpus-ch
   q: How do you keep an index fresh when the underlying corpus changes continuously?
-  a: >
-    Use change events or frequent incremental syncs from each source, keyed by document id and
-    content hash, so only changed documents are re-parsed and re-embedded, and deletions remove
-    their chunks. Updates should replace a document's chunks atomically so readers never see
-    half-updated content.
+  a: |
+    Use change events or frequent incremental syncs from each source, keyed by document id and content hash, so only changed documents are re-parsed and re-embedded, and deletions remove their chunks. Updates should replace a document's chunks atomically so readers never see half-updated content.
 
-
-    Track freshness lag per source and alert when it grows, run periodic full reconciliations to
-    catch missed events, and fully re-embed when the embedding model changes. For fast-changing
-    facts such as prices or status, query the system of record live instead of indexing it.
-  topic: rag
+    Track freshness lag per source and alert when it grows, run periodic full reconciliations to catch missed events, and fully re-embed when the embedding model changes. For fast-changing facts such as prices or status, query the system of record live instead of indexing it.
   level: Mid
+  category: rag
+  subcategory: chunking-ingestion
   companies:
-    - Cursor
-    - Perplexity
+  - Cursor
+  - Perplexity
   related: /ai-system-design/genai-system-design/rag-fundamentals
+  source: outcome-school
+- id: how-would-you-chunk-and-embed-heterogeneous-enterprise-conte
+  q: 'How would you chunk and embed heterogeneous enterprise content: Slack threads, Jira tickets, Google Docs, PDFs?'
+  a: |
+    Use source-specific chunking. Slack: group messages into threads or time-windowed conversations with channel and participant context. Jira: one chunk per ticket with title, description and key fields, and comments as linked chunks. Google Docs: split by headings with document title prepended. PDFs: layout-aware parsing by section, keeping tables intact.
+
+    Normalize everything into a common schema with source, author, timestamps, permissions and links, add contextual headers to each chunk, and use one embedding model across sources so results are comparable, with source-aware ranking features. Evaluate retrieval per source, since quality varies widely.
+  level: Mid
+  category: rag
+  subcategory: chunking-ingestion
+  companies:
+  - Glean
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+  refs:
+  - title: Chunking Strategies for RAG
+    url: https://outcomeschool.com/blog/chunking-strategies-for-rag
+  source: outcome-school
+- id: design-a-connector-framework-that-syncs-content-and-permissi
+  q: Design a connector framework that syncs content and permissions from 100+ SaaS apps into one index.
+  a: |
+    Each connector implements a common interface: authenticate, list and fetch content incrementally, fetch permissions including groups, and handle webhooks or change feeds. A sync engine schedules connectors, handles rate limits and retries, normalizes content into a common document model with metadata and ACLs, and tracks sync state per source.
+
+    Permissions are synced as carefully as content, including group membership expansion, and checked at query time. Monitor freshness and errors per connector, run periodic full reconciliations, and isolate connector failures so one broken source does not stall others.
+  level: Senior
+  category: rag
+  subcategory: chunking-ingestion
+  companies:
+  - Glean
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+  source: outcome-school
+- id: describe-the-ingestion-pipeline-of-a-rag-system
+  q: Describe the ingestion pipeline of a RAG system.
+  a: |
+    Collect documents from sources, parse them into clean text while keeping structure such as headings and tables, split into chunks, attach metadata such as source, date and permissions, embed each chunk, and write vectors and metadata to an index. Incremental updates and deletions keep the index in sync with the sources.
+  level: Junior
+  category: rag
+  subcategory: chunking-ingestion
+- id: how-do-you-choose-between-a-sparse-retriever-bm25-and-a-dens
+  q: How do you choose between a sparse retriever (BM25) and a dense retriever? When do you need both?
+  a: |
+    BM25 matches exact terms and excels at identifiers, error codes, product names and rare jargon, needs no training and is explainable. Dense retrieval matches meaning, handles paraphrases and natural-language questions, and works across wording differences, but can miss exact tokens and needs a good embedding model for the domain.
+
+    You need both when queries mix the two, which is most enterprise and technical search. Run them in parallel and merge with reciprocal rank fusion, then re-rank. Measure each alone and combined on your query set to confirm the gain.
+  level: Mid
+  category: rag
+  subcategory: vector-search
+  companies:
+  - Glean
+  - Microsoft
+  - Perplexity
+  related: /ai-system-design/genai-system-design/advanced-rag
+  refs:
+  - title: How does Hybrid Search work?
+    url: https://outcomeschool.com/blog/how-does-hybrid-search-work
+  source: outcome-school
+- id: what-causes-semantic-drift-in-embedding-search-and-how-do-yo
+  q: What causes semantic drift in embedding search and how do you detect it?
+  a: |
+    Semantic drift is when retrieval quality degrades because queries, documents or the embedding space change: new product names and jargon the model never saw, a shift in what users ask, a mix of vectors from different embedding model versions, or growing corpora where near-duplicates crowd out the right results.
+
+    Detect it by monitoring retrieval scores and the share of low-similarity or "no relevant context" queries, tracking query topic distributions, sampling queries for human or LLM-judge relevance checks, and re-running a fixed evaluation set regularly. Fix with re-embedding everything when changing models, hybrid search for new terms, and fine-tuning embeddings on fresh data.
+  level: Senior
+  category: rag
+  subcategory: vector-search
+  companies:
+  - Cohere
+  related: /ai-system-design/genai-system-design/vector-databases
+  source: outcome-school
+- id: compare-hnsw-ivf-pq-and-flat-indexes-how-do-you-pick-and-wha
+  q: Compare HNSW, IVF-PQ and flat indexes. How do you pick, and what does recall@k cost in latency?
+  a: |
+    Flat search compares the query with every vector: exact, simple, fine up to roughly a million vectors or for building ground truth. HNSW is a layered proximity graph with high recall and low latency but large memory use and slower builds. IVF-PQ clusters vectors and compresses them with product quantization, so it scales to billions cheaply at some recall loss.
+
+    Pick by size, memory budget and recall target. Higher recall costs latency: in HNSW, raising efSearch explores more of the graph; in IVF, raising nprobe searches more clusters. Measure recall at k against exact search alongside p95 latency and choose the cheapest setting that meets the recall target.
+  level: Mid
+  category: rag
+  subcategory: vector-search
+  related: /ai-system-design/genai-system-design/vector-databases
+  refs:
+  - title: How does Approximate Nearest Neighbor (ANN) search work?
+    url: https://outcomeschool.com/blog/how-does-approximate-nearest-neighbor-ann-search-work
+  - title: How does a Vector Database work?
+    url: https://outcomeschool.com/blog/how-does-a-vector-database-work
+  source: outcome-school
+- id: an-enterprise-wants-semantic-search-over-100m-documents-but
+  q: An enterprise wants semantic search over ~100M documents but is balking at vector-index cost. Walk me through embedding compression options and the maths.
+  a: |
+    Say 100M documents become 300M chunks with 1,024-dimension float32 vectors: 300M × 1,024 × 4 bytes ≈ 1.2 TB, before index overhead. Int8 quantization cuts that 4x to about 300 GB; binary embeddings cut it 32x to about 38 GB; reducing dimensions with Matryoshka-trained models halves or quarters it again; product quantization compresses even further.
+
+    The trick is a two-step search: search compressed vectors to get a few hundred candidates fast and cheaply, then rescore them with higher-precision vectors or a re-ranker, which recovers most of the lost recall. Measure recall at k for each setting and pick the cheapest that meets the target.
+  level: Senior
+  category: rag
+  subcategory: vector-search
+  companies:
+  - Cohere
+  related: /ai-system-design/genai-system-design/vector-databases
+  refs:
+  - title: How does a Vector Database work?
+    url: https://outcomeschool.com/blog/how-does-a-vector-database-work
+  source: outcome-school
+- id: how-do-embeddings-enable-semantic-search
+  q: How do embeddings enable semantic search?
+  a: |
+    An embedding model maps text to vectors so that texts with similar meaning have nearby vectors. The query is embedded the same way, and the nearest document vectors by cosine similarity or dot product are retrieved, which finds relevant passages even when they use different words from the query.
+  level: Junior
+  category: rag
+  subcategory: vector-search
+- id: cosine-similarity-vs-dot-product-vs-euclidean-distance-which
+  q: 'Cosine similarity vs dot product vs Euclidean distance: which do you use?'
+  a: |
+    Use the metric the embedding model was trained with. Cosine similarity ignores vector length and compares direction; dot product includes length, which some models use to encode importance; Euclidean distance is equivalent to cosine for normalized vectors. Many models output normalized vectors, making these choices rank-equivalent.
+  level: Mid
+  category: rag
+  subcategory: vector-search
+- id: how-do-you-choose-an-embedding-model
+  q: How do you choose an embedding model?
+  a: |
+    Compare candidates on your own retrieval evaluation set, using public leaderboards such as MTEB only to shortlist. Consider language and domain coverage, maximum input length, vector dimension and storage cost, latency, licensing and hosting. Fine-tuning an embedding model on your domain's query-passage pairs can give large gains.
+  level: Mid
+  category: rag
+  subcategory: vector-search
+- id: what-is-a-reranker-when-should-you-use-one-and-what-does-a-c
+  q: What is a reranker, when should you use one, and what does a cross-encoder cost you?
+  a: |
+    A re-ranker rescores a candidate list from the first-stage retriever with a more accurate model. A cross-encoder reads the query and each passage together, so it captures fine-grained relevance that separate embeddings miss.
+
+    Use one when the right passage is usually retrieved but not ranked near the top, or when you can only fit a few passages in the prompt. The cost is latency and compute that grow with the number of candidates, since every pair needs a forward pass: typically tens to hundreds of milliseconds for 50–100 candidates. Limit candidates, use a smaller model, or batch on GPU.
+  level: Mid
+  category: rag
+  subcategory: advanced-rag
+  companies:
+  - Cohere
+  - Microsoft
+  - Perplexity
+  related: /ai-system-design/genai-system-design/advanced-rag
+  refs:
+  - title: How does a Reranker work?
+    url: https://outcomeschool.com/blog/how-does-a-reranker-work
+  source: outcome-school
+- id: what-is-hyde-hypothetical-document-embeddings-and-when-does
+  q: What is HyDE (hypothetical document embeddings) and when does it outperform standard dense retrieval?
+  a: |
+    HyDE asks an LLM to write a hypothetical answer to the query, embeds that answer and searches with it. A full fake answer often looks more like the real relevant documents than a short question does, so it lands closer in embedding space.
+
+    It helps most for short, vague or abstract queries, zero-shot domains without a tuned retriever, and questions phrased very differently from the documents. It hurts when the generated answer is confidently wrong and steers retrieval astray, and it adds an LLM call of latency, so test it on your own queries.
+  level: Mid
+  category: rag
+  subcategory: advanced-rag
+  related: /ai-system-design/genai-system-design/advanced-rag
+  refs:
+  - title: How does HyDE work in RAG?
+    url: https://outcomeschool.com/blog/how-does-hyde-work
   source: outcome-school
 - id: how-do-you-attribute-every-claim-in-a-generated-answer-to-a
   q: How do you attribute every claim in a generated answer to a specific retrieved span?
-  a: >
-    Give every retrieved passage an id, ask the model to cite ids for each sentence or claim, and
-    ideally have it quote the supporting span. Then verify after generation: split the answer into
-    claims, check each cited span exists and entails the claim with an NLI model or LLM judge, and
-    remove or flag claims that fail.
+  a: |
+    Give every retrieved passage an id, ask the model to cite ids for each sentence or claim, and ideally have it quote the supporting span. Then verify after generation: split the answer into claims, check each cited span exists and entails the claim with an NLI model or LLM judge, and remove or flag claims that fail.
 
-
-    Render citations as links to the exact span in the source. Measure citation precision (cited
-    spans support the claim) and recall (claims that have a citation) on a test set, and treat
-    uncited factual claims as defects.
-  topic: rag
+    Render citations as links to the exact span in the source. Measure citation precision (cited spans support the claim) and recall (claims that have a citation) on a test set, and treat uncited factual claims as defects.
   level: Senior
+  category: rag
+  subcategory: advanced-rag
   companies:
-    - Abridge
-    - Harvey
-    - Perplexity
+  - Abridge
+  - Harvey
+  - Perplexity
   related: /ai-system-design/genai-system-design/hallucination-mitigation
   source: outcome-school
 - id: you-have-an-embedding-model-and-a-reranker-why-sell-both-des
-  q: >-
-    You have an embedding model and a reranker. Why sell both? Design the two-stage retrieval
-    pipeline and tell me when the reranker earns its latency.
-  a: >
-    They solve different stages. The embedding model makes first-stage retrieval fast and scalable,
-    because document vectors are precomputed; the re-ranker makes final ordering accurate, because
-    it reads query and passage together. Together they beat either alone at a reasonable cost.
+  q: You have an embedding model and a reranker. Why sell both? Design the two-stage retrieval pipeline and tell me when the reranker earns its latency.
+  a: |
+    They solve different stages. The embedding model makes first-stage retrieval fast and scalable, because document vectors are precomputed; the re-ranker makes final ordering accurate, because it reads query and passage together. Together they beat either alone at a reasonable cost.
 
-
-    The pipeline: embed and index documents, retrieve the top 50–200 candidates with vector or
-    hybrid search, re-rank them, and pass the best 5–10 to the LLM. The re-ranker earns its latency
-    when first-stage results contain the answer but rank it too low, when the prompt budget is
-    small, or when precision matters more than a few hundred milliseconds.
-  topic: rag
+    The pipeline: embed and index documents, retrieve the top 50–200 candidates with vector or hybrid search, re-rank them, and pass the best 5–10 to the LLM. The re-ranker earns its latency when first-stage results contain the answer but rank it too low, when the prompt budget is small, or when precision matters more than a few hundred milliseconds.
   level: Mid
+  category: rag
+  subcategory: advanced-rag
   companies:
-    - Cohere
+  - Cohere
   related: /ai-system-design/genai-system-design/advanced-rag
   refs:
-    - title: How does a Reranker work?
-      url: https://outcomeschool.com/blog/how-does-a-reranker-work
-  source: outcome-school
-- id: an-enterprise-wants-semantic-search-over-100m-documents-but
-  q: >-
-    An enterprise wants semantic search over ~100M documents but is balking at vector-index cost.
-    Walk me through embedding compression options and the maths.
-  a: >
-    Say 100M documents become 300M chunks with 1,024-dimension float32 vectors: 300M × 1,024 × 4
-    bytes ≈ 1.2 TB, before index overhead. Int8 quantization cuts that 4x to about 300 GB; binary
-    embeddings cut it 32x to about 38 GB; reducing dimensions with Matryoshka-trained models halves
-    or quarters it again; product quantization compresses even further.
-
-
-    The trick is a two-step search: search compressed vectors to get a few hundred candidates fast
-    and cheaply, then rescore them with higher-precision vectors or a re-ranker, which recovers most
-    of the lost recall. Measure recall at k for each setting and pick the cheapest that meets the
-    target.
-  topic: rag
-  level: Senior
-  companies:
-    - Cohere
-  related: /ai-system-design/genai-system-design/vector-databases
-  refs:
-    - title: How does a Vector Database work?
-      url: https://outcomeschool.com/blog/how-does-a-vector-database-work
-  source: outcome-school
-- id: how-would-you-evaluate-multilingual-retrieval-quality-when-e
-  q: >-
-    How would you evaluate multilingual retrieval quality when employees query in French and Korean
-    over mostly-English documents?
-  a: >
-    Build test sets of real French and Korean queries written by native speakers, each labeled with
-    the relevant English documents, rather than machine-translating English queries. Measure recall
-    at k and nDCG per language against an English-query baseline on the same documents, so you can
-    see the cross-lingual gap.
-
-
-    Check failure patterns by language, such as named entities, acronyms and domain terms, and test
-    mixed-language queries. Compare options such as multilingual embeddings, query translation
-    before retrieval, and cross-lingual re-rankers, and include generation checks that answers come
-    back in the user's language.
-  topic: rag
-  level: Senior
-  companies:
-    - Cohere
-  related: /ai-system-design/genai-system-design/rag-fundamentals
-  source: outcome-school
-- id: a-customer-10x-d-their-indexed-documents-and-reports-answer
-  q: >-
-    A customer 10x'd their indexed documents and reports answer quality “got noticeably worse.”
-    Drive the investigation.
-  a: >
-    First reproduce it with a fixed set of questions answered before and after, and check whether
-    the right passages are still retrieved. With 10x more documents, likely causes are
-    near-duplicates and outdated versions crowding the top results, new low-quality or off-topic
-    sources, an index whose recall dropped at the larger size, metadata filters missing on new
-    content, or permission sync gaps.
-
-
-    Fix by deduplicating and preferring the latest versions, adding metadata filters and source
-    weighting, retuning index parameters for the new scale, adding or strengthening re-ranking, and
-    re-evaluating recall at k on the bigger corpus.
-  topic: rag
-  level: Senior
-  companies:
-    - Cohere
-  related: /ai-system-design/genai-system-design/advanced-rag
-  source: outcome-school
-- id: for-a-long-context-assistant-when-is-a-1m-token-context-wind
-  q: >-
-    For a long-context assistant, when is a 1M-token context window the right tool, and when should
-    you use retrieval instead?
-  a: >
-    A huge context window is right when the task needs to reason over a whole body of material at
-    once, such as analyzing one large codebase or a long contract end to end, when the material is
-    used once, and when retrieval would likely miss cross-references.
-
-
-    Retrieval is better when the corpus is larger than any window, when the same knowledge serves
-    many queries, when cost and latency per query matter, when permissions and citations are
-    required, and when the relevant part is a small fraction of the material. Combining both,
-    retrieving a generous but focused context, is often best.
-  topic: rag
-  level: Mid
-  companies:
-    - Moonshot AI
-  related: /ai-system-design/genai-system-design/rag-fundamentals
-  refs:
-    - title: The Lost in the Middle Problem in LLMs
-      url: https://outcomeschool.com/blog/lost-in-the-middle-problem-in-llms
+  - title: How does a Reranker work?
+    url: https://outcomeschool.com/blog/how-does-a-reranker-work
   source: outcome-school
 - id: design-cross-lingual-rag-the-knowledge-base-is-in-english-an
-  q: >-
-    Design cross-lingual RAG: the knowledge base is in English and Hindi, but users ask in Tamil,
-    Telugu or transliterated Hinglish.
-  a: >
-    Normalize queries first: detect language and script, transliterate romanized text such as
-    Hinglish into native script, and optionally translate the query into English and Hindi. Retrieve
-    with a strong multilingual embedding model plus the translated queries, merge results, and
-    re-rank with a cross-lingual re-ranker.
+  q: 'Design cross-lingual RAG: the knowledge base is in English and Hindi, but users ask in Tamil, Telugu or transliterated Hinglish.'
+  a: |
+    Normalize queries first: detect language and script, transliterate romanized text such as Hinglish into native script, and optionally translate the query into English and Hindi. Retrieve with a strong multilingual embedding model plus the translated queries, merge results, and re-rank with a cross-lingual re-ranker.
 
-
-    Generate the answer in the user's language, citing the original passages. Evaluate with
-    native-speaker queries per language, including code-mixed and transliterated inputs, and watch
-    tokenizer efficiency, since Indic text can be expensive in tokens.
-  topic: rag
+    Generate the answer in the user's language, citing the original passages. Evaluate with native-speaker queries per language, including code-mixed and transliterated inputs, and watch tokenizer efficiency, since Indic text can be expensive in tokens.
   level: Senior
+  category: rag
+  subcategory: advanced-rag
   companies:
-    - Sarvam AI
+  - Sarvam AI
   related: /ai-system-design/genai-system-design/advanced-rag
   source: outcome-school
 - id: discuss-reranker-architecture-choices-cross-encoder-colbert
-  q: "Discuss reranker architecture choices: cross-encoder, ColBERT, LLM-based."
-  a: >
-    Cross-encoders read query and passage jointly and give the most accurate pairwise scores among
-    small models, but every candidate needs a full forward pass, so they are used on short lists.
-    ColBERT-style late interaction keeps one vector per token, matching query tokens to document
-    tokens with a cheap max-similarity sum; document vectors are precomputed, so it is much faster
-    than a cross-encoder at somewhat lower accuracy, but storage is large.
+  q: 'Discuss reranker architecture choices: cross-encoder, ColBERT, LLM-based.'
+  a: |
+    Cross-encoders read query and passage jointly and give the most accurate pairwise scores among small models, but every candidate needs a full forward pass, so they are used on short lists. ColBERT-style late interaction keeps one vector per token, matching query tokens to document tokens with a cheap max-similarity sum; document vectors are precomputed, so it is much faster than a cross-encoder at somewhat lower accuracy, but storage is large.
 
-
-    LLM-based re-rankers, scoring passages individually or ranking a list, can use world knowledge
-    and instructions and handle nuanced relevance, but are the slowest and most expensive. A common
-    pattern is cheap retrieval, ColBERT or a small cross-encoder for the top 100, then an LLM
-    re-ranker for the top 10 where quality matters.
-  topic: rag
+    LLM-based re-rankers, scoring passages individually or ranking a list, can use world knowledge and instructions and handle nuanced relevance, but are the slowest and most expensive. A common pattern is cheap retrieval, ColBERT or a small cross-encoder for the top 100, then an LLM re-ranker for the top 10 where quality matters.
   level: Senior
+  category: rag
+  subcategory: advanced-rag
   companies:
-    - Perplexity
+  - Perplexity
   related: /ai-system-design/genai-system-design/advanced-rag
   refs:
-    - title: How does a Reranker work?
-      url: https://outcomeschool.com/blog/how-does-a-reranker-work
-    - title: ColBERT - Late Interaction Retrieval Explained
-      url: https://outcomeschool.com/blog/decoding-colbert
+  - title: How does a Reranker work?
+    url: https://outcomeschool.com/blog/how-does-a-reranker-work
+  - title: ColBERT - Late Interaction Retrieval Explained
+    url: https://outcomeschool.com/blog/decoding-colbert
   source: outcome-school
 - id: you-retrieved-50-candidate-passages-but-the-model-s-useful-c
-  q: >-
-    You retrieved 50 candidate passages but the model's useful context budget is ~10. How do you
-    choose, and how do you know your choices are good?
-  a: >
-    Re-rank the 50 with a cross-encoder or LLM re-ranker, then select for coverage, not just score:
-    drop near-duplicates, prefer passages from different sources or sub-topics the question needs,
-    compress long passages to their relevant sentences, and order the strongest evidence first.
+  q: You retrieved 50 candidate passages but the model's useful context budget is ~10. How do you choose, and how do you know your choices are good?
+  a: |
+    Re-rank the 50 with a cross-encoder or LLM re-ranker, then select for coverage, not just score: drop near-duplicates, prefer passages from different sources or sub-topics the question needs, compress long passages to their relevant sentences, and order the strongest evidence first.
 
-
-    Know the choices are good by measuring: on a labeled set, check that the supporting passages
-    survive selection, measure answer faithfulness and correctness at different budgets, and run
-    ablations such as top-10 by score versus diversity-aware selection. Production signals such as
-    citation clicks and user feedback confirm it.
-  topic: rag
+    Know the choices are good by measuring: on a labeled set, check that the supporting passages survive selection, measure answer faithfulness and correctness at different budgets, and run ablations such as top-10 by score versus diversity-aware selection. Production signals such as citation clicks and user feedback confirm it.
   level: Senior
+  category: rag
+  subcategory: advanced-rag
   companies:
-    - Perplexity
+  - Perplexity
   related: /ai-system-design/genai-system-design/advanced-rag
   refs:
-    - title: How does a Reranker work?
-      url: https://outcomeschool.com/blog/how-does-a-reranker-work
-  source: outcome-school
-- id: long-context-windows-keep-getting-cheaper-why-not-drop-retri
-  q: >-
-    Long context windows keep getting cheaper. Why not drop retrieval and stuff the whole repo into
-    context for every request?
-  a: >
-    Most repositories are far larger than any window, and stuffing a whole repo into every request
-    means paying prefill cost and latency for millions of tokens on every keystroke-driven call,
-    even with caching. Models also use the middle of very long contexts less reliably, so irrelevant
-    code can distract them and lower quality.
-
-
-    Retrieval selects the few files and symbols that matter, keeps latency low and costs
-    predictable, and scales as the repo grows. Long context still helps by letting you include more
-    retrieved material, larger files and full call chains, so the best systems combine good
-    retrieval with generous context.
-  topic: rag
-  level: Mid
-  companies:
-    - Cursor
-  related: /ai-system-design/genai-system-design/rag-fundamentals
-  refs:
-    - title: The Lost in the Middle Problem in LLMs
-      url: https://outcomeschool.com/blog/lost-in-the-middle-problem-in-llms
-    - title: How does Cursor work?
-      url: https://outcomeschool.com/blog/how-does-cursor-work
+  - title: How does a Reranker work?
+    url: https://outcomeschool.com/blog/how-does-a-reranker-work
   source: outcome-school
 - id: the-agent-answers-from-a-customer-s-knowledge-base-which-con
-  q: >-
-    The agent answers from a customer's knowledge base, which contains outdated and contradictory
-    articles. How do you prevent confidently wrong answers?
-  a: >
-    Clean and govern the source: deduplicate, mark articles with owners and effective dates, retire
-    outdated ones, and flag conflicts for the customer to resolve. At retrieval time, prefer the
-    most recent and authoritative articles using metadata, and filter by product, region and plan.
+  q: The agent answers from a customer's knowledge base, which contains outdated and contradictory articles. How do you prevent confidently wrong answers?
+  a: |
+    Clean and govern the source: deduplicate, mark articles with owners and effective dates, retire outdated ones, and flag conflicts for the customer to resolve. At retrieval time, prefer the most recent and authoritative articles using metadata, and filter by product, region and plan.
 
-
-    At generation time, instruct the agent to cite its source, notice contradictions and say so
-    rather than pick one silently, and escalate or ask a clarifying question when sources disagree
-    on something consequential. Monitor answers that customers or agents flag as wrong and feed them
-    back to content owners.
-  topic: rag
+    At generation time, instruct the agent to cite its source, notice contradictions and say so rather than pick one silently, and escalate or ask a clarifying question when sources disagree on something consequential. Monitor answers that customers or agents flag as wrong and feed them back to content owners.
   level: Senior
+  category: rag
+  subcategory: advanced-rag
   companies:
-    - Sierra
+  - Sierra
   related: /ai-system-design/genai-system-design/hallucination-mitigation
   source: outcome-school
-- id: a-lawyer-asks-about-a-200-page-credit-agreement-where-the-op
-  q: >-
-    A lawyer asks about a 200-page credit agreement where the operative clause on page 140 depends
-    on a defined term on page 8. How do you build retrieval that gets this right?
-  a: >
-    Parse the agreement structurally: sections, clause numbers, cross-references and the definitions
-    article. Build an index of defined terms, and when a retrieved clause uses a capitalized defined
-    term, automatically pull that term's definition, and any clauses it references, into the context
-    alongside it.
-
-
-    Retrieval becomes clause retrieval plus expansion over the document's internal reference graph,
-    with the whole relevant chain cited. Given the document is only 200 pages, it can also fit in a
-    long context window, so a hybrid works well: retrieve and expand to highlight the key clauses,
-    and verify with full-document context for completeness.
-  topic: rag
+- id: how-do-you-handle-conversational-follow-up-questions-in-rag
+  q: How do you handle conversational follow-up questions in RAG?
+  a: |
+    Rewrite the follow-up into a standalone query using the conversation history, for example turning "what about the premium plan?" into "what is the refund policy for the premium plan?", then retrieve with that. Keep the history in the generation prompt so the answer stays coherent.
+  level: Mid
+  category: rag
+  subcategory: advanced-rag
+- id: how-would-you-add-multimodal-inputs-to-a-rag-system
+  q: How would you add multimodal inputs to a RAG system?
+  a: |
+    Use multimodal embedding models that place images and text in a shared space, or convert images to text descriptions and captions with a vision-language model and index those. At query time, retrieve across modalities and pass images or their descriptions to a multimodal generator. Evaluate retrieval separately for each modality.
   level: Senior
+  category: rag
+  subcategory: advanced-rag
+- id: what-is-reciprocal-rank-fusion
+  q: What is reciprocal rank fusion?
+  a: |
+    A simple way to merge ranked lists from different retrievers: each document scores the sum of 1 divided by a constant plus its rank in each list. It needs no score calibration between systems, rewards documents ranked well by several retrievers, and is the common default for hybrid search.
+  level: Mid
+  category: rag
+  subcategory: advanced-rag
+- id: what-is-the-lost-in-the-middle-problem
+  q: What is the 'lost in the middle' problem?
+  a: |
+    Models tend to use information at the beginning and end of a long context more reliably than information in the middle. In RAG this means stuffing many chunks can bury the relevant one. Re-ranking, keeping fewer chunks, and placing the most relevant ones at the start or end help.
+  level: Mid
+  category: rag
+  subcategory: advanced-rag
+- id: how-does-agentic-rag-differ-from-standard-rag-and-when-is-th
+  q: How does agentic RAG differ from standard RAG, and when is the extra complexity justified?
+  a: |
+    Standard RAG runs one fixed pipeline: retrieve once, then generate. Agentic RAG gives an LLM search tools and lets it decide whether to search, which sources to query, how to rewrite queries and when it has enough, looping over several retrievals and possibly structured lookups.
+
+    The extra latency, cost and unpredictability are justified for complex, multi-hop or research-style questions across several sources, where one retrieval cannot gather the evidence. For high-volume, predictable questions, a fixed pipeline with good ranking is cheaper, faster and easier to evaluate.
+  level: Mid
+  category: rag
+  subcategory: agentic-rag
+  related: /ai-system-design/genai-system-design/advanced-rag
+  refs:
+  - title: Agentic RAG
+    url: https://outcomeschool.com/blog/agentic-rag
+  source: outcome-school
+- id: a-lawyer-asks-about-a-200-page-credit-agreement-where-the-op
+  q: A lawyer asks about a 200-page credit agreement where the operative clause on page 140 depends on a defined term on page 8. How do you build retrieval that gets this right?
+  a: |
+    Parse the agreement structurally: sections, clause numbers, cross-references and the definitions article. Build an index of defined terms, and when a retrieved clause uses a capitalized defined term, automatically pull that term's definition, and any clauses it references, into the context alongside it.
+
+    Retrieval becomes clause retrieval plus expansion over the document's internal reference graph, with the whole relevant chain cited. Given the document is only 200 pages, it can also fit in a long context window, so a hybrid works well: retrieve and expand to highlight the key clauses, and verify with full-document context for completeness.
+  level: Senior
+  category: rag
+  subcategory: agentic-rag
   companies:
-    - Harvey
+  - Harvey
   related: /ai-system-design/genai-system-design/knowledge-graph-systems
   refs:
-    - title: Chunking Strategies for RAG
-      url: https://outcomeschool.com/blog/chunking-strategies-for-rag
-    - title: How does Contextual Retrieval work?
-      url: https://outcomeschool.com/blog/how-does-contextual-retrieval-work
-  source: outcome-school
-- id: when-would-you-put-a-whole-contract-in-the-context-window-in
-  q: >-
-    When would you put a whole contract in the context window instead of retrieving over it? Defend
-    the answer with numbers.
-  a: >
-    A 100-page contract is roughly 50,000–75,000 tokens, which fits comfortably in modern windows.
-    If a lawyer asks a handful of questions about one contract, full-context processing costs
-    perhaps tens of cents per question at typical prices, gives the model every cross-reference and
-    definition, and avoids retrieval misses, which matter a lot in legal work where missing a clause
-    is costly.
-
-
-    Retrieval wins when reviewing thousands of contracts, when the same documents are queried
-    thousands of times, when latency must be low, or when documents exceed the window. Prefix
-    caching also changes the math: repeated questions over one contract reuse the cached prefill,
-    making full-context answers much cheaper.
-  topic: rag
-  level: Senior
-  companies:
-    - Harvey
-  related: /ai-system-design/genai-system-design/rag-fundamentals
-  refs:
-    - title: The Lost in the Middle Problem in LLMs
-      url: https://outcomeschool.com/blog/lost-in-the-middle-problem-in-llms
-  source: outcome-school
-- id: how-would-you-chunk-and-embed-heterogeneous-enterprise-conte
-  q: >-
-    How would you chunk and embed heterogeneous enterprise content: Slack threads, Jira tickets,
-    Google Docs, PDFs?
-  a: >
-    Use source-specific chunking. Slack: group messages into threads or time-windowed conversations
-    with channel and participant context. Jira: one chunk per ticket with title, description and key
-    fields, and comments as linked chunks. Google Docs: split by headings with document title
-    prepended. PDFs: layout-aware parsing by section, keeping tables intact.
-
-
-    Normalize everything into a common schema with source, author, timestamps, permissions and
-    links, add contextual headers to each chunk, and use one embedding model across sources so
-    results are comparable, with source-aware ranking features. Evaluate retrieval per source, since
-    quality varies widely.
-  topic: rag
-  level: Mid
-  companies:
-    - Glean
-  related: /ai-system-design/genai-system-design/rag-fundamentals
-  refs:
-    - title: Chunking Strategies for RAG
-      url: https://outcomeschool.com/blog/chunking-strategies-for-rag
-  source: outcome-school
-- id: why-is-rag-the-right-architecture-for-an-enterprise-assistan
-  q: >-
-    Why is RAG the right architecture for an enterprise assistant instead of fine-tuning on the
-    company's data? Where does RAG break?
-  a: >
-    Enterprise knowledge changes constantly, is spread across permissioned systems, and answers must
-    be traceable. RAG reads current content at query time, enforces each user's permissions, cites
-    sources, and updates by re-indexing, while fine-tuning bakes in a snapshot, cannot enforce
-    per-user access, does not cite, and memorizes facts unreliably.
-
-
-    RAG breaks on questions needing aggregation or computation over many records, which need
-    structured queries; on poor parsing and chunking; when the right document is not retrieved; on
-    contradictory or stale content; and on multi-hop questions without iterative retrieval.
-    Fine-tuning can still help with style or domain language on top of RAG.
-  topic: rag
-  level: Mid
-  companies:
-    - Glean
-  related: /ai-system-design/genai-system-design/rag-fundamentals
-  refs:
-    - title: "AI Engineering Explained: LLM, RAG, MCP, Agent, Fine-Tuning, Quantization"
-      url: https://www.youtube.com/watch?v=lnfWvX66FUk
-  source: outcome-school
-- id: the-patient-s-chart-already-lists-their-medications-how-woul
-  q: >-
-    The patient's chart already lists their medications. How would you use that to improve
-    transcription of drug names, and how would you keep it from backfiring?
-  a: >
-    Use contextual biasing: give the speech recognizer, or a post-correction step, the patient's
-    medication list as a boosted vocabulary, so drug names that sound alike are resolved toward
-    medications the patient actually takes, which improves accuracy on hard pharmaceutical terms.
-
-
-    Keep it from backfiring: only boost, never force a substitution; require acoustic confidence
-    before mapping to a listed drug; flag when the clinician mentions a new or changed medication
-    rather than snapping to the existing list; keep the audio and original transcript as evidence;
-    and measure errors where the bias introduced a wrong drug, since that is a patient-safety risk.
-  topic: rag
-  level: Senior
-  companies:
-    - Abridge
-  related: /ai-system-design/genai-system-design/kg-healthcare-case-study
+  - title: Chunking Strategies for RAG
+    url: https://outcomeschool.com/blog/chunking-strategies-for-rag
+  - title: How does Contextual Retrieval work?
+    url: https://outcomeschool.com/blog/how-does-contextual-retrieval-work
   source: outcome-school
 - id: users-ask-how-many-open-orders-are-blocked-on-a-supplier-iss
-  q: >-
-    Users ask “how many open orders are blocked on a supplier issue?” Plain RAG gets this wrong.
-    Why, and what's the right architecture?
-  a: >
-    It is an aggregation over structured, live operational data. Plain RAG retrieves a few text
-    chunks and asks the model to count, so it sees only a sample, uses stale indexed copies, and
-    cannot join orders with supplier issues reliably.
+  q: Users ask “how many open orders are blocked on a supplier issue?” Plain RAG gets this wrong. Why, and what's the right architecture?
+  a: |
+    It is an aggregation over structured, live operational data. Plain RAG retrieves a few text chunks and asks the model to count, so it sees only a sample, uses stale indexed copies, and cannot join orders with supplier issues reliably.
 
-
-    The right architecture routes such questions to structured querying: an LLM translates the
-    question into a query against a semantic layer or ontology over the operational systems (orders,
-    suppliers, issues and their links), the query is validated and run with the user's permissions,
-    and the model explains the exact result. RAG remains useful for the unstructured parts, such as
-    explaining the supplier issue from documents.
-  topic: rag
+    The right architecture routes such questions to structured querying: an LLM translates the question into a query against a semantic layer or ontology over the operational systems (orders, suppliers, issues and their links), the query is validated and run with the user's permissions, and the model explains the exact result. RAG remains useful for the unstructured parts, such as explaining the supplier issue from documents.
   level: Senior
+  category: rag
+  subcategory: agentic-rag
   companies:
-    - Palantir
+  - Palantir
   related: /ai-system-design/genai-system-design/knowledge-graph-systems
   source: outcome-school
+- id: what-is-graphrag-and-when-is-it-useful
+  q: What is GraphRAG and when is it useful?
+  a: |
+    GraphRAG builds a knowledge graph of entities and relationships from the corpus and uses it to retrieve connected facts, and in Microsoft's version, summaries of graph communities. It helps multi-hop questions and corpus-wide questions such as "what are the main themes?", which chunk retrieval answers poorly, at a high indexing cost.
+  level: Senior
+  category: rag
+  subcategory: graph-rag
+- id: how-do-you-detect-and-measure-hallucinations-in-a-production
+  q: How do you detect and measure hallucinations in a production RAG system?
+  a: |
+    Offline, use a test set with source documents and break answers into claims; check each claim against the retrieved context with an NLI model or calibrated LLM judge, and report the unsupported-claim rate and correct abstentions on unanswerable questions.
+
+    In production, run the same faithfulness check on a sample of live answers, track citation validity and the share of answers with uncited claims, monitor user feedback and corrections, and send flagged answers to human review. Trend the rate by source, topic and model version.
+  level: Mid
+  category: rag
+  subcategory: rag-evaluation
+  companies:
+  - Anthropic
+  - Cursor
+  - OpenAI
+  related: /ai-system-design/genai-system-design/hallucination-mitigation
+  source: outcome-school
+- id: how-would-you-evaluate-the-quality-of-a-rag-pipeline-retriev
+  q: 'How would you evaluate the quality of a RAG pipeline: retrieval and generation separately?'
+  a: |
+    Build a test set of real questions with reference answers and the passages that support them. Evaluate retrieval on its own with recall at k, MRR and nDCG: did the right evidence reach the prompt, and how high was it ranked?
+
+    Evaluate generation separately on faithfulness (every claim supported by the retrieved context), answer relevance and correctness against references, using LLM judges calibrated against human labels, as in RAGAS. Include unanswerable questions to test abstention, track results per question type, and run the suite on every change.
+  level: Mid
+  category: rag
+  subcategory: rag-evaluation
+  companies:
+  - Cohere
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+  refs:
+  - title: LLM Evaluation
+    url: https://outcomeschool.com/blog/llm-evaluation
+  source: outcome-school
+- id: how-would-you-evaluate-multilingual-retrieval-quality-when-e
+  q: How would you evaluate multilingual retrieval quality when employees query in French and Korean over mostly-English documents?
+  a: |
+    Build test sets of real French and Korean queries written by native speakers, each labeled with the relevant English documents, rather than machine-translating English queries. Measure recall at k and nDCG per language against an English-query baseline on the same documents, so you can see the cross-lingual gap.
+
+    Check failure patterns by language, such as named entities, acronyms and domain terms, and test mixed-language queries. Compare options such as multilingual embeddings, query translation before retrieval, and cross-lingual re-rankers, and include generation checks that answers come back in the user's language.
+  level: Senior
+  category: rag
+  subcategory: rag-evaluation
+  companies:
+  - Cohere
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+  source: outcome-school
+- id: a-customer-10x-d-their-indexed-documents-and-reports-answer
+  q: A customer 10x'd their indexed documents and reports answer quality “got noticeably worse.” Drive the investigation.
+  a: |
+    First reproduce it with a fixed set of questions answered before and after, and check whether the right passages are still retrieved. With 10x more documents, likely causes are near-duplicates and outdated versions crowding the top results, new low-quality or off-topic sources, an index whose recall dropped at the larger size, metadata filters missing on new content, or permission sync gaps.
+
+    Fix by deduplicating and preferring the latest versions, adding metadata filters and source weighting, retuning index parameters for the new scale, adding or strengthening re-ranking, and re-evaluating recall at k on the bigger corpus.
+  level: Senior
+  category: rag
+  subcategory: rag-evaluation
+  companies:
+  - Cohere
+  related: /ai-system-design/genai-system-design/advanced-rag
+  source: outcome-school
+- id: what-are-faithfulness-and-answer-relevance-in-rag-evaluation
+  q: What are faithfulness and answer relevance in RAG evaluation?
+  a: |
+    Faithfulness measures whether every claim in the answer is supported by the retrieved context, catching hallucinations. Answer relevance measures whether the answer actually addresses the question. Tools such as RAGAS estimate both with LLM graders, alongside context precision and recall.
+  level: Mid
+  category: rag
+  subcategory: rag-evaluation
+- id: rag-answers-are-often-wrong-how-do-you-find-the-cause
+  q: RAG answers are often wrong. How do you find the cause?
+  a: |
+    Sample failures and check whether the correct passage was retrieved. If not, it is retrieval: look at parsing, chunking, query rewriting, hybrid search and metadata filters. If retrieved but ranked low, add or tune re-ranking. If present in the prompt but answered wrongly, fix the prompt, context ordering or model choice. Categorize failures and fix the biggest bucket first.
+  level: Senior
+  category: rag
+  subcategory: rag-evaluation
+- id: what-does-a-production-rag-monitoring-dashboard-show
+  q: What does a production RAG monitoring dashboard show?
+  a: |
+    Query volume and latency per stage, the share of queries with no relevant context, retrieval scores, citation rates, user feedback, sampled faithfulness scores from an LLM judge, cost per query, and index freshness. Breaking these down by source and user group helps find problems quickly.
+  level: Mid
+  category: rag
+  subcategory: rag-evaluation
+- id: what-is-agentic-rag
+  q: What is agentic RAG, and what does the agent decide that a fixed RAG pipeline does not?
+  a: |
+    In a fixed pipeline every query runs the same steps: embed, retrieve top-k, generate. In agentic RAG an LLM agent controls retrieval as a tool: it decides whether retrieval is needed at all, which source or index to query, how to phrase or split the query, whether the results are good enough, and when to stop and answer.
+
+    That makes it better at multi-hop and ambiguous questions, and at choosing between sources such as documents, SQL tables and APIs, at the cost of more latency, more tokens and less predictable behavior.
+  level: Junior
+  category: rag
+  subcategory: agentic-rag
+  related: /ai-system-design/genai-system-design/advanced-rag
+- id: when-is-agentic-rag-not-worth-it
+  q: When is agentic RAG not worth the extra cost and latency?
+  a: |
+    When most questions are single-hop lookups that one well-tuned retrieval step already answers, when strict latency budgets rule out several model calls, when behavior must be predictable and auditable step by step, or when the corpus is small and clean enough that hybrid search plus a reranker hits high recall.
+
+    A good pattern is routing: send simple queries down a fast fixed pipeline and only escalate complex or low-confidence ones to the agentic path, then measure whether the agentic path actually improves answer quality on those queries.
+  level: Mid
+  category: rag
+  subcategory: agentic-rag
+  related: /ai-system-design/genai-system-design/advanced-rag
+- id: how-does-an-agent-judge-retrieval-quality
+  q: How can a RAG agent tell that what it retrieved is not good enough, and what does it do next?
+  a: |
+    It can grade results with a lightweight relevance check (an LLM or cross-encoder scoring each passage against the question), check coverage of every part of a multi-part question, notice contradictions between passages, or see low retrieval scores. Corrective RAG patterns formalize this as a grade-then-act step.
+
+    Next steps include rewriting or decomposing the query, switching to a different index or to web search, retrieving neighbors or parent sections of good chunks, or answering with an explicit statement of what could not be found. A step and cost budget stops the loop.
+  level: Mid
+  category: rag
+  subcategory: agentic-rag
+  related: /ai-system-design/genai-system-design/advanced-rag
+- id: design-agentic-rag-over-docs-and-sql
+  q: Design an agentic RAG assistant that answers questions using both a document store and a SQL warehouse.
+  a: |
+    Give the agent separate tools: a document search tool with hybrid retrieval and permission filters, and a SQL tool that exposes a curated semantic layer (approved tables, column descriptions, example queries) rather than the raw warehouse. A router or the agent's own planning decides which tool each sub-question needs, for example definitions from documents and numbers from SQL.
+
+    Validate generated SQL (read-only, row limits, schema checks), show the query and citations with the answer, cap the number of steps, log every tool call for debugging, and evaluate on a set of questions labeled with the right source and answer.
+  level: Senior
+  category: rag
+  subcategory: agentic-rag
+  related: /ai-system-design/genai-system-design/advanced-rag
+- id: how-do-you-evaluate-agentic-rag
+  q: How do you evaluate an agentic RAG system differently from a single-step RAG pipeline?
+  a: |
+    Besides final-answer correctness and faithfulness, evaluate the trajectory: did the agent retrieve when it should, choose the right sources, reformulate sensibly, and stop at the right time? Measure steps, tokens and latency per question, since agentic loops can be accurate but too slow or expensive.
+
+    Build test sets that include single-hop, multi-hop and unanswerable questions, compare against a fixed-pipeline baseline on the same set, and inspect traces of failures to see whether errors come from retrieval, planning or generation.
+  level: Senior
+  category: rag
+  subcategory: agentic-rag
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation

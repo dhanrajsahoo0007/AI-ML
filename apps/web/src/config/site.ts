@@ -63,7 +63,7 @@ export const siteConfig = {
         icon: "brain",
         title: "Interview Prep",
         description:
-          "Question banks for AI, data science and ML interviews, filterable by topic and difficulty.",
+          "AI, data science and ML interview questions organized by topic and subtopic, tagged with the companies that ask them.",
       },
       {
         href: "/system-design",

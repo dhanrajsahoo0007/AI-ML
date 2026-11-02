@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { siteConfig } from "@/config/site";
+import { ThemeToggle } from "@/components/theme";
 
 export function SiteHeader() {
   const pathname = usePathname();
@@ -49,6 +50,7 @@ export function SiteHeader() {
               </Link>
             );
           })}
+          <ThemeToggle className="-mx-2" />
           <Link
             href={siteConfig.hero.primaryCta.href}
             className="hidden rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-colors hover:bg-primary xl:inline-flex"
@@ -57,7 +59,8 @@ export function SiteHeader() {
           </Link>
         </div>
 
-        <div className="lg:hidden">
+        <div className="flex items-center gap-1 lg:hidden">
+          <ThemeToggle />
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger
               className="inline-flex size-10 items-center justify-center rounded-full text-ink transition-colors hover:bg-paper-2"

@@ -10,7 +10,6 @@ import rehypeKatex from "rehype-katex";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
 import { Pre, Figure } from "@/components/mdx/code-block";
-import { BankQuestions, CompanyQuestions, CompanyOverview, SourceCredit } from "@/components/mdx/question-bank";
 import type { ContentSection, ContentMeta, ContentGroupDef } from "@/types/content";
 
 export type { ContentSection };
@@ -56,10 +55,6 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
       InterviewQuestions,
       InterviewQuestion,
       Figure,
-      BankQuestions,
-      CompanyQuestions,
-      CompanyOverview,
-      SourceCredit,
       pre: Pre,
     },
   });

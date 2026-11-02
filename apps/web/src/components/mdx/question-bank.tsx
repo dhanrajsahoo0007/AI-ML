@@ -1,13 +1,6 @@
 import * as React from "react";
-import Link from "next/link";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
-import {
-  getCompany,
-  getQuestions,
-  TOPICS,
-  type BankQuestion,
-  type TopicKey,
-} from "@/lib/question-bank";
+import { getCompanies, type LibraryQuestion } from "@/lib/question-bank";
 
 const SOURCE_URL =
   "https://github.com/pallavi-shekhar/ai-engineering-interview-questions-company-wise";
@@ -15,7 +8,7 @@ const SOURCE_URL =
 export function SourceCredit() {
   return (
     <p>
-      Questions adapted from{" "}
+      Company-tagged questions are adapted from{" "}
       <a href={SOURCE_URL} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
         AI Engineering Interview Questions Company Wise
       </a>{" "}
@@ -24,6 +17,7 @@ export function SourceCredit() {
         Outcome School
       </a>{" "}
       (Apache 2.0), compiled from publicly reported interviews. Answers are written by Origins AI Learn.
+      Company names and logos are trademarks of their owners and imply no affiliation.
     </p>
   );
 }
@@ -43,88 +37,39 @@ function renderAnswer(text: string) {
   ));
 }
 
-function QuestionList({
+// Library questions as <InterviewQuestion> elements; `tagOf` labels each one for the topic chips.
+export function questionItems(questions: LibraryQuestion[], tagOf?: (q: LibraryQuestion) => string) {
+  const companies = new Map(getCompanies().map((c) => [c.slug, { slug: c.slug, name: c.name }]));
+  return questions.map((q) => (
+    <InterviewQuestion
+      key={q.id}
+      question={q.q}
+      category={tagOf?.(q)}
+      level={q.level}
+      companies={q.companies.map((slug) => companies.get(slug)!)}
+      related={q.related}
+      refs={q.refs}
+    >
+      {renderAnswer(q.a)}
+    </InterviewQuestion>
+  ));
+}
+
+// A filterable list of library questions.
+export function QuestionList({
   questions,
   title,
-  categoryOf,
+  tagOf,
 }: {
-  questions: BankQuestion[];
+  questions: LibraryQuestion[];
   title: string;
-  categoryOf: (q: BankQuestion) => string | undefined;
+  tagOf?: (q: LibraryQuestion) => string;
 }) {
   if (questions.length === 0) return null;
+  const credited = questions.some((q) => q.source === "outcome-school");
   return (
-    <InterviewQuestions title={title} footer={<SourceCredit />}>
-      {questions.map((q) => (
-        <InterviewQuestion
-          key={q.id}
-          question={q.q}
-          category={categoryOf(q)}
-          level={q.level}
-          companies={q.companies}
-          related={q.related}
-          refs={q.refs}
-        >
-          {renderAnswer(q.a)}
-        </InterviewQuestion>
-      ))}
+    <InterviewQuestions title={title} footer={credited ? <SourceCredit /> : undefined}>
+      {questionItems(questions, tagOf)}
     </InterviewQuestions>
-  );
-}
-
-// Imported questions for one topic bank, filterable by company.
-export function BankQuestions({ topic }: { topic: TopicKey }) {
-  const questions = getQuestions({ topic });
-  return (
-    <QuestionList
-      questions={questions}
-      title="Asked at top AI companies"
-      categoryOf={() => undefined}
-    />
-  );
-}
-
-// Every imported question tagged with a company, categorized by topic.
-export function CompanyQuestions({ company }: { company: string }) {
-  const c = getCompany(company);
-  if (!c) throw new Error(`Unknown company: ${company}`);
-  const questions = getQuestions({ company: c.name }).sort(
-    (a, b) =>
-      Object.keys(TOPICS).indexOf(a.topic) - Object.keys(TOPICS).indexOf(b.topic)
-  );
-  const topics = [...new Set(questions.map((q) => q.topic))];
-  return (
-    <>
-      <p>
-        Practice by topic:{" "}
-        {topics.map((t, i) => (
-          <React.Fragment key={t}>
-            {i > 0 && " · "}
-            <Link href={`/interviews/${TOPICS[t].bank}`}>{TOPICS[t].label}</Link>
-          </React.Fragment>
-        ))}
-      </p>
-      <QuestionList
-        questions={questions}
-        title={`Reported ${c.name} questions`}
-        categoryOf={(q) => TOPICS[q.topic].label}
-      />
-    </>
-  );
-}
-
-// Roles and interview loop summary for a company page.
-export function CompanyOverview({ company }: { company: string }) {
-  const c = getCompany(company);
-  if (!c) throw new Error(`Unknown company: ${company}`);
-  return (
-    <>
-      <p>
-        <strong>Roles:</strong> {c.roles}
-      </p>
-      <p>
-        <strong>Interview loop (as publicly reported):</strong> {c.loop}
-      </p>
-    </>
   );
 }
