@@ -32,14 +32,12 @@ export default async function HomePage() {
   const totalTopics = slugCounts.reduce((a, b) => a + b, 0);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-16 pt-6">
-      <div className="-mt-6">
-        <Hero />
-        <Workflow />
-        <Features />
-        <Stats modules={catalogCount} paths={pathCount} topics={totalTopics} />
-        <CtaBanner />
-      </div>
-    </div>
+    <>
+      <Hero />
+      <Workflow />
+      <Features />
+      <Stats modules={catalogCount} paths={pathCount} topics={totalTopics} />
+      <CtaBanner />
+    </>
   );
 }

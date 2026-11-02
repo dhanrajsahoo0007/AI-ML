@@ -1,6 +1,7 @@
 import { Breadcrumb } from "@/components/breadcrumb";
 import { FadeIn } from "@/components/motion/fade-in";
 import { StaggerChildren } from "@/components/motion/stagger-children";
+import { PageHeader } from "@/components/ui/editorial";
 
 interface SectionIndexProps {
   breadcrumbLabel: string;
@@ -16,24 +17,25 @@ export function SectionIndex({
   children,
 }: SectionIndexProps) {
   return (
-    <main className="mx-auto max-w-6xl space-y-8 px-4 pb-16 pt-6">
+    <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8">
       <Breadcrumb
-        items={[
-          { label: "Home", href: "/" },
-          { label: breadcrumbLabel },
-        ]}
+        items={[{ label: "Home", href: "/" }, { label: breadcrumbLabel }]}
       />
 
       <FadeIn>
-        <header className="space-y-2">
-          <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
-          <p className="max-w-2xl text-muted-foreground">{subtitle}</p>
-        </header>
+        <PageHeader
+          className="mt-10 mb-12 border-b border-hairline pb-12 sm:mb-16"
+          title={title}
+          lead={subtitle}
+        />
       </FadeIn>
 
-      <StaggerChildren className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <StaggerChildren
+        className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3"
+        itemClassName="h-full"
+      >
         {children}
       </StaggerChildren>
-    </main>
+    </div>
   );
 }

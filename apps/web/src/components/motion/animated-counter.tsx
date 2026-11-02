@@ -1,14 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import {
-  useMotionValue,
-  useTransform,
-  animate,
-  motion,
-  useInView,
-} from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { animate, useInView, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { EASE_OUT } from "@/components/motion/fade-in";
 
 interface AnimatedCounterProps {
   from?: number;
@@ -21,34 +16,33 @@ interface AnimatedCounterProps {
 export function AnimatedCounter({
   from = 0,
   to,
-  duration = 2,
+  duration = 1.4,
   className,
   suffix = "",
 }: AnimatedCounterProps) {
   const ref = useRef<HTMLSpanElement>(null);
-  const motionValue = useMotionValue(from);
-  const rounded = useTransform(motionValue, (v) => Math.round(v));
   const isInView = useInView(ref, { once: true });
+  const reduce = useReducedMotion();
+  const [value, setValue] = useState(reduce ? to : from);
 
   useEffect(() => {
-    if (isInView) {
-      animate(motionValue, to, { duration, ease: "easeOut" });
+    if (!isInView) return;
+    if (reduce) {
+      setValue(to);
+      return;
     }
-  }, [isInView, motionValue, to, duration]);
-
-  useEffect(() => {
-    const unsubscribe = rounded.on("change", (v) => {
-      if (ref.current) {
-        ref.current.textContent = `${v}${suffix}`;
-      }
+    const controls = animate(from, to, {
+      duration,
+      ease: EASE_OUT,
+      onUpdate: (v) => setValue(Math.round(v)),
     });
-    return unsubscribe;
-  }, [rounded, suffix]);
+    return () => controls.stop();
+  }, [isInView, reduce, from, to, duration]);
 
   return (
-    <motion.span ref={ref} className={cn(className)}>
-      {from}
+    <span ref={ref} className={cn("tabular-nums", className)}>
+      {value}
       {suffix}
-    </motion.span>
+    </span>
   );
 }

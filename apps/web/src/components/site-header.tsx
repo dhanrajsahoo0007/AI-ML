@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, Sparkles } from "lucide-react";
-import { motion } from "framer-motion";
+import { Menu } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -11,110 +10,91 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { cn } from "@/lib/utils";
 import { siteConfig } from "@/config/site";
 
 export function SiteHeader() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-xl backdrop-saturate-[1.8]">
-      <nav className="mx-auto grid h-16 max-w-screen-2xl grid-cols-[1fr_auto_1fr] items-center px-6 lg:px-8">
-        {/* Left — nav links */}
-        <div className="hidden items-center gap-1 sm:flex">
+    <header className="sticky top-0 z-40 w-full border-b border-hairline/80 bg-paper/85 backdrop-blur-md">
+      <nav className="mx-auto flex h-16 w-full max-w-[1200px] items-center justify-between gap-6 px-4 sm:px-8">
+        <Link href="/" className="flex items-baseline gap-3">
+          <span className="font-display text-xl whitespace-nowrap sm:text-2xl">
+            {siteConfig.name}
+          </span>
+          <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground lg:inline">
+            {siteConfig.tagline}
+          </span>
+        </Link>
+
+        <div className="hidden items-center gap-8 md:flex">
           {siteConfig.nav.map((item) => {
             const isActive = pathname.startsWith(item.href);
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`relative rounded-md px-3.5 py-2 text-[15px] font-medium transition-colors ${
+                aria-current={isActive ? "page" : undefined}
+                className={cn(
+                  "relative py-1 text-sm transition-colors",
                   isActive
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                }`}
+                    ? "text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-ink"
+                    : "text-muted-foreground hover:text-ink"
+                )}
               >
                 {item.label}
-                {isActive && (
-                  <motion.div
-                    layoutId="nav-underline"
-                    className="absolute inset-x-1 -bottom-[calc(0.5rem+1px)] h-0.5 rounded-full bg-primary"
-                    transition={{
-                      type: "spring",
-                      stiffness: 380,
-                      damping: 30,
-                    }}
-                  />
-                )}
               </Link>
             );
           })}
+          <Link
+            href={siteConfig.hero.primaryCta.href}
+            className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition-colors hover:bg-primary"
+          >
+            Start learning
+          </Link>
         </div>
-        <div className="sm:hidden" />
 
-        {/* Center — logo */}
-        <Link href="/" className="group flex items-center justify-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/20">
-            <Sparkles className="h-4 w-4 text-primary" />
-          </div>
-          <motion.span
-            className="hidden text-lg font-bold tracking-tight text-foreground sm:inline-block"
-            whileHover={{ scale: 1.01 }}
-            transition={{ type: "spring", stiffness: 400, damping: 30 }}
-          >
-            {siteConfig.name}
-          </motion.span>
-          <motion.span
-            className="text-lg font-bold tracking-tight text-foreground sm:hidden"
-            whileHover={{ scale: 1.01 }}
-            transition={{ type: "spring", stiffness: 400, damping: 30 }}
-          >
-            Origins AI
-          </motion.span>
-        </Link>
-
-        {/* Right — theme toggle + mobile menu */}
-        <div className="flex items-center justify-end gap-1">
-          <ThemeToggle />
-
-          <div className="sm:hidden">
-            <Sheet>
-              <SheetTrigger
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Open menu"
-              >
-                <Menu className="h-5 w-5" />
-              </SheetTrigger>
-              <SheetContent side="right" className="w-72">
-                <SheetHeader>
-                  <SheetTitle className="text-left text-base">
-                    Navigate
-                  </SheetTitle>
-                </SheetHeader>
-                <div className="mt-8 flex flex-col gap-1">
-                  <Link
-                    className="rounded-md px-3 py-2.5 text-[15px] font-medium text-foreground transition-colors hover:bg-muted"
-                    href="/"
-                  >
-                    Home
-                  </Link>
-                  {siteConfig.nav.map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={`rounded-md px-3 py-2.5 text-[15px] font-medium transition-colors hover:bg-muted ${
-                        pathname.startsWith(item.href)
-                          ? "bg-muted text-foreground"
-                          : "text-muted-foreground"
-                      }`}
-                    >
-                      {item.label}
-                    </Link>
-                  ))}
-                </div>
-              </SheetContent>
-            </Sheet>
-          </div>
+        <div className="md:hidden">
+          <Sheet>
+            <SheetTrigger
+              className="inline-flex size-10 items-center justify-center rounded-full text-ink transition-colors hover:bg-paper-2"
+              aria-label="Open menu"
+            >
+              <Menu className="size-5" />
+            </SheetTrigger>
+            <SheetContent side="right" className="w-80 bg-paper">
+              <SheetHeader>
+                <SheetTitle className="text-left text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  Menu
+                </SheetTitle>
+              </SheetHeader>
+              <div className="flex flex-col gap-4 px-4">
+                {[{ href: "/", label: "Home" }, ...siteConfig.nav].map(
+                  (item) => {
+                    const isActive =
+                      item.href === "/"
+                        ? pathname === "/"
+                        : pathname.startsWith(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={cn(
+                          "font-display text-3xl transition-colors",
+                          isActive
+                            ? "text-ink"
+                            : "text-muted-foreground hover:text-ink"
+                        )}
+                      >
+                        {item.label}
+                      </Link>
+                    );
+                  }
+                )}
+              </div>
+            </SheetContent>
+          </Sheet>
         </div>
       </nav>
     </header>

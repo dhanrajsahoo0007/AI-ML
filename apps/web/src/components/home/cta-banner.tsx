@@ -1,34 +1,33 @@
 "use client";
 
-import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { FadeIn } from "@/components/motion/fade-in";
+import { ButtonLink, Container, Eyebrow } from "@/components/ui/editorial";
 import { siteConfig } from "@/config/site";
 
 export function CtaBanner() {
   const { cta } = siteConfig;
 
   return (
-    <section className="py-16 sm:py-24">
-      <FadeIn>
-        <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-primary/5 p-12 text-center sm:p-16">
-          <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+    <section className="border-t border-hairline bg-paper-2/60 py-20 sm:py-28">
+      <Container className="grid gap-10 md:grid-cols-12">
+        <FadeIn className="md:col-span-5">
+          <Eyebrow index="03">Get started</Eyebrow>
+          <h2 className="mt-6 font-display text-4xl leading-[1.05] tracking-tight text-balance sm:text-5xl">
             {cta.headline}
           </h2>
-          <p className="mx-auto mt-3 max-w-lg text-muted-foreground">
+        </FadeIn>
+        <FadeIn delay={0.08} className="md:col-span-7 md:pt-10">
+          <p className="max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
             {cta.description}
           </p>
-          <div className="mt-8">
-            <Button asChild size="lg" className="shine group">
-              <Link href={cta.button.href}>
-                {cta.button.label}
-                <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-              </Link>
-            </Button>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <ButtonLink href={cta.button.href}>{cta.button.label}</ButtonLink>
+            <ButtonLink href="/system-design" variant="secondary">
+              Browse system design
+            </ButtonLink>
           </div>
-        </div>
-      </FadeIn>
+        </FadeIn>
+      </Container>
     </section>
   );
 }

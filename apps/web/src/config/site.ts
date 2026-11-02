@@ -1,5 +1,6 @@
 export const siteConfig = {
   name: "Origins AI Learn",
+  tagline: "AI learning",
   description:
     "Origins AI Learn is a structured learning system for going from scratch to job-ready in modern AI: machine learning, deep learning, generative AI, large language models, agentic AI, and adjacent topics. It combines guided learning paths, interview prep, and ML system design notes so you understand both concepts and how they show up in real systems.",
   github: "https://github.com/dhanrajsahoo0007",
