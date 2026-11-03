@@ -106,7 +106,27 @@ export async function getTopLevelMeta(
       categories: data.categories as string[] | undefined,
       groups: data.groups as ContentGroupDef[] | undefined,
       area: data.area as string | undefined,
+      order: typeof data.order === "number" ? data.order : undefined,
     });
   }
-  return metas;
+  // Hubs with an `order` frontmatter value come first, in that order; the rest keep file order.
+  return metas
+    .map((m, i) => ({ m, i }))
+    .sort((a, b) => (a.m.order ?? Infinity) - (b.m.order ?? Infinity) || a.i - b.i)
+    .map(({ m }) => m);
+}
+
+// Articles (pages below a hub) that are written up, i.e. not marked `status: outline`.
+export async function countWrittenArticles(sections: ContentSection[]): Promise<number> {
+  let count = 0;
+  for (const section of sections) {
+    const { children } = partitionSlugs(await getContentSlugs(section));
+    for (const [hub, slugs] of Object.entries(children)) {
+      for (const slug of slugs) {
+        const raw = await fs.readFile(path.join(process.cwd(), "content", section, hub, `${slug}.mdx`), "utf8");
+        if (matter(raw).data.status !== "outline") count += 1;
+      }
+    }
+  }
+  return count;
 }

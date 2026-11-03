@@ -4,16 +4,16 @@ import { AnimatedCounter } from "@/components/motion/animated-counter";
 import { Container } from "@/components/ui/editorial";
 
 interface StatsProps {
-  modules: number;
-  paths: number;
-  topics: number;
+  questions: number;
+  articles: number;
+  companies: number;
 }
 
-export function Stats({ modules, paths, topics }: StatsProps) {
+export function Stats({ questions, articles, companies }: StatsProps) {
   const stats = [
-    { value: modules, suffix: "+", label: "Modules" },
-    { value: paths, suffix: "", label: "Learning paths" },
-    { value: topics, suffix: "", label: "Topics written up" },
+    { value: questions, suffix: "+", label: "Interview questions" },
+    { value: articles, suffix: "", label: "Design articles" },
+    { value: companies, suffix: "", label: "Companies covered" },
   ];
 
   return (

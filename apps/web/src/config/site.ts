@@ -1,77 +1,67 @@
+import { isSectionEnabled } from "@/config/features";
+import type { ContentSection } from "@/types/content";
+
+interface NavLink {
+  href: string;
+  label: string;
+  section: ContentSection;
+}
+
+const allNav: NavLink[] = [
+  { href: "/ai-system-design", label: "AI System Design", section: "ai-system-design" },
+  { href: "/system-design", label: "System Design", section: "system-design" },
+  { href: "/interviews", label: "Interviews", section: "interviews" },
+  { href: "/companies", label: "Companies", section: "companies" },
+  { href: "/ml-system-design", label: "ML System Design", section: "ml-system-design" },
+];
+
 export const siteConfig = {
   name: "Origins AI Learn",
-  tagline: "AI learning",
+  tagline: "AI system design",
   description:
-    "Origins AI Learn is a structured learning system for going from scratch to job-ready in modern AI: machine learning, deep learning, generative AI, large language models, agentic AI, and adjacent topics. It combines guided learning paths, interview prep, and ML system design notes so you understand both concepts and how they show up in real systems.",
+    "Origins AI Learn is a one-stop place to prepare for AI and system design interviews: deep-dives on LLMs, RAG, agents and production AI systems, classic system design case studies, and interview questions tagged with the companies that ask them.",
   github: "https://github.com/dhanrajsahoo0007",
-  nav: [
-    { href: "/learning-paths", label: "Learning Paths" },
-    { href: "/interviews", label: "Interviews" },
-    { href: "/system-design", label: "ML System Design" },
-    { href: "/ai-system-design", label: "AI System Design" },
-    { href: "/companies", label: "Companies" },
-  ],
+  // Sections switched off in src/config/features.ts are left out everywhere the nav is shown.
+  nav: allNav.filter((item) => isSectionEnabled(item.section)),
   hero: {
-    badge: "One place for AI, data science and ML interview prep",
+    badge: "One place for AI and system design interview prep",
     headline: ["Master AI.", "From Scratch."],
     description:
-      "A structured path through **machine learning**, **data science**, **transformers**, **LLMs**, **RAG**, and **agentic AI**, with question banks and AI system design deep-dives so you can explain how ideas land in real systems.",
-    primaryCta: { label: "Start Learning", href: "/learning-paths" },
+      "Deep-dives on **transformers**, **LLMs**, **RAG**, **agents** and **production AI systems**, plus **system design** case studies and interview questions reported at top AI companies, so you can explain how ideas land in real systems.",
+    primaryCta: { label: "Explore AI System Design", href: "/ai-system-design" },
     secondaryCta: { label: "Explore Interviews", href: "/interviews" },
   },
   workflow: {
     title: "Your learning journey",
-    subtitle: "A clear path from fundamentals to production-ready knowledge.",
+    subtitle: "From how models work to designing the systems around them.",
     steps: [
       {
         num: "01",
         icon: "graduation-cap",
         title: "Learn Concepts",
         description:
-          "Work through structured paths covering ML, deep learning, generative AI, LLMs, and agentic AI.",
+          "Read AI system design deep-dives on transformers, RAG, agents, inference and evaluation, each with diagrams and trade-offs.",
       },
       {
         num: "02",
         icon: "target",
         title: "Practice Interviews",
         description:
-          "Drill with question-first pages and collapsible answers to build recall without spoilers.",
+          "Drill questions by topic, difficulty and company, with answers hidden until you are ready.",
       },
       {
         num: "03",
         icon: "rocket",
         title: "Design Systems",
         description:
-          "Study architecture patterns for serving, data movement, and reliability in production ML.",
+          "Work through system design fundamentals and case studies, from APIs and databases to WhatsApp and YouTube.",
       },
     ],
   },
   features: {
     title: "Everything you need",
-    subtitle:
-      "Four pillars that cover concepts, practice, and real-world architecture.",
+    subtitle: "Four pillars that cover concepts, practice and real-world architecture.",
     items: [
-      {
-        href: "/learning-paths",
-        icon: "book-open",
-        title: "Learning Paths",
-        description:
-          "ML, deep learning, generative AI, LLMs, and agentic AI — sequenced for newcomers and structured for depth.",
-      },
-      {
-        href: "/interviews",
-        icon: "brain",
-        title: "Interview Prep",
-        description:
-          "AI, data science and ML interview questions organized by topic and subtopic, tagged with the companies that ask them.",
-      },
-      {
-        href: "/system-design",
-        icon: "layers",
-        title: "ML System Design",
-        description:
-          "Serving, data movement, and reliability patterns you will see in real production systems.",
-      },
       {
         href: "/ai-system-design",
         icon: "sparkles",
@@ -79,12 +69,33 @@ export const siteConfig = {
         description:
           "Transformers, RAG, knowledge graphs, agents and recommenders, explained with architecture diagrams.",
       },
+      {
+        href: "/system-design",
+        icon: "layers",
+        title: "System Design",
+        description:
+          "APIs, databases, replication and classic case studies such as URL shorteners, chat apps and video platforms.",
+      },
+      {
+        href: "/interviews",
+        icon: "brain",
+        title: "Interview Prep",
+        description:
+          "AI interview questions organized by topic and subtopic, filterable by difficulty and company.",
+      },
+      {
+        href: "/companies",
+        icon: "users",
+        title: "Companies",
+        description:
+          "See what top AI companies are reported to ask, with their interview loops and our answers.",
+      },
     ],
   },
   cta: {
     headline: "Ready to master AI?",
     description:
-      "Start with the fundamentals and build up to production systems. Track your progress along the way.",
-    button: { label: "Start Learning", href: "/learning-paths" },
+      "Start with the deep-dives, then practice the questions top AI companies ask.",
+    button: { label: "Explore AI System Design", href: "/ai-system-design" },
   },
-} as const;
+};

@@ -6,9 +6,9 @@ export default function SystemDesignIndexPage() {
   return (
     <HubSectionIndex
       section="system-design"
-      label="ML System Design"
-      title="ML system design"
-      subtitle="Architecture notes focused on reliability, data movement, and the interfaces between research and production."
+      label="System Design"
+      title="System design"
+      subtitle="The fundamentals behind every large system, from APIs and databases to replication, plus classic interview case studies such as WhatsApp, YouTube and a URL shortener."
     />
   );
 }

@@ -1,6 +1,6 @@
 # Origins AI Learn
 
-**Origins AI Learn** is a structured learning system for going from **scratch to job-ready** in modern AI: **machine learning**, **deep learning**, **generative AI**, **large language models**, **agentic AI**, and adjacent topics. It combines **guided learning paths**, **interview prep** (question-first drills), and **ML system design** notes so you understand both concepts and how they show up in real systems.
+**Origins AI Learn** is a one-stop place to prepare for **AI system design** and **system design** interviews: deep-dives on transformers, LLMs, RAG, agents and production AI systems, classic system design fundamentals and case studies, and an interview question library tagged with the companies that ask each question.
 
 Stack: **Next.js (App Router)**, **PostgreSQL**, **Redis**.
 
@@ -10,6 +10,42 @@ Stack: **Next.js (App Router)**, **PostgreSQL**, **Redis**.
 - `packages/*` — reserved for shared packages (optional)
 
 **Documentation:** keep in-repo prose in **this README only** (no extra markdown guides under `docs/` or elsewhere).
+
+## Content
+
+All content lives in `apps/web/content` as MDX and YAML:
+
+| Folder | Site section |
+| --- | --- |
+| `ai-system-design/` | AI System Design deep-dives (`/ai-system-design`) |
+| `system-design/` | System Design fundamentals and case studies (`/system-design`) |
+| `question-bank/` | Interview question library: `taxonomy.yaml` (categories and subsections), one YAML file per category, `articles.yaml` (files practice questions inside articles under a subsection) |
+| `companies/` | Company records used for tags and `/companies` |
+| `ml-system-design/` | ML System Design, parked (see feature flags) |
+
+### Feature flags
+
+`apps/web/src/config/features.ts` parks content for later iterations without deleting it:
+
+- `mlSystemDesign` shows the `/ml-system-design` section and the practice questions from its articles.
+- `mlInterviews` shows the interview categories marked `flag: mlInterviews` in `taxonomy.yaml` (ML Fundamentals, Deep Learning, Statistics & Data Science).
+
+Set a flag to `true` and rebuild to bring that content back in the nav, pages, interview library, companies page and home counts.
+
+### Writing System Design content
+
+This repo is the only home for system design content. The old [System-Design](https://github.com/dhanrajsahoo0007/System-Design) repo (an outline of empty files, last commit `869dacb`) was migrated here as outline pages and retired; do not add content anywhere else.
+
+- **Structure:** `apps/web/content/system-design/<hub>.mdx` is a hub (`fundamentals`, `databases`, `patterns`, `case-studies`, ordered by the `order` frontmatter field) whose `<ModelCategory>`/`<ModelCard>` blocks drive the hub page and the sidebar. Articles live in `apps/web/content/system-design/<hub>/<slug>.mdx`.
+- **Adding a topic:** create the article file and add a `<ModelCard title icon description href>` to its hub. Icons must exist in `apps/web/src/lib/icons.ts`. Quote frontmatter values that contain a colon.
+- **Article template** (the same one AI System Design uses): TL;DR, the idea in plain English, core concepts, an architecture Mermaid diagram, a deep dive, a trade-offs table, real-world examples, common pitfalls, how to answer in an interview, further reading, and `<InterviewQuestions>` practice questions.
+- **Finishing an outline page:** outline pages carry `status: outline` in their frontmatter and `status="outline"` on their hub card, which shows an "Outline" badge and keeps them out of the home page's article count. Remove both when the article is written.
+- **Interview questions:** the build fails if an article with `<InterviewQuestion>` blocks is not mapped in `question-bank/articles.yaml`. When the first System Design article gets questions, add a "System Design" category to `taxonomy.yaml` with subsections mirroring the hubs, then map each article to its subsection.
+- **Writing order:** (1) requirements and APIs, (2) client-server communication, (3) storage data structures, (4) replication, (5) distributed infrastructure case studies (rate limiter, key-value store, URL shortener, message queue, typeahead), (6) the remaining case study groups, (7) design patterns, networking and security.
+
+### Follow-ups
+
+- The database still has the old learning-path catalog (`learning_paths` and `modules` tables, `/api/v1/catalog`, `scripts/seed.mjs`), which the site no longer shows. Removing it needs a migration.
 
 ## Full stack in Docker (Postgres + Redis + Next.js)
 
