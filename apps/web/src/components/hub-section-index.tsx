@@ -21,7 +21,7 @@ export async function HubSectionIndex({
 
   return (
     <SectionIndex breadcrumbLabel={label} title={title} subtitle={subtitle}>
-      {topLevel.flatMap((slug) => {
+      {meta.map((m) => m.slug).filter((s) => topLevel.includes(s)).flatMap((slug) => {
         const m = meta.find((x) => x.slug === slug);
         const childCount = (children[slug] ?? []).length;
 

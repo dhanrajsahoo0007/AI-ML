@@ -8,6 +8,7 @@ import {
   partitionSlugs,
 } from "@/lib/mdx-doc";
 import { getCategories } from "@/lib/question-bank";
+import { isSectionEnabled } from "@/config/features";
 import type { ContentSection } from "@/types/content";
 
 export interface NavItem {
@@ -44,11 +45,11 @@ const sectionDefs: {
   href: string;
   icon: string;
 }[] = [
-  { key: "learning-paths", label: "Learning Paths", href: "/learning-paths", icon: "book-open" },
-  { key: "interviews", label: "Interviews", href: "/interviews", icon: "brain" },
-  { key: "system-design", label: "ML System Design", href: "/system-design", icon: "layers" },
   { key: "ai-system-design", label: "AI System Design", href: "/ai-system-design", icon: "sparkles" },
+  { key: "system-design", label: "System Design", href: "/system-design", icon: "layers" },
+  { key: "interviews", label: "Interviews", href: "/interviews", icon: "brain" },
   { key: "companies", label: "Companies", href: "/companies", icon: "users" },
+  { key: "ml-system-design", label: "ML System Design", href: "/ml-system-design", icon: "server" },
 ];
 
 function extractCategoryMapping(
@@ -121,7 +122,7 @@ async function buildGroupsForSection(
 
   const groups: NavGroup[] = [];
 
-  for (const slug of topLevel) {
+  for (const slug of metas.map((m) => m.slug).filter((s) => topLevel.includes(s))) {
     const meta = metas.find((m) => m.slug === slug);
     const childSlugs = children[slug];
 
@@ -224,7 +225,7 @@ export async function getNavTree(): Promise<NavSection[]> {
 
   const sections: NavSection[] = [];
 
-  for (const def of sectionDefs) {
+  for (const def of sectionDefs.filter((d) => isSectionEnabled(d.key))) {
     const groups = await buildGroupsForSection(def.key);
     sections.push({
       key: def.key,

@@ -15,6 +15,6 @@ export default async function SystemDesignPage({
 }) {
   const { slug } = await params;
   return (
-    <SectionDocPage section="system-design" label="ML System Design" slug={slug} />
+    <SectionDocPage section="system-design" label="System Design" slug={slug} />
   );
 }

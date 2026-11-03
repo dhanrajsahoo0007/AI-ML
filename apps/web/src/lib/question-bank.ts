@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import matter from "gray-matter";
+import { features, isPathEnabled, type FeatureFlag } from "@/config/features";
 
 // The interview question library: every question has a category and subsection from
 // content/question-bank/taxonomy.yaml. Questions come from two places:
@@ -51,6 +52,8 @@ export interface Category {
   description: string;
   study: LinkRef[];
   subsections: Subsection[];
+  /** Feature flag that must be on for the category to be shown. */
+  flag?: FeatureFlag;
 }
 
 export interface Company {
@@ -85,7 +88,7 @@ function readYaml<T>(file: string): T {
   return yaml.load(fs.readFileSync(file, "utf8")) as T;
 }
 
-// Resolves a site path such as /learning-paths/llms to its MDX file and title.
+// Resolves a site path such as /ai-system-design/genai-system-design to its MDX file and title.
 function resolvePage(href: string): LinkRef | null {
   const file = path.join(CONTENT, `${href}.mdx`);
   if (!href.startsWith("/") || !fs.existsSync(file)) return null;
@@ -105,6 +108,7 @@ function loadTaxonomy(errors: string[]): Category[] {
     if (seen.has(c.slug)) errors.push(`taxonomy: duplicate category ${c.slug}`);
     seen.add(c.slug);
     if (!CATEGORY_GROUPS.includes(c.group)) errors.push(`taxonomy ${c.slug}: unknown group ${c.group}`);
+    if (c.flag !== undefined && !(c.flag in features)) errors.push(`taxonomy ${c.slug}: unknown flag ${c.flag}`);
     const subs = new Set<string>();
     for (const s of c.subsections) {
       if (subs.has(s.slug)) errors.push(`taxonomy ${c.slug}: duplicate subsection ${s.slug}`);
@@ -240,8 +244,10 @@ function loadArticleQuestions(
     }
   }
   // Every article with practice questions must be filed somewhere.
-  for (const section of ["ai-system-design", "learning-paths", "system-design"]) {
-    for (const rel of fs.readdirSync(path.join(CONTENT, section), { recursive: true }) as string[]) {
+  for (const section of ["ai-system-design", "system-design", "ml-system-design"]) {
+    const dir = path.join(CONTENT, section);
+    if (!fs.existsSync(dir)) continue;
+    for (const rel of fs.readdirSync(dir, { recursive: true }) as string[]) {
       if (!rel.endsWith(".mdx")) continue;
       const href = `/${section}/${rel.replace(/\.mdx$/, "")}`;
       if (!(href in map) && fs.readFileSync(path.join(CONTENT, section, rel), "utf8").includes("<InterviewQuestion ")) {
@@ -290,12 +296,24 @@ function load(): Library {
   return cache;
 }
 
+// Everything is loaded and validated, but readers only see categories whose flag is on, and
+// links and article questions from sections that are switched off are left out.
+function isCategoryVisible(c: Category) {
+  return !c.flag || features[c.flag];
+}
+
+function visibleLink(link?: LinkRef) {
+  return link && isPathEnabled(link.href) ? link : undefined;
+}
+
 export function getCategories() {
-  return load().categories;
+  return load()
+    .categories.filter(isCategoryVisible)
+    .map((c) => ({ ...c, study: c.study.filter((s) => isPathEnabled(s.href)) }));
 }
 
 export function getCategory(slug: string) {
-  return load().categories.find((c) => c.slug === slug);
+  return getCategories().find((c) => c.slug === slug);
 }
 
 export function getQuestions({
@@ -303,12 +321,17 @@ export function getQuestions({
   subcategory,
   company,
 }: { category?: string; subcategory?: string; company?: string } = {}) {
-  return load().questions.filter(
-    (q) =>
-      (!category || q.category === category) &&
-      (!subcategory || q.subcategory === subcategory) &&
-      (!company || q.companies.includes(company))
-  );
+  const visible = new Set(getCategories().map((c) => c.slug));
+  return load()
+    .questions.filter(
+      (q) =>
+        visible.has(q.category) &&
+        !(q.source === "article" && !visibleLink(q.related)) &&
+        (!category || q.category === category) &&
+        (!subcategory || q.subcategory === subcategory) &&
+        (!company || q.companies.includes(company))
+    )
+    .map((q) => (q.related && !visibleLink(q.related) ? { ...q, related: undefined } : q));
 }
 
 export function getCompanies() {

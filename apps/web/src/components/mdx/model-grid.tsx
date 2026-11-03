@@ -46,11 +46,14 @@ export function ModelCard({
   icon,
   description,
   href,
+  status,
 }: {
   title: string;
   icon: string;
   description: string;
   href: string;
+  /** "outline" marks a planned page that is not written yet. */
+  status?: "outline";
 }) {
   return (
     <Link
@@ -61,10 +64,17 @@ export function ModelCard({
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-paper-2 text-primary [&_svg]:size-4">
           {resolveIcon(icon)}
         </span>
-        <ArrowRight
-          aria-hidden
-          className="size-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1 group-hover:text-ink"
-        />
+        <span className="flex items-center gap-2">
+          {status === "outline" && (
+            <span className="rounded-full border border-hairline px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+              Outline
+            </span>
+          )}
+          <ArrowRight
+            aria-hidden
+            className="size-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1 group-hover:text-ink"
+          />
+        </span>
       </div>
       <h3 className="!mt-5 font-display text-lg leading-snug text-ink">
         {title}

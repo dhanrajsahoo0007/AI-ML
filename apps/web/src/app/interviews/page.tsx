@@ -22,12 +22,12 @@ export default function InterviewsIndexPage() {
         <PageHeader
           className="mt-10 mb-12 border-b border-hairline pb-12 sm:mb-16"
           title="Interview questions"
-          lead={`${total.toLocaleString("en-US")} AI, data science and ML interview questions with clear answers, organized by topic and subtopic and tagged with the companies reported to ask them. Filter by difficulty and company, search, and keep answers hidden until you are ready.`}
+          lead={`${total.toLocaleString("en-US")} AI interview questions with clear answers, organized by topic and subtopic and tagged with the companies reported to ask them. Filter by difficulty and company, search, and keep answers hidden until you are ready.`}
         />
       </FadeIn>
 
       <div className="space-y-16">
-        {CATEGORY_GROUPS.map((group, i) => (
+        {CATEGORY_GROUPS.filter((g) => categories.some((c) => c.group === g)).map((group, i) => (
           <section key={group}>
             <Eyebrow index={String(i + 1).padStart(2, "0")} className="mb-6">
               {group}

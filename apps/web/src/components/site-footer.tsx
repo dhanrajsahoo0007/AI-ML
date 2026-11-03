@@ -12,8 +12,8 @@ export function SiteFooter() {
             From scratch to <em className="text-primary">job-ready AI.</em>
           </p>
           <p className="mt-4 max-w-md text-[15px] leading-relaxed text-muted-foreground">
-            Learning paths, interview drills and ML system design notes in one
-            place.
+            AI system design deep-dives, system design case studies and
+            interview drills in one place.
           </p>
         </div>
 
