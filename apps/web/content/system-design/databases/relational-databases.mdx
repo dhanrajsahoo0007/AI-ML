@@ -1,0 +1,163 @@
+---
+title: "Relational (SQL)"
+description: "Tables, joins and ACID transactions; the default choice and how far it scales."
+---
+
+A relational database stores data in tables with a fixed schema and lets you ask any question of it with SQL. It is the safest default in system design: start here and move away only when a requirement forces you to.
+
+<DbProfile id="relational" />
+
+## How the data looks
+
+The same small social app is used on every database page, so you can compare the shapes. Here it is normalized: each fact is stored once, and relationships are foreign keys.
+
+<DataModelView title="Social app: users, posts, likes">
+<DataModelTab label="The schema">
+
+```sql
+CREATE TABLE users (
+  id         BIGINT PRIMARY KEY,
+  handle     TEXT UNIQUE NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE posts (
+  id         BIGINT PRIMARY KEY,
+  author_id  BIGINT NOT NULL REFERENCES users(id),
+  body       TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX posts_by_author ON posts (author_id, created_at DESC);
+
+CREATE TABLE likes (
+  user_id BIGINT REFERENCES users(id),
+  post_id BIGINT REFERENCES posts(id),
+  PRIMARY KEY (user_id, post_id)   -- a user can like a post only once
+);
+```
+
+</DataModelTab>
+<DataModelTab label="The query">
+
+```sql
+-- A user's 20 latest posts with like counts: one query, any shape you need.
+SELECT p.id, p.body, count(l.user_id) AS likes
+FROM posts p
+LEFT JOIN likes l ON l.post_id = p.id
+WHERE p.author_id = 42
+GROUP BY p.id
+ORDER BY p.created_at DESC
+LIMIT 20;
+```
+
+</DataModelTab>
+<DataModelTab label="The transaction">
+
+```sql
+-- Transfer credits: both updates happen, or neither does.
+BEGIN;
+UPDATE wallets SET balance = balance - 100 WHERE user_id = 1 AND balance >= 100;
+UPDATE wallets SET balance = balance + 100 WHERE user_id = 2;
+INSERT INTO ledger (from_user, to_user, amount) VALUES (1, 2, 100);
+COMMIT;
+```
+
+</DataModelTab>
+</DataModelView>
+
+## Why it's fast (and where it isn't)
+
+- **B-tree indexes** turn a lookup into 3–4 page reads, even over billions of rows. See [B-Trees](/system-design/databases/b-trees).
+- **The query planner** picks indexes and join orders for you, so new questions don't need new code.
+- **The buffer pool** keeps hot pages in memory, so most reads never touch disk.
+- **Where it slows down:** every write goes to one primary, joins across huge tables get expensive, and scans of whole tables (analytics) read every column of every row.
+
+## Scaling a relational database
+
+Scale in this order. Each step is more work than the one before it.
+
+<AnimatedDiagram name="databases/read-scaling" caption="Read-heavy scaling: replicas, then a cache, then the edge" step={1} stepper minWidth={620} />
+
+| Step | Fixes | Cost |
+|---|---|---|
+| **Bigger machine** (vertical) | Everything, for a while | Price, and a ceiling |
+| **Indexes + query tuning** | Slow reads | Slightly slower writes |
+| **Read replicas** | Read volume | Replication lag ([Single-Leader Replication](/system-design/databases/single-leader-replication)) |
+| **Cache** (Redis) | Hot reads | Invalidation ([Caching](/system-design/patterns/caching)) |
+| **Partitioning** (within one DB) | Huge tables, cheap deletes of old data | Queries must include the partition key |
+| **Sharding** (across DBs) | Write volume, data size | Cross-shard joins and transactions ([Sharding](/system-design/patterns/sharding)) |
+| **Distributed SQL** | All of the above, automatically | Latency and cost ([NewSQL](/system-design/databases/newsql-databases)) |
+
+<Callout tone="green" title="How far one Postgres goes" icon="gauge">
+  A well-tuned primary on modern hardware handles tens of thousands of writes per second and several terabytes of data. Add replicas and a cache, and the read side scales much further. Most interview systems never need to shard the relational part.
+</Callout>
+
+## Isolation levels in one table
+
+Transactions are only as safe as their isolation level. Postgres defaults to Read Committed.
+
+| Level | Prevents | Still allows | Use for |
+|---|---|---|---|
+| Read Committed | Dirty reads | Lost updates, write skew | Most CRUD |
+| Repeatable Read / Snapshot | Non-repeatable reads | Write skew | Reports, consistent reads |
+| Serializable | Everything | Nothing; retries on conflict | Money, inventory, bookings |
+
+Two common ways to avoid double-booking: `SELECT ... FOR UPDATE` (pessimistic locking), or a `version` column checked on update (optimistic locking).
+
+## Workload scenarios
+
+<ScenarioGrid>
+  <ScenarioCard workload="Transactions" title="Hotel booking" problem="Two users try to book the last room at the same moment. Exactly one must win, and payments must match bookings." pick="PostgreSQL with a unique constraint or SELECT … FOR UPDATE">
+    Put a unique constraint on `(room_id, night)` so the database itself rejects the second booking. Or lock the inventory row inside the transaction. Both rely on ACID guarantees that most NoSQL stores don't give you.
+  </ScenarioCard>
+  <ScenarioCard workload="Read-heavy" title="User profiles at 50K reads/s" problem="Profiles change rarely but are read on every page view, at a 200:1 read-to-write ratio." pick="Postgres primary + read replicas + Redis cache-aside">
+    The writes fit easily on one primary. Cache profiles by user id with a TTL, and delete the key on update. Replicas absorb cache misses. After a user edits their own profile, read it from the primary for a few seconds so they never see the old version.
+  </ScenarioCard>
+  <ScenarioCard workload="Write-heavy" title="Multi-tenant SaaS outgrows one primary" problem="10,000 customer workspaces, the primary is at 80% CPU, and almost every query filters by workspace_id." pick="Shard Postgres by workspace_id">
+    Each workspace lives entirely on one shard, so transactions and joins still work inside it. A routing layer maps workspace to shard. Notion and Figma both did this instead of moving off Postgres.
+  </ScenarioCard>
+</ScenarioGrid>
+
+## In the wild
+
+- **Instagram** ran on sharded PostgreSQL, with IDs that encode the shard number. See [Unique ID Generation](/system-design/patterns/unique-id-generation).
+- **Notion** sharded its block table across 480 logical shards by workspace id, routed in application code.
+- **Figma** scaled Postgres about 100× and then sharded horizontally behind its own query proxy (DBProxy).
+- **Stripe** and most banks keep money movements in relational, transactional stores.
+
+## Common pitfalls
+
+- **N+1 queries**: one query per row in a loop instead of a join or `IN (...)`.
+- **Missing or wrong indexes**: an index on `(a, b)` doesn't help a query that filters only on `b`.
+- **Long transactions** that hold locks and block vacuum.
+- **Sharding too early**: you lose joins and transactions for scale you don't yet need.
+
+## How to answer in an interview
+
+> "Users, orders and payments are relational and need transactions, so they go in **PostgreSQL**. At about 3K writes/s a single primary is fine. Reads are 50:1, so I'll add **read replicas and Redis**. If writes grow 10×, I'll shard by `user_id`, since every query is already scoped to a user."
+
+## Related
+
+[Choosing a Database](/system-design/databases/choosing-a-database) · [NewSQL](/system-design/databases/newsql-databases) · [B-Trees](/system-design/databases/b-trees) · [Sharding](/system-design/patterns/sharding) · [Caching](/system-design/patterns/caching) · [Idempotency](/system-design/patterns/idempotency)
+
+## Further reading
+
+- [Use The Index, Luke: SQL indexing explained](https://use-the-index-luke.com/)
+- [Sharding Postgres at Notion](https://www.notion.com/blog/sharding-postgres-at-notion)
+- [How Figma's databases team lived to tell the scale](https://www.figma.com/blog/how-figmas-databases-team-lived-to-tell-the-scale/)
+- Martin Kleppmann, *Designing Data-Intensive Applications*, chapter 7 (transactions)
+
+<InterviewQuestions>
+  <InterviewQuestion question="When would you choose a relational database over NoSQL?" category="Concepts" level="Junior">
+    When the data has relationships you'll join on, when you need multi-row transactions (money, inventory, bookings), or when query patterns aren't known yet. SQL lets you ask new questions without remodeling the data. A single primary also handles more load than most systems need.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you prevent two users from booking the same seat?" category="Consistency" level="Mid">
+    Let the database enforce it. Either use a unique constraint on (seat, event) so the second insert fails, or lock the seat row with SELECT … FOR UPDATE inside the transaction, or use optimistic locking with a version column and retry on conflict. For high contention, add a short-lived hold (reservation with expiry) before payment.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your Postgres primary is at 90% CPU. Walk through your options." category="Scaling" level="Senior">
+    First find out whether reads or writes are the cause. For reads: fix slow queries and indexes, move reads to replicas, and add a cache. For writes: batch them, drop unused indexes, move append-only or analytical data to another store, then scale vertically. If writes still don't fit, shard by the key most queries filter on (tenant or user), or move to a distributed SQL database.
+  </InterviewQuestion>
+  <InterviewQuestion question="What problems do read replicas introduce?" category="Consistency" level="Mid">
+    Replication is usually asynchronous, so replicas lag. A user can write and then not see their own change (read-your-writes violation), or see data jump backwards between replicas. Fix this by reading from the leader for a short time after a user's own writes, pinning a user to one replica, or waiting for the replica to reach a known log position.
+  </InterviewQuestion>
+</InterviewQuestions>

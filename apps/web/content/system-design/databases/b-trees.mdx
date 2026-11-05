@@ -1,9 +1,106 @@
 ---
 title: "B-Trees"
 description: "Page-oriented balanced trees, write-ahead logs, and B-trees vs LSM trees."
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+The B-tree is the index behind almost every relational database (PostgreSQL, MySQL InnoDB, SQL Server, Oracle) and many others. It keeps keys sorted in fixed-size pages, so any key can be found in 3–4 page reads, even among billions of rows.
 
-**What it will cover:** page-oriented balanced trees, write-ahead logs, and B-trees vs LSM trees.
+## TL;DR
+
+- Data is split into **pages** (4–16 KB). Each page holds many sorted keys and pointers to child pages.
+- The tree is **wide and shallow**: with ~500 keys per page, 4 levels index about 60 billion keys.
+- **Lookups and range scans** are fast: walk from root to leaf, then follow linked leaves.
+- **Writes update pages in place**, protected by a **write-ahead log (WAL)** for crash safety.
+- Compared to **LSM trees**: faster, more predictable reads; slower random writes.
+
+## The idea in plain English
+
+Think of a phone book's index tabs. The first tab tells you which section holds "M". That section's tab tells you which page holds "Mo". The page has the entry. Each step narrows the search by a factor of hundreds, because each "tab" (page) holds hundreds of keys.
+
+## How a lookup works
+
+<AnimatedDiagram name="databases/btree-lookup" caption="Root → internal → leaf: three page reads to find id 342" step={1} stepper minWidth={680} />
+
+## Core concepts
+
+1. **Pages.** The unit of disk I/O. A page holds sorted keys and either child pointers (internal pages) or row data / row pointers (leaf pages).
+2. **Branching factor.** How many children a page has, typically in the hundreds. A high branching factor keeps the tree to 3–4 levels.
+3. **Balanced.** Every leaf is at the same depth, so every lookup costs the same number of page reads.
+4. **Splits.** Inserting into a full page splits it in two and pushes a separator key up to the parent. The root splitting is the only way the tree grows taller.
+5. **Linked leaves (B+ tree).** Leaves point to their neighbors, so `WHERE id BETWEEN 300 AND 500` walks sideways without going back up the tree.
+6. **Write-ahead log.** Every change is appended to the WAL and flushed *before* pages are modified. After a crash, the WAL is replayed so half-written pages are repaired.
+7. **Buffer pool.** Hot pages (always the root and upper levels) stay cached in memory, so a lookup often costs one disk read or none.
+
+## What the index can and can't do
+
+```sql
+CREATE INDEX orders_user_time ON orders (user_id, created_at);
+
+-- ✓ uses the index: equality on the first column, range on the second
+SELECT * FROM orders WHERE user_id = 42 AND created_at > now() - interval '7 days';
+
+-- ✓ uses the index: sorted output comes for free
+SELECT * FROM orders WHERE user_id = 42 ORDER BY created_at DESC LIMIT 20;
+
+-- ✗ can't use it: skips the leading column
+SELECT * FROM orders WHERE created_at > now() - interval '7 days';
+
+-- ✗ can't use a B-tree: leading wildcard
+SELECT * FROM products WHERE name LIKE '%shoe%';
+```
+
+Column order in a composite index matters. Put equality columns first and range columns last.
+
+## B-tree vs LSM tree
+
+| | B-tree | LSM tree |
+|---|---|---|
+| Write pattern | Random in-place page updates | Sequential appends, merged later |
+| Write throughput | Good | Excellent |
+| Read latency | Predictable: one path, root to leaf | Variable: may check memtable + several SSTables |
+| Range scans | Excellent (linked leaves) | Good (merge across files) |
+| Write amplification | WAL + full page writes | Compaction rewrites data several times |
+| Space | Pages ~50–70% full after splits | Compact after compaction; temporary bloat before |
+| Used by | PostgreSQL, MySQL InnoDB, SQL Server | Cassandra, RocksDB, ScyllaDB, LevelDB, HBase |
+
+See [LSM Trees](/system-design/databases/lsm-trees) for the other side.
+
+## Real-world examples
+
+- **PostgreSQL** uses B-tree indexes by default. Tables are heaps, and leaves point to row locations.
+- **MySQL InnoDB** stores the table itself as a B+ tree clustered on the primary key, and secondary indexes point to the primary key.
+- **SQLite, LMDB and BoltDB** are B-tree based key-value stores.
+- See [Relational Databases](/system-design/databases/relational-databases) for how this shapes scaling.
+
+## Common pitfalls
+
+- **Random UUID primary keys in a clustered index**: inserts land on random pages, which causes splits and cache misses. Prefer time-ordered ids (UUIDv7, Snowflake).
+- **Too many indexes**: every insert updates every index.
+- **Wrong column order** in composite indexes.
+- **Low-selectivity indexes** (on a boolean column): the planner ignores them, but you still pay to maintain them.
+
+## How to answer in an interview
+
+"Relational databases index with B-trees: sorted pages, 3–4 levels deep, so a lookup is a handful of page reads, mostly from cache. Writes update pages in place behind a WAL. That gives predictable reads and good range scans, at the cost of random write I/O compared to an LSM-tree store."
+
+## Related
+
+[LSM Trees](/system-design/databases/lsm-trees) · [Relational Databases](/system-design/databases/relational-databases) · [SSTables](/system-design/databases/sstables) · [Choosing a Database](/system-design/databases/choosing-a-database)
+
+## Further reading
+
+- [Use The Index, Luke: anatomy of an index](https://use-the-index-luke.com/sql/anatomy)
+- [PostgreSQL B-tree index implementation](https://www.postgresql.org/docs/current/btree.html)
+- Martin Kleppmann, *Designing Data-Intensive Applications*, chapter 3 (B-trees, comparing B-trees and LSM-trees)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is a B-tree only 3–4 levels deep even for billions of rows?" category="Internals" level="Mid">
+    Each page holds hundreds of keys, so each level multiplies the number of reachable entries by the branching factor. With about 500 children per page, 3 levels cover 125M keys and 4 levels about 60B. The root and upper levels are almost always cached, so a lookup typically costs one or two disk reads.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the write-ahead log for?" category="Internals" level="Mid">
+    Durability and crash recovery. A change is appended to the sequential WAL and flushed before the data pages are modified in place. If the server crashes mid-update, recovery replays the WAL to redo committed changes and repair torn pages. The WAL also feeds replication and change data capture.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why can random UUIDs as primary keys hurt insert performance?" category="Performance" level="Senior">
+    In a clustered B-tree (InnoDB) or any index on the key, sequential keys append to the rightmost leaf, which stays hot in cache. Random keys insert into random leaves across the whole tree, causing page splits, half-empty pages, cache misses and extra WAL volume. Time-ordered ids such as UUIDv7 or Snowflake keep inserts local.
+  </InterviewQuestion>
+</InterviewQuestions>

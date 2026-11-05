@@ -1,11 +1,108 @@
 ---
 title: "Inverted Index"
 description: "Term-to-document postings that power full-text search."
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+An inverted index maps each **term** to the list of documents that contain it, the opposite of a document listing its words. It's the core of every search engine, from Lucene (Elasticsearch, OpenSearch, Solr) to web search.
 
-**What it will cover:** term-to-document postings that power full-text search.
+## TL;DR
 
-**Related reading on this site:** [Search Ranking System](/ai-system-design/genai-system-design/search-ranking-system)
+- **Analysis** turns text into terms: tokenize, lowercase, remove stop words, stem.
+- Each term has a **postings list**: sorted doc ids, plus term frequency and positions.
+- A query is analyzed the same way, its postings lists are **intersected or unioned**, and matches are **scored** (BM25).
+- Indexes are built as immutable **segments** that are merged in the background, much like LSM trees.
+
+## The idea in plain English
+
+It's the index at the back of a textbook. To find "replication", you don't read every page. You look up the word and get page numbers 112, 140 and 301.
+
+## Index time and query time
+
+<AnimatedDiagram name="databases/inverted-index" caption="Analyze, store postings, look up, combine, rank" step={1} stepper minWidth={680} />
+
+## Core concepts
+
+1. **Analyzer.** A pipeline of character filters → tokenizer → token filters (lowercase, stop words, stemming "running" → "run", synonyms). Index and query must use the same analyzer or terms won't match.
+2. **Term dictionary.** All distinct terms, sorted, often stored as a finite-state transducer, so lookups and prefix/fuzzy searches are fast.
+3. **Postings list.** For each term: sorted doc ids (delta-encoded and compressed), frequency per doc, and positions for phrase queries.
+4. **Boolean retrieval.** AND = intersect postings, OR = union, NOT = subtract. Sorted lists make these linear merges, with skip pointers to jump ahead.
+5. **Scoring (BM25).** Rewards terms that appear often in a document (with diminishing returns), terms that are rare across the corpus, and shorter documents.
+6. **Segments.** New documents go into small immutable segments that become searchable after a refresh (~1 s). Background merges combine segments. Deletes are marked, then dropped on merge.
+
+## A tiny example
+
+```text
+doc 1: "Red running shoes"
+doc 2: "Red dress"
+doc 3: "Trail running shoe"
+
+After analysis (lowercase + stem):
+  dress → [2]
+  red   → [1, 2]
+  run   → [1, 3]
+  shoe  → [1, 3]
+  trail → [3]
+
+Query "red running shoes" → terms [red, run, shoe]
+  AND: [1,2] ∩ [1,3] ∩ [1,3] = [1]
+  OR + BM25: doc 1 (3 terms) > doc 3 (2 rare-ish terms) > doc 2 (1 term)
+```
+
+## Beyond single words
+
+| Need | Technique |
+|---|---|
+| Phrase "running shoes" | Positions in postings: terms must be adjacent |
+| Typos ("shoees") | Fuzzy search: terms within edit distance 1–2 (Levenshtein automata on the term dictionary) |
+| Prefix / typeahead | Edge n-grams at index time, or prefix walks on the term dictionary |
+| Substring ("%oes") | n-gram indexes; see [Suffix Tree](/system-design/databases/suffix-tree) |
+| Meaning, not words | Vector search; see [Vector Databases](/system-design/databases/vector-databases) |
+
+## Trade-offs
+
+| Choice | Gain | Cost |
+|---|---|---|
+| Aggressive stemming | More recall ("run" matches "running") | Less precision ("universe" vs "university") |
+| Storing positions | Phrase queries | Bigger index |
+| Short refresh interval | Fresher results | More small segments, more merging |
+| n-gram fields | Substring and typeahead matches | Index several times larger |
+
+## Real-world examples
+
+- **Lucene** powers Elasticsearch, OpenSearch and Solr. See [Search Engines](/system-design/databases/search-engines).
+- **Postgres full-text search** uses `tsvector` columns with GIN indexes, which are inverted indexes inside Postgres.
+- **Web search engines** shard the inverted index by document across thousands of machines and merge the top results from each.
+- **Typeahead** systems use prefix structures built on the same ideas. See the [Typeahead case study](/system-design/case-studies/typeahead).
+
+## Common pitfalls
+
+- **Different analyzers at index and query time**: nothing matches.
+- **Indexing everything as `text`**: you can't filter, sort or aggregate on exact values.
+- **Very frequent terms** ("the") with huge postings lists: remove stop words or rely on BM25's IDF.
+- **Expecting instant visibility**: new documents appear only after the next refresh.
+
+## How to answer in an interview
+
+"Full-text search uses an inverted index: analyze each document into terms, and store a sorted postings list per term. A query is analyzed the same way, postings are intersected or unioned, and results are ranked with BM25. Updates land in new segments that merge in the background, so the index is near real time, about a second behind."
+
+## Related
+
+[Search Engines](/system-design/databases/search-engines) · [Suffix Tree](/system-design/databases/suffix-tree) · [LSM Trees](/system-design/databases/lsm-trees) · [Vector Databases](/system-design/databases/vector-databases) · [Search Ranking System](/ai-system-design/genai-system-design/search-ranking-system)
+
+## Further reading
+
+- Manning, Raghavan and Schütze, [*Introduction to Information Retrieval*](https://nlp.stanford.edu/IR-book/), chapters 1–2 and 6 (free online)
+- [Lucene's index file format](https://lucene.apache.org/core/9_0_0/core/org/apache/lucene/codecs/lucene90/package-summary.html)
+- [Practical BM25 (Elastic blog)](https://www.elastic.co/blog/practical-bm25-part-2-the-bm25-algorithm-and-its-variables)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How does an inverted index answer a multi-word query?" category="Internals" level="Mid">
+    The query is analyzed into terms with the same analyzer used at index time. Each term's sorted postings list is fetched. For AND they're intersected, for OR unioned, using linear merges with skip pointers. Matching documents are scored, typically with BM25 combining term frequency, inverse document frequency and document length, and the top k are returned.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why do new documents take about a second to become searchable?" category="Internals" level="Mid">
+    Lucene writes new documents into an in-memory buffer and makes them searchable only when a refresh creates a new immutable segment, every second by default. That batching keeps indexing throughput high and avoids rebuilding big structures per document. Segments are later merged in the background, much like LSM compaction.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you support typo-tolerant search?" category="Design" level="Mid">
+    Use fuzzy queries that match terms within an edit distance of 1–2, computed efficiently over the term dictionary with Levenshtein automata. Add n-gram or phonetic fields for harder cases, and a "did you mean" suggester built from the term dictionary or query logs. Rank exact matches above fuzzy ones.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,9 +1,89 @@
 ---
 title: "LSM Trees"
 description: "Log-structured merge trees, write amplification and compaction strategies."
-status: outline
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+A log-structured merge tree never updates data in place. It buffers writes in memory, flushes them to disk as sorted immutable files, and merges those files in the background. That turns random writes into sequential ones, which is why Cassandra, RocksDB, ScyllaDB, HBase and many time-series databases use it.
 
-**What it will cover:** log-structured merge trees, write amplification and compaction strategies.
+## TL;DR
+
+- **Write** = append to a WAL + insert into an in-memory sorted **memtable**. Very fast.
+- A full memtable is **flushed** as an immutable sorted file: an **SSTable**.
+- **Reads** check the memtable, then SSTables from newest to oldest. **Bloom filters** skip files that can't contain the key.
+- **Compaction** merges SSTables, dropping overwritten values and deleted keys (tombstones).
+- The trade-off is between **write**, **read** and **space amplification**, and the compaction strategy picks the balance.
+
+## The idea in plain English
+
+Instead of filing every letter into the right folder as it arrives (slow, random access), drop letters into an inbox tray. When the tray is full, sort it and put the stack on a shelf. Every so often, merge the stacks on the shelf into fewer, bigger sorted stacks. To find a letter, check the tray first, then the stacks from newest to oldest.
+
+## Write and read path
+
+<AnimatedDiagram name="databases/lsm-write-path" caption="WAL + memtable, flush to SSTables, compact, read newest first" step={1} stepper minWidth={680} />
+
+## Core concepts
+
+1. **Memtable.** An in-memory sorted structure (often a [skip list](/system-design/databases/skip-list)). Writes and recent reads hit it first.
+2. **WAL / commit log.** Every write is appended here first, so a crash doesn't lose the memtable.
+3. **SSTables.** Immutable files of sorted key-value pairs, each with a sparse index and a Bloom filter. See [SSTables](/system-design/databases/sstables).
+4. **Tombstones.** A delete writes a marker. The old value disappears only when compaction merges the tombstone with it.
+5. **Bloom filters.** A small per-SSTable bit array that answers "definitely not here" or "maybe here", which saves most disk reads for missing keys. See [Bloom Filter](/system-design/patterns/bloom-filter).
+6. **Compaction.** Background merge-sort of SSTables that keeps only the newest value per key.
+
+## Compaction strategies
+
+| Strategy | How | Good for | Cost |
+|---|---|---|---|
+| **Size-tiered** (Cassandra default) | Merge several similar-sized SSTables into one bigger one | Write-heavy workloads | A key may live in many files (read amplification); up to 2× temporary space |
+| **Leveled** (RocksDB, LevelDB) | Levels L0, L1, …, each ~10× bigger with non-overlapping ranges | Read-heavy, updates | More rewriting (write amplification) |
+| **Time-window** | Group SSTables by time window, never merge across windows | Time series with TTL | Only fits data that expires by time |
+
+## The three amplifications
+
+| | Meaning | LSM | B-tree |
+|---|---|---|---|
+| **Write amplification** | Bytes written to disk per byte of user data | Compaction rewrites data several times (10–30× for leveled) | WAL + whole-page writes |
+| **Read amplification** | Disk reads per lookup | Several files, mitigated by Bloom filters | One root-to-leaf path |
+| **Space amplification** | Disk used / live data | Stale versions until compaction | Partially full pages |
+
+You can't minimize all three at once. Tuning an LSM store is choosing which one to sacrifice.
+
+## Real-world examples
+
+- **Cassandra and ScyllaDB**: commit log + memtable + SSTables. See [Wide-Column Stores](/system-design/databases/wide-column-stores).
+- **RocksDB** (from LevelDB) is embedded in MySQL's MyRocks, CockroachDB's storage engine (now Pebble, a RocksDB-inspired engine), Kafka Streams state stores and many more.
+- **Bigtable / HBase** introduced the memtable + SSTable design at Google.
+- **InfluxDB** uses a time-structured merge tree, an LSM variant for time series.
+
+## Common pitfalls
+
+- **Delete-heavy workloads**: tombstones pile up and reads scan through them. Cassandra queues that delete constantly are a classic failure.
+- **Compaction falling behind**: SSTable counts grow, reads slow down and disk fills up.
+- **Choosing size-tiered for update-heavy data**: old versions linger in many files.
+- **Ignoring write stalls**: when L0 fills faster than compaction drains it, the engine throttles writes.
+
+## How to answer in an interview
+
+"For write-heavy data I'd pick an LSM-based store like Cassandra or RocksDB. Writes are sequential appends to a WAL and memtable, flushed as SSTables and merged by compaction. Reads use Bloom filters to skip files. I'd choose leveled compaction if reads matter more, or size-tiered or time-window compaction for append-only, TTL'd data."
+
+## Related
+
+[B-Trees](/system-design/databases/b-trees) · [SSTables](/system-design/databases/sstables) · [Skip List](/system-design/databases/skip-list) · [Bloom Filter](/system-design/patterns/bloom-filter) · [Wide-Column Stores](/system-design/databases/wide-column-stores)
+
+## Further reading
+
+- [The log-structured merge-tree (O'Neil et al., 1996)](https://www.cs.umb.edu/~poneil/lsmtree.pdf)
+- [RocksDB wiki: compaction](https://github.com/facebook/rocksdb/wiki/Compaction)
+- Martin Kleppmann, *Designing Data-Intensive Applications*, chapter 3 (SSTables and LSM-trees)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why are LSM trees better for write-heavy workloads than B-trees?" category="Internals" level="Mid">
+    An LSM write is a sequential WAL append plus an in-memory insert, with no read-modify-write of on-disk pages. Data reaches disk in large sorted sequential flushes. B-trees update random pages in place, which costs random I/O per write. The LSM price is paid later in compaction and on reads, which may check several files.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does an LSM tree handle deletes?" category="Internals" level="Mid">
+    It writes a tombstone, a marker saying the key is deleted. Reads that find the tombstone treat the key as gone. Only when compaction merges the tombstone with older versions (after a grace period, so replicas also see it) is the data actually removed. Heavy deletes therefore create many tombstones that slow reads until compaction catches up.
+  </InterviewQuestion>
+  <InterviewQuestion question="Leveled vs size-tiered compaction: which would you pick?" category="Trade-offs" level="Senior">
+    Size-tiered gives the lowest write amplification and suits write-heavy, append-mostly data, but a key can be spread over many SSTables and it needs headroom for big merges. Leveled keeps non-overlapping ranges per level, so a read touches about one file per level, which is better for read-heavy or update-heavy data, at the cost of more rewriting. For TTL'd time series, use time-window compaction.
+  </InterviewQuestion>
+</InterviewQuestions>

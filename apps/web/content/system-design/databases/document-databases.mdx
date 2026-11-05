@@ -1,0 +1,139 @@
+---
+title: "Document Databases"
+description: "JSON documents shaped like your app's objects: catalogs, profiles and content."
+---
+
+A document database stores each entity as a self-contained JSON document, nested the way your application reads it. One read returns the whole object, with no joins.
+
+<DbProfile id="document" />
+
+## How the data looks
+
+The key design question is **embed or reference?** Embed data that is read together and bounded in size. Reference data that is shared or grows without limit.
+
+<DataModelView title="Social app: a post document">
+<DataModelTab label="Embedded (good)">
+
+```json
+{
+  "_id": "post_1001",
+  "author": { "id": "user_42", "handle": "ada", "avatar": "…/ada.png" },
+  "body": "Shipped the new search!",
+  "tags": ["search", "launch"],
+  "media": [{ "type": "image", "url": "s3://…/1.png", "w": 1200, "h": 800 }],
+  "likeCount": 5821,
+  "recentComments": [
+    { "by": "bob", "text": "Nice!", "at": "2026-11-05T10:31:00Z" }
+  ],
+  "createdAt": "2026-11-05T10:00:00Z"
+}
+```
+
+</DataModelTab>
+<DataModelTab label="Referenced (when it grows)">
+
+```json
+// posts collection: keep the post small
+{ "_id": "post_1001", "authorId": "user_42", "body": "…", "likeCount": 5821 }
+
+// comments collection: unbounded, so one document per comment
+{ "_id": "c_9", "postId": "post_1001", "by": "bob", "text": "Nice!", "at": "…" }
+// index: { postId: 1, at: -1 }
+```
+
+</DataModelTab>
+<DataModelTab label="The query">
+
+```js
+// One read returns everything the post page needs
+db.posts.findOne({ _id: "post_1001" })
+
+// Query by any indexed field, including inside arrays
+db.posts.find({ tags: "search", likeCount: { $gt: 1000 } })
+        .sort({ createdAt: -1 }).limit(20)
+
+// Aggregation pipeline
+db.posts.aggregate([
+  { $match: { "author.id": "user_42" } },
+  { $group: { _id: null, totalLikes: { $sum: "$likeCount" } } }
+])
+```
+
+</DataModelTab>
+</DataModelView>
+
+<Callout tone="orange" title="The duplication trade-off" icon="alert-triangle">
+  The post above copies the author's handle and avatar. Reads are fast, but if Ada changes her avatar, every one of her posts is stale until you update them (or accept it). Document modeling trades write-time work for read-time speed.
+</Callout>
+
+## Why it's fast (and where it isn't)
+
+- **Locality**: the whole aggregate is stored together, so one disk read serves one page.
+- **Flexible schema**: each document can have different fields. You add a field without a migration.
+- **Secondary indexes** on any field, including nested fields and arrays.
+- **Where it breaks:** many-to-many relationships (who follows whom), reports that join collections, and documents that grow without limit (MongoDB caps documents at 16 MB).
+
+## Document vs relational
+
+<CompareDatabases a="document" b="relational" />
+
+## Scaling and consistency
+
+| Concern | MongoDB's answer |
+|---|---|
+| Replication | Replica set: one primary, secondaries, automatic failover |
+| Sharding | Pick a shard key (hashed or ranged). It must spread writes and match common queries |
+| Atomicity | A single-document write is atomic. Multi-document transactions exist but cost more |
+| Read consistency | Choose per query: read from the primary (fresh) or secondaries (may lag) |
+
+## Workload scenarios
+
+<ScenarioGrid>
+  <ScenarioCard workload="Flexible schema" title="Product catalog" problem="Laptops have RAM and CPU, shirts have size and fabric, books have ISBN. 5M products, read far more than written." pick="Document database">
+    Each product is one document with its own attributes. No sparse 300-column table, no entity-attribute-value tables. Index the fields you filter on, and put a search engine in front for full-text and facets.
+  </ScenarioCard>
+  <ScenarioCard workload="Read-heavy" title="CMS article pages" problem="Each article has sections, embedded media, author info and SEO metadata. Pages are rendered from one article at a time." pick="Document database (or Postgres JSONB)">
+    The page is one aggregate, so storing it as one document matches the access pattern exactly. If you already run Postgres, a JSONB column gives you most of the same benefit plus transactions.
+  </ScenarioCard>
+  <ScenarioCard workload="Relationships" title="Followers and feeds" problem="Users follow each other. You need 'who does Ada follow', 'who follows Ada', and mutual follows." pick="Not a document store: use relational or a graph">
+    Many-to-many relationships are where document stores struggle. Embedding a follower array in a celebrity's document hits size limits and creates write contention. Model follows as an edge table instead.
+  </ScenarioCard>
+</ScenarioGrid>
+
+## In the wild
+
+- **eBay, Forbes and many CMS platforms** use MongoDB for catalogs and content with varied shapes.
+- **Firebase / Firestore** powers mobile apps where documents sync directly to clients.
+- **Postgres JSONB** is often the pragmatic middle ground: document flexibility inside a relational database.
+
+## Common pitfalls
+
+- **Unbounded arrays** (all comments embedded in a post): documents bloat and every update rewrites them.
+- **Modeling relationally in a document store**: lots of references plus `$lookup` gives you the costs of both models.
+- **A poor shard key** (e.g. a timestamp): every new write lands on the same shard.
+- **"Schemaless" meaning no schema**: the schema just moves into your code. Validate it anyway.
+
+## How to answer in an interview
+
+> "Products have very different attributes and are read as one unit, so I'll store each as a **document**, sharded by `product_id`. Orders stay in Postgres because they need transactions. Search goes through Elasticsearch."
+
+## Related
+
+[Choosing a Database](/system-design/databases/choosing-a-database) · [Relational](/system-design/databases/relational-databases) · [Search Engines](/system-design/databases/search-engines) · [Sharding](/system-design/patterns/sharding)
+
+## Further reading
+
+- [MongoDB data modeling: embedding vs references](https://www.mongodb.com/docs/manual/data-modeling/)
+- Martin Kleppmann, *Designing Data-Intensive Applications*, chapter 2 (relational vs document models)
+
+<InterviewQuestions>
+  <InterviewQuestion question="When do you embed and when do you reference in a document database?" category="Data modeling" level="Mid">
+    Embed data that is read together, owned by the parent, and bounded in size: an order's line items, a product's specs. Reference data that is shared across many parents, updated independently, or grows without limit: comments, followers, authors used across many posts. When in doubt, follow the read path. One page should ideally be one document read.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why might you pick Postgres JSONB over MongoDB?" category="Trade-offs" level="Mid">
+    JSONB gives schema flexibility for the parts that vary, while keeping transactions, joins, constraints and the tooling you already run. It's a strong choice when only some of the data is document-shaped. MongoDB is the better fit when the whole model is document-centric and you want built-in sharding and replica sets.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you choose a shard key in MongoDB?" category="Scaling" level="Senior">
+    It needs high cardinality, writes that spread evenly, and alignment with the most common queries so they hit one shard instead of all of them. A monotonically increasing key (a timestamp or ObjectId) puts every insert on the last shard, so hash it or use a compound key like (tenantId, createdAt). Changing it later is expensive.
+  </InterviewQuestion>
+</InterviewQuestions>

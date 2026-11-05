@@ -20,16 +20,22 @@ interface ContentSidebarProps {
 
 export function ContentSidebar({ navTree, onNavigate }: ContentSidebarProps) {
   const pathname = usePathname();
+  // Show only the section being read; fall back to every section on pages outside them.
+  const current = navTree.filter(
+    (s) => pathname === s.href || pathname.startsWith(`${s.href}/`)
+  );
+  const sections = current.length ? current : navTree;
 
   return (
     <nav className="flex h-full flex-col overflow-y-auto pb-8">
       <div className="space-y-4 px-3 pt-3">
-        {navTree.map((section) => (
+        {sections.map((section) => (
           <SidebarSection
             key={section.key}
             section={section}
             pathname={pathname}
             onNavigate={onNavigate}
+            pinnedOpen={sections.length === 1}
           />
         ))}
       </div>
@@ -41,13 +47,16 @@ function SidebarSection({
   section,
   pathname,
   onNavigate,
+  pinnedOpen,
 }: {
   section: NavSection;
   pathname: string;
   onNavigate?: () => void;
+  pinnedOpen?: boolean;
 }) {
   const isActive = pathname.startsWith(section.href);
-  const [open, setOpen] = React.useState(isActive);
+  const [openState, setOpen] = React.useState(isActive);
+  const open = pinnedOpen || openState;
 
   React.useEffect(() => {
     if (isActive && !open) setOpen(true);
@@ -58,10 +67,11 @@ function SidebarSection({
   return (
     <div>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => !pinnedOpen && setOpen(!open)}
         aria-expanded={open}
         className={cn(
           "flex w-full items-center gap-2.5 border-b px-2 py-2.5 text-left font-display text-base transition-colors",
+          pinnedOpen && "cursor-default",
           isActive
             ? "border-ink text-ink"
             : "border-hairline text-ink-2 hover:text-ink"
@@ -76,12 +86,14 @@ function SidebarSection({
           />
         )}
         <span className="flex-1">{section.label}</span>
-        <ChevronDown
-          className={cn(
-            "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
-            !open && "-rotate-90"
-          )}
-        />
+        {!pinnedOpen && (
+          <ChevronDown
+            className={cn(
+              "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
+              !open && "-rotate-90"
+            )}
+          />
+        )}
       </button>
 
       {open && (

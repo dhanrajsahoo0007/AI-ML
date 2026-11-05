@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { CompanyExplorer } from "@/components/company-explorer";
 import { FadeIn } from "@/components/motion/fade-in";
@@ -30,9 +31,11 @@ export default function CompaniesPage() {
           lead="Pick a company to see the questions it is publicly reported to ask, across every topic, along with the reported roles and interview loop. Every question also carries its company tags in the topic pages."
         />
       </FadeIn>
+      <Suspense>
       <CompanyExplorer groups={COMPANY_GROUPS} companies={companies} footer={<SourceCredit />}>
         {questionItems(tagged, (q) => categoryTitles.get(q.category)!)}
       </CompanyExplorer>
+      </Suspense>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Menu, PanelLeftClose, PanelLeft } from "lucide-react";
 import { ContentSidebar } from "@/components/content-sidebar";
+import { SiteFooter } from "@/components/site-footer";
 import {
   Sheet,
   SheetTrigger,
@@ -22,7 +23,7 @@ export function ContentShell({ navTree, children }: ContentShellProps) {
 
   return (
     <>
-      <div className="hidden h-[calc(100vh-4rem)] md:flex">
+      <div data-content-shell className="hidden md:flex">
         <DesktopShell navTree={navTree}>{children}</DesktopShell>
       </div>
 
@@ -101,10 +102,10 @@ function DesktopShell({
   );
 
   return (
-    <div className="flex h-full w-full">
-      {/* Sidebar */}
+    <div className="flex w-full items-start">
+      {/* Sidebar: pinned below the header, scrolls on its own; the page scrolls normally so the footer follows the content */}
       <div
-        className="relative shrink-0 border-r border-hairline bg-paper-2/50 transition-[width] duration-200 ease-in-out"
+        className="sticky top-16 h-[calc(100vh-4rem)] shrink-0 border-r border-hairline bg-paper-2 transition-[width] duration-200 ease-in-out"
         style={{ width: collapsed ? 0 : width, overflow: "hidden" }}
       >
         {!collapsed && (
@@ -133,14 +134,14 @@ function DesktopShell({
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize sidebar"
-          className="group relative z-10 -ml-px flex w-1.5 shrink-0 cursor-col-resize items-center justify-center"
+          className="group sticky top-16 z-10 -ml-px flex h-[calc(100vh-4rem)] w-1.5 shrink-0 cursor-col-resize items-center justify-center"
         >
           <div className="h-full w-px bg-transparent transition-colors group-hover:bg-primary group-active:bg-primary" />
         </div>
       )}
 
       {/* Main content */}
-      <div className="relative min-w-0 flex-1 overflow-y-auto">
+      <div className="relative flex min-w-0 flex-1 flex-col">
         {collapsed && (
           <button
             onClick={() => setCollapsed(false)}
@@ -150,7 +151,8 @@ function DesktopShell({
             <PanelLeft className="h-4 w-4" />
           </button>
         )}
-        {children}
+        <div className="flex-1">{children}</div>
+        <SiteFooter />
       </div>
     </div>
   );

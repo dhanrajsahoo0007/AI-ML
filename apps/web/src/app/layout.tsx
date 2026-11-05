@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { getNavTree } from "@/lib/nav-tree";
 import { THEME_SCRIPT, ThemedToaster } from "@/components/theme";
 import { siteConfig } from "@/config/site";
 import "katex/dist/katex.min.css";
@@ -35,11 +36,12 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const navTree = await getNavTree();
   return (
     <html
       lang="en"
@@ -57,7 +59,7 @@ export default function RootLayout({
         >
           Skip to content
         </a>
-        <SiteHeader />
+        <SiteHeader navTree={navTree} />
         <main id="main" className="w-full flex-1">
           {children}
         </main>

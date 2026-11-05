@@ -1,0 +1,158 @@
+---
+title: "Wide-Column Stores"
+description: "Cassandra-style stores for massive write volume and query-first data modeling."
+---
+
+Wide-column stores like Cassandra, ScyllaDB, HBase and Bigtable are built to absorb huge write volume across many machines. The price: you design one table per query, up front.
+
+<DbProfile id="wide-column" />
+
+## The two keys that decide everything
+
+Every table has a **primary key = partition key + clustering columns**.
+
+<StepCards>
+  <StepCard n={1} title="Partition key → which node">
+    Hashed to place the row on a node (and its replicas). All rows with the same partition key live together.
+  </StepCard>
+  <StepCard n={2} title="Clustering key → order on disk">
+    Inside a partition, rows are sorted by the clustering columns. Range scans in that order are sequential reads.
+  </StepCard>
+  <StepCard n={3} title="Queries must match">
+    You can only efficiently query by partition key, then by a prefix of the clustering columns. Anything else needs another table.
+  </StepCard>
+</StepCards>
+
+## How the data looks
+
+Wide-column modeling is **query-first**. Write down the queries, then make one table per query and duplicate the data into each.
+
+<DataModelView title="Social app: chat messages and timelines">
+<DataModelTab label="Messages table">
+
+```sql
+-- Query: "latest 50 messages in a channel, then scroll back"
+CREATE TABLE messages (
+  channel_id  bigint,
+  bucket      int,          -- e.g. 10-day window, keeps partitions bounded
+  message_id  bigint,       -- time-sortable id (Snowflake)
+  author_id   bigint,
+  body        text,
+  PRIMARY KEY ((channel_id, bucket), message_id)
+) WITH CLUSTERING ORDER BY (message_id DESC);
+```
+
+</DataModelTab>
+<DataModelTab label="The query">
+
+```sql
+SELECT * FROM messages
+WHERE channel_id = 42 AND bucket = 2051
+LIMIT 50;                        -- one partition, one sequential read
+
+SELECT * FROM messages
+WHERE channel_id = 42 AND bucket = 2051 AND message_id < 9876543
+LIMIT 50;                        -- scroll back: still one range scan
+
+-- ✗ Not allowed without a full scan:
+-- SELECT * FROM messages WHERE author_id = 7;
+```
+
+</DataModelTab>
+<DataModelTab label="One table per query">
+
+```sql
+-- Query: "a user's posts, newest first"
+CREATE TABLE posts_by_user (
+  user_id bigint, post_id bigint, body text,
+  PRIMARY KEY (user_id, post_id)
+) WITH CLUSTERING ORDER BY (post_id DESC);
+
+-- Query: "posts with a tag, newest first": same data, written again
+CREATE TABLE posts_by_tag (
+  tag text, post_id bigint, user_id bigint, body text,
+  PRIMARY KEY (tag, post_id)
+) WITH CLUSTERING ORDER BY (post_id DESC);
+```
+
+</DataModelTab>
+</DataModelView>
+
+## Why it's fast at writes
+
+Writes never update data in place. They append to a log and an in-memory table, which is the **LSM-tree** design. Step through it:
+
+<AnimatedDiagram name="databases/lsm-write-path" caption="LSM write path: WAL + memtable, flush to SSTables, compact in the background" step={1} stepper minWidth={680} />
+
+- Every write is a sequential append, the fastest thing a disk does.
+- **Leaderless replication**: any node can take a write for any key and forward it to the replicas, so there's no single primary to saturate.
+- **Where it slows down:** reads may check several SSTables, deletes become tombstones that must be compacted away, and any query outside the partition key scans the whole cluster. See [LSM Trees](/system-design/databases/lsm-trees).
+
+## Tunable consistency
+
+With replication factor N = 3, you choose how many replicas must answer each request.
+
+| Write (W) | Read (R) | Result |
+|---|---|---|
+| ONE | ONE | Fastest, may read stale data |
+| QUORUM (2) | QUORUM (2) | R + W > N, so reads see the latest write |
+| ALL | ONE | Slow writes, fails if any replica is down |
+| LOCAL_QUORUM | LOCAL_QUORUM | Quorum within one data center: the common multi-region setting |
+
+See [Replication Quorums](/system-design/databases/replication-quorums) and [Leaderless Replication](/system-design/databases/leaderless-replication).
+
+## Workload scenarios
+
+<ScenarioGrid>
+  <ScenarioCard workload="Write-heavy" title="IoT sensor readings" problem="2M devices send a reading every 10 seconds (200K writes/s). Queries: 'readings for device X between T1 and T2'." pick="Cassandra, partitioned by (device_id, day)">
+    Each device-day is one bounded partition, clustered by timestamp, so a time-range query is one sequential read. Writes spread across all nodes. Set a TTL to expire old data automatically. A time-series database is the other strong choice if you need rollups and downsampling.
+  </ScenarioCard>
+  <ScenarioCard workload="Write-heavy" title="Activity feed" problem="Fan-out on write: each post is copied into followers' feeds. Reads are 'latest 30 items in my feed'." pick="Wide-column store, partitioned by user_id">
+    `PRIMARY KEY (user_id, item_id)` clustered descending makes the feed read one partition scan. Fan-out writes are many small appends, which is exactly what LSM storage is good at.
+  </ScenarioCard>
+  <ScenarioCard workload="Hot partition" title="One giant channel" problem="Most channels get a few messages a day, but one has 2M members posting constantly and slows the whole cluster." pick="Bucket the partition key and protect it upstream">
+    Add a time bucket to the partition key so no partition grows forever. Put a service in front that coalesces concurrent reads of the same partition. Discord did both: buckets in Cassandra, and later a Rust "data services" layer in front of ScyllaDB.
+  </ScenarioCard>
+</ScenarioGrid>
+
+## In the wild
+
+- **Discord** stores trillions of messages partitioned by `(channel_id, bucket)`. It moved from 177 Cassandra nodes to 72 ScyllaDB nodes, mainly to escape GC pauses and hot-partition pain.
+- **Netflix** runs Cassandra across regions for viewing history and many other services.
+- **Google Bigtable** (and HBase, its open-source descendant) backs search indexing, Maps and Analytics.
+
+## Common pitfalls
+
+- **Unbounded partitions**: a partition per channel with no bucket grows forever and slows down.
+- **Low-cardinality partition keys** (`country`): a few nodes take all the load.
+- **Using `ALLOW FILTERING` or secondary indexes** to fake ad-hoc queries.
+- **Heavy deletes**: tombstones pile up and slow reads until compaction removes them.
+
+## How to answer in an interview
+
+> "Messages are write-heavy, about 100K/s, and always read as 'latest N in a channel', so I'll use **Cassandra** with `PRIMARY KEY ((channel_id, bucket), message_id)`. The bucket keeps partitions bounded. I'll use LOCAL_QUORUM reads and writes, and denormalize into a second table if we need messages by user."
+
+## Related
+
+[Choosing a Database](/system-design/databases/choosing-a-database) · [LSM Trees](/system-design/databases/lsm-trees) · [Leaderless Replication](/system-design/databases/leaderless-replication) · [Consistent Hashing](/system-design/patterns/consistent-hashing) · [Fan-out](/system-design/patterns/fan-out) · [Messenger case study](/system-design/case-studies/facebook-messenger)
+
+## Further reading
+
+- [How Discord stores trillions of messages](https://discord.com/blog/how-discord-stores-trillions-of-messages)
+- [Cassandra data modeling](https://cassandra.apache.org/doc/latest/cassandra/developing/data-modeling/index.html)
+- [Bigtable: a distributed storage system for structured data (2006)](https://research.google/pubs/bigtable-a-distributed-storage-system-for-structured-data/)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why are Cassandra writes so fast?" category="Internals" level="Mid">
+    A write appends to the commit log and inserts into an in-memory memtable, then returns. No read-before-write, no in-place update, no single leader. Memtables are flushed as immutable sorted SSTables and merged later by compaction. Sequential I/O plus spreading writes across all nodes gives very high throughput.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you design a Cassandra table for 'latest messages in a channel'?" category="Data modeling" level="Mid">
+    Partition by channel plus a time bucket so partitions stay bounded, and cluster by a time-sortable message id in descending order: PRIMARY KEY ((channel_id, bucket), message_id). Reading the latest N is then one partition range scan, and scrolling back is another range scan with message_id less than the last seen id.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is a hot partition and how do you fix one?" category="Scaling" level="Senior">
+    One partition key gets far more traffic than the others, so its replicas saturate while the rest of the cluster idles, and with quorum reads that latency spreads. Fixes: add a bucket or salt to the partition key to split it, cache hot reads upstream, coalesce concurrent identical requests, and rate-limit abusive keys. Discord put a request-coalescing service in front of its message store.
+  </InterviewQuestion>
+  <InterviewQuestion question="When would you not use Cassandra?" category="Trade-offs" level="Mid">
+    When query patterns are unknown or ad-hoc, when you need joins, aggregates or multi-row transactions, when data is small enough for one Postgres, or when the team can't operate a distributed cluster. It's a specialist tool for high write volume with known access patterns.
+  </InterviewQuestion>
+</InterviewQuestions>

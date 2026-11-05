@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { InterviewQuestions } from "@/components/mdx/interview-qa";
@@ -29,11 +30,13 @@ export function CompanyExplorer({
   children: React.ReactNode;
 }) {
   const [selected, setSelected] = useState("");
+  const params = useSearchParams();
 
+  // Follows ?company= so links from the header menu work while already on this page.
   useEffect(() => {
-    const slug = new URLSearchParams(window.location.search).get("company") ?? "";
+    const slug = params.get("company") ?? "";
     if (companies.some((c) => c.slug === slug)) setSelected(slug);
-  }, [companies]);
+  }, [companies, params]);
 
   function choose(slug: string) {
     setSelected(slug);

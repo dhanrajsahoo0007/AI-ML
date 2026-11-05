@@ -1,0 +1,133 @@
+---
+title: "Graph Databases"
+description: "Nodes and edges for multi-hop queries: social graphs, fraud rings, recommendations."
+---
+
+In a graph database, relationships are first-class data. Following an edge from one node to the next costs about the same whether the graph has a thousand nodes or a billion. That makes queries 3, 4 or 5 hops deep practical.
+
+<DbProfile id="graph" />
+
+## Why joins struggle with deep relationships
+
+"Friends of friends of friends" in SQL is a self-join per hop. Each join searches an index over the whole edge table, and the intermediate result grows with every hop.
+
+| Hops | SQL | Graph database |
+|---|---|---|
+| 1 (my friends) | One indexed lookup: fast | Fast |
+| 2 (friends of friends) | One self-join: fine | Fast |
+| 3–4 | Several joins over millions of intermediate rows: slow | Pointer chasing from the start node: fast |
+| Variable depth ("any path up to 6") | Recursive CTE: hard and slow | One pattern: `-[:FOLLOWS*1..6]->` |
+
+Graph databases store each node's edges next to it (**index-free adjacency**), so a hop is a pointer lookup rather than an index search.
+
+## How the data looks
+
+<DataModelView title="Social graph">
+<DataModelTab label="The graph">
+
+```text
+(:User {handle:"ada"}) -[:FOLLOWS]->  (:User {handle:"bob"})
+(:User {handle:"bob"}) -[:FOLLOWS]->  (:User {handle:"cy"})
+(:User {handle:"ada"}) -[:LIKED {at: 2026-11-05}]-> (:Post {id: 1001})
+(:Post {id: 1001})     -[:TAGGED]->   (:Topic {name:"search"})
+```
+
+</DataModelTab>
+<DataModelTab label="Cypher query">
+
+```text
+// People Ada might know: followed by people she follows, not already followed
+MATCH (me:User {handle:"ada"})-[:FOLLOWS]->(friend)-[:FOLLOWS]->(suggestion)
+WHERE NOT (me)-[:FOLLOWS]->(suggestion) AND suggestion <> me
+RETURN suggestion.handle, count(friend) AS mutuals
+ORDER BY mutuals DESC
+LIMIT 10;
+```
+
+</DataModelTab>
+<DataModelTab label="Same thing in SQL">
+
+```sql
+SELECT f2.followee_id, count(*) AS mutuals
+FROM follows f1
+JOIN follows f2 ON f2.follower_id = f1.followee_id
+WHERE f1.follower_id = 42
+  AND f2.followee_id <> 42
+  AND f2.followee_id NOT IN (SELECT followee_id FROM follows WHERE follower_id = 42)
+GROUP BY f2.followee_id
+ORDER BY mutuals DESC
+LIMIT 10;
+-- Fine at 2 hops. Add a third hop and the intermediate rows explode.
+```
+
+</DataModelTab>
+</DataModelView>
+
+## Graph database or graph in SQL?
+
+Most "graph" features in interviews (followers, friends, mutuals) only go 1–2 hops. That works well in relational or wide-column stores plus a cache. Reach for a graph database when:
+
+- queries go **3+ hops** or have **variable depth**;
+- the **shape of the path** matters (fraud rings, supply-chain dependencies, access-control inheritance);
+- you run **graph algorithms**: shortest path, PageRank, community detection.
+
+<CompareDatabases a="graph" b="relational" />
+
+## Scaling and consistency
+
+- **Single-machine first**: Neo4j is ACID on one server, with read replicas for scale.
+- **Partitioning a graph is hard.** Any cut creates edges that cross machines, and every cross-machine hop is a network call.
+- **At social-network scale**, companies build sharded edge stores with caches instead (Facebook TAO, LinkedIn's graph services).
+
+## Workload scenarios
+
+<ScenarioGrid>
+  <ScenarioCard workload="Relationships" title="Fraud ring detection" problem="Find accounts that share devices, cards or addresses with a known fraudster, up to 4 links away, in real time at checkout." pick="Graph database (Neo4j / Neptune)">
+    Accounts, devices, cards and addresses are nodes. Shared use is an edge. A variable-length path query from the fraudster finds the ring in milliseconds, where SQL would need a self-join per hop.
+  </ScenarioCard>
+  <ScenarioCard workload="Scale" title="Followers for 2B users" problem="Show follower and following counts and lists, and check 'does A follow B', at hundreds of thousands of reads per second." pick="Sharded edge store (wide-column / MySQL) + cache, not a graph DB">
+    These are 1-hop lookups at enormous scale. Store edges as (user, followee) rows partitioned by user, keep a reverse table for followers, and cache heavily. Facebook's TAO does exactly this on top of MySQL.
+  </ScenarioCard>
+  <ScenarioCard workload="Recommendations" title="'Customers also bought'" problem="Recommend products bought by users who bought the same items as you, refreshed daily." pick="Batch graph or ML job, results stored in a key-value store">
+    Compute it offline (Spark, graph algorithms or embeddings) and store the top-N per product in Redis or DynamoDB. A live graph query isn't needed when the results only change daily.
+  </ScenarioCard>
+</ScenarioGrid>
+
+## In the wild
+
+- **Facebook TAO**: a graph-shaped API (objects and associations) on top of sharded MySQL, with a huge cache layer.
+- **LinkedIn** "degrees of connection" runs on in-memory graph services.
+- **Banks and payment companies** use Neo4j and Neptune for fraud and anti-money-laundering investigations.
+- **Knowledge graphs** (Google's and many RAG systems) store entities and relationships as graphs.
+
+## Common pitfalls
+
+- **Using a graph DB for 1-hop lookups** that a table with an index handles well.
+- **Supernodes**: a celebrity with 100M edges makes any traversal through it slow.
+- **Expecting easy horizontal scaling.** Plan for a single large machine plus replicas, or a custom sharded design.
+
+## How to answer in an interview
+
+> "Follow relationships are 1-hop reads at huge scale, so I'll store edges in a **sharded table** with a reverse index and a cache. For fraud detection, where we need paths up to 4 hops across shared devices and cards, I'll use a **graph database** fed from the event stream."
+
+## Related
+
+[Choosing a Database](/system-design/databases/choosing-a-database) · [Relational](/system-design/databases/relational-databases) · [Wide-Column Stores](/system-design/databases/wide-column-stores) · [Twitter case study](/system-design/case-studies/twitter)
+
+## Further reading
+
+- [TAO: Facebook's distributed data store for the social graph (USENIX ATC 2013)](https://www.usenix.org/conference/atc13/technical-sessions/presentation/bronson)
+- [Neo4j: graph data modeling](https://neo4j.com/docs/getting-started/data-modeling/)
+- Martin Kleppmann, *Designing Data-Intensive Applications*, chapter 2 (graph-like data models)
+
+<InterviewQuestions>
+  <InterviewQuestion question="When is a graph database worth it over SQL?" category="Trade-offs" level="Mid">
+    When queries traverse 3+ hops or variable-length paths, when the path's shape matters (fraud rings, dependency chains), or when you run graph algorithms. For 1–2 hop lookups such as followers or mutual friends, an indexed edge table plus a cache is simpler and scales more easily.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you store a social graph for a billion users?" category="Design" level="Senior">
+    As an edge list: a following table partitioned by user id and a followers table partitioned by followee id, so both directions are single-partition reads. Put a large read-through cache in front, as Facebook TAO does. Handle celebrities specially (no full fan-out, paginated follower lists), and precompute counts.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why are graph databases hard to shard?" category="Internals" level="Senior">
+    Traversals follow edges wherever they lead. Any partitioning cuts some edges, so a multi-hop query bounces between machines and adds network latency per hop. Good partitions need graph clustering, which shifts as the graph changes. That's why most graph databases scale up with replicas rather than out.
+  </InterviewQuestion>
+</InterviewQuestions>

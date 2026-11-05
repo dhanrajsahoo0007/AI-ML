@@ -1,0 +1,154 @@
+---
+title: "Search Engines"
+description: "Elasticsearch and inverted indexes for full-text relevance, facets and typeahead."
+---
+
+When users type words and expect the best matches first, you need a search engine. Elasticsearch, OpenSearch, Solr and Typesense are built on an **inverted index**, which maps every word to the documents that contain it.
+
+<DbProfile id="search" />
+
+## Why `LIKE '%shoe%'` doesn't cut it
+
+| | SQL `LIKE '%term%'` | Search engine |
+|---|---|---|
+| Speed | Scans every row (a leading wildcard can't use a B-tree) | Looks up the term: milliseconds |
+| "Running" matches "run"? | No | Yes (stemming) |
+| Typos ("shoees")? | No | Yes (fuzzy matching) |
+| Ranking | None | BM25 relevance, boosts, recency |
+| Facets ("Nike (120), Adidas (98)") | Expensive GROUP BYs | Built-in aggregations |
+
+## How it works
+
+Documents and queries go through the **same analyzer**, which tokenizes, lowercases, removes stop words and stems. Matching happens on those normalized terms. Step through it:
+
+<AnimatedDiagram name="databases/inverted-index" caption="Index time and query time share one analyzer" step={1} stepper minWidth={680} />
+
+See [Inverted Index](/system-design/databases/inverted-index) for postings lists, segments and BM25 in detail.
+
+## How the data looks
+
+<DataModelView title="Product search">
+<DataModelTab label="The mapping">
+
+```json
+PUT /products
+{
+  "mappings": {
+    "properties": {
+      "title":    { "type": "text", "analyzer": "english" },
+      "brand":    { "type": "keyword" },
+      "price":    { "type": "scaled_float", "scaling_factor": 100 },
+      "rating":   { "type": "float" },
+      "location": { "type": "geo_point" },
+      "suggest":  { "type": "search_as_you_type" }
+    }
+  }
+}
+```
+
+</DataModelTab>
+<DataModelTab label="The query">
+
+```json
+GET /products/_search
+{
+  "query": {
+    "bool": {
+      "must":   { "match": { "title": { "query": "red runing shoes", "fuzziness": "AUTO" } } },
+      "filter": [
+        { "term":  { "brand": "nike" } },
+        { "range": { "price": { "lte": 120 } } }
+      ]
+    }
+  },
+  "aggs": { "brands": { "terms": { "field": "brand" } } },
+  "size": 20
+}
+```
+
+</DataModelTab>
+<DataModelTab label="text vs keyword">
+
+```text
+"title": "Red Running Shoes"
+  text    → analyzed into [red, run, shoe]   → full-text match, scoring
+  keyword → stored as "Red Running Shoes"    → exact filter, sort, facet
+
+Rule: text for things people type, keyword for things people filter on.
+```
+
+</DataModelTab>
+</DataModelView>
+
+## Keeping the index in sync
+
+The search engine is a **derived store**. The source of truth stays in your database, and changes flow into the index:
+
+<AnimatedDiagram name="databases/cdc-to-search" caption="Change data capture keeps the index about a second behind the database" step={1} stepper minWidth={680} />
+
+| Approach | How | Watch out for |
+|---|---|---|
+| **CDC** (recommended) | Tail the DB's WAL with Debezium → Kafka → indexer | More moving parts, but no lost updates |
+| **Outbox** | Write an event row in the same transaction, then publish it | Needs a relay process |
+| **Dual write** | App writes to the DB, then to the index | One write can fail. Drift between them |
+| **Batch reindex** | Rebuild the index nightly | Stale for hours; fine for some catalogs |
+
+## Scaling and consistency
+
+- **Shards** split an index. The count is fixed at creation, so size it for growth (aim for 10–50 GB per shard).
+- **Replicas** add read throughput and failover.
+- **Near real time:** new documents become searchable after the refresh interval (1 s by default), so it's eventually consistent.
+- **Updates are delete + reinsert** inside immutable segments, so heavy update traffic is expensive.
+
+## Workload scenarios
+
+<ScenarioGrid>
+  <ScenarioCard workload="Search" title="E-commerce search with filters" problem="20M products. Shoppers type free text, then filter by brand, size and price range, and see counts per filter." pick="Elasticsearch, fed from the catalog DB by CDC">
+    Full-text with fuzziness for the query, `keyword` fields for filters and facet aggregations, and function scoring to boost popular or in-stock items. Price and stock are re-checked against the database at checkout.
+  </ScenarioCard>
+  <ScenarioCard workload="Typeahead" title="Search-as-you-type" problem="Show 10 suggestions within 50 ms of every keystroke, ranked by popularity." pick="Edge n-gram index, or precomputed prefixes in Redis">
+    A `search_as_you_type` or edge-n-gram field matches prefixes inside the engine. At very high QPS, precompute the top-k completions per prefix and serve them from Redis or a trie in memory. See the [Typeahead case study](/system-design/case-studies/typeahead).
+  </ScenarioCard>
+  <ScenarioCard workload="Logs" title="Searching application logs" problem="5 TB of logs a day. Engineers search for error messages and filter by service and time, mostly over the last 7 days." pick="OpenSearch / Elasticsearch with time-based indices">
+    Create one index per day, so retention means dropping old indices, and hot-warm tiers keep recent days on fast disks. At very large volume, columnar stores (ClickHouse) or log-specific systems (Loki) are cheaper.
+  </ScenarioCard>
+</ScenarioGrid>
+
+## In the wild
+
+- **GitHub, Wikipedia, Uber and Netflix** run Elasticsearch / OpenSearch for search and log analytics.
+- **LinkedIn's Galene** and **Twitter's Earlybird** are custom inverted-index systems for people and tweet search.
+- **Hybrid search** (BM25 plus vector similarity) is now standard. Elasticsearch and OpenSearch support both in one query.
+
+## Common pitfalls
+
+- **Making it the source of truth.** Indices get corrupted, mappings change, and you'll need to rebuild from the database.
+- **Wrong field types**: `text` where you needed `keyword` breaks filters and aggregations.
+- **Too many shards**: thousands of tiny shards waste memory and slow the cluster.
+- **Deep pagination** (`from: 100000`): use `search_after` cursors instead.
+
+## How to answer in an interview
+
+> "The catalog lives in Postgres. For search I'll stream changes via **CDC into Elasticsearch**, accepting about 1 s of lag. Title is a `text` field with an English analyzer and fuzziness, and brand and size are `keyword` fields for filters and facets. I'll re-check price and stock against Postgres at checkout."
+
+## Related
+
+[Choosing a Database](/system-design/databases/choosing-a-database) · [Inverted Index](/system-design/databases/inverted-index) · [Vector Databases](/system-design/databases/vector-databases) · [Polyglot Persistence](/system-design/databases/polyglot-persistence) · [Geospatial Indexing](/system-design/patterns/geospatial-indexing)
+
+## Further reading
+
+- [Elasticsearch: the definitive guide, how search works](https://www.elastic.co/guide/en/elasticsearch/reference/current/search-analyze.html)
+- [Practical BM25 (Elastic blog)](https://www.elastic.co/blog/practical-bm25-part-2-the-bm25-algorithm-and-its-variables)
+- Manning, Raghavan and Schütze, *Introduction to Information Retrieval*, chapters 1–2 (free online)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you keep Elasticsearch in sync with your database?" category="Consistency" level="Mid">
+    Treat the database as the source of truth. Use change data capture (Debezium reading the WAL into Kafka, then an idempotent indexer) or a transactional outbox, so no committed change is lost. Avoid naive dual writes, because one side can fail. Make indexing idempotent using document ids and versions, and keep a way to rebuild the index from scratch.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why is a search engine faster than SQL LIKE for text search?" category="Internals" level="Junior">
+    LIKE with a leading wildcard can't use a B-tree index, so it scans every row. A search engine precomputes an inverted index from each term to its postings list, so a query looks up a few terms and merges small sorted lists. Analysis (stemming, lowercasing) and BM25 scoring also make results more relevant.
+  </InterviewQuestion>
+  <InterviewQuestion question="A product's price changed but search still shows the old one. Why, and is it OK?" category="Consistency" level="Mid">
+    The index is updated asynchronously (CDC lag plus the refresh interval), so it trails the database by around a second, longer if the pipeline is backed up. That's acceptable for browsing as long as the authoritative price is read from the database on the product page and at checkout. Monitor pipeline lag and alert when it grows.
+  </InterviewQuestion>
+</InterviewQuestions>

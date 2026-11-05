@@ -1,0 +1,133 @@
+---
+title: "Key-Value & In-Memory"
+description: "Redis and DynamoDB for sessions, caching, counters and lookups by key at any scale."
+---
+
+A key-value store does one thing: given a key, return the value. Giving up queries buys you the simplest possible scaling story and the lowest latency of any database.
+
+<DbProfile id="key-value" />
+
+## Two different tools under one name
+
+| | In-memory (Redis, Memcached) | Durable, distributed (DynamoDB, Riak, Aerospike) |
+|---|---|---|
+| **Where data lives** | RAM (optional snapshots / append-only log) | Disk / SSD, replicated 3× |
+| **Latency** | Under 1 ms | 1–10 ms |
+| **Size limit** | Memory you can afford | Effectively unlimited |
+| **Typical role** | Cache, sessions, counters, rate limits, leaderboards | Primary store for key-addressed data at huge scale |
+| **If a node dies** | Data since the last snapshot may be lost | Nothing lost |
+
+## How the data looks
+
+You design keys around how you'll read them. There is no "find all posts where …"; if you need a lookup, you store it under a key.
+
+<DataModelView title="Social app as keys and values">
+<DataModelTab label="Redis keys">
+
+```text
+user:42                 → HASH  { handle: "ada", followers: 1830 }
+session:9f3c…           → STRING "{ userId: 42, exp: … }"     TTL 30m
+post:1001:likes         → INT    5821                          (INCR)
+post:1001:likers        → SET    { 42, 77, 913, … }
+leaderboard:weekly      → ZSET   { ada: 9120, bob: 8700, … }   (sorted by score)
+ratelimit:42:2026-11-05T10:31 → INT 17                          TTL 60s
+```
+
+</DataModelTab>
+<DataModelTab label="Redis commands">
+
+```text
+INCR post:1001:likes                     # atomic counter
+SADD post:1001:likers 42                 # returns 0 if already liked
+ZINCRBY leaderboard:weekly 50 ada        # bump a score
+ZREVRANGE leaderboard:weekly 0 9 WITHSCORES   # top 10, O(log n + 10)
+SET lock:order:7 owner123 NX PX 30000    # simple lease lock
+```
+
+</DataModelTab>
+<DataModelTab label="DynamoDB items">
+
+```text
+Partition key (PK)   Sort key (SK)          Attributes
+USER#42              PROFILE                handle=ada, created=…
+USER#42              POST#2026-11-05#1001   body=…, likes=5821
+USER#42              POST#2026-11-04#0997   body=…, likes=120
+
+Query: PK = "USER#42" AND begins_with(SK, "POST#")  → newest posts, one partition
+```
+
+</DataModelTab>
+</DataModelView>
+
+DynamoDB is key-value with a twist: a **sort key** lets you range-query within one partition. That's how "single-table design" stores several entity types under one partition key.
+
+## Why it's fast (and where it isn't)
+
+- **Hash the key → find the node → find the value.** No parsing, no planning, no joins.
+- **Partitioning is trivial**: hash the key across nodes with [consistent hashing](/system-design/patterns/consistent-hashing). Adding nodes adds capacity almost linearly.
+- **In-memory stores** skip the disk entirely. Redis runs commands on a single thread per shard, so every command is atomic.
+- **Where it breaks:** any question that isn't "give me key X". Finding all users in Berlin means a full scan, or a second key you maintain yourself.
+
+## Scaling and consistency
+
+| Concern | What happens |
+|---|---|
+| Partitioning | Hash of the key picks the shard; Redis Cluster uses 16,384 hash slots |
+| Replication | Redis: async primary → replica (can lose recent writes on failover). DynamoDB: 3 replicas, quorum writes |
+| Consistency | DynamoDB offers eventually or strongly consistent reads per request |
+| Hot keys | One very popular key can overload one shard: replicate it, add a local cache, or split it (`key#1..N`) |
+| Memory | In-memory stores need an eviction policy (LRU, LFU) and TTLs |
+
+## Workload scenarios
+
+<ScenarioGrid>
+  <ScenarioCard workload="Low latency" title="Login sessions" problem="10M active users. Every API request validates a session token, and sessions expire after 30 minutes of inactivity." pick="Redis with TTL">
+    Key `session:token` → user id, with a TTL refreshed on use. Lookups are sub-millisecond and expiry is automatic. If Redis loses a session, the user just logs in again, so durability doesn't matter much.
+  </ScenarioCard>
+  <ScenarioCard workload="Counters" title="Real-time like counts" problem="A viral post gets 50K likes per second. The count must update live and a user can like only once." pick="Redis SET + INCR, flushed to the database">
+    `SADD` deduplicates likers and `INCR` bumps the counter atomically. A background job periodically writes the totals to the durable store. For a single extremely hot post, shard the counter into N keys and sum them on read.
+  </ScenarioCard>
+  <ScenarioCard workload="Huge scale" title="Shopping carts on Black Friday" problem="Traffic jumps 20× for a few hours. Carts are always read and written by cart id, and must not be lost." pick="DynamoDB (on-demand capacity)">
+    Every access is by key, so a durable key-value store scales horizontally with no schema or joins in the way. Amazon's original Dynamo paper was written for exactly this shopping-cart workload.
+  </ScenarioCard>
+</ScenarioGrid>
+
+## In the wild
+
+- **Amazon's Dynamo** (2007) introduced leaderless replication, consistent hashing and vector clocks for the shopping cart. Its ideas live on in Cassandra and Riak.
+- **Twitter** caches timelines in Redis: each user's home timeline is a list of tweet ids.
+- **Facebook** runs one of the largest Memcached deployments in the world in front of MySQL ("Scaling Memcache at Facebook").
+
+## Common pitfalls
+
+- **Using Redis as the only copy** of data you can't afford to lose, without persistence or replicas.
+- **No TTLs**: memory fills up and eviction starts dropping keys you need.
+- **Big values or big collections** (a 10 MB hash): every read moves the whole thing, and it blocks Redis's single thread.
+- **Scanning keys** (`KEYS *`) in production. It blocks the server.
+
+## How to answer in an interview
+
+> "Every lookup is by short code, so a **key-value store** fits. I'll use DynamoDB as the durable store, partitioned by code, and put **Redis** in front for the hottest 20% of links with a 24h TTL. No joins or secondary queries are needed."
+
+## Related
+
+[Choosing a Database](/system-design/databases/choosing-a-database) · [Caching](/system-design/patterns/caching) · [Rate Limiting](/system-design/patterns/rate-limiting) · [Consistent Hashing](/system-design/patterns/consistent-hashing) · [Wide-Column Stores](/system-design/databases/wide-column-stores) · [Key-Value Store case study](/system-design/case-studies/key-value-store)
+
+## Further reading
+
+- [Dynamo: Amazon's highly available key-value store (2007)](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf)
+- [Scaling Memcache at Facebook (NSDI 2013)](https://www.usenix.org/conference/nsdi13/technical-sessions/presentation/nishtala)
+- [Redis data types](https://redis.io/docs/latest/develop/data-types/)
+- Alex DeBrie, *The DynamoDB Book* (single-table design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What would you store in Redis, and what would you never store only in Redis?" category="Concepts" level="Junior">
+    Good fits: caches, sessions, rate-limit counters, leaderboards, short-lived locks, anything that can be rebuilt or briefly lost. Never keep the only copy of orders, payments or user content there. Replication is asynchronous, so a failover can drop recent writes, and memory limits force eviction.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you build a real-time leaderboard for 10M players?" category="Design" level="Mid">
+    Use a Redis sorted set: ZINCRBY to update a score, ZREVRANGE for the top N, and ZREVRANK for a player's rank, all O(log n). Persist scores to a durable store asynchronously. For very large or sharded boards, keep per-shard sets and merge the top N from each shard.
+  </InterviewQuestion>
+  <InterviewQuestion question="One key is getting 500K requests per second. What do you do?" category="Scaling" level="Senior">
+    A hot key pins one shard. Options: add a small in-process cache in each app server with a short TTL; replicate the key under N suffixes (key#1..N) and read a random one; serve reads from replicas; for counters, split writes across N sub-counters and sum on read. Also find out why it's hot. It's often a celebrity or a trending item that needs special handling.
+  </InterviewQuestion>
+</InterviewQuestions>

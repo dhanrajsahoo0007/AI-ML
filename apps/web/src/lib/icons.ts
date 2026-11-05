@@ -95,6 +95,11 @@ import {
   Bot,
   Presentation,
   GitMerge,
+  Table2,
+  KeyRound,
+  Columns3,
+  LineChart,
+  Share2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -196,6 +201,11 @@ export const iconMap: Record<string, LucideIcon> = {
   bot: Bot,
   presentation: Presentation,
   "git-merge": GitMerge,
+  table: Table2,
+  key: KeyRound,
+  columns: Columns3,
+  "line-chart": LineChart,
+  share: Share2,
 };
 
 export function getIconComponent(name: string): LucideIcon | undefined {

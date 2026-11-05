@@ -8,10 +8,10 @@ interface NavLink {
 }
 
 const allNav: NavLink[] = [
-  { href: "/ai-system-design", label: "AI System Design", section: "ai-system-design" },
-  { href: "/system-design", label: "System Design", section: "system-design" },
-  { href: "/interviews", label: "Interviews", section: "interviews" },
-  { href: "/companies", label: "Companies", section: "companies" },
+  { href: "/ai-system-design", label: "GenAI & LLM Systems", section: "ai-system-design" },
+  { href: "/system-design", label: "Classic System Design", section: "system-design" },
+  { href: "/interviews", label: "Interview Practice", section: "interviews" },
+  { href: "/companies", label: "Company Questions", section: "companies" },
   { href: "/ml-system-design", label: "ML System Design", section: "ml-system-design" },
 ];
 
@@ -28,8 +28,8 @@ export const siteConfig = {
     headline: ["Master AI.", "From Scratch."],
     description:
       "Deep-dives on **transformers**, **LLMs**, **RAG**, **agents** and **production AI systems**, plus **system design** case studies and interview questions reported at top AI companies, so you can explain how ideas land in real systems.",
-    primaryCta: { label: "Explore AI System Design", href: "/ai-system-design" },
-    secondaryCta: { label: "Explore Interviews", href: "/interviews" },
+    primaryCta: { label: "Explore GenAI & LLM Systems", href: "/ai-system-design" },
+    secondaryCta: { label: "Explore Interview Practice", href: "/interviews" },
   },
   workflow: {
     title: "Your learning journey",
@@ -96,6 +96,6 @@ export const siteConfig = {
     headline: "Ready to master AI?",
     description:
       "Start with the deep-dives, then practice the questions top AI companies ask.",
-    button: { label: "Explore AI System Design", href: "/ai-system-design" },
+    button: { label: "Explore GenAI & LLM Systems", href: "/ai-system-design" },
   },
 };

@@ -1,0 +1,102 @@
+---
+title: "Polyglot Persistence"
+description: "Using several stores together, keeping them in sync with CDC, and when not to."
+---
+
+Polyglot persistence means using more than one kind of database in one system, each for the access pattern it's best at. It's how almost every large product works. It's also an easy way to drown in sync bugs and on-call pages if you add stores without a reason.
+
+## TL;DR
+
+- **One source of truth per piece of data.** Every other store is a derived copy that can be rebuilt.
+- **Sync derived stores with change data capture** or a transactional outbox, not with dual writes.
+- **Derived stores lag.** Design the UX and the read paths for that.
+- **Add a store only when an access pattern clearly diverges** from what your primary store does well.
+
+## A typical stack
+
+Step through how an e-commerce backend picks up stores as needs appear:
+
+<AnimatedDiagram name="databases/polyglot-ecommerce" caption="Postgres is the source of truth; everything else is derived or specialized" step={1} stepper />
+
+| Data / access pattern | Store | Role |
+|---|---|---|
+| Orders, payments, users | PostgreSQL | **Source of truth** |
+| Sessions, carts, hot product reads | Redis | Cache / ephemeral |
+| Product search, facets | Elasticsearch | Derived (CDC) |
+| Clickstream, sales dashboards | ClickHouse | Derived (stream) |
+| Product images | S3 + CDN | Source of truth for bytes |
+| Recommendations | Key-value store of precomputed lists | Derived (batch job) |
+
+## Keeping stores in sync
+
+The hard part isn't choosing stores but keeping them consistent.
+
+<AnimatedDiagram name="databases/cdc-to-search" caption="CDC: the app writes once; a connector streams every committed change" step={1} stepper minWidth={680} />
+
+| Pattern | How | Failure mode |
+|---|---|---|
+| **Dual write** | App writes to the DB, then to the index | Crash between the two writes = permanent drift. Concurrent writes can arrive out of order |
+| **Transactional outbox** | Write the business row and an "event" row in one transaction. A relay publishes the events | Needs a relay. Events can be delivered twice, so consumers must be idempotent |
+| **Change data capture** | Tail the database's WAL/binlog (Debezium) into Kafka | Extra infrastructure, but every committed change is captured in order |
+| **Batch rebuild** | Periodically regenerate the derived store | Stale between runs, but simple and self-healing |
+
+<Callout tone="red" title="Never dual-write" icon="alert-triangle">
+  "Write to Postgres, then write to Elasticsearch" looks fine until the second write fails, times out, or two updates arrive in the opposite order. Use CDC or an outbox, and make consumers idempotent by writing with the source row's version.
+</Callout>
+
+## Designing for lag
+
+Derived stores are **eventually consistent**. Common tactics:
+
+- **Read-your-writes from the source**: after a user edits a product, show the page from Postgres, not from the search index.
+- **Show "processing" states**: a newly uploaded video appears with a spinner until the pipeline finishes.
+- **Verify at the critical moment**: re-check price and stock in the source of truth at checkout.
+- **Monitor lag** (consumer offsets, last-event timestamps) and alert when it grows.
+
+## When *not* to add a store
+
+<ScenarioGrid>
+  <ScenarioCard workload="Search" title="Admin search over 50K rows" problem="Internal staff want to search customers by name and email. There are 50K customers." pick="Postgres full-text search or trigram index">
+    A `pg_trgm` index or `tsvector` column handles this in milliseconds. An Elasticsearch cluster would add a pipeline, a second copy and on-call load for no user-visible gain.
+  </ScenarioCard>
+  <ScenarioCard workload="Similarity" title="RAG prototype" problem="A team wants semantic search over 300K chunks and plans to add Pinecone alongside their Postgres." pick="pgvector in the same Postgres">
+    300K vectors fit easily in one Postgres with an HNSW index, filtered and joined with the existing tables, with no sync pipeline. Revisit at tens of millions of vectors.
+  </ScenarioCard>
+  <ScenarioCard workload="Analytics" title="Clickstream dashboards" problem="Product wants dashboards over 3B events a month, and analysts' queries are slowing the production replica." pick="Yes, add an OLAP store">
+    This is a real divergence: full scans over billions of rows hurt the OLTP system and run slowly on row storage. Stream events to ClickHouse or a warehouse and point the dashboards there.
+  </ScenarioCard>
+</ScenarioGrid>
+
+## Common pitfalls
+
+- **Two sources of truth** for the same field: nobody knows which copy is right.
+- **Dual writes** instead of CDC or an outbox.
+- **No rebuild path**: when a derived store is corrupted, you need a backfill job.
+- **A store per microservice per feature**: each one brings backups, upgrades, monitoring and expertise.
+
+## How to answer in an interview
+
+> "**Postgres is the source of truth.** Search and analytics are derived: **Debezium streams changes into Kafka**, which feeds Elasticsearch and ClickHouse. Consumers are idempotent using row versions, so replays are safe, and either store can be rebuilt from a snapshot plus the stream. Anything that must be exact, like price at checkout, is read from Postgres."
+
+## Related
+
+[Choosing a Database](/system-design/databases/choosing-a-database) · [Search Engines](/system-design/databases/search-engines) · [CQRS & Event Sourcing](/system-design/patterns/cqrs-event-sourcing) · [Message Queues](/system-design/patterns/message-queues) · [Idempotency](/system-design/patterns/idempotency)
+
+## Further reading
+
+- [Polyglot persistence (Martin Fowler)](https://martinfowler.com/bliki/PolyglotPersistence.html)
+- [Pattern: transactional outbox (microservices.io)](https://microservices.io/patterns/data/transactional-outbox.html)
+- [Debezium documentation](https://debezium.io/documentation/)
+- Martin Kleppmann, *Designing Data-Intensive Applications*, chapter 11 (stream processing, CDC)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What's wrong with writing to the database and then to the search index from the app?" category="Consistency" level="Mid">
+    The two writes aren't atomic. If the process crashes or the second call fails after the first succeeds, the stores diverge permanently. Two concurrent updates can also reach the index in the opposite order from the database. Use CDC or a transactional outbox so the index is fed from the database's own commit log, and apply updates idempotently by version.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you rebuild a derived store from scratch?" category="Reliability" level="Senior">
+    Take a consistent snapshot of the source (the CDC tool's initial snapshot or a database export), note the log position at snapshot time, bulk-load into a new index or table, then replay the change stream from that position until caught up. Atomically switch reads to the new store (an alias swap in Elasticsearch) and drop the old one.
+  </InterviewQuestion>
+  <InterviewQuestion question="When is adding a second database the wrong call?" category="Trade-offs" level="Mid">
+    When the primary store can still meet the requirement: Postgres full-text for small search needs, pgvector for modest vector counts, replicas for read load. Each new store adds a sync pipeline, lag, failure modes and on-call burden. Add one only when an access pattern clearly diverges and the numbers show the primary can't handle it.
+  </InterviewQuestion>
+</InterviewQuestions>

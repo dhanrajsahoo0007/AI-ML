@@ -11,6 +11,14 @@ import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
 import { Pre, Figure } from "@/components/mdx/code-block";
 import type { ContentSection, ContentMeta, ContentGroupDef } from "@/types/content";
+import { AnimatedDiagram } from "@/components/diagrams/animated-diagram";
+import { DatabasePicker } from "@/components/db/database-picker";
+import { DatabaseWorkloadMatrix } from "@/components/db/workload-matrix";
+import { CompareDatabases } from "@/components/db/compare-databases";
+import { DbProfile } from "@/components/db/db-profile";
+import { DataModelView, DataModelTab } from "@/components/db/data-model-view";
+import { ScenarioCard, ScenarioGrid } from "@/components/db/scenario-card";
+import { Callout, StepCards, StepCard } from "@/components/db/callouts";
 
 export type { ContentSection };
 
@@ -55,6 +63,18 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
       InterviewQuestions,
       InterviewQuestion,
       Figure,
+      AnimatedDiagram,
+      DatabasePicker,
+      DatabaseWorkloadMatrix,
+      CompareDatabases,
+      DbProfile,
+      DataModelView,
+      DataModelTab,
+      ScenarioCard,
+      ScenarioGrid,
+      Callout,
+      StepCards,
+      StepCard,
       pre: Pre,
     },
   });

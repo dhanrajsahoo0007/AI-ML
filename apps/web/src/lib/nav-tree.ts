@@ -7,7 +7,7 @@ import {
   getTopLevelMeta,
   partitionSlugs,
 } from "@/lib/mdx-doc";
-import { getCategories } from "@/lib/question-bank";
+import { getCategories, getCompanies, COMPANY_GROUPS } from "@/lib/question-bank";
 import { isSectionEnabled } from "@/config/features";
 import type { ContentSection } from "@/types/content";
 
@@ -45,10 +45,10 @@ const sectionDefs: {
   href: string;
   icon: string;
 }[] = [
-  { key: "ai-system-design", label: "AI System Design", href: "/ai-system-design", icon: "sparkles" },
-  { key: "system-design", label: "System Design", href: "/system-design", icon: "layers" },
-  { key: "interviews", label: "Interviews", href: "/interviews", icon: "brain" },
-  { key: "companies", label: "Companies", href: "/companies", icon: "users" },
+  { key: "ai-system-design", label: "GenAI & LLM Systems", href: "/ai-system-design", icon: "sparkles" },
+  { key: "system-design", label: "Classic System Design", href: "/system-design", icon: "layers" },
+  { key: "interviews", label: "Interview Practice", href: "/interviews", icon: "brain" },
+  { key: "companies", label: "Company Questions", href: "/companies", icon: "users" },
   { key: "ml-system-design", label: "ML System Design", href: "/ml-system-design", icon: "server" },
 ];
 
@@ -108,11 +108,24 @@ function buildInterviewGroups(): NavGroup[] {
   }));
 }
 
+// Companies live on one page that filters by ?company=; one group per company type, one item per company.
+function buildCompanyGroups(): NavGroup[] {
+  const companies = getCompanies();
+  return COMPANY_GROUPS.map((name) => ({
+    slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+    title: name,
+    href: "/companies",
+    items: companies
+      .filter((c) => c.group === name)
+      .map((c) => ({ slug: c.slug, title: c.name, href: `/companies?company=${c.slug}` })),
+  })).filter((g) => g.items.length > 0);
+}
+
 async function buildGroupsForSection(
   section: ContentSection
 ): Promise<NavGroup[]> {
   if (section === "interviews") return buildInterviewGroups();
-  if (section === "companies") return [];
+  if (section === "companies") return buildCompanyGroups();
   const allSlugs = await getContentSlugs(section);
   const metas = await getTopLevelMeta(section);
   const { topLevel, children } = partitionSlugs(allSlugs);
