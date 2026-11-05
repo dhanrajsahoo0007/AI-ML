@@ -1,0 +1,74 @@
+---
+title: "Choosing Compute on AWS"
+description: "EC2 vs ECS vs EKS vs Fargate vs Lambda: an interactive picker, who runs what, and the matching choice on Google Cloud and Azure."
+---
+
+"Where would you run this?" is a question in most cloud design interviews. On AWS the honest answer depends on three things: **how long each unit of work runs**, **how steady the load is**, and **how much platform your team wants to run**. This guide walks through those three, then gives the matching answer on Google Cloud and Azure.
+
+## TL;DR
+
+- **Short, spiky, event-driven work** → **Lambda**.
+- **Long-running services, no Kubernetes needed** → **ECS on Fargate** (or **ECS Express Mode** for a simple web app).
+- **Kubernetes is the requirement** → **EKS**, with **Auto Mode** unless you need custom nodes.
+- **You need the machine** (GPUs, licensed software, steady high load) → **EC2**, or ECS/EKS on EC2.
+- **Batch jobs** → **AWS Batch**, on Spot where jobs can retry.
+- On Google Cloud, **Cloud Run** covers most of what Lambda, Fargate and Express Mode do on AWS; on Azure, **Container Apps** does.
+
+## Try it: pick a compute service
+
+<CloudDecisionTree topic="compute" />
+
+## Who runs what
+
+Every option is the same stack. What changes is how much of it you operate. Moving right trades control for less operational work.
+
+<ResponsibilityGrid set="aws-compute" />
+
+## The options side by side
+
+| | EC2 | ECS on EC2 | EKS | ECS on Fargate | Lambda |
+|---|---|---|---|---|---|
+| **Unit you deploy** | VM image | Container | Container (pod) | Container | Function or container image |
+| **Max run time** | Unlimited | Unlimited | Unlimited | Unlimited | 15 minutes |
+| **Scale to zero** | No | No | Nodes can; the cluster fee stays | Manually (0 tasks) | Yes, automatically |
+| **Cold start** | Minutes (boot) | Seconds to minutes | Seconds to minutes | Tens of seconds | Milliseconds to seconds |
+| **GPUs** | Yes | Yes | Yes | No | No |
+| **Billing** | Per instance-second | Per instance-second | Cluster-hour + instances | Per task vCPU and GB-second | Per request + GB-second |
+| **Ops burden** | Highest | High | High (lower with Auto Mode) | Low | Lowest |
+
+## The same decision on each cloud
+
+| Need | AWS | Google Cloud | Azure |
+|---|---|---|---|
+| Event-driven functions | Lambda | Cloud Run functions | Azure Functions |
+| Image → HTTPS service | ECS Express Mode | Cloud Run | Container Apps |
+| Containers without Kubernetes | ECS on Fargate | Cloud Run | Container Apps |
+| Kubernetes, provider runs nodes | EKS Auto Mode | GKE Autopilot | AKS Automatic |
+| Kubernetes, you run nodes | EKS + managed node groups | GKE Standard | AKS |
+| VMs | EC2 + Auto Scaling | Compute Engine + MIGs | Virtual Machines + Scale Sets |
+| Batch | AWS Batch | Batch | Azure Batch |
+
+The biggest structural difference: AWS splits serverless compute into **Lambda** (functions) and **Fargate** (containers under ECS or EKS), while Google Cloud and Azure each have **one** serverless container product (Cloud Run, Container Apps) that also runs functions.
+
+## How to answer in an interview
+
+1. **Name the shape of the work:** request/response service, event handler, stream consumer, batch job, or connection-holding server.
+2. **Name the load:** spiky or steady, and roughly how many requests or connections at peak (from your estimates).
+3. **Pick the least platform that fits**, and say what would push you one step left (more control) or right (less work).
+4. **Say the trade-off out loud:** "Fargate costs more per vCPU-hour than EC2, but at our utilisation the saved ops time is worth more."
+
+## Related
+
+[Compute on AWS](/cloud/aws/compute) · [Containers on AWS](/cloud/aws/containers) · [Containers on Google Cloud](/cloud/gcp/containers) · [Containers on Azure](/cloud/azure/containers) · [Load Balancing](/system-design/patterns/load-balancing)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Lambda or Fargate for an API that gets 50 requests per second all day?" category="Cloud" level="Mid">
+    Fargate (ECS). At steady load Lambda's per-request and per-millisecond pricing usually costs more than a few always-on tasks, and containers avoid cold starts and connection-pool problems. Lambda wins when traffic is spiky or idle much of the time.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is the Google Cloud equivalent of ECS on Fargate?" category="Cloud" level="Junior">
+    Cloud Run is the usual answer: serverless containers billed by the resources they use, with no cluster to run. Google Cloud has no ECS-style orchestrator, so workloads that need more control go to GKE, often in Autopilot mode.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your Lambda functions overload the database during a traffic spike. What do you change?" category="Reliability" level="Senior">
+    Cap the function's reserved concurrency to what the database can take, put RDS Proxy in front of the database to pool connections, and move non-urgent writes behind an SQS queue so a burst is absorbed rather than passed straight to the database.
+  </InterviewQuestion>
+</InterviewQuestions>

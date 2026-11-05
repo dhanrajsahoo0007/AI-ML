@@ -10,6 +10,7 @@ interface NavLink {
 const allNav: NavLink[] = [
   { href: "/ai-system-design", label: "GenAI & LLM Systems", section: "ai-system-design" },
   { href: "/system-design", label: "Classic System Design", section: "system-design" },
+  { href: "/cloud", label: "Cloud", section: "cloud" },
   { href: "/interviews", label: "Interview Practice", section: "interviews" },
   { href: "/companies", label: "Company Questions", section: "companies" },
   { href: "/ml-system-design", label: "ML System Design", section: "ml-system-design" },

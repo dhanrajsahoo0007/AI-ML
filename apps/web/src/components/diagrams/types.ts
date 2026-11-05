@@ -2,10 +2,22 @@
 
 export type Tone = "blue" | "green" | "orange" | "red" | "violet" | "teal" | "neutral";
 
+export type CloudProvider = "aws" | "gcp" | "azure";
+
+/** A service on one cloud: a catalog id from src/lib/cloud-catalog (such as "aws-msk"), or a label with an optional id. */
+export type CloudRef = string | { id?: string; label: string };
+
+/**
+ * How a zone is drawn. Default: a dotted group with a title tab (Clients, Edge, Storage...). For deployment diagrams:
+ * "region" is a plain outline, "vpc" a solid tinted network boundary, "subnet" a tinted band with an inline label.
+ */
+export type ZoneKind = "region" | "vpc" | "subnet";
+
 export interface DiagramZone {
   id: string;
   title: string;
   tone: Tone;
+  kind?: ZoneKind;
   x: number;
   y: number;
   w: number;
@@ -26,6 +38,8 @@ export interface DiagramNode {
   variant?: "card" | "glyph";
   /** Build step that introduces this node (default 1). */
   step?: number;
+  /** The managed service that plays this role on each cloud; drives the diagram's cloud toggle and mapping table. */
+  cloud?: Partial<Record<CloudProvider, CloudRef>>;
   /** Centre of the node (of the drawing, for glyph nodes). */
   x: number;
   y: number;

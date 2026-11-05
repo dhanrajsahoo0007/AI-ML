@@ -47,6 +47,7 @@ const sectionDefs: {
 }[] = [
   { key: "ai-system-design", label: "GenAI & LLM Systems", href: "/ai-system-design", icon: "sparkles" },
   { key: "system-design", label: "Classic System Design", href: "/system-design", icon: "layers" },
+  { key: "cloud", label: "Cloud Architecture", href: "/cloud", icon: "cloud" },
   { key: "interviews", label: "Interview Practice", href: "/interviews", icon: "brain" },
   { key: "companies", label: "Company Questions", href: "/companies", icon: "users" },
   { key: "ml-system-design", label: "ML System Design", href: "/ml-system-design", icon: "server" },

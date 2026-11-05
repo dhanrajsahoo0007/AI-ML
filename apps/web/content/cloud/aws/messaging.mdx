@@ -1,0 +1,91 @@
+---
+title: "Messaging & Streaming on AWS"
+description: "SQS, SNS, EventBridge, Kinesis, MSK, Amazon MQ and Firehose: queues vs topics vs streams, with the Google Cloud and Azure equivalents."
+---
+
+Almost every case study has an "async pipeline" box. On AWS that box is one of three things: a **queue** (SQS), where each message is work for one consumer; a **topic** (SNS or EventBridge), where each message goes to every subscriber; or a **stream** (Kinesis or MSK), an ordered log many consumers read and replay. Picking the wrong one is a common interview mistake, so start with what should happen to each message.
+
+## TL;DR
+
+- **Work to be done once** → **SQS**. Use **FIFO** when order per key matters.
+- **Tell several services something happened** → **SNS → SQS** for simple fan-out, **EventBridge** for content-based routing across teams.
+- **Ordered, replayable firehose of events** → **Kinesis** (simplest) or **MSK** (Kafka ecosystem).
+- **Land a stream in S3 or a warehouse** → **Firehose**.
+- **Existing AMQP/JMS apps** → **Amazon MQ**.
+
+## At a glance
+
+<CloudGroupTable group="messaging" lead="aws" />
+
+## Queue vs topic vs stream
+
+| | Queue (SQS) | Topic (SNS / EventBridge) | Stream (Kinesis / MSK) |
+|---|---|---|---|
+| **Each message goes to** | One consumer | Every subscriber | Every consumer group, which tracks its own position |
+| **After processing** | Deleted | Delivered and gone | Kept for the retention period |
+| **Ordering** | None (FIFO: per group) | None (SNS FIFO: per group) | Per shard or partition |
+| **Replay** | No | EventBridge archive and replay | Yes, from any offset or time |
+| **Scales consumers by** | Adding workers | Adding subscribers | Adding shards or partitions |
+| **Typical use** | Background jobs | Domain events | Telemetry, clickstreams, message buses |
+
+<CloudDecisionTree topic="messaging" />
+
+## Services
+
+### Amazon SQS
+
+<CloudServiceProfile id="aws-sqs" />
+
+### Amazon SNS
+
+<CloudServiceProfile id="aws-sns" />
+
+### Amazon Kinesis Data Streams
+
+<CloudServiceProfile id="aws-kinesis" />
+
+### Amazon MSK
+
+<CloudServiceProfile id="aws-msk" />
+
+### Amazon Data Firehose
+
+<CloudServiceProfile id="aws-firehose" />
+
+### Amazon MQ
+
+<CloudServiceProfile id="aws-mq" />
+
+EventBridge is covered on [Serverless & Orchestration](/cloud/aws/serverless#aws-eventbridge).
+
+## Where this shows up in system design
+
+- **[Messenger](/system-design/case-studies/facebook-messenger):** the message bus is Kafka keyed by conversation (MSK), so each conversation stays ordered. Fan-out workers are a consumer group, and push notifications go through SNS mobile push.
+- **[Uber Eats](/system-design/case-studies/uber-eats):** order events flow through an ordered bus keyed by order id; courier location updates are a high-rate stream.
+- **[Metrics and logging](/system-design/case-studies/metrics-and-logging):** agents write to Kinesis or MSK, and Firehose lands the data in S3 for queries.
+- **[Web crawler](/system-design/case-studies/web-crawler):** the URL frontier is a set of SQS queues, one per politeness group.
+- **[Distributed message queue](/system-design/case-studies/distributed-message-queue):** the case study explains how SQS- and Kafka-style systems work inside.
+
+## Common mistakes
+
+- **Using a queue for fan-out.** Two consumers on one SQS queue split the messages rather than each getting all of them. Use SNS → SQS.
+- **Non-idempotent consumers.** SQS, SNS, EventBridge and Kinesis consumers can all see a message twice. Deduplicate with an idempotency key (see [Idempotency](/system-design/patterns/idempotency)).
+- **No dead-letter queue.** One bad message retries forever and hides real failures.
+- **A hot partition key.** One busy key (a celebrity, a big group chat) overloads one shard. Spread it with a suffix or sub-key.
+- **Visibility timeout shorter than processing time.** Messages reappear and are processed twice.
+
+## Related
+
+[Queues vs Streams](/cloud/start-here/queues-vs-streams) · [Serverless & Orchestration on AWS](/cloud/aws/serverless) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
+
+<InterviewQuestions>
+  <InterviewQuestion question="SQS or Kinesis for processing order events?" category="Cloud" level="Mid">
+    If each event is a job that one service must handle once, SQS (FIFO with the order id as group id if order matters). If several services need the same events in order and may need to replay them, Kinesis or MSK keyed by order id. Many systems use both: a stream as the source of truth and SQS queues for individual jobs.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you guarantee a message is processed exactly once with SQS?" category="Reliability" level="Senior">
+    You can't rely on delivery alone; aim for effectively-once processing. Make the consumer idempotent by recording a message or business key in a store with a conditional write (for example DynamoDB) before applying side effects, and skip keys already seen. FIFO queues add deduplication within a five-minute window, which helps but does not replace idempotent consumers.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does Messenger's design key the message bus by conversation id?" category="Architecture" level="Mid">
+    A partition preserves order, so putting a conversation's messages on one partition keeps them ordered for every consumer. Different conversations spread across partitions, so the bus still scales horizontally.
+  </InterviewQuestion>
+</InterviewQuestions>

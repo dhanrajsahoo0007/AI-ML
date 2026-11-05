@@ -1,0 +1,53 @@
+---
+title: "Messaging & Streaming on Google Cloud"
+description: "Pub/Sub, Cloud Tasks and Managed Service for Apache Kafka, with the AWS and Azure equivalents."
+---
+
+Google Cloud has one product where AWS has three: **Pub/Sub** acts as a queue, a fan-out topic and an event stream, with no partitions or shards to manage. **Cloud Tasks** adds rate-limited HTTP task queues, and **Managed Service for Apache Kafka** covers Kafka workloads.
+
+## TL;DR
+
+- **Pub/Sub** for queues (pull subscriptions), fan-out (many subscriptions) and streams (ordering keys, seek to replay).
+- **Ordering is per ordering key** and enabled per subscription; delivery is at least once, exactly-once optional on pull.
+- **Cloud Tasks** to call HTTP handlers at a controlled rate with retries.
+- **Managed Kafka** when you need the Kafka API and ecosystem.
+
+## At a glance
+
+<CloudGroupTable group="messaging" lead="gcp" />
+
+## Services
+
+### Pub/Sub
+
+<CloudServiceProfile id="gcp-pubsub" />
+
+Because Pub/Sub has no partitions, consumer parallelism is not capped by a partition count. The trade-off is less control: ordering exists only per ordering key, and replay is by snapshot or timestamp rather than by offset.
+
+### Cloud Tasks
+
+<CloudServiceProfile id="gcp-cloud-tasks" />
+
+### Managed Service for Apache Kafka
+
+<CloudServiceProfile id="gcp-managed-kafka" />
+
+## Coming from AWS
+
+| On AWS | On Google Cloud | What actually changes |
+|---|---|---|
+| SQS | Pub/Sub pull subscription or Cloud Tasks | Ack deadlines instead of visibility timeouts |
+| SNS → SQS fan-out | One topic, many subscriptions | No extra queue per subscriber; each subscription keeps its own backlog |
+| Kinesis | Pub/Sub | No shards; ordering keys and seek instead of partitions and offsets |
+| MSK | Managed Service for Apache Kafka | Sized by vCPU and memory |
+| Firehose | BigQuery and Cloud Storage subscriptions | Pub/Sub writes straight to the destination |
+
+## Related
+
+[Messaging & Streaming on AWS](/cloud/aws/messaging) · [Messaging & Streaming on Azure](/cloud/azure/messaging) · [Queues vs Streams](/cloud/start-here/queues-vs-streams) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you keep a chat conversation's messages ordered with Pub/Sub?" category="Architecture" level="Mid">
+    Publish with the conversation id as the ordering key and enable message ordering on the subscription. Messages with the same key are delivered in publish order, while different conversations are delivered in parallel.
+  </InterviewQuestion>
+</InterviewQuestions>

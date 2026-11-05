@@ -1,0 +1,111 @@
+---
+title: "Databases on AWS"
+description: "RDS, Aurora, Aurora DSQL, DynamoDB, DocumentDB, Neptune, OpenSearch and more: which AWS database fits each access pattern, with the Google Cloud and Azure equivalents."
+---
+
+AWS has a managed service for almost every database family. Choosing one is the same skill as choosing a database in general: **start from the access pattern, then pick the family, then the service**. This page maps each family to its AWS service. The [database guides](/system-design/databases/choosing-a-database) explain the families themselves.
+
+## TL;DR
+
+- **Default to Aurora PostgreSQL** (or RDS for smaller or commercial-engine databases) for business records.
+- **DynamoDB** when you know the access patterns, need any scale by key, and want nothing to operate.
+- **Aurora DSQL** when relational data must accept writes in several Regions with strong consistency.
+- **OpenSearch** for search and log queries, fed from the primary store with change data capture, never as the source of truth.
+- **Specialists:** Neptune for graphs, Keyspaces for Cassandra workloads, Timestream for InfluxDB for time series, DocumentDB for MongoDB-style apps.
+
+## At a glance
+
+<CloudGroupTable group="databases" lead="aws" />
+
+## From access pattern to service
+
+| Access pattern | Family | AWS service |
+|---|---|---|
+| Orders, payments, bookings with transactions | Relational | Aurora PostgreSQL / RDS |
+| Lookup by key at huge scale (sessions, carts, messages by conversation) | Key-value | DynamoDB |
+| Huge write stream, query-first model | Wide-column | DynamoDB or Keyspaces |
+| Flexible JSON documents | Document | DynamoDB or DocumentDB |
+| Global transactions, writes in many Regions | Distributed SQL | Aurora DSQL |
+| Full-text search, relevance, facets | Search | OpenSearch Service |
+| Similarity over embeddings | Vector | OpenSearch, Aurora pgvector, S3 Vectors |
+| Multi-hop relationships | Graph | Neptune |
+| Metrics and telemetry | Time series | Timestream for InfluxDB |
+| Dashboards over all history | Analytical | Redshift / Athena (see Analytics) |
+
+<Callout tone="orange" title="Retired or closed to new customers" icon="alert-triangle">
+Amazon QLDB was discontinued on July 31, 2025 (AWS suggests Aurora PostgreSQL for ledger-style data). Timestream for LiveAnalytics closed to new customers on June 20, 2025; new time-series work goes to Timestream for InfluxDB.
+</Callout>
+
+## Services
+
+### Amazon Aurora
+
+<CloudServiceProfile id="aws-aurora" />
+
+### Amazon RDS
+
+<CloudServiceProfile id="aws-rds" />
+
+### Amazon DynamoDB
+
+<CloudServiceProfile id="aws-dynamodb" />
+
+A DynamoDB table is designed from its queries. For a chat app's messages:
+
+```sql
+-- Table: messages
+-- Partition key: conversation_id   (all of a conversation's messages live together)
+-- Sort key:      message_id        (time-sortable id, so a range query returns a page in order)
+-- Query: newest 50 messages before a cursor
+--   KeyConditionExpression: conversation_id = :c AND message_id < :cursor
+--   ScanIndexForward = false, Limit = 50
+```
+
+A very busy conversation is a hot partition. Large group chats may need the key split by time bucket (`conversation_id#2026-11`).
+
+### Amazon Aurora DSQL
+
+<CloudServiceProfile id="aws-aurora-dsql" />
+
+### Amazon DocumentDB
+
+<CloudServiceProfile id="aws-documentdb" />
+
+### Amazon Neptune
+
+<CloudServiceProfile id="aws-neptune" />
+
+### Amazon OpenSearch Service
+
+<CloudServiceProfile id="aws-opensearch" />
+
+## Where this shows up in system design
+
+- **[Messenger](/system-design/case-studies/facebook-messenger):** messages in DynamoDB or Keyspaces partitioned by conversation; users and groups in Aurora.
+- **[Uber Eats](/system-design/case-studies/uber-eats):** orders in Aurora (transactions); restaurant search in OpenSearch; courier positions in ElastiCache GEO.
+- **[Ticketmaster](/system-design/case-studies/ticketmaster) and [hotel booking](/system-design/case-studies/hotel-booking):** seat and room inventory need transactions and conditional writes, which means Aurora, or DynamoDB with condition expressions.
+- **[Key-value store](/system-design/case-studies/key-value-store):** DynamoDB is the managed answer to the same design (see [Consistent Hashing](/system-design/patterns/consistent-hashing)).
+
+## Common mistakes
+
+- **Choosing DynamoDB before knowing the queries.** A new access pattern later can mean a new index or a data migration.
+- **Scans in DynamoDB.** A `Scan` reads the whole table. Design keys and indexes so every request is a `Query` or `GetItem`.
+- **Read replicas for read-your-own-writes.** Replica lag means a user may not see their own update. Read from the writer for those paths.
+- **Search as the source of truth.** Rebuildable indexes only, fed by DynamoDB Streams or CDC.
+- **One giant RDS instance with no plan.** Know your next step: read replicas, caching, Aurora, then sharding or DynamoDB for the hottest table.
+
+## Related
+
+[Caching on AWS](/cloud/aws/caching) · [Storage on AWS](/cloud/aws/storage) · [Choosing a Database](/system-design/databases/choosing-a-database) · [Key-Value Stores](/system-design/databases/key-value-stores) · [NewSQL / Distributed SQL](/system-design/databases/newsql-databases) · [Sharding and Partitioning](/system-design/patterns/sharding)
+
+<InterviewQuestions>
+  <InterviewQuestion question="DynamoDB or Aurora for an orders table?" category="Cloud" level="Mid">
+    Aurora by default: orders need transactions across order, payment and inventory rows, plus ad-hoc queries for support and reporting. DynamoDB fits when the access patterns are few and known (get order by id, list a customer's orders), scale is very high, and you accept designing indexes up front and moving reporting to an analytics store.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you avoid hot partitions in DynamoDB?" category="Data modeling" level="Senior">
+    Choose a partition key with many distinct, evenly used values. For naturally hot keys, add a suffix (write sharding) and read across the suffixes, or bucket by time. Cache hot reads with DAX, and remember that on-demand mode raises table capacity but cannot make a single key's partition faster.
+  </InterviewQuestion>
+  <InterviewQuestion question="When is Aurora DSQL worth it over Aurora Global Database?" category="Architecture" level="Senior">
+    Global Database has one writer Region with fast replicas elsewhere; a Regional failure needs a failover and may lose the last second of writes. DSQL accepts strongly consistent writes in multiple Regions and stays available if one fails, at the cost of higher write latency, optimistic concurrency retries and partial PostgreSQL compatibility.
+  </InterviewQuestion>
+</InterviewQuestions>

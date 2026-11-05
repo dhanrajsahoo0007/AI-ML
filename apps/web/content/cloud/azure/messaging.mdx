@@ -1,0 +1,47 @@
+---
+title: "Messaging & Streaming on Azure"
+description: "Service Bus, Event Hubs, Event Grid and Queue Storage, with the AWS and Google Cloud equivalents."
+---
+
+Azure splits messaging by job. **Service Bus** is the enterprise broker for queues and topics, with sessions, transactions and duplicate detection. **Event Hubs** is the partitioned event stream, with a Kafka-compatible endpoint. **Event Grid** routes discrete events. **Queue Storage** is a cheap, simple queue inside a storage account.
+
+## TL;DR
+
+- **Service Bus queues** for work; **Service Bus topics** for fan-out with per-subscription filters.
+- **Sessions** give ordered, one-at-a-time processing per key.
+- **Event Hubs** for telemetry and clickstreams, readable with Kafka clients; **Capture** writes to storage.
+- **Event Grid** for reacting to resource events and routing domain events.
+
+## At a glance
+
+<CloudGroupTable group="messaging" lead="azure" />
+
+## Services
+
+### Azure Service Bus
+
+<CloudServiceProfile id="azure-service-bus" />
+
+### Azure Event Hubs
+
+<CloudServiceProfile id="azure-event-hubs" />
+
+## Coming from AWS
+
+| On AWS | On Azure | What actually changes |
+|---|---|---|
+| SQS FIFO | Service Bus sessions | Plus transactions and scheduled messages |
+| SNS → SQS | Service Bus topic with subscriptions | Each subscription is its own durable queue with SQL-like filters |
+| Kinesis / MSK | Event Hubs | Partitions and consumer groups; Kafka endpoint instead of real brokers |
+| Firehose | Event Hubs Capture | Writes Avro or Parquet to Blob or Data Lake Storage |
+| Amazon MQ | Service Bus Premium | AMQP 1.0 and JMS 2.0 |
+
+## Related
+
+[Messaging & Streaming on AWS](/cloud/aws/messaging) · [Messaging & Streaming on Google Cloud](/cloud/gcp/messaging) · [Queues vs Streams](/cloud/start-here/queues-vs-streams) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Service Bus or Event Hubs for order events?" category="Cloud" level="Mid">
+    Service Bus when each event is work to be done once, possibly in order per order id (sessions), with dead-lettering and transactions. Event Hubs when many consumers need the same high-volume stream and may replay it. Many designs use Event Hubs as the event log and Service Bus for individual jobs.
+  </InterviewQuestion>
+</InterviewQuestions>

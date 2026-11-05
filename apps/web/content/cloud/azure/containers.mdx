@@ -1,0 +1,63 @@
+---
+title: "Containers on Azure"
+description: "AKS, AKS Automatic, Container Apps, Container Instances and ACR: what each one does, when to pick it, and the matching AWS and Google Cloud service."
+---
+
+Azure's container options line up with the other clouds once you see the pattern: **AKS** for Kubernetes, **Container Apps** for serverless containers that hide Kubernetes, and **Container Instances** for single containers on demand. App Service also runs containers for classic web apps.
+
+## TL;DR
+
+- **Default to Container Apps** for microservices, APIs and event-driven workers. It scales on HTTP or queue depth (via KEDA), down to zero.
+- **Use AKS when Kubernetes is the requirement.** Start with **AKS Automatic** so Azure runs nodes, scaling and security defaults.
+- **Use Container Instances** for one-off tasks and burst capacity, not long-running services.
+- **Coming from AWS:** Container Apps ≈ ECS on Fargate + Express Mode; AKS Automatic ≈ EKS Auto Mode; AKS ≈ EKS; ACI ≈ a single Fargate task.
+
+## At a glance
+
+<CloudGroupTable group="containers" lead="azure" />
+
+## Services
+
+### Azure Container Apps
+
+<CloudServiceProfile id="azure-container-apps" />
+
+Container Apps is built from open-source pieces that you can also use directly on AKS: **KEDA** for event-driven scaling, **Dapr** for service invocation, pub/sub and state, and **Envoy** for ingress. You get revisions with traffic splitting for blue-green and canary releases. The consumption plan scales to zero; **dedicated workload profiles** give reserved capacity, larger sizes and GPUs.
+
+### Azure Kubernetes Service
+
+<CloudServiceProfile id="azure-aks" />
+
+**AKS Automatic** (generally available since September 2025) creates production-ready clusters with node auto-provisioning, autoscaling, Azure Linux nodes and security guardrails turned on. Use AKS Standard for clusters where you tune node pools yourself. Production clusters should use the Standard pricing tier for its uptime SLA.
+
+### Azure Container Instances
+
+<CloudServiceProfile id="azure-container-instances" />
+
+### Azure Container Registry
+
+<CloudServiceProfile id="azure-acr" />
+
+## What changes when you move a design from AWS
+
+| AWS design | On Azure | What actually changes |
+|---|---|---|
+| ECS on Fargate | Container Apps | Scaling rules use KEDA scalers (Service Bus, Event Hubs, Kafka) directly |
+| ECS Express Mode | Container Apps or App Service | Revisions and traffic splitting are built in |
+| EKS Auto Mode | AKS Automatic | Entra ID handles cluster sign-in |
+| EKS | AKS | Free control-plane tier for dev; Standard tier for the SLA |
+| RunTask on Fargate | Container Instances or Container Apps jobs | Jobs can be triggered by events or a schedule |
+| ECR | ACR | Geo-replication needs the Premium tier |
+
+## Related
+
+[Containers on AWS](/cloud/aws/containers) · [Containers on Google Cloud](/cloud/gcp/containers) · [Choosing compute on AWS](/cloud/start-here/choosing-compute)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Container Apps or AKS for a new set of microservices on Azure?" category="Cloud" level="Mid">
+    Container Apps, unless you need the Kubernetes API itself: CRDs and operators, DaemonSets, or a shared cluster that other teams already use. Container Apps gives you KEDA scaling, Dapr and revisions without running a cluster.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you scale queue workers on Azure?" category="Cloud" level="Mid">
+    Run them in Container Apps with a KEDA scale rule on the Service Bus queue length (or Event Hubs lag). Workers scale out as the backlog grows and back to zero when it is empty, and you pay only while they run.
+  </InterviewQuestion>
+</InterviewQuestions>

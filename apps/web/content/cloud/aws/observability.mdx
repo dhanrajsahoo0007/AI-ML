@@ -1,0 +1,69 @@
+---
+title: "Observability on AWS"
+description: "CloudWatch, X-Ray with OpenTelemetry, CloudTrail, and managed Prometheus and Grafana: seeing what a system is doing, with the Google Cloud and Azure equivalents."
+---
+
+A design isn't finished until you can say how you'd know it's broken. On AWS that means **CloudWatch** for metrics, alarms and logs, **X-Ray** (instrumented with **OpenTelemetry**) for traces across services, and **CloudTrail** for who changed what. Teams that live in Prometheus and Grafana use the managed versions of those instead.
+
+## TL;DR
+
+- **Alarm on symptoms users feel**: error rate, latency percentiles, queue age, consumer lag. Don't alarm on CPU alone.
+- **Instrument once with OpenTelemetry**, send traces to X-Ray and metrics to CloudWatch or Managed Prometheus. The X-Ray SDKs reach end of support in February 2027.
+- **Structured JSON logs** with a request id, searched with Logs Insights, and a retention period on every log group.
+- **CloudTrail organisation trail** into a locked log-archive account for audit and security.
+
+## At a glance
+
+<CloudGroupTable group="observability" lead="aws" />
+
+## What to watch in a typical design
+
+| Component | Key signals | Alarm when |
+|---|---|---|
+| Load balancer / API Gateway | 5xx rate, p99 latency, request count | 5xx > 1% for 5 min; p99 above SLO |
+| ECS service / Lambda | Errors, throttles, duration, concurrency | Throttles > 0; errors spike |
+| SQS queue | Age of oldest message, DLQ depth | Oldest message older than the processing SLA; DLQ > 0 |
+| Kinesis / MSK | Iterator age / consumer lag | Lag growing for 10 min |
+| DynamoDB | Throttled requests, latency | Any sustained throttling |
+| Aurora | CPU, replica lag, connections | Replica lag > a few seconds; connections near max |
+| ElastiCache | Evictions, memory, hit ratio | Evictions rising; hit ratio dropping |
+
+## Services
+
+### Amazon CloudWatch
+
+<CloudServiceProfile id="aws-cloudwatch" />
+
+### AWS X-Ray
+
+<CloudServiceProfile id="aws-xray" />
+
+### AWS CloudTrail
+
+<CloudServiceProfile id="aws-cloudtrail" />
+
+## Where this shows up in system design
+
+- **Every case study's "how would you monitor this?" follow-up:** name the SLOs (for example, 99.9% of messages delivered within 1 second) and the signals above that measure them.
+- **[Metrics and logging](/system-design/case-studies/metrics-and-logging):** the case study designs what CloudWatch and Prometheus do internally.
+- **Debugging fan-out:** a trace shows a message going from the chat server through the bus and fan-out workers to the recipient's server, with the time spent at each hop.
+
+## Common mistakes
+
+- **Alerting on causes, not symptoms.** High CPU may be fine; rising error rates are not.
+- **Unlimited log retention.** The default keeps logs forever. Set retention and archive to S3.
+- **Averages instead of percentiles.** p99 latency shows the slow requests an average hides.
+- **No correlation id.** Without one id across logs and traces you can't follow a request.
+
+## Related
+
+[DevOps & IaC on AWS](/cloud/aws/devops) · [Identity & Security on AWS](/cloud/aws/security) · [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries) · [Time-Series Databases](/system-design/databases/time-series-databases)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Which alarms would you set for an SQS-based worker pipeline?" category="Reliability" level="Mid">
+    Age of the oldest message (the workers are falling behind), dead-letter queue depth above zero (messages are failing repeatedly), worker error rate and throttles, and the downstream dependency's latency. Queue length alone can mislead, because a long queue that drains quickly is fine.
+  </InterviewQuestion>
+  <InterviewQuestion question="Logs, metrics or traces: which do you reach for first in an outage?" category="Reliability" level="Mid">
+    Metrics first to see what is broken and since when (error rate, latency, which service). Traces next to find which hop in the request path is slow or failing. Logs last for the detail of a specific failing request, found by its trace or request id.
+  </InterviewQuestion>
+</InterviewQuestions>

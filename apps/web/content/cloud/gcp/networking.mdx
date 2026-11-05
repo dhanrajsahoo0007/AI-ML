@@ -1,0 +1,55 @@
+---
+title: "Networking on Google Cloud"
+description: "Global VPC, firewall rules, Cloud NAT, Cloud Load Balancing, Private Service Connect and Interconnect, with the AWS and Azure equivalents."
+---
+
+The biggest networking difference between the clouds is on Google Cloud: a **VPC is global**. One network spans every Region, subnets are regional, and VMs in different Regions talk privately with no peering or transit hub. Combined with the **global external load balancer**, a multi-Region design on Google Cloud needs noticeably less plumbing than on AWS.
+
+## TL;DR
+
+- **One global VPC** per environment; **Shared VPC** lets many projects use a centrally managed network.
+- **Firewall rules and policies** target network tags or service accounts.
+- **Cloud NAT** for outbound internet from private VMs; **Private Service Connect** for private access to services.
+- **Cloud Load Balancing**: one global anycast IP for HTTP across Regions, plus regional and internal options.
+
+## At a glance
+
+<CloudGroupTable group="networking" lead="gcp" />
+
+## Services
+
+### Virtual Private Cloud
+
+<CloudServiceProfile id="gcp-vpc" />
+
+### Cloud Load Balancing
+
+<CloudServiceProfile id="gcp-cloud-load-balancing" />
+
+### Private Service Connect
+
+<CloudServiceProfile id="gcp-psc" />
+
+### Cloud Interconnect
+
+<CloudServiceProfile id="gcp-interconnect" />
+
+## Coming from AWS
+
+| On AWS | On Google Cloud | What actually changes |
+|---|---|---|
+| VPC per Region + Transit Gateway | One global VPC | Cross-Region private traffic needs no peering or hub |
+| Security groups | Firewall rules by tag or service account | Rules live on the network and target workloads by identity |
+| NAT gateway per zone | Cloud NAT | Software-defined, no gateway instances, regional |
+| ALB + CloudFront/Global Accelerator | Global external Application Load Balancer | One anycast IP fronts backends in many Regions |
+| PrivateLink | Private Service Connect | Same idea, also used to reach managed services like Cloud SQL |
+
+## Related
+
+[Networking on AWS](/cloud/aws/networking) · [Networking on Azure](/cloud/azure/networking) · [Edge, DNS & CDN on Google Cloud](/cloud/gcp/edge) · [Load Balancing](/system-design/patterns/load-balancing)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why does a multi-Region design need less networking on Google Cloud?" category="Cloud" level="Mid">
+    Because a VPC is global: subnets in every Region share one private network, so services talk across Regions without peering or a transit hub. The global external Application Load Balancer gives one anycast IP that routes users to the nearest healthy Region.
+  </InterviewQuestion>
+</InterviewQuestions>

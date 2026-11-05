@@ -31,28 +31,28 @@ export const messengerArchitecture: DiagramSpec = {
   nodes: [
     { id: "sender", label: "Sender", sub: "mobile / web", icon: "phone", x: 105, y: 210, w: 140, h: 64 },
     { id: "recipient", label: "Recipient", sub: "mobile / web", icon: "phone", x: 105, y: 540, w: 140, h: 64 },
-    { id: "lb", label: "Load balancer", sub: "sticky WebSockets", icon: "load-balancer", tone: "blue", x: 297, y: 210, w: 160, h: 64 },
-    { id: "chat", label: "Chat servers", sub: "hold WebSocket conns", icon: "chat", tone: "green", accent: true, x: 575, y: 120, w: 210, h: 64 },
-    { id: "store", label: "Message store", sub: "by conversation", icon: "database", tone: "violet", variant: "glyph", x: 1098, y: 120 },
+    { id: "lb", label: "Load balancer", sub: "sticky WebSockets", icon: "load-balancer", tone: "blue", x: 297, y: 210, w: 160, h: 64, cloud: { aws: { id: "aws-elb", label: "NLB" }, gcp: { id: "gcp-cloud-load-balancing", label: "Network LB" }, azure: { id: "azure-load-balancer", label: "Load Balancer" } } },
+    { id: "chat", label: "Chat servers", sub: "hold WebSocket conns", icon: "chat", tone: "green", accent: true, x: 575, y: 120, w: 210, h: 64, cloud: { aws: { id: "aws-ecs", label: "ECS on EC2" }, gcp: { id: "gcp-gke", label: "GKE" }, azure: { id: "azure-aks", label: "AKS" } } },
+    { id: "store", label: "Message store", sub: "by conversation", icon: "database", tone: "violet", variant: "glyph", x: 1098, y: 120, cloud: { aws: "aws-dynamodb", gcp: "gcp-bigtable", azure: "azure-cosmos-db" } },
 
-    { id: "session", label: "Session registry", sub: "user → server", icon: "registry", tone: "green", step: 2, x: 495, y: 215, w: 150, h: 64 },
+    { id: "session", label: "Session registry", sub: "user → server", icon: "registry", tone: "green", step: 2, x: 495, y: 215, w: 150, h: 64, cloud: { aws: "aws-elasticache", gcp: "gcp-memorystore", azure: { id: "azure-managed-redis", label: "Managed Redis" } } },
 
-    { id: "push", label: "Push service", sub: "APNs / FCM", icon: "bell", tone: "orange", step: 3, x: 879, y: 450, w: 190, h: 64 },
+    { id: "push", label: "Push service", sub: "APNs / FCM", icon: "bell", tone: "orange", step: 3, x: 879, y: 450, w: 190, h: 64, cloud: { aws: { id: "aws-sns", label: "SNS mobile push" }, gcp: { label: "FCM (Firebase)" }, azure: { label: "Notification Hubs" } } },
 
-    { id: "gateway", label: "API gateway", sub: "auth, rate limit", icon: "gateway", tone: "blue", step: 4, x: 297, y: 515, w: 160, h: 64 },
-    { id: "groups", label: "Group service", sub: "members, roles", icon: "users", tone: "teal", step: 4, x: 575, y: 420, w: 210, h: 64 },
-    { id: "fanout", label: "Fan-out workers", sub: "one copy per member", icon: "workers", tone: "orange", step: 4, x: 879, y: 290, w: 190, h: 64 },
-    { id: "cache", label: "Cache", sub: "members, recent", icon: "cache", tone: "red", variant: "glyph", step: 4, x: 1098, y: 290 },
-    { id: "metadb", label: "Metadata DB", sub: "users, groups", icon: "database", tone: "blue", variant: "glyph", step: 4, x: 1098, y: 505 },
+    { id: "gateway", label: "API gateway", sub: "auth, rate limit", icon: "gateway", tone: "blue", step: 4, x: 297, y: 515, w: 160, h: 64, cloud: { aws: { id: "aws-elb", label: "ALB + WAF" }, gcp: { id: "gcp-cloud-load-balancing", label: "Cloud LB" }, azure: { id: "azure-app-gateway", label: "App Gateway" } } },
+    { id: "groups", label: "Group service", sub: "members, roles", icon: "users", tone: "teal", step: 4, x: 575, y: 420, w: 210, h: 64, cloud: { aws: { id: "aws-fargate", label: "ECS on Fargate" }, gcp: "gcp-cloud-run", azure: "azure-container-apps" } },
+    { id: "fanout", label: "Fan-out workers", sub: "one copy per member", icon: "workers", tone: "orange", step: 4, x: 879, y: 290, w: 190, h: 64, cloud: { aws: { id: "aws-fargate", label: "ECS on Fargate" }, gcp: "gcp-cloud-run", azure: "azure-container-apps" } },
+    { id: "cache", label: "Cache", sub: "members, recent", icon: "cache", tone: "red", variant: "glyph", step: 4, x: 1098, y: 290, cloud: { aws: "aws-elasticache", gcp: "gcp-memorystore", azure: { id: "azure-managed-redis", label: "Managed Redis" } } },
+    { id: "metadb", label: "Metadata DB", sub: "users, groups", icon: "database", tone: "blue", variant: "glyph", step: 4, x: 1098, y: 505, cloud: { aws: { id: "aws-aurora", label: "Aurora PostgreSQL" }, gcp: "gcp-alloydb", azure: { id: "azure-postgresql", label: "Azure PostgreSQL" } } },
 
-    { id: "bus", label: "Message bus", sub: "Kafka, keyed by convo", icon: "queue", tone: "orange", variant: "glyph", step: 5, x: 879, y: 120, w: 90 },
+    { id: "bus", label: "Message bus", sub: "Kafka, keyed by convo", icon: "queue", tone: "orange", variant: "glyph", step: 5, x: 879, y: 120, w: 90, cloud: { aws: "aws-msk", gcp: "gcp-managed-kafka", azure: "azure-event-hubs" } },
 
-    { id: "presence", label: "Presence", sub: "heartbeats + TTL", icon: "presence", tone: "green", step: 6, x: 660, y: 215, w: 150, h: 64 },
+    { id: "presence", label: "Presence", sub: "heartbeats + TTL", icon: "presence", tone: "green", step: 6, x: 660, y: 215, w: 150, h: 64, cloud: { aws: "aws-elasticache", gcp: "gcp-memorystore", azure: { id: "azure-managed-redis", label: "Managed Redis" } } },
 
-    { id: "media", label: "Media service", sub: "upload URLs, thumbnails", icon: "media", tone: "teal", step: 7, x: 575, y: 515, w: 210, h: 64 },
-    { id: "blob", label: "Blob store + CDN", sub: "photos, video", icon: "blob", tone: "violet", variant: "glyph", step: 7, x: 1098, y: 610 },
+    { id: "media", label: "Media service", sub: "upload URLs, thumbnails", icon: "media", tone: "teal", step: 7, x: 575, y: 515, w: 210, h: 64, cloud: { aws: { id: "aws-fargate", label: "ECS on Fargate" }, gcp: "gcp-cloud-run", azure: "azure-container-apps" } },
+    { id: "blob", label: "Blob store + CDN", sub: "photos, video", icon: "blob", tone: "violet", variant: "glyph", step: 7, x: 1098, y: 610, cloud: { aws: { id: "aws-s3", label: "S3 + CloudFront" }, gcp: { id: "gcp-cloud-storage", label: "Storage + Cloud CDN" }, azure: { id: "azure-blob", label: "Blob + Front Door" } } },
 
-    { id: "history", label: "History service", sub: "paged by message id", icon: "history", tone: "teal", step: 8, x: 575, y: 610, w: 210, h: 64 },
+    { id: "history", label: "History service", sub: "paged by message id", icon: "history", tone: "teal", step: 8, x: 575, y: 610, w: 210, h: 64, cloud: { aws: { id: "aws-fargate", label: "ECS on Fargate" }, gcp: "gcp-cloud-run", azure: "azure-container-apps" } },
   ],
   edges: [
     // Step 1: one chat server path, persist directly.

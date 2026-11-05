@@ -269,6 +269,89 @@ The components are grouped by responsibility; the same groups appear in every ca
 5. Online members get `new_message` pushed over their WebSocket by the chat server that holds their connection; their app replies with a `delivered` receipt.
 6. Offline members are handed to the **push service** (APNs / FCM); when they reconnect, the app calls `GET /v1/sync` to fetch what it missed.
 
+<CloudOnly>
+
+## 8. Running it on AWS
+
+The design above doesn't depend on any cloud. Use the **Services** buttons on the final diagram to see which managed service plays each role on AWS, Google Cloud or Azure. This section builds the AWS version: which service, why the estimates point to it, and what it costs to run at this scale.
+
+### Service mapping
+
+<CloudMapping diagram="messenger/architecture" lead="aws" />
+
+### The deployment, step by step
+
+<AnimatedDiagram name="messenger/aws" stepper caption="Messenger on AWS: one Region, a VPC across three Availability Zones, managed services beside it. Use the numbers to replay the build." />
+
+Everything inside the VPC runs in **three Availability Zones**. Only the two load balancers sit in public subnets; chat servers, workers, services, caches, the message bus and Aurora are private. DynamoDB and S3 are reached through **gateway endpoints**, and SNS, ECR and CloudWatch through **interface endpoints**, so the services need no internet access and no NAT gateway, and the traffic stays on the AWS network.
+
+### Key decisions
+
+| Decision | AWS choice | Why (from the estimates) | Alternative and its cost |
+|---|---|---|---|
+| **Connection tier** | ECS on EC2 (network-optimised Graviton instances) behind an NLB | 100M WebSockets at about 100K per server is roughly 1,000 instances running all day, which is cheapest on EC2 with Savings Plans. The NLB passes long-lived TCP connections through with little overhead. | API Gateway WebSocket APIs bill $0.25 per million connection-minutes: 100M always-on connections is about 4.3 trillion minutes, or roughly **$1M a month before any messages**, and connections drop every 2 hours. |
+| **Message bus** | Amazon MSK, topic keyed by `conversation_id` | Peak 700K messages/s × 200 B ≈ 140 MB/s. A few hundred partitions over brokers in three zones (replication factor 3) handle it with headroom. | Kinesis: 1,000 records/s per shard means at least 700 shards at peak (1,000+ with headroom). Simpler to run, but there is no Kafka ecosystem and per-shard limits apply to hot conversations. |
+| **Message store** | DynamoDB: partition key `conversation_id` (plus a time bucket for very large groups), sort key `message_id` | 230K writes/s on average suits provisioned capacity with autoscaling; a history page is one `Query`. | Keyspaces if the team already speaks Cassandra. Self-managed Cassandra on storage-optimised EC2 is cheapest at this volume but needs a dedicated team. |
+| **Session registry and presence** | Two ElastiCache for Valkey clusters | The registry is written on connect and disconnect and read on every fan-out. Presence takes a heartbeat from 100M clients every 30 s, about **3.3M writes/s**, so it gets its own cluster with dozens of shards. | One shared cluster: heartbeat load would slow the lookups every message delivery depends on. |
+| **Workers and services** | ECS on Fargate | Stateless, uneven load, scaling on MSK consumer lag or request count, with no hosts to patch. | Lambda with an MSK trigger works, but at 700K messages/s all day, per-invocation pricing costs more than tasks. |
+| **Metadata** | Aurora PostgreSQL with read replicas; membership cached | Users, groups and membership need transactions and admin queries; reads dominate. | DynamoDB would scale further but makes membership changes and support queries harder. |
+| **Media** | S3 with pre-signed multipart uploads, CloudFront for delivery | About 200 TB a day of media must never pass through app servers. | — |
+| **Push** | SNS mobile push to APNs and FCM | Manages device endpoints and fan-out to Apple and Google. | Calling APNs and FCM directly from workers: more control over batching, more code to own. |
+
+### Storage over time
+
+Text alone is about **4 TB a day, or 1.5 PB a year**. DynamoDB replicates across zones for you, so the 3× in the estimates is AWS's job, not yours. After the first few months, **storage, not throughput, is the largest part of the bill**. A common approach is one table per month (`messages_2026_11`): keep recent months in the Standard table class, switch older months to **Standard-IA**, and eventually export them to S3 as Parquet and drop the table. The history service then reads old pages from S3 on the rare occasions someone scrolls back that far.
+
+### Availability, failover and limits
+
+- **Three zones everywhere** covers the 99.99% target within one Region:
+  - ECS tasks spread across zones.
+  - MSK brokers in three zones with replication factor 3 and `min.insync.replicas=2`.
+  - Aurora and ElastiCache in Multi-AZ mode with automatic failover.
+  - DynamoDB and S3 are multi-zone by design.
+- **When a chat server or a zone fails**, clients reconnect through the NLB with jittered backoff, so 100M users don't all reconnect in the same second. Stale session entries expire by TTL, and clients resync from their last `message_id`.
+- **Multi-Region** (for Regional outages or global latency):
+  - Home each user to a Region with Route 53 latency routing.
+  - Replicate messages with DynamoDB global tables, metadata with Aurora Global Database, and events with MSK Replicator.
+  - Deliver cross-Region conversations through the recipient's home Region.
+- **Limits that bite at this scale:**
+  - A very active group chat concentrates writes on one DynamoDB partition key. Add a time bucket to the key.
+  - MSK partition counts are hard to reduce, so size for growth.
+  - Celebrity-size groups make hot keys in the membership cache. Cache membership inside the fan-out workers.
+  - Each EC2 host holding 100K sockets needs higher file-descriptor and kernel limits.
+  - The NLB closes idle TCP flows after 350 seconds by default, so client heartbeats (every 30–60 s) also keep connections open.
+
+### Security and operations
+
+- **Identity:**
+  - Cognito (or an in-house identity service) issues JWTs.
+  - Chat servers validate the token when a WebSocket connects; API services validate it on every request.
+  - AWS WAF on the ALB and CloudFront rate-limits abusive clients.
+- **Encryption:**
+  - TLS on the NLB and ALB listeners.
+  - KMS keys at rest for DynamoDB, S3, MSK, Aurora and ElastiCache.
+  - An IAM task role per service, so each one can reach only its own tables and topics.
+- **Observability:**
+  - Custom CloudWatch metrics for connections per task and p99 send-to-deliver latency.
+  - Alarms on MSK consumer lag and DynamoDB throttling.
+  - OpenTelemetry traces that carry `message_id` across hops.
+- **Delivery:** one CDK app per service, deployed per Region. Chat servers drain connections gradually during rollouts so reconnects are spread out.
+
+### On Google Cloud and Azure
+
+| Concern | Google Cloud | Azure |
+|---|---|---|
+| Connection tier | GKE behind a passthrough Network Load Balancer | AKS behind Azure Load Balancer (Web PubSub at smaller scale) |
+| Message bus | Managed Service for Apache Kafka, or Pub/Sub with `conversation_id` as the ordering key | Event Hubs (Kafka endpoint), partition key `conversation_id` |
+| Message store | Bigtable, row key `conversation_id#message_id` | Cosmos DB, partition key `conversation_id`, session consistency |
+| Sessions and presence | Memorystore for Valkey | Azure Managed Redis |
+| Push | Firebase Cloud Messaging | Notification Hubs |
+| Multi-Region | Bigtable replication; the global VPC removes cross-Region network plumbing | Cosmos DB multi-Region writes (eventually consistent, so keep per-conversation writes in one home Region) |
+
+See [Containers on AWS](/cloud/aws/containers), [Messaging & Streaming on AWS](/cloud/aws/messaging) and [Databases on AWS](/cloud/aws/databases) for the services in depth.
+
+</CloudOnly>
+
 ## Patterns used
 
 [Load Balancing](/system-design/patterns/load-balancing) · [Sharding and Partitioning](/system-design/patterns/sharding) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Unique ID Generation](/system-design/patterns/unique-id-generation) · [Idempotency](/system-design/patterns/idempotency) · [Caching](/system-design/patterns/caching) · [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking)
@@ -288,5 +371,11 @@ The components are grouped by responsibility; the same groups appear in every ca
   </InterviewQuestion>
   <InterviewQuestion question="What happens when a chat server crashes?" category="Reliability" level="Senior">
     Its clients reconnect through the load balancer to another server, which re-registers them in the session registry. No messages are lost because a message is only acknowledged after it is persisted, and clients resync from their last received message id.
+  </InterviewQuestion>
+  <InterviewQuestion question="Would you use API Gateway WebSocket APIs for Messenger on AWS?" category="Cloud" level="Senior">
+    Not at this scale. It bills per connection-minute and per message, so 100 million always-on connections cost about a million dollars a month in connection time alone, and connections are closed every two hours. Self-managed WebSocket servers on ECS with EC2 behind an NLB cost an order of magnitude less. API Gateway WebSockets fit well for products with thousands to low millions of connections.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you keep DynamoDB storage costs under control for years of chat history?" category="Cloud" level="Senior">
+    Partition messages into monthly tables, keep recent months in the Standard table class, move older months to Standard-IA, and eventually export them to S3 as Parquet and drop the table. The history service reads old pages from S3 on a cache miss, because almost nobody scrolls back years.
   </InterviewQuestion>
 </InterviewQuestions>

@@ -1,0 +1,60 @@
+---
+title: "Containers on Google Cloud"
+description: "GKE Standard, GKE Autopilot, Cloud Run and Artifact Registry: what each one does, when to pick it, and the matching AWS and Azure service."
+---
+
+Google Cloud keeps containers simple: **GKE** when you want Kubernetes, **Cloud Run** when you don't. There is no separate ECS-style orchestrator and no Fargate-style capacity type. Cloud Run covers that ground on its own, and also runs functions and batch jobs.
+
+## TL;DR
+
+- **Default to Cloud Run** for stateless HTTP services, event handlers and jobs. It scales on requests, down to zero.
+- **Use GKE when Kubernetes is the requirement**, and start in **Autopilot** mode so Google runs the nodes and you pay per pod.
+- **Use GKE Standard** when you need node-level control: custom node pools, GPUs with specific drivers, DaemonSets, privileged pods.
+- **Coming from AWS:** Cloud Run ≈ Lambda + Fargate + ECS Express Mode; GKE Autopilot ≈ EKS Auto Mode; GKE Standard ≈ EKS with node groups.
+
+## At a glance
+
+<CloudGroupTable group="containers" lead="gcp" />
+
+## Services
+
+### Cloud Run
+
+<CloudServiceProfile id="gcp-cloud-run" />
+
+Cloud Run has three shapes. **Services** answer HTTP requests and scale with concurrent requests. **Jobs** run containers to completion, in parallel tasks if needed. **Functions** (formerly Cloud Functions) let you deploy source code and have Cloud Run build the container. Each instance can serve many requests at once (up to 1,000), so it scales out far less than one-request-per-instance platforms like Lambda.
+
+Two settings matter most in a design: **minimum instances** (keep some warm to avoid cold starts on latency-sensitive paths) and **billing mode** (request-based for spiky APIs, instance-based for services that do background work or hold WebSockets).
+
+### Google Kubernetes Engine
+
+<CloudServiceProfile id="gcp-gke" />
+
+**Autopilot** is the recommended mode for new clusters. Google provisions nodes to fit pod requests, patches and upgrades them, and enforces secure defaults. You pay for the CPU, memory and storage your pods request, not for whole nodes, so bin-packing waste is Google's problem. **Standard** mode is for when you need to tune nodes yourself.
+
+### Artifact Registry
+
+<CloudServiceProfile id="gcp-artifact-registry" />
+
+## What changes when you move a design from AWS
+
+| AWS design | On Google Cloud | What actually changes |
+|---|---|---|
+| Lambda functions | Cloud Run functions or services | Instances serve many requests at once, so fewer cold starts and fewer database connections |
+| ECS on Fargate | Cloud Run | No cluster or service objects; scale-to-zero is built in |
+| ECS on EC2 / EKS node groups | GKE Standard | Node pools replace capacity providers and node groups |
+| EKS Auto Mode | GKE Autopilot | Billing is per pod request rather than per node |
+| ECR | Artifact Registry | Also hosts language packages |
+
+## Related
+
+[Containers on AWS](/cloud/aws/containers) · [Containers on Azure](/cloud/azure/containers) · [Choosing compute on AWS](/cloud/start-here/choosing-compute)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Cloud Run or GKE for a new microservice on Google Cloud?" category="Cloud" level="Mid">
+    Cloud Run, unless the service needs something only Kubernetes gives you: operators or CRDs, DaemonSets, custom networking, or a shared platform many teams already deploy to. Cloud Run removes cluster operations entirely and scales to zero.
+  </InterviewQuestion>
+  <InterviewQuestion question="How does Cloud Run's concurrency change capacity planning compared with Lambda?" category="Cloud" level="Senior">
+    A Lambda environment handles one request at a time, so 1,000 concurrent requests need 1,000 environments. A Cloud Run instance can handle many at once (up to 1,000), so the same load may need only a handful of instances. That means fewer cold starts and fewer database connections, but each instance must be safe to run requests in parallel.
+  </InterviewQuestion>
+</InterviewQuestions>

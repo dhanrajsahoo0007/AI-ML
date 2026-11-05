@@ -1,0 +1,61 @@
+---
+title: "Databases on Azure"
+description: "Azure SQL, Azure Database for PostgreSQL, Cosmos DB, Azure DocumentDB and Azure AI Search, with the AWS and Google Cloud equivalents."
+---
+
+Azure's databases split into the **SQL Server family** (Azure SQL Database, SQL Managed Instance), **open-source relational** (Azure Database for PostgreSQL and MySQL) and **Cosmos DB**, a globally distributed NoSQL engine with several APIs and five consistency levels. **Azure DocumentDB** (formerly Cosmos DB for MongoDB vCore) serves MongoDB workloads, and **Azure AI Search** handles search and RAG retrieval.
+
+## TL;DR
+
+- **Azure SQL** for SQL Server workloads; **Azure Database for PostgreSQL** as the open-source default.
+- **Cosmos DB** for key-value and document data at global scale; pick the **partition key** and **consistency level** with care.
+- **Azure DocumentDB** for MongoDB-compatible apps sized by vCore.
+- No direct Spanner or Aurora DSQL equivalent: Cosmos DB multi-Region writes are not strongly consistent.
+
+## At a glance
+
+<CloudGroupTable group="databases" lead="azure" />
+
+## Services
+
+### Azure SQL Database
+
+<CloudServiceProfile id="azure-sql" />
+
+### Azure Database for PostgreSQL
+
+<CloudServiceProfile id="azure-postgresql" />
+
+### Azure Cosmos DB
+
+<CloudServiceProfile id="azure-cosmos-db" />
+
+Cosmos DB's five consistency levels, from strongest to weakest: **strong**, **bounded staleness**, **session** (read your own writes, the default), **consistent prefix** and **eventual**. Weaker levels cost fewer request units and give lower latency. Strong consistency is not available with multi-Region writes.
+
+### Azure DocumentDB
+
+<CloudServiceProfile id="azure-documentdb" />
+
+### Azure AI Search
+
+<CloudServiceProfile id="azure-ai-search" />
+
+## Coming from AWS
+
+| On AWS | On Azure | What actually changes |
+|---|---|---|
+| RDS / Aurora PostgreSQL | Azure Database for PostgreSQL | HorizonDB (preview) targets Aurora-style scale-out |
+| RDS for SQL Server | Azure SQL Database / Managed Instance | Hyperscale for very large databases |
+| DynamoDB | Cosmos DB for NoSQL | Request units and five consistency levels |
+| DocumentDB | Azure DocumentDB | Built on the open-source DocumentDB engine |
+| OpenSearch Service | Azure AI Search | Built-in vector and hybrid retrieval for RAG |
+
+## Related
+
+[Databases on AWS](/cloud/aws/databases) · [Databases on Google Cloud](/cloud/gcp/databases) · [Databases on Each Cloud](/cloud/start-here/databases-per-cloud) · [Consistency Models and CAP](/system-design/patterns/consistency-models)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Which Cosmos DB consistency level would you choose for a chat app?" category="Data modeling" level="Mid">
+    Session consistency: each user always sees their own writes and reads in order within their session, at low latency and request-unit cost. Strong consistency would add latency and is unavailable with multi-Region writes; eventual could show a user's own message missing right after sending it.
+  </InterviewQuestion>
+</InterviewQuestions>

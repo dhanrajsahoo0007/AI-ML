@@ -1,6 +1,7 @@
 export type ContentSection =
   | "interviews"
   | "system-design"
+  | "cloud"
   | "ai-system-design"
   | "ml-system-design"
   | "companies";

@@ -1,0 +1,97 @@
+---
+title: "Compute on AWS"
+description: "EC2, Auto Scaling, Spot, Savings Plans, Elastic Beanstalk and Batch: choosing instances, paying less, and the matching Google Cloud and Azure service."
+---
+
+Every other compute service on AWS, from Fargate to Lambda, runs on top of EC2. This page covers the VM layer itself: picking an instance, keeping a fleet healthy across zones, and paying a fraction of the list price. Containers and functions have their own pages.
+
+## TL;DR
+
+- **EC2 is the right tool when you need the machine:** specific hardware (GPUs, big memory, local NVMe), licensed or legacy software, or steady load where commitments make VMs cheapest.
+- **Never run a single instance for a service.** Use an **Auto Scaling group** across three Availability Zones behind a load balancer.
+- **Pay less in three ways:** Savings Plans for the steady baseline, Spot for interruptible work, Graviton (Arm) for better price-performance.
+- **Batch jobs** go to **AWS Batch**; **classic web apps on VMs** can use **Elastic Beanstalk**, but new container work should start on ECS.
+
+## At a glance
+
+<CloudGroupTable group="compute" lead="aws" />
+
+## Picking an instance
+
+An instance name such as `m8g.xlarge` has three parts: the **family** (`m`), the **generation** (`8`) and attributes (`g` = Graviton, `i` = Intel, `a` = AMD, `d` = local NVMe disk, `n` = more network). After the dot comes the **size**: each step up doubles vCPU and memory.
+
+| Family | Built for | Typical use in a design |
+|---|---|---|
+| **M** (general purpose) | Balanced CPU and memory | Web and app servers, most services |
+| **C** (compute optimised) | More CPU per GB | Encoding, game servers, high-throughput APIs |
+| **R / X** (memory optimised) | More memory per vCPU | In-memory caches, large JVM heaps, self-managed databases |
+| **I / D** (storage optimised) | Fast local NVMe or dense HDD | Self-managed Cassandra, Kafka, Elasticsearch |
+| **P / G / Inf / Trn** (accelerated) | GPUs, Inferentia, Trainium | Model training and inference, video |
+| **T** (burstable) | Cheap baseline with CPU credits | Dev, test and spiky low-traffic tools |
+
+**Start on Graviton** unless a dependency needs x86. It typically gives better price-performance and most languages and base images support arm64 now.
+
+## Paying for EC2
+
+| Option | Discount | Commitment | Use it for |
+|---|---|---|---|
+| **On-Demand** | None | None | Unknown or short-lived load, the top of daily peaks |
+| **Savings Plans** | Up to about 72% | 1 or 3 years of $/hour | The steady baseline. Compute Savings Plans also cover Fargate and Lambda |
+| **Reserved Instances** | Up to about 72% | 1 or 3 years, specific type | Mostly replaced by Savings Plans; still used to reserve capacity in a zone |
+| **Spot** | Up to about 90% | None, but AWS can reclaim with 2 minutes' notice | Stateless workers, batch, CI, anything that can retry |
+
+A common mix: Savings Plans cover the always-on floor, On-Demand covers the daily peak, and Spot runs workers and batch.
+
+## Keeping a fleet healthy
+
+An **Auto Scaling group** keeps a desired number of instances running from a **launch template** (image, instance types, user data). It replaces instances that fail health checks, including load balancer checks, and balances them across zones.
+
+- **Scaling policies:** target tracking (for example "keep CPU at 50%"), step scaling, scheduled scaling for known peaks, and predictive scaling that learns daily patterns.
+- **Mixed instances policy:** several instance types and On-Demand + Spot in one group, so a Spot shortage in one type does not stop scaling.
+- **Warm pools** keep pre-initialised instances stopped and ready, cutting scale-out time for apps that boot slowly.
+- **Placement groups:** *cluster* packs instances close together for low-latency HPC; *spread* puts each on separate hardware; *partition* isolates groups of instances for Kafka or Cassandra racks.
+
+## Services
+
+### Amazon EC2
+
+<CloudServiceProfile id="aws-ec2" />
+
+### AWS Elastic Beanstalk
+
+<CloudServiceProfile id="aws-elastic-beanstalk" />
+
+### AWS Batch
+
+<CloudServiceProfile id="aws-batch" />
+
+## Where EC2 shows up in system design
+
+- **Stateful tiers you run yourself:** a self-managed Kafka or Cassandra cluster on I-family instances with local NVMe.
+- **Connection-heavy servers:** WebSocket gateways in a chat system ([Facebook Messenger](/system-design/case-studies/facebook-messenger)), where steady load and huge connection counts favour large network-optimised instances.
+- **GPU fleets** for model inference and video transcoding.
+- **Underneath managed services:** ECS on EC2, EKS nodes and EMR clusters are EC2 instances you can size and discount.
+
+## Common mistakes
+
+- **One instance, one zone.** Use an Auto Scaling group, even with a minimum of one, so failed instances come back by themselves.
+- **Snowflake servers.** Changes made by SSH get lost on replacement. Bake images or use user data and configuration management.
+- **Scaling on CPU only.** For queue workers, scale on queue depth; for web tiers, on request count per target.
+- **Buying commitments before right-sizing.** Measure for a few weeks, shrink oversized instances, then commit.
+- **Spot for stateful work without a plan.** Handle the 2-minute notice: drain, checkpoint, and keep a mixed instances policy.
+
+## Related
+
+[Containers on AWS](/cloud/aws/containers) · [Choosing compute on AWS](/cloud/start-here/choosing-compute) · [Load Balancing](/system-design/patterns/load-balancing) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How would you cut the EC2 bill for a service that runs all day with a daily peak?" category="Cloud" level="Mid">
+    Right-size from real metrics first. Then cover the always-on floor with a Compute Savings Plan, serve the daily peak with On-Demand through autoscaling, move interruptible workers and batch to Spot, and switch to Graviton instances where the stack supports arm64.
+  </InterviewQuestion>
+  <InterviewQuestion question="How do you make an EC2-based tier highly available?" category="Reliability" level="Mid">
+    Run it in an Auto Scaling group spread across at least three Availability Zones behind a load balancer, with load balancer health checks so failed instances are replaced automatically. Keep instances stateless so any one can be replaced, and store state in managed services.
+  </InterviewQuestion>
+  <InterviewQuestion question="When is Spot a bad idea?" category="Cloud" level="Mid">
+    For work that cannot be interrupted or resumed: a single-instance database, long jobs with no checkpoints, or a tier where losing capacity at peak breaks the SLA. Spot fits stateless, retryable work spread over several instance types.
+  </InterviewQuestion>
+</InterviewQuestions>

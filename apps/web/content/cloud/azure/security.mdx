@@ -1,0 +1,55 @@
+---
+title: "Identity & Security on Azure"
+description: "Entra ID, managed identities, Azure RBAC and Policy, Key Vault, WAF, DDoS Protection and Defender for Cloud, with the AWS and Google Cloud equivalents."
+---
+
+Identity is Azure's home ground. **Microsoft Entra ID** handles employee sign-in and access to Azure, **managed identities** let services authenticate without secrets, **Azure RBAC** and **Azure Policy** control and constrain what can be done, and **Entra External ID** covers customer sign-in. **Key Vault**, **WAF**, **DDoS Protection** and **Defender for Cloud** complete the picture.
+
+## TL;DR
+
+- **Managed identities** for every app, with Azure RBAC roles; no connection strings with keys.
+- **Azure Policy** as guardrails across subscriptions (allowed Regions, required encryption, no public IPs).
+- **Key Vault** for secrets, keys and certificates, behind private endpoints.
+- **Front Door WAF** at the edge; **Defender for Cloud** for posture and threats.
+
+## At a glance
+
+<CloudGroupTable group="security" lead="azure" />
+
+## Services
+
+### Microsoft Entra ID
+
+<CloudServiceProfile id="azure-entra-id" />
+
+### Azure Key Vault
+
+<CloudServiceProfile id="azure-key-vault" />
+
+### Azure Web Application Firewall
+
+<CloudServiceProfile id="azure-waf" />
+
+### Microsoft Defender for Cloud
+
+<CloudServiceProfile id="azure-defender" />
+
+## Coming from AWS
+
+| On AWS | On Azure | What actually changes |
+|---|---|---|
+| IAM role for a workload | Managed identity + Azure RBAC | Assigned to the resource; tokens come from Entra ID |
+| SCPs / AWS Config rules | Azure Policy | Deny or audit non-compliant resources at any scope |
+| Cognito | Entra External ID | Azure AD B2C is closed to new customers |
+| KMS + Secrets Manager + ACM | Key Vault | One service for keys, secrets and certificates |
+| Security Hub + GuardDuty | Defender for Cloud | Also covers AWS and Google Cloud accounts |
+
+## Related
+
+[Identity & Security on AWS](/cloud/aws/security) · [Identity & Security on Google Cloud](/cloud/gcp/security) · [Security fundamentals](/system-design/fundamentals/security) · [Rate Limiting](/system-design/patterns/rate-limiting)
+
+<InterviewQuestions>
+  <InterviewQuestion question="How does an Azure Function read a secret from Key Vault without storing credentials?" category="Cloud" level="Junior">
+    Give the function app a managed identity, grant that identity the Key Vault Secrets User role on the vault, and reference the secret from app settings or fetch it with the Azure SDK. Entra ID issues the tokens, so no secret is stored to read the secret.
+  </InterviewQuestion>
+</InterviewQuestions>

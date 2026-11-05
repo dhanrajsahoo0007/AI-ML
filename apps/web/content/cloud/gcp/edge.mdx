@@ -1,0 +1,40 @@
+---
+title: "Edge, DNS & CDN on Google Cloud"
+description: "Cloud DNS, Cloud CDN, Media CDN and the global external load balancer, with the AWS and Azure equivalents."
+---
+
+On Google Cloud the edge is built into the load balancer. The **global external Application Load Balancer** terminates TLS at Google's edge and routes to the nearest healthy backend, **Cloud CDN** is a switch on that load balancer, and **Cloud Armor** attaches to it. **Cloud DNS** handles names and routing policies; **Media CDN** serves large video and downloads.
+
+## TL;DR
+
+- **Global external Application Load Balancer** as the single entry point for HTTP, worldwide.
+- **Cloud CDN** enabled per backend for caching; **Media CDN** for streaming-scale video.
+- **Cloud DNS** with geolocation, weighted and failover routing policies.
+- **Cloud Armor** on the same load balancer for WAF and DDoS protection.
+
+## At a glance
+
+<CloudGroupTable group="edge" lead="gcp" />
+
+## Services
+
+### Cloud DNS
+
+<CloudServiceProfile id="gcp-cloud-dns" />
+
+### Cloud CDN and Media CDN
+
+<CloudServiceProfile id="gcp-cloud-cdn" />
+
+## Coming from AWS
+
+| On AWS | On Google Cloud | What actually changes |
+|---|---|---|
+| Route 53 | Cloud DNS | Routing policies similar; health checks via the load balancer |
+| CloudFront | Cloud CDN on the global load balancer | CDN is a backend setting, not a separate distribution |
+| Global Accelerator | Global external load balancer | Anycast IP is built in, no extra service |
+| Lambda@Edge | Service Extensions | Plugins on load balancers and Media CDN; narrower than Lambda@Edge |
+
+## Related
+
+[Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Edge, DNS & CDN on Azure](/cloud/azure/edge) · [Networking on Google Cloud](/cloud/gcp/networking) · [Caching](/system-design/patterns/caching)

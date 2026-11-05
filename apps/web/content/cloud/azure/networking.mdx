@@ -1,0 +1,59 @@
+---
+title: "Networking on Azure"
+description: "VNets, NSGs, NAT Gateway, Application Gateway, Load Balancer, Private Link, Virtual WAN and ExpressRoute, with the AWS and Google Cloud equivalents."
+---
+
+An Azure **Virtual Network** is regional like an AWS VPC, but its **subnets span all zones** in the Region, so you don't create one subnet per zone. **Network security groups** filter traffic, **Private Link** puts PaaS services on private IPs, and **Virtual WAN** or hub-and-spoke peering connects many networks. New VNets created with current APIs start with **private subnets that have no implicit internet access**, so outbound traffic needs a NAT Gateway or firewall.
+
+## TL;DR
+
+- **Hub-and-spoke**: a hub VNet with Azure Firewall and gateways, spokes per workload, or **Virtual WAN** at scale.
+- **NSGs** on subnets and NICs; **application security groups** to group VMs by role.
+- **Private endpoints** for Storage, SQL, Cosmos DB and Key Vault, with private DNS zones.
+- **Application Gateway** (regional L7), **Load Balancer** (L4), **Front Door** (global L7).
+
+## At a glance
+
+<CloudGroupTable group="networking" lead="azure" />
+
+## Services
+
+### Azure Virtual Network
+
+<CloudServiceProfile id="azure-vnet" />
+
+### Azure Application Gateway
+
+<CloudServiceProfile id="azure-app-gateway" />
+
+### Azure Load Balancer
+
+<CloudServiceProfile id="azure-load-balancer" />
+
+### Azure Private Link
+
+<CloudServiceProfile id="azure-private-link" />
+
+### Azure ExpressRoute
+
+<CloudServiceProfile id="azure-expressroute" />
+
+## Coming from AWS
+
+| On AWS | On Azure | What actually changes |
+|---|---|---|
+| VPC with a subnet per zone | VNet with regional subnets | Zone spreading is per resource, not per subnet |
+| Security groups | Network security groups | Applied to subnets or NICs; ASGs group VMs by role |
+| Transit Gateway | Virtual WAN or hub VNet with peering | Hub usually holds Azure Firewall |
+| PrivateLink endpoints | Private endpoints + private DNS zones | DNS zones are required for hostnames to resolve privately |
+| ALB / NLB | Application Gateway / Load Balancer | Global HTTP goes through Front Door instead |
+
+## Related
+
+[Networking on AWS](/cloud/aws/networking) · [Networking on Google Cloud](/cloud/gcp/networking) · [Edge, DNS & CDN on Azure](/cloud/azure/edge) · [Load Balancing](/system-design/patterns/load-balancing)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why does a private endpoint need a private DNS zone?" category="Cloud" level="Mid">
+    Clients still use the service's public hostname, such as mystorage.blob.core.windows.net. A private DNS zone linked to the VNet makes that name resolve to the private endpoint's IP inside the network; without it, traffic would go to the public endpoint or fail.
+  </InterviewQuestion>
+</InterviewQuestions>

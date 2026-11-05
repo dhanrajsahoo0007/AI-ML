@@ -8,15 +8,23 @@ export const features = {
   mlSystemDesign: false,
   /** Interview categories flagged `mlInterviews` in taxonomy.yaml: ML Fundamentals, Deep Learning, Statistics & Data Science. */
   mlInterviews: false,
+  /** The /cloud section (AWS, GCP and Azure). Shown under `next dev` only until the pilot pages are approved; set to
+   *  true to publish it in production builds. */
+  cloud: process.env.NODE_ENV !== "production",
 } as const;
 
 export type FeatureFlag = keyof typeof features;
 
 export function isSectionEnabled(section: ContentSection) {
-  return section === "ml-system-design" ? features.mlSystemDesign : true;
+  if (section === "ml-system-design") return features.mlSystemDesign;
+  if (section === "cloud") return features.cloud;
+  return true;
 }
 
 // True when a site path such as /ml-system-design/... belongs to an enabled section.
 export function isPathEnabled(href: string) {
-  return !(href === "/ml-system-design" || href.startsWith("/ml-system-design/")) || features.mlSystemDesign;
+  const under = (root: string) => href === root || href.startsWith(`${root}/`);
+  if (under("/ml-system-design")) return features.mlSystemDesign;
+  if (under("/cloud")) return features.cloud;
+  return true;
 }

@@ -66,18 +66,18 @@ export function SiteHeader({ navTree }: { navTree: NavSection[] }) {
           <span className="font-display text-xl whitespace-nowrap sm:text-2xl">
             {siteConfig.name}
           </span>
-          <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground xl:inline">
+          <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground 2xl:inline">
             {siteConfig.tagline}
           </span>
         </Link>
 
-        <div className="relative hidden flex-1 items-center justify-center gap-7 self-stretch lg:flex">
+        <div className="relative hidden flex-1 items-center justify-center gap-3 self-stretch lg:flex xl:gap-7">
           {siteConfig.nav.map((item) => {
             const isActive = pathname.startsWith(item.href);
             const section = navTree.find((s) => s.href === item.href);
             const hasSub = !!section && section.groups.length > 0;
             const itemClass = cn(
-              "relative inline-flex items-center gap-1 whitespace-nowrap py-1 text-sm transition-colors",
+              "relative inline-flex items-center gap-1 whitespace-nowrap py-1 text-[13px] transition-colors xl:text-sm",
               isActive || openHref === item.href
                 ? "text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-ink"
                 : "text-muted-foreground hover:text-ink"

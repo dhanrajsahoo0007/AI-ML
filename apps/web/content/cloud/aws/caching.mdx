@@ -1,0 +1,70 @@
+---
+title: "Caching on AWS"
+description: "ElastiCache (Valkey, Redis OSS, Memcached), ElastiCache Serverless, MemoryDB and DAX: which cache fits, and the Google Cloud and Azure equivalents."
+---
+
+A cache in a system design diagram is usually **ElastiCache** on AWS. The choices that matter are the engine (Valkey for new clusters), node-based versus Serverless, and whether the data may be lost. Data you cannot lose belongs in **MemoryDB** or a real database. For DynamoDB-heavy designs, **DAX** caches without any cache code.
+
+## TL;DR
+
+- **ElastiCache for Valkey** for cache-aside, sessions, counters, leaderboards, rate limits and ephemeral state such as presence.
+- **ElastiCache Serverless** when traffic is unpredictable or you don't want to size shards; **node-based clusters** for steady, large caches at the lowest cost.
+- **MemoryDB** when Redis data structures are the system of record and must survive failover without data loss.
+- **DAX** for read-heavy DynamoDB tables.
+- **CloudFront** is also a cache, for HTTP responses at the edge.
+
+## At a glance
+
+<CloudGroupTable group="caching" lead="aws" />
+
+## Services
+
+### Amazon ElastiCache
+
+<CloudServiceProfile id="aws-elasticache" />
+
+| Use | Data structure | Example |
+|---|---|---|
+| Cache-aside | String with TTL | `user:42 → JSON`, 5-minute TTL |
+| Sessions | Hash with TTL | `session:abc → {user, roles}` |
+| Rate limiting | Counter with expiry, or sorted set | `rl:42:2026-11-05T10:01 → 17` |
+| Leaderboards | Sorted set | `ZADD board 1500 user42` |
+| Presence and routing | String with TTL, refreshed by heartbeat | `conn:42 → chat-server-7` |
+| Nearby search | GEO set | `GEOSEARCH couriers FROMLONLAT … BYRADIUS 3 km` |
+| Fan-out between servers | Pub/sub | `PUBLISH convo:9 …` |
+
+### Amazon MemoryDB
+
+<CloudServiceProfile id="aws-memorydb" />
+
+### Amazon DynamoDB Accelerator (DAX)
+
+<CloudServiceProfile id="aws-dax" />
+
+## Where this shows up in system design
+
+- **[Messenger](/system-design/case-studies/facebook-messenger):** the session registry (user → chat server) and presence with heartbeat TTLs in ElastiCache.
+- **[Uber Eats](/system-design/case-studies/uber-eats):** live courier locations in a GEO set, refreshed every few seconds.
+- **[Rate limiter](/system-design/case-studies/rate-limiter):** token or sliding-window counters with atomic Lua scripts (see [Rate Limiting](/system-design/patterns/rate-limiting)).
+- **[URL shortener](/system-design/case-studies/url-shortener) and [typeahead](/system-design/case-studies/typeahead):** hot keys and top prefixes cached in front of the database.
+
+## Common mistakes
+
+- **Using the cache as the database.** A failover or eviction can lose recent writes. Rebuild from the source, or use MemoryDB.
+- **No TTLs.** Stale data never leaves and memory fills. Give every key a TTL unless there is a clear reason not to.
+- **Cache stampede on a hot key.** When it expires, thousands of requests hit the database at once. Use request coalescing, early refresh or a lock (see [Caching](/system-design/patterns/caching)).
+- **Multi-key operations across shards.** In cluster mode, keys in one transaction must share a hash slot. Use hash tags such as `{user42}:cart`.
+- **Picking Redis OSS by habit.** Valkey is protocol-compatible and cheaper on ElastiCache.
+
+## Related
+
+[Databases on AWS](/cloud/aws/databases) · [Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Caching](/system-design/patterns/caching) · [Key-Value Stores](/system-design/databases/key-value-stores) · [Geospatial Indexing](/system-design/patterns/geospatial-indexing)
+
+<InterviewQuestions>
+  <InterviewQuestion question="ElastiCache or MemoryDB?" category="Cloud" level="Mid">
+    ElastiCache when the data can be rebuilt from a source of truth: caches, sessions you can recreate, counters that may reset. MemoryDB when the in-memory store is the source of truth and must not lose acknowledged writes on failover; it pays for that with slower writes and a higher price.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you keep a presence system in ElastiCache?" category="Architecture" level="Mid">
+    Each connected client's chat server sets a key per user with a short TTL (say 30 seconds) and refreshes it on every heartbeat. A missing key means offline. Last-seen times are written when a key expires or the user disconnects. Status changes are pushed to interested users through pub/sub or the messaging pipeline.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import { DIAGRAMS } from "./specs";
 import { GLYPH_SIZE, NODE_H, NODE_W, edgePoints, nodeBox, pathD, pointAt } from "./geometry";
 import { Glyph, isGlyph } from "./glyphs";
-import type { DiagramEdge, DiagramNode, DiagramSpec, DiagramZone, Tone } from "./types";
+import type { CloudProvider, CloudRef, DiagramEdge, DiagramNode, DiagramSpec, DiagramZone, Tone } from "./types";
 
 // Lucide fallbacks for icon names that have no drawn glyph.
 const DIAGRAM_ICONS: Record<string, LucideIcon> = {
@@ -46,6 +46,20 @@ const DIAGRAM_ICONS: Record<string, LucideIcon> = {
 const TONES: Tone[] = ["blue", "green", "orange", "red", "violet", "teal", "neutral"];
 const stroke = (t: Tone) => `var(--dg-${t})`;
 const soft = (t: Tone) => `var(--dg-${t}-soft)`;
+
+// Cloud toggle: "generic" shows the role names; a provider shows the managed service that plays each role.
+type CloudView = "generic" | CloudProvider;
+const CLOUD_VIEWS: { id: CloudView; label: string; tone?: Tone }[] = [
+  { id: "generic", label: "Generic" },
+  { id: "aws", label: "AWS", tone: "orange" },
+  { id: "gcp", label: "Google Cloud", tone: "green" },
+  { id: "azure", label: "Azure", tone: "blue" },
+];
+
+// Label for a cloud ref: an explicit label, the catalog short name for an id, or the string itself.
+function cloudLabel(ref: CloudRef, names: Record<string, string>) {
+  return typeof ref === "string" ? names[ref] ?? ref : ref.label;
+}
 
 /** How an element is drawn at the current build step: added in this step, carried over, or full diagram. */
 type Phase = "new" | "old" | "full";
@@ -113,12 +127,15 @@ export function AnimatedDiagram({
   step,
   stepper = false,
   minWidth = 680,
+  cloudNames = {},
 }: {
   name: string;
   caption?: string;
   step?: number;
   stepper?: boolean;
   minWidth?: number;
+  /** Short service names for the catalog ids used in node.cloud, resolved on the server (see ./diagram.tsx). */
+  cloudNames?: Record<string, string>;
 }) {
   const spec = DIAGRAMS[name];
   const uid = `dg${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
@@ -127,6 +144,7 @@ export function AnimatedDiagram({
   const [inView, setInView] = useState(false);
   const [playing, setPlaying] = useState(true);
   const [current, setCurrent] = useState<number | undefined>(step);
+  const [cloud, setCloud] = useState<CloudView>("generic");
   const reduced = useReducedMotion();
   const running = inView && playing && !reduced;
 
@@ -155,9 +173,38 @@ export function AnimatedDiagram({
   const info = current !== undefined ? steps[current - 1] : undefined;
   const added = view.nodes.filter((v) => v.phase === "new").map((v) => v.node.label);
   const label = caption ?? spec.title;
+  // The cloud toggle appears on the full design and the stepper, not on single-step figures.
+  const showCloud = spec.nodes.some((n) => n.cloud) && (stepper || step === undefined);
+  const display = (n: DiagramNode): DiagramNode => {
+    const ref = cloud === "generic" ? undefined : n.cloud?.[cloud];
+    return ref ? { ...n, label: cloudLabel(ref, cloudNames), sub: n.label } : n;
+  };
 
   return (
     <figure ref={figRef} className="my-10 xl:-mx-24 2xl:-mx-40">
+      {showCloud && (
+        <div className="mb-3 flex flex-wrap items-center gap-2" role="group" aria-label="Show services for">
+          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Services</span>
+          {CLOUD_VIEWS.map((v) => {
+            const on = cloud === v.id;
+            return (
+              <button
+                key={v.id}
+                type="button"
+                aria-pressed={on}
+                onClick={() => setCloud(v.id)}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
+                  on ? "border-transparent text-paper" : "border-hairline text-muted-foreground hover:border-ink hover:text-ink",
+                )}
+                style={on ? { background: v.tone ? stroke(v.tone) : "var(--ink)" } : undefined}
+              >
+                {v.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {(current !== undefined || stepper) && (
         <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
           <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
@@ -214,7 +261,7 @@ export function AnimatedDiagram({
               ))}
             </g>
             {view.nodes.map(({ node, phase }) => (
-              <Node key={node.id} node={node} phase={phase} />
+              <Node key={node.id} node={display(node)} phase={phase} />
             ))}
           </svg>
         </div>
@@ -291,6 +338,7 @@ function Defs({ uid }: { uid: string }) {
 }
 
 function Zone({ zone, phase }: { zone: DiagramZone; phase: Phase }) {
+  if (zone.kind) return <BoundaryZone zone={zone} phase={phase} />;
   const tabW = zone.title.length * 8.2 + 28;
   return (
     <g opacity={phase === "old" ? 0.6 : 1}>
@@ -322,6 +370,49 @@ function Zone({ zone, phase }: { zone: DiagramZone; phase: Phase }) {
         fontSize={14}
         fontWeight={600}
         style={{ fill: stroke(zone.tone) }}
+      >
+        {zone.title}
+      </text>
+    </g>
+  );
+}
+
+// Deployment boundaries: a Region outline, a solid tinted VPC, and tinted subnet bands with an inline label.
+function BoundaryZone({ zone, phase }: { zone: DiagramZone; phase: Phase }) {
+  const t = zone.tone;
+  const opacity = phase === "old" ? 0.6 : 1;
+  if (zone.kind === "subnet") {
+    return (
+      <g opacity={opacity}>
+        <rect x={zone.x} y={zone.y} width={zone.w} height={zone.h} rx={10} style={{ fill: soft(t), stroke: stroke(t) }} strokeWidth={1} strokeOpacity={0.45} />
+        <text x={zone.x + 12} y={zone.y + 20} fontSize={11.5} fontWeight={700} letterSpacing={0.6} style={{ fill: stroke(t) }}>
+          {zone.title.toUpperCase()}
+        </text>
+      </g>
+    );
+  }
+  const region = zone.kind === "region";
+  const tabW = zone.title.length * 7.6 + 24;
+  return (
+    <g opacity={opacity}>
+      <rect
+        x={zone.x}
+        y={zone.y}
+        width={zone.w}
+        height={zone.h}
+        rx={region ? 16 : 12}
+        style={{ fill: region ? "none" : soft(t), stroke: stroke(t) }}
+        fillOpacity={0.35}
+        strokeWidth={region ? 1.6 : 1.8}
+      />
+      <rect x={zone.x + 14} y={zone.y - 12} width={tabW} height={24} rx={6} style={{ fill: region ? "var(--paper)" : stroke(t), stroke: stroke(t) }} strokeWidth={1.2} />
+      <text
+        x={zone.x + 14 + tabW / 2}
+        y={zone.y + 4.5}
+        textAnchor="middle"
+        fontSize={13}
+        fontWeight={700}
+        style={{ fill: region ? stroke(t) : "var(--paper)" }}
       >
         {zone.title}
       </text>

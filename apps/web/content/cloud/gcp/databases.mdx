@@ -1,0 +1,61 @@
+---
+title: "Databases on Google Cloud"
+description: "Cloud SQL, AlloyDB, Spanner, Firestore and Bigtable: which Google Cloud database fits each access pattern, with the AWS and Azure equivalents."
+---
+
+Google Cloud's database line-up is smaller than AWS's but includes two systems other clouds copied: **Spanner**, the first globally distributed, strongly consistent SQL database, and **Bigtable**, the wide-column store behind many Google products. **Cloud SQL** and **AlloyDB** cover PostgreSQL and MySQL, and **Firestore** covers serverless documents.
+
+## TL;DR
+
+- **Cloud SQL** by default for relational data; **AlloyDB** for demanding PostgreSQL and mixed analytics.
+- **Spanner** when relational data outgrows one primary or must survive a Region failure with strong consistency.
+- **Firestore** for serverless app data with real-time listeners; **Bigtable** for huge write-heavy tables.
+- Search has no first-party OpenSearch equivalent: use Vertex AI Search, AlloyDB/Spanner full-text, or Elastic via Marketplace.
+
+## At a glance
+
+<CloudGroupTable group="databases" lead="gcp" />
+
+## Services
+
+### Cloud SQL
+
+<CloudServiceProfile id="gcp-cloud-sql" />
+
+### AlloyDB for PostgreSQL
+
+<CloudServiceProfile id="gcp-alloydb" />
+
+### Spanner
+
+<CloudServiceProfile id="gcp-spanner" />
+
+Spanner shards data automatically by primary key range and commits transactions across shards using synchronised clocks (TrueTime). The design rule that matters most is the key: a timestamp or auto-increment key sends every new write to the same shard.
+
+### Firestore
+
+<CloudServiceProfile id="gcp-firestore" />
+
+### Bigtable
+
+<CloudServiceProfile id="gcp-bigtable" />
+
+## Coming from AWS
+
+| On AWS | On Google Cloud | What actually changes |
+|---|---|---|
+| RDS | Cloud SQL | Similar; Enterprise Plus edition adds faster failover |
+| Aurora PostgreSQL | AlloyDB | Adds a columnar engine for analytical queries |
+| Aurora DSQL | Spanner | Spanner is older, sized by compute, with interleaved tables and graph support |
+| DynamoDB | Firestore or Bigtable | Firestore for app data, Bigtable for very high write rates; neither is a drop-in |
+| OpenSearch Service | Vertex AI Search or Marketplace Elastic | No managed OpenSearch from Google |
+
+## Related
+
+[Databases on AWS](/cloud/aws/databases) · [Databases on Azure](/cloud/azure/databases) · [Databases on Each Cloud](/cloud/start-here/databases-per-cloud) · [NewSQL / Distributed SQL](/system-design/databases/newsql-databases)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why do sequential primary keys hurt in Spanner and Bigtable?" category="Data modeling" level="Senior">
+    Both store rows sorted by key and split the key space into ranges served by different servers. Sequential keys send every new write to the last range, creating a hotspot on one server. Use UUIDs, bit-reversed sequences, or a hashed prefix so writes spread across ranges.
+  </InterviewQuestion>
+</InterviewQuestions>

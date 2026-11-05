@@ -1,0 +1,51 @@
+---
+title: "Storage on Google Cloud"
+description: "Cloud Storage, Persistent Disk and Hyperdisk, Filestore and Managed Lustre, with the AWS and Azure equivalents."
+---
+
+**Cloud Storage** is Google Cloud's object store. Its location model is the main difference from S3: a bucket can be **regional, dual-region or multi-region**, and the multi-location types replicate across Regions automatically. Block storage (**Persistent Disk** and **Hyperdisk**) and file storage (**Filestore**, **Managed Lustre**, **NetApp Volumes**) fill the same roles as EBS, EFS and FSx.
+
+## TL;DR
+
+- **Cloud Storage** for blobs; pick **dual- or multi-region** buckets for built-in cross-Region durability.
+- **Autoclass** moves objects between Standard, Nearline, Coldline and Archive automatically.
+- **Hyperdisk** for high-performance VM disks; **regional persistent disks** replicate across two zones.
+- **Filestore** for shared NFS; **Managed Lustre** for ML and HPC throughput.
+
+## At a glance
+
+<CloudGroupTable group="storage" lead="gcp" />
+
+## Services
+
+### Cloud Storage
+
+<CloudServiceProfile id="gcp-cloud-storage" />
+
+### Persistent Disk and Hyperdisk
+
+<CloudServiceProfile id="gcp-persistent-disk" />
+
+### Filestore
+
+<CloudServiceProfile id="gcp-filestore" />
+
+## Coming from AWS
+
+| On AWS | On Google Cloud | What actually changes |
+|---|---|---|
+| S3 + Cross-Region Replication | Dual- or multi-region bucket | Cross-Region copies with no replication rules |
+| S3 Intelligent-Tiering | Autoclass | Per-bucket automatic class changes |
+| EBS (zonal) | Persistent Disk / Hyperdisk, regional option | Synchronous two-zone replication is available |
+| EFS | Filestore | Provisioned capacity by tier instead of pay-per-use elastic |
+| Pre-signed URL | Signed URL | Same pattern for direct uploads |
+
+## Related
+
+[Storage on AWS](/cloud/aws/storage) · [Storage on Azure](/cloud/azure/storage) · [Databases on Google Cloud](/cloud/gcp/databases) · [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking)
+
+<InterviewQuestions>
+  <InterviewQuestion question="When would you choose a dual-region Cloud Storage bucket?" category="Reliability" level="Mid">
+    When data must survive a Region outage and stay readable with low latency in two specific Regions, for example user uploads served from two Regions. Writes are replicated automatically, and turbo replication can bound the replication time, with no replication rules to manage.
+  </InterviewQuestion>
+</InterviewQuestions>

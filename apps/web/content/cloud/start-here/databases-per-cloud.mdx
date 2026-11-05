@@ -1,0 +1,53 @@
+---
+title: "Databases on Each Cloud"
+description: "The managed service for each database family on AWS, Google Cloud and Azure, and the differences that change a design."
+---
+
+Every database family from the [database guides](/system-design/databases/choosing-a-database) has a managed service on each cloud. The names differ, and so do a few behaviours that matter in an interview: how far one writer scales, whether writes can happen in several Regions, and how consistency is chosen. Pick the family from the access pattern first, then look up the service here.
+
+## TL;DR
+
+- **Relational:** RDS / Aurora on AWS, Cloud SQL / AlloyDB on Google Cloud, Azure SQL / Azure Database for PostgreSQL on Azure.
+- **Global strongly consistent SQL:** Spanner (since 2017) and Aurora DSQL (since 2025). Azure has no direct equivalent.
+- **Serverless key-value / document:** DynamoDB, Firestore (or Bigtable for very high write rates), Cosmos DB.
+- **Cosmos DB is several databases in one:** NoSQL, MongoDB, Cassandra, Gremlin and Table APIs, with five consistency levels.
+- **Search:** OpenSearch Service and Azure AI Search are managed; Google Cloud relies on Vertex AI Search or Elastic through the Marketplace.
+
+## Family by family
+
+<CloudGroupTable group="databases" lead="aws" />
+
+## Caches next to the database
+
+<CloudGroupTable group="caching" lead="aws" />
+
+## Differences that change a design
+
+| Question | AWS | Google Cloud | Azure |
+|---|---|---|---|
+| **Writes in several Regions with strong consistency?** | Aurora DSQL; DynamoDB global tables (multi-Region strong consistency, chosen at creation) | Spanner (multi-region configurations) | Cosmos DB multi-Region writes are eventually consistent; strong consistency needs a single write Region |
+| **How do I choose consistency?** | Per read (DynamoDB strongly consistent reads) or per product | Spanner is strong by default; stale reads are opt-in | Per account or request: strong, bounded staleness, session, consistent prefix, eventual |
+| **How do I pay for NoSQL?** | DynamoDB on-demand per request or provisioned capacity | Firestore per operation; Bigtable per node | Cosmos DB request units (provisioned, autoscale or serverless) |
+| **PostgreSQL beyond one big primary?** | Aurora Limitless (sharded), Aurora DSQL | AlloyDB read pools, Spanner PostgreSQL interface | Cosmos DB for PostgreSQL (Citus); HorizonDB in preview |
+
+## Mapping a case study
+
+| Component (Messenger) | AWS | Google Cloud | Azure |
+|---|---|---|---|
+| Messages by conversation | DynamoDB or Keyspaces | Bigtable | Cosmos DB (NoSQL or Cassandra API) |
+| Users, groups, metadata | Aurora PostgreSQL | Cloud SQL or AlloyDB | Azure Database for PostgreSQL |
+| Session registry, presence | ElastiCache (Valkey) | Memorystore for Valkey | Azure Managed Redis |
+| Media | S3 | Cloud Storage | Blob Storage |
+
+## Related
+
+[Databases on AWS](/cloud/aws/databases) · [Caching on AWS](/cloud/aws/caching) · [Choosing a Database](/system-design/databases/choosing-a-database) · [Consistency Models and CAP](/system-design/patterns/consistency-models) · [Polyglot Persistence](/system-design/databases/polyglot-persistence)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the Azure equivalent of DynamoDB, and what is different?" category="Cloud" level="Mid">
+    Azure Cosmos DB for NoSQL. Both are serverless-feeling key-value and document stores partitioned by a key. Cosmos DB bills in request units, offers five consistency levels, and supports multi-Region writes (eventually consistent). DynamoDB bills per request or provisioned capacity and offers strongly consistent reads plus global tables, including a multi-Region strongly consistent mode.
+  </InterviewQuestion>
+  <InterviewQuestion question="Spanner or Aurora DSQL?" category="Architecture" level="Senior">
+    Both give strongly consistent SQL across Regions. Spanner is the mature option with a long track record, interleaved tables and its own SQL dialect or a PostgreSQL interface, and you size compute. Aurora DSQL is serverless and PostgreSQL-compatible with optimistic concurrency, but supports a subset of PostgreSQL features and pairs Regions within a Region set. In practice the choice usually follows the cloud you are already on.
+  </InterviewQuestion>
+</InterviewQuestions>
