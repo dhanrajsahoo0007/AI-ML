@@ -7,6 +7,7 @@ import { compileMDX } from "next-mdx-remote/rsc";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import { rehypeHeadingIds, type DocHeading } from "@/lib/doc-headings";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
 import { Pre, Figure } from "@/components/mdx/code-block";
@@ -47,13 +48,14 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
   const filePath = path.join(process.cwd(), "content", section, `${slugPath}.mdx`);
   const raw = await fs.readFile(filePath, "utf8");
   const { data, content } = matter(raw);
+  const headings: DocHeading[] = [];
   const { content: mdxBody } = await compileMDX({
     source: content,
     options: {
       parseFrontmatter: false,
       mdxOptions: {
         remarkPlugins: [remarkGfm, remarkMath],
-        rehypePlugins: [rehypeKatex],
+        rehypePlugins: [rehypeKatex, [rehypeHeadingIds, { headings }]],
       },
     },
     components: {
@@ -84,8 +86,14 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
       description?: string;
       icon?: string;
       categories?: string[];
+      /** "classic" opts an article out of the docs-style layout (table of contents, updated date, copy for LLM). */
+      layout?: string;
+      /** Overrides the last-updated date taken from git, as YYYY-MM-DD. */
+      updated?: string | Date;
     },
     body: mdxBody as ReactElement,
+    headings,
+    filePath,
   };
 }
 
