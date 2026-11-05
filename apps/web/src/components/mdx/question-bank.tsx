@@ -22,19 +22,34 @@ export function SourceCredit() {
   );
 }
 
-// Answers are plain paragraphs separated by blank lines, with `inline code`.
+function renderInline(text: string) {
+  return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).map((part, j) => {
+    if (part.length > 1 && part.startsWith("`") && part.endsWith("`")) return <code key={j}>{part.slice(1, -1)}</code>;
+    if (part.length > 4 && part.startsWith("**") && part.endsWith("**"))
+      return <strong key={j} className="font-semibold text-ink">{part.slice(2, -2)}</strong>;
+    return <React.Fragment key={j}>{part}</React.Fragment>;
+  });
+}
+
+// Answers are blocks separated by blank lines: paragraphs, "- " bullet lists or "1. " numbered
+// lists, with `inline code` and **bold**.
 function renderAnswer(text: string) {
-  return text.split(/\n\s*\n/).map((para, i) => (
-    <p key={i}>
-      {para.split(/(`[^`]+`)/g).map((part, j) =>
-        part.startsWith("`") && part.endsWith("`") ? (
-          <code key={j}>{part.slice(1, -1)}</code>
-        ) : (
-          <React.Fragment key={j}>{part}</React.Fragment>
-        )
-      )}
-    </p>
-  ));
+  return text.trim().split(/\n\s*\n/).map((block, i) => {
+    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.every((l) => l.startsWith("- ")))
+      return (
+        <ul key={i} className="list-disc space-y-1 pl-5">
+          {lines.map((l, j) => <li key={j}>{renderInline(l.slice(2))}</li>)}
+        </ul>
+      );
+    if (lines.every((l) => /^\d+\. /.test(l)))
+      return (
+        <ol key={i} className="list-decimal space-y-1 pl-5">
+          {lines.map((l, j) => <li key={j}>{renderInline(l.replace(/^\d+\. /, ""))}</li>)}
+        </ol>
+      );
+    return <p key={i}>{renderInline(block)}</p>;
+  });
 }
 
 // Library questions as <InterviewQuestion> elements; `tagOf` labels each one for the topic chips.
