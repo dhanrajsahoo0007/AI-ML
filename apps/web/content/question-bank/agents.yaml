@@ -409,3 +409,172 @@
   level: Mid
   category: agents
   subcategory: agent-reliability
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: what-is-the-difference-between-a-reactive-agent-and-a-proact
+  q: What is the difference between a reactive agent and a proactive one, and what does a proactive agent need that a reactive one doesn't?
+  a: |
+    A reactive agent acts only when a user asks. A proactive agent acts on its own triggers, such as a schedule, an incoming event or a monitored condition ("a deploy failed, so open a ticket and draft a fix").
+
+    Proactive agents need extra infrastructure:
+
+    - event subscriptions or schedulers
+    - durable state between runs
+    - a clear policy on what they may do unattended
+    - deduplication, so one event does not trigger ten runs
+    - a notification channel for results and approvals
+
+    The risk profile changes because no human is watching each run. Start with proposing actions for approval, and give full autonomy only to cheap, reversible actions with good monitoring.
+  level: Mid
+  category: agents
+  subcategory: agent-architectures
+  related: /ai-system-design/genai-system-design/agent-architectures
+- id: an-agent-loops-forever-on-some-inputs-how-do-you-find-out-wh
+  q: An agent loops forever on some inputs. How do you find out why and fix it?
+  a: |
+    Pull the traces for the looping runs and read the last ten steps. Usual causes:
+
+    - **Failing tool, no feedback:** a tool keeps failing and the error message gives the model nothing actionable, so it retries the same call.
+    - **No clear finish:** the model cannot tell the task is done, because there is no finish tool or success criterion.
+    - **Lost goal:** context truncation dropped the original goal.
+    - **Bad results:** a tool returns empty or truncated results that look like progress.
+
+    Fixes, in order:
+
+    1. Hard caps on steps, tokens and wall-clock time, with a graceful exit that reports partial progress.
+    2. Repeat detection: the same tool and arguments N times triggers a strategy change or escalation.
+    3. Tool errors that say what to do differently.
+    4. An explicit "done" or "give up" action, plus a stated success criterion in the prompt.
+    5. Pinning the goal so compaction never drops it.
+
+    Add the looping inputs to the eval set so the fix stays fixed.
+  level: Mid
+  category: agents
+  subcategory: harness-engineering
+  related: /ai-system-design/genai-system-design/harness-engineering
+- id: a-five-step-agent-must-answer-in-under-800-ms-end-to-end-how
+  q: A five-step agent must answer in under 800 ms end to end. How do you design for that budget?
+  a: |
+    Five sequential LLM calls at typical latencies will not fit, so cut sequential model calls:
+
+    - Replace fixed steps with deterministic code or a workflow, and keep the LLM only for the decisions that need it.
+    - Use a small, fast model for routing and argument filling.
+    - Run independent tool calls in parallel.
+    - Cache tool results and prompt prefixes.
+    - Stream the first useful output while the rest continues.
+
+    Then budget each stage. For example: 150 ms for the first model call's time to first token, 200 ms for parallel tools, 300 ms for the final generation, and the remainder as network and slack. Measure p95, not averages, per stage.
+
+    Precompute likely next steps speculatively when the action is safe. If the budget still does not fit, change the product: answer fast with what you have and finish asynchronously.
+  level: Senior
+  category: agents
+  subcategory: harness-engineering
+  related: /ai-system-design/genai-system-design/harness-engineering
+- id: how-do-you-make-a-long-running-agent-resumable-after-a-crash
+  q: How do you make a long-running agent resumable after a crash or a multi-day wait for human approval?
+  a: |
+    Treat the agent as a durable workflow. After every step, persist the full state (messages, plan, tool results and pending actions) keyed by run id. Graph frameworks call this checkpointing; workflow engines such as Temporal do it with event history. On restart, reload the last checkpoint and continue rather than replaying from scratch.
+
+    Make every side-effecting tool idempotent with an idempotency key, so a step re-run after a crash does not repeat a payment or an email. Model human approval as a paused state that releases the worker, not a blocked thread. Version the agent's code and prompts so a resumed run knows which version it started under.
+  level: Senior
+  category: agents
+  subcategory: harness-engineering
+  related: /ai-system-design/genai-system-design/harness-engineering
+- id: how-do-you-write-instructions-that-make-an-agent-plan-well-a
+  q: How do you write instructions that make an agent plan well and stop at the right time?
+  a: |
+    State the goal and what "done" looks like in checkable terms ("all tests pass and the PR description lists the changes"). Ask for a short plan before acting, and require it to be revised when new information contradicts it. Say when to stop: success criteria met, a budget reached, or a blocker that needs a human. Give an explicit tool or format for finishing and for asking for help.
+
+    Include examples of when to give up, because models are biased towards continuing. Back the instructions with hard limits in the harness: the prompt asks the agent to stop, the code makes sure it does.
+  level: Mid
+  category: agents
+  subcategory: harness-engineering
+  related: /ai-system-design/genai-system-design/harness-engineering
+- id: what-types-of-memory-does-an-ai-agent-use
+  q: What types of memory does an AI agent use?
+  a: |
+    - **Working memory:** the current context window, holding the task, recent messages and tool results.
+    - **Episodic memory:** records of past interactions or runs, retrieved when relevant ("last time this user asked about X").
+    - **Semantic memory:** durable facts and preferences ("the user prefers metric units"), often stored as structured records or embeddings.
+    - **Procedural memory:** how to do things, held in prompts, tool definitions or learned skills.
+
+    The engineering work is deciding what gets written to long-term memory, how it is retrieved, and how it is updated or forgotten. Storing everything makes retrieval noisy and stale.
+  level: Junior
+  category: agents
+  subcategory: memory-context
+  related: /ai-system-design/genai-system-design/agent-memory
+- id: your-agent-remembers-user-preferences-across-sessions-and-so
+  q: Your agent remembers user preferences across sessions, and some remembered facts turn out to be wrong or outdated. How do you design memory so that doesn't happen?
+  a: |
+    Be selective about writes. Save only explicit statements or repeatedly confirmed patterns, not one-off guesses. Store each memory with its source, timestamp and confidence. When a new fact contradicts an old one, update or supersede the old record rather than appending, and prefer recent facts at retrieval time.
+
+    Let users see and edit what is remembered. Expire time-sensitive facts. Treat memory written from untrusted content, such as web pages or emails, as data that cannot override instructions, because poisoned memory is a persistent prompt injection. Evaluate memory with multi-session test scripts that include changed preferences.
+  level: Mid
+  category: agents
+  subcategory: memory-context
+  related: /ai-system-design/genai-system-design/agent-memory
+- id: a-coding-agent-works-on-a-task-for-hours-and-fills-its-conte
+  q: A coding agent works on a task for hours and fills its context window. Compare summarizing, structured note-taking and subagents as ways to keep going.
+  a: |
+    - **Summarizing (compaction).** When the context fills, replace old turns with a summary of decisions, state and open problems. It is simple, but it loses detail, and a bad summary silently drops a constraint.
+    - **Structured note-taking.** The agent maintains a file of progress, decisions and todos outside the context and re-reads it as needed. It survives any number of compactions and is inspectable by humans.
+    - **Subagents.** Hand an exploratory subtask, such as searching a codebase or reading logs, to a fresh agent with its own context, which returns only a condensed result. That keeps the main context clean.
+
+    Strong harnesses combine all three. Test long-horizon tasks specifically, because these failures only appear after hours.
+  level: Senior
+  category: agents
+  subcategory: memory-context
+  related: /ai-system-design/genai-system-design/agent-memory
+- id: what-communication-patterns-do-multi-agent-systems-use-and-w
+  q: What communication patterns do multi-agent systems use, and what are the trade-offs?
+  a: |
+    - **Orchestrator–worker:** a lead agent splits work, dispatches it to workers and merges the results. Easy to reason about, but the orchestrator is a bottleneck.
+    - **Sequential handoff:** each agent passes its output to the next, like a pipeline. Simple, but errors compound down the chain.
+    - **Shared state or blackboard:** agents read and write a common workspace. Flexible, but conflicting writes need coordination.
+    - **Peer-to-peer messaging or debate:** agents talk directly. This can improve answers, but it is costly and hard to bound.
+
+    Most production systems use orchestrator–worker with structured messages, because traces stay readable and cost is bounded. Whatever the pattern, define message schemas, cap rounds, and log every exchange.
+  level: Mid
+  category: agents
+  subcategory: multi-agent
+  related: /ai-system-design/genai-system-design/multi-agent-systems
+- id: two-agents-in-your-system-disagree-for-example-a-coder-and-a
+  q: Two agents in your system disagree, for example a coder and a reviewer. How do you resolve conflicts?
+  a: |
+    Prefer objective arbiters: run the tests, query the source of truth, or check against a stated policy. When there is no ground truth, give one agent decision authority (the orchestrator or a judge), with explicit criteria and a cap on debate rounds so they cannot argue forever.
+
+    Require agents to justify their positions with evidence such as a failing test or a quoted policy, not opinion, because models tend to cave to whoever spoke last. Escalate unresolved, high-stakes conflicts to a human, and log them. Recurring disagreements usually point at an unclear spec, not at the agents.
+  level: Mid
+  category: agents
+  subcategory: multi-agent
+  related: /ai-system-design/genai-system-design/multi-agent-systems
+- id: when-should-a-main-agent-spawn-a-subagent-instead-of-doing-t
+  q: When should a main agent spawn a subagent instead of doing the work itself?
+  a: |
+    Spawn one when a subtask is self-contained, would flood the main context with material that is not needed afterwards (searching a large codebase, reading many documents), can run in parallel with other work, or needs different tools or permissions. The subagent returns a compact answer, and the main agent keeps a clean context.
+
+    Avoid it when the subtask needs most of the main agent's context, or when it makes tightly coupled decisions such as editing the same files. Handing off context loses information, and parallel writers conflict. Each subagent also costs a fresh prompt and its own tokens, so measure whether parallelism and clean context actually beat a single agent on your tasks.
+  level: Senior
+  category: agents
+  subcategory: multi-agent
+  related: /ai-system-design/genai-system-design/multi-agent-systems
+- id: your-agent-retried-a-payment-tool-call-after-a-timeout-and-t
+  q: Your agent retried a payment tool call after a timeout, and the customer was charged twice. How do you prevent that?
+  a: |
+    A timeout does not mean failure; the first call may have succeeded. Make side-effecting tools idempotent: the harness generates an idempotency key per intended action, and the downstream API uses it to dedupe repeats. Where the API does not support keys, check status before retrying ("did a charge for this order exist?").
+
+    Handle retries in code, with backoff and a retry budget, not by letting the model decide to call again. Classify tools by risk, so irreversible ones need confirmation or a two-phase "prepare, then commit". Log every attempt with its key for reconciliation.
+  level: Senior
+  category: agents
+  subcategory: agent-reliability
+  related: /ai-system-design/genai-system-design/harness-engineering
+- id: how-would-you-design-an-agent-that-must-hand-over-gracefully
+  q: How would you design an agent that must hand over gracefully when it runs out of budget, steps or confidence?
+  a: |
+    Treat "cannot finish" as a first-class outcome. When a limit is hit or confidence is low, the agent stops taking actions, records what it completed and what it did not, saves a resumable state, and produces a handover: what was asked, what was done with evidence, what is blocking, and the suggested next step.
+
+    Route the handover to the right place: back to the user, to a human queue, or to a stronger model. Measure the handover rate and the quality of handovers. A good partial result with a clear note is far better than a confident wrong answer or a silent timeout.
+  level: Mid
+  category: agents
+  subcategory: agent-reliability
+  related: /ai-system-design/genai-system-design/harness-engineering

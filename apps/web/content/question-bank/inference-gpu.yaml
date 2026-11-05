@@ -1054,3 +1054,139 @@
   level: Mid
   category: inference-gpu
   subcategory: cost-optimization
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: how-does-token-streaming-work-end-to-end-and-what-can-go-wro
+  q: How does token streaming work end to end, and what can go wrong with it?
+  a: |
+    The server sends each token or small group of tokens as soon as the decoder produces it, usually over server-sent events or a WebSocket, and the client renders them as they arrive. Streaming does not make generation faster, but it cuts perceived latency to the time to first token.
+
+    What goes wrong:
+
+    - Proxies or load balancers that buffer responses.
+    - Connections dropping mid-answer with no way to resume.
+    - Partial UTF-8 characters or markdown rendered half-finished.
+    - Post-generation safety checks that cannot run until the end.
+    - Billing and logging that must handle aborted streams.
+
+    Design for these: no buffering, heartbeat events, resumable ids, and streaming-aware output guardrails.
+  level: Junior
+  category: inference-gpu
+  subcategory: serving-batching
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+- id: providers-offer-batch-inference-at-roughly-half-the-price-of
+  q: Providers offer batch inference at roughly half the price of real-time calls. Why can they, and when should you use it?
+  a: |
+    Batch jobs have relaxed deadlines, often up to 24 hours. That lets the provider:
+
+    - fill idle GPU capacity between traffic peaks
+    - run very large batch sizes for maximum throughput instead of low latency
+    - schedule work on whatever hardware is free
+
+    Cost per token drops sharply when you do not have to keep spare capacity for latency.
+
+    Use it for anything that is not user-facing: evals, classifying or enriching large datasets, generating embeddings or synthetic data, nightly summaries and backfills. Design the pipeline for asynchronous results, partial failures and idempotent resubmission, and keep a real-time path for the small share of work that is urgent.
+  level: Mid
+  category: inference-gpu
+  subcategory: serving-batching
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+- id: how-do-you-benchmark-an-llm-serving-stack-so-the-numbers-mea
+  q: How do you benchmark an LLM serving stack so the numbers mean something?
+  a: |
+    Use a workload that matches production: real input and output length distributions, realistic arrival rates such as Poisson or replayed traffic, and the same prompt-caching patterns.
+
+    Report time to first token and inter-token latency at p50, p95 and p99, plus throughput, all as a function of load. Then compare stacks at the same latency target, for example the highest requests per second while keeping p95 TTFT under 500 ms, not at maximum throughput where latency is unusable.
+
+    Fix the model, precision, hardware and engine settings, warm up first, run long enough to reach steady state, and check output quality as well as speed. Quantization or speculative settings that change outputs need an accuracy check too.
+  level: Mid
+  category: inference-gpu
+  subcategory: serving-batching
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+- id: clients-consume-streamed-tokens-at-very-different-speeds-and
+  q: Clients consume streamed tokens at very different speeds, and some are slow. How do you design the streaming server so slow consumers don't hurt everyone else?
+  a: |
+    Decouple generation from delivery. The GPU engine writes tokens into a bounded per-request buffer, and a separate network layer drains it to the client.
+
+    If a client is slow:
+
+    - Keep generating, because GPU time is the scarce resource, and buffer up to a limit.
+    - If the buffer fills, the request can be paused and its KV cache offloaded or dropped, or the connection closed with a resumable id.
+
+    Never let one slow socket block the batch's decode step. Use async I/O with many connections per process, apply backpressure at the edge per client, and cap concurrent streams per tenant. Measure the time from token generated to token delivered separately from engine latency, so you can see which layer is slow.
+  level: Senior
+  category: inference-gpu
+  subcategory: serving-batching
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+- id: why-does-8-bit-or-4-bit-quantization-often-barely-hurt-llm-a
+  q: Why does 8-bit or 4-bit quantization often barely hurt LLM accuracy?
+  a: |
+    LLM weights are heavily redundant. Each output is a sum over thousands of weights, so small, roughly random rounding errors mostly average out. Most weights also sit in a narrow range that a few bits can represent well.
+
+    The damage comes from outliers: a few large-magnitude weights and activation channels. Methods such as GPTQ, AWQ and SmoothQuant protect or rescale those, and per-group scales keep errors local.
+
+    Quality loss grows as bits drop, and it shows up first on hard reasoning, long contexts, maths, code and low-resource languages, not on average benchmarks. Always evaluate on your own task.
+  level: Junior
+  category: inference-gpu
+  subcategory: quantization
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+- id: estimate-the-maximum-decode-throughput-of-an-8b-model-on-one
+  q: Estimate the maximum decode throughput of an 8B model on one H100.
+  a: |
+    Three bounds:
+
+    - **Compute bound.** About 16 GFLOPs per token (2 × parameters). At roughly 400 TFLOPs of realistic bf16 throughput, that is about 25,000 tokens/s if the batch were large enough.
+    - **Memory bound.** Each decode step reads the 16 GB of weights plus every active sequence's KV cache. A Llama-3-8B-style model with GQA uses about 128 KB of KV cache per token. With about 60 GB free after weights, that holds roughly 460K tokens, or about 230 sequences at 2K context.
+    - **Step time.** At about 3.35 TB/s, one step reads 16 GB of weights (about 5 ms) plus about 60 GB of KV (about 18 ms), so roughly 23 ms. 230 sequences at 23 ms per step gives about 10,000 tokens/s.
+
+    The binding limit is KV-cache memory, not FLOPs. Shorter contexts, FP8 KV caches or a bigger GPU raise it.
+  level: Senior
+  category: inference-gpu
+  subcategory: gpu-performance
+  related: /ai-system-design/genai-system-design/gpu-performance-for-llms
+- id: you-need-to-serve-a-70b-model-on-a-node-with-four-a100-80-gb
+  q: You need to serve a 70B model on a node with four A100 80 GB GPUs. Do you run one replica with tensor parallelism 4, or two replicas with TP=2?
+  a: |
+    In bf16 the weights are about 140 GB:
+
+    - **TP=2** puts 70 GB on each GPU and leaves under 10 GB for KV cache, which at about 320 KB per token for a 70B GQA model is too few concurrent sequences.
+    - **TP=4** puts 35 GB per GPU and leaves about 45 GB each for KV. That gives one replica with a large batch, at the cost of all-reduce traffic every layer, which NVLink handles well.
+
+    If you quantize weights to 8-bit or 4-bit (A100 has no native FP8, so use INT8 or AWQ-style INT4), two TP=2 replicas become viable. That doubles fault isolation and can raise total throughput, because less communication is needed.
+
+    The choice depends on your latency target and quality tolerance, so benchmark both at the target p95.
+  level: Senior
+  category: inference-gpu
+  subcategory: distributed
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+- id: how-do-you-design-a-model-router-that-sends-easy-requests-to
+  q: How do you design a model router that sends easy requests to a small model and hard ones to a large model, without hurting quality?
+  a: |
+    Start by measuring. Run a sample of real traffic through both models and judge which requests the small model handles as well as the large one; that gives labels.
+
+    Train a cheap classifier on request features, such as length, task type, embeddings and user tier, to predict "small model is good enough". Pick a threshold that meets a quality floor. Alternatives are cascades (try small first, escalate when a verifier or the model's own confidence says so) and simple rules for obvious categories.
+
+    Monitor it in production:
+
+    - the share routed to each model
+    - the quality gap on sampled traffic
+    - escalation rates
+
+    Then re-label after model upgrades. A router trained against old models silently drifts.
+  level: Senior
+  category: inference-gpu
+  subcategory: cost-optimization
+  related: /ai-system-design/genai-system-design/cost-latency-optimization
+- id: when-does-self-hosting-an-open-model-become-cheaper-than-pay
+  q: When does self-hosting an open model become cheaper than paying for an API? Walk me through the break-even.
+  a: |
+    Self-hosted cost per million tokens is about GPU cost per hour ÷ (tokens per second × 3,600 × utilization) × 10⁶, plus engineering and operations.
+
+    For example, an H100 at about $2.50/hour serving an 8B-class model at 5,000 tokens/s with 50% average utilization produces about 6.6 billion tokens a month for about $1,800, which is roughly $0.28 per million tokens of GPU cost.
+
+    The catch is utilization. Spiky or low traffic leaves GPUs idle, and a 70B-class model costs about ten times more per token. Add the people to run it, redundancy, and the quality gap against frontier APIs.
+
+    Self-hosting wins at high, steady volume on a model you can match in quality, or when data residency requires it. APIs win for low or bursty volume and when you need the best model.
+  level: Senior
+  category: inference-gpu
+  subcategory: cost-optimization
+  related: /ai-system-design/genai-system-design/cost-latency-optimization

@@ -469,3 +469,171 @@
   - title: Reinforcement Learning from Human Feedback (RLHF)
     url: https://outcomeschool.com/blog/reinforcement-learning-from-human-feedback-rlhf
   source: outcome-school
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: how-do-you-build-a-fine-tuning-dataset-for-a-domain-q-a-assi
+  q: How do you build a fine-tuning dataset for a domain Q&A assistant?
+  a: |
+    Start from real user questions if you have logs; otherwise have experts write the questions people actually ask. Then write or generate answers in the exact style and format you want. Using a strong model with retrieved source documents works well, as long as experts review a sample.
+
+    Include:
+
+    - hard and ambiguous cases
+    - questions the model should refuse or say it cannot answer
+    - multi-turn examples if the product is a chat
+
+    Deduplicate, filter low-quality or inconsistent answers, balance topics, and hold out a test split by topic so you measure generalization rather than memorization. A few thousand clean, varied examples beat tens of thousands of noisy ones.
+  level: Mid
+  category: fine-tuning
+  subcategory: sft
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+- id: which-hyperparameters-matter-most-when-fine-tuning-an-llm-an
+  q: Which hyperparameters matter most when fine-tuning an LLM, and how do you set them?
+  a: |
+    Learning rate matters most. Full fine-tuning uses small rates, around 1e-5 to 2e-5. LoRA tolerates around 1e-4 to 2e-4. Use warmup and cosine or linear decay.
+
+    Keep epochs low, usually 1–3, because more epochs overfit quickly on small datasets. Set the effective batch size (per-device batch × gradient accumulation × GPUs) to something stable, such as 32–128 sequences. For LoRA, start with a rank of 8–64 and alpha around 1–2× the rank, and apply it to all linear layers.
+
+    Tune by watching validation loss and, more importantly, task evals at each checkpoint. Pick the checkpoint that scores best on the task, not the one with the lowest loss.
+  level: Mid
+  category: fine-tuning
+  subcategory: sft
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+- id: how-do-you-prevent-overfitting-when-fine-tuning-on-a-small-d
+  q: How do you prevent overfitting when fine-tuning on a small dataset?
+  a: |
+    - Use fewer epochs and a lower learning rate.
+    - Prefer parameter-efficient methods such as LoRA, which change far fewer weights.
+    - Add more varied examples, including paraphrases.
+    - Use dropout on the adapters and weight decay.
+    - Stop early based on validation metrics.
+
+    Watch for the signs: training loss keeps falling while validation loss rises, the model repeats training answers verbatim, or general abilities degrade.
+
+    Mixing in some general instruction data helps keep broad skills. Evaluate on a held-out set that differs from training in topic or phrasing, so memorization does not look like success.
+  level: Junior
+  category: fine-tuning
+  subcategory: sft
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+- id: what-is-gradient-accumulation-and-when-do-you-need-it
+  q: What is gradient accumulation, and when do you need it?
+  a: |
+    Gradient accumulation runs several small micro-batches forward and backward, adds up their gradients, and only then takes one optimizer step. Four micro-batches of 8 behave like a batch of 32, as far as the optimizer is concerned.
+
+    You need it when the batch size you want for stable training does not fit in GPU memory. The cost is time, not memory: steps take proportionally longer. Scale the loss correctly so gradients are averaged, not summed, and remember that batch-dependent layers such as batch norm do not see the full batch, although LLMs rarely use those.
+  level: Junior
+  category: fine-tuning
+  subcategory: sft
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+- id: how-do-you-teach-a-fine-tuned-model-to-say-i-don-t-know-when
+  q: How do you teach a fine-tuned model to say "I don't know" when the context doesn't contain the answer?
+  a: |
+    Include abstention in the training data. For a RAG-style model, add examples where the retrieved context is irrelevant or incomplete and the target answer says the information is not available, ideally pointing to what is missing. Use real retrieval failures from logs as well as synthetic ones made by swapping in unrelated passages.
+
+    Balance the mix. Too many abstention examples teach the model to refuse answerable questions. Measure both sides on a held-out set: the false-answer rate on unanswerable questions and the false-refusal rate on answerable ones.
+
+    Preference tuning, which ranks a grounded abstention above a fluent guess, strengthens the behaviour. A post-hoc grounding check catches what training misses.
+  level: Senior
+  category: fine-tuning
+  subcategory: sft
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+- id: after-fine-tuning-how-do-you-check-that-the-model-didn-t-get
+  q: After fine-tuning, how do you check that the model didn't get worse at everything else?
+  a: |
+    Run three eval sets before and after:
+
+    - **The target task**, to confirm the gain.
+    - **A general capability suite** covering instruction following, reasoning, maths, code and other languages if they matter, to catch catastrophic forgetting.
+    - **Safety and refusal behaviour**, because fine-tuning even on benign data can weaken safety training.
+
+    Also check format compliance and response length, which often drift.
+
+    Compare against the base model with the same prompts and decoding settings. If general skills drop, reduce the learning rate or epochs, use LoRA instead of full fine-tuning, or mix general data back in. Ship only if the target gain outweighs any measured regression for your users.
+  level: Mid
+  category: fine-tuning
+  subcategory: sft
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+- id: you-own-the-fine-tuning-api-at-a-model-provider-what-would-y
+  q: You own the fine-tuning API at a model provider. What would you offer customers, and how do you stop them shooting themselves in the foot?
+  a: |
+    Offer a ladder of methods:
+
+    - **SFT** for format, style and narrow tasks.
+    - **Preference tuning (DPO)** to choose between good and bad outputs.
+    - **Reinforcement fine-tuning with customer-defined graders** for tasks with checkable answers.
+    - **Distillation** from a large model's outputs into a cheaper model.
+
+    Pair them with built-in evals, data validation, hyperparameter defaults and checkpoints to choose from.
+
+    Guardrails for customers:
+
+    - Recommend prompting and RAG first, and show the baseline.
+    - Require a held-out eval set.
+    - Flag tiny or duplicated datasets.
+    - Run safety evals on the tuned model and block deployments that regress safety.
+    - Keep tuned models pinned and versioned.
+
+    Measure success by how many customers ship a tuned model that beats their prompt baseline, not by job count.
+  level: Senior
+  category: fine-tuning
+  subcategory: sft
+  companies:
+  - OpenAI
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+- id: what-are-the-main-families-of-parameter-efficient-fine-tunin
+  q: What are the main families of parameter-efficient fine-tuning methods?
+  a: |
+    - **Additive methods** add small new trainable pieces and freeze the base model. Examples are adapter layers between blocks, prefix tuning and prompt tuning (learned virtual tokens).
+    - **Selective methods** train only a chosen subset of existing weights, such as biases (BitFit) or the top layers.
+    - **Reparameterization methods** express the weight update in a compact form. LoRA learns a low-rank update; QLoRA does the same on a 4-bit base; DoRA splits magnitude and direction.
+
+    LoRA dominates in practice. It adds no inference latency once merged, adapters are small enough to swap per customer, and quality is close to full fine-tuning for most tasks.
+  level: Junior
+  category: fine-tuning
+  subcategory: peft
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+- id: your-lora-fine-tuning-run-is-too-slow-what-can-you-do-to-spe
+  q: Your LoRA fine-tuning run is too slow. What can you do to speed it up?
+  a: |
+    - Pack multiple short examples into each sequence so padding does not waste compute.
+    - Use bf16 and fused, memory-efficient kernels such as FlashAttention and fused cross-entropy.
+    - Increase the micro-batch size until memory is full, rather than relying on gradient accumulation.
+    - Turn off gradient checkpointing if you have the memory, because it trades about 30% more compute for memory.
+    - Use a lower LoRA rank or fewer target modules if quality holds.
+    - Spread over more GPUs with data parallelism or FSDP.
+
+    Also cut the data. Deduplicate, drop examples that add nothing, and cap overlong sequences. Check that the data loader and tokenization are not the bottleneck by profiling GPU utilization first.
+  level: Mid
+  category: fine-tuning
+  subcategory: peft
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+- id: when-would-you-move-from-sft-to-preference-alignment-such-as
+  q: When would you move from SFT to preference alignment such as DPO or RLHF?
+  a: |
+    SFT teaches the model to imitate demonstrations, so it needs examples of the right answer. Move to preference methods when:
+
+    - the problem is choosing between several plausible outputs, such as tone, helpfulness, length or safety trade-offs
+    - writing perfect demonstrations is hard, but judging which of two answers is better is easy
+    - the model already produces good answers sometimes and you want it to do so consistently
+
+    Preference tuning also suppresses specific bad behaviours better than SFT, such as verbosity, sycophancy or unsafe completions. Use RL with verifiable rewards when outputs can be checked automatically, such as code that passes tests or maths with known answers.
+  level: Mid
+  category: fine-tuning
+  subcategory: preference-rl
+  related: /ai-system-design/genai-system-design/fine-tuning-llms
+- id: you-have-a-few-thousand-thumbs-up-and-thumbs-down-ratings-fr
+  q: You have a few thousand thumbs-up and thumbs-down ratings from production. Can you use them for preference tuning?
+  a: |
+    Yes, with care. Thumbs ratings are pointwise (one answer rated) rather than pairwise, so either use methods that accept unpaired labels, such as KTO, or construct pairs from the same prompt where one response was liked and another disliked.
+
+    The data is noisy and biased:
+
+    - Few users rate.
+    - Ratings mix answer quality with UI issues or latency.
+    - Thumbs-down often reflects a refusal the user wanted removed.
+
+    Filter and audit a sample. Strip personal data, and get consent for training use. Reweight topics so frequent ones do not dominate. Check that tuning does not increase sycophancy or unsafe compliance, because optimizing for user approval tends to do both.
+  level: Senior
+  category: fine-tuning
+  subcategory: preference-rl
+  related: /ai-system-design/genai-system-design/fine-tuning-llms

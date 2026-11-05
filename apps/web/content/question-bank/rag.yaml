@@ -609,3 +609,187 @@
   category: rag
   subcategory: agentic-rag
   related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: when-is-retrieval-the-wrong-tool-for-a-question
+  q: When is retrieval the wrong tool for a question?
+  a: |
+    Retrieval finds a few relevant passages. It fails when the answer is not in any few passages:
+
+    - **Aggregations** ("how many contracts renew in Q3") need a database or SQL query.
+    - **Whole-document reasoning** ("summarize the themes across this report") needs the full document or map-reduce summarization.
+    - **Exact, live data** ("current stock level") needs an API call.
+    - **Reasoning tasks** where the needed knowledge is already in the model and retrieved text would only distract.
+
+    A good design routes by query type: retrieval for lookups, tools or SQL for structured and live data, and long-context or map-reduce for whole-document tasks.
+  level: Mid
+  category: rag
+  subcategory: rag-fundamentals
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+- id: can-mcp-replace-rag-or-do-they-solve-different-problems
+  q: Can MCP replace RAG, or do they solve different problems?
+  a: |
+    They solve different problems. RAG is a retrieval pattern: index content ahead of time, then find the most relevant pieces for a query by semantic or keyword search. MCP is a protocol for connecting a model to tools and data sources at run time through a standard interface.
+
+    They combine well. An MCP server can expose a search tool that runs a RAG pipeline underneath, and an agent can call it alongside live tools such as a CRM lookup. MCP alone does not do ranking over millions of documents. Calling a source system's own search through MCP works for small or well-indexed sources, but it is usually weaker than a dedicated index with good chunking, embeddings and reranking.
+  level: Mid
+  category: rag
+  subcategory: rag-fundamentals
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+- id: how-do-you-choose-the-chunk-size-for-a-rag-system
+  q: How do you choose the chunk size for a RAG system?
+  a: |
+    Chunk size trades precision against context:
+
+    - **Small chunks** (100–300 tokens) match specific questions precisely, but split explanations and lose surrounding context.
+    - **Large chunks** (800–1,500 tokens) keep context, but dilute the embedding with mixed topics and fill the prompt faster.
+
+    What drives the choice is how long a self-contained answer is in your documents, how specific the queries are, the embedding model's effective length, and the context budget.
+
+    Do not pick 512 by default. Chunk along document structure, such as headings, sections and paragraphs, add a small overlap, then run your retrieval eval with two or three sizes and pick the one with the best recall@k at the context budget you can afford. Different document types often need different sizes.
+  level: Mid
+  category: rag
+  subcategory: chunking-ingestion
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+- id: your-documents-are-deeply-structured-with-long-manuals-neste
+  q: Your documents are deeply structured, with long manuals, nested headings and numbered lists. How do you chunk them so answers keep their context?
+  a: |
+    Preserve the hierarchy instead of cutting by token count:
+
+    - Split on headings.
+    - Keep lists and their lead-in sentence together.
+    - Prefix each chunk with its breadcrumb ("Manual > Installation > Network setup").
+
+    Use small-to-big retrieval: index small chunks for precise matching, but return the parent section to the model so it sees the full procedure. Keep a map from chunk to parent so you can expand context on demand. Store section ids and document versions as metadata, so answers can cite the exact step and stale versions can be filtered out.
+  level: Mid
+  category: rag
+  subcategory: chunking-ingestion
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+- id: a-key-data-source-is-a-spreadsheet-with-10-000-rows-how-do-y
+  q: A key data source is a spreadsheet with 10,000 rows. How do you make it answerable in a RAG assistant?
+  a: |
+    Do not embed the table as text chunks. Embeddings of rows are poor at filters and aggregates. Load it into a SQL table or dataframe, and give the assistant a text-to-SQL or query tool with the schema, column descriptions and a few sample values. Questions like "top five suppliers by delay" then become exact queries.
+
+    For fuzzy lookups such as product descriptions, also embed a natural-language rendering of each row ("Supplier X, region EU, average delay 4 days") with the row id as metadata, then fetch the full row by id. Route between the two by question type, and validate generated SQL with read-only access and row limits.
+  level: Senior
+  category: rag
+  subcategory: chunking-ingestion
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+- id: what-is-contextual-chunk-enrichment-and-why-does-it-improve-
+  q: What is contextual chunk enrichment, and why does it improve retrieval?
+  a: |
+    A chunk cut from a document often lacks the context that makes it findable. "Revenue grew 3%" does not say which company or quarter. Contextual enrichment prepends a short description to each chunk before embedding and indexing it: the document title and section path, or an LLM-generated sentence situating the chunk in the whole document. It is applied to both the dense and the BM25 index.
+
+    It measurably cuts retrieval failures on ambiguous chunks. The cost is one cheap LLM call per chunk at ingestion, which prompt caching of the parent document makes affordable. Re-run it whenever the document changes.
+  level: Mid
+  category: rag
+  subcategory: chunking-ingestion
+  related: /ai-system-design/genai-system-design/rag-fundamentals
+- id: how-do-you-benchmark-embedding-models-on-your-own-data-rathe
+  q: How do you benchmark embedding models on your own data rather than trusting a public leaderboard?
+  a: |
+    Build a labelled set of a few hundred real queries, each mapped to the passages that answer it. Use logged queries and expert labels where possible, or LLM-generated questions per passage that you then spot-check. Include hard negatives, jargon and multilingual queries if users send them.
+
+    Index the same chunks with each candidate model, and compare recall@k, MRR or nDCG at the k you will actually use, plus latency, embedding dimension (storage cost) and price. Public leaderboards are a shortlist only. Domain vocabulary, query style and document length change rankings a lot.
+  level: Mid
+  category: rag
+  subcategory: vector-search
+  related: /ai-system-design/genai-system-design/vector-databases
+- id: retrieval-quality-with-your-hosted-embedding-model-is-too-lo
+  q: Retrieval quality with your hosted embedding model is too low for your domain. What can you do short of switching providers?
+  a: |
+    Work through the levers in order of cost:
+
+    1. Check the data pipeline, because bad parsing and chunking are the usual culprits.
+    2. Add BM25 hybrid search for exact terms, codes and names.
+    3. Add a reranker.
+    4. Enrich chunks with context and rewrite queries.
+
+    If the gap is domain vocabulary, train a small adapter: a linear transform applied to query embeddings, learned from query–passage pairs, which works even when the base model is a closed API. With more data, fine-tune an open embedding model with contrastive loss on in-domain pairs and mined hard negatives. Re-embedding the corpus is then required. Measure each step on the same retrieval eval set.
+  level: Senior
+  category: rag
+  subcategory: vector-search
+  related: /ai-system-design/genai-system-design/vector-databases
+- id: how-does-metadata-filtering-work-in-a-vector-database-and-wh
+  q: How does metadata filtering work in a vector database, and why can it break recall?
+  a: |
+    Filters such as tenant, permissions, date or document type can be applied after the vector search (post-filtering) or during it (pre-filtering or filtered search).
+
+    - **Post-filtering** is simple, but if the filter is selective, most of the top-k results get thrown away, and you return too few or none.
+    - **Naive pre-filtering on HNSW** breaks graph connectivity, so search walks into dead ends and recall drops.
+
+    Production systems handle this in several ways: indexes that support filtered traversal, a fall back to brute-force search when the filtered set is small, a separate partition or index per tenant, and an over-fetched k when post-filtering. Test recall under your most selective realistic filters, not just unfiltered queries.
+  level: Senior
+  category: rag
+  subcategory: vector-search
+  related: /ai-system-design/genai-system-design/vector-databases
+- id: when-is-postgres-with-pgvector-enough-and-when-do-you-need-a
+  q: When is Postgres with pgvector enough, and when do you need a dedicated vector database?
+  a: |
+    pgvector is a strong default up to a few million vectors. It keeps embeddings next to your relational data, so permissions, joins and transactions come for free, and it adds no new system to operate.
+
+    A dedicated vector database earns its place when the following matter more than one fewer system:
+
+    - hundreds of millions of vectors or high QPS that needs horizontal sharding
+    - heavy filtered search
+    - built-in hybrid search, quantization and tiered storage
+    - very fast index rebuilds
+
+    Decide with a load test on your own data at the scale you expect in a year.
+  level: Mid
+  category: rag
+  subcategory: vector-search
+  related: /ai-system-design/genai-system-design/vector-databases
+- id: why-do-short-queries-and-long-documents-embed-differently-an
+  q: Why do short queries and long documents embed differently, and how do embedding models deal with that?
+  a: |
+    A five-word question and a 400-token passage live in different parts of the embedding space even when the passage answers the question. One is a request for information and the other is a statement of it. Long passages also average many topics into one vector, which blurs them.
+
+    Retrieval-tuned models handle the asymmetry with separate query and document prefixes or encoders, trained on query–passage pairs. Use the prefixes the model expects. Mismatched or missing prefixes are a common silent bug. For long documents, chunk to a size the model represents well rather than embedding whole files.
+  level: Mid
+  category: rag
+  subcategory: vector-search
+  related: /ai-system-design/genai-system-design/vector-databases
+- id: a-question-needs-facts-from-three-different-documents-how-do
+  q: A question needs facts from three different documents. How does your RAG system answer it?
+  a: |
+    Single-shot retrieval usually finds only the document closest to the whole question. Decompose instead: have the model break the question into sub-questions, retrieve for each, and answer each before combining them. For chained questions, where the second lookup depends on the first answer, run retrieval iteratively in an agent loop.
+
+    Alternatives are retrieving more candidates with a reranker, and graph-style retrieval when entities link documents. Cap the number of hops and track which sub-question each passage supports, so the final answer can cite all three sources.
+  level: Mid
+  category: rag
+  subcategory: advanced-rag
+  related: /ai-system-design/genai-system-design/advanced-rag
+- id: when-and-how-would-you-fine-tune-a-reranker
+  q: When and how would you fine-tune a reranker?
+  a: |
+    Fine-tune when an off-the-shelf reranker misorders domain results and you have relevance data. That data can come from clicks, citations users kept, expert labels, or LLM-judged pairs you have spot-checked.
+
+    Train a cross-encoder on query–passage pairs with positive labels and hard negatives mined from your own retriever's top results, because those are the confusions it must learn. Evaluate nDCG@10 on a held-out set of queries, not passages, so it generalizes to new questions. Watch for position and click bias in logged data, and keep the base model as a fallback.
+  level: Senior
+  category: rag
+  subcategory: advanced-rag
+  related: /ai-system-design/genai-system-design/advanced-rag
+- id: users-type-two-word-queries-such-as-vpn-broken-how-do-you-im
+  q: Users type two-word queries such as "vpn broken". How do you improve retrieval for short, vague queries?
+  a: |
+    Rewrite the query before retrieval. Use an LLM to expand it into a fuller question using conversation history and user context (role, product, OS). Generate a few alternative phrasings, retrieve for each, and fuse the results. Hybrid search helps because short queries often contain exact terms.
+
+    If the query is genuinely ambiguous, ask one clarifying question or show results grouped by interpretation. Log rewritten queries next to the originals so you can evaluate whether rewriting helps. It can also drift from what the user meant.
+  level: Mid
+  category: rag
+  subcategory: advanced-rag
+  related: /ai-system-design/genai-system-design/advanced-rag
+- id: compare-recall-k-precision-k-mrr-and-ndcg-when-does-each-mis
+  q: Compare recall@k, precision@k, MRR and nDCG. When does each mislead you?
+  a: |
+    - **Recall@k:** the share of relevant passages found in the top k. This is the main RAG metric, because the generator can only use what was retrieved. It misleads when only one passage is needed, or when k is larger than the context you actually send.
+    - **Precision@k:** how much of the top k is relevant. This matters when context is tight or irrelevant text distracts the model.
+    - **MRR:** how high the first relevant result ranks. Good for single-answer lookups, blind to the rest of the list.
+    - **nDCG:** rewards putting the most relevant results first, with graded relevance. Good for reranking, but it needs graded labels.
+
+    All of them need labelled relevance, and all ignore whether the final answer was right. Pair them with answer-level faithfulness and correctness checks.
+  level: Mid
+  category: rag
+  subcategory: rag-evaluation
+  related: /ai-system-design/genai-system-design/rag-fundamentals

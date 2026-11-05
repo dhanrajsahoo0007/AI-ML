@@ -321,3 +321,233 @@
   level: Mid
   category: mcp-tool-use
   subcategory: computer-code-agents
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: what-is-parallel-tool-calling-and-when-should-an-agent-use-i
+  q: What is parallel tool calling, and when should an agent use it?
+  a: |
+    The model emits several tool calls in one turn, the harness runs them concurrently, and all the results go back together. It cuts latency and turns when calls are independent, such as fetching weather for three cities or reading four files.
+
+    Avoid it when one call's output determines the next call's arguments, or when calls have side effects that must happen in order. Parallel writes to the same resource race. The harness needs a concurrency limit, per-call timeouts, and a way to return partial results when one call fails. Some models over-parallelize, so check traces for wasted calls.
+  level: Mid
+  category: mcp-tool-use
+  subcategory: function-calling
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: the-model-calls-a-tool-that-doesn-t-exist-or-invents-argumen
+  q: The model calls a tool that doesn't exist, or invents argument values. How do you handle hallucinated tool calls?
+  a: |
+    Prevent first. Use strict tool-calling or constrained decoding so names and argument types must match the schema. Keep the tool list short and relevant to the task. Give each tool a clear name and description, and use enums for fixed choices.
+
+    Then validate every call in the harness before running it:
+
+    - An unknown tool or a schema violation gets an error message back to the model that says what is valid.
+    - Arguments that look invented, such as an id not seen in any earlier result, get checked against known values.
+    - A step cap stops the model from looping on bad calls.
+
+    Log these errors as a quality metric. A rising rate usually means a confusing tool description or a model change.
+  level: Mid
+  category: mcp-tool-use
+  subcategory: function-calling
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: a-tool-returns-100-000-tokens-of-json-how-do-you-keep-it-fro
+  q: A tool returns 100,000 tokens of JSON. How do you keep it from wrecking the agent's context?
+  a: |
+    Design tools to return what the model needs, not everything the API has:
+
+    - Filter fields server-side.
+    - Paginate with a cursor.
+    - Return summaries with ids, and offer a follow-up tool to fetch details.
+
+    In the harness, cap tool output size. Truncate with a clear marker saying how much was cut and how to get the rest. Or store large results outside the context, as a file or variable the agent can query with code.
+
+    For code-capable agents, it often works best to let the agent process data in a sandbox and only print the result it needs. Track tokens per tool in traces to find the tools that bloat context.
+  level: Mid
+  category: mcp-tool-use
+  subcategory: function-calling
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: explain-mcp-s-architecture-what-are-the-host-the-client-and-
+  q: 'Explain MCP''s architecture: what are the host, the client and the server?'
+  a: |
+    - **Host:** the AI application the user interacts with, such as a chat app, IDE or agent. It runs the model and decides what the model can use.
+    - **Client:** a connector inside the host. Each client keeps a one-to-one session with one server.
+    - **Server:** a program that exposes capabilities from some system, such as a database, GitHub or a file system, through the protocol.
+
+    The host can connect to many servers at once, each through its own client, and merge their tools into what the model sees. The split means a server is written once and works in any MCP-compatible host, which is the point of the protocol.
+  level: Junior
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: mcp-servers-expose-tools-resources-and-prompts-how-do-the-th
+  q: MCP servers expose tools, resources and prompts. How do the three differ?
+  a: |
+    They differ in who decides to use them:
+
+    - **Tools are model-controlled.** They are functions with input schemas that the model chooses to call, such as "create issue" or "run query", and they may have side effects.
+    - **Resources are application-controlled.** They are read-only data identified by URIs, such as a file, a table schema or a log, which the host or user attaches as context.
+    - **Prompts are user-controlled.** They are reusable templates a user invokes, often as slash commands, that package instructions and arguments.
+
+    Picking the right primitive keeps the model's tool list small. Not everything needs to be a tool.
+  level: Junior
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: how-is-an-mcp-server-different-from-a-regular-rest-api
+  q: How is an MCP server different from a regular REST API?
+  a: |
+    A REST API is designed for developers who read docs and write client code for each endpoint. An MCP server is designed for models and AI hosts:
+
+    - **Discovery at run time.** A client can list a server's tools and their schemas.
+    - **Model-readable descriptions.** Descriptions and results are written for a model to read.
+    - **Stateful sessions** with capability negotiation and notifications, such as "the tool list changed".
+    - **Requests back to the host**, such as asking for a model completion or user input.
+
+    Many MCP servers are thin wrappers over existing REST APIs. The value is not new functionality but a standard way for any AI app to discover and use it. Good servers also reshape the API: fewer, task-level tools rather than one tool per endpoint.
+  level: Junior
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: when-would-you-use-the-stdio-transport-for-mcp-and-when-stre
+  q: When would you use the stdio transport for MCP, and when Streamable HTTP?
+  a: |
+    **stdio** runs the server as a local subprocess of the host, exchanging messages over standard input and output. Use it for local tools: file systems, local git, dev tools. It is simple, fast and needs no network auth, but it is one server per user machine and inherits the user's local permissions.
+
+    **Streamable HTTP** runs the server as a remote web service. The client POSTs JSON-RPC messages, and the server can stream responses and notifications back. Use it for shared, multi-user or SaaS integrations. It needs proper authentication (OAuth), TLS, session handling and the usual web-service operations, but one deployment serves every user and can be centrally governed.
+  level: Mid
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: how-does-mcp-use-json-rpc-and-what-happens-when-a-client-fir
+  q: How does MCP use JSON-RPC, and what happens when a client first connects to a server?
+  a: |
+    All MCP messages are JSON-RPC 2.0:
+
+    - **Requests** carry an id and expect a response, for example `tools/call`.
+    - **Responses** carry a result or an error.
+    - **Notifications** have no id and expect no reply, for example progress updates or list-changed events.
+
+    On connection the client sends `initialize` with its protocol version and capabilities. The server replies with its own version and capabilities, such as whether it offers tools or resources and whether it emits list-changed notifications. The client then sends an initialized notification. After that the client can list and call tools or read resources.
+
+    Capability negotiation lets old and new clients and servers interoperate by only using features both sides declared.
+  level: Mid
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: what-are-roots-sampling-and-elicitation-in-mcp-and-why-do-th
+  q: What are roots, sampling and elicitation in MCP, and why do they exist?
+  a: |
+    They are features the client offers to servers, so requests can flow back from server to host:
+
+    - **Roots:** the client tells the server which directories or URIs it may work within, for example the open project folder. This scopes a server's access.
+    - **Sampling:** the server asks the host's model to generate a completion. A server can then use an LLM without holding its own API key, and the host keeps control and can require user approval.
+    - **Elicitation:** the server asks the user for structured input mid-task, such as a missing parameter or a confirmation.
+
+    All three keep the user and host in control while letting servers build richer, agent-like behaviour.
+  level: Mid
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: design-an-mcp-server-that-lets-an-agent-search-and-query-a-c
+  q: Design an MCP server that lets an agent search and query a company's Postgres database.
+  a: |
+    Expose a few task-level tools rather than raw SQL:
+
+    - `list_tables` and `describe_table`, returning schema and column descriptions
+    - `search_records`, with typed filters
+    - for analysts, a `run_query` tool that accepts read-only SQL
+
+    Also expose schemas as resources the host can attach.
+
+    Enforce safety in the server, not the model:
+
+    - a read-only database role, row-level security per user
+    - statement timeouts and row limits
+    - SQL parsing that rejects writes and multi-statements
+    - authentication over Streamable HTTP with the user's identity passed through, so access matches what that user can see
+
+    Return compact results with row counts and truncation markers, and errors that help the model fix its query. Log every query with the user and agent run id for audit.
+  level: Senior
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: what-security-risks-does-mcp-introduce-in-an-enterprise-and-
+  q: What security risks does MCP introduce in an enterprise, and how do you mitigate them?
+  a: |
+    **Risks:**
+
+    - **Tool poisoning:** malicious instructions hidden in tool descriptions or results.
+    - **Rug pulls:** a server changes its tool behaviour after approval.
+    - **Prompt injection through returned content.**
+    - **Confused deputy:** a server acts with broader credentials than the user has.
+    - **Token passthrough and leaked credentials.**
+    - **Over-broad local servers:** they can read the whole disk.
+    - **Exfiltration:** data from one server is sent out through another tool.
+
+    **Mitigations:**
+
+    - an allowlist of vetted servers with pinned versions, plus a gateway that logs and inspects traffic
+    - OAuth with per-user, least-privilege scopes; servers validate that tokens were issued for them and never forward client tokens
+    - sandboxing for local servers
+    - human confirmation for sensitive actions
+    - treating all tool output as untrusted data
+    - separating servers that read sensitive data from tools that can send data out
+  level: Senior
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: a-tool-behind-your-mcp-server-takes-ten-minutes-to-finish-ho
+  q: A tool behind your MCP server takes ten minutes to finish. How do you handle long-running work?
+  a: |
+    Do not hold a single request open and hope nothing times out. Two options:
+
+    - Return quickly with a job id, and expose a `get_status` or `get_result` tool, or a resource, that the agent polls.
+    - Keep the request open and send progress notifications, while supporting cancellation.
+
+    Recent spec revisions add first-class task support for this pattern.
+
+    Make the job durable and idempotent, so a reconnect or retry does not start a second run. Tell the model in the result how long to expect and when to check back, so it does other work instead of spinning. Clean up abandoned jobs with a time-to-live.
+  level: Mid
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: an-agent-keeps-making-wrong-or-failing-calls-to-your-mcp-ser
+  q: An agent keeps making wrong or failing calls to your MCP server's tools. How do you debug it?
+  a: |
+    Separate protocol problems from model problems:
+
+    1. Test the server directly with an inspector tool or a script that lists tools and calls them with known inputs. That catches schema errors, transport issues and auth failures.
+    2. Read the agent traces to see the exact tool calls and responses.
+    3. If the calls are well formed but wrong, the problem is usually the tool design: ambiguous names, missing descriptions, overlapping tools, or error messages that don't say how to fix the input.
+
+    Improve descriptions, merge or remove overlapping tools, add examples to parameter descriptions, and return actionable errors. Then build a small eval of tasks that use the server, and track the tool-call success rate per tool.
+  level: Mid
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: explain-the-agent2agent-a2a-protocol-and-where-it-fits-next-
+  q: Explain the Agent2Agent (A2A) protocol and where it fits next to MCP.
+  a: |
+    A2A, introduced by Google and now an open project, standardizes how independent agents talk to each other:
+
+    - **Agent cards** are JSON documents that advertise an agent's skills, endpoint and auth.
+    - **Tasks** move through states such as submitted, working, input-required, completed, failed and canceled.
+    - **Messages and artifacts** carry the content.
+
+    MCP connects an agent to tools and data. A2A connects an agent to another agent, which may itself be a black box with its own reasoning and tools. They are complementary: an agent might use MCP for its own tools and A2A to delegate a subtask to a partner's agent. A2A's long-running task model also fits work that takes hours or needs human input.
+  level: Mid
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp
+- id: your-agent-has-40-mcp-servers-connected-and-tool-definitions
+  q: Your agent has 40 MCP servers connected, and tool definitions alone use a third of the context window. What do you do?
+  a: |
+    Stop loading every tool up front:
+
+    - Load tool definitions on demand: give the model a tool-search capability, and add only matching definitions to the context.
+    - Group servers by task, and enable only the relevant group per session or route.
+    - Trim verbose descriptions and drop unused tools, based on call statistics.
+
+    For code-capable agents, present servers as code APIs the agent can browse and call from a sandbox, which avoids putting every schema in context. Measure the effect on tool-selection accuracy as well as tokens. Fewer visible tools usually improves accuracy, but the search step can miss the right tool, so test it.
+  level: Senior
+  category: mcp-tool-use
+  subcategory: mcp
+  related: /ai-system-design/genai-system-design/tool-use-and-mcp

@@ -304,3 +304,113 @@
   - Palantir
   related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
   source: outcome-school
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: in-a-customer-simulation-round-the-customer-describes-a-vagu
+  q: In a customer-simulation round, the "customer" describes a vague problem. How do you turn it into something you would build?
+  a: |
+    Lead with questions, not architecture:
+
+    - Who has the problem, and how often?
+    - What do they do today, and what does it cost?
+    - What would success look like in numbers?
+    - What data and systems exist, and what are the constraints (security, compliance, timeline, budget)?
+
+    Play back the problem in one sentence and get agreement.
+
+    Then propose the smallest useful build:
+
+    - one workflow
+    - what the model does, what code and humans do, and where the data comes from
+    - how you will measure it
+    - the main risks and how you will test them early
+
+    Name what you are deliberately not doing. Throughout, translate trade-offs into the customer's terms, so they can make the decisions.
+  level: Mid
+  category: forward-deployed
+  subcategory: customer-scoping
+  companies:
+  - Anthropic
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+- id: before-building-anything-how-do-you-define-the-success-crite
+  q: Before building anything, how do you define the success criteria for a six-week AI pilot with a customer?
+  a: |
+    Agree in writing on:
+
+    1. **The workflow and users in scope.**
+    2. **The baseline:** today's time, cost, error rate or volume, measured before the pilot starts.
+    3. **Target metrics and thresholds:** for example, 70% of tickets drafted with no factual errors, and handling time down 30%.
+    4. **The evaluation method:** a labelled test set built with their experts, plus live usage measures.
+    5. **Guardrail conditions:** error types that are unacceptable at any rate.
+    6. **What happens at the end:** expand, extend or stop.
+
+    Get the customer's experts to label the eval set early. That builds trust and surfaces disagreements about what "correct" means before they derail the pilot. Report progress weekly against the same numbers.
+  level: Mid
+  category: forward-deployed
+  subcategory: customer-scoping
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+- id: a-healthcare-provider-with-many-regional-offices-runs-your-l
+  q: A healthcare provider with many regional offices runs your LLM agent. Design the monitoring and evaluation dashboard they need.
+  a: |
+    Instrument every agent run with traces: inputs (PHI redacted or access-controlled), retrieved sources, tool calls, outputs, latency, tokens and cost, tagged by office, workflow and model version.
+
+    Dashboard views:
+
+    - **Volume and adoption** per office.
+    - **Quality:** a sampled hallucination and grounding rate from judges calibrated against clinician review, user corrections, and escalations.
+    - **Safety:** policy violations and PHI leakage alerts.
+    - **Performance:** p50 and p95 latency, error and timeout rates.
+    - **Cost** per office and per workflow.
+
+    Add drill-down from any metric to example traces, alerting on threshold breaches, and comparisons across model or prompt versions. Meet HIPAA requirements: audit logs, role-based access, data residency, and retention limits on stored conversations.
+  level: Senior
+  category: forward-deployed
+  subcategory: customer-scoping
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+- id: it-s-48-hours-before-a-customer-go-live-the-pilot-data-turns
+  q: It's 48 hours before a customer go-live. The pilot data turns out to be corrupted and your product returns zero results. What do you do?
+  a: |
+    Communicate early. Tell the customer's owner right away what you know, what you are doing, and when the next update will come. Do not let them discover it at launch.
+
+    Triage in parallel:
+
+    - Find where the data broke (export, transform or ingestion) by checking row counts and samples at each stage.
+    - Get a fresh or partial clean extract.
+    - Re-index the most important slice first, so the core workflow works.
+
+    Decide with the customer by a set time: launch with reduced scope on clean data, or move the date with a concrete plan. Afterwards, add validation checks (counts, schema, sample queries) to the pipeline, and a pre-launch smoke test, so it cannot recur silently.
+  level: Mid
+  category: forward-deployed
+  subcategory: escalations
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+- id: your-ai-integration-calls-a-customer-s-fragile-internal-api-
+  q: Your AI integration calls a customer's fragile internal API that falls over above about 50 requests per second. How do you protect it?
+  a: |
+    Put a client-side rate limiter in front of every call, shared across all workers and agent instances. A token bucket at a safe rate, say 40 rps, works, backed by a central store such as Redis when you run many processes.
+
+    Then reduce the load:
+
+    - Queue non-urgent calls.
+    - Batch where the API allows it.
+    - Cache stable responses.
+    - Deduplicate identical in-flight requests.
+
+    Handle failure gracefully: exponential backoff with jitter on 429 and 5xx errors, a circuit breaker that stops calls when the API is struggling, and timeouts.
+
+    Make agents aware too. Return a clear "system busy, try later" tool result rather than letting the model retry in a loop. Agree a rate budget with the customer's team, and monitor usage against it.
+  level: Mid
+  category: forward-deployed
+  subcategory: escalations
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering
+- id: the-customer-s-lead-architect-insists-on-an-approach-you-bel
+  q: The customer's lead architect insists on an approach you believe will fail under their peak-season load. How do you change their mind without damaging the relationship?
+  a: |
+    Understand why they want it first. There may be constraints you do not know about, such as an existing contract, a skills gap or a security rule.
+
+    Then make the risk concrete with evidence, not opinion: a quick load test or a back-of-the-envelope calculation showing where it breaks at peak traffic, and what that costs the business. Present an alternative that keeps what they care about, and give them credit for the parts of their design that hold.
+
+    Do it one-to-one before any big meeting, so nobody is cornered in public. If they still disagree, write down the risk and the decision, agree a test or checkpoint that will settle it, and escalate through the account owner only if customer harm is likely.
+  level: Mid
+  category: forward-deployed
+  subcategory: escalations
+  related: /ai-system-design/genai-system-design/forward-deployed-ai-engineering

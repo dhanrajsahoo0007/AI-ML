@@ -414,3 +414,175 @@
   level: Mid
   category: safety-security
   subcategory: responsible-ai
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: your-product-s-system-prompt-has-been-leaked-and-posted-onli
+  q: Your product's system prompt has been leaked and posted online. How much does that matter, and what do you change?
+  a: |
+    If the system prompt held only instructions and persona, the damage is mostly competitive and reputational. Prompts are hard to keep secret, and you should assume users can extract them.
+
+    It matters a lot if the prompt contained secrets (API keys, internal URLs, customer data) or if the security of the product relied on the prompt staying hidden, such as "never reveal discount codes".
+
+    Fixes:
+
+    - Rotate any leaked secrets.
+    - Move secrets and authorization logic into code and backend checks.
+    - Assume the prompt is public when reviewing it.
+    - Optionally add output filters that detect verbatim prompt disclosure, accepting that determined users will still get around them.
+  level: Mid
+  category: safety-security
+  subcategory: prompt-injection
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+- id: design-an-llm-feature-that-summarizes-product-reviews-on-an-
+  q: Design an LLM feature that summarizes product reviews on an e-commerce site, defending against prompt injection and personal data in reviews.
+  a: |
+    Reviews are untrusted input written by strangers, so treat them as data:
+
+    - Wrap each review in delimiters.
+    - Instruct the model that review text cannot change its task.
+    - Give the summarizer no tools or links that could exfiltrate anything.
+
+    Before summarizing, run classifiers for injection patterns and abusive content, and redact personal data such as names, emails, phone numbers and order numbers with a PII detector.
+
+    After generation, check that the summary contains no URLs, PII, promotional instructions ("use code X") or claims not supported by the reviews, and that its sentiment matches the rating distribution.
+
+    Generate summaries offline in batch with human spot checks, cache them, and keep a takedown path. Track injection attempts as a metric.
+  level: Senior
+  category: safety-security
+  subcategory: guardrails
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+- id: guardrail-checks-add-latency-to-every-response-how-do-you-ke
+  q: Guardrail checks add latency to every response. How do you keep safety checks without making the product slow?
+  a: |
+    - **Input checks** must finish before the action they protect. Use small, fast classifiers instead of a large LLM, and run them in parallel with retrieval or other preprocessing.
+    - **Output checks** can run in parallel with streaming: check each chunk or sentence as it is produced, and stop or retract if something trips. For high-risk content, buffer a short window before showing it.
+    - **Tier the checks by risk:** cheap filters on every request, expensive judge models only on flagged or sampled traffic, and asynchronous post-hoc review for monitoring.
+
+    Budget latency per check, cache verdicts for repeated inputs, and measure how much each guardrail actually catches, so you can remove ones that add delay without catching anything.
+  level: Mid
+  category: safety-security
+  subcategory: guardrails
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+- id: users-complain-your-assistant-refuses-perfectly-reasonable-r
+  q: Users complain your assistant refuses perfectly reasonable requests. How do you measure and reduce over-refusal without making it unsafe?
+  a: |
+    Build two eval sets:
+
+    - **Benign requests that look sensitive:** medical, security or legal questions, fiction with dark themes, and refusal complaints sampled from production.
+    - **Genuinely harmful requests.**
+
+    Track the false-refusal rate on the first and the unsafe-compliance rate on the second, together. Find the cause:
+
+    - an overly broad system-prompt rule
+    - an input classifier with a low threshold
+    - a model that is conservative by default
+
+    Fixes: narrow the policies with examples of allowed edge cases, tune classifier thresholds on the paired evals, prefer safe partial help over flat refusal, and route borderline cases to a stronger judge rather than blocking them. Re-run both evals on every change, so fixing one side does not break the other.
+  level: Mid
+  category: safety-security
+  subcategory: guardrails
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+- id: what-different-kinds-of-hallucination-are-there-and-why-does
+  q: What different kinds of hallucination are there, and why does the distinction matter?
+  a: |
+    - **Factuality errors:** the output contradicts world knowledge, such as a wrong date or an invented citation.
+    - **Faithfulness errors:** the output contradicts or goes beyond the provided context. This splits into intrinsic errors (contradicting the source) and extrinsic errors (adding unsupported claims).
+    - **Instruction or format errors:** ignoring constraints, or inventing tool arguments or fields.
+
+    The distinction matters because the fixes differ. Factuality needs retrieval or better knowledge. Faithfulness needs grounding instructions, citation checks and faithfulness evals. Fabricated fields need structured outputs and validation. Measure each separately, rather than reporting one "hallucination rate".
+  level: Junior
+  category: safety-security
+  subcategory: hallucination
+  related: /ai-system-design/genai-system-design/hallucination-mitigation
+- id: what-is-chain-of-verification-and-when-is-it-worth-using
+  q: What is Chain-of-Verification, and when is it worth using?
+  a: |
+    Chain-of-Verification has the model:
+
+    1. draft an answer
+    2. generate verification questions about the claims in it ("Was X born in 1950?")
+    3. answer those questions independently, without seeing the draft, so it does not just repeat itself
+    4. revise the draft to fix any claims the checks contradict
+
+    It reduces factual errors in list-style and multi-fact answers. It costs several extra model calls and adds latency, so it suits offline or high-value outputs, not chat. It works better when the verification step can use retrieval or tools, because a model checking itself from the same memory can confirm its own mistakes.
+  level: Mid
+  category: safety-security
+  subcategory: hallucination
+  related: /ai-system-design/genai-system-design/hallucination-mitigation
+- id: your-model-gives-confident-but-wrong-answers-in-a-high-risk-
+  q: Your model gives confident but wrong answers in a high-risk domain such as medicine or finance. How do you investigate and mitigate it?
+  a: |
+    Investigate:
+
+    1. Collect failing cases from users and red-teaming, and label them by cause: missing knowledge, outdated knowledge, a misread question, faulty reasoning, or ignored context.
+    2. Measure calibration: does stated or logprob confidence track accuracy?
+    3. Check whether errors cluster by topic or phrasing.
+
+    Mitigate in layers:
+
+    - Ground answers in vetted sources with citations.
+    - Teach and prompt the model to express uncertainty and abstain.
+    - Add verification steps for numbers and claims.
+    - Restrict scope to what the system can support.
+    - Require human review for high-stakes outputs.
+    - Show users the confidence and the sources.
+
+    Track the confident-error rate on a dedicated eval set as the release-blocking metric, not overall accuracy.
+  level: Senior
+  category: safety-security
+  subcategory: hallucination
+  companies:
+  - Anthropic
+  related: /ai-system-design/genai-system-design/hallucination-mitigation
+- id: you-discover-your-model-can-reproduce-sensitive-data-from-it
+  q: You discover your model can reproduce sensitive data from its training set. What do you do next?
+  a: |
+    Treat it as an incident:
+
+    1. Confirm and scope it with extraction tests: which data, how easily it is triggered, and whether it is in production.
+    2. Escalate to security, privacy and legal, because notification obligations may apply.
+    3. Apply immediate mitigations: output filters that detect and block the specific data and similar patterns, and rate-limits on extraction-style prompts.
+
+    Then fix the root cause:
+
+    - Trace how the data entered the training set, and remove it from the data pipeline.
+    - Improve PII filtering and deduplication, because duplicated data is memorized far more.
+    - Retrain or apply unlearning where feasible.
+    - Add memorization and extraction tests to the release evals.
+
+    Document what happened, and review the data-governance gaps that allowed it.
+  level: Senior
+  category: safety-security
+  subcategory: responsible-ai
+  companies:
+  - Anthropic
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
+- id: which-ethical-risks-come-with-letting-ai-agents-act-in-high-
+  q: Which ethical risks come with letting AI agents act in high-stakes domains, and how should those risks shape the design?
+  a: |
+    Risks:
+
+    - harmful irreversible actions taken at machine speed
+    - unclear accountability when an agent errs
+    - biased decisions applied at scale
+    - manipulation through prompt injection
+    - privacy intrusion from broad data access
+    - automation bias, where humans rubber-stamp agent decisions
+
+    The design responses:
+
+    - least-privilege access
+    - human approval for consequential or irreversible actions, with a meaningful review rather than a click-through
+    - full audit trails
+    - clear disclosure to affected people
+    - fairness testing across groups
+    - staged rollout with monitoring
+    - an easy way to contest or reverse decisions
+
+    Some decisions, such as denying care, credit or benefits, should stay with humans, with the agent as an assistant rather than the decider.
+  level: Mid
+  category: safety-security
+  subcategory: responsible-ai
+  companies:
+  - Anthropic
+  related: /ai-system-design/genai-system-design/guardrails-and-safety
