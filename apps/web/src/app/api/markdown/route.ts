@@ -5,7 +5,7 @@ import { getContentSlugs } from "@/lib/mdx-doc";
 import { toLlmMarkdown } from "@/lib/doc-meta";
 import type { ContentSection } from "@/types/content";
 
-const ARTICLE_SECTIONS: ContentSection[] = ["ai-system-design", "system-design", "ml-system-design"];
+const ARTICLE_SECTIONS: ContentSection[] = ["ai-system-design", "system-design", "ml-system-design", "cloud"];
 
 // GET /api/markdown?path=/ai-system-design/genai-system-design/rag-fundamentals
 // The article as plain Markdown, for the "Copy for LLM" button and "View as Markdown".
