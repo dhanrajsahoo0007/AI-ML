@@ -1007,3 +1007,195 @@
   level: Senior
   category: llm-foundations
   subcategory: llm-behaviour
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: you-re-pretraining-a-model-that-must-handle-code-and-twenty-
+  q: You're pretraining a model that must handle code and twenty languages. How do you choose the vocabulary size, and what does a very large vocabulary cost you?
+  a: |
+    A larger vocabulary lowers fertility (tokens per word), especially for non-Latin scripts and code. That shortens sequences, cuts attention and KV-cache cost per document, and lets the context window hold more text. The cost is a bigger embedding table and output projection: at 256K tokens and a 4K hidden size, those two matrices alone hold about 2B parameters. The final softmax also gets more expensive, and rare tokens get too few training updates to learn good embeddings.
+
+    In practice, train candidate tokenizers on a sample that matches the planned data mix and measure fertility per language and for code. Then pick the smallest vocabulary that brings the worst-served languages close to English. Large-model labs have settled in the 128K–256K range: at their parameter counts the embedding cost is a small share, and the sequence-length savings compound over trillions of training tokens.
+  level: Senior
+  category: llm-foundations
+  subcategory: tokenization-embeddings
+  related: /ai-system-design/genai-system-design/tokenization
+- id: how-does-a-modern-llm-handle-a-word-it-has-never-seen-and-wh
+  q: How does a modern LLM handle a word it has never seen, and why is "out of vocabulary" mostly a solved problem?
+  a: |
+    Subword tokenizers break an unseen word into smaller pieces that are in the vocabulary. Byte-level BPE guarantees a fallback all the way down to raw bytes, so any string can be encoded without an unknown token, including typos, emoji and new names.
+
+    The problem shifts from "can't encode" to "encodes poorly". A rare word split into many fragments costs more tokens and gives the model less clean signal about its meaning. That shows up as weaker handling of rare names, low-resource languages and domain jargon. You fix it with better tokenizer training data or by giving the model context, not by adding an unknown-token path.
+  level: Junior
+  category: llm-foundations
+  subcategory: tokenization-embeddings
+  related: /ai-system-design/genai-system-design/tokenization
+- id: diffusion-language-models-generate-text-by-refining-a-whole-
+  q: Diffusion language models generate text by refining a whole sequence in parallel. How do they differ from autoregressive LLMs, and would you use one for a latency-sensitive product today?
+  a: |
+    An autoregressive model writes one token at a time, each conditioned on everything before it, so output length sets the number of sequential steps. A diffusion language model starts from a noised or fully masked sequence and denoises many positions at once over a fixed number of refinement steps. It can emit a long answer in fewer sequential passes, and it can revise earlier positions.
+
+    The latency case is real for long outputs such as code edits, but the trade-offs are immature:
+
+    - Quality still trails the best autoregressive models on reasoning.
+    - Output length usually has to be chosen up front.
+    - Serving tools such as KV caching, speculative decoding and continuous batching were built for autoregressive decoding.
+
+    For a product today, I would benchmark one on my own task. I would still default to an autoregressive model with speculative decoding unless the diffusion model wins on both quality and p95 latency.
+  level: Mid
+  category: llm-foundations
+  subcategory: architectures
+  related: /ai-system-design/genai-system-design/transformer-architecture
+- id: where-does-the-transformer-architecture-fall-short-and-which
+  q: Where does the transformer architecture fall short, and which of those weaknesses has the field actually worked around?
+  a: |
+    The limitations:
+
+    - **Long contexts are expensive.** Attention cost grows quadratically with sequence length, and the KV cache grows linearly per token.
+    - **Fixed computation per token.** Depth is fixed, so the computation the model can do before emitting a token is bounded.
+    - **No persistent memory** beyond the context window.
+    - **Positional encodings** are needed to know token order, and they generalize poorly past the trained length.
+
+    The workarounds:
+
+    - FlashAttention, GQA, MLA and sliding windows cut memory and IO.
+    - RoPE scaling methods extend context.
+    - Chain-of-thought and reasoning models buy extra computation by generating more tokens.
+    - Retrieval and agent memory stand in for persistent memory.
+
+    State-space and hybrid models attack the quadratic cost directly. They still trail on precise recall over long contexts.
+  level: Mid
+  category: llm-foundations
+  subcategory: architectures
+  related: /ai-system-design/genai-system-design/transformer-architecture
+- id: how-do-llm-training-and-inference-differ-in-compute-memory-a
+  q: How do LLM training and inference differ in compute, memory and the hardware bottleneck each one hits?
+  a: |
+    Training runs forward and backward passes over full sequences in parallel. It keeps activations for backpropagation and stores optimizer state, about 16 bytes per parameter with Adam in mixed precision. It is compute-bound, spread across many GPUs and measured in throughput over weeks.
+
+    Inference runs only the forward pass, but generation is sequential:
+
+    - **Prefill** processes the prompt in parallel and is compute-bound.
+    - **Decoding** produces one token per step and re-reads all weights and the KV cache each time, so it is memory-bandwidth-bound at small batch sizes.
+
+    Inference is measured in latency per user and cost per token. That is why serving work focuses on batching, KV-cache management and quantization rather than raw FLOPs.
+  level: Junior
+  category: llm-foundations
+  subcategory: pretraining-scaling
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+- id: why-is-pretraining-called-self-supervised-and-why-does-that-
+  q: Why is pretraining called self-supervised, and why does that matter so much for scaling?
+  a: |
+    The labels come from the data itself. For next-token prediction the target is just the next token in the text, so every token of raw web, book and code data is a training example with no human labelling. That is what lets pretraining use trillions of tokens.
+
+    Scaling laws only pay off if data can grow with model size, and self-supervision is the only way to get data at that volume. The limits are that raw text contains errors, bias and low-quality content, and the supply of high-quality human text is finite. That is why labs now invest heavily in filtering, deduplication and synthetic data.
+  level: Junior
+  category: llm-foundations
+  subcategory: pretraining-scaling
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+- id: why-do-modern-llms-train-in-bf16-rather-than-fp16-and-what-s
+  q: Why do modern LLMs train in bf16 rather than fp16, and what still has to stay in fp32?
+  a: |
+    bf16 keeps fp32's 8-bit exponent, and so its dynamic range, and trades away mantissa precision. fp16 has a narrow range, so large activations overflow and small gradients underflow. That forced loss scaling and still caused instabilities. With bf16, training mostly works without loss scaling on hardware that supports it.
+
+    Precision-sensitive parts stay in fp32:
+
+    - the master copy of the weights the optimizer updates, because small updates to large weights would be rounded away in bf16
+    - optimizer moments
+    - often, reductions such as softmax normalization, layer-norm statistics and the loss computation
+
+    The rule of thumb is low precision for the big matrix multiplies, high precision for anything that accumulates.
+  level: Mid
+  category: llm-foundations
+  subcategory: pretraining-scaling
+  related: /ai-system-design/genai-system-design/scaling-laws-and-training
+- id: what-are-stop-sequences-and-what-are-the-different-ways-an-l
+  q: What are stop sequences, and what are the different ways an LLM generation can end?
+  a: |
+    Generation ends in one of three ways:
+
+    - The model emits its end-of-sequence token.
+    - The output hits the max-token limit.
+    - The text matches a stop sequence the caller supplied, such as a closing tag or the next speaker label. The serving layer checks for stop sequences as tokens stream out, and usually does not return the matched string.
+
+    Each path needs handling:
+
+    - **Max tokens** means the answer is truncated. Check the finish reason, then retry, continue or fail clearly rather than parsing half a JSON object.
+    - **Stop sequences** must be strings the model would never produce mid-answer. They also interact with tokenization: a stop string split across token boundaries needs the server to match on decoded text, not on tokens.
+  level: Junior
+  category: llm-foundations
+  subcategory: llm-behaviour
+  related: /ai-system-design/genai-system-design/transformer-architecture
+- id: you-set-temperature-to-0-and-still-get-different-outputs-for
+  q: You set temperature to 0 and still get different outputs for the same prompt in production. Why?
+  a: |
+    Temperature 0 means greedy decoding, so the output is deterministic only if the logits are bit-identical on every call. They usually are not:
+
+    - Batched inference changes the order of floating-point additions, depending on which other requests share the batch.
+    - Different GPU kernels or hardware give slightly different results.
+    - A near-tie between two tokens flips with tiny numeric differences, then sends the rest of the answer down a different path.
+    - Hosted APIs may route to different model snapshots or apply hidden system prompts.
+
+    If you need reproducibility:
+
+    - Pin the model version.
+    - Use a seed where the API supports it.
+    - Log full requests and outputs.
+    - Design evals and tests to tolerate variation, for example by checking properties of the answer rather than exact strings.
+
+    Batch-invariant kernels exist, but they cost throughput.
+  level: Mid
+  category: llm-foundations
+  subcategory: llm-behaviour
+  related: /ai-system-design/genai-system-design/transformer-architecture
+- id: an-autoregressive-model-can-t-go-back-and-fix-a-token-it-has
+  q: An autoregressive model can't go back and fix a token it has already emitted. What problems does that cause, and how do systems work around it?
+  a: |
+    Each token is committed once it is sampled. An early mistake, such as picking the wrong approach in the first sentence or a wrong digit in a calculation, becomes context that the rest of the answer conditions on. The model then tends to stay consistent with the error rather than correct it, and it cannot plan the end of an answer before writing the beginning.
+
+    The workarounds give the system room to revise:
+
+    - Let the model reason before answering, with chain-of-thought or a reasoning model.
+    - Sample several answers and pick one by voting or with a verifier.
+    - Run a second critique-and-revise pass.
+    - Use tools that check intermediate results, such as a code interpreter.
+
+    In products, structured outputs and validation catch malformed results so the system can retry.
+  level: Mid
+  category: llm-foundations
+  subcategory: llm-behaviour
+  related: /ai-system-design/genai-system-design/transformer-architecture
+- id: how-would-you-use-token-log-probabilities-in-a-production-ll
+  q: How would you use token log-probabilities in a production LLM feature?
+  a: |
+    Log-probabilities give the model's confidence in each generated token and in the alternatives it did not pick. Uses:
+
+    - **Cheap classification:** constrain the answer to a few labels and read the probability of each.
+    - **Review routing:** flag low-confidence extractions for human review.
+    - **Ranking** candidate answers.
+    - **Spotting near coin-flips** on fields like a date or an amount.
+
+    Treat them as a signal, not ground truth:
+
+    - Instruction tuning and RLHF make models overconfident, so calibrate thresholds on labelled data before relying on them.
+    - For long free-form text, sequence-level confidence is not the product of token probabilities.
+    - Some hosted APIs return logprobs only for a few top tokens, or not at all for reasoning models.
+  level: Mid
+  category: llm-foundations
+  subcategory: llm-behaviour
+  related: /ai-system-design/genai-system-design/transformer-architecture
+- id: explain-how-chain-of-thought-gives-a-transformer-more-comput
+  q: Explain how chain-of-thought gives a transformer more computation, and why that helps on multi-step problems.
+  a: |
+    A transformer does a fixed amount of computation per generated token, set by its depth and width. A problem that needs many sequential steps, such as multi-digit arithmetic or a chain of deductions, may not fit in one forward pass. Writing out intermediate steps turns each step into tokens the model can attend to later, so total computation grows with the length of the reasoning.
+
+    That explains three things:
+
+    - Chain-of-thought helps most on multi-step tasks and barely at all on lookup or classification tasks.
+    - Reasoning models trained with RL to produce long, self-checking traces gain accuracy with more thinking tokens.
+    - The cost is latency and tokens.
+
+    A written-out trace is also not guaranteed to reflect how the model actually reached its answer.
+  level: Senior
+  category: llm-foundations
+  subcategory: llm-behaviour
+  related: /ai-system-design/genai-system-design/transformer-architecture

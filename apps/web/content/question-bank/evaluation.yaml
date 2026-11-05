@@ -575,3 +575,192 @@
   level: Mid
   category: evaluation
   subcategory: observability
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: how-do-you-choose-the-best-llm-for-a-specific-use-case
+  q: How do you choose the best LLM for a specific use case?
+  a: |
+    Shortlist with public benchmarks and constraints: context length, price, latency, data residency, licence, and tool-calling support. Then decide on your own data:
+
+    1. Build an eval set of 100–500 real tasks with scoring.
+    2. Run each candidate with a prompt adapted to it.
+    3. Compare quality, cost per task and p95 latency together.
+
+    Look at failure categories, not just averages: one model may be better overall but fail on the cases that matter most.
+
+    Consider operations too: rate limits, uptime history, version deprecation policy, and whether you can self-host later. Re-run the comparison when new models ship. Rankings change every few months.
+  level: Mid
+  category: evaluation
+  subcategory: llm-eval-methods
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+- id: why-are-bleu-rouge-and-similar-metrics-a-poor-fit-for-evalua
+  q: Why are BLEU, ROUGE and similar metrics a poor fit for evaluating LLM outputs, and what do you use instead?
+  a: |
+    They score word overlap with a reference answer. A correct answer phrased differently scores low, and a fluent answer with one wrong fact can score high. Most LLM tasks have many valid answers, and the important failures (wrong facts, unsafe content, ignored instructions) are not about overlap.
+
+    Use instead:
+
+    - exact or programmatic checks where possible: tests, schema validation, extracted values
+    - rubric-based scoring by human raters or a calibrated LLM judge for open-ended output
+    - task outcome metrics in production, such as resolution or acceptance rates
+
+    Overlap metrics still have narrow uses, such as tracking translation regressions against a fixed reference set.
+  level: Junior
+  category: evaluation
+  subcategory: llm-eval-methods
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+- id: how-many-eval-examples-do-you-need-before-you-trust-that-mod
+  q: How many eval examples do you need before you trust that model B beats model A?
+  a: |
+    The standard error of an accuracy score is about √(p(1−p)/n). At 80% accuracy on 200 examples that is about 2.8 points, so the 95% interval is about ±5.5 points. A 3-point difference on 200 examples is noise.
+
+    Use paired comparisons on the same examples: a bootstrap over examples, or McNemar's test for pass/fail. Pairing removes example difficulty from the variance and needs far fewer samples. Detecting a 2–3 point improvement typically needs around a thousand examples, or repeated runs for stochastic outputs.
+
+    Report confidence intervals, not single numbers, and do not slice results into many small segments and celebrate the one that moved.
+  level: Senior
+  category: evaluation
+  subcategory: llm-eval-methods
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+- id: what-success-metrics-would-you-define-for-an-ai-feature-befo
+  q: What success metrics would you define for an AI feature before launch?
+  a: |
+    Tie metrics to the user outcome the feature exists for:
+
+    - **Primary:** task success, such as answers that resolve the question without a follow-up search, accepted code suggestions, or tickets resolved without escalation.
+    - **Quality:** eval scores, judge-rated helpfulness and accuracy on sampled traffic, citation correctness.
+    - **Guardrails:** hallucination or safety-flag rates, latency p95, cost per request, refusal rate.
+    - **Engagement and retention**, read carefully because they can rise for bad reasons.
+
+    Set targets and minimums before launch. Define how each metric is measured, including sampling and labelling. Decide which metric wins in a trade-off, for example accepting a small cost increase for a quality gain but no increase in the hallucination rate.
+  level: Mid
+  category: evaluation
+  subcategory: llm-eval-methods
+  companies:
+  - Perplexity
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+- id: quality-went-up-after-your-change-but-latency-and-cost-becam
+  q: Quality went up after your change, but latency and cost became unacceptable. What do you do?
+  a: |
+    Find where the gain came from: a bigger model, longer prompts, more retrieved context, or more reasoning or agent steps. Then try to keep the gain more cheaply:
+
+    - Route only the hard requests to the expensive path.
+    - Trim context with a reranker.
+    - Cache prompt prefixes.
+    - Use a smaller model fine-tuned or distilled on the better model's outputs.
+    - Lower reasoning effort where evals show no loss.
+
+    Agree the trade-off with product using numbers, for example +4 points of quality for +40% cost and +600 ms p95. Sometimes the right call is to ship the improvement only for a premium tier or a specific task.
+  level: Mid
+  category: evaluation
+  subcategory: llm-eval-methods
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+- id: a-stakeholder-wants-to-ship-an-ai-feature-but-your-evaluatio
+  q: A stakeholder wants to ship an AI feature, but your evaluation evidence is weak. What do you say?
+  a: |
+    State what is known and what is not:
+
+    - what the eval covered, and how big it was
+    - the confidence interval
+    - the failure types seen
+    - the risks that were not tested
+
+    Translate them into user impact, for example "roughly 1 in 20 answers may cite the wrong policy".
+
+    Then offer a path rather than a veto: a limited launch such as an internal beta, one segment or a feature flag, with monitoring, a rollback plan, human review for high-stakes outputs, and a date to decide on wider rollout. Agree in advance which result would stop the launch. Escalate only if the risk is serious, such as safety, legal or customer harm, and document the decision either way.
+  level: Mid
+  category: evaluation
+  subcategory: llm-eval-methods
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+- id: you-have-30-human-labelled-examples-build-an-automatic-faith
+  q: You have 30 human-labelled examples. Build an automatic faithfulness judge and show it can be trusted.
+  a: |
+    1. Write a rubric with a clear definition: every claim in the answer must be supported by the context.
+    2. Have the judge list each claim with a supported or unsupported verdict and evidence, then output a score.
+    3. Use a strong model different from the one being judged.
+    4. Split the labels: tune the prompt on about 15 examples and test on the other 15.
+
+    Measure agreement with the human labels using accuracy, Cohen's kappa, and especially the false-pass rate on unfaithful answers. Thirty labels is small, so report the uncertainty and plan to collect more, prioritizing disagreements. Re-check calibration whenever the judge model or prompt changes, and periodically audit judge decisions on production samples.
+  level: Senior
+  category: evaluation
+  subcategory: llm-as-judge
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+- id: when-should-an-llm-judge-compare-two-answers-side-by-side-an
+  q: When should an LLM judge compare two answers side by side, and when should it score each one alone?
+  a: |
+    **Pairwise** comparison is more reliable for subjective quality and for comparing two model or prompt versions: "which is better" is easier than an absolute score, for models and humans alike. It suffers from position bias, so run both orders and count disagreements as ties. It does not give an absolute quality level.
+
+    **Pointwise** scoring against a rubric suits monitoring a single system over time, pass/fail checks such as faithfulness or policy compliance, and large-scale production sampling.
+
+    A common setup: pointwise checks for hard requirements, pairwise for deciding whether a change is an improvement.
+  level: Mid
+  category: evaluation
+  subcategory: llm-as-judge
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+- id: how-do-you-measure-agreement-between-annotators-and-between-
+  q: How do you measure agreement between annotators, and between an LLM judge and humans?
+  a: |
+    Raw percent agreement overstates reliability when one label dominates. Use chance-corrected statistics:
+
+    - **Cohen's kappa** for two raters.
+    - **Fleiss' kappa or Krippendorff's alpha** for more raters or missing labels.
+    - **Weighted kappa or correlation** for ordinal scales.
+
+    Roughly, above 0.6 is substantial agreement and below 0.4 means the task or guidelines are unclear.
+
+    Compute judge–human agreement the same way, and compare it to human–human agreement. A judge cannot be expected to agree with humans more than they agree with each other. Low agreement is usually a rubric problem: clarify definitions with examples of edge cases and re-label.
+  level: Mid
+  category: evaluation
+  subcategory: llm-as-judge
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+- id: design-an-evaluation-platform-for-agents-that-catches-regres
+  q: Design an evaluation platform for agents that catches regressions whenever a prompt, tool or model changes.
+  a: |
+    **Components:**
+
+    - **A versioned scenario library** from real conversations and synthetic edge cases, each with a goal and success criteria.
+    - **A simulator** that plays the user and mocks or sandboxes tools with recorded responses, so runs are reproducible.
+    - **Graders:** programmatic checks on tool calls and final state, plus LLM judges for conversation quality and policy compliance.
+
+    **Every change** to a prompt, tool schema or model version triggers a run across the suite with several seeds. The platform reports pass rates with confidence intervals per scenario category and shows diffs of failing traces against the baseline. Gate deploys on no significant regression in critical categories.
+
+    Feed production failures back into the library, and track cost and latency per scenario alongside quality.
+  level: Senior
+  category: evaluation
+  subcategory: agent-eval
+  companies:
+  - Cresta
+  related: /ai-system-design/genai-system-design/agentic-ai-evaluation
+- id: you-launched-a-support-assistant-how-do-you-know-it-s-actual
+  q: You launched a support assistant. How do you know it's actually helping, not making things worse?
+  a: |
+    Measure outcomes against a counterfactual. Run a holdout or A/B test where some users get the old flow, and compare resolution rate, time to resolution, repeat contacts within 7 days, escalations, CSAT and churn.
+
+    Look for hidden harm:
+
+    - tickets marked resolved where the user came back
+    - wrong answers on sampled conversations, judged by QA staff or a calibrated judge
+    - policy violations
+    - users giving up, which looks like deflection but is not resolution
+
+    Segment by issue type, because the assistant may help on simple issues and hurt on complex ones. Route those to humans.
+  level: Senior
+  category: evaluation
+  subcategory: observability
+  related: /ai-system-design/genai-system-design/llmops-observability
+- id: a-customer-s-only-feedback-is-that-your-assistant-seems-unin
+  q: A customer's only feedback is that your assistant seems unintelligent. How do you turn that into a fix?
+  a: |
+    Nothing yet. First turn the vague complaint into specifics. Ask for example conversations, pull their traces, and label what went wrong. Typical causes:
+
+    - failed retrieval, so it did not know the answer
+    - lost context, so it forgot what was said
+    - over-refusal or vague hedging
+    - not taking an action it should have
+    - slow responses
+    - a generic tone
+
+    Fix the most frequent cause with the cheapest change: retrieval and context assembly fixes usually beat prompt tweaks, and both beat switching models. Add the failing conversations to the eval set, show the customer before-and-after examples, and agree on a measurable signal to track.
+  level: Mid
+  category: evaluation
+  subcategory: observability
+  related: /ai-system-design/genai-system-design/llmops-observability

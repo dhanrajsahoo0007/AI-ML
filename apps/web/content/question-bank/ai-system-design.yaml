@@ -1008,3 +1008,154 @@
   level: Senior
   category: ai-system-design
   subcategory: llm-platforms
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: the-interviewer-allows-an-ai-assistant-in-your-coding-or-des
+  q: The interviewer allows an AI assistant in your coding or design round. How do you use it well?
+  a: |
+    The interviewer is grading your judgement, not the assistant's output. Clarify the problem and sketch the approach yourself first, out loud. Then use the assistant for well-scoped pieces: boilerplate, an API you'd normally look up, test cases.
+
+    Read every line it produces and explain it as you integrate it. Catch its mistakes visibly; that is a strong signal. Run and test the code rather than trusting it.
+
+    Avoid pasting the whole problem in and narrating the result, going silent while prompting, and accepting code you cannot explain. Keep prompts specific and short, and say why you are delegating each piece.
+  level: Junior
+  category: ai-system-design
+  subcategory: interview-approach
+- id: design-an-insurance-claims-assistant-that-uses-rag-over-poli
+  q: Design an insurance-claims assistant that uses RAG over policy documents and claim files, while keeping token costs under control.
+  a: |
+    Ingestion:
+
+    - Parse policies into clause-level chunks with metadata: policy type, version, effective dates, jurisdiction.
+    - Extract claim files into structured fields with OCR and an extraction model.
+
+    For each claim:
+
+    1. Filter retrieval by the claimant's exact policy and version, and retrieve only the clauses relevant to the claim type.
+    2. Rerank to the top few.
+    3. Produce a structured recommendation (covered, not covered, or needs review) with cited clauses and missing information.
+
+    Cost controls:
+
+    - a small model for extraction and triage, with the large model only for ambiguous claims
+    - prompt caching of policy text shared across claims
+    - tight context budgets and batch processing for non-urgent claims
+    - cost per claim tracked as a metric
+
+    Keep humans in the loop for denials and high-value claims, log every decision with its evidence for audit, and evaluate against adjuster decisions.
+  level: Senior
+  category: ai-system-design
+  subcategory: genai-products
+  companies:
+  - Scale AI
+  related: /ai-system-design/genai-system-design/conversational-assistant-design
+- id: design-an-ai-customer-service-agent-platform-that-a-vendor-d
+  q: Design an AI customer-service agent platform that a vendor deploys for many client companies, each with its own systems, policies and brand voice.
+  a: |
+    Separate the shared platform from per-client configuration.
+
+    **The platform** provides:
+
+    - the agent runtime and harness
+    - channels: chat, voice and email
+    - an integration framework for client APIs such as orders, CRM and billing
+    - evals, observability and human handoff
+
+    **Each client** gets:
+
+    - a knowledge base and policies, versioned
+    - tool connectors with scoped credentials
+    - a brand voice and guardrails
+    - escalation rules
+    - its own eval suite built from its real conversations
+
+    Isolate tenants strictly: separate data stores or row-level scoping, per-tenant keys, and no cross-client memory.
+
+    Encode business rules such as refund limits as code-enforced tool policies, not prompt text. Ship config changes through a test, simulate and staged-rollout pipeline per client. Measure resolution rate, policy violations and CSAT per client, because each client's success defines yours.
+  level: Senior
+  category: ai-system-design
+  subcategory: genai-products
+  companies:
+  - Sierra
+  related: /ai-system-design/genai-system-design/conversational-assistant-design
+- id: design-how-a-chat-product-stores-conversations-including-edi
+  q: Design how a chat product stores conversations, including edits, regenerations and branching threads.
+  a: |
+    Model a conversation as a tree of messages, not a list. Each message has an id, parent id, role, content parts (text, images, tool calls), model and version, token counts and timestamps. Editing a user message or regenerating a reply creates a sibling branch, and the conversation stores a pointer to the active leaf. The context for the next call is the path from the root to that leaf.
+
+    Store metadata in a sharded database keyed by user and conversation, large attachments in object storage, and a search index for history. Plan for:
+
+    - very large conversations, by paginating and loading branch paths lazily
+    - data retention and deletion requests
+    - multi-device sync
+    - the summaries or memories derived from conversations, which must be updated when the source messages are deleted
+  level: Mid
+  category: ai-system-design
+  subcategory: genai-products
+  companies:
+  - OpenAI
+  related: /ai-system-design/genai-system-design/conversational-assistant-design
+- id: design-an-llm-powered-code-review-tool-that-comments-on-pull
+  q: Design an LLM-powered code review tool that comments on pull requests.
+  a: |
+    Trigger on PR events. Gather context:
+
+    - the diff
+    - the full changed files
+    - related code found by symbol references and repository search
+    - the PR description, linked issue, and repo conventions such as lint rules and a style guide
+
+    Run focused passes (bugs, security, performance, tests) with a strong model, asking for findings with file, line, severity and a suggested fix.
+
+    Precision matters more than recall. Developers ignore noisy bots. So:
+
+    - Verify each finding with a second check, or by running tests or static analysis.
+    - Drop low-confidence and stylistic nitpicks already covered by linters.
+    - Cap the number of comments.
+
+    Measure the accepted-suggestion rate and the dismissal rate, learn per-repo preferences from dismissals, and never let the bot block a merge on its own judgement.
+  level: Mid
+  category: ai-system-design
+  subcategory: genai-products
+  related: /ai-system-design/genai-system-design/conversational-assistant-design
+- id: design-the-openai-playground-a-web-tool-where-developers-try
+  q: 'Design the OpenAI Playground: a web tool where developers try prompts, models and parameters against the API.'
+  a: |
+    The front end is a prompt editor with system and user messages, model and parameter controls, tool and schema definitions, streaming output, and token and cost counters. It calls the same public API through a thin backend that handles auth, the org's rate limits and quotas, and streams responses over server-sent events.
+
+    Features that make it a product:
+
+    - saved and versioned prompts with shareable links
+    - side-by-side comparison of models or prompts
+    - run history
+    - "view code" export
+    - small eval runs over a dataset
+
+    Concerns: usage counts against the org's billing, rate limiting per user and org, abuse and moderation checks, storing prompts securely with retention controls, and graceful handling of model deprecations in saved prompts.
+  level: Senior
+  category: ai-system-design
+  subcategory: llm-platforms
+  companies:
+  - OpenAI
+  related: /ai-system-design/genai-system-design/llm-serving-inference
+- id: design-usage-metering-and-billing-for-an-llm-api-that-charge
+  q: Design usage metering and billing for an LLM API that charges per input and output token.
+  a: |
+    The serving layer emits a usage event per request:
+
+    - request id
+    - org, project and API key
+    - model
+    - input, cached-input, output and reasoning tokens
+    - tool or image units
+    - timestamp
+
+    It is written to a durable log, such as Kafka, at least once. A metering service deduplicates by request id, aggregates per org and model into time buckets, and applies the price book (versioned, with per-model and per-customer rates, discounts and batch pricing). It feeds invoicing and real-time spend dashboards.
+
+    For spending limits and prepaid credits, keep a fast running balance in a low-latency store, checked at admission. Accept small overshoot under concurrency, and reconcile against the authoritative ledger. Handle streaming that was cancelled midway (bill tokens actually generated), retries, refunds and audits.
+  level: Senior
+  category: ai-system-design
+  subcategory: llm-platforms
+  companies:
+  - OpenAI
+  related: /ai-system-design/genai-system-design/llm-serving-inference

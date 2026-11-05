@@ -676,3 +676,110 @@
   - Waymo
   related: /ai-system-design/genai-system-design/agentic-ai-evaluation
   source: outcome-school
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: design-the-file-upload-path-for-an-ai-chat-app-users-attach-
+  q: 'Design the file-upload path for an AI chat app: users attach large PDFs, images and spreadsheets, and the model must use them.'
+  a: |
+    Upload directly to object storage with presigned, resumable multipart URLs. Scan for malware, check type and size limits, and process asynchronously while the user keeps typing.
+
+    Process per type:
+
+    - **PDFs:** extract text and layout, and render the pages that have figures as images.
+    - **Images:** resize to the model's resolution limits, because image tokens grow with resolution.
+    - **Spreadsheets:** parse into tables, and expose them through a code or query tool rather than raw text.
+
+    If a file fits the context budget, include it directly, which caches well across turns. If not, chunk and index it for retrieval, and keep a summary in context.
+
+    Show processing status and token cost to the user. Enforce per-user quotas, scope files to the conversation with access checks, set retention rules, and treat file contents as untrusted input that may contain prompt injection.
+  level: Senior
+  category: multimodal
+  subcategory: vision-language
+  companies:
+  - xAI
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+- id: for-document-understanding-when-do-you-run-an-ocr-and-layout
+  q: For document understanding, when do you run an OCR and layout pipeline, and when do you send page images straight to a vision-language model?
+  a: |
+    An **OCR and layout pipeline** (text extraction, table detection, reading order) is cheap at volume, gives exact text you can index, search and cite, and is predictable. It struggles with complex tables, charts, handwriting and odd layouts.
+
+    A **VLM on page images** understands charts, forms and visual structure, and needs less pipeline code. It costs more per page, is slower, can hallucinate text, and gives you no character-level positions for citations.
+
+    A common hybrid: OCR everything for indexing and search, detect hard pages (tables, figures, low OCR confidence), and send only those to a VLM for extraction or description. Evaluate on a labelled sample of your own documents, field by field.
+  level: Mid
+  category: multimodal
+  subcategory: vision-language
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+- id: design-a-real-time-ai-voice-system-for-customer-support-from
+  q: Design a real-time AI voice system for customer support, from audio in to audio out.
+  a: |
+    The pipeline:
+
+    1. Audio arrives over WebRTC or telephony.
+    2. Voice-activity detection and turn detection decide when the user has finished.
+    3. Streaming ASR produces partial and final transcripts.
+    4. A dialogue orchestrator holds session state (conversation, customer context, task progress) and calls the LLM with tools.
+    5. The LLM streams its answer into streaming TTS, sentence by sentence.
+    6. Audio plays back, while barge-in detection stops playback when the user speaks.
+
+    The targets are roughly 500–800 ms from the end of user speech to the first audio, so every stage streams, and the models are co-located near the media servers.
+
+    Around the pipeline:
+
+    - **Safety:** policy-constrained tools, PII redaction in logs, and handoff to a human.
+    - **Observability:** per-stage latency, ASR confidence, interruptions and outcomes per call.
+    - **Cost:** per-minute tracking across ASR, LLM, TTS and telephony, with smaller models where quality allows.
+  level: Senior
+  category: multimodal
+  subcategory: voice-agents
+  companies:
+  - Decagon
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+- id: how-does-a-voice-agent-decide-that-the-user-has-finished-spe
+  q: How does a voice agent decide that the user has finished speaking, and why is a fixed silence threshold not enough?
+  a: |
+    The simplest approach waits for a fixed silence, say 700 ms, after voice-activity detection stops. It is too slow for quick replies ("yes") and too fast for people who pause mid-thought or read out numbers, so the agent either lags or interrupts.
+
+    Better systems combine signals:
+
+    - VAD silence
+    - a semantic or acoustic turn-detection model that judges whether the utterance sounds complete, from the words and intonation
+    - context, such as expecting a long answer after "what's your address?"
+
+    They adapt the wait accordingly. Some start generating speculatively during a pause and discard the result if the user continues. Tune on real call recordings, measuring both interruption rate and response delay.
+  level: Mid
+  category: multimodal
+  subcategory: voice-agents
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+- id: a-voice-agent-calls-a-backend-tool-that-takes-three-seconds-
+  q: A voice agent calls a backend tool that takes three seconds. What should the caller hear, and how do you build it?
+  a: |
+    Silence for more than about a second sounds like a dropped call. Have the agent acknowledge immediately with a short, natural filler tied to the action ("Let me check your booking"), generated or templated while the tool runs in parallel. For longer waits, add a brief progress line, and keep the user able to interrupt.
+
+    Under the hood:
+
+    - Start the tool call as soon as the intent is clear, even before the LLM finishes its sentence.
+    - Stream the result into the next response.
+    - Set timeouts with a spoken fallback.
+
+    Avoid repetitive fillers by varying them. Measure dead-air time per call as a quality metric.
+  level: Mid
+  category: multimodal
+  subcategory: voice-agents
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai
+- id: how-do-you-evaluate-a-voice-agent-end-to-end-beyond-asr-word
+  q: How do you evaluate a voice agent end to end, beyond ASR word error rate and TTS quality?
+  a: |
+    Evaluate whole conversations:
+
+    - task completion and correctness of actions taken
+    - policy compliance
+    - escalation rate
+    - turn-taking quality: response latency at p50 and p95, interruptions of the user, missed barge-ins, dead air
+    - the user's experience: CSAT, hang-ups and repeat calls
+
+    Run simulated callers (LLM-driven, with TTS voices, accents, background noise and interruptions) against scripted scenarios before release. Then score a sample of real calls with judges that read transcripts and per-turn timing data. Break results down by language, accent and line quality, because averages hide the groups the agent fails.
+  level: Mid
+  category: multimodal
+  subcategory: voice-agents
+  related: /ai-system-design/genai-system-design/multimodal-and-voice-ai

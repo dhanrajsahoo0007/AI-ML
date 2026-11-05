@@ -25,3 +25,318 @@
   subcategory: prompt-ops
   related: /ai-system-design/genai-system-design/llmops-observability
   source: outcome-school
+
+# Original questions from web research, reviewed in "AI Interview Question Expansion: Review Draft" (2026-11).
+- id: walk-me-through-how-you-would-structure-the-system-prompt-fo
+  q: Walk me through how you would structure the system prompt for a production assistant.
+  a: |
+    Order it from stable to specific:
+
+    1. Who the assistant serves and what it is for.
+    2. Hard rules: what it must never do, and when to refuse or escalate.
+    3. How to use the tools and retrieved context it gets.
+    4. Output format.
+    5. A few examples of tricky cases.
+
+    Write instructions as plain, specific sentences with the reason attached ("keep answers under 100 words because they are shown on a phone"). Separate sections with headings or tags so the model can tell instructions from data.
+
+    Treat the prompt as code. Keep it in version control, give every rule a test case in the eval set, and delete rules that no longer change behaviour. Long prompts full of conflicting "always" and "never" lines are the most common cause of erratic behaviour.
+  level: Junior
+  category: prompt-engineering
+  subcategory: techniques
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: what-belongs-in-the-system-prompt-versus-the-user-message-an
+  q: What belongs in the system prompt versus the user message, and is the system prompt a security boundary?
+  a: |
+    - **System prompt:** the developer's standing instructions, such as role, policies, tone, tools and format.
+    - **User message:** the end user's request.
+    - **Retrieved documents and tool results:** these go in their own clearly marked blocks, never mixed into either of the above.
+
+    Models are trained to weight system instructions more heavily, which makes them the right place for rules that must hold across the conversation.
+
+    It is not a security boundary. Users can often extract the system prompt, and injected text can override it, so never put secrets, keys or authorization logic there. Enforce anything that must hold, such as permissions, spending limits or data access, in code outside the model.
+  level: Junior
+  category: prompt-engineering
+  subcategory: techniques
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: how-do-you-choose-few-shot-examples-and-when-do-examples-mak
+  q: How do you choose few-shot examples, and when do examples make a prompt worse?
+  a: |
+    Pick examples that cover the hard cases and the range of valid outputs, not the easy middle. Keep the format exactly as you want it back, and balance labels so the model does not learn "the answer is usually A". For large or varied tasks, retrieve the most similar examples per request from a labelled pool instead of using a fixed set.
+
+    Examples hurt when they are copied too literally: the model mimics their length, phrasing or specific values, or overfits to their topics. Order matters too, because later examples pull harder. With strong instruction-tuned models, a clear instruction plus one or two examples often beats ten. Measure zero-, one- and few-shot on your eval set rather than assuming more is better.
+  level: Mid
+  category: prompt-engineering
+  subcategory: techniques
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: should-you-still-ask-for-step-by-step-reasoning-when-you-re-
+  q: Should you still ask for step-by-step reasoning when you're using a reasoning model?
+  a: |
+    For standard chat models, asking for reasoning before the answer helps on multi-step math, logic and planning. It barely helps on simple lookups and classification, where it only adds latency and tokens.
+
+    Reasoning models already think internally, and they were trained to do so. Prescribing detailed steps can constrain them and make results worse. With these models, state the goal, the constraints and what a good answer looks like, set the reasoning effort or budget the API offers, and drop "think step by step" scaffolding. In both cases, if you need the answer parsed, separate the reasoning from the final answer with a clear marker or a structured field.
+  level: Mid
+  category: prompt-engineering
+  subcategory: techniques
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: what-is-self-consistency-prompting-and-when-is-it-worth-the-
+  q: What is self-consistency prompting, and when is it worth the cost?
+  a: |
+    Self-consistency samples several reasoning paths at a non-zero temperature, then takes the most common final answer. Independent paths that reach the same answer are more likely right, so voting filters out one-off reasoning slips.
+
+    It multiplies cost and latency by the number of samples, and it only works when answers can be compared, such as a number, a label or a choice. It is worth it for high-value, low-volume decisions and for building eval or training labels. It is not worth it for interactive chat or free-form writing. A verifier or a reasoning model is often a cheaper way to get the same gain.
+  level: Mid
+  category: prompt-engineering
+  subcategory: techniques
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: your-chain-of-thought-prompt-still-gets-a-reasoning-task-wro
+  q: Your chain-of-thought prompt still gets a reasoning task wrong. What do you try next?
+  a: |
+    First read the failing traces to see where they go wrong: misreading the input, a calculation slip, a missing fact, or a bad plan. Then fix the right thing:
+
+    - **Missing facts:** add retrieval.
+    - **Arithmetic or lookup slips:** give the model a tool such as a calculator, code execution or a database.
+    - **Bad plans:** decompose the task into a chain of smaller prompts, or have the model plan first and execute second.
+    - **Unstable answers:** sample several and vote, or add a checker that verifies the answer and feeds back errors.
+
+    If the task is still beyond the model, switch to a reasoning model or a larger model for that step only. Fine-tune only if it is a narrow, repeated task with plenty of verified examples.
+  level: Mid
+  category: prompt-engineering
+  subcategory: techniques
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: users-send-ambiguous-requests-should-the-prompt-tell-the-mod
+  q: Users send ambiguous requests. Should the prompt tell the model to ask a clarifying question or make an assumption?
+  a: |
+    It depends on the cost of a wrong guess against the cost of a round trip. For cheap, reversible outputs such as a draft or a search, assume the most likely reading, say what you assumed, and offer the alternative. For expensive or irreversible actions, such as sending, buying or deleting, ask first.
+
+    Put this policy in the prompt explicitly, with examples of each, because models default to over-asking or never asking depending on their training. Track clarification rate and correction rate in production to tune it.
+  level: Mid
+  category: prompt-engineering
+  subcategory: techniques
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: when-do-you-split-a-task-into-a-chain-of-prompts-and-when-is
+  q: When do you split a task into a chain of prompts, and when is one prompt better?
+  a: |
+    Split when steps need different context or tools, when you want to validate or cache an intermediate result, when one step needs a stronger model than the others, or when a single prompt keeps dropping instructions. Each step gets a narrow job and its own eval, which makes failures easy to locate.
+
+    Keep one prompt when the steps depend tightly on each other and splitting would lose context, or when latency matters. Every extra call adds a round trip and another place for errors to compound. A good default is one prompt first, then split at the point the traces show it failing.
+  level: Mid
+  category: prompt-engineering
+  subcategory: techniques
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: a-prompt-tuned-for-one-model-works-badly-on-another-why-and-
+  q: A prompt tuned for one model works badly on another. Why, and how do you migrate prompts when you switch models?
+  a: |
+    Models differ in instruction-following style, sensitivity to formatting such as XML tags or markdown, default verbosity, how literally they take "always" and "never", tool-calling formats and chat templates. A prompt full of workarounds for one model's quirks often confuses another.
+
+    Treat migration as a project:
+
+    1. Run the existing eval set on the new model with the old prompt to get a baseline.
+    2. Strip model-specific workarounds and rewrite the prompt from the intent, using the new vendor's prompting guide.
+    3. Re-run the evals and compare failure categories, not just the score.
+    4. Roll out behind a flag with side-by-side monitoring.
+
+    Pin model versions so the same thing does not happen silently on a provider update.
+  level: Senior
+  category: prompt-engineering
+  subcategory: techniques
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: which-prompt-design-choices-reduce-hallucination-and-what-ca
+  q: Which prompt-design choices reduce hallucination, and what can prompting not fix?
+  a: |
+    Prompting helps when the answer is in the context:
+
+    - Tell the model to answer only from the provided sources and to say when they do not contain the answer.
+    - Ask for quotes or citations for each claim.
+    - Put the source material before the question.
+    - Lower the temperature for factual tasks.
+
+    Giving the model an explicit way out ("if unsure, say so") reduces made-up answers because it no longer has to produce something.
+
+    Prompting cannot supply knowledge the model does not have, and it cannot guarantee faithfulness. For that you need retrieval, verification such as a citation checker or a second-pass judge, and evals that measure hallucination rates.
+  level: Junior
+  category: prompt-engineering
+  subcategory: techniques
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: does-giving-the-model-a-role-or-persona-you-are-an-expert-ta
+  q: Does giving the model a role or persona ("You are an expert tax accountant") actually improve answers?
+  a: |
+    A role mostly sets tone, vocabulary and the level of detail. That is useful for style and for keeping a product persona consistent. On factual accuracy and reasoning, studies and practice show small or no gains from "you are an expert" alone, because the label adds no knowledge.
+
+    What improves answers is the specific context a real expert would use: the audience, the jurisdiction, the constraints, the format, and examples of good output. Use a role as a short framing line, and spend the prompt on concrete instructions.
+  level: Junior
+  category: prompt-engineering
+  subcategory: techniques
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: your-pipeline-parses-json-from-model-output-and-about-2-of-r
+  q: Your pipeline parses JSON from model output and about 2% of responses fail to parse. How do you get that to zero?
+  a: |
+    Stop relying on the prompt alone. Use the provider's structured-output or strict tool-calling mode, or constrained decoding on self-hosted models, so the decoder can only emit tokens that fit your JSON schema. That removes syntax errors entirely.
+
+    Then handle what is left:
+
+    - Check the finish reason, because truncated output at max tokens is the most common cause of broken JSON.
+    - Validate against the schema, including enums and ranges, with a library such as Pydantic.
+    - On failure, retry once with the validation error in the prompt.
+    - Keep schemas small and flat, with descriptive field names, because deeply nested optional structures raise error rates even with constraints.
+  level: Mid
+  category: prompt-engineering
+  subcategory: structured-output
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: does-forcing-json-or-constrained-decoding-hurt-the-quality-o
+  q: Does forcing JSON or constrained decoding hurt the quality of the answer?
+  a: |
+    It can. Constraining every token to the schema removes the model's room to reason before answering. Odd field orders can force it to commit to a conclusion before writing the evidence. Some studies show reasoning accuracy drops under strict formats.
+
+    Mitigations:
+
+    - Put a reasoning or notes field before the answer fields.
+    - Order fields in the sequence a person would think.
+    - Let the model answer freely first, then extract into JSON with a second cheap call.
+
+    Measure task accuracy with and without the format on your eval set, and choose per task. Extraction usually loses nothing, while multi-step reasoning may.
+  level: Senior
+  category: prompt-engineering
+  subcategory: structured-output
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: in-a-document-extraction-task-the-model-invents-values-for-f
+  q: In a document-extraction task, the model invents values for fields that aren't in the document. How do you stop it?
+  a: |
+    Make absence a valid output: every field should be nullable, and the prompt should say that null is correct when the document does not state the value. Then ask for evidence, such as the source quote or page for each extracted value, and reject values whose quote does not appear in the document.
+
+    Add a separate confidence or "found" flag per field and route uncertain records to review. Build an eval set that includes documents with deliberately missing fields, because without those cases the fabrication rate is invisible.
+  level: Mid
+  category: prompt-engineering
+  subcategory: structured-output
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: how-do-you-iterate-on-a-prompt-systematically-instead-of-by-
+  q: How do you iterate on a prompt systematically instead of by trial and error?
+  a: |
+    Start with an eval set of real or realistic inputs that includes edge cases, plus a scoring method: exact checks where possible, an LLM judge or a rubric otherwise. Run the current prompt to get a baseline. Read the failures and group them by cause, then change one thing at a time and re-run the whole set, so you catch regressions as well as fixes.
+
+    Keep a log of each version and its scores. Add every new production failure to the set. Stop when the remaining failures need something prompting cannot give, such as retrieval, tools or a different model.
+  level: Mid
+  category: prompt-engineering
+  subcategory: prompt-ops
+  related: /ai-system-design/genai-system-design/llmops-observability
+- id: how-would-you-a-b-test-a-prompt-change-safely-in-production
+  q: How would you A/B test a prompt change safely in production?
+  a: |
+    The new version must first pass the offline regression suite. Then:
+
+    1. Ship it behind a flag and give it a small share of traffic, sticky per user so conversations do not switch prompts midway.
+    2. Log the prompt version with every request.
+    3. Compare quality signals such as thumbs, edits, escalations, task completion and judge scores on sampled traffic, alongside guardrail metrics such as refusals, safety flags, latency and cost.
+    4. Ramp up gradually, and keep rollback a config change rather than a deploy.
+
+    Run the test long enough to cover the main user segments. LLM metrics are noisy, so decide the success metric and sample size before you start.
+  level: Mid
+  category: prompt-engineering
+  subcategory: prompt-ops
+  related: /ai-system-design/genai-system-design/llmops-observability
+- id: when-would-you-use-automatic-prompt-optimization-such-as-dsp
+  q: When would you use automatic prompt optimization, such as DSPy-style optimizers, instead of hand-writing prompts?
+  a: |
+    Automatic optimizers search over instructions and few-shot examples to maximize a metric on a training set. They pay off when you have a reliable automatic metric and a few hundred labelled examples, and when you run multi-step pipelines whose prompts are tedious to tune by hand. They are also useful when re-tuning for a new model.
+
+    They are a poor fit when quality is subjective and the metric is weak. The optimizer will overfit to the metric, and the resulting prompts can be hard to read or maintain. In practice, hand-write the first version to learn the task, then optimize once the eval set and metric are trustworthy, and always check the result on a held-out set.
+  level: Senior
+  category: prompt-engineering
+  subcategory: prompt-ops
+  related: /ai-system-design/genai-system-design/llmops-observability
+- id: how-do-you-lay-out-a-long-prompt-so-that-prompt-caching-actu
+  q: How do you lay out a long prompt so that prompt caching actually saves money?
+  a: |
+    Caches match on an exact prefix, so put the stable content first and the changing content last:
+
+    1. tool definitions, the system prompt and long reference documents
+    2. conversation history
+    3. the new user message
+
+    Anything that changes per request, such as a timestamp, user name or retrieved snippets, breaks the cache for everything after it if placed early.
+
+    Keep the static part byte-identical, so no reordered tools and no re-serialized JSON with different key order. Mark cache breakpoints where the provider supports them. Watch the cache-hit rate in your metrics. A cache that silently stops hitting after an innocent prompt edit can double input costs.
+  level: Mid
+  category: prompt-engineering
+  subcategory: prompt-ops
+  related: /ai-system-design/genai-system-design/llmops-observability
+- id: when-is-more-prompting-not-the-answer
+  q: When is more prompting not the answer?
+  a: |
+    When the model lacks the knowledge (use retrieval), when it needs exact computation or fresh data (use tools), or when a rule must hold every time, such as permissions, spending limits or compliance (enforce it in code). Also when the eval shows the model cannot do the task at any prompt (use a stronger model or fine-tune), or when the prompt has grown so long that new rules break old ones (split the task).
+
+    A signal is the "whack-a-mole" pattern: each fix creates a new failure elsewhere. At that point, step back and change the architecture rather than adding another instruction.
+  level: Mid
+  category: prompt-engineering
+  subcategory: prompt-ops
+  related: /ai-system-design/genai-system-design/llmops-observability
+- id: what-is-the-difference-between-prompt-engineering-and-contex
+  q: What is the difference between prompt engineering and context engineering?
+  a: |
+    Prompt engineering is about writing the instructions well. Context engineering is about assembling everything the model sees on each call. That includes the system prompt, tool definitions, retrieved documents, memory, conversation history and tool results, and how they are selected, ordered, compressed and refreshed as a task runs.
+
+    The shift matters for agents and long-running assistants, where most of the context is generated at run time. Quality then depends less on wording and more on the system that decides what to include and what to leave out.
+  level: Junior
+  category: prompt-engineering
+  subcategory: context-engineering
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: how-do-you-decide-what-information-belongs-in-the-context-wi
+  q: How do you decide what information belongs in the context window for a request?
+  a: |
+    Include what the model needs to do this step and cannot know otherwise:
+
+    - the task and its constraints
+    - the relevant facts, retrieved for this query
+    - the tools it can use now
+    - enough recent history to keep continuity
+
+    Leave out what is merely related, stale, or available on demand through a tool.
+
+    Rank candidates by expected usefulness and fill a fixed token budget, placing critical instructions and key evidence at the start or end, where models attend best. Measure it: run ablations that remove each context source and see which ones move eval scores, and drop the ones that do not.
+  level: Mid
+  category: prompt-engineering
+  subcategory: context-engineering
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: what-goes-wrong-when-you-give-a-model-too-much-context
+  q: What goes wrong when you give a model too much context?
+  a: |
+    Quality drops even within the advertised window. The model is distracted by irrelevant or contradictory passages, uses information in the middle less reliably, and may follow instructions hidden in retrieved text. Cost and time-to-first-token rise with every input token, and the cache-hit rate falls as context varies more.
+
+    The fix is selection, not size. Retrieve fewer, better chunks with a reranker, summarize old history, load tool definitions only when relevant, and test quality as context length grows, rather than assuming a larger window means better answers.
+  level: Mid
+  category: prompt-engineering
+  subcategory: context-engineering
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: how-should-retrieved-passages-be-placed-and-formatted-in-a-r
+  q: How should retrieved passages be placed and formatted in a RAG prompt?
+  a: |
+    Put each passage in its own delimited block with an id, title, source and date, so the model can cite it and judge freshness. Order them by relevance, and put the instructions and the question where the model will weight them, usually after the documents for long contexts.
+
+    Tell the model explicitly that the passages are data, not instructions, and what to do when they conflict or do not contain the answer. Deduplicate near-identical chunks and trim boilerplate first. Repeated content wastes tokens and makes one source look more authoritative than it is.
+  level: Mid
+  category: prompt-engineering
+  subcategory: context-engineering
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
+- id: a-multi-turn-assistant-juggles-a-system-prompt-tools-retriev
+  q: A multi-turn assistant juggles a system prompt, tools, retrieved documents and chat history. How do you split its token budget?
+  a: |
+    Give each part of the context a budget:
+
+    - a fixed allowance for the system prompt and tools
+    - a cap for retrieved content
+    - a share for history
+    - a reserve for the model's output and reasoning
+
+    Count tokens with the model's own tokenizer before each call.
+
+    When history overflows:
+
+    - Keep the last few turns verbatim.
+    - Replace older turns with a running summary that preserves decisions, user preferences and open tasks.
+    - Truncate or summarize large tool outputs, and keep a handle to fetch the full result again.
+
+    Pin facts that must never drop, such as the user's goal or a constraint, in a structured memory block. Log the budget breakdown per call so you can see which part is crowding out the others, and evaluate long conversations specifically, because that is where these policies fail.
+  level: Senior
+  category: prompt-engineering
+  subcategory: context-engineering
+  related: /ai-system-design/genai-system-design/prompt-engineering-types
