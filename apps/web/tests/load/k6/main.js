@@ -28,7 +28,7 @@ if (!LOCAL_HOSTS.includes(hostname) && __ENV.LOAD_ALLOW_HOST !== hostname) {
 }
 
 const PROFILE = __ENV.PROFILE === "staging" ? "staging" : "local";
-const URLS = JSON.parse(open(__ENV.URLS_FILE || "../../.generated/load/urls.json"));
+const URLS = JSON.parse(open(__ENV.URLS_FILE || "../../../test-results/load/input/urls.json"));
 const ENT_COOKIE = __ENV.ENT_COOKIE || "";
 
 // ── Scenario shapes per profile ───────────────────────────────────────────────────────────────────────────────────

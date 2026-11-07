@@ -22,9 +22,9 @@ import { parseKey, signEntitlement } from "../../src/server/edge/entitlement";
 
 const WEB_ROOT = path.resolve(import.meta.dirname, "../..");
 const LOAD_DIR = path.join(WEB_ROOT, "tests/load");
-// Both are git- and Prettier-ignored already.
-const GENERATED = path.join(WEB_ROOT, "tests/.generated/load");
+// test-results/ is git- and Prettier-ignored already. The URL list goes in its own folder (mounted read-only).
 const RESULTS = path.join(WEB_ROOT, "test-results/load");
+const GENERATED = path.join(RESULTS, "input");
 const K6_IMAGE = "grafana/k6:1.4.0";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const SCENARIOS = ["free_pages", "premium_pages", "auth", "spike", "soak"];

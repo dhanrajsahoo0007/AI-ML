@@ -56,7 +56,10 @@ function importedValues(source: string): { spec: string; names: string[] }[] {
         names.push(p.split(/\s+as\s+/)[0].trim());
       }
     }
-    const def = clause.replace(/\{[^}]*\}/, "").replace(/,/g, "").trim();
+    const def = clause
+      .replace(/\{[^}]*\}/, "")
+      .replace(/,/g, "")
+      .trim();
     if (def && !def.startsWith("*")) names.push("default");
     if (names.length) out.push({ spec: m[2], names });
   }
@@ -73,7 +76,7 @@ describe("server → client module boundary", () => {
     expect(clientFiles.size).toBeGreaterThan(10);
   });
 
-  it("server modules import only components from \"use client\" modules", () => {
+  it('server modules import only components from "use client" modules', () => {
     const violations: string[] = [];
     for (const file of files) {
       if (clientFiles.has(file)) continue;
