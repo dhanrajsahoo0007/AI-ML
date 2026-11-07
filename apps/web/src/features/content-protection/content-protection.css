@@ -1,0 +1,62 @@
+/* Copy protection layer 1 (plan §11.10). Everything in <main> is protected except [data-copy-ok] regions
+   and form controls. Selection is a deterrent only; screen readers and keyboard navigation are unaffected. */
+
+main {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+main :is([data-copy-ok], input, textarea, select, [contenteditable]:not([contenteditable="false"])) {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+main :is(img, svg) {
+  -webkit-user-drag: none;
+}
+
+.cp-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  z-index: 70;
+  transform: translate(-50%, 1rem);
+  max-width: calc(100vw - 2rem);
+  padding: 0.6rem 1rem;
+  border-radius: 9999px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 0.875rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.cp-toast[data-show] {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@media print {
+  body:not(:has([data-copy-ok="page"])) > * {
+    display: none !important;
+  }
+
+  body:not(:has([data-copy-ok="page"]))::after {
+    content: "This content is protected and can't be printed. Read it online.";
+    display: block;
+    padding: 2rem;
+    font: 600 1.25rem/1.5 system-ui, sans-serif;
+    color: #000;
+  }
+
+  body[data-print-notice]:not(:has([data-copy-ok="page"]))::after {
+    content: attr(data-print-notice);
+  }
+
+  .cp-toast {
+    display: none;
+  }
+}

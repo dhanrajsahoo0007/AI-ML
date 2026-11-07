@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ContentProtection } from "@/features/content-protection/content-protection";
 import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
@@ -59,6 +60,7 @@ export default async function RootLayout({
           Skip to content
         </a>
         <SiteHeader navTree={navTree} />
+        <ContentProtection />
         <main id="main" className="w-full flex-1">
           {children}
         </main>
