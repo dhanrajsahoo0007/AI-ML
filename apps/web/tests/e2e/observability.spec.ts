@@ -123,7 +123,8 @@ test.describe("error pages @core", () => {
   test("an error outside a page shows app/global-error.tsx", async ({ page }) => {
     // Break the pricing page's client chunk, then navigate there client-side: the router can't load the page's
     // modules, which fails above every segment, so the last-resort boundary replaces the document.
-    await page.route(/\/_next\/static\/chunks\/app\/pricing\/page-[^/]+\.js$/, (route) =>
+    // /pricing may be served by the /pricing/live variant (checkout open, plan §9.3): break either chunk.
+    await page.route(/\/_next\/static\/chunks\/app\/pricing\/(?:live\/)?page-[^/]+\.js$/, (route) =>
       route.fulfill({ contentType: "application/javascript", body: 'throw new Error("e2e: broken chunk")' })
     );
     await page.goto("/", { waitUntil: "load" });
