@@ -26,7 +26,12 @@ Signed out: the browser writes `localStorage` only. Signed in: `GET/POST/DELETE 
 - `local.ts` ships to the browser: no zod there; the API validates what it receives. Never store tokens or personal
   data in `localStorage`.
 - Merge keeps the earliest completion time, never removes saved rows, and clamps future timestamps to now.
-- Keys aren't checked against existing pages at write time; a renamed article leaves old keys behind (harmless).
+- **Keys must name a page of the build** (security review M7): `isKnownContentKey()` checks the inlined page index
+  (`SEARCH_INDEX`, every page of every `on` section; `hasPageIndex()` / `pageInfo()` in
+  `apps/web/src/features/search/titles.ts`), so POST, DELETE and merge answer 400 to anything else, and rows per user
+  are bounded by the number of pages. Without an index (`next dev`, unit tests) well-formed keys pass; a production
+  bundle without one refuses all. The merge island drops refused items (by the `items.N.contentKey` paths in the 400) and sends the rest once. Pages of `hidden` sections aren't in the index, so admins can't save progress there.
+  A renamed article leaves its old rows behind (harmless; they can no longer be changed through the API).
 
 ## Extend it
 

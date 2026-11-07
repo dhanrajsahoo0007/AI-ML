@@ -3,7 +3,12 @@ import { searchEntries, type SearchEntry } from "./search";
 
 const index: SearchEntry[] = [
   { t: "Consistent Hashing", h: "/system-design/fundamentals/consistent-hashing", s: "Classic System Design" },
-  { t: "Design Facebook Messenger", d: "One-to-one and group chat at scale", h: "/system-design/case-studies/facebook-messenger", s: "Classic System Design" },
+  {
+    t: "Design Facebook Messenger",
+    d: "One-to-one and group chat at scale",
+    h: "/system-design/case-studies/facebook-messenger",
+    s: "Classic System Design",
+  },
   { t: "Retrieval-Augmented Generation", h: "/ai-system-design/genai-system-design/rag", s: "GenAI & LLM Systems" },
   { t: "AWS Compute", h: "/infra/aws/compute", s: "Infrastructure" },
 ];

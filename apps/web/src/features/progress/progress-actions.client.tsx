@@ -35,7 +35,10 @@ export function ProgressActions({ contentKey }: { contentKey: string }) {
 
   const button = "inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors";
   return (
-    <div className="mt-12 flex flex-wrap items-center gap-3 border-t border-hairline pt-6" data-testid="progress-actions">
+    <div
+      className="mt-12 flex flex-wrap items-center gap-3 border-t border-hairline pt-6"
+      data-testid="progress-actions"
+    >
       <button
         type="button"
         onClick={() => toggle("complete")}
@@ -63,7 +66,11 @@ export function ProgressActions({ contentKey }: { contentKey: string }) {
             : "border-hairline text-ink-2 hover:border-ink hover:text-ink"
         )}
       >
-        {state?.bookmark ? <BookmarkCheck aria-hidden className="size-4" /> : <Bookmark aria-hidden className="size-4" />}
+        {state?.bookmark ? (
+          <BookmarkCheck aria-hidden className="size-4" />
+        ) : (
+          <Bookmark aria-hidden className="size-4" />
+        )}
         {state?.bookmark ? "Bookmarked" : "Bookmark"}
       </button>
       {savedToAccount === false && (

@@ -166,8 +166,19 @@ test.describe("sign-in with the database @core", () => {
   });
 
   test("progress persists across browser contexts and signed-out progress merges at sign-in", async ({ browser }) => {
-    const key = `e2e/progress-${Date.now()}`;
-    const merged = `e2e/merged-${Date.now()}`;
+    // Real pages of this build: the API refuses keys that aren't (security review M7).
+    const pages = JSON.parse(fs.readFileSync(path.join(webRoot, "src/generated/search-index.json"), "utf8")) as {
+      h: string;
+      t: string;
+    }[];
+    const [{ h: keyHref, t: keyTitle }, { h: mergedHref, t: mergedTitle }] = pages.slice(-2) as [
+      { h: string; t: string },
+      { h: string; t: string },
+    ];
+    const key = keyHref.slice(1);
+    const merged = mergedHref.slice(1);
+    // A key of a page that doesn't exist is refused (and, from localStorage, dropped by the merge island).
+    const junk = `e2e/not-a-page-${Date.now()}`;
 
     const first = await browser.newContext();
     await loginAs(first, "pro_yearly");
@@ -176,28 +187,37 @@ test.describe("sign-in with the database @core", () => {
       headers: { origin: origin() },
     });
     expect(marked.status()).toBe(200);
+    const refused = await first.request.post("/api/progress", {
+      data: { contentKey: junk, kind: "complete" },
+      headers: { origin: origin() },
+    });
+    expect(refused.status()).toBe(400);
 
     // Signed out in a second browser: progress goes to localStorage, then merges on sign-in.
     const second = await browser.newContext();
     const page = await second.newPage();
     await page.goto("/");
     await page.evaluate(
-      ([k]) => localStorage.setItem("oa_progress_v1", JSON.stringify({ completed: { [k]: new Date().toISOString() } })),
-      [merged]
+      ([k, j]) =>
+        localStorage.setItem(
+          "oa_progress_v1",
+          JSON.stringify({ completed: { [k]: new Date().toISOString(), [j]: new Date().toISOString() } })
+        ),
+      [merged, junk]
     );
     await loginAs(second, "pro_yearly");
     await page.goto("/sign-in/complete?next=%2Faccount");
     await expect(page).toHaveURL(/\/account$/);
     const completed = page.getByTestId("account-completed");
-    await expect(completed).toContainText(key);
-    await expect(completed).toContainText(merged);
+    await expect(completed.locator(`a[href="${keyHref}"]`)).toHaveText(keyTitle);
+    await expect(completed.locator(`a[href="${mergedHref}"]`)).toHaveText(mergedTitle);
     expect(await page.evaluate(() => localStorage.getItem("oa_progress_v1"))).toBeNull();
 
     // And the first browser sees what the second one merged.
     const list = await (await first.request.get("/api/progress")).json();
-    expect(list.progress.map((p: { contentKey: string }) => p.contentKey)).toEqual(
-      expect.arrayContaining([key, merged])
-    );
+    const keys = list.progress.map((p: { contentKey: string }) => p.contentKey);
+    expect(keys).toEqual(expect.arrayContaining([key, merged]));
+    expect(keys).not.toContain(junk);
     await first.close();
     await second.close();
   });
