@@ -9,9 +9,9 @@
 // later; the svix-id is the idempotency key the caller stores (webhook_event). Web Crypto only, so it runs on
 // Workers and in Node, with no dependency; crypto.subtle.verify compares in constant time.
 
-export const SIGNATURE_TOLERANCE_SECONDS = 5 * 60;
+const SIGNATURE_TOLERANCE_SECONDS = 5 * 60;
 
-export type SignatureResult =
+type SignatureResult =
   | { ok: true; id: string; timestamp: number }
   | {
       ok: false;

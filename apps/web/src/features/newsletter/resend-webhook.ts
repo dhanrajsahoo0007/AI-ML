@@ -48,9 +48,9 @@ export const resendEventSchema = z.object({
     .default({}),
 });
 
-export type ResendEvent = z.infer<typeof resendEventSchema>;
+type ResendEvent = z.infer<typeof resendEventSchema>;
 
-export type ProcessResult = "processed" | "duplicate" | "ignored";
+type ProcessResult = "processed" | "duplicate" | "ignored";
 
 const SLUG_MAX = 200;
 
@@ -58,7 +58,7 @@ const SLUG_MAX = 200;
  * Which issue an event belongs to: the `issue` tag (set on issue sends), else the broadcast, else the template
  * tag ResendEmailSender puts on transactional mail (confirm, welcome).
  */
-export function issueSlugOf(event: ResendEvent): string {
+function issueSlugOf(event: ResendEvent): string {
   const tags = event.data.tags ?? {};
   const slug = tags.issue
     ? tags.issue

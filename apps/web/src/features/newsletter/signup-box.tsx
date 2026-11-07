@@ -5,7 +5,7 @@ import { SignupForm } from "./signup-form.client";
 
 const SUBSCRIBE_ENDPOINT = "/api/newsletter/subscribe";
 const ACCOUNT_ENDPOINT = "/api/newsletter/account";
-export const EMAIL_PREFERENCES_HREF = "/account/email-preferences";
+const EMAIL_PREFERENCES_HREF = "/account/email-preferences";
 
 export function SignupBox({ source, title }: { source: "archive" | "issue"; title: string }) {
   return (

@@ -21,7 +21,7 @@ import {
 // written together. Same contract as MemoryNewsletterStore (store.contract.ts runs against both).
 
 /** A drizzle database or an open transaction (the webhook processor runs the store inside its own). */
-export type Queryable = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
+type Queryable = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 type Row = typeof newsletterSubscriber.$inferSelect;
 

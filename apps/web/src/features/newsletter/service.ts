@@ -113,9 +113,9 @@ export async function unsubscribeWithToken(deps: NewsletterDeps, token: string):
 // ── Signed-in users (/account/email-preferences, the sign-up form's "Subscribe with your account") ──────────────
 
 /** What a signed-in user sees. `suppressed` = the address bounced or was reported as spam: we can't mail it. */
-export type AccountNewsletterStatus = "none" | "pending" | "active" | "unsubscribed" | "suppressed";
+type AccountNewsletterStatus = "none" | "pending" | "active" | "unsubscribed" | "suppressed";
 
-export interface AccountUser {
+interface AccountUser {
   id: string;
   /** The account's email, verified by Google at sign-in. */
   email: string;
