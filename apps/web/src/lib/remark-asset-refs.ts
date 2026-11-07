@@ -1,5 +1,3 @@
-import type { Root } from "mdast";
-
 // `<Mermaid ref="system-design/wal" />` is the documented way to reuse a diagram from
 // assets/diagrams/mermaid/ (plan §5.6), but React reserves `ref`: Server Components reject it at render.
 // This plugin renames the attribute to `id` on <Mermaid> while the MDX compiles, before any JSX exists.
@@ -16,5 +14,5 @@ export function remarkAssetRefs() {
     }
     node.children?.forEach(visit);
   };
-  return (tree: Root) => visit(tree as unknown as Node);
+  return (tree: Node) => visit(tree);
 }

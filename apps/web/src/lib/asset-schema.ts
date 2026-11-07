@@ -21,13 +21,11 @@ export const ASSET_TYPES = [
 ] as const;
 export type AssetType = (typeof ASSET_TYPES)[number];
 
-export const RASTER_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "avif", "gif"] as const;
-export const DOWNLOAD_EXTENSIONS = ["pdf", "zip", "csv"] as const;
+const RASTER_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "avif", "gif"] as const;
+const DOWNLOAD_EXTENSIONS = ["pdf", "zip", "csv"] as const;
 
 /** Types rendered as an image, which therefore need `alt` (except decorative og/ backgrounds). */
 export const ALT_REQUIRED: readonly AssetType[] = ["image", "svg", "mermaid", "excalidraw", "animated"];
-/** Types drawn in the page as inline SVG markup (no URL to download). */
-export const INLINE_TYPES: readonly AssetType[] = ["svg", "mermaid", "excalidraw", "logo", "tech-icon", "icon"];
 /** Folders that are always public (plan §5.6 step 5), whatever uses them. */
 export const ALWAYS_PUBLIC_GROUPS = ["brand", "og"] as const;
 /** A tag that marks an asset as used outside articles (emails, pricing, landing), so it is always public. */
@@ -216,7 +214,9 @@ export function assetTypeOf(relPath: string): AssetType | null {
   }
   if (group === "logos") {
     if (ext !== "svg") return null;
-    return sub === "companies" ? "logo" : sub === "tech" ? "tech-icon" : null;
+    // Matched as a path prefix, since the folder name alone is also a section key (no section literals in shared code).
+    if (relPath.startsWith("logos/companies/")) return "logo";
+    return sub === "tech" ? "tech-icon" : null;
   }
   if (group === "icons") return ext === "svg" ? "icon" : null;
   if (group === "brand" || group === "images" || group === "og") {
