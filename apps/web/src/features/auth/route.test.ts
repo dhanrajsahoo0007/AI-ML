@@ -92,6 +92,16 @@ describe.skipIf(!available)("route() wrapper (integration)", () => {
     expect(missing.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("skips the Origin check only for routes that opt out (signature-checked webhooks)", async () => {
+    const webhook = route({ origin: false, handler: () => ({ ok: true }) });
+    const res = await call(webhook, "/api/hook", { method: "POST", origin: null });
+    expect(res.status).toBe(200);
+    const crossSite = await call(webhook, "/api/hook", { method: "POST", origin: "https://evil.example" });
+    expect(crossSite.status).toBe(200);
+    const strict = route({ handler: () => ({ ok: true }) });
+    expect((await call(strict, "/api/hook", { method: "POST", origin: null })).status).toBe(403);
+  });
+
   it("rejects unauthenticated requests and revoked or forged sessions", async () => {
     expect((await call(echo, "/api/x", { method: "POST", body: { name: "Ada" } })).status).toBe(401);
     const forged = await call(echo, "/api/x", {

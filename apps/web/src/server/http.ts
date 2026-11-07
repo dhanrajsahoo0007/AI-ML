@@ -146,6 +146,12 @@ export interface HandlerContext<S extends BodySchema | undefined, A extends Auth
 
 export interface RouteOptions<S extends BodySchema | undefined, A extends AuthLevel> {
   auth?: A;
+  /**
+   * The Origin allow-list check on state-changing methods (default true). Set `false` only for endpoints that
+   * authenticate the request some other way and are called server to server, such as payment webhooks
+   * (signature-checked); they never act on a browser's cookies.
+   */
+  origin?: boolean;
   body?: S;
   rateLimit?: { name: RateLimitName; by: "ip" | "user" };
   handler(ctx: HandlerContext<S, A>): Promise<Response | Json | void> | Response | Json | void;
@@ -216,6 +222,7 @@ export function createRoute(deps: RouteDeps) {
 
       try {
         if (
+          options.origin !== false &&
           STATE_CHANGING.has(request.method) &&
           !originAllowed(request.headers.get("origin"), deps.allowedOrigins())
         ) {
