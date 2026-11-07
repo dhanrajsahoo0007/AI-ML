@@ -38,9 +38,11 @@ export async function SectionDocPage({
     { label, href: `/${section}` },
   ];
   if (slug.length > 1) {
+    // Link the hub only when it exists (test fixtures have no hub page).
+    const hubExists = loadDocItems(def).some((i) => i.isHub && i.slug === slug[0]);
     crumbs.push({
       label: slug[0].replaceAll("-", " "),
-      href: `/${section}/${slug[0]}`,
+      ...(hubExists ? { href: `/${section}/${slug[0]}` } : {}),
     });
   }
   crumbs.push({ label: doc.frontmatter.title ?? slugPath });
@@ -65,9 +67,9 @@ export async function SectionDocPage({
         title={doc.frontmatter.title ?? slugPath}
         description={doc.frontmatter.description}
         docs={docs}
+        after={preview ? <Paywall path={item.href} /> : undefined}
       >
         {doc.body}
-        {preview && <Paywall path={item.href} />}
       </ArticleLayout>
     </div>
   );

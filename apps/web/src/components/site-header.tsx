@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useCanonicalPathname } from "@/features/paywall/use-canonical-pathname";
 import { ArrowRight, ChevronDown, ChevronRight, Menu } from "lucide-react";
 import {
   Sheet,
@@ -46,7 +46,7 @@ function menuGroups(navTree: HeaderNavSection[]): MenuGroup[] {
 }
 
 export function SiteHeader({ navTree }: { navTree: HeaderNavSection[] }) {
-  const pathname = usePathname();
+  const pathname = useCanonicalPathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [openName, setOpenName] = useState<NavGroupName | null>(null);
   const [activeSection, setActiveSection] = useState<string | null>(null);

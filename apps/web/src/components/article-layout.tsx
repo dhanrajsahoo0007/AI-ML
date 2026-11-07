@@ -19,12 +19,15 @@ export function ArticleLayout({
   title,
   description,
   docs,
+  after,
   children,
 }: {
   title: string;
   description?: string;
   /** Docs-style layout: "On this page" rail and updated date. */
   docs?: DocsLayoutProps;
+  /** Rendered after the article, outside its prose styles (the paywall of a premium preview). */
+  after?: React.ReactNode;
   children: React.ReactNode;
 }) {
   if (!docs) {
@@ -35,6 +38,7 @@ export function ArticleLayout({
           <PageHeader className="mb-12 border-b border-hairline pb-10" title={title} lead={description} />
         </FadeIn>
         <article className="prose-editorial max-w-[72ch] [&_:is(h2,h3)]:scroll-mt-24">{children}</article>
+        {after}
       </div>
     );
   }
@@ -58,6 +62,7 @@ export function ArticleLayout({
             <OnThisPageMobile headings={docs.headings} />
           </div>
           <article className="prose-editorial [&_:is(h2,h3)]:scroll-mt-24">{children}</article>
+          {after}
         </div>
         <aside className="hidden xl:block">
           <OnThisPage headings={docs.headings} />

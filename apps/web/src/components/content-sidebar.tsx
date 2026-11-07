@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useCanonicalPathname } from "@/features/paywall/use-canonical-pathname";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
@@ -14,7 +14,7 @@ interface ContentSidebarProps {
 }
 
 export function ContentSidebar({ navTree, onNavigate }: ContentSidebarProps) {
-  const pathname = usePathname();
+  const pathname = useCanonicalPathname();
   // Show only the section being read; fall back to every section on pages outside them.
   const current = navTree.filter(
     (s) => pathname === s.href || pathname.startsWith(`${s.href}/`)
