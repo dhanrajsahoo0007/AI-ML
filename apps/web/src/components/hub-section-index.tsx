@@ -1,44 +1,30 @@
-import { getContentSlugs, getTopLevelMeta, partitionSlugs } from "@/lib/mdx-doc";
 import { SectionIndex } from "@/components/section-index";
 import { TopicCard } from "@/components/topic-card";
-import type { ContentSection } from "@/types/content";
+import { docGroupSchema, type SectionDef } from "@/features/sections/schema";
+import { articlesOf, hubsOf, type DocItem } from "@/features/docs/source";
 
-// Index page for sections built from hub files: one card per hub group, else one per hub.
-export async function HubSectionIndex({
-  section,
-  label,
-  title,
-  subtitle,
-}: {
-  section: ContentSection;
-  label: string;
-  title: string;
-  subtitle: string;
-}) {
-  const allSlugs = await getContentSlugs(section);
-  const meta = await getTopLevelMeta(section);
-  const { topLevel, children } = partitionSlugs(allSlugs);
-
+// Index page of a docs section: one card per hub group, else one per hub. Title, subtitle and
+// breadcrumb label come from the section's registry entry.
+export function HubSectionIndex({ section, items }: { section: SectionDef; items: DocItem[] }) {
+  const hub = section.hub ?? { title: section.label, subtitle: "" };
   return (
-    <SectionIndex breadcrumbLabel={label} title={title} subtitle={subtitle}>
-      {meta.map((m) => m.slug).filter((s) => topLevel.includes(s)).flatMap((slug) => {
-        const m = meta.find((x) => x.slug === slug);
-        const childCount = (children[slug] ?? []).length;
+    <SectionIndex breadcrumbLabel={section.label} title={hub.title} subtitle={hub.subtitle}>
+      {hubsOf(items).flatMap((h) => {
+        const childCount = articlesOf(items, h.slug).length;
+        const categories = Array.isArray(h.data.categories) ? (h.data.categories as string[]) : undefined;
+        const groups = docGroupSchema.array().safeParse(h.data.groups);
+        const description = h.description ?? "Architecture note.";
 
-        if (m?.groups && m.groups.length > 0) {
-          return m.groups.map((g) => (
+        if (groups.success && groups.data.length > 0) {
+          return groups.data.map((g) => (
             <TopicCard
-              key={`${slug}--${g.name}`}
-              href={`/${section}/${slug}`}
-              icon={g.icon ?? m.icon}
+              key={`${h.slug}--${g.name}`}
+              href={h.href}
+              icon={g.icon ?? h.icon}
               title={g.name}
-              description={m.description ?? "Architecture note."}
+              description={description}
               childCount={
-                childCount > 0
-                  ? g.categories.length < (m.categories?.length ?? 0)
-                    ? undefined
-                    : childCount
-                  : undefined
+                childCount > 0 ? (g.categories.length < (categories?.length ?? 0) ? undefined : childCount) : undefined
               }
               categories={g.categories}
             />
@@ -47,13 +33,13 @@ export async function HubSectionIndex({
 
         return (
           <TopicCard
-            key={slug}
-            href={`/${section}/${slug}`}
-            icon={m?.icon}
-            title={m?.title ?? slug.replaceAll("-", " ")}
-            description={m?.description ?? "Architecture note."}
+            key={h.slug}
+            href={h.href}
+            icon={h.icon}
+            title={h.title}
+            description={description}
             childCount={childCount > 0 ? childCount : undefined}
-            categories={m?.categories}
+            categories={categories}
           />
         );
       })}
