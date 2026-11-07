@@ -16,6 +16,19 @@ interface PrerenderManifest {
 export interface BuiltRoutes {
   ok: string[];
   notFound: string[];
+  /** Built pages of `hidden` sections: middleware 404s them for everyone but admins (plan §5.1.1). */
+  hidden: string[];
+}
+
+// Written by the build from content/sections.yaml (see src/features/sections/registry.ts).
+function hiddenPrefixes(): string[] {
+  const file = path.join(webRoot, "src", "generated", "hidden-routes.json");
+  if (!fs.existsSync(file)) return [];
+  return (JSON.parse(fs.readFileSync(file, "utf8")) as { hidden?: string[] }).hidden ?? [];
+}
+
+function isUnder(route: string, prefixes: string[]) {
+  return prefixes.some((p) => route === p || route.startsWith(`${p}/`));
 }
 
 function metaStatus(route: string): number | undefined {
@@ -31,13 +44,17 @@ export function loadBuiltRoutes(): BuiltRoutes {
   }
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as PrerenderManifest;
 
+  const hiddenUnder = hiddenPrefixes();
   const ok: string[] = [];
   const notFound: string[] = [];
+  const hidden: string[] = [];
   for (const [route, info] of Object.entries(manifest.routes)) {
     // Skip non-page files (favicon, robots, sitemap: no RSC data route) and Next's own 404 page.
     if (!info.dataRoute || route === "/_not-found") continue;
     const status = info.initialStatus ?? metaStatus(route) ?? 200;
-    (status === 404 ? notFound : ok).push(route);
+    if (status === 404) notFound.push(route);
+    else if (isUnder(route, hiddenUnder)) hidden.push(route);
+    else ok.push(route);
   }
-  return { ok: ok.sort(), notFound: notFound.sort() };
+  return { ok: ok.sort(), notFound: notFound.sort(), hidden: hidden.sort() };
 }

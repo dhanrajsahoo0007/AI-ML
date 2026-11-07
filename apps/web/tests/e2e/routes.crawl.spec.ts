@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { loadBuiltRoutes } from "./support/built-routes";
 
 // @core route crawl (plan §12.2): every URL in the build returns 200 and renders a real page.
-const { ok, notFound } = loadBuiltRoutes();
+const { ok, notFound, hidden } = loadBuiltRoutes();
 
 // Guard against a broken manifest silently producing an empty or tiny crawl.
 test("the build lists the expected pages @core", () => {
@@ -51,6 +51,13 @@ test.describe("routes.crawl @core", () => {
 
   for (const url of notFound) {
     test(`404 ${url} (section switched off)`, async ({ request }) => {
+      const response = await request.get(url, { maxRedirects: 0 });
+      expect(response.status()).toBe(404);
+    });
+  }
+
+  for (const url of hidden) {
+    test(`404 ${url} (hidden section, anonymous)`, async ({ request }) => {
       const response = await request.get(url, { maxRedirects: 0 });
       expect(response.status()).toBe(404);
     });

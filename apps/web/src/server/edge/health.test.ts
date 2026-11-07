@@ -9,12 +9,12 @@ describe("edge env", () => {
   it("reads and validates the variables", () => {
     vi.stubEnv("APP_ENV", "staging");
     vi.stubEnv("NEXT_PUBLIC_GIT_SHA", "0123456789abcdef0123456789abcdef01234567");
-    vi.stubEnv("SECTIONS_KILL", "dsa");
+    vi.stubEnv("SECTIONS_KILL", "example-section");
     vi.stubEnv("ENTITLEMENT_SECRET", "");
     expect(readEdgeEnv()).toEqual({
       APP_ENV: "staging",
       NEXT_PUBLIC_GIT_SHA: "0123456789abcdef0123456789abcdef01234567",
-      SECTIONS_KILL: "dsa",
+      SECTIONS_KILL: "example-section",
       ENTITLEMENT_SECRET: undefined,
       ENTITLEMENT_SECRET_PREVIOUS: undefined,
     });
