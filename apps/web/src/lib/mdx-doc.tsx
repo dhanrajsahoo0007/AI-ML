@@ -14,18 +14,22 @@ import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/intervie
 import { Pre, Figure, MermaidSvg } from "@/components/mdx/code-block";
 import type { ContentSection, ContentMeta, ContentGroupDef } from "@/types/content";
 import { Diagram } from "@/components/diagrams/diagram";
-import { DatabasePicker } from "@/components/db/database-picker";
-import { DatabaseWorkloadMatrix } from "@/components/db/workload-matrix";
-import { CompareDatabases } from "@/components/db/compare-databases";
+import {
+  DatabasePicker,
+  DatabaseWorkloadMatrix,
+  CompareDatabases,
+  DataModelView,
+  DataModelTab,
+  ScenarioCard,
+  ScenarioGrid,
+  CloudDecisionTree,
+  CloudEquivalenceMatrix,
+} from "@/lib/mdx-lazy-widgets";
 import { DbProfile } from "@/components/db/db-profile";
-import { DataModelView, DataModelTab } from "@/components/db/data-model-view";
-import { ScenarioCard, ScenarioGrid } from "@/components/db/scenario-card";
 import { Callout, StepCards, StepCard } from "@/components/db/callouts";
 import { CloudGroupTable } from "@/components/cloud/cloud-group-table";
 import { CloudServiceProfile } from "@/components/cloud/cloud-service-profile";
-import { CloudDecisionTree } from "@/components/cloud/cloud-decision-tree";
 import { ResponsibilityGrid } from "@/components/cloud/responsibility-grid";
-import { CloudEquivalenceMatrix } from "@/components/cloud/cloud-equivalence-matrix";
 import { CloudMapping } from "@/components/cloud/cloud-mapping";
 import { CloudOnly } from "@/components/cloud/cloud-only";
 
