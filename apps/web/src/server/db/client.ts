@@ -31,17 +31,20 @@ export function onQuery(listener: QueryListener): () => void {
   return () => listeners.delete(listener);
 }
 
-function fileQueryLog(appEnv: AppEnv): QueryListener | null {
+function fileQueryLog(appEnv: AppEnv, label: string): QueryListener | null {
   const file = process.env.DB_QUERY_LOG_FILE;
   if (!file || appEnv === "production") return null;
   return (query) => {
-    void import("node:fs").then((fs) => fs.appendFileSync(file, `${new Date().toISOString()} ${query}\n`));
+    const line = `${new Date().toISOString()} [${label}] ${query.replace(/\s+/g, " ")}\n`;
+    void import("node:fs").then((fs) => fs.appendFileSync(file, line));
   };
 }
 
 export interface CreateDbOptions {
   connectionString?: string;
   appEnv?: AppEnv;
+  /** Who opened the handle (an API route path, `page:account`), shown in the query log. */
+  label?: string;
 }
 
 export function createDb(options: CreateDbOptions = {}): DbHandle {
@@ -59,7 +62,7 @@ export function createDb(options: CreateDbOptions = {}): DbHandle {
   // An idle-client error (server restart, network drop) must not crash the process; the next query reconnects.
   pool.on("error", () => {});
 
-  const fileLog = fileQueryLog(appEnv);
+  const fileLog = fileQueryLog(appEnv, options.label ?? "unlabelled");
   const db = drizzle(pool, {
     schema,
     logger: {

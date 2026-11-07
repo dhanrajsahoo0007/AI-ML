@@ -80,8 +80,10 @@ export function authConfig(env: EnvLike = process.env, appEnv: AppEnv = readAppE
     secret: e.BETTER_AUTH_SECRET ?? LOCAL_DEV_SECRET,
     baseURL: base.origin,
     trustedOrigins: [...new Set([base.origin, ...extra])],
-    // Secure cookies everywhere except plain-http local and test runs (browsers drop `Secure` cookies there).
-    secureCookies: !local || base.protocol === "https:",
+    // `Secure` (and the `__Secure-` prefix) whenever the site is served over https, which every deployed
+    // environment is (production refuses anything else). Plain-http runs (local dev, e2e on 127.0.0.1) can't
+    // hold Secure cookies, so they get the same cookies without the flag.
+    secureCookies: base.protocol === "https:",
     google:
       e.GOOGLE_CLIENT_ID && e.GOOGLE_CLIENT_SECRET
         ? { clientId: e.GOOGLE_CLIENT_ID, clientSecret: e.GOOGLE_CLIENT_SECRET }

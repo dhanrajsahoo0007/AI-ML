@@ -21,11 +21,14 @@ async function hasSessionCookie(): Promise<boolean> {
 export async function withPageSession<T>(fn: (auth: RequestSessionInfo, db: Db) => Promise<T>): Promise<T | null> {
   if (!(await hasSessionCookie())) return null;
   const requestHeaders = await headers();
-  return withDb(async (db) => {
-    const result = await createAuth(db).api.getSession({
-      headers: requestHeaders,
-      query: { disableCookieCache: true },
-    });
-    return result ? fn(toSessionInfo(result), db) : null;
-  });
+  return withDb(
+    async (db) => {
+      const result = await createAuth(db).api.getSession({
+        headers: requestHeaders,
+        query: { disableCookieCache: true },
+      });
+      return result ? fn(toSessionInfo(result), db) : null;
+    },
+    { label: "page:account" }
+  );
 }

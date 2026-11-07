@@ -205,7 +205,7 @@ export function createRoute(deps: RouteDeps) {
     return async (request, context) => {
       const requestId = request.headers.get("cf-ray") ?? crypto.randomUUID();
       let handle: DbHandle | null = null;
-      const db = () => (handle ??= createDb()).db;
+      const db = () => (handle ??= createDb({ label: new URL(request.url).pathname })).db;
       const setCookies: string[] = [];
 
       try {
