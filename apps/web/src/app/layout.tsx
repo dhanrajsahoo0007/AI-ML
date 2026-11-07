@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ContentProtection } from "@/features/content-protection/content-protection";
+import { Observability } from "@/features/observability/observability";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
@@ -81,6 +82,7 @@ export default async function RootLayout({
           {children}
         </main>
         <SiteFooter />
+        <Observability />
       </body>
     </html>
   );
