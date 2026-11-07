@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { bindingRateLimiter, hashKey, MemoryRateLimiter, RATE_LIMITS, type RateLimitName } from "./rate-limit";
+import { bindingRateLimiter, MemoryRateLimiter, RATE_LIMITS, type RateLimitName } from "./rate-limit";
 
 // H1 (security review): every named limit actually limits, through the Workers binding when present and the
 // memory fallback otherwise, and wrangler.jsonc declares a binding with the same numbers in every environment.
@@ -11,7 +11,8 @@ describe("MemoryRateLimiter", () => {
     let now = 1_000_000;
     const limiter = new MemoryRateLimiter(() => now);
     const { limit } = RATE_LIMITS.auth;
-    for (let i = 0; i < limit; i++) expect((await limiter.limit({ name: "auth", key: "ip:1.2.3.4" })).success).toBe(true);
+    for (let i = 0; i < limit; i++)
+      expect((await limiter.limit({ name: "auth", key: "ip:1.2.3.4" })).success).toBe(true);
     const refused = await limiter.limit({ name: "auth", key: "ip:1.2.3.4" });
     expect(refused).toEqual({ success: false, retryAfterSeconds: 60 });
     // Other keys and other limits have their own counters.
@@ -42,25 +43,20 @@ describe("bindingRateLimiter", () => {
       },
     };
     const limiter = bindingRateLimiter(() => bindings, { limit: async () => ({ success: true }) });
-    expect(await limiter.limit({ name: "progress", key: "user:u1" })).toEqual({ success: false, retryAfterSeconds: 60 });
+    expect(await limiter.limit({ name: "progress", key: "user:u1" })).toEqual({
+      success: false,
+      retryAfterSeconds: 60,
+    });
     expect(seen).toEqual(["progress:user:u1"]);
   });
 
   it("falls back to memory off Cloudflare, so limits still apply under next start and in tests", async () => {
     const limiter = bindingRateLimiter(() => null);
     const results = [];
-    for (let i = 0; i <= RATE_LIMITS.checkout.limit; i++) results.push((await limiter.limit({ name: "checkout", key: "user:u" })).success);
+    for (let i = 0; i <= RATE_LIMITS.checkout.limit; i++)
+      results.push((await limiter.limit({ name: "checkout", key: "user:u" })).success);
     expect(results.at(-1)).toBe(false);
     expect(results.filter(Boolean)).toHaveLength(RATE_LIMITS.checkout.limit);
-  });
-});
-
-describe("hashKey", () => {
-  it("is stable, case-insensitive and carries no part of the address", async () => {
-    const a = await hashKey("Victim@Example.com ");
-    expect(a).toBe(await hashKey("victim@example.com"));
-    expect(a).toMatch(/^[0-9a-f]{24}$/);
-    expect(a).not.toContain("victim");
   });
 });
 

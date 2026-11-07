@@ -1,13 +1,8 @@
 import "server-only";
 import type { z } from "zod";
 import { route } from "@/features/auth";
-import {
-  HttpError,
-  notFoundRoute,
-  type AuthLevel,
-  type NextRouteHandler,
-  type RouteOptions,
-} from "@/server/http";
+import { HttpError, notFoundRoute, type AuthLevel, type NextRouteHandler, type RouteOptions } from "@/server/http";
+import { log } from "@/server/log";
 import { newsletterHref, NotConfiguredError } from "./server";
 
 // The newsletter's API routes go through the shared route() wrapper (src/server/http.ts, plan §11.6), plus:
@@ -27,7 +22,7 @@ function withConfigErrors<S extends BodySchema | undefined, A extends AuthLevel>
         return await options.handler(ctx);
       } catch (e) {
         if (e instanceof NotConfiguredError) {
-          console.error(`[newsletter] not configured: ${e.message}`);
+          log.error("newsletter_not_configured", { request_id: ctx.requestId, error: e.message });
           throw new HttpError(503, "not_configured", "This feature is not configured yet");
         }
         throw e;

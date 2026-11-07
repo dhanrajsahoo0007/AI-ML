@@ -30,9 +30,9 @@ interface CloudflareEnv {
   RL_PORTAL?: WorkersRateLimitBinding;
   RL_ENTITLEMENTS?: WorkersRateLimitBinding;
   RL_TEST?: WorkersRateLimitBinding;
-  RL_NEWSLETTER?: WorkersRateLimitBinding;
-  RL_NEWSLETTER_EMAIL?: WorkersRateLimitBinding;
-  RL_NEWSLETTER_TOKEN?: WorkersRateLimitBinding;
+  RL_SIGNUP?: WorkersRateLimitBinding;
+  RL_SIGNUP_EMAIL?: WorkersRateLimitBinding;
+  RL_EMAIL_LINK?: WorkersRateLimitBinding;
   RL_CSP?: WorkersRateLimitBinding;
   RL_VITALS?: WorkersRateLimitBinding;
   // TODO(account): uncomment with the bindings in wrangler.jsonc.

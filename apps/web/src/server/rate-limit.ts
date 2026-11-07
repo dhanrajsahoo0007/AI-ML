@@ -33,11 +33,11 @@ export const RATE_LIMITS = {
   /** Test-login (never in production builds): generous, since E2E signs in from one IP; the key is ≥ 16 chars. */
   test: { binding: "RL_TEST", limit: 120, periodSeconds: 60 },
   /** Newsletter sign-up per IP (plan §15.2). Hourly caps come from the zone rule and the per-address cool-down. */
-  newsletter: { binding: "RL_NEWSLETTER", limit: 5, periodSeconds: 60 },
+  signup: { binding: "RL_SIGNUP", limit: 5, periodSeconds: 60 },
   /** Newsletter sign-up per target address (hashed), on top of the database cool-down. */
-  newsletterEmail: { binding: "RL_NEWSLETTER_EMAIL", limit: 2, periodSeconds: 60 },
+  signupEmail: { binding: "RL_SIGNUP_EMAIL", limit: 2, periodSeconds: 60 },
   /** Newsletter confirm / unsubscribe / account status, per IP. */
-  newsletterToken: { binding: "RL_NEWSLETTER_TOKEN", limit: 30, periodSeconds: 60 },
+  emailLink: { binding: "RL_EMAIL_LINK", limit: 30, periodSeconds: 60 },
   /** CSP violation reports, per IP. */
   csp: { binding: "RL_CSP", limit: 30, periodSeconds: 60 },
   /** Web-vitals beacons, per IP. */
@@ -130,10 +130,4 @@ export function bindingRateLimiter(
       return fallback.limit({ name, key });
     },
   };
-}
-
-/** A short, non-reversible key for an email address (rate-limit keys must not carry personal data). */
-export async function hashKey(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value.trim().toLowerCase()));
-  return Array.from(new Uint8Array(digest).slice(0, 12), (b) => b.toString(16).padStart(2, "0")).join("");
 }

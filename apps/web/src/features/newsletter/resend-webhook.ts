@@ -28,9 +28,9 @@ const EVENT_TYPES = {
 
 const tagsSchema = z.union([
   z.record(z.string(), z.string()),
-  z.array(z.object({ name: z.string(), value: z.string() })).transform((list) =>
-    Object.fromEntries(list.map((t) => [t.name, t.value]))
-  ),
+  z
+    .array(z.object({ name: z.string(), value: z.string() }))
+    .transform((list) => Object.fromEntries(list.map((t) => [t.name, t.value]))),
 ]);
 
 export const resendEventSchema = z.object({
@@ -74,7 +74,9 @@ function recipients(event: ResendEvent): string[] {
   const to = event.data.to;
   const list = Array.isArray(to) ? to : to ? [to] : [];
   // "Name <a@b>" → a@b
-  const emails = list.map((t) => normalizeEmail(/<([^>]+)>/.exec(t)?.[1] ?? t)).filter((e) => /^[^@\s]+@[^@\s]+$/.test(e));
+  const emails = list
+    .map((t) => normalizeEmail(/<([^>]+)>/.exec(t)?.[1] ?? t))
+    .filter((e) => /^[^@\s]+@[^@\s]+$/.test(e));
   return [...new Set(emails)];
 }
 
@@ -102,7 +104,10 @@ function trimmed(event: ResendEvent) {
   };
 }
 
-export async function processResendEvent(db: Db, input: { eventId: string; event: ResendEvent }): Promise<ProcessResult> {
+export async function processResendEvent(
+  db: Db,
+  input: { eventId: string; event: ResendEvent }
+): Promise<ProcessResult> {
   const { eventId, event } = input;
   return db.transaction(async (tx) => {
     const [claimed] = await tx
@@ -137,7 +142,9 @@ export async function processResendEvent(db: Db, input: { eventId: string; event
     if (subscriberIds.length > 0) {
       const issueSlug = issueSlugOf(event);
       const at = eventTime(event);
-      await tx.insert(newsletterEvent).values(subscriberIds.map((subscriberId) => ({ subscriberId, issueSlug, type, at })));
+      await tx
+        .insert(newsletterEvent)
+        .values(subscriberIds.map((subscriberId) => ({ subscriberId, issueSlug, type, at })));
     }
     await markProcessed();
     return "processed";

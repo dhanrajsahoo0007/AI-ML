@@ -53,7 +53,10 @@ describe("premium gate", () => {
       "/system-design/databases/%62-trees",
     ]) {
       expect(isPremiumPath(pathname, premium), pathname).toBe(true);
-      expect(decidePaywall({ pathname, premium, tier: null })).toEqual({ action: "preview", to: `${ARTICLE}/_preview` });
+      expect(decidePaywall({ pathname, premium, tier: null })).toEqual({
+        action: "preview",
+        to: `${ARTICLE}/_preview`,
+      });
     }
   });
 

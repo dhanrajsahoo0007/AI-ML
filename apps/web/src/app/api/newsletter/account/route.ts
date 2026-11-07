@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export const GET = newsletterRoute({
   auth: "optional",
-  rateLimit: { name: "newsletterToken", by: "user" },
+  rateLimit: { name: "emailLink", by: "user" },
   handler: async ({ auth, db }) => {
     if (!auth) return { signedIn: false };
     return { signedIn: true, ...(await accountStatus(newsletterStore(db), auth.user)) };

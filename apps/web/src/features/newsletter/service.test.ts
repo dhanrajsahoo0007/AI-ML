@@ -134,7 +134,11 @@ describe("newsletter sign-up flow", () => {
   it("a confirm token with an unknown consent version is invalid", async () => {
     const { d, store } = deps();
     const { subscriber } = await store.upsertPending({ email: "x@example.com", source: "archive" });
-    const token = await signToken(SECRET, { subscriberId: subscriber.id, purpose: "confirm", consentVersion: "1999-01-01" });
+    const token = await signToken(SECRET, {
+      subscriberId: subscriber.id,
+      purpose: "confirm",
+      consentVersion: "1999-01-01",
+    });
     expect(await confirmSubscription(d, token)).toEqual({ kind: "invalid" });
   });
 });
@@ -194,3 +198,34 @@ describe("signed-in users", () => {
   });
 });
 
+describe("email-bombing protection (security review H2)", () => {
+  it("a burst of sign-ups for one address from many IPs sends one confirmation email", async () => {
+    const { d, sender } = deps();
+    d.limiter = new MemoryRateLimiter({ requests: 100, windowSeconds: 60 });
+    for (let i = 0; i < 20; i++) {
+      expect(await subscribe(d, input("victim@example.com", { ip: `198.51.100.${i}` }))).toEqual({ kind: "accepted" });
+    }
+    expect(sender.sent.filter((m) => m.to === "victim@example.com")).toHaveLength(1);
+  });
+
+  it("the per-address limit answers as usual but sends nothing, even before the store is asked", async () => {
+    const { d, sender, store } = deps();
+    const seen: string[] = [];
+    d.limiter = {
+      hit: async (scope, key) => (seen.push(`${scope}:${key}`), { allowed: scope === "ip", retryAfterSeconds: 0 }),
+    };
+    expect(await subscribe(d, input("victim@example.com", { ip: "198.51.100.9" }))).toEqual({ kind: "accepted" });
+    expect(sender.sent).toHaveLength(0);
+    expect(await store.findByEmail("victim@example.com")).toBeNull();
+    // The address is only ever a hash in limiter keys.
+    expect(seen[0]).toBe("ip:198.51.100.9");
+    expect(seen[1]).toMatch(/^email:[0-9a-f]{24}$/);
+  });
+
+  it("suppressed (bounced) addresses get no email", async () => {
+    const { d, sender, store } = deps();
+    await store.suppress("gone@example.com", "bounced");
+    expect(await subscribe(d, input("gone@example.com"))).toEqual({ kind: "accepted" });
+    expect(sender.sent).toHaveLength(0);
+  });
+});

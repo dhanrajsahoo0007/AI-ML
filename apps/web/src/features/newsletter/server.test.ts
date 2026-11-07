@@ -34,3 +34,13 @@ describe("newsletter wiring", () => {
     expect(() => resendWebhookSecret(env({ RESEND_WEBHOOK_SECRET: "plain" }))).toThrow(/whsec_/);
   });
 });
+
+describe("newsletter store (security review H2)", () => {
+  it("refuses the per-process memory store outside APP_ENV=local, where the cool-down must survive isolates", async () => {
+    const { newsletterStore } = await import("./server");
+    for (const appEnv of ["preview", "staging", "production"] as const) {
+      expect(() => newsletterStore(undefined, appEnv)).toThrow(NotConfiguredError);
+    }
+    expect(newsletterStore(undefined, "local")).toBeDefined();
+  });
+});

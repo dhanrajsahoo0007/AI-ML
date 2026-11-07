@@ -25,5 +25,5 @@ describe.skipIf(!available)("PostgresNewsletterStore (integration)", () => {
     await tdb.db.execute(sql`truncate newsletter_subscriber cascade`);
   });
 
-  describeStoreContract("PostgresNewsletterStore", () => new PostgresNewsletterStore(tdb.db));
+  describeStoreContract("PostgresNewsletterStore", (now) => new PostgresNewsletterStore(tdb.db, now));
 });

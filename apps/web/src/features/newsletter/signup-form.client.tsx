@@ -162,11 +162,7 @@ export function SignupForm(props: SignupFormProps) {
             </button>
             <p className="text-sm text-muted-foreground">
               As <strong className="text-ink">{account.email}</strong>, with no confirmation email.{" "}
-              <button
-                type="button"
-                onClick={() => setUseOtherEmail(true)}
-                className="underline hover:text-ink"
-              >
+              <button type="button" onClick={() => setUseOtherEmail(true)} className="underline hover:text-ink">
                 Use a different email
               </button>
             </p>

@@ -8,7 +8,8 @@ import { publicNav, SUBSCRIBE_KIND as NEWSLETTER_KIND } from "../sections/public
 import { APP_ENVS, type AppEnv } from "../sections/schema";
 import type { Db } from "@/server/db/client";
 import { databaseUrl } from "@/server/db/config";
-import { MemoryRateLimiter, type RateLimiter } from "./rate-limit";
+import { checkRateLimit } from "@/server/http";
+import type { RateLimiter } from "./rate-limit";
 import type { NewsletterDeps } from "./service";
 import { MemoryNewsletterStore, type NewsletterStore } from "./store";
 import { PostgresNewsletterStore } from "./store-postgres";
@@ -16,9 +17,10 @@ import { turnstileFromEnv } from "./turnstile";
 
 // Wires the newsletter ports for the API routes and the email-preferences page:
 //   store    Postgres (PostgresNewsletterStore) whenever a database is configured (DATABASE_URL or the
-//            Hyperdrive binding); otherwise in-memory, per process (local runs without Docker, unit tests)
+//            Hyperdrive binding); in-memory, per process, only for APP_ENV=local without a database (the
+//            per-address cool-down must survive isolates, so deployed environments refuse the memory store)
 //   sender   Resend when RESEND_API_KEY is set, otherwise the dev sender (logs + .eml outbox) outside production
-//   limiter  in-memory until the route() wrapper brings the Workers Rate Limiting binding
+//   limiter  the route() wrapper's limiter (server/rate-limit.ts: Workers binding, memory fallback)
 //   captcha  Turnstile when TURNSTILE_SECRET_KEY is set, otherwise none
 //   secret   NEWSLETTER_TOKEN_SECRET; a fixed dev secret is allowed only when APP_ENV=local
 //
@@ -72,15 +74,24 @@ export function emailSender(env: NodeJS.ProcessEnv = process.env, appEnv = curre
   return new DevEmailSender();
 }
 
-// One store and limiter per process. Kept on globalThis because Next can load a module once per route bundle.
-const globalPorts = globalThis as typeof globalThis & {
-  __newsletterPorts?: { store: NewsletterStore; limiter: RateLimiter };
-};
+// One memory store per process (local runs only). Kept on globalThis because Next can load a module once per
+// route bundle.
+const globalPorts = globalThis as typeof globalThis & { __newsletterStore?: NewsletterStore };
 
-function processPorts() {
-  globalPorts.__newsletterPorts ??= { store: new MemoryNewsletterStore(), limiter: new MemoryRateLimiter() };
-  return globalPorts.__newsletterPorts;
+function memoryStore(appEnv: AppEnv): NewsletterStore {
+  if (appEnv !== "local") throw new NotConfiguredError(`the newsletter needs a database (APP_ENV=${appEnv})`);
+  return (globalPorts.__newsletterStore ??= new MemoryNewsletterStore());
 }
+
+/** The sign-up limits (rate-limit.ts) on the shared limiter: `signup` per IP, `signupEmail` per address. */
+const limiter: RateLimiter = {
+  async hit(scope, key) {
+    const decision = await checkRateLimit(scope === "ip" ? "signup" : "signupEmail", `${scope}:${key}`);
+    return decision.success
+      ? { allowed: true, retryAfterSeconds: 0 }
+      : { allowed: false, retryAfterSeconds: decision.retryAfterSeconds ?? 60 };
+  },
+};
 
 /** True when this request can reach a database. */
 export function hasDatabase(): boolean {
@@ -92,13 +103,15 @@ export function hasDatabase(): boolean {
   }
 }
 
-/** The subscriber store: Postgres over the request's handle when a database is configured, else in-memory. */
-export function newsletterStore(db?: () => Db): NewsletterStore {
-  return db && hasDatabase() ? new PostgresNewsletterStore(db()) : processPorts().store;
+/**
+ * The subscriber store: Postgres over the request's handle when a database is configured, else in-memory, which
+ * only APP_ENV=local accepts (NotConfiguredError → 503 elsewhere).
+ */
+export function newsletterStore(db?: () => Db, appEnv: AppEnv = currentAppEnv()): NewsletterStore {
+  return db && hasDatabase() ? new PostgresNewsletterStore(db()) : memoryStore(appEnv);
 }
 
 export function newsletterDeps(href: string, db?: () => Db): NewsletterDeps {
-  const { limiter } = processPorts();
   return {
     store: newsletterStore(db),
     limiter,

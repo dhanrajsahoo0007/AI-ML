@@ -77,9 +77,14 @@ export function setRateLimiter(limiter: RateLimiter | null): void {
   rateLimiter = limiter ?? defaultLimiter;
 }
 
+/** Counts one request against `name` for `key` (for limits a route applies itself, like the newsletter's). */
+export function checkRateLimit(name: RateLimitName, key: string) {
+  return rateLimiter.limit({ name, key });
+}
+
 /** Counts one request against `name` for `key`; throws the uniform 429 (with Retry-After) when over. */
 export async function enforceRateLimit(name: RateLimitName, key: string): Promise<void> {
-  const decision = await rateLimiter.limit({ name, key });
+  const decision = await checkRateLimit(name, key);
   if (!decision.success) {
     throw new HttpError(429, "rate_limited", "Too many requests, try again shortly", undefined, {
       "Retry-After": String(decision.retryAfterSeconds ?? 60),
@@ -264,7 +269,10 @@ export function createRoute(deps: RouteDeps) {
 
         const ip = request.headers.get("cf-connecting-ip");
         if (limit) {
-          await enforceRateLimit(limit.name, limit.by === "user" && auth ? `user:${auth.user.id}` : `ip:${ip ?? "unknown"}`);
+          await enforceRateLimit(
+            limit.name,
+            limit.by === "user" && auth ? `user:${auth.user.id}` : `ip:${ip ?? "unknown"}`
+          );
         }
 
         const body = (options.body ? await readJsonBody(request, options.body) : undefined) as HandlerContext<

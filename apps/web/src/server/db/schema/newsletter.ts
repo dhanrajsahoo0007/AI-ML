@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { char, check, index, pgEnum, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { char, check, index, integer, pgEnum, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { user } from "./auth";
 import { createdAt, id, tz } from "./columns";
 
@@ -34,6 +34,10 @@ export const newsletterSubscriber = pgTable(
     createdAt: createdAt(),
     confirmedAt: tz("confirmed_at"),
     unsubscribedAt: tz("unsubscribed_at"),
+    // Double opt-in emails sent to this address (security review H2): the last one, and how many in the run that
+    // ended with it (reset when the last one is over 24 hours old). The store refuses to send more often.
+    confirmationSentAt: tz("confirmation_sent_at"),
+    confirmationCount: integer("confirmation_count").notNull().default(0),
   },
   (t) => [
     uniqueIndex("newsletter_subscriber_email_key").on(t.email),

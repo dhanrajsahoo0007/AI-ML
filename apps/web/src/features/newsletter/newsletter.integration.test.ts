@@ -17,7 +17,14 @@ import { NEWSLETTER_KIND } from "./kind";
 const available = await testDatabaseAvailable();
 
 const SECTION_NAV = JSON.stringify([
-  { key: NEWSLETTER_KIND, kind: NEWSLETTER_KIND, label: "Newsletter", href: "/newsletter", icon: "mail", navGroup: "more" },
+  {
+    key: NEWSLETTER_KIND,
+    kind: NEWSLETTER_KIND,
+    label: "Newsletter",
+    href: "/newsletter",
+    icon: "mail",
+    navGroup: "more",
+  },
 ]);
 const WEBHOOK_SECRET = `whsec_${Buffer.from("integration-webhook-secret-0123456789").toString("base64")}`;
 
@@ -156,11 +163,15 @@ describe.skipIf(!available)("newsletter API (integration)", () => {
     ]);
     // A welcome email (with one-click unsubscribe), and no confirmation email.
     expect(mail("welcome", email)).toContain("List-Unsubscribe-Post: List-Unsubscribe=One-Click");
-    expect(fs.readdirSync(outbox).some((f) => f.includes(`confirm-subscription-${email.replace(/[^a-z0-9]+/g, "_")}`))).toBe(
-      false
-    );
+    expect(
+      fs.readdirSync(outbox).some((f) => f.includes(`confirm-subscription-${email.replace(/[^a-z0-9]+/g, "_")}`))
+    ).toBe(false);
 
-    const off = await call(POST, "/api/newsletter/account", { method: "POST", body: { action: "unsubscribe" }, cookie });
+    const off = await call(POST, "/api/newsletter/account", {
+      method: "POST",
+      body: { action: "unsubscribe" },
+      cookie,
+    });
     expect(await off.json()).toEqual({ signedIn: true, status: "unsubscribed", email });
     expect((await consents(row.id)).map((c) => c.text_version)).toEqual(["2026-11-07", "withdrawn"]);
 
@@ -191,7 +202,12 @@ describe.skipIf(!available)("newsletter API (integration)", () => {
     const event = (type: string, to: string, data: Record<string, unknown> = {}) => ({
       type,
       created_at: "2027-01-15T08:00:00.000Z",
-      data: { email_id: "4ef9a417-02e9-4d39-ad75-9611e0fcc33c", to: [to], created_at: "2027-01-15T08:00:00.000Z", ...data },
+      data: {
+        email_id: "4ef9a417-02e9-4d39-ad75-9611e0fcc33c",
+        to: [to],
+        created_at: "2027-01-15T08:00:00.000Z",
+        ...data,
+      },
     });
     const events = (email: string) =>
       rows<{ type: string; issue_slug: string }>(
@@ -225,7 +241,11 @@ describe.skipIf(!available)("newsletter API (integration)", () => {
       expect(JSON.stringify(stored[0].payload)).not.toContain(email);
 
       // Suppressed: the account shows it and one click can't revive it.
-      const again = await call(POST, "/api/newsletter/account", { method: "POST", body: { action: "subscribe" }, cookie });
+      const again = await call(POST, "/api/newsletter/account", {
+        method: "POST",
+        body: { action: "subscribe" },
+        cookie,
+      });
       expect(await again.json()).toMatchObject({ status: "suppressed" });
     });
 
@@ -254,9 +274,16 @@ describe.skipIf(!available)("newsletter API (integration)", () => {
         body: { email: "soft@example.com" },
         headers: { "x-forwarded-for": "198.18.0.3" },
       });
-      await deliver(event("email.bounced", "soft@example.com", { bounce: { type: "Transient" }, tags: { template: "confirm-subscription" } }));
+      await deliver(
+        event("email.bounced", "soft@example.com", {
+          bounce: { type: "Transient" },
+          tags: { template: "confirm-subscription" },
+        })
+      );
       expect((await subscriberRow("soft@example.com")).status).toBe("pending");
-      expect(await events("soft@example.com")).toEqual([{ type: "bounced", issue_slug: "template:confirm-subscription" }]);
+      expect(await events("soft@example.com")).toEqual([
+        { type: "bounced", issue_slug: "template:confirm-subscription" },
+      ]);
     });
 
     it("refuses bad signatures, stale timestamps and unsigned requests, storing nothing", async () => {
