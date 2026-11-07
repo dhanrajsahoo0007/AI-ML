@@ -1,0 +1,75 @@
+// Cloudflare Workers config for the OpenNext build (plan §7). No Cloudflare account exists yet:
+// everything here works locally (`npm run preview -w web`, i.e. `opennextjs-cloudflare preview`).
+// Bindings that need account resources are present but commented, with a TODO each. Names are
+// placeholders; IDs are filled in by the owner once the account exists. Never put secrets here:
+// secrets are set with `wrangler secret put <NAME> --env <env>` (names only in AGENTS.md).
+//
+// Environments (`--env`): the top level is local (`wrangler dev`, `opennextjs-cloudflare preview`);
+// `preview` holds one version per PR (preview URLs), `staging` is deployed from `development`,
+// `production` from `main` (.github/workflows/deploy.yml, preview.yml).
+// Bindings and `vars` are not inherited by environments, so each environment repeats them.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "origins-ai-learn",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-11-04",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    // _next/static, fonts, SVGs and public files; also the prerendered pages under
+    // cdn-cgi/_next_cache/ (readable by the Worker only) used by the static-assets cache.
+    "directory": ".open-next/assets",
+    "binding": "ASSETS",
+  },
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
+  "workers_dev": true,
+  "preview_urls": false,
+  // APP_ENV is also inlined at build by next.config.ts (section states are resolved per build); the
+  // runtime value labels logs. SECTIONS_KILL (the §5.1.1 kill switch) is a secret, not a var, so a
+  // deploy never resets it: `wrangler secret put SECTIONS_KILL --env production` (e.g. "dsa,cloud").
+  "vars": { "APP_ENV": "local" },
+
+  // ── Account-bound bindings (uncomment per environment once the resources exist) ──────────────────
+  // TODO(account): R2 incremental cache for the Phase 5 R2 + regional cache (open-next.config.ts).
+  // "r2_buckets": [
+  //   { "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "origins-ai-learn-cache-<env>" },
+  //   // Public media (media.<domain>), large free assets (plan §5.6).
+  //   { "binding": "MEDIA_PUBLIC", "bucket_name": "origins-ai-learn-media-public" },
+  //   // Premium media, served only through the Worker after an entitlement check.
+  //   { "binding": "MEDIA_PRIVATE", "bucket_name": "origins-ai-learn-media-private" },
+  // ],
+  // TODO(account, Phase 4): Hyperdrive in front of Neon. Only /api/* handlers may use it.
+  // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id>", "localConnectionString": "postgres://app:app@localhost:5432/app" }],
+  // TODO(account): Workers Rate Limiting for /api/* (plan §11.6). namespace_id is an account-unique integer.
+  // "ratelimits": [{ "name": "RATE_LIMITER", "namespace_id": "<namespace-id>", "simple": { "limit": 30, "period": 60 } }],
+  // TODO(account): Analytics Engine dataset for paywall/checkout metrics (plan §10.5).
+  // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_<env>" }],
+
+  "env": {
+    // One Worker (origins-ai-learn-preview) holds a version per PR, each with its own preview URL
+    // (`wrangler versions upload --env preview --preview-alias pr-<n>`). Never routed to a domain.
+    "preview": {
+      "workers_dev": true,
+      "preview_urls": true,
+      "vars": { "APP_ENV": "preview" },
+      // TODO(account): r2_buckets / hyperdrive / ratelimits / analytics_engine_datasets as above (preview names).
+    },
+    // Deployed from `development`. TODO(account): route `staging.<domain>` once the zone exists:
+    // "routes": [{ "pattern": "staging.<domain>", "custom_domain": true }],
+    "staging": {
+      "workers_dev": true,
+      "preview_urls": true,
+      "vars": { "APP_ENV": "staging" },
+      // TODO(account): r2_buckets / hyperdrive / ratelimits / analytics_engine_datasets as above (staging names).
+    },
+    // Deployed from `main` through the `production` GitHub environment. workers.dev stays on because
+    // the deploy smoke tests use it (Bot Fight Mode on the custom domain blocks CI runners).
+    // TODO(account): "routes": [{ "pattern": "<domain>", "custom_domain": true }, { "pattern": "www.<domain>", "custom_domain": true }],
+    "production": {
+      "workers_dev": true,
+      "preview_urls": true,
+      "vars": { "APP_ENV": "production" },
+      // TODO(account): r2_buckets / hyperdrive / ratelimits / analytics_engine_datasets as above (production names).
+    },
+  },
+}
