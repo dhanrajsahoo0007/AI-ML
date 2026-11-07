@@ -2,6 +2,8 @@ import { z } from "zod";
 import { authFor, isFreshSession, route } from "@/features/auth";
 import { deleteAccount, LiveSubscriptionError } from "@/features/account";
 import { HttpError } from "@/server/http";
+// Registers the provider-backed canceller: live subscriptions are cancelled at the provider first.
+import "@/features/billing/register";
 
 // Deletes the signed-in user's account and everything linked to it. Needs a sign-in within the last 10
 // minutes and the typed confirmation.
