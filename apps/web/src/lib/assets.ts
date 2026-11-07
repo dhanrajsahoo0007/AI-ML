@@ -29,7 +29,8 @@ export class AssetError extends Error {}
 /** The manifest entry for an asset ID. Throws an AssetError when there is no manifest or no such asset. */
 export function getAsset(id: string): AssetEntry {
   const m = manifest();
-  if (!m) throw new AssetError("the asset manifest is missing; run `npm run assets` (it also runs before `npm run build`)");
+  if (!m)
+    throw new AssetError("the asset manifest is missing; run `npm run assets` (it also runs before `npm run build`)");
   const entry = m.assets[id];
   if (!entry) throw new AssetError(`unknown asset "${id}"; search with \`npm run asset:find -- <words>\``);
   return entry;

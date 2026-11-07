@@ -35,7 +35,8 @@ export async function renderImage(source: Buffer, outDir: string, slug: string) 
     const base = sharp(source).rotate().resize({ width: w });
     for (const format of ["avif", "webp"] as const) {
       const name = `${slug}-${w}.${format}`;
-      const out = format === "avif" ? base.clone().avif({ quality: 55, effort: 4 }) : base.clone().webp({ quality: 78 });
+      const out =
+        format === "avif" ? base.clone().avif({ quality: 55, effort: 4 }) : base.clone().webp({ quality: 78 });
       const buf = await out.toBuffer();
       fs.writeFileSync(path.join(outDir, name), buf);
       files.push({ name, format, width: w, height: h, bytes: buf.length });
@@ -76,7 +77,9 @@ export class DiagramRenderer {
     try {
       this.browser = await chromium.launch();
     } catch (err) {
-      throw new Error(`could not start Chromium. Run \`npx playwright install chromium\` first.\n${(err as Error).message}`);
+      throw new Error(
+        `could not start Chromium. Run \`npx playwright install chromium\` first.\n${(err as Error).message}`
+      );
     }
     this.page = await this.browser.newPage({ deviceScaleFactor: 2 });
     // Nothing leaves the machine: the page and its scripts are served from memory, every other request fails.
@@ -89,7 +92,8 @@ export class DiagramRenderer {
     });
     this.page.on("console", (m) => {
       // @excalidraw/utils logs this when font subsetting falls back to the main thread; harmless.
-      if (m.type() === "error" && !m.text().includes("Worker has to be in a separate chunk")) this.errors.push(m.text());
+      if (m.type() === "error" && !m.text().includes("Worker has to be in a separate chunk"))
+        this.errors.push(m.text());
     });
     await this.page.goto(`${ORIGIN}/`);
     await this.page.evaluate(() => document.fonts.ready);
@@ -109,7 +113,9 @@ export class DiagramRenderer {
   }
 
   /** Light and dark SVG for each Mermaid chart, through the same config and post-processing as the fences. */
-  async mermaid(jobs: { key: string; chart: string }[]): Promise<Map<string, { light: string; dark: string } | { error: string }>> {
+  async mermaid(
+    jobs: { key: string; chart: string }[]
+  ): Promise<Map<string, { light: string; dark: string } | { error: string }>> {
     const page = await this.open();
     if (!this.mermaidReady) {
       await page.addScriptTag({ path: require.resolve("mermaid/dist/mermaid.min.js") });
@@ -120,7 +126,11 @@ export class DiagramRenderer {
     for (const mode of ["light", "dark"] as const) {
       const results = await page.evaluate(
         async ({ config, jobs }) => {
-          const mermaid = (window as unknown as { mermaid: { initialize(c: unknown): void; render(id: string, s: string): Promise<{ svg: string }> } }).mermaid;
+          const mermaid = (
+            window as unknown as {
+              mermaid: { initialize(c: unknown): void; render(id: string, s: string): Promise<{ svg: string }> };
+            }
+          ).mermaid;
           mermaid.initialize(config);
           const res: { svg?: string; error?: string }[] = [];
           for (const job of jobs) {
@@ -168,10 +178,18 @@ export class DiagramRenderer {
       type Exporter = { exportScene(o: unknown): Promise<SVGSVGElement | Blob> };
       const { exportScene } = (window as unknown as { excalidraw: Exporter }).excalidraw;
       const s = scene as { elements: unknown[]; appState?: Record<string, unknown>; files?: unknown };
-      const data = { elements: s.elements, appState: { viewBackgroundColor: "#ffffff", ...(s.appState ?? {}) }, files: s.files ?? {} };
+      const data = {
+        elements: s.elements,
+        appState: { viewBackgroundColor: "#ffffff", ...(s.appState ?? {}) },
+        files: s.files ?? {},
+      };
       const out: Record<string, string> = {};
       for (const theme of ["light", "dark"]) {
-        const svg = (await exportScene({ data, type: "svg", config: { theme, canvasBackgroundColor: false } })) as SVGSVGElement;
+        const svg = (await exportScene({
+          data,
+          type: "svg",
+          config: { theme, canvasBackgroundColor: false },
+        })) as SVGSVGElement;
         out[`${theme}Svg`] = svg.outerHTML;
         const png = (await exportScene({ data, type: "png", config: { theme, scale: 2 } })) as Blob;
         const bytes = new Uint8Array(await png.arrayBuffer());

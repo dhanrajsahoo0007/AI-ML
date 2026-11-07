@@ -16,7 +16,9 @@ const PNG_SIGNATURE = "89504e470d0a1a0a";
 
 test("renderImage: AVIF + WebP per width, never upscaled, with a blur placeholder", async () => {
   const dir = tmp();
-  const src = await sharp({ create: { width: 1200, height: 600, channels: 3, background: "#3366cc" } }).png().toBuffer();
+  const src = await sharp({ create: { width: 1200, height: 600, channels: 3, background: "#3366cc" } })
+    .png()
+    .toBuffer();
   const out = await renderImage(src, dir, "hero");
   assert.equal(out.width, 1200);
   assert.equal(out.height, 600);
@@ -37,7 +39,9 @@ test("renderImage: AVIF + WebP per width, never upscaled, with a blur placeholde
 
 test("renderImage: an image narrower than 480 px gets one rendition at its own width", async () => {
   const dir = tmp();
-  const src = await sharp({ create: { width: 300, height: 100, channels: 4, background: "#fff0" } }).png().toBuffer();
+  const src = await sharp({ create: { width: 300, height: 100, channels: 4, background: "#fff0" } })
+    .png()
+    .toBuffer();
   const out = await renderImage(src, dir, "small");
   assert.deepEqual([...new Set(out.files.map((f) => f.width))], [300]);
   fs.rmSync(dir, { recursive: true });
@@ -46,7 +50,8 @@ test("renderImage: an image narrower than 480 px gets one rendition at its own w
 test("svgToPng: 2x PNG on the given background", async () => {
   const dir = tmp();
   const file = path.join(dir, "x.png");
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" width="100" height="50"><rect width="50" height="50" fill="red"/></svg>';
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" width="100" height="50"><rect width="50" height="50" fill="red"/></svg>';
   const r = await svgToPng(svg, 100, file, "#ffffff");
   assert.equal(r.width, 200);
   assert.equal(r.height, 100);
@@ -113,7 +118,8 @@ test("DiagramRenderer: Excalidraw and Mermaid to light/dark SVG and PNG", { time
       assert.match(svg, /Load balancer/);
     }
     assert.notEqual(ex.lightSvg, ex.darkSvg, "dark export differs from light");
-    for (const png of [ex.lightPng, ex.darkPng]) assert.equal(Buffer.from(png, "base64").subarray(0, 8).toString("hex"), PNG_SIGNATURE);
+    for (const png of [ex.lightPng, ex.darkPng])
+      assert.equal(Buffer.from(png, "base64").subarray(0, 8).toString("hex"), PNG_SIGNATURE);
 
     const results = await renderer.mermaid([
       { key: "ok", chart: "flowchart LR\n  A[Client] --> B[Service]" },

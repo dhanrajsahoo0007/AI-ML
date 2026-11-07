@@ -21,12 +21,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  ASSET_TYPES,
-  assetSlug,
-  assetTypeOf,
-  isKebab,
-} from "../src/lib/asset-schema";
+import { ASSET_TYPES, assetSlug, assetTypeOf, isKebab } from "../src/lib/asset-schema";
 import {
   SIDECAR_SUFFIX,
   assertNoLeaks,
@@ -61,7 +56,11 @@ const MANIFEST_FILE = path.join(APP_DIR, "src", "generated", "asset-manifest.jso
 
 // `npm run build` builds for production unless APP_ENV says otherwise (as `next build` does), so the
 // prebuild step must publish production's assets too.
-if (!process.env.APP_ENV && !process.env.NODE_ENV && ["prebuild", "build"].includes(process.env.npm_lifecycle_event ?? "")) {
+if (
+  !process.env.APP_ENV &&
+  !process.env.NODE_ENV &&
+  ["prebuild", "build"].includes(process.env.npm_lifecycle_event ?? "")
+) {
   Object.assign(process.env, { NODE_ENV: "production" });
 }
 
@@ -274,7 +273,9 @@ function assetNew(args: string[]) {
   const fromIdx = args.indexOf("--from");
   const from = fromIdx >= 0 ? args[fromIdx + 1] : undefined;
   if (!id) {
-    console.error("usage: npm run asset:new -- <id> [--from <file>]\n  e.g. diagrams/mermaid/system-design/write-ahead-log");
+    console.error(
+      "usage: npm run asset:new -- <id> [--from <file>]\n  e.g. diagrams/mermaid/system-design/write-ahead-log"
+    );
     process.exit(1);
   }
   const bad = id.split("/").find((s) => !isKebab(s));
@@ -316,7 +317,12 @@ function assetNew(args: string[]) {
 // ── asset:find ───────────────────────────────────────────────────────────────────────────────────
 
 async function assetFind(args: string[]) {
-  const words = args.filter((a) => !a.startsWith("--")).join(" ").toLowerCase().split(/\s+/).filter(Boolean);
+  const words = args
+    .filter((a) => !a.startsWith("--"))
+    .join(" ")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
   const index = indexAssets(ASSETS_DIR, APP_DIR);
   const refs = scanUsage(CONTENT_DIR, await contentPages(CONTENT_DIR), APP_DIR);
   const usedBy = usedByOf(index.assets, refs);
@@ -348,4 +354,3 @@ try {
   console.error(`assets: ${(err as Error).message}`);
   process.exit(1);
 }
-

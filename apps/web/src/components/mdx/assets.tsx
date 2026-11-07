@@ -32,7 +32,8 @@ function resolve(component: AssetRefComponent, ref: string | undefined): Resolve
     if (!ref) throw new AssetError("an `id` is required");
     return { asset: getAsset(id) };
   } catch (err) {
-    if (!(err instanceof AssetError) || isProd) throw new Error(`<${component} id="${ref ?? ""}">: ${(err as Error).message}`);
+    if (!(err instanceof AssetError) || isProd)
+      throw new Error(`<${component} id="${ref ?? ""}">: ${(err as Error).message}`);
     return { problem: <AssetProblem message={`<${component} id="${ref ?? ""}">: ${err.message}`} /> };
   }
 }
@@ -60,7 +61,17 @@ function Caption({ children }: { children: React.ReactNode }) {
 const DEFAULT_SIZES = "(min-width: 768px) 720px, 100vw";
 
 /** A raster image: AVIF and WebP srcsets, intrinsic width/height (no layout shift), lazy, blurred placeholder. */
-function Picture({ asset, alt, sizes = DEFAULT_SIZES, priority }: { asset: AssetEntry; alt: string; sizes?: string; priority?: boolean }) {
+function Picture({
+  asset,
+  alt,
+  sizes = DEFAULT_SIZES,
+  priority,
+}: {
+  asset: AssetEntry;
+  alt: string;
+  sizes?: string;
+  priority?: boolean;
+}) {
   const srcset = (format: "avif" | "webp") =>
     asset.variants
       .filter((v) => v.format === format && v.url)
@@ -87,7 +98,9 @@ function Picture({ asset, alt, sizes = DEFAULT_SIZES, priority }: { asset: Asset
         fetchPriority={priority ? "high" : undefined}
         decoding="async"
         draggable={false}
-        style={asset.placeholder ? { backgroundImage: `url(${asset.placeholder})`, backgroundSize: "cover" } : undefined}
+        style={
+          asset.placeholder ? { backgroundImage: `url(${asset.placeholder})`, backgroundSize: "cover" } : undefined
+        }
         className="mx-auto h-auto max-w-full rounded-xl"
       />
     </picture>
@@ -120,10 +133,19 @@ function AssetFigure({ asset, caption, minWidth, step, stepper }: { asset: Asset
   const label = asset.title ?? asset.id;
   const text = caption ?? asset.caption ?? asset.title;
   const alt = asset.alt ?? text ?? "";
-  if (asset.access === "premium") return <ProPlaceholder label={label} kind={asset.type === "image" ? "image" : "diagram"} />;
+  if (asset.access === "premium")
+    return <ProPlaceholder label={label} kind={asset.type === "image" ? "image" : "diagram"} />;
   switch (asset.type) {
     case "animated":
-      return <AnimatedDiagramById spec={asset.id} caption={caption ?? asset.caption} step={step} stepper={stepper} minWidth={minWidth} />;
+      return (
+        <AnimatedDiagramById
+          spec={asset.id}
+          caption={caption ?? asset.caption}
+          step={step}
+          stepper={stepper}
+          minWidth={minWidth}
+        />
+      );
     case "mermaid":
     case "excalidraw":
       return (
@@ -196,7 +218,12 @@ export function Img({
  * A captioned figure. With `id` it shows that asset (image, SVG or any diagram) and takes its caption from
  * the sidecar unless `caption` is given; without `id` it wraps its children (e.g. a ```mermaid fence).
  */
-export function Figure({ id, caption, children, ...options }: { id?: string; children?: React.ReactNode } & DiagramOptions) {
+export function Figure({
+  id,
+  caption,
+  children,
+  ...options
+}: { id?: string; children?: React.ReactNode } & DiagramOptions) {
   if (!id) return <ChildFigure caption={caption ?? ""}>{children}</ChildFigure>;
   const r = resolve("Figure", id);
   return r.problem ?? <AssetFigure asset={r.asset} caption={caption} {...options} />;
@@ -206,7 +233,8 @@ export function Figure({ id, caption, children, ...options }: { id?: string; chi
 export function Diagram({ id, ...options }: { id: string } & DiagramOptions) {
   const r = resolve("Diagram", id);
   if (r.problem) return r.problem;
-  if (!["svg", "mermaid", "excalidraw", "animated"].includes(r.asset.type)) return wrongType("Diagram", r.asset).problem!;
+  if (!["svg", "mermaid", "excalidraw", "animated"].includes(r.asset.type))
+    return wrongType("Diagram", r.asset).problem!;
   return <AssetFigure asset={r.asset} {...options} />;
 }
 
@@ -225,7 +253,8 @@ export function Mermaid({ id: source, caption, minWidth }: { id?: string; captio
       const meta = findAsset(assetId);
       const text = caption ?? meta?.caption ?? meta?.title;
       const entry = readDiagram(diagramHash(chart));
-      if (entry) return <MermaidSvg light={entry.light} dark={entry.dark} caption={text} alt={meta?.alt} minWidth={minWidth} />;
+      if (entry)
+        return <MermaidSvg light={entry.light} dark={entry.dark} caption={text} alt={meta?.alt} minWidth={minWidth} />;
       if (DevMermaid) return <DevMermaid chart={chart} caption={text} />;
     }
   }
@@ -250,7 +279,8 @@ export function TechIcon({ id, title, className }: { id: string; title?: string;
   );
 }
 
-const formatBytes = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+const formatBytes = (n: number) =>
+  n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 
 /** A downloadable file (cheat sheet, template). Premium files are never public: they show a Pro placeholder. */
 export function Download({ id, label }: { id: string; label?: string }) {

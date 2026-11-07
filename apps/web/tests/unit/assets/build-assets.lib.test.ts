@@ -49,7 +49,12 @@ function fixture(files: Record<string, string | Buffer>) {
 
 const SVG = (body = '<path d="M0 0h10v10H0z"/>', attrs = "") =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"${attrs}>${body}</svg>`;
-const page = (href: string, over: Partial<PageInfo> = {}): PageInfo => ({ href, visible: true, access: "free", ...over });
+const page = (href: string, over: Partial<PageInfo> = {}): PageInfo => ({
+  href,
+  visible: true,
+  access: "free",
+  ...over,
+});
 const ref = (id: string, p: PageInfo | null, component: AssetRef["component"] = "Img"): AssetRef => ({
   id,
   component,
@@ -66,7 +71,9 @@ describe("asset IDs", () => {
     expect(resolveAssetRef("Mermaid", "mermaid/system-design/wal")).toBe("diagrams/mermaid/system-design/wal");
     expect(resolveAssetRef("AnimatedDiagram", "messenger/aws")).toBe("diagrams/animated/messenger/aws");
     expect(resolveAssetRef("AnimatedDiagram", "animated/messenger/aws")).toBe("diagrams/animated/messenger/aws");
-    expect(resolveAssetRef("AnimatedDiagram", "diagrams/animated/messenger/aws")).toBe("diagrams/animated/messenger/aws");
+    expect(resolveAssetRef("AnimatedDiagram", "diagrams/animated/messenger/aws")).toBe(
+      "diagrams/animated/messenger/aws"
+    );
     expect(resolveAssetRef("CloudMapping", "messenger/architecture")).toBe("diagrams/animated/messenger/architecture");
     expect(resolveAssetRef("TechIcon", "aws/lambda")).toBe("logos/tech/aws/lambda");
     expect(resolveAssetRef("Diagram", "excalidraw/sd/ring")).toBe("diagrams/excalidraw/sd/ring");
@@ -117,7 +124,14 @@ describe("indexAssets + checkAssets", () => {
     const index = indexAssets(path.join(dir, "assets"), dir);
     expect(index.problems).toEqual([]);
     const cap = index.assets.get("diagrams/svg/sd/cap")!;
-    expect(cap).toMatchObject({ type: "svg", group: "diagrams", alt: "A triangle", access: "free", width: 10, height: 10 });
+    expect(cap).toMatchObject({
+      type: "svg",
+      group: "diagrams",
+      alt: "A triangle",
+      access: "free",
+      width: 10,
+      height: 10,
+    });
     expect(index.assets.get("logos/companies/acme")!.license).toMatchObject({ key: "mit-pack", license: "MIT" });
     const problems = checkAssets(index, [ref("diagrams/svg/sd/cap", page("/a"), "Figure")]);
     expect(messages(problems)).toEqual([]);
@@ -142,7 +156,11 @@ describe("indexAssets + checkAssets", () => {
     });
     const index = indexAssets(path.join(dir, "assets"), dir);
     const errors = messages(checkAssets(index, []));
-    const has = (text: string) => expect(errors.some((e) => e.includes(text)), `${text}\n${errors.join("\n")}`).toBe(true);
+    const has = (text: string) =>
+      expect(
+        errors.some((e) => e.includes(text)),
+        `${text}\n${errors.join("\n")}`
+      ).toBe(true);
     has('"Bad_Name" is not kebab-case');
     has("images/a/no-alt: alt is required");
     has("same file as assets/images/a/dup.svg");
@@ -196,10 +214,12 @@ describe("indexAssets + checkAssets", () => {
 
 describe("usage scan", () => {
   it("maps references to their page and line", () => {
-    const dir = fixture({ "content/sd/a.mdx": "---\ntitle: A\n---\n\nText\n\n<Img id=\"images/x\" />\n" });
+    const dir = fixture({ "content/sd/a.mdx": '---\ntitle: A\n---\n\nText\n\n<Img id="images/x" />\n' });
     const file = path.join(dir, "content/sd/a.mdx");
     const refs = scanUsage(path.join(dir, "content"), new Map([[file, page("/sd/a")]]), dir);
-    expect(refs).toEqual([{ id: "images/x", component: "Img", file: "content/sd/a.mdx", line: 7, page: page("/sd/a") }]);
+    expect(refs).toEqual([
+      { id: "images/x", component: "Img", file: "content/sd/a.mdx", line: 7, page: page("/sd/a") },
+    ]);
   });
 
   it("finds every animated diagram in the real content", async () => {
@@ -232,9 +252,9 @@ describe("per-environment publishing", () => {
     expect(isPublic(asset({ group: "og" }), [])).toBe(true);
     expect(isPublic(asset({ tags: ["shared"] }), [])).toBe(true);
     // Premium is never public, wherever it's used.
-    expect(isPublic(asset({ access: "premium", group: "brand", tags: ["shared"] }), [ref("images/a/b", page("/on"))])).toBe(
-      false
-    );
+    expect(
+      isPublic(asset({ access: "premium", group: "brand", tags: ["shared"] }), [ref("images/a/b", page("/on"))])
+    ).toBe(false);
   });
 
   it("copies premium files only to the private folder, hidden-section files nowhere, and fails on leaks", () => {
