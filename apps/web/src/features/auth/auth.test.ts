@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { consentLog, session } from "@/server/db/schema";
 import { testDatabaseAvailable } from "@/server/db/testing";
 import { CONSENT_VERSIONS } from "@/server/db/consent";
+import { testUserEmail } from "@/server/db/test-users";
 import { authConfig } from "./config";
 import { call, cookieHeader, setupAuthTestEnv, TEST_KEY, testLoginAs } from "./test-helpers";
 import { TEST_LOGIN_HEADER } from "./test-login";
@@ -55,6 +56,25 @@ describe.skipIf(!available)("auth (integration)", () => {
       expect(token).toMatch(/SameSite=Lax/i);
       expect(token).not.toMatch(/Domain=/i);
       expect(await sessionsOf(env.ids.pro_monthly)).toHaveLength(1);
+    });
+
+    it("keeps the cached session encrypted: no email or name readable in oa.session_data (L2)", async () => {
+      const { POST } = await import("@/app/api/test/login/route");
+      const res = await call(POST, "/api/test/login", {
+        method: "POST",
+        body: { userKey: "free" },
+        headers: { [TEST_LOGIN_HEADER]: TEST_KEY },
+      });
+      const data = res.headers.getSetCookie().find((c) => c.startsWith("oa.session_data="));
+      expect(data).toBeDefined();
+      const value = decodeURIComponent(data!.split(";")[0]!.slice("oa.session_data=".length));
+      const decoded = value
+        .split(".")
+        .map((part) => Buffer.from(part, "base64url").toString("latin1"))
+        .join("|");
+      expect(decoded).not.toContain(testUserEmail("free"));
+      expect(decoded).not.toContain('"email"');
+      expect(decoded).toContain('"enc"');
     });
 
     it("is not registered unless APP_ENV allows it and ENABLE_TEST_LOGIN=1", () => {

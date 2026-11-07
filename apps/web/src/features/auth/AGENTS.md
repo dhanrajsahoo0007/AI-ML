@@ -24,7 +24,7 @@ Google callback → session row created → hooks: keep the newest 3 sessions, r
 
 ## Invariants and gotchas
 
-- **Session cookie cache:** Better Auth's `cookieCache` (5 min, `compact`) is on, but API routes and account pages
+- **Session cookie cache:** Better Auth's `cookieCache` (5 min, `jwe`: encrypted, since it holds name, email and role) is on, but API routes and account pages
   pass `disableCookieCache` and read the database, so a revoked session stops working at once. Don't rely on the
   cached cookie for authorisation.
 - `route`'s session lookup skips Better Auth and the DB entirely when no `oa.session_token` cookie is present.

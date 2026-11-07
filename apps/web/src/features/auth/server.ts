@@ -67,7 +67,8 @@ export function createAuth(db: Db, config: AuthConfig = authConfig(), options: {
       updateAge: DAY,
       // Re-auth window for Better Auth's own sensitive endpoints; ours check it in features/account.
       freshAge: 10 * 60,
-      cookieCache: { enabled: true, maxAge: 5 * 60, strategy: "compact" },
+      // Encrypted (JWE), not just signed: the cached session carries the name, email and role (security review L2).
+      cookieCache: { enabled: true, maxAge: 5 * 60, strategy: "jwe" },
     },
 
     account: {
@@ -75,8 +76,24 @@ export function createAuth(db: Db, config: AuthConfig = authConfig(), options: {
       accountLinking: { enabled: true, trustedProviders: ["google"] },
     },
 
-    // Endpoints we don't offer: account changes go through our own routes (features/account).
-    disabledPaths: ["/update-user", "/change-email", "/delete-user", "/link-social", "/unlink-account"],
+    // Endpoints we don't offer: account changes go through our own routes (features/account). Session listing and
+    // revocation ("sign out everywhere" is /api/account/sessions) and the Google token endpoints are off too, so
+    // no script on the page can read session tokens or OAuth tokens (security review L1).
+    disabledPaths: [
+      "/update-user",
+      "/change-email",
+      "/delete-user",
+      "/link-social",
+      "/unlink-account",
+      "/list-sessions",
+      "/revoke-session",
+      "/revoke-sessions",
+      "/revoke-other-sessions",
+      "/get-access-token",
+      "/refresh-token",
+      "/account-info",
+      "/list-accounts",
+    ],
 
     advanced: {
       useSecureCookies: config.secureCookies,
