@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- CommonJS config file read by the tool */
 // Lighthouse CI budgets (plan §6): `/`, a section hub, the heaviest diagram article and an interview subsection,
 // mobile emulation with Lighthouse's default simulated throttling, 3 runs each, asserted on the median run.
 // Run after `npm run build` with `npm run lighthouse -w web`. It serves the build with `next start` (static
@@ -47,7 +48,6 @@ module.exports = {
     upload: {
       target: "filesystem",
       outputDir: path.join(webDir, "test-results", "lighthouse"),
-      reportFilenamePattern: "%%PATHNAME%%-%%DATETIME%%.report.%%EXTENSION%%",
     },
   },
 };

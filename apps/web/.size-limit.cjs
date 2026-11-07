@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- CommonJS config file read by the tool */
 // JavaScript size budgets per route type (plan §6), measured from the production build: `npm run build`, then
 // `npm run size -w web`. Sizes are gzip, 1 kB = 1000 bytes, the same units `next build` prints.
 //
