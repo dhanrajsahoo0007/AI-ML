@@ -61,10 +61,30 @@ function isLocalHost(host: string): boolean {
  */
 export function assertDatabaseAllowed(connectionString: string, appEnv: AppEnv = readAppEnv()): void {
   const host = databaseHost(connectionString);
-  if (isLocalHost(host) || REMOTE_DB_ENVS.has(appEnv)) return;
+  if (isLocalHost(host)) return;
+  if (REMOTE_DB_ENVS.has(appEnv)) {
+    assertTls(connectionString, host);
+    return;
+  }
   throw new DatabaseConfigError(
     `Refusing to connect to non-local database host "${host}" with APP_ENV=${appEnv}. ` +
       `Remote databases are allowed only for APP_ENV ${[...REMOTE_DB_ENVS].join(", ")}.`
+  );
+}
+
+const TLS_MODES = new Set(["require", "verify-ca", "verify-full"]);
+
+/**
+ * A remote database is reached over TLS only (security review L7): the URL must say `sslmode=require` (or a
+ * verify mode). Hyperdrive's local endpoint (`*.hyperdrive.local`) is exempt: the Worker talks to Hyperdrive inside
+ * Cloudflare, and Hyperdrive connects to Neon over TLS itself.
+ */
+function assertTls(connectionString: string, host: string): void {
+  if (host.endsWith(".hyperdrive.local")) return;
+  const mode = new URL(connectionString).searchParams.get("sslmode");
+  if (mode && TLS_MODES.has(mode)) return;
+  throw new DatabaseConfigError(
+    `Refusing to connect to "${host}" without TLS: add sslmode=require (or verify-full) to the connection string.`
   );
 }
 
