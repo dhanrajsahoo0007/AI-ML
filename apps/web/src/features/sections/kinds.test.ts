@@ -37,7 +37,7 @@ describe("kinds", () => {
     }
   });
   it("planned kinds load nothing and are marked coming soon", async () => {
-    for (const section of [...builtSectionsOfKind("problems"), ...builtSectionsOfKind("newsletter")]) {
+    for (const section of builtSectionsOfKind("newsletter")) {
       const kind = kindOf(section);
       assert.deepEqual(await kind.load(section), []);
       assert.equal(kind.nav(section, []).comingSoon, true);

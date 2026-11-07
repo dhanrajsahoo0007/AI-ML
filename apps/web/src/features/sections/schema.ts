@@ -13,7 +13,7 @@ export const SECTION_KINDS = ["docs", "question-bank", "directory", "problems", 
 export type SectionKindName = (typeof SECTION_KINDS)[number];
 
 /** Kinds whose module and routes exist. Sections of other kinds show as "coming soon" in the nav. */
-export const KINDS_WITH_ROUTES: readonly SectionKindName[] = ["docs", "question-bank", "directory"];
+export const KINDS_WITH_ROUTES: readonly SectionKindName[] = ["docs", "question-bank", "directory", "problems"];
 
 export const NAV_GROUPS = ["learn", "practice", "more"] as const;
 export type NavGroupName = (typeof NAV_GROUPS)[number];
