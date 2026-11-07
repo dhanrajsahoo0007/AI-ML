@@ -120,9 +120,9 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
       description?: string;
       icon?: string;
       categories?: string[];
-      /** "classic" opts an article out of the docs-style layout (table of contents, updated date, copy for LLM). */
+      /** "classic" opts an article out of the docs-style layout (table of contents, updated date). */
       layout?: string;
-      /** Overrides the last-updated date taken from git, as YYYY-MM-DD. */
+      /** Overrides the last-updated date taken from git history at build time, as YYYY-MM-DD. */
       updated?: string | Date;
     },
     body: (flags.math ? (
