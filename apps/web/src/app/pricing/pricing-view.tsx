@@ -7,6 +7,8 @@ import { siteConfig } from "@/config/site";
 import { BillingPeriod } from "@/features/pages/billing-period.client";
 import { loadPageDoc } from "@/features/pages/page-doc";
 
+const pricesSet = !business.PRICE_MONTHLY_USD.includes("TODO") && !business.PRICE_YEARLY_USD.includes("TODO");
+
 export const pricingMetadata: Metadata = {
   title: "Pricing",
   description:
@@ -128,14 +130,21 @@ export async function PricingView({ live = false }: { live?: boolean }) {
               >
                 <Eyebrow className="text-primary">Pro</Eyebrow>
                 <h2 id="plan-pro" className="mt-4 font-display text-4xl tracking-tight">
-                  <span className="group-data-[period=yearly]:hidden">
-                    {business.PRICE_MONTHLY_USD}
-                    <span className="text-lg text-muted-foreground">/month</span>
-                  </span>
-                  <span className="hidden group-data-[period=yearly]:inline">
-                    {business.PRICE_YEARLY_USD}
-                    <span className="text-lg text-muted-foreground">/year</span>
-                  </span>
+                  {pricesSet ? (
+                    <>
+                      <span className="group-data-[period=yearly]:hidden">
+                        {business.PRICE_MONTHLY_USD}
+                        <span className="text-lg text-muted-foreground">/month</span>
+                      </span>
+                      <span className="hidden group-data-[period=yearly]:inline">
+                        {business.PRICE_YEARLY_USD}
+                        <span className="text-lg text-muted-foreground">/year</span>
+                      </span>
+                    </>
+                  ) : (
+                    // Prices aren't set in config/business.ts yet: never show the raw TODO marker to visitors.
+                    <span className="text-3xl">Price announced at launch</span>
+                  )}
                 </h2>
                 <p className="mt-2 text-[15px] text-muted-foreground">For serious interview preparation.</p>
                 <FeatureList items={PRO_FEATURES} />
