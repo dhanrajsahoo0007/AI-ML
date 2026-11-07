@@ -12,11 +12,11 @@ test("the build lists the expected pages @core", () => {
   }
 });
 
-// KNOWN ISSUE (pre-existing on `development`, 2026-11-07): under parallel load some pages log React error #418
-// (hydration mismatch, the client re-renders the page). It doesn't reproduce in `next dev` or with one browser.
-// Suspects are the motion wrappers and ContentShell, which wave-1 stream B is rewriting. The error is recorded as
-// a test annotation instead of failing the crawl. Remove this entry once stream B is merged.
-const KNOWN_CONSOLE_ERRORS = [/Minified React error #418\b/];
+// Console errors that are known and tracked elsewhere; each one is recorded as a test annotation instead of
+// failing the crawl. Keep this empty: React #418 (hydration mismatch under load) was listed here until it was
+// fixed on 2026-11-07 (root layout: THEME_SCRIPT from a plain module + HydrationSlot around the late RSC rows; see
+// tests/unit/client-boundary.test.ts). Add an entry only with a linked issue and an owner.
+const KNOWN_CONSOLE_ERRORS: RegExp[] = [];
 
 function collectConsoleErrors(page: Page) {
   const errors: string[] = [];
