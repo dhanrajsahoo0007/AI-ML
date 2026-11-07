@@ -1,17 +1,21 @@
 import type { EmailSender } from "../email/sender";
+import { CURRENT_CONSENT_VERSION, FIRST_CONSENT_VERSION, isConsentVersion } from "./consent";
 import { confirmationEmail, welcomeEmail, type SubscriberLinks } from "./emails";
 import type { RateLimiter } from "./rate-limit";
-import type { NewsletterStore } from "./store";
+import { isSuppressed, type NewsletterStore, type Subscriber } from "./store";
+import type { CaptchaVerifier } from "./turnstile";
 import { signToken, verifyToken } from "./token";
 
 // The sign-up flow (plan §15.2), independent of HTTP: the route handlers in app/api/newsletter parse the request
-// and call these. Every dependency is a port, so the same code runs on the in-memory dev implementations now and
-// on Neon + Resend (+ Queue) later.
+// and call these. Every dependency is a port, so the same code runs on the in-memory dev implementations and on
+// Postgres + Resend (+ Queue later).
 
 export interface NewsletterDeps {
   store: NewsletterStore;
   sender: EmailSender;
   limiter: RateLimiter;
+  /** Turnstile (TURNSTILE_SECRET_KEY); null or absent means no check. */
+  captcha?: CaptchaVerifier | null;
   /** HMAC secret for the tokens (NEWSLETTER_TOKEN_SECRET). */
   secret: string;
   /** Absolute URLs for a subscriber's links, given their tokens. */
@@ -25,16 +29,30 @@ interface SubscribeInput {
   /** Honeypot field; people never fill it. */
   website: string;
   ip: string;
+  turnstileToken?: string;
+  country?: string | null;
 }
 
-type SubscribeResult = { kind: "accepted" } | { kind: "rate-limited"; retryAfterSeconds: number };
+type SubscribeResult =
+  | { kind: "accepted" }
+  | { kind: "rate-limited"; retryAfterSeconds: number }
+  | { kind: "captcha-failed"; reason: "missing" | "rejected" | "unavailable" };
 
-async function tokensFor(deps: NewsletterDeps, subscriberId: string) {
+async function tokensFor(deps: NewsletterDeps, subscriberId: string, consentVersion?: string) {
   const [confirm, unsubscribe] = await Promise.all([
-    signToken(deps.secret, { subscriberId, purpose: "confirm" }),
+    signToken(deps.secret, { subscriberId, purpose: "confirm", consentVersion }),
     signToken(deps.secret, { subscriberId, purpose: "unsubscribe" }),
   ]);
   return deps.links({ confirm, unsubscribe });
+}
+
+async function sendWelcome(deps: NewsletterDeps, subscriber: Subscriber) {
+  try {
+    await deps.sender.send(await welcomeEmail(subscriber.email, await tokensFor(deps, subscriber.id)));
+  } catch (e) {
+    // The subscription stands either way; a missing welcome email is not worth failing it for.
+    console.error(`[newsletter] welcome email failed: ${(e as Error).message}`);
+  }
 }
 
 /**
@@ -44,37 +62,41 @@ async function tokensFor(deps: NewsletterDeps, subscriberId: string) {
 export async function subscribe(deps: NewsletterDeps, input: SubscribeInput): Promise<SubscribeResult> {
   const limit = await deps.limiter.hit(`subscribe:${input.ip}`);
   if (!limit.allowed) return { kind: "rate-limited", retryAfterSeconds: limit.retryAfterSeconds };
+  if (deps.captcha) {
+    const check = await deps.captcha.verify(input.turnstileToken, input.ip);
+    if (!check.ok) return { kind: "captcha-failed", reason: check.reason };
+  }
   if (input.website.trim() !== "") return { kind: "accepted" };
 
   const { subscriber, outcome } = await deps.store.upsertPending({
     email: input.email,
     source: input.source,
-    consentVersion: input.consentVersion,
+    country: input.country,
   });
   if (outcome === "send-confirmation") {
-    await deps.sender.send(await confirmationEmail(subscriber.email, await tokensFor(deps, subscriber.id)));
+    await deps.sender.send(
+      await confirmationEmail(subscriber.email, await tokensFor(deps, subscriber.id, input.consentVersion))
+    );
   }
   return { kind: "accepted" };
 }
 
 type ConfirmResult = { kind: "active" } | { kind: "invalid" } | { kind: "expired" } | { kind: "not-pending" };
 
-/** Confirms a subscription from a confirm token and sends the welcome email the first time. */
+/**
+ * Confirms a subscription from a confirm token: records the opt-in in consent_log with the consent text version
+ * the person agreed to (carried in the signed token), and sends the welcome email the first time.
+ */
 export async function confirmSubscription(deps: NewsletterDeps, token: string): Promise<ConfirmResult> {
   const verified = await verifyToken(deps.secret, token, "confirm");
   if (!verified.ok) return { kind: verified.reason === "expired" ? "expired" : "invalid" };
-  const result = await deps.store.confirm(verified.subscriberId);
+  // Tokens issued before the version was put in the token were all for the first consent text.
+  const consentVersion = verified.consentVersion ?? FIRST_CONSENT_VERSION;
+  if (!isConsentVersion(consentVersion)) return { kind: "invalid" };
+  const result = await deps.store.confirm(verified.subscriberId, { consentVersion });
   if (!result) return { kind: "invalid" };
   if (result.subscriber.status !== "active") return { kind: "not-pending" };
-  // TODO(data layer): write consent_log (kind newsletter, result.subscriber.consentVersion) when result.changed.
-  if (result.changed) {
-    try {
-      await deps.sender.send(await welcomeEmail(result.subscriber.email, await tokensFor(deps, result.subscriber.id)));
-    } catch (e) {
-      // The subscription is confirmed either way; a missing welcome email is not worth failing it for.
-      console.error(`[newsletter] welcome email failed: ${(e as Error).message}`);
-    }
-  }
+  if (result.changed) await sendWelcome(deps, result.subscriber);
   return { kind: "active" };
 }
 
@@ -86,4 +108,50 @@ export async function unsubscribeWithToken(deps: NewsletterDeps, token: string):
   if (!verified.ok) return { kind: "invalid" };
   await deps.store.unsubscribe(verified.subscriberId);
   return { kind: "unsubscribed" };
+}
+
+// ── Signed-in users (/account/email-preferences, the sign-up form's "Subscribe with your account") ──────────────
+
+/** What a signed-in user sees. `suppressed` = the address bounced or was reported as spam: we can't mail it. */
+type AccountNewsletterStatus = "none" | "pending" | "active" | "unsubscribed" | "suppressed";
+
+interface AccountUser {
+  id: string;
+  /** The account's email, verified by Google at sign-in. */
+  email: string;
+}
+
+const accountStatusOf = (s: Subscriber | null): AccountNewsletterStatus =>
+  !s ? "none" : isSuppressed(s) ? "suppressed" : (s.status as AccountNewsletterStatus);
+
+export async function accountStatus(store: NewsletterStore, user: AccountUser) {
+  const subscriber = await store.findForUser(user.id, user.email);
+  return { status: accountStatusOf(subscriber), email: subscriber?.email ?? user.email.toLowerCase() };
+}
+
+/**
+ * One-click subscribe for a signed-in user: no double opt-in (the address is verified), the opt-in goes to
+ * consent_log with the current consent text, and the welcome email (with one-click unsubscribe) goes out once.
+ */
+export async function subscribeWithAccount(
+  deps: NewsletterDeps,
+  user: AccountUser,
+  input: { source: string; country?: string | null }
+) {
+  const { subscriber, changed } = await deps.store.subscribeVerified({
+    email: user.email,
+    userId: user.id,
+    source: input.source,
+    consentVersion: CURRENT_CONSENT_VERSION,
+    country: input.country,
+  });
+  if (changed) await sendWelcome(deps, subscriber);
+  return { status: accountStatusOf(subscriber), email: subscriber.email };
+}
+
+export async function unsubscribeAccount(store: NewsletterStore, user: AccountUser) {
+  const subscriber = await store.findForUser(user.id, user.email);
+  if (!subscriber) return { status: "none" as const, email: user.email.toLowerCase() };
+  const result = await store.unsubscribe(subscriber.id);
+  return { status: accountStatusOf(result?.subscriber ?? subscriber), email: subscriber.email };
 }

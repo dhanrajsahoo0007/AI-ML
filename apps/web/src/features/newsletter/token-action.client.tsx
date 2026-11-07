@@ -11,7 +11,7 @@ interface TokenActionProps {
   endpoint: string;
   button: string;
   done: string;
-  /** Messages for error codes from the API ({ error }), plus `default`. */
+  /** Messages for error codes from the API ({ error: { code } }), plus `default`. */
   errors: Record<string, string> & { default: string };
   missing: string;
 }
@@ -39,8 +39,8 @@ export function TokenAction({ endpoint, button, done, errors, missing }: TokenAc
         setPhase("done");
         return;
       }
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      setMessage(errors[body.error ?? ""] ?? errors.default);
+      const body = (await res.json().catch(() => ({}))) as { error?: { code?: string } };
+      setMessage(errors[body.error?.code ?? ""] ?? errors.default);
     } catch {
       setMessage(errors.default);
     }

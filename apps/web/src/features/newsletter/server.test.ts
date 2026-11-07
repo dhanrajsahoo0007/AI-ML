@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DevEmailSender } from "../email/dev-sender";
 import { ResendEmailSender } from "../email/resend-sender";
-import { emailSender, NotConfiguredError, tokenSecret } from "./server";
+import { emailSender, NotConfiguredError, resendWebhookSecret, tokenSecret } from "./server";
 
 const env = (vars: Record<string, string>) => vars as unknown as NodeJS.ProcessEnv;
 
@@ -26,5 +26,11 @@ describe("newsletter wiring", () => {
     expect(emailSender(env({ RESEND_API_KEY: "re_test" }), "production")).toBeInstanceOf(ResendEmailSender);
     expect(emailSender(env({}), "preview")).toBeInstanceOf(DevEmailSender);
     expect(() => emailSender(env({}), "production")).toThrow(NotConfiguredError);
+  });
+
+  it("needs a whsec_ RESEND_WEBHOOK_SECRET for the webhook", () => {
+    expect(resendWebhookSecret(env({ RESEND_WEBHOOK_SECRET: "whsec_abc" }))).toBe("whsec_abc");
+    expect(() => resendWebhookSecret(env({}))).toThrow(NotConfiguredError);
+    expect(() => resendWebhookSecret(env({ RESEND_WEBHOOK_SECRET: "plain" }))).toThrow(/whsec_/);
   });
 });

@@ -4,6 +4,8 @@ import { SignupForm } from "./signup-form.client";
 // The sign-up panel shown on the archive and at the end of each issue.
 
 const SUBSCRIBE_ENDPOINT = "/api/newsletter/subscribe";
+const ACCOUNT_ENDPOINT = "/api/newsletter/account";
+const EMAIL_PREFERENCES_HREF = "/account/email-preferences";
 
 export function SignupBox({ source, title }: { source: "archive" | "issue"; title: string }) {
   return (
@@ -19,6 +21,9 @@ export function SignupBox({ source, title }: { source: "archive" | "issue"; titl
       </p>
       <SignupForm
         endpoint={SUBSCRIBE_ENDPOINT}
+        accountEndpoint={ACCOUNT_ENDPOINT}
+        preferencesHref={EMAIL_PREFERENCES_HREF}
+        turnstileSiteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || undefined}
         consentText={consentText()}
         consentVersion={CURRENT_CONSENT_VERSION}
         privacyHref="/legal/privacy"

@@ -6,17 +6,23 @@ import { ResendEmailSender } from "../email/resend-sender";
 import type { EmailSender } from "../email/sender";
 import { publicNav, SUBSCRIBE_KIND as NEWSLETTER_KIND } from "../sections/public";
 import { APP_ENVS, type AppEnv } from "../sections/schema";
+import type { Db } from "@/server/db/client";
+import { databaseUrl } from "@/server/db/config";
 import { MemoryRateLimiter, type RateLimiter } from "./rate-limit";
 import type { NewsletterDeps } from "./service";
 import { MemoryNewsletterStore, type NewsletterStore } from "./store";
+import { PostgresNewsletterStore } from "./store-postgres";
+import { turnstileFromEnv } from "./turnstile";
 
-// Wires the newsletter ports for the API routes. No accounts exist yet, so:
-//   store    in-memory (MemoryNewsletterStore) until the data layer provides a Neon-backed NewsletterStore
+// Wires the newsletter ports for the API routes and the email-preferences page:
+//   store    Postgres (PostgresNewsletterStore) whenever a database is configured (DATABASE_URL or the
+//            Hyperdrive binding); otherwise in-memory, per process (local runs without Docker, unit tests)
 //   sender   Resend when RESEND_API_KEY is set, otherwise the dev sender (logs + .eml outbox) outside production
 //   limiter  in-memory until the route() wrapper brings the Workers Rate Limiting binding
+//   captcha  Turnstile when TURNSTILE_SECRET_KEY is set, otherwise none
 //   secret   NEWSLETTER_TOKEN_SECRET; a fixed dev secret is allowed only when APP_ENV=local
 //
-// Nothing here runs during a page render: only app/api/newsletter/** imports it.
+// Nothing here runs during a content page render: only app/api/** and the account pages import it.
 
 export class NotConfiguredError extends Error {}
 
@@ -37,6 +43,7 @@ const DEV_SECRET = "local-dev-only-newsletter-token-secret-0000";
 const envSchema = z.object({
   NEWSLETTER_TOKEN_SECRET: z.string().min(32, "NEWSLETTER_TOKEN_SECRET must be at least 32 characters").optional(),
   RESEND_API_KEY: z.string().min(1).optional(),
+  RESEND_WEBHOOK_SECRET: z.string().startsWith("whsec_", "RESEND_WEBHOOK_SECRET must start with whsec_").optional(),
 });
 
 /** The section's href when it is `on` in this build (next.config.ts inlines the public nav), else null. */
@@ -49,6 +56,13 @@ export function tokenSecret(env: NodeJS.ProcessEnv = process.env, appEnv = curre
   if (parsed.NEWSLETTER_TOKEN_SECRET) return parsed.NEWSLETTER_TOKEN_SECRET;
   if (appEnv === "local") return DEV_SECRET;
   throw new NotConfiguredError(`NEWSLETTER_TOKEN_SECRET is not set (APP_ENV=${appEnv})`);
+}
+
+/** The signing secret of the Resend webhook endpoint (`whsec_…`, from the Resend dashboard). */
+export function resendWebhookSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const parsed = envSchema.parse({ RESEND_WEBHOOK_SECRET: env.RESEND_WEBHOOK_SECRET || undefined });
+  if (!parsed.RESEND_WEBHOOK_SECRET) throw new NotConfiguredError("RESEND_WEBHOOK_SECRET is not set");
+  return parsed.RESEND_WEBHOOK_SECRET;
 }
 
 export function emailSender(env: NodeJS.ProcessEnv = process.env, appEnv = currentAppEnv()): EmailSender {
@@ -68,11 +82,27 @@ function processPorts() {
   return globalPorts.__newsletterPorts;
 }
 
-export function newsletterDeps(href: string): NewsletterDeps {
-  const { store, limiter } = processPorts();
+/** True when this request can reach a database. */
+export function hasDatabase(): boolean {
+  try {
+    databaseUrl();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The subscriber store: Postgres over the request's handle when a database is configured, else in-memory. */
+export function newsletterStore(db?: () => Db): NewsletterStore {
+  return db && hasDatabase() ? new PostgresNewsletterStore(db()) : processPorts().store;
+}
+
+export function newsletterDeps(href: string, db?: () => Db): NewsletterDeps {
+  const { limiter } = processPorts();
   return {
-    store,
+    store: newsletterStore(db),
     limiter,
+    captcha: turnstileFromEnv(),
     // Built on first use, so unsubscribing works even where no sender is configured.
     get sender() {
       return emailSender();
