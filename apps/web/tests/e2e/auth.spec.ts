@@ -10,6 +10,25 @@ import { builtAppEnv } from "./support/registry";
 
 const webRoot = path.resolve(__dirname, "../..");
 
+// Security review M1: `next` after sign-in must never leave the site (the URL parser strips tabs and newlines and
+// reads `\` as `/`). Runs against every build; signed out, /account then continues to /sign-in.
+test.describe("sign-in never redirects off the site @core", () => {
+  for (const next of [
+    "/%09/example.com/phish",
+    "/%0A/example.com",
+    "/%5Cexample.com",
+    "//example.com",
+    "/..//example.com",
+  ]) {
+    test(`/sign-in/complete?next=${next}`, async ({ page, baseURL }) => {
+      await page.route(/example\.com/, (r) => r.abort());
+      await page.goto(`/sign-in/complete?next=${next}`);
+      await page.waitForURL((u) => u.pathname !== "/sign-in/complete" || u.origin !== new URL(baseURL!).origin);
+      expect(new URL(page.url()).origin).toBe(new URL(baseURL!).origin);
+    });
+  }
+});
+
 test.describe("test-login provider is absent from production @core", () => {
   test("POST /api/test/login returns 404 in a production-profile build", async ({ request }) => {
     test.skip(builtAppEnv() !== "production", "the build under test is not the production profile");

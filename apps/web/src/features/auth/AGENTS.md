@@ -10,6 +10,8 @@ wrapper every API handler uses. Code-owner review required (`.github/CODEOWNERS`
 - `withPageSession(fn)`: session + DB handle for the dynamic account pages only (null when signed out).
 - `authConfig()`, `isGoogleConfigured()`: zod-validated env, read per request.
 - `ageCookie()`, `isFreshSession()`, `revokeAllSessions()`, `MAX_SESSIONS_PER_USER` (3), `safeNextPath()`.
+- `public.ts`: client-safe exports for islands in other features (`safeNextPath()`, which refuses control
+  characters, backslashes, `//` and dot-segment tricks, and returns the URL parser's own same-origin path).
 - Client island by path: `sign-in-form.client.tsx` (never re-exported from the index, so server tests don't parse
   JSX).
 

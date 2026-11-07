@@ -55,29 +55,66 @@ describe("authConfig", () => {
   });
 });
 
-describe("safeNextPath", () => {
-  it("keeps same-site paths and drops everything else", () => {
+describe("safeNextPath (security review M1)", () => {
+  it("keeps same-origin paths, with their query and hash", () => {
     expect(safeNextPath("/system-design/caching")).toBe("/system-design/caching");
-    for (const bad of [
-      "https://evil.example",
-      "//evil.example",
-      "/\\evil.example",
-      "javascript:alert(1)",
-      "/api/x",
-      "/sign-in",
-    ]) {
-      expect(safeNextPath(bad)).toBe("/account");
-    }
+    expect(safeNextPath("/interviews?company=google#top")).toBe("/interviews?company=google#top");
+    expect(safeNextPath("/a/./b/../c")).toBe("/a/c");
+    expect(safeNextPath("/%E2%9C%93")).toBe("/%E2%9C%93");
     expect(safeNextPath(undefined, "/")).toBe("/");
     expect(safeNextPath(["/a", "/b"])).toBe("/a");
   });
-});
 
-describe("safeEqual", () => {
-  it("compares exactly", () => {
-    expect(safeEqual("abc", "abc")).toBe(true);
-    expect(safeEqual("abc", "abd")).toBe(false);
-    expect(safeEqual("abc", "abcd")).toBe(false);
+  // Each value as the page receives it (search params are already decoded once).
+  const bypasses = [
+    "https://evil.example",
+    "http:evil.example",
+    "//evil.example",
+    "///evil.example",
+    "/\\evil.example",
+    "\\/evil.example",
+    "\\\\evil.example",
+    "/\t/evil.example",
+    "/\n/evil.example",
+    "/\r/evil.example",
+    "\t//evil.example",
+    "/\t\t/evil.example",
+    "/%09/evil.example",
+    "/%0A/evil.example",
+    "/%0d/evil.example",
+    "/%5Cevil.example",
+    "/%2F/evil.example",
+    "/%2f%2fevil.example",
+    "/\u0000/evil.example",
+    "/\u007F/evil.example",
+    "/\u0085/evil.example",
+    "/\u2028/evil.example",
+    "/..//evil.example",
+    "/./..//evil.example",
+    "/a/../..//evil.example",
+    "javascript:alert(1)",
+    "JaVaScRiPt:alert(1)",
+    "data:text/html,x",
+    " /x",
+    "x",
+    "",
+    "/api/x",
+    "/api",
+    "/sign-in",
+    "/sign-in/complete?next=//evil.example",
+    "/%",
+    `/${"a".repeat(600)}`,
+  ];
+
+  it.each(bypasses)("refuses %j", (bad) => {
+    expect(safeNextPath(bad)).toBe("/account");
+  });
+
+  it("never returns something a browser would resolve off-origin", () => {
+    for (const bad of bypasses) {
+      expect(new URL(safeNextPath(bad), "https://origins.example").origin).toBe("https://origins.example");
+    }
+    expect(safeNextPath(42)).toBe("/account");
   });
 });
 

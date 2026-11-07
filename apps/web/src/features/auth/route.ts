@@ -1,7 +1,13 @@
 import "server-only";
 import { isAPIError } from "better-auth/api";
 import type { Db } from "@/server/db/client";
-import { createRoute, HttpError, type RateLimitOption, type RequestSessionInfo, type SessionLookup } from "@/server/http";
+import {
+  createRoute,
+  HttpError,
+  type RateLimitOption,
+  type RequestSessionInfo,
+  type SessionLookup,
+} from "@/server/http";
 import { authConfig } from "./config";
 import { createAuth, type Auth } from "./server";
 
