@@ -50,9 +50,8 @@ for (const vp of VIEWPORTS) {
             await diagram.scrollIntoViewIfNeeded();
             // The diagram is taller than the viewport, so the sticky site header would land on it at a scroll
             // offset that varies; hide it for this shot.
-            await expect(diagram).toHaveScreenshot(`${p.name}-diagram-${vp.name}-${scheme}.png`, {
-              style: "header.sticky { visibility: hidden !important; }",
-            });
+            await page.addStyleTag({ content: "header.sticky { visibility: hidden !important; }" });
+            await expect(diagram).toHaveScreenshot(`${p.name}-diagram-${vp.name}-${scheme}.png`);
           }
         });
       }

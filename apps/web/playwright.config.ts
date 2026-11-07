@@ -19,7 +19,7 @@ export default defineConfig({
   // Plan §12.7: 2 retries in CI (flakes are reported), none locally.
   retries: isCI ? 2 : 0,
   workers: isCI ? 4 : undefined,
-  reporter: isCI ? [["github"], ["html", { open: "never" }], ["blob"]] : [["list"], ["html", { open: "never" }]],
+  reporter: isCI ? [["github"], ["html", { open: "never" }]] : [["list"], ["html", { open: "never" }]],
   // One baseline per screenshot, shared by every machine: baselines are always made on Linux (Docker or CI).
   snapshotPathTemplate: "{testDir}/__screenshots__/{testFilePath}/{arg}{ext}",
   expect: {
