@@ -14,10 +14,13 @@ async function open(page: Page, path: string) {
 
 /** Dispatches a cancelable event on the first match and returns whether the page cancelled it. */
 function dispatch(page: Page, selector: string, type: "contextmenu" | "dragstart") {
-  return page.locator(selector).first().evaluate((el, t) => {
-    const ev = new MouseEvent(t, { bubbles: true, cancelable: true });
-    return !el.dispatchEvent(ev);
-  }, type);
+  return page
+    .locator(selector)
+    .first()
+    .evaluate((el, t) => {
+      const ev = new MouseEvent(t, { bubbles: true, cancelable: true });
+      return !el.dispatchEvent(ev);
+    }, type);
 }
 
 test.describe("content protection", () => {
@@ -36,12 +39,15 @@ test.describe("content protection", () => {
 
   test("copying puts the notice on the clipboard instead of the content", async ({ page }) => {
     await open(page, ARTICLE);
-    const result = await page.locator("article p").first().evaluate((el) => {
-      const data = new DataTransfer();
-      const ev = new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: data });
-      el.dispatchEvent(ev);
-      return { cancelled: ev.defaultPrevented, text: data.getData("text/plain") };
-    });
+    const result = await page
+      .locator("article p")
+      .first()
+      .evaluate((el) => {
+        const data = new DataTransfer();
+        const ev = new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData: data });
+        el.dispatchEvent(ev);
+        return { cancelled: ev.defaultPrevented, text: data.getData("text/plain") };
+      });
     expect(result.cancelled).toBe(true);
     expect(result.text).toMatch(NOTICE);
   });
@@ -123,14 +129,23 @@ test.describe("crawler controls", () => {
   test("robots.txt refuses AI crawlers and allows Googlebot and Bingbot", async ({ page }) => {
     const groups = await robotsGroups(page);
     const groupOf = (agent: string) => groups.find((g) => g.agents.includes(agent));
-    for (const bot of ["GPTBot", "ChatGPT-User", "CCBot", "ClaudeBot", "anthropic-ai", "Google-Extended", "PerplexityBot", "Bytespider"]) {
+    for (const bot of [
+      "GPTBot",
+      "ChatGPT-User",
+      "CCBot",
+      "ClaudeBot",
+      "anthropic-ai",
+      "Google-Extended",
+      "PerplexityBot",
+      "Bytespider",
+    ]) {
       expect(groupOf(bot)?.disallow, bot).toContain("/");
     }
     for (const bot of ["Googlebot", "Bingbot"]) {
       expect(groupOf(bot)?.allow, bot).toContain("/");
       expect(groupOf(bot)?.disallow, bot).not.toContain("/");
     }
-    const all = (await (await page.request.get("/robots.txt")).text());
+    const all = await (await page.request.get("/robots.txt")).text();
     expect(all).toMatch(/^Sitemap: https?:\/\/.+\/sitemap\.xml$/m);
   });
 

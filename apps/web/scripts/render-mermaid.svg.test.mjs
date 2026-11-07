@@ -41,7 +41,7 @@ test("rounding never merges adjacent numbers", () => {
 
 test("random compact paths stay valid and equal the rounded input", () => {
   let seed = 42;
-  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
   for (let k = 0; k < 2000; k++) {
     let d = "M";
     const nums = [];
@@ -65,7 +65,8 @@ test("other attributes keep their separators", () => {
 });
 
 test("optimize rounds symbol paths without corrupting them", () => {
-  const svg = '<svg id="r"><symbol id="r-i"><path d="M12.2604 0l.2601 0 .26.0149.25.01"/></symbol><use href="#r-i"/></svg>';
+  const svg =
+    '<svg id="r"><symbol id="r-i"><path d="M12.2604 0l.2601 0 .26.0149.25.01"/></symbol><use href="#r-i"/></svg>';
   const d = /\sd="([^"]*)"/.exec(optimize(svg, "r"))[1];
   assert.deepEqual(pathNumbers(d), [12.26, 0, 0.26, 0, 0.26, 0.01, 0.25, 0.01]);
   assert.equal(d, "M12.26 0l.26 0 .26.01.25.01");

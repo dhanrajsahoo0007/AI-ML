@@ -94,7 +94,9 @@ async function main() {
     try {
       browser = await chromium.launch();
     } catch (err) {
-      console.error(`mermaid: could not start Chromium. Run \`npx playwright install chromium\` first.\n${err.message}`);
+      console.error(
+        `mermaid: could not start Chromium. Run \`npx playwright install chromium\` first.\n${err.message}`
+      );
       process.exit(1);
     }
     const page = await browser.newPage();
@@ -130,12 +132,13 @@ async function main() {
         {
           config: mermaidConfig(mode),
           jobs: jobs.map((j) => ({ id: `mmd-${j.hash}-${mode[0]}`, source: prepareSource(j.chart, mode) })),
-        },
+        }
       );
       results.forEach((r, i) => {
         const job = jobs[i];
         if (r.error) {
-          if (mode === "light") failures.push(`${job.file}:${job.line}: Mermaid error: ${r.error.split("\n").slice(0, 4).join(" ")}`);
+          if (mode === "light")
+            failures.push(`${job.file}:${job.line}: Mermaid error: ${r.error.split("\n").slice(0, 4).join(" ")}`);
           job.failed = true;
         } else {
           const rootId = `mmd-${job.hash}-${mode[0]}`;

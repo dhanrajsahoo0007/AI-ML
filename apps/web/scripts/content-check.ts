@@ -38,7 +38,10 @@ function lineIn(text: string, index: number) {
 }
 
 function lineOfKey(file: string, key: string) {
-  const i = fs.readFileSync(file, "utf8").split("\n").findIndex((l) => l.includes(`key: ${key}`));
+  const i = fs
+    .readFileSync(file, "utf8")
+    .split("\n")
+    .findIndex((l) => l.includes(`key: ${key}`));
   return i === -1 ? undefined : i + 1;
 }
 
@@ -54,15 +57,30 @@ function checkRegistry(sections: SectionDef[]) {
     const routeDir = path.join(APP_DIR, s.key);
     const hasContent = fs.existsSync(contentDir);
     if (s.kind === "docs") {
-      if (!hasContent) report(regFile, `docs section ${s.key} has no content/${s.key}/ folder`, s.state === "off" ? "warning" : "error", line);
-      if (fs.existsSync(routeDir)) report(path.relative(ROOT, routeDir), `docs sections are served by app/(content)/[section]; remove app/${s.key}`);
+      if (!hasContent)
+        report(
+          regFile,
+          `docs section ${s.key} has no content/${s.key}/ folder`,
+          s.state === "off" ? "warning" : "error",
+          line
+        );
+      if (fs.existsSync(routeDir))
+        report(
+          path.relative(ROOT, routeDir),
+          `docs sections are served by app/(content)/[section]; remove app/${s.key}`
+        );
     } else if (KINDS_WITH_ROUTES.includes(s.kind) && s.state !== "off" && !fs.existsSync(routeDir)) {
       report(regFile, `section ${s.key} (${s.kind}) has no app/${s.key}/ route folder`, "error", line);
     }
     for (const a of s.aggregates ?? []) {
       const target = sections.find((t) => t.key === a);
       if (target && target.kind !== "question-bank" && target.kind !== "problems") {
-        report(regFile, `section ${s.key} aggregates ${a}, whose kind (${target.kind}) has no company tags`, "warning", line);
+        report(
+          regFile,
+          `section ${s.key} aggregates ${a}, whose kind (${target.kind}) has no company tags`,
+          "warning",
+          line
+        );
       }
     }
   }
@@ -191,7 +209,12 @@ async function main() {
         } else if (state !== "on" && section.state === "on") {
           const isGuarded = guarded.some(([a, b]) => m.index! >= a && m.index! < b);
           if (!isGuarded) {
-            report(item.file, `links to ${raw}, which is ${state} in this environment (${process.env.APP_ENV ?? "default"})`, "warning", line);
+            report(
+              item.file,
+              `links to ${raw}, which is ${state} in this environment (${process.env.APP_ENV ?? "default"})`,
+              "warning",
+              line
+            );
           }
         }
       }

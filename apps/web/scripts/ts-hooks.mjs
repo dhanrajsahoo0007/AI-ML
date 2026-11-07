@@ -39,7 +39,8 @@ registerHooks({
   },
   // The repo's TypeScript is ESM; say so, instead of letting Node guess per file (and warn).
   load(url, context, nextLoad) {
-    if (url.startsWith("file:") && url.endsWith(".ts")) return nextLoad(url, { ...context, format: "module-typescript" });
+    if (url.startsWith("file:") && url.endsWith(".ts"))
+      return nextLoad(url, { ...context, format: "module-typescript" });
     return nextLoad(url, context);
   },
 });

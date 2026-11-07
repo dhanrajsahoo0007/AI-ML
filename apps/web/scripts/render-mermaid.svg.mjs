@@ -54,7 +54,8 @@ export function uniquifyIds(svg, prefix) {
 
 // Interaction-only data (data-points, data-id, ...), unused marker definitions, ids nothing points at and
 // sub-pixel precision add ~30% to each SVG without changing how it looks.
-const GEOMETRY_ATTRS = /(\s(?:d|transform|x|y|x1|y1|x2|y2|cx|cy|r|rx|ry|width|height|viewBox|points|refX|refY)=")([^"]*)"/g;
+const GEOMETRY_ATTRS =
+  /(\s(?:d|transform|x|y|x1|y1|x2|y2|cx|cy|r|rx|ry|width|height|viewBox|points|refX|refY)=")([^"]*)"/g;
 
 export function optimize(svg, rootId) {
   let out = svg.replace(/\sdata-[\w-]+="[^"]*"/g, "");
