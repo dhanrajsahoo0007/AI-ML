@@ -57,12 +57,10 @@ function beforeBuild() {
   fs.writeFileSync(path.join(dir, "hidden-routes.json"), `${JSON.stringify(hiddenRoutes(), null, 2)}\n`);
   fs.writeFileSync(path.join(dir, "premium-routes.json"), `${JSON.stringify(premiumRoutes(), null, 2)}\n`);
   if (process.env.SKIP_CONTENT_CHECK) return;
-  // Cloud's practice questions are not filed in articles.yaml yet: reported, but not blocking.
-  execFileSync(
-    process.execPath,
-    ["--import", "./scripts/ts-hooks.mjs", "scripts/content-check.ts", "--warn-cloud-questions"],
-    { cwd: __dirname, stdio: "inherit" }
-  );
+  execFileSync(process.execPath, ["--import", "./scripts/ts-hooks.mjs", "scripts/content-check.ts"], {
+    cwd: __dirname,
+    stdio: "inherit",
+  });
 }
 
 function readGenerated(file: string): string {
