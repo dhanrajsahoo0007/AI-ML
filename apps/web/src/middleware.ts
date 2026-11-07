@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ENTITLEMENT_COOKIE, isAdmin, keyringFromEnv, verifyEntitlement } from "@/server/edge/entitlement";
-import { readEdgeEnv } from "@/server/edge/env";
+import { appVersion, readEdgeEnv } from "@/server/edge/env";
 import { maintenanceResponse } from "@/server/edge/maintenance";
 import {
   EMPTY_MANIFEST,
@@ -22,8 +22,11 @@ import {
 
 const manifest = loadManifest();
 
-/** A path no route serves: rewriting to it renders the site's 404 page with status 404. */
+/** A path no route serves: rewriting to it renders the site's 404 page (for RSC requests too). */
 const NOT_FOUND_PATH = "/_edge-gate/not-found";
+
+/** Response header carrying the deployed commit; the deploy smoke test checks it (plan §7.8). */
+const VERSION_HEADER = "x-app-version";
 
 export async function middleware(request: NextRequest) {
   const env = readEdgeEnv();
@@ -36,25 +39,29 @@ export async function middleware(request: NextRequest) {
   }
 
   const decision = decideGate({ pathname, manifest, killed: parseKillList(env.SECTIONS_KILL), isAdmin: admin });
+  let response: Response;
   switch (decision.action) {
     case "maintenance":
-      return maintenanceResponse();
-    case "not-found": {
-      const response = NextResponse.rewrite(new URL(NOT_FOUND_PATH, request.url));
+      response = maintenanceResponse();
+      break;
+    case "not-found":
+      // Next.js answers 404 for HTML; RSC requests get the not-found tree with a 200, as for any missing
+      // page. Don't force 404 on those: the client router leaves non-200 prefetch bodies unread.
+      response = NextResponse.rewrite(new URL(NOT_FOUND_PATH, request.url));
       response.headers.set("Cache-Control", "no-store");
       response.headers.set("X-Robots-Tag", "noindex");
-      return response;
-    }
-    case "pass": {
-      if (!decision.gated) return NextResponse.next();
-      // A hidden page shown to an admin: keep it out of every shared cache.
-      const response = NextResponse.next();
-      response.headers.set("Cache-Control", "private, no-store");
-      response.headers.set("Vary", "Cookie");
-      response.headers.set("X-Robots-Tag", "noindex");
-      return response;
-    }
+      break;
+    case "pass":
+      response = NextResponse.next();
+      if (decision.gated) {
+        // A hidden page shown to an admin: keep it out of every shared cache.
+        response.headers.set("Cache-Control", "private, no-store");
+        response.headers.set("X-Robots-Tag", "noindex");
+      }
+      break;
   }
+  response.headers.set(VERSION_HEADER, appVersion(env));
+  return response;
 }
 
 export const config = {

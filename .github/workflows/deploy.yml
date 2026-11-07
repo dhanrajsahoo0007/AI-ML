@@ -155,8 +155,10 @@ jobs:
           manifest=apps/web/src/generated/hidden-routes.json
           for p in $(jq -r '.hidden[], .off[]' "$manifest"); do
             code=$(fetch "$p"); [ "$code" = "404" ] || fail "$p (hidden/off) returned ${code}, expected 404"
-            code=$(curl "${args[@]}" -H "RSC: 1" -o /dev/null -w '%{http_code}' "$base$p" || echo 000)
-            [ "$code" = "404" ] || fail "$p (hidden/off, RSC) returned ${code}, expected 404"
+            # RSC requests for a missing page get a 200 with the not-found tree (Next.js behaviour).
+            code=$(curl "${args[@]}" -H "RSC: 1" -o "$body" -w '%{http_code}' "$base$p" || echo 000)
+            [ "$code" = "404" ] || grep -q "NEXT_HTTP_ERROR_FALLBACK;404" "$body" \
+              || fail "$p (hidden/off, RSC) returned ${code} without the not-found tree"
           done
 
           # robots.txt and sitemap.xml are valid.
