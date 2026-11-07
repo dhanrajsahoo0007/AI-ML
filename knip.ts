@@ -16,8 +16,6 @@ const config: KnipConfig = {
         "eslint-config-next",
         // Peer of @tailwindcss/postcss; Next.js ships its own copy.
         "postcss",
-        // Kept for the zod frontmatter/env schemas that wave-1 stream D and Phase 4 add (plan §3: zod at boundaries).
-        "zod",
       ],
     },
   },
