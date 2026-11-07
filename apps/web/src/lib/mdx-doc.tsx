@@ -10,6 +10,7 @@ import rehypeKatex from "rehype-katex";
 import type { Root as MdastRoot } from "mdast";
 import { rehypeHeadingIds, type DocHeading } from "@/lib/doc-headings";
 import { rehypeMermaidSvg } from "@/lib/rehype-mermaid-svg";
+import { remarkAssetRefs } from "@/lib/remark-asset-refs";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
 import { Pre, MermaidSvg } from "@/components/mdx/code-block";
@@ -81,7 +82,7 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
     options: {
       parseFrontmatter: false,
       mdxOptions: {
-        remarkPlugins: [remarkGfm, remarkMath, [remarkDetectMath, flags]],
+        remarkPlugins: [remarkGfm, remarkMath, [remarkDetectMath, flags], remarkAssetRefs],
         rehypePlugins: [[rehypeMermaidSvg, { filePath, lineOffset }], rehypeKatex, [rehypeHeadingIds, { headings }]],
       },
     },

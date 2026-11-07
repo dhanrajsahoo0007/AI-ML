@@ -212,11 +212,11 @@ export function Diagram({ id, ...options }: { id: string } & DiagramOptions) {
 
 /**
  * A reusable Mermaid diagram from assets/diagrams/mermaid/<ref>.mmd, pre-rendered to light and dark SVG by
- * the same build-time pipeline as ```mermaid fences. In `next dev` the .mmd file is read directly, so edits
- * show up without a rebuild (client-side fallback until `npm run assets` renders them).
+ * the same build-time pipeline as ```mermaid fences. Written `<Mermaid ref="…" />` in MDX; remarkAssetRefs
+ * renames `ref` (which React reserves) to `id` at compile time. In `next dev` the .mmd file is read directly,
+ * so edits show up without a rebuild (client-side fallback until `npm run assets` renders them).
  */
-export function Mermaid({ ref, id, caption, minWidth }: { ref?: string; id?: string; caption?: string; minWidth?: number }) {
-  const source = ref ?? id;
+export function Mermaid({ id: source, caption, minWidth }: { id?: string; caption?: string; minWidth?: number }) {
   if (!isProd && source) {
     const assetId = resolveAssetRef("Mermaid", source);
     const file = path.join(process.cwd(), "assets", `${assetId}.mmd`);
