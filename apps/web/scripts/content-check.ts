@@ -29,7 +29,18 @@ const APP_DIR = path.join(ROOT, "src", "app");
 /** content/ folders that hold data rather than a section. */
 const DATA_FOLDERS = new Set(["question-bank", "pages", "assets"]);
 /** Top-level route folders that are not sections (plan §5.1 registry contract). */
-const SYSTEM_ROUTES = new Set(["api", "pricing", "account", "admin", "legal", "contact", "security", "auth", "login"]);
+const SYSTEM_ROUTES = new Set([
+  "api",
+  "pricing",
+  "account",
+  "sign-in",
+  "admin",
+  "legal",
+  "contact",
+  "security",
+  "auth",
+  "login",
+]);
 
 const problems: ContentError[] = [];
 const report = (file: string, message: string, level: ContentError["level"] = "error", line?: number) =>
