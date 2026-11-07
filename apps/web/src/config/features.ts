@@ -1,30 +1,37 @@
-import type { ContentSection } from "@/types/content";
+import fs from "node:fs";
+import path from "node:path";
+import yaml from "js-yaml";
+import { featuresSchema } from "../features/sections/schema";
+import { isPathVisible, resolveAppEnv } from "../features/sections/registry";
 
-// Switches for content that is parked for a future iteration. Files stay in the repo; flipping a
-// flag to true and rebuilding brings the section or categories back everywhere (nav, pages,
-// interview library, companies page and home counts).
-export const features = {
-  /** The /ml-system-design section and the practice questions from its articles. */
-  mlSystemDesign: false,
-  /** Interview categories flagged `mlInterviews` in taxonomy.yaml: ML Fundamentals, Deep Learning, Statistics & Data Science. */
-  mlInterviews: false,
-  /** The /cloud section (AWS, GCP and Azure). Shown under `next dev` only until the pilot pages are approved; set to
-   *  true to publish it in production builds. */
-  cloud: process.env.NODE_ENV !== "production",
-} as const;
+// Switches that are not sections, read from content/features.yaml with a state per environment
+// (sections and their release states live in content/sections.yaml). Build-time module: also read by
+// next.config.ts, so relative imports only.
 
-export type FeatureFlag = keyof typeof features;
+const FILE = path.join(process.cwd(), "content", "features.yaml");
 
-export function isSectionEnabled(section: ContentSection) {
-  if (section === "ml-system-design") return features.mlSystemDesign;
-  if (section === "cloud") return features.cloud;
-  return true;
+function loadFeatures(): Record<string, boolean> {
+  const result = featuresSchema.safeParse(yaml.load(fs.readFileSync(FILE, "utf8")));
+  if (!result.success) {
+    const lines = result.error.issues.map((i) => `  ${FILE} [${i.path.join(".")}]: ${i.message}`);
+    throw new Error(`Invalid feature switches:\n${lines.join("\n")}`);
+  }
+  const env = resolveAppEnv();
+  return Object.fromEntries(Object.entries(result.data).map(([name, states]) => [name, states[env] === "on"]));
 }
 
-// True when a site path such as /ml-system-design/... belongs to an enabled section.
-export function isPathEnabled(href: string) {
-  const under = (root: string) => href === root || href.startsWith(`${root}/`);
-  if (under("/ml-system-design")) return features.mlSystemDesign;
-  if (under("/cloud")) return features.cloud;
-  return true;
+/** Each switch's value in the current environment, e.g. `features.mlInterviews`. */
+export const features: Readonly<Record<string, boolean>> = loadFeatures();
+
+export type FeatureFlag = string;
+
+export function isFeatureOn(flag: FeatureFlag): boolean {
+  return features[flag] === true;
 }
+
+/**
+ * @deprecated Section switches moved to content/sections.yaml; use isPathVisible from
+ * features/sections/registry. Kept only for src/app/api/markdown, which stream B deletes; remove
+ * this alias once that route is gone.
+ */
+export const isPathEnabled = isPathVisible;

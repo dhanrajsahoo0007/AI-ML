@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import matter from "gray-matter";
-import { features, isPathEnabled, type FeatureFlag } from "@/config/features";
+import { features, type FeatureFlag } from "@/config/features";
+import { allSections, isPathVisible, sectionOfKind } from "@/features/sections/registry";
 
 // The interview question library: every question has a category and subsection from
 // content/question-bank/taxonomy.yaml. Questions come from two places:
@@ -124,7 +125,7 @@ function loadTaxonomy(errors: string[]): Category[] {
 }
 
 function loadCompanies(errors: string[]): Company[] {
-  const raw = readYaml<Company[]>(path.join(CONTENT, "companies", "companies.yaml"));
+  const raw = readYaml<Company[]>(path.join(CONTENT, sectionOfKind("directory").key, "companies.yaml"));
   const slugs = new Set<string>();
   for (const c of raw) {
     for (const key of ["slug", "name", "group", "roles", "loop"] as const) {
@@ -243,19 +244,43 @@ function loadArticleQuestions(
       });
     }
   }
-  // Every article with practice questions must be filed somewhere.
-  for (const section of ["ai-system-design", "system-design", "ml-system-design"]) {
-    const dir = path.join(CONTENT, section);
+  return out;
+}
+
+export interface UnmappedQuestionArticle {
+  section: string;
+  href: string;
+  file: string;
+}
+
+// Every article with practice questions must be filed in articles.yaml. Checked for each section with
+// `questions: true` in content/sections.yaml, by scripts/content-check.ts (not at render time).
+export function findUnmappedQuestionArticles(): UnmappedQuestionArticle[] {
+  const map = readYaml<Record<string, string>>(path.join(BANK_DIR, "articles.yaml"));
+  const out: UnmappedQuestionArticle[] = [];
+  for (const section of allSections().filter((s) => s.questions)) {
+    const dir = path.join(CONTENT, section.key);
     if (!fs.existsSync(dir)) continue;
-    for (const rel of fs.readdirSync(dir, { recursive: true }) as string[]) {
+    for (const rel of (fs.readdirSync(dir, { recursive: true }) as string[]).sort()) {
       if (!rel.endsWith(".mdx")) continue;
-      const href = `/${section}/${rel.replace(/\.mdx$/, "")}`;
-      if (!(href in map) && fs.readFileSync(path.join(CONTENT, section, rel), "utf8").includes("<InterviewQuestion ")) {
-        errors.push(`articles.yaml: ${href} has practice questions but no subsection`);
+      const href = `${section.href}/${rel.replace(/\.mdx$/, "")}`;
+      const file = path.join(dir, rel);
+      if (!(href in map) && fs.readFileSync(file, "utf8").includes("<InterviewQuestion ")) {
+        out.push({ section: section.key, href, file });
       }
     }
   }
   return out;
+}
+
+/** Loads and validates the whole library; returns the problems instead of throwing (content-check). */
+export function validateLibrary(): string[] {
+  try {
+    load();
+    return [];
+  } catch (e) {
+    return String((e as Error).message).split("\n").slice(1);
+  }
 }
 
 interface Library {
@@ -297,19 +322,19 @@ function load(): Library {
 }
 
 // Everything is loaded and validated, but readers only see categories whose flag is on, and
-// links and article questions from sections that are switched off are left out.
+// links and article questions from sections that are not `on` (hidden or off) are left out.
 function isCategoryVisible(c: Category) {
   return !c.flag || features[c.flag];
 }
 
 function visibleLink(link?: LinkRef) {
-  return link && isPathEnabled(link.href) ? link : undefined;
+  return link && isPathVisible(link.href) ? link : undefined;
 }
 
 export function getCategories() {
   return load()
     .categories.filter(isCategoryVisible)
-    .map((c) => ({ ...c, study: c.study.filter((s) => isPathEnabled(s.href)) }));
+    .map((c) => ({ ...c, study: c.study.filter((s) => isPathVisible(s.href)) }));
 }
 
 export function getCategory(slug: string) {

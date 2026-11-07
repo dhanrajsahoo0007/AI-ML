@@ -5,11 +5,11 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { FadeIn } from "@/components/motion/fade-in";
 import { PageHeader } from "@/components/ui/editorial";
 import { QuestionList } from "@/components/mdx/question-bank";
+import { isRouteBuilt, routeSection } from "@/features/sections/route-helpers";
 import { getCategories, getCategory, getQuestions } from "@/lib/question-bank";
 
-export const revalidate = 3600;
-
 export function generateStaticParams() {
+  if (!isRouteBuilt("question-bank")) return [];
   return getCategories().map((c) => ({ category: c.slug }));
 }
 
@@ -21,6 +21,7 @@ export async function generateMetadata({ params }: { params: Promise<{ category:
 export default async function CategoryPage({ params }: { params: Promise<{ category: string }> }) {
   const category = getCategory((await params).category);
   if (!category) notFound();
+  const section = routeSection("question-bank");
   const questions = getQuestions({ category: category.slug });
   const titles = new Map(category.subsections.map((s) => [s.slug, s.title]));
 
@@ -29,7 +30,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ categ
       <Breadcrumb
         items={[
           { label: "Home", href: "/" },
-          { label: "Interviews", href: "/interviews" },
+          { label: section.label, href: section.href },
           { label: category.title },
         ]}
       />

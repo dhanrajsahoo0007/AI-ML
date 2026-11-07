@@ -5,13 +5,13 @@ import { FadeIn } from "@/components/motion/fade-in";
 import { PageHeader } from "@/components/ui/editorial";
 import { QuestionList } from "@/components/mdx/question-bank";
 import { cn } from "@/lib/utils";
+import { isRouteBuilt, routeSection } from "@/features/sections/route-helpers";
 import { getCategories, getCategory, getQuestions } from "@/lib/question-bank";
-
-export const revalidate = 3600;
 
 type Params = Promise<{ category: string; subsection: string }>;
 
 export function generateStaticParams() {
+  if (!isRouteBuilt("question-bank")) return [];
   return getCategories().flatMap((c) =>
     c.subsections.map((s) => ({ category: c.slug, subsection: s.slug }))
   );
@@ -35,6 +35,7 @@ export default async function SubsectionPage({ params }: { params: Params }) {
   const p = await params;
   const found = resolve(p.category, p.subsection);
   if (!found) notFound();
+  const section = routeSection("question-bank");
   const { category, subsection } = found;
   const questions = getQuestions({ category: category.slug, subcategory: subsection.slug });
 
@@ -43,7 +44,7 @@ export default async function SubsectionPage({ params }: { params: Params }) {
       <Breadcrumb
         items={[
           { label: "Home", href: "/" },
-          { label: "Interviews", href: "/interviews" },
+          { label: section.label, href: section.href },
           { label: category.title, href: `/interviews/${category.slug}` },
           { label: subsection.title },
         ]}

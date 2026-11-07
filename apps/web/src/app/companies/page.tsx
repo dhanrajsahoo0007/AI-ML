@@ -5,25 +5,34 @@ import { FadeIn } from "@/components/motion/fade-in";
 import { PageHeader } from "@/components/ui/editorial";
 import { questionItems, SourceCredit } from "@/components/mdx/question-bank";
 import { COMPANY_GROUPS, getCategories, getCompanies, getQuestions } from "@/lib/question-bank";
-
-export const revalidate = 3600;
+import { routeSection } from "@/features/sections/route-helpers";
+import { directoryRefs } from "@/features/sections/kinds";
+import { getSection } from "@/features/sections/registry";
 
 export const metadata = {
   title: "Interview questions by company",
   description: "Interview questions publicly reported at top AI companies, with our answers.",
 };
 
-export default function CompaniesPage() {
-  const tagged = getQuestions().filter((q) => q.companies.length > 0);
+export default async function CompaniesPage() {
+  const section = routeSection("directory");
+  // Counts and questions come only from the aggregated sections that are `on` (Interview Practice
+  // today; DSA later).
+  const refs = await directoryRefs(section);
+  const fromBank = (section.aggregates ?? []).some((key) => {
+    const s = getSection(key);
+    return s?.kind === "question-bank" && s.state === "on";
+  });
+  const tagged = fromBank ? getQuestions().filter((q) => q.companies.length > 0) : [];
   const companies = getCompanies().map((c) => ({
     ...c,
-    count: tagged.filter((q) => q.companies.includes(c.slug)).length,
+    count: refs.filter((r) => r.company === c.slug).length,
   }));
   const categoryTitles = new Map(getCategories().map((c) => [c.slug, c.title]));
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8">
-      <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Companies" }]} />
+      <Breadcrumb items={[{ label: "Home", href: "/" }, { label: section.label }]} />
       <FadeIn>
         <PageHeader
           className="mt-10 mb-12 border-b border-hairline pb-12"

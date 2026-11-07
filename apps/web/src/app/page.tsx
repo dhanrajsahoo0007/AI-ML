@@ -3,24 +3,24 @@ import { Workflow } from "@/components/home/workflow";
 import { Features } from "@/components/home/features";
 import { Stats } from "@/components/home/stats";
 import { CtaBanner } from "@/components/home/cta-banner";
-import { countWrittenArticles } from "@/lib/mdx-doc";
-import { getCompanies, getQuestions } from "@/lib/question-bank";
-
-export const revalidate = 3600;
+import { visibleSections } from "@/features/sections/registry";
+import { loadSection } from "@/features/sections/kinds";
+import type { SectionKindName } from "@/features/sections/schema";
 
 export default async function HomePage() {
-  const articles = await countWrittenArticles(["ai-system-design", "system-design"]);
+  // Stats count only `on` sections, each through its kind's counts().
+  const loaded = await Promise.all(visibleSections().map(loadSection));
+  const written = (kind: SectionKindName) =>
+    loaded
+      .filter((l) => l.section.kind === kind)
+      .reduce((n, l) => n + l.kind.counts(l.items).written, 0);
 
   return (
     <>
       <Hero />
       <Workflow />
       <Features />
-      <Stats
-        questions={getQuestions().length}
-        articles={articles}
-        companies={getCompanies().length}
-      />
+      <Stats questions={written("question-bank")} articles={written("docs")} companies={written("directory")} />
       <CtaBanner />
     </>
   );

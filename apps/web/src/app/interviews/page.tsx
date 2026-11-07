@@ -4,11 +4,11 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { FadeIn } from "@/components/motion/fade-in";
 import { Eyebrow, PageHeader } from "@/components/ui/editorial";
 import { getIconComponent } from "@/lib/icons";
+import { routeSection } from "@/features/sections/route-helpers";
 import { CATEGORY_GROUPS, getCategories, getQuestions } from "@/lib/question-bank";
 
-export const revalidate = 3600;
-
 export default function InterviewsIndexPage() {
+  const section = routeSection("question-bank");
   const categories = getCategories();
   const total = getQuestions().length;
   const count = (category: string, subcategory?: string) =>
@@ -16,7 +16,7 @@ export default function InterviewsIndexPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8">
-      <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Interviews" }]} />
+      <Breadcrumb items={[{ label: "Home", href: "/" }, { label: section.label }]} />
 
       <FadeIn>
         <PageHeader

@@ -1,9 +1,13 @@
 import type { NextConfig } from "next";
-import path from "path";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
 import { features } from "./src/config/features";
+import { allSections, hiddenRoutes, publicNavLinks, resolveAppEnv } from "./src/features/sections/registry";
 
 // Old topic-bank URLs, now category and subsection pages of the question library. Banks whose
-// category is switched off (see src/config/features.ts) go to the interviews index instead.
+// category is switched off (content/features.yaml) go to the interviews index instead.
 const ml = (to: string) => (features.mlInterviews ? to : "/interviews");
 const OLD_BANKS: Record<string, string> = {
   "ab-testing-and-experimentation": ml("/interviews/data-science/ab-testing"),
@@ -29,37 +33,64 @@ const OLD_BANKS: Record<string, string> = {
   "transformers-and-attention": "/interviews/llm-foundations/attention",
 };
 
-const nextConfig: NextConfig = {
-  output: "standalone",
-  outputFileTracingRoot: path.join(__dirname, "../.."),
-  async redirects() {
-    return [
-      ...Object.entries(OLD_BANKS).map(([slug, destination]) => ({
-        source: `/interviews/${slug}`,
-        destination,
-        permanent: true,
-      })),
-      { source: "/companies/:slug", destination: "/companies?company=:slug", permanent: true },
-      // Learning Paths was removed; ML System Design moved to /ml-system-design/components.
-      { source: "/learning-paths/:path*", destination: "/ai-system-design", permanent: true },
-      { source: "/learning-paths", destination: "/ai-system-design", permanent: true },
-      ...(features.mlSystemDesign
-        ? [
-            { source: "/system-design/ml-system-design", destination: "/ml-system-design/components", permanent: true },
-            { source: "/system-design/ml-system-design/:path*", destination: "/ml-system-design/components/:path*", permanent: true },
-          ]
-        : [
-            { source: "/system-design/ml-system-design", destination: "/ai-system-design", permanent: false },
-            { source: "/system-design/ml-system-design/:path*", destination: "/ai-system-design", permanent: false },
-          ]),
-      ...(features.mlInterviews
-        ? []
-        : ["ml-fundamentals", "deep-learning", "data-science"].flatMap((c) => [
-            { source: `/interviews/${c}`, destination: "/interviews", permanent: false },
-            { source: `/interviews/${c}/:path*`, destination: "/interviews", permanent: false },
-          ])),
-    ];
-  },
-};
+// Redirects declared by sections in content/sections.yaml: to `to` while the section is on, else to
+// `fallback` (temporary, so turning the section on later is not blocked by cached permanent redirects).
+function sectionRedirects() {
+  return allSections().flatMap((s) =>
+    (s.redirects ?? []).flatMap((r) => {
+      const destination = s.state === "on" ? r.to : r.fallback;
+      return destination ? [{ source: r.from, destination, permanent: s.state === "on" }] : [];
+    })
+  );
+}
 
-export default nextConfig;
+// Once per build (config is loaded again in build workers): write the hidden-route manifest for the
+// middleware (plan §5.1.1) and run the content checks before any page is rendered.
+function beforeBuild() {
+  if (process.env.SECTIONS_PREBUILD_DONE) return;
+  process.env.SECTIONS_PREBUILD_DONE = "1";
+  const dir = path.join(__dirname, "src", "generated");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "hidden-routes.json"), `${JSON.stringify(hiddenRoutes(), null, 2)}\n`);
+  if (process.env.SKIP_CONTENT_CHECK) return;
+  // Cloud's practice questions are not filed in articles.yaml yet: reported, but not blocking.
+  execFileSync(
+    process.execPath,
+    ["--import", "./scripts/ts-hooks.mjs", "scripts/content-check.ts", "--warn-cloud-questions"],
+    { cwd: __dirname, stdio: "inherit" }
+  );
+}
+
+export default function nextConfig(phase: string): NextConfig {
+  if (phase === PHASE_PRODUCTION_BUILD) beforeBuild();
+  return {
+    output: "standalone",
+    outputFileTracingRoot: path.join(__dirname, "../.."),
+    // Resolved once at build: the environment the section states were built for, and the `on`
+    // sections' header links (client components read these; hidden and off sections never ship).
+    env: {
+      APP_ENV: resolveAppEnv(),
+      SECTION_NAV: JSON.stringify(publicNavLinks()),
+    },
+    async redirects() {
+      return [
+        ...Object.entries(OLD_BANKS).map(([slug, destination]) => ({
+          source: `/interviews/${slug}`,
+          destination,
+          permanent: true,
+        })),
+        { source: "/companies/:slug", destination: "/companies?company=:slug", permanent: true },
+        // Learning Paths was removed.
+        { source: "/learning-paths/:path*", destination: "/ai-system-design", permanent: true },
+        { source: "/learning-paths", destination: "/ai-system-design", permanent: true },
+        ...sectionRedirects(),
+        ...(features.mlInterviews
+          ? []
+          : ["ml-fundamentals", "deep-learning", "data-science"].flatMap((c) => [
+              { source: `/interviews/${c}`, destination: "/interviews", permanent: false },
+              { source: `/interviews/${c}/:path*`, destination: "/interviews", permanent: false },
+            ])),
+      ];
+    },
+  };
+}
