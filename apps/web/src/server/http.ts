@@ -151,6 +151,12 @@ export interface RouteOptions<S extends BodySchema | undefined, A extends AuthLe
   handler(ctx: HandlerContext<S, A>): Promise<Response | Json | void> | Response | Json | void;
 }
 
+/** A route that doesn't exist in this build: always the uniform 404, with no config, session or DB work. */
+export const notFoundRoute: NextRouteHandler = async (request) => {
+  const requestId = request.headers.get("cf-ray") ?? crypto.randomUUID();
+  return finalize(errorResponse(notFound(), requestId), requestId);
+};
+
 export type NextRouteHandler = (
   request: Request,
   context: { params: Promise<Record<string, string | string[] | undefined>> }
