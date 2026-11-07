@@ -17,7 +17,7 @@ export function SignupBox({ source, title }: { source: "archive" | "issue"; titl
         {title}
       </h2>
       <p className="mt-2 mb-5 text-[15px] text-muted-foreground">
-        Free, no account needed (signed in? one click). One short email per issue; unsubscribe with one click.
+        Free, no account needed. One short email per issue; unsubscribe with one click.
       </p>
       <SignupForm
         endpoint={SUBSCRIBE_ENDPOINT}

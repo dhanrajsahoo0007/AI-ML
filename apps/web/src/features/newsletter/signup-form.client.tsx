@@ -3,11 +3,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useTurnstile } from "./turnstile.client";
 
-// The sign-up form: a small client island on the archive and issue pages (static HTML around it).
-// - Signed out: posts JSON to the subscribe API; the API answers the same for every address, so the form always
+// The sign-up form: a small client island on the archive and issue pages (static HTML around it). Content pages
+// make no API requests on load (auth.spec checks), so nothing is fetched until the visitor acts.
+// - By email: posts JSON to the subscribe API; the API answers the same for every address, so the form always
 //   says "check your inbox". With a Turnstile site key the widget loads on first interaction.
-// - Signed in: after load it asks the account API (no database work for signed-out visitors) and offers
-//   "Subscribe with your account": one click, no confirmation email (Google verified the address).
+// - "Subscribe with your account": one click for signed-in users, no confirmation email (Google verified the
+//   address). Signed out, it goes to sign-in and comes back with ?account=1, which shows the account's status.
 
 type State = { kind: "idle" | "sending" | "sent" } | { kind: "error"; message: string };
 
@@ -31,6 +32,9 @@ const MESSAGES: Record<number, string> = {
   429: "Too many sign-ups from this network. Please try again in an hour.",
 };
 
+/** Query parameter the sign-in round trip comes back with. */
+const RETURN_PARAM = "account";
+
 const CAPTCHA_FAILED = "Please complete the bot check below the email field, then try again.";
 
 const panel = "rounded-xl border border-hairline bg-paper-2/60 p-4 text-[15px] text-ink";
@@ -49,7 +53,9 @@ export function SignupForm(props: SignupFormProps) {
   const [useOtherEmail, setUseOtherEmail] = useState(false);
   const turnstile = useTurnstile(props.turnstileSiteKey);
 
+  // Back from sign-in (?account=1): show the account's status instead of the email form.
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get(RETURN_PARAM) !== "1") return;
     let live = true;
     fetch(accountEndpoint, { credentials: "same-origin", cache: "no-store" })
       .then((res) => (res.ok ? (res.json() as Promise<Account>) : null))
@@ -68,6 +74,11 @@ export function SignupForm(props: SignupFormProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "subscribe", source }),
       });
+      if (res.status === 401) {
+        const back = `${window.location.pathname}?${RETURN_PARAM}=1`;
+        window.location.assign(`/sign-in?callbackURL=${encodeURIComponent(back)}`);
+        return;
+      }
       if (res.ok) {
         setAccount((await res.json()) as Account);
         setState({ kind: "idle" });
@@ -212,6 +223,15 @@ export function SignupForm(props: SignupFormProps) {
       {state.kind === "error" && (
         <p role="alert" className="text-sm text-destructive">
           {state.message}
+        </p>
+      )}
+      {!account?.signedIn && (
+        <p className="text-sm text-muted-foreground">
+          Have an account?{" "}
+          <button type="button" onClick={subscribeWithAccount} className="underline hover:text-ink">
+            Subscribe with your account
+          </button>{" "}
+          in one click, no confirmation email.
         </p>
       )}
       <p className="text-xs leading-relaxed text-muted-foreground">
