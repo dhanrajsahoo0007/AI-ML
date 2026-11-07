@@ -1,0 +1,63 @@
+---
+title: Hash Maps
+description: Constant-time lookup by key, and the handful of patterns that turn quadratic scans into a single pass.
+icon: binary
+order: 1
+---
+
+A hash map stores key–value pairs and finds a value by its key in expected constant time. It does that by
+running the key through a hash function, which turns it into an array index (a *bucket*). Two keys that land in
+the same bucket are a *collision*; the map keeps both, either in a short list per bucket or by probing the next
+free slot. As long as the map grows before its buckets get crowded, lookups, inserts and deletes stay O(1) on
+average.
+
+## What it costs
+
+| Operation | Average | Worst case |
+| --- | --- | --- |
+| Insert / update | O(1) | O(n) |
+| Lookup | O(1) | O(n) |
+| Delete | O(1) | O(n) |
+| Iterate all entries | O(n) | O(n) |
+
+The worst case only happens when many keys collide, which a good hash function makes very unlikely. Memory is
+the real price: a hash map uses several times the space of a plain array holding the same values.
+
+In interviews you can treat the average case as the cost, and say so out loud.
+
+## In JavaScript and Python
+
+- **JavaScript:** use `Map` for arbitrary keys. It keeps insertion order, has a real `size`, and never confuses a
+  key with an inherited property the way a plain object can (`"constructor" in {}` is `true`).
+- **Python:** `dict` keeps insertion order too. `collections.Counter` counts things, `collections.defaultdict`
+  saves the "is the key there yet?" check, and `collections.OrderedDict` can move a key to either end in O(1).
+
+Keys must not change while they are in the map. Strings, numbers and tuples are safe. A JavaScript array used
+as a key is compared by identity, not by contents, so `[1, 2]` twice is two different keys; join it into a
+string (`"1,2"`) instead.
+
+## Patterns worth recognising
+
+1. **Complement lookup.** Looking for two items that combine into a target? For each item, ask the map whether
+   its partner was already seen, then record the item. One pass replaces a nested loop. *Two Sum* is the
+   canonical example.
+2. **Counting.** Count occurrences in one pass (`Counter`, or `map.set(x, (map.get(x) ?? 0) + 1)`), then answer
+   questions about frequencies: anagrams, the most common element, whether two strings use the same letters.
+3. **Grouping by a signature.** Compute a canonical key for each item (sorted letters, a tuple of counts) and
+   collect items under it. Everything that shares a key belongs together.
+4. **Index of last sighting.** Store where each value was last seen to measure distances or to slide a window's
+   left edge forward without rescanning.
+5. **Map plus another structure.** A map gives O(1) access by key but no order; pair it with a linked list, a
+   heap or an array when you also need recency, priority or random choice. *LRU Cache* combines a map with a
+   doubly linked list.
+
+## Pitfalls
+
+- **Checking before inserting.** In complement lookups, ask about the partner *before* adding the current item,
+  or an item can pair with itself.
+- **Falsy values.** A stored `0` or empty string is still a hit. Test with `map.has(key)` or `key in d`, not with
+  the truthiness of the value.
+- **Iteration order assumptions.** Insertion order is guaranteed in modern JavaScript and Python, but not in
+  every language. Don't rely on it in an answer you might have to port.
+- **When an array is enough.** If keys are small integers (letters `a`–`z`, values `0..n`), a fixed-size array is
+  faster and smaller than a map.
