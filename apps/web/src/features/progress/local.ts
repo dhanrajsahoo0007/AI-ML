@@ -35,6 +35,26 @@ export function readLocalProgress(): MergeItem[] {
   }));
 }
 
+/** Whether this browser has `contentKey` marked complete / bookmarked. */
+export function localProgressState(contentKey: string): { complete: boolean; bookmark: boolean } {
+  const { completed = {}, bookmarks = {} } = read();
+  return { complete: contentKey in completed, bookmark: contentKey in bookmarks };
+}
+
+/** Records (or removes) a completion or bookmark in this browser; merged into the account at sign-in. */
+export function setLocalProgress(contentKey: string, kind: "complete" | "bookmark", on: boolean): void {
+  const data = read();
+  const field = kind === "complete" ? "completed" : "bookmarks";
+  const entries = { ...(data[field] ?? {}) };
+  if (on) entries[contentKey] = new Date().toISOString();
+  else delete entries[contentKey];
+  try {
+    window.localStorage.setItem(LOCAL_PROGRESS_KEY, JSON.stringify({ ...data, [field]: entries }));
+  } catch {
+    // Storage blocked (private mode): the account copy, if signed in, still has it.
+  }
+}
+
 export function clearLocalProgress(): void {
   try {
     window.localStorage.removeItem(LOCAL_PROGRESS_KEY);

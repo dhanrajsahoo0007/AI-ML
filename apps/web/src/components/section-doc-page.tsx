@@ -6,6 +6,7 @@ import { getUpdatedDate } from "@/lib/doc-meta";
 import { loadDocItems } from "@/features/docs/source";
 import { isPremiumDoc } from "@/features/paywall/access";
 import { Paywall } from "@/features/paywall/paywall";
+import { ProgressActions } from "@/features/progress/progress-actions.client";
 import { getSection } from "@/features/sections/registry";
 import type { BreadcrumbItem, ContentSection } from "@/types/content";
 
@@ -67,7 +68,7 @@ export async function SectionDocPage({
         title={doc.frontmatter.title ?? slugPath}
         description={doc.frontmatter.description}
         docs={docs}
-        after={preview ? <Paywall path={item.href} /> : undefined}
+        after={preview ? <Paywall path={item.href} /> : <ProgressActions contentKey={item.href.slice(1)} />}
       >
         {doc.body}
       </ArticleLayout>
