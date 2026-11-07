@@ -160,7 +160,8 @@ only). Build outputs (src/generated/, .build-cache/, public/\_a/) are gitignored
 ```
 AGENTS.md · CLAUDE.md (@AGENTS.md) · README.md · knip.ts · .claude/skills/
 .github/workflows/      ci.yml (checks, two build profiles, E2E with Postgres, visual, a11y, leak, size,
-                        Lighthouse, gitleaks, semgrep, osv), deploy.yml + preview.yml, newsletter-send.yml
+                        Lighthouse, gitleaks, semgrep, osv), deploy.yml, preview.yml (unprivileged PR build) +
+                        preview-deploy.yml (trusted workflow_run upload), newsletter-send.yml (main only)
 apps/web/
   content/              sections.yaml, features.yaml, one folder per section, question-bank, companies, pages
   assets/               asset library (brand, images, diagrams, logos, icons, og, downloads, LICENSES.yaml)

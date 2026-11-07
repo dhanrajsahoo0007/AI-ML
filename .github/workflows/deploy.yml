@@ -7,7 +7,10 @@ name: Deploy
 #   → gradual deploy 10% → smoke tests pinned to the new version → 100% → smoke tests → (on failure) rollback
 #
 # Needs the secrets CLOUDFLARE_API_TOKEN (Workers Scripts: Edit, Account Settings: Read) and
-# CLOUDFLARE_ACCOUNT_ID, as environment secrets of `staging` and `production`. Until they exist the job
+# CLOUDFLARE_ACCOUNT_ID, as environment secrets of `staging` and `production`. Cloudflare can't scope a Workers
+# token to one script, so the token can deploy over every Worker in its account: keep the `preview` environment's
+# token separate (ideally on a separate Cloudflare account with no production Worker, security review M4), and
+# restrict each environment's deployment branches (production → main, staging → development). Until they exist the job
 # succeeds with a notice and deploys nothing. The first run on an environment with no Worker yet does a plain
 # `wrangler deploy` (nothing to roll back to).
 #

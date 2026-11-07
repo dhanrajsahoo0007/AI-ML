@@ -1,0 +1,178 @@
+name: Preview deploy
+
+# Second half of the per-PR preview (see preview.yml; security review M4). `workflow_run` always runs this file and
+# checks out the default branch, so the Cloudflare token only ever meets trusted code:
+#   - the PR's build output arrives as an artifact and is treated as data: wrangler (pinned by the default
+#     branch's lockfile, installed with --ignore-scripts) uploads it with the default branch's wrangler.jsonc, so
+#     a PR can't rename the Worker, add a build command, or point at another environment;
+#   - the compiled open-next config inside the artifact is deleted before `populateCache`, which would otherwise
+#     import it; the default branch's open-next.config.ts is compiled instead;
+#   - PRs from forks are never deployed.
+# The PR's code still runs on Cloudflare inside the preview Worker, so the `preview` environment must only ever hold
+# preview-only secret values (never production ones), and its Cloudflare token should be scoped to the preview
+# Worker's account (owner: a separate account, or at least a token without production access).
+#
+# Needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as secrets of the `preview` GitHub environment (add required
+# reviewers there to approve each preview). Until they exist the job succeeds with a notice and uploads nothing.
+# First run: if the preview Worker doesn't exist yet it is created with one `wrangler deploy`.
+
+on:
+  workflow_run:
+    workflows: [Preview]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-deploy-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: preview
+    permissions:
+      contents: read
+      actions: read # download the artifact of the triggering run
+      pull-requests: write # the preview URL comment
+    env:
+      WRANGLER_ENV: preview
+      WORKER: origins-ai-learn-preview
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: Check Cloudflare credentials and the PR
+        id: creds
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if ! printf '%s' "$PR" | grep -Eq '^[0-9]+$' || ! printf '%s' "$HEAD_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::notice title=Preview skipped::No pull request for this run."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice title=Preview skipped::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not set for the preview environment."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The default branch (workflow_run's default ref), never the PR head.
+      - if: steps.creds.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: steps.creds.outputs.ready == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - if: steps.creds.outputs.ready == 'true'
+        run: npm ci --ignore-scripts
+
+      - name: Download the PR's build output (data only)
+        if: steps.creds.outputs.ready == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: preview-build
+          path: ${{ runner.temp }}/preview-build
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Put the build output in place
+        if: steps.creds.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/preview-build"
+          rm -rf apps/web/.open-next
+          cp -R "$src" apps/web/.open-next
+          # populateCache imports this file when it exists; compile the default branch's config instead.
+          rm -f apps/web/.open-next/.build/open-next.config.edge.mjs apps/web/.open-next/.build/open-next.config.mjs
+
+      - name: Populate the incremental cache
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx opennextjs-cloudflare populateCache remote --env "$WRANGLER_ENV"
+        working-directory: apps/web
+
+      - name: Create the preview Worker on first use
+        if: steps.creds.outputs.ready == 'true'
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${WORKER}/deployments")
+          if [ "$code" = "404" ]; then
+            npx wrangler deploy --env "$WRANGLER_ENV" --name "$WORKER" --message "Create the preview Worker"
+          fi
+
+      - name: Upload the preview version
+        if: steps.creds.outputs.ready == 'true'
+        id: upload
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-upload.ndjson
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload --env "$WRANGLER_ENV" --name "$WORKER" --preview-alias "pr-${PR}" \
+            --tag "${HEAD_SHA::12}" --message "PR #${PR} ${HEAD_SHA::7}"
+          out=$(jq -c 'select(.type == "version-upload")' "$WRANGLER_OUTPUT_FILE_PATH" | tail -n1)
+          {
+            echo "version=$(jq -r '.version_id' <<<"$out")"
+            echo "url=$(jq -r '.preview_url // ""' <<<"$out")"
+            echo "alias_url=$(jq -r '.preview_alias_url // ""' <<<"$out")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the preview
+        if: steps.upload.outcome == 'success'
+        env:
+          BASE: ${{ steps.upload.outputs.url }}
+        run: |
+          set -euo pipefail
+          [ -n "$BASE" ] || { echo "::error::wrangler returned no preview URL (is preview_urls on?)"; exit 1; }
+          ua="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+          code=$(curl -sS -A "$ua" --max-time 20 -o "$RUNNER_TEMP/body" -D "$RUNNER_TEMP/head" -w '%{http_code}' "$BASE/")
+          [ "$code" = "200" ] || { echo "::error::/ returned ${code}"; exit 1; }
+          grep -qi "^x-app-version: ${HEAD_SHA}" "$RUNNER_TEMP/head" || { echo "::error::wrong or missing x-app-version"; exit 1; }
+          grep -q "<h1" "$RUNNER_TEMP/body" || { echo "::error::/ has no <h1>"; exit 1; }
+
+      - name: Comment the preview URL
+        if: steps.upload.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.upload.outputs.url }}
+          ALIAS_URL: ${{ steps.upload.outputs.alias_url }}
+          VERSION: ${{ steps.upload.outputs.version }}
+        run: |
+          set -euo pipefail
+          marker="<!-- workers-preview -->"
+          body="${marker}
+          **Preview** for \`${HEAD_SHA::7}\` (APP_ENV=preview)
+
+          - Stable for this PR: ${ALIAS_URL:-n/a}
+          - This commit: ${URL}
+          - Worker version: \`${VERSION}\`"
+          ids=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"${marker}\")) | .id")
+          id=${ids%%$'\n'*}
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${id}" -f body="$body" > /dev/null
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" -f body="$body" > /dev/null
+          fi
