@@ -28,7 +28,7 @@ export async function revokeAllSessions(db: Db, userId: string): Promise<number>
 }
 
 /** Re-authentication window for export and delete (plan §11.2). */
-export const REAUTH_WINDOW_MS = 10 * 60 * 1000;
+const REAUTH_WINDOW_MS = 10 * 60 * 1000;
 
 export function isFreshSession(createdAt: Date, now = Date.now()): boolean {
   return now - createdAt.getTime() <= REAUTH_WINDOW_MS;

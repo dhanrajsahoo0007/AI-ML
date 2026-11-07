@@ -11,7 +11,7 @@ import { migrateDatabase } from "./migrate";
 // server isn't reachable the DB tests are skipped, unless REQUIRE_DB=1 (set it in CI with a Postgres service),
 // in which case they fail.
 
-export const TEST_SERVER_URL = process.env.TEST_DATABASE_URL ?? "postgres://origins:origins@127.0.0.1:54329/postgres";
+const TEST_SERVER_URL = process.env.TEST_DATABASE_URL ?? "postgres://origins:origins@127.0.0.1:54329/postgres";
 
 function withDatabase(url: string, name: string): string {
   const u = new URL(url);

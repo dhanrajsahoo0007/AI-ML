@@ -1,9 +1,13 @@
-import { MAX_MERGE_ITEMS, type MergeItem } from "./content-key";
+// No zod here: this file ships to the browser (the merge island), the API validates what it sends.
+import type { MergeItem } from "./content-key";
+
+/** Cap on how many signed-out entries are merged at sign-in. */
+export const MAX_MERGE_ITEMS = 500;
 
 // Signed-out progress lives in this browser's localStorage (never tokens or personal data) until the learner
 // signs in; then /sign-in/complete merges it into the account and clears it.
 
-export const LOCAL_PROGRESS_KEY = "oa_progress_v1";
+const LOCAL_PROGRESS_KEY = "oa_progress_v1";
 
 interface LocalProgress {
   completed?: Record<string, string>;

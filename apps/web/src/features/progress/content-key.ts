@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { MAX_MERGE_ITEMS } from "./local";
+
+export { MAX_MERGE_ITEMS };
 
 // `section/slug` keys for progress and bookmarks, e.g. `system-design/caching/cdn`. Same rule as the database
 // check constraint (server/db/schema/account-data.ts).
@@ -8,9 +11,6 @@ export const contentKeySchema = z
 
 export const progressKindSchema = z.enum(["complete", "bookmark"]);
 export type ProgressKind = z.infer<typeof progressKindSchema>;
-
-/** Cap on how many signed-out entries are merged at sign-in. */
-export const MAX_MERGE_ITEMS = 500;
 
 export const mergeItemSchema = z.strictObject({
   contentKey: contentKeySchema,

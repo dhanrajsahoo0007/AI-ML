@@ -7,10 +7,10 @@ import { toSessionInfo } from "./route";
 
 // Session lookup for the dynamic account pages (never content pages: those stay static and DB-free).
 
-export const SESSION_COOKIE = /^(?:__Secure-)?oa\.session_token$/;
+const SESSION_COOKIE = /^(?:__Secure-)?oa\.session_token$/;
 
 /** True when the browser sends a session cookie at all (cheap, no DB). */
-export async function hasSessionCookie(): Promise<boolean> {
+async function hasSessionCookie(): Promise<boolean> {
   return (await cookies()).getAll().some((c) => SESSION_COOKIE.test(c.name));
 }
 

@@ -28,7 +28,7 @@ export function readAppEnv(
   return nodeEnv === "production" ? "production" : "local";
 }
 
-export class DatabaseConfigError extends Error {
+class DatabaseConfigError extends Error {
   override name = "DatabaseConfigError";
 }
 
@@ -51,7 +51,7 @@ export function databaseHost(connectionString: string): string {
   return url.hostname.toLowerCase();
 }
 
-export function isLocalHost(host: string): boolean {
+function isLocalHost(host: string): boolean {
   return LOCAL_HOSTS.has(host) || host.startsWith("127.") || host.endsWith(".localhost");
 }
 
@@ -94,7 +94,7 @@ export function setConnectionStringSource(source: ConnectionStringSource | null)
 const urlSchema = z.string().min(1);
 
 /** The connection string for this request, or null when no database is configured (for example a bare build). */
-export function databaseUrlOrNull(): string | null {
+function databaseUrlOrNull(): string | null {
   const parsed = urlSchema.safeParse(connectionStringSource?.() ?? process.env.DATABASE_URL);
   return parsed.success ? parsed.data : null;
 }

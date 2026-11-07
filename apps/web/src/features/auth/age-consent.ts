@@ -5,9 +5,9 @@ import { CONSENT_VERSIONS } from "@/server/db/consent";
 // - refuses `/sign-in/social` without it (hooks.before in server.ts), and
 // - records it in consent_log (kind `age_confirmation`) when the session is created after the Google callback.
 
-export const AGE_COOKIE = "oa_age_ok";
-export const AGE_COOKIE_PATH = "/api/auth";
-export const AGE_COOKIE_MAX_AGE = 15 * 60;
+const AGE_COOKIE = "oa_age_ok";
+const AGE_COOKIE_PATH = "/api/auth";
+const AGE_COOKIE_MAX_AGE = 15 * 60;
 export const AGE_TEXT_VERSION = CONSENT_VERSIONS.age_confirmation;
 
 export function ageCookie(secure: boolean): string {

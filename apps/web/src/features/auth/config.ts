@@ -43,7 +43,7 @@ export interface AuthConfig {
   testLogin: { key: string } | null;
 }
 
-export class AuthConfigError extends Error {
+class AuthConfigError extends Error {
   override name = "AuthConfigError";
 }
 

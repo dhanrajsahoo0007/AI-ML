@@ -8,14 +8,19 @@ import { daysFromNow, TEST_USER_KEYS, TEST_USERS, testUserEmail, type TestUserKe
 
 // `npm run db:seed:test -w web`: (re)creates the seeded test users with their subscription and entitlement
 // rows. Local databases only (plan §8.1: no seed scripts against non-local hosts). Re-running resets them.
+// Pass user keys to reset only those: `npm run db:seed:test -w web -- free admin`.
 
-export async function seedTestUsers(db: Db, now = Date.now()): Promise<Record<TestUserKey, string>> {
-  const emails = TEST_USER_KEYS.map(testUserEmail);
+export async function seedTestUsers(
+  db: Db,
+  keys: readonly TestUserKey[] = TEST_USER_KEYS,
+  now = Date.now()
+): Promise<Record<TestUserKey, string>> {
+  const emails = keys.map(testUserEmail);
   const ids = {} as Record<TestUserKey, string>;
   await db.transaction(async (tx) => {
     // Cascades to sessions, subscriptions, entitlements, progress, consent.
     await tx.delete(user).where(inArray(user.email, emails));
-    for (const key of TEST_USER_KEYS) {
+    for (const key of keys) {
       const spec = TEST_USERS[key];
       const [row] = await tx
         .insert(user)
@@ -66,9 +71,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1);
   }
   assertLocalDatabase(url, "seed test users");
+  const requested = process.argv.slice(2);
+  const unknown = requested.filter((k) => !(TEST_USER_KEYS as readonly string[]).includes(k));
+  if (unknown.length) {
+    console.error(`db:seed:test: unknown user keys ${unknown.join(", ")} (known: ${TEST_USER_KEYS.join(", ")})`);
+    process.exit(1);
+  }
+  const keys = requested.length ? (requested as TestUserKey[]) : TEST_USER_KEYS;
   const handle = createDb({ connectionString: url, appEnv: "test" });
-  seedTestUsers(handle.db)
-    .then((ids) => console.log(`db:seed:test: seeded ${Object.keys(ids).length} users (${TEST_USER_KEYS.join(", ")})`))
+  seedTestUsers(handle.db, keys)
+    .then((ids) => console.log(`db:seed:test: seeded ${Object.keys(ids).join(", ")}`))
     .catch((err: unknown) => {
       console.error("db:seed:test failed:", err instanceof Error ? err.message : err);
       process.exitCode = 1;

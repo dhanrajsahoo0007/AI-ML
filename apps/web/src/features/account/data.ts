@@ -20,7 +20,7 @@ import {
 // The user's own data: the account page overview, the JSON export (GDPR art. 15/20, India DPDP) and account
 // deletion. Every query is filtered by the signed-in user's id; nothing else is ever selected.
 
-export const EXPORT_FORMAT = "origins-ai-learn/account-export@1";
+const EXPORT_FORMAT = "origins-ai-learn/account-export@1";
 
 export async function exportUserData(db: Db, userId: string, now = new Date()) {
   const [profile] = await db
@@ -121,8 +121,6 @@ export async function exportUserData(db: Db, userId: string, now = new Date()) {
   };
 }
 
-export type AccountExport = NonNullable<Awaited<ReturnType<typeof exportUserData>>>;
-
 /** What /account shows. */
 export async function accountOverview(db: Db, userId: string) {
   const [profile, accounts, sessions, ent, completed, bookmarks] = await Promise.all([
@@ -174,8 +172,6 @@ export async function accountOverview(db: Db, userId: string) {
     bookmarks: bookmarks.map((b) => b.contentKey),
   };
 }
-
-export type AccountOverview = NonNullable<Awaited<ReturnType<typeof accountOverview>>>;
 
 // ── Deletion ─────────────────────────────────────────────────────────────────────────────────────────────────
 
