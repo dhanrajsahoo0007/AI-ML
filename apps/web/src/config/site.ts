@@ -1,19 +1,12 @@
-import { isSectionEnabled } from "@/config/features";
-import type { ContentSection } from "@/types/content";
+import { publicNav, type PublicNavLink } from "@/features/sections/public";
 
-interface NavLink {
-  href: string;
-  label: string;
-  section: ContentSection;
-}
+// Section links come from the registry (content/sections.yaml), resolved at build for the current
+// environment: only `on` sections, and only those with pages (not "coming soon" kinds).
+const nav: PublicNavLink[] = publicNav().filter((link) => !link.comingSoon);
 
-const allNav: NavLink[] = [
-  { href: "/ai-system-design", label: "GenAI & LLM Systems", section: "ai-system-design" },
-  { href: "/system-design", label: "Classic System Design", section: "system-design" },
-  { href: "/cloud", label: "Cloud", section: "cloud" },
-  { href: "/interviews", label: "Interview Practice", section: "interviews" },
-  { href: "/companies", label: "Company Questions", section: "companies" },
-  { href: "/ml-system-design", label: "ML System Design", section: "ml-system-design" },
+/** Links that are not sections, placed in a header mega-menu group. */
+const extraNav: { href: string; label: string; navGroup: PublicNavLink["navGroup"] }[] = [
+  { href: "/pricing", label: "Pricing", navGroup: "more" },
 ];
 
 export const siteConfig = {
@@ -22,8 +15,8 @@ export const siteConfig = {
   description:
     "Origins AI Learn is a one-stop place to prepare for AI and system design interviews: deep-dives on LLMs, RAG, agents and production AI systems, classic system design case studies, and interview questions tagged with the companies that ask them.",
   github: "https://github.com/dhanrajsahoo0007",
-  // Sections switched off in src/config/features.ts are left out everywhere the nav is shown.
-  nav: allNav.filter((item) => isSectionEnabled(item.section)),
+  nav,
+  extraNav,
   hero: {
     badge: "One place for AI and system design interview prep",
     headline: ["Master AI.", "From Scratch."],
