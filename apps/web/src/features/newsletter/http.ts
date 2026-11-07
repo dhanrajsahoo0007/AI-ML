@@ -65,12 +65,24 @@ const s2sRoute = createRoute({
   allowedOrigins: () => [SERVER_TO_SERVER_ORIGIN],
 });
 
-function withPlaceholderOrigin(request: Request): Request {
+/** Largest body these routes accept (the webhook's limit); larger requests are refused before reading. */
+const MAX_SERVER_TO_SERVER_BODY = 256 * 1024;
+
+/**
+ * A copy of the request with the placeholder Origin and no cookies. The body is buffered (it is small and
+ * capped): re-wrapping a streamed body with `new Request(request, …)` can stall under `next start`.
+ */
+async function withPlaceholderOrigin(request: Request): Promise<Request> {
   const headers = new Headers(request.headers);
   headers.set("origin", SERVER_TO_SERVER_ORIGIN);
   // Cookies are never used by these routes; drop them so nothing downstream can act on a browser session.
   headers.delete("cookie");
-  return new Request(request, { headers });
+  const hasBody = request.method !== "GET" && request.method !== "HEAD";
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    body: hasBody ? await request.arrayBuffer() : undefined,
+  });
 }
 
 /** A newsletter route called by mail systems: the shared wrapper with the Origin check off and no sessions. */
@@ -78,7 +90,15 @@ export function serverToServerRoute<S extends BodySchema | undefined = undefined
   options: RouteOptions<S, "none">
 ): NextRouteHandler {
   const handler = s2sRoute(withConfigErrors({ ...options, auth: "none" }));
-  return gated((request, context) => handler(withPlaceholderOrigin(request), context));
+  return gated(async (request, context) => {
+    if (Number(request.headers.get("content-length") ?? "0") > MAX_SERVER_TO_SERVER_BODY) {
+      return Response.json(
+        { error: { code: "body_too_large", message: "The request body is too large" } },
+        { status: 413, headers: { "cache-control": "no-store" } }
+      );
+    }
+    return handler(await withPlaceholderOrigin(request), context);
+  });
 }
 
 /** The uniform error body for a response that needs extra headers (Retry-After). */
