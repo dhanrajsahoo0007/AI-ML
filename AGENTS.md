@@ -61,7 +61,7 @@ LCP ≤ 1.5 s, INP ≤ 100 ms, CLS ≤ 0.05; 99.9% availability; zero premium by
    protection (`apps/web/src/features/content-protection/`) stays on for content areas (owner decision 2026-11-07).
 8. **Zod at every trust boundary** (env, frontmatter, request bodies, webhook payloads); no `any`. Every API route
    goes through the `route()` wrapper (`apps/web/src/server/http.ts`, bound to sessions as `route` in
-   `apps/web/src/features/auth/index.ts`): zod body, auth/role, Origin check, rate-limit hook, `no-store`, uniform
+   `apps/web/src/features/auth/index.ts`): zod body, auth/role, Origin check, rate limit, `no-store`, uniform
    errors.
 9. **Every bug fix lands with a test that would have caught it.**
 10. Keep the dependency surface small: `npm run knip` must stay clean; add a dependency only when it's used.
@@ -287,4 +287,4 @@ and the section registry need code-owner review (`.github/CODEOWNERS`).
   subscriptions keep a 7-day grace; switch `BILLING_PRIMARY` to the standby once one exists).
 - `/admin` dashboards; nightly `pg_dump` backup workflow and restore drill; DSA stage C judge; newsletter Turnstile,
   Postgres store, bounce webhooks; `eslint-plugin-boundaries`; Analytics Engine; Sentry on the Worker entry;
-  R2 + regional cache; Hyperdrive and rate-limit bindings.
+  R2 + regional cache; Hyperdrive binding.

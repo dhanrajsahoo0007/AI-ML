@@ -29,8 +29,8 @@ No index file; import the files directly.
   `scrubEvent` as a second layer); local hosts never send. Logs never contain secrets, cookies, tokens or full
   emails; `redact()` runs on every field.
 - Route labels use the path only, never the query string.
-- `/api/vitals` (`apps/web/src/app/api/vitals/route.ts`) writes one log line per beacon; it doesn't use `route()`
-  (no session, no DB) and relies on a Cloudflare rate-limit rule. Analytics Engine writes come with the binding.
+- `/api/vitals` (`apps/web/src/app/api/vitals/route.ts`) writes one log line per beacon, through `route()` with the
+  `vitals` rate limit and the Origin check off (no session, no DB). Analytics Engine writes come with the binding.
 - On Workers the Sentry server SDK must wrap the Worker entry (`@sentry/nextjs/cloudflare`); not wired yet.
 - The CSP gets a tool's hosts only when its variable is set (`csp-hosts.ts`).
 

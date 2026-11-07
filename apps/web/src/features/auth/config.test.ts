@@ -80,3 +80,15 @@ describe("safeEqual", () => {
     expect(safeEqual("abc", "abcd")).toBe(false);
   });
 });
+
+describe("authRateLimit", () => {
+  it("gives sign-in paths the strict limit and the rest of /api/auth/* the session limit", async () => {
+    const { authRateLimit } = await import("./route");
+    const at = (p: string) => authRateLimit(new Request(`https://example.com${p}`)).name;
+    expect(at("/api/auth/sign-in/social")).toBe("auth");
+    expect(at("/api/auth/callback/google")).toBe("auth");
+    expect(at("/api/auth/get-session")).toBe("session");
+    expect(at("/api/auth/sign-out")).toBe("session");
+    expect(at("/api/auth/sign-inx")).toBe("session");
+  });
+});

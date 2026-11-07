@@ -1,11 +1,15 @@
 import "server-only";
 import { z } from "zod";
 import { createDb, type Db, type DbHandle } from "./db/client";
+import { log } from "./log";
+import { bindingRateLimiter, type RateLimiter, type RateLimitName } from "./rate-limit";
+
+export type { RateLimitName, RateLimiter } from "./rate-limit";
 
 // The one wrapper every API route handler goes through (plan §11.6):
 // - an Origin allow-list check on state-changing methods (CSRF); GET never changes state
 // - auth / role check
-// - a rate-limit hook (the Workers Rate Limiting binding is plugged in with setRateLimiter)
+// - rate limits (server/rate-limit.ts: the Workers Rate Limiting binding, memory fallback off Cloudflare)
 // - zod body parsing that rejects unknown fields
 // - `Cache-Control: no-store` on every response
 // - a uniform error shape `{ error: { code, message }, requestId }` with no stack traces
@@ -21,7 +25,9 @@ export class HttpError extends Error {
     readonly status: number,
     readonly code: string,
     message: string = code,
-    readonly details?: unknown
+    readonly details?: unknown,
+    /** Extra response headers (Retry-After on a 429). */
+    readonly headers?: Record<string, string>
   ) {
     super(message);
     this.name = "HttpError";
@@ -59,20 +65,26 @@ export interface RouteDeps {
   mapError?(err: unknown): HttpError | null;
 }
 
-// ── Rate limiting (hook) ─────────────────────────────────────────────────────────────────────────────────────
+// ── Rate limiting ────────────────────────────────────────────────────────────────────────────────────────────
+// server/rate-limit.ts: the Workers Rate Limiting binding of each named limit, or a per-isolate memory counter
+// where the Worker has no binding (`next start`, tests). Always on: a route with a `rateLimit` option is limited.
 
-/** Named limits from plan §11.6; the limiter decides the numbers (Workers Rate Limiting binding config). */
-export type RateLimitName = "auth" | "account" | "progress" | "checkout" | "portal" | "entitlements" | "test";
+const defaultLimiter = bindingRateLimiter();
+let rateLimiter: RateLimiter = defaultLimiter;
 
-export interface RateLimiter {
-  limit(input: { name: RateLimitName; key: string }): Promise<{ success: boolean }>;
+/** Tests only: swap the limiter; `null` restores the default (binding or memory). */
+export function setRateLimiter(limiter: RateLimiter | null): void {
+  rateLimiter = limiter ?? defaultLimiter;
 }
 
-let rateLimiter: RateLimiter | null = null;
-
-/** Stream G wires the Workers `RATE_LIMITER` binding here at startup. Without one, requests aren't limited. */
-export function setRateLimiter(limiter: RateLimiter | null): void {
-  rateLimiter = limiter;
+/** Counts one request against `name` for `key`; throws the uniform 429 (with Retry-After) when over. */
+export async function enforceRateLimit(name: RateLimitName, key: string): Promise<void> {
+  const decision = await rateLimiter.limit({ name, key });
+  if (!decision.success) {
+    throw new HttpError(429, "rate_limited", "Too many requests, try again shortly", undefined, {
+      "Retry-After": String(decision.retryAfterSeconds ?? 60),
+    });
+  }
 }
 
 // ── Origin check ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -105,7 +117,7 @@ function errorResponse(err: HttpError, requestId: string): Response {
     requestId,
   };
   if (err.details !== undefined) body.error.details = err.details;
-  return Response.json(body, { status: err.status });
+  return Response.json(body, { status: err.status, headers: err.headers });
 }
 
 function finalize(response: Response, requestId: string, setCookies: readonly string[] = []): Response {
@@ -125,6 +137,11 @@ function finalize(response: Response, requestId: string, setCookies: readonly st
 // ── route() ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 export type AuthLevel = "none" | "optional" | "user" | "admin";
+
+export interface RateLimitOption {
+  name: RateLimitName;
+  by: "ip" | "user";
+}
 
 // The body schema is any zod object; the wrapper makes it strict.
 type BodySchema = z.ZodObject;
@@ -153,7 +170,11 @@ export interface RouteOptions<S extends BodySchema | undefined, A extends AuthLe
    */
   origin?: boolean;
   body?: S;
-  rateLimit?: { name: RateLimitName; by: "ip" | "user" };
+  /**
+   * The named limit (server/rate-limit.ts) and its key: the user ID (falling back to the IP when signed out) or the
+   * client IP. A function picks the limit per request (e.g. sign-in paths vs. the rest of /api/auth/*); null skips.
+   */
+  rateLimit?: RateLimitOption | ((request: Request) => RateLimitOption | null);
   handler(ctx: HandlerContext<S, A>): Promise<Response | Json | void> | Response | Json | void;
 }
 
@@ -169,16 +190,13 @@ export type NextRouteHandler = (
 ) => Promise<Response>;
 
 function logError(requestId: string, request: Request, err: unknown) {
-  // Structured one-liner until stream M's server/log.ts lands. Never the stack or the body.
-  console.error(
-    JSON.stringify({
-      level: "error",
-      requestId,
-      method: request.method,
-      path: new URL(request.url).pathname,
-      error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
-    })
-  );
+  // Through log.ts, so values inside error messages (Postgres repeats emails in `Key (email)=(…)`) are redacted.
+  log.error("api_error", {
+    request_id: requestId,
+    method: request.method,
+    route: new URL(request.url).pathname,
+    error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+  });
 }
 
 async function readJsonBody(request: Request, schema: BodySchema): Promise<unknown> {
@@ -229,8 +247,9 @@ export function createRoute(deps: RouteDeps) {
           throw new HttpError(403, "bad_origin", "Cross-origin request refused");
         }
 
+        const limit = typeof options.rateLimit === "function" ? options.rateLimit(request) : options.rateLimit;
         let auth: RequestSessionInfo | null = null;
-        const needsSession = level !== "none" || options.rateLimit?.by === "user";
+        const needsSession = level !== "none" || limit?.by === "user";
         if (needsSession) {
           const lookup = await deps.getSession(request, db);
           auth = lookup.info;
@@ -244,10 +263,8 @@ export function createRoute(deps: RouteDeps) {
         }
 
         const ip = request.headers.get("cf-connecting-ip");
-        if (options.rateLimit && rateLimiter) {
-          const key = options.rateLimit.by === "user" && auth ? `user:${auth.user.id}` : `ip:${ip ?? "unknown"}`;
-          const { success } = await rateLimiter.limit({ name: options.rateLimit.name, key });
-          if (!success) throw new HttpError(429, "rate_limited", "Too many requests, try again shortly");
+        if (limit) {
+          await enforceRateLimit(limit.name, limit.by === "user" && auth ? `user:${auth.user.id}` : `ip:${ip ?? "unknown"}`);
         }
 
         const body = (options.body ? await readJsonBody(request, options.body) : undefined) as HandlerContext<

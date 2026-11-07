@@ -1,7 +1,7 @@
 import "server-only";
 import { isAPIError } from "better-auth/api";
 import type { Db } from "@/server/db/client";
-import { createRoute, HttpError, type RequestSessionInfo, type SessionLookup } from "@/server/http";
+import { createRoute, HttpError, type RateLimitOption, type RequestSessionInfo, type SessionLookup } from "@/server/http";
 import { authConfig } from "./config";
 import { createAuth, type Auth } from "./server";
 
@@ -69,3 +69,11 @@ export const route = createRoute({
   allowedOrigins: () => authConfig().trustedOrigins,
   mapError,
 });
+
+// Starting a sign-in and the OAuth callback (plan §11.6: 10/min/IP); everything else under /api/auth/*.
+const SIGN_IN_PATH = /^\/api\/auth\/(?:sign-in|callback|oauth2)(?:\/|$)/;
+
+/** The rate limit of a Better Auth request: `auth` for sign-in paths, `session` for the rest (both per IP). */
+export function authRateLimit(request: Request): RateLimitOption {
+  return { name: SIGN_IN_PATH.test(new URL(request.url).pathname) ? "auth" : "session", by: "ip" };
+}

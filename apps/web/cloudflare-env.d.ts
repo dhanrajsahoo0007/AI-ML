@@ -21,10 +21,28 @@ interface CloudflareEnv {
   DODO_ENVIRONMENT?: "test_mode" | "live_mode";
   DODO_PRODUCT_PRO_MONTHLY?: string;
   DODO_PRODUCT_PRO_YEARLY?: string;
+  /** Workers Rate Limiting, one per named limit (src/server/rate-limit.ts, wrangler.jsonc `ratelimits`). */
+  RL_AUTH?: WorkersRateLimitBinding;
+  RL_SESSION?: WorkersRateLimitBinding;
+  RL_ACCOUNT?: WorkersRateLimitBinding;
+  RL_PROGRESS?: WorkersRateLimitBinding;
+  RL_CHECKOUT?: WorkersRateLimitBinding;
+  RL_PORTAL?: WorkersRateLimitBinding;
+  RL_ENTITLEMENTS?: WorkersRateLimitBinding;
+  RL_TEST?: WorkersRateLimitBinding;
+  RL_NEWSLETTER?: WorkersRateLimitBinding;
+  RL_NEWSLETTER_EMAIL?: WorkersRateLimitBinding;
+  RL_NEWSLETTER_TOKEN?: WorkersRateLimitBinding;
+  RL_CSP?: WorkersRateLimitBinding;
+  RL_VITALS?: WorkersRateLimitBinding;
   // TODO(account): uncomment with the bindings in wrangler.jsonc.
   // MEDIA_PUBLIC: R2Bucket;
   // MEDIA_PRIVATE: R2Bucket;
   // HYPERDRIVE: Hyperdrive;
-  // RATE_LIMITER: RateLimit;
   // ANALYTICS: AnalyticsEngineDataset;
+}
+
+/** The Workers Rate Limiting binding's runtime API (`ratelimits` in wrangler.jsonc). */
+interface WorkersRateLimitBinding {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
 }

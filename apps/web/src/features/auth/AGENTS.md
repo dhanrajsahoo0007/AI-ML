@@ -33,7 +33,9 @@ Google callback → session row created → hooks: keep the newest 3 sessions, r
 - `role` is `input: false`: admins are promoted in the database, never from a request.
 - Disabled Better Auth endpoints: update-user, change-email, delete-user, link/unlink; account changes go through
   `apps/web/src/features/account/`.
-- Better Auth's own rate limiter is off (per isolate on Workers); limits come from `route`'s `rateLimit` hook.
+- Limits: `route()`'s `rateLimit` (`authRateLimit()`: `auth` 10/min/IP for sign-in paths, `session` for the rest),
+  backed by the Workers binding. Better Auth's own limiter is a second, per-isolate layer, on only on Cloudflare
+  (it keys by `cf-connecting-ip`, which `next start` doesn't have).
 - **Test-login** (`test-login.ts`): `POST /api/test/login` with header `x-test-login-key` signs in a seeded user
   (`npm run db:seed:test -w web`). Registered only when `APP_ENV` isn't production, `ENABLE_TEST_LOGIN=1` and
   `TEST_LOGIN_KEY` are set; production builds export a plain 404 (`apps/web/tests/e2e/auth.spec.ts` asserts no bundle

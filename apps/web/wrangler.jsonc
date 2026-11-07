@@ -34,6 +34,26 @@
   // nothing is created in any account.
   "r2_buckets": [{ "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "origins-ai-learn-cache-local" }],
 
+  // Workers Rate Limiting for /api/* (plan §11.6), one binding per named limit in src/server/rate-limit.ts (same
+  // numbers; src/server/rate-limit.test.ts keeps them in sync). namespace_id is an integer we choose, unique per
+  // account (no resource to create): 1xxx local, 2xxx preview, 3xxx staging, 4xxx production, so environments
+  // never share counters. Counters are per Cloudflare location; the hourly caps are zone rules (owner).
+  "ratelimits": [
+    { "name": "RL_AUTH", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_SESSION", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } },
+    { "name": "RL_ACCOUNT", "namespace_id": "1003", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_PROGRESS", "namespace_id": "1004", "simple": { "limit": 60, "period": 60 } },
+    { "name": "RL_CHECKOUT", "namespace_id": "1005", "simple": { "limit": 5, "period": 60 } },
+    { "name": "RL_PORTAL", "namespace_id": "1006", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_ENTITLEMENTS", "namespace_id": "1007", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_TEST", "namespace_id": "1008", "simple": { "limit": 120, "period": 60 } },
+    { "name": "RL_NEWSLETTER", "namespace_id": "1009", "simple": { "limit": 5, "period": 60 } },
+    { "name": "RL_NEWSLETTER_EMAIL", "namespace_id": "1010", "simple": { "limit": 2, "period": 60 } },
+    { "name": "RL_NEWSLETTER_TOKEN", "namespace_id": "1011", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_CSP", "namespace_id": "1012", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_VITALS", "namespace_id": "1013", "simple": { "limit": 60, "period": 60 } },
+  ],
+
   // ── Account-bound bindings (uncomment per environment once the resources exist) ──────────────────
   // TODO(account): per environment, the R2 cache bucket (required for preview and staging, which build
   // with the paywall on) plus the media buckets:
@@ -46,8 +66,6 @@
   // ],
   // TODO(account, Phase 4): Hyperdrive in front of Neon. Only /api/* handlers may use it.
   // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id>", "localConnectionString": "postgres://app:app@localhost:5432/app" }],
-  // TODO(account): Workers Rate Limiting for /api/* (plan §11.6). namespace_id is an account-unique integer.
-  // "ratelimits": [{ "name": "RATE_LIMITER", "namespace_id": "<namespace-id>", "simple": { "limit": 30, "period": 60 } }],
   // TODO(account): Analytics Engine dataset for paywall/checkout metrics (plan §10.5).
   // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_<env>" }],
 
@@ -58,7 +76,22 @@
       "workers_dev": true,
       "preview_urls": true,
       "vars": { "APP_ENV": "preview" },
-      // TODO(account): r2_buckets / hyperdrive / ratelimits / analytics_engine_datasets as above (preview names).
+      "ratelimits": [
+        { "name": "RL_AUTH", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_SESSION", "namespace_id": "2002", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_ACCOUNT", "namespace_id": "2003", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_PROGRESS", "namespace_id": "2004", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_CHECKOUT", "namespace_id": "2005", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_PORTAL", "namespace_id": "2006", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_ENTITLEMENTS", "namespace_id": "2007", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_TEST", "namespace_id": "2008", "simple": { "limit": 120, "period": 60 } },
+        { "name": "RL_NEWSLETTER", "namespace_id": "2009", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_NEWSLETTER_EMAIL", "namespace_id": "2010", "simple": { "limit": 2, "period": 60 } },
+        { "name": "RL_NEWSLETTER_TOKEN", "namespace_id": "2011", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_CSP", "namespace_id": "2012", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_VITALS", "namespace_id": "2013", "simple": { "limit": 60, "period": 60 } },
+      ],
+      // TODO(account): r2_buckets / hyperdrive / analytics_engine_datasets as above (preview names).
     },
     // Deployed from `development`. TODO(account): route `staging.<domain>` once the zone exists:
     // "routes": [{ "pattern": "staging.<domain>", "custom_domain": true }],
@@ -66,7 +99,22 @@
       "workers_dev": true,
       "preview_urls": true,
       "vars": { "APP_ENV": "staging" },
-      // TODO(account): r2_buckets / hyperdrive / ratelimits / analytics_engine_datasets as above (staging names).
+      "ratelimits": [
+        { "name": "RL_AUTH", "namespace_id": "3001", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_SESSION", "namespace_id": "3002", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_ACCOUNT", "namespace_id": "3003", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_PROGRESS", "namespace_id": "3004", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_CHECKOUT", "namespace_id": "3005", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_PORTAL", "namespace_id": "3006", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_ENTITLEMENTS", "namespace_id": "3007", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_TEST", "namespace_id": "3008", "simple": { "limit": 120, "period": 60 } },
+        { "name": "RL_NEWSLETTER", "namespace_id": "3009", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_NEWSLETTER_EMAIL", "namespace_id": "3010", "simple": { "limit": 2, "period": 60 } },
+        { "name": "RL_NEWSLETTER_TOKEN", "namespace_id": "3011", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_CSP", "namespace_id": "3012", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_VITALS", "namespace_id": "3013", "simple": { "limit": 60, "period": 60 } },
+      ],
+      // TODO(account): r2_buckets / hyperdrive / analytics_engine_datasets as above (staging names).
     },
     // Deployed from `main` through the `production` GitHub environment. workers.dev stays on because
     // the deploy smoke tests use it (Bot Fight Mode on the custom domain blocks CI runners).
@@ -75,7 +123,22 @@
       "workers_dev": true,
       "preview_urls": true,
       "vars": { "APP_ENV": "production" },
-      // TODO(account): r2_buckets / hyperdrive / ratelimits / analytics_engine_datasets as above (production names).
+      "ratelimits": [
+        { "name": "RL_AUTH", "namespace_id": "4001", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_SESSION", "namespace_id": "4002", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_ACCOUNT", "namespace_id": "4003", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_PROGRESS", "namespace_id": "4004", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_CHECKOUT", "namespace_id": "4005", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_PORTAL", "namespace_id": "4006", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_ENTITLEMENTS", "namespace_id": "4007", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_TEST", "namespace_id": "4008", "simple": { "limit": 120, "period": 60 } },
+        { "name": "RL_NEWSLETTER", "namespace_id": "4009", "simple": { "limit": 5, "period": 60 } },
+        { "name": "RL_NEWSLETTER_EMAIL", "namespace_id": "4010", "simple": { "limit": 2, "period": 60 } },
+        { "name": "RL_NEWSLETTER_TOKEN", "namespace_id": "4011", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_CSP", "namespace_id": "4012", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_VITALS", "namespace_id": "4013", "simple": { "limit": 60, "period": 60 } },
+      ],
+      // TODO(account): r2_buckets / hyperdrive / analytics_engine_datasets as above (production names).
     },
   },
 }

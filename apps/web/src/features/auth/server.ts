@@ -6,6 +6,7 @@ import type { Db } from "@/server/db/client";
 import { recordConsentOnce } from "@/server/db/consent";
 import { account, session, user, verification } from "@/server/db/schema";
 import { uuidv7 } from "@/server/db/uuid";
+import { cloudflareBindings } from "@/server/env";
 import { AGE_TEXT_VERSION, ageCookieName, requestCountry } from "./age-consent";
 import { authConfig, type AuthConfig } from "./config";
 import { enforceSessionLimit } from "./sessions";
@@ -16,7 +17,14 @@ import { testLogin } from "./test-login";
 
 const DAY = 60 * 60 * 24;
 
-export function createAuth(db: Db, config: AuthConfig = authConfig()) {
+/**
+ * Better Auth's limiter keys by the client IP. On Cloudflare `cf-connecting-ip` is set by the edge and can't be
+ * spoofed; elsewhere (`next start`, tests) there is no trusted IP and every request would share one bucket, so
+ * it is on only where the Worker runs, unless a caller (a test) says otherwise.
+ */
+const onCloudflare = () => cloudflareBindings() !== null;
+
+export function createAuth(db: Db, config: AuthConfig = authConfig(), options: { rateLimit?: boolean } = {}) {
   return betterAuth({
     appName: "Origins AI Learn",
     baseURL: config.baseURL,
@@ -80,9 +88,18 @@ export function createAuth(db: Db, config: AuthConfig = authConfig()) {
       ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
     },
 
-    // Limits are applied by the route() wrapper's rate-limit hook (the Workers Rate Limiting binding, plan
-    // §11.6) and Cloudflare rules; Better Auth's in-memory limiter is per isolate and so not meaningful there.
-    rateLimit: { enabled: false },
+    // The main limits are the route() wrapper's (the Workers Rate Limiting binding, plan §11.6) and Cloudflare
+    // zone rules. Better Auth's in-memory limiter is per isolate, so it is only a second layer here.
+    rateLimit: {
+      enabled: options.rateLimit ?? onCloudflare(),
+      storage: "memory",
+      window: 60,
+      max: 120,
+      customRules: {
+        "/sign-in/*": { window: 60, max: 10 },
+        "/callback/*": { window: 60, max: 10 },
+      },
+    },
     telemetry: { enabled: false },
 
     databaseHooks: {

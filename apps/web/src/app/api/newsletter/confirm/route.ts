@@ -14,6 +14,7 @@ const body = z.object({ token: z.string().min(1).max(1024) });
 
 export const POST = newsletterRoute({
   body,
+  rateLimit: { name: "newsletterToken", by: "ip" },
   handler: async ({ body, db }) => {
     const result = await confirmSubscription(newsletterDeps(newsletterHref()!, db), body.token);
     switch (result.kind) {

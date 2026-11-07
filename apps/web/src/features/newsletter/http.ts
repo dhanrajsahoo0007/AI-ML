@@ -2,7 +2,6 @@ import "server-only";
 import type { z } from "zod";
 import { route } from "@/features/auth";
 import {
-  createRoute,
   HttpError,
   notFoundRoute,
   type AuthLevel,
@@ -51,45 +50,17 @@ export function newsletterRoute<S extends BodySchema | undefined = undefined, A 
 
 // ── Server-to-server routes ──────────────────────────────────────────────────────────────────────────────────
 // The Resend webhook and the RFC 8058 one-click unsubscribe are POSTed by mail systems, which send no Origin
-// header, so the wrapper's Origin check must be off for them. They authenticate otherwise (webhook signature,
-// signed unsubscribe token) and never read cookies or a session.
-//
-// TODO(after stream L merges): L adds `origin: false` to route() (src/server/http.ts). Replace this shim with
-// `route({ origin: false, ... })`. Until then the shim is a wrapper with no sessions whose only allowed origin
-// is a reserved placeholder it sets on the request itself.
-
-const SERVER_TO_SERVER_ORIGIN = "https://server-to-server.invalid";
-
-const s2sRoute = createRoute({
-  getSession: async () => ({ info: null }),
-  allowedOrigins: () => [SERVER_TO_SERVER_ORIGIN],
-});
+// header, so the wrapper's Origin check is off for them (`origin: false`). They authenticate otherwise (webhook
+// signature, signed unsubscribe token), and with `auth: "none"` the wrapper never reads cookies or a session.
 
 /** Largest body these routes accept (the webhook's limit); larger requests are refused before reading. */
 const MAX_SERVER_TO_SERVER_BODY = 256 * 1024;
-
-/**
- * A copy of the request with the placeholder Origin and no cookies. The body is buffered (it is small and
- * capped): re-wrapping a streamed body with `new Request(request, …)` can stall under `next start`.
- */
-async function withPlaceholderOrigin(request: Request): Promise<Request> {
-  const headers = new Headers(request.headers);
-  headers.set("origin", SERVER_TO_SERVER_ORIGIN);
-  // Cookies are never used by these routes; drop them so nothing downstream can act on a browser session.
-  headers.delete("cookie");
-  const hasBody = request.method !== "GET" && request.method !== "HEAD";
-  return new Request(request.url, {
-    method: request.method,
-    headers,
-    body: hasBody ? await request.arrayBuffer() : undefined,
-  });
-}
 
 /** A newsletter route called by mail systems: the shared wrapper with the Origin check off and no sessions. */
 export function serverToServerRoute<S extends BodySchema | undefined = undefined>(
   options: RouteOptions<S, "none">
 ): NextRouteHandler {
-  const handler = s2sRoute(withConfigErrors({ ...options, auth: "none" }));
+  const handler = route(withConfigErrors({ ...options, auth: "none", origin: false }));
   return gated(async (request, context) => {
     if (Number(request.headers.get("content-length") ?? "0") > MAX_SERVER_TO_SERVER_BODY) {
       return Response.json(
@@ -97,7 +68,7 @@ export function serverToServerRoute<S extends BodySchema | undefined = undefined
         { status: 413, headers: { "cache-control": "no-store" } }
       );
     }
-    return handler(await withPlaceholderOrigin(request), context);
+    return handler(request, context);
   });
 }
 
