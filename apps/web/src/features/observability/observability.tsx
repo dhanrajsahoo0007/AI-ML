@@ -1,4 +1,4 @@
-import { CloudflareBeacon } from "../analytics/cloudflare-beacon";
+import { CloudflareBeacon } from "../analytics";
 import { ObservabilityIsland } from "./observability.client";
 
 // Mounted once in the root layout: the Cloudflare Web Analytics tag (server-rendered, only with its token) and the
