@@ -1,4 +1,5 @@
 import * as React from "react";
+import Link from "next/link";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
 import { getCompanies, type LibraryQuestion } from "@/lib/question-bank";
 
@@ -52,8 +53,25 @@ function renderAnswer(text: string) {
   });
 }
 
-// Library questions as <InterviewQuestion> elements; `tagOf` labels each one for the topic chips.
-export function questionItems(questions: LibraryQuestion[], tagOf?: (q: LibraryQuestion) => string) {
+// Stands in for a Pro answer on public pages (plan §9.1): the answer text is not in the page at all.
+function LockedAnswer() {
+  return (
+    <p data-premium="answer" className="text-muted-foreground">
+      This answer is part of Pro.{" "}
+      <Link href="/pricing" className="text-primary underline underline-offset-2">
+        See plans
+      </Link>
+    </p>
+  );
+}
+
+// Library questions as <InterviewQuestion> elements; `tagOf` labels each one for the topic chips. Answers for
+// which `locked` is true are replaced by the Pro placeholder.
+export function questionItems(
+  questions: LibraryQuestion[],
+  tagOf?: (q: LibraryQuestion) => string,
+  locked?: (q: LibraryQuestion) => boolean
+) {
   const companies = new Map(getCompanies().map((c) => [c.slug, { slug: c.slug, name: c.name }]));
   return questions.map((q) => (
     <InterviewQuestion
@@ -65,7 +83,7 @@ export function questionItems(questions: LibraryQuestion[], tagOf?: (q: LibraryQ
       related={q.related}
       refs={q.refs}
     >
-      {renderAnswer(q.a)}
+      {locked?.(q) ? <LockedAnswer /> : renderAnswer(q.a)}
     </InterviewQuestion>
   ));
 }
@@ -75,16 +93,18 @@ export function QuestionList({
   questions,
   title,
   tagOf,
+  locked,
 }: {
   questions: LibraryQuestion[];
   title: string;
   tagOf?: (q: LibraryQuestion) => string;
+  locked?: (q: LibraryQuestion) => boolean;
 }) {
   if (questions.length === 0) return null;
   const credited = questions.some((q) => q.source === "outcome-school");
   return (
     <InterviewQuestions title={title} footer={credited ? <SourceCredit /> : undefined}>
-      {questionItems(questions, tagOf)}
+      {questionItems(questions, tagOf, locked)}
     </InterviewQuestions>
   );
 }

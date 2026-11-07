@@ -1,6 +1,8 @@
 import "server-only";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { isPremiumDoc } from "../paywall/access";
+import { PREVIEW_SEGMENT } from "../paywall/constants";
 import { builtSectionsOfKind, getSection } from "../sections/registry";
 import type { SectionDef } from "../sections/schema";
 import { docsKind } from "./kind";
@@ -29,7 +31,18 @@ export async function docsItems(section: SectionDef) {
 export async function docSlugParams(param: string) {
   const section = getSection(param);
   if (!section || section.kind !== "docs" || section.state === "off") return [];
-  return docsKind.staticParams(section, await docsKind.load(section)) as { slug: string[] }[];
+  const items = await docsKind.load(section);
+  // Every premium page also gets its public preview, `<path>/_preview`, which middleware serves to visitors
+  // without Pro (plan §9.2).
+  const previews = items.filter((i) => isPremiumDoc(section, i)).map((i) => ({ slug: [...i.segments, PREVIEW_SEGMENT] }));
+  return [...(docsKind.staticParams(section, items) as { slug: string[] }[]), ...previews];
+}
+
+/** Splits a docs route's slug into the page and its variant (`[..., "_preview"]` is the public preview). */
+export function docVariant(slug: string[]): { slug: string[]; preview: boolean } {
+  return slug.at(-1) === PREVIEW_SEGMENT && slug.length > 1
+    ? { slug: slug.slice(0, -1), preview: true }
+    : { slug, preview: false };
 }
 
 /** `hidden` sections are built for review but kept out of search engines. */

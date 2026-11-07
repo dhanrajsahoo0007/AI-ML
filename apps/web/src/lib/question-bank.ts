@@ -55,6 +55,8 @@ export interface Category {
   subsections: Subsection[];
   /** Feature flag that must be on for the category to be shown. */
   flag?: FeatureFlag;
+  /** `premium`: answers are for Pro when the paywall is on (plan §9.1); default free. */
+  access?: "free" | "premium";
 }
 
 export interface Company {
@@ -110,6 +112,9 @@ function loadTaxonomy(errors: string[]): Category[] {
     seen.add(c.slug);
     if (!CATEGORY_GROUPS.includes(c.group)) errors.push(`taxonomy ${c.slug}: unknown group ${c.group}`);
     if (c.flag !== undefined && !(c.flag in features)) errors.push(`taxonomy ${c.slug}: unknown flag ${c.flag}`);
+    if (c.access !== undefined && c.access !== "free" && c.access !== "premium") {
+      errors.push(`taxonomy ${c.slug}: access must be free or premium`);
+    }
     const subs = new Set<string>();
     for (const s of c.subsections) {
       if (subs.has(s.slug)) errors.push(`taxonomy ${c.slug}: duplicate subsection ${s.slug}`);
