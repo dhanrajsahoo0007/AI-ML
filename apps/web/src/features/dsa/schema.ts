@@ -10,8 +10,7 @@ import { DIFFICULTIES, HARNESS_MODES, LANGUAGES } from "./constants";
 //   content/<section>/tests/<slug>.hidden.json hidden test cases (never shipped; the Stage C judge runs them)
 //   content/<section>/patterns.yaml            the patterns problems may be tagged with
 
-export { DIFFICULTIES, HARNESS_MODES, LANGUAGES, LANGUAGE_LABELS } from "./constants";
-export type { Difficulty, HarnessMode, Language } from "./constants";
+export { LANGUAGES } from "./constants";
 
 /** Minimum hidden cases a published problem should have (fewer is a content-check warning). */
 export const MIN_HIDDEN_TESTS = 5;

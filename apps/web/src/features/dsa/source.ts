@@ -57,7 +57,7 @@ export type ValidProblem = DsaProblem & { fm: ProblemFrontmatter };
 export type ValidTopic = DsaTopic & { fm: TopicFrontmatter };
 
 export const TOPICS_DIR = "topics";
-export const PROBLEMS_DIR = "problems";
+const PROBLEMS_DIR = "problems";
 export const PATTERNS_FILE = "patterns.yaml";
 /** Path segment of the problem list and problem pages, below the section href. */
 export const PROBLEMS_SEGMENT = "problems";

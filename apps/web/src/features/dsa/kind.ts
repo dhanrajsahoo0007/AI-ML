@@ -18,7 +18,6 @@ import {
   topicsOf,
   validProblems,
   type DsaItem,
-  type DsaProblem,
   type ValidProblem,
 } from "./source";
 
@@ -239,5 +238,3 @@ function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProbl
 export function problemsForTopic(items: DsaItem[], topic: string): ValidProblem[] {
   return validProblems(items).filter((p) => p.fm.status === "published" && p.fm.topics.includes(topic));
 }
-
-export type { DsaItem, DsaProblem };

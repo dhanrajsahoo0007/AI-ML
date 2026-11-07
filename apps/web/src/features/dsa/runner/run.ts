@@ -14,7 +14,7 @@ import {
 // - Every case gets CASE_TIMEOUT_MS of wall-clock time. When it runs out, the worker is terminated (the only
 //   reliable way to stop an infinite loop), the case is reported as a timeout and the rest as skipped.
 
-export interface RunEvents {
+interface RunEvents {
   onStatus(text: string): void;
   onCase(index: number, result: CaseResult): void;
   onDone(): void;

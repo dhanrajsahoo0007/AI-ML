@@ -12,7 +12,7 @@ import type { RunHandle } from "./runner/run";
 // focuses, clicks or presses "Edit code". "Run tests" imports the runner and runs the PUBLIC cases in a
 // Web Worker in the browser; nothing is sent to the server. Hidden tests are not part of the props.
 
-export interface WorkspaceProps {
+interface WorkspaceProps {
   title: string;
   languages: Language[];
   starter: Partial<Record<Language, string>>;
