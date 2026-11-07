@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { EmailMessage, EmailSender } from "../email/sender";
 import { MemoryRateLimiter } from "./rate-limit";
-import { confirmSubscription, subscribe, unsubscribeWithToken, type NewsletterDeps } from "./service";
+import {
+  accountStatus,
+  confirmSubscription,
+  subscribe,
+  subscribeWithAccount,
+  unsubscribeAccount,
+  unsubscribeWithToken,
+  type NewsletterDeps,
+} from "./service";
 import { MemoryNewsletterStore } from "./store";
 import { signToken } from "./token";
 
@@ -114,4 +122,75 @@ describe("newsletter sign-up flow", () => {
     expect(await confirmSubscription(d, unsub)).toEqual({ kind: "invalid" });
     expect(await unsubscribeWithToken(d, "garbage")).toEqual({ kind: "invalid" });
   });
+
+  it("records the consent version from the sign-up in consent history on confirm", async () => {
+    const { d, sender, store } = deps();
+    await subscribe(d, input("v@example.com"));
+    await confirmSubscription(d, tokenIn(sender.sent[0], "confirm"));
+    const sub = (await store.findByEmail("v@example.com"))!;
+    expect(await store.consentHistory(sub.id)).toMatchObject([{ event: "opt-in", textVersion: "2026-11-07" }]);
+  });
+
+  it("a confirm token with an unknown consent version is invalid", async () => {
+    const { d, store } = deps();
+    const { subscriber } = await store.upsertPending({ email: "x@example.com", source: "archive" });
+    const token = await signToken(SECRET, { subscriberId: subscriber.id, purpose: "confirm", consentVersion: "1999-01-01" });
+    expect(await confirmSubscription(d, token)).toEqual({ kind: "invalid" });
+  });
 });
+
+describe("Turnstile in the sign-up flow", () => {
+  it("checks the token before anything is stored; the honeypot still answers like a success", async () => {
+    const { d, sender, store } = deps();
+    const seen: (string | undefined)[] = [];
+    d.captcha = {
+      verify: async (token) => {
+        seen.push(token);
+        return token === "good" ? { ok: true } : { ok: false, reason: token ? "rejected" : "missing" };
+      },
+    };
+    expect(await subscribe(d, input("a@example.com"))).toEqual({ kind: "captcha-failed", reason: "missing" });
+    expect(await subscribe(d, input("a@example.com", { turnstileToken: "bad", ip: "203.0.113.7" }))).toEqual({
+      kind: "captcha-failed",
+      reason: "rejected",
+    });
+    expect(await store.findByEmail("a@example.com")).toBeNull();
+    expect(await subscribe(d, input("a@example.com", { turnstileToken: "good", ip: "203.0.113.8" }))).toEqual({
+      kind: "accepted",
+    });
+    expect(sender.sent).toHaveLength(1);
+    expect(seen).toEqual([undefined, "bad", "good"]);
+  });
+});
+
+describe("signed-in users", () => {
+  const user = { id: "0190f0f0-0000-7000-8000-000000000009", email: "Member@Example.com" };
+
+  it("subscribe with one click: active at once, welcome email only, idempotent", async () => {
+    const { d, sender, store } = deps();
+    expect(await accountStatus(store, user)).toEqual({ status: "none", email: "member@example.com" });
+    expect(await subscribeWithAccount(d, user, { source: "account" })).toEqual({
+      status: "active",
+      email: "member@example.com",
+    });
+    expect(sender.sent.map((m) => m.template)).toEqual(["welcome"]);
+    expect(sender.sent[0].headers?.["List-Unsubscribe-Post"]).toBe("List-Unsubscribe=One-Click");
+    await subscribeWithAccount(d, user, { source: "account" });
+    expect(sender.sent).toHaveLength(1);
+    expect(await unsubscribeAccount(store, user)).toEqual({ status: "unsubscribed", email: "member@example.com" });
+    expect(await accountStatus(store, user)).toMatchObject({ status: "unsubscribed" });
+  });
+
+  it("suppressed addresses stay suppressed and get no email", async () => {
+    const { d, sender, store } = deps();
+    await store.suppress(user.email, "bounced");
+    expect(await subscribeWithAccount(d, user, { source: "account" })).toMatchObject({ status: "suppressed" });
+    expect(sender.sent).toEqual([]);
+  });
+
+  it("unsubscribing with no subscription is a no-op", async () => {
+    const { store } = deps();
+    expect(await unsubscribeAccount(store, user)).toEqual({ status: "none", email: "member@example.com" });
+  });
+});
+
