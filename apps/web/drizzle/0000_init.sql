@@ -7,7 +7,7 @@ CREATE TYPE "public"."subscription_status" AS ENUM('active', 'on_hold', 'cancell
 CREATE TYPE "public"."tier" AS ENUM('free', 'pro');--> statement-breakpoint
 CREATE TYPE "public"."newsletter_event_type" AS ENUM('delivered', 'opened', 'clicked', 'bounced', 'complained');--> statement-breakpoint
 CREATE TYPE "public"."newsletter_status" AS ENUM('pending', 'active', 'unsubscribed', 'bounced', 'complained');--> statement-breakpoint
-CREATE TYPE "public"."consent_kind" AS ENUM('age_confirmation', 'terms', 'privacy', 'eu_withdrawal_waiver', 'newsletter');--> statement-breakpoint
+CREATE TYPE "public"."consent_kind" AS ENUM('age_confirmation', 'terms', 'privacy', 'eu_withdrawal_waiver', 'newsletter_opt_in');--> statement-breakpoint
 CREATE TABLE "account" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"account_id" text NOT NULL,

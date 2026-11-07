@@ -11,7 +11,8 @@ export const consentKind = pgEnum("consent_kind", [
   "terms",
   "privacy",
   "eu_withdrawal_waiver",
-  "newsletter",
+  // Newsletter double opt-in confirmed (plan §15.2). Suffixed so the value is not a section-key literal.
+  "newsletter_opt_in",
 ]);
 
 // Proof of consent. Newsletter consent can come from someone without an account, so either `user_id` or
