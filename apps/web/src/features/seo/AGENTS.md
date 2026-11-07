@@ -26,9 +26,13 @@ from `apps/web/src/config/crawlers.ts`, search engines allowed) live in the app 
 - **Headers come from `next.config.ts`, not middleware.** `securityHeaders()` is applied to `/:path*`; a second rule
   relaxes the CSP only for the DSA runner chunks (`dsaRunner: true`: `'unsafe-eval'`, `'wasm-unsafe-eval'`,
   Pyodide CDN). Never relax the page CSP to fix a runner problem.
-- The CSP is **Report-Only** until Phase 7; `upgrade-insecure-requests` and `report-to` are left out until it is
-  enforced and `CSP_REPORT_ENDPOINT` exists. `'unsafe-inline'` scripts are a known trade-off (nonces would break
-  static caching).
+- **On Cloudflare, static files never reach `next.config.ts`**: the assets binding serves `/_next/static/*` and
+  public files. `npm run cf:build -w web` therefore writes `.open-next/assets/_headers` from
+  `staticAssetHeadersFile()` (`apps/web/scripts/static-headers.ts`): the baseline headers on `/*`, and for each runner
+  chunk the page CSP detached (`!`) and the runner policy instead.
+- The CSP is **Report-Only** until Phase 7 and reports to `CSP_REPORT_ENDPOINT` (`/api/csp-report`, which logs a
+  `csp_violation` line per report, URLs without query strings; `csp-report.ts`). `upgrade-insecure-requests` is left
+  out until it is enforced. `'unsafe-inline'` scripts are a known trade-off (nonces would break static caching).
 - Third-party hosts are added in `CSP_HOSTS` or come from `apps/web/src/features/observability/csp-hosts.ts` only
   when that tool's variable is set. The Dodo checkout origin is still empty (stream L).
 - Importing `security-headers.ts` runs `pinPublicObservabilityEnv()` (see `apps/web/src/features/observability/AGENTS.md`).
