@@ -8,13 +8,6 @@ import type { DocHeading } from "@/lib/doc-headings";
 // Offset from the top of the viewport at which a heading counts as "current" (below the 4rem site header).
 const ACTIVE_OFFSET = 120;
 
-// The content shell renders the page twice (desktop and mobile copies, one hidden), so every heading id
-// exists twice. Use the copy that is actually laid out.
-function visibleHeading(id: string) {
-  const all = document.querySelectorAll<HTMLElement>(`[id="${CSS.escape(id)}"]`);
-  return Array.from(all).find((el) => el.offsetParent !== null) ?? all[0] ?? null;
-}
-
 // The heading the reader is in: the last one whose top has scrolled above the offset line.
 function useActiveHeading(headings: DocHeading[]) {
   const [active, setActive] = React.useState<string | undefined>(headings[0]?.id);
@@ -28,7 +21,7 @@ function useActiveHeading(headings: DocHeading[]) {
       if (atBottom) return setActive(headings[headings.length - 1].id);
       let current = headings[0].id;
       for (const h of headings) {
-        const el = visibleHeading(h.id);
+        const el = document.getElementById(h.id);
         if (el && el.getBoundingClientRect().top <= ACTIVE_OFFSET) current = h.id;
       }
       setActive(current);
@@ -51,7 +44,7 @@ function useActiveHeading(headings: DocHeading[]) {
 
 function useJump(setActive: (id: string) => void, onJump?: () => void) {
   return (e: React.MouseEvent<HTMLAnchorElement>, id: string) => {
-    const el = visibleHeading(id);
+    const el = document.getElementById(id);
     if (!el) return;
     e.preventDefault();
     el.scrollIntoView({ behavior: "smooth", block: "start" });
