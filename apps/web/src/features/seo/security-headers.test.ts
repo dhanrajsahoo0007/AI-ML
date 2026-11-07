@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { observabilityCspHosts } from "../observability/csp-hosts";
 import { contentSecurityPolicy, securityHeaders } from "./security-headers";
 
 const asMap = (headers: { key: string; value: string }[]) => new Map(headers.map((h) => [h.key, h.value]));
@@ -51,12 +52,14 @@ describe("securityHeaders", () => {
 });
 
 describe("contentSecurityPolicy", () => {
-  const d = directives(contentSecurityPolicy());
+  // No observability tool switched on, whatever the environment of the test run.
+  const off = observabilityCspHosts({});
+  const d = directives(contentSecurityPolicy({ observability: off }));
 
   it("matches §11.4", () => {
     expect(d.get("default-src")).toEqual(["'self'"]);
-    expect(d.get("script-src")).toEqual(["'self'", "'unsafe-inline'", "https://static.cloudflareinsights.com"]);
-    expect(d.get("connect-src")).toEqual(["'self'", "https://cloudflareinsights.com"]);
+    expect(d.get("script-src")).toEqual(["'self'", "'unsafe-inline'"]);
+    expect(d.get("connect-src")).toEqual(["'self'"]);
     expect(d.get("img-src")).toEqual(["'self'", "data:", "https://lh3.googleusercontent.com"]);
     expect(d.get("style-src")).toEqual(["'self'", "'unsafe-inline'"]);
     expect(d.get("font-src")).toEqual(["'self'"]);
@@ -74,5 +77,34 @@ describe("contentSecurityPolicy", () => {
   it("allows eval only for the dev server", () => {
     expect(d.get("script-src")).not.toContain("'unsafe-eval'");
     expect(directives(contentSecurityPolicy({ dev: true })).get("script-src")).toContain("'unsafe-eval'");
+  });
+});
+
+describe("observability hosts in the CSP", () => {
+  it("adds Sentry, PostHog and Cloudflare Web Analytics only when their variables are set", () => {
+    const on = observabilityCspHosts({
+      NEXT_PUBLIC_SENTRY_DSN: "https://abc123@o42.ingest.us.sentry.io/7",
+      NEXT_PUBLIC_POSTHOG_KEY: "phc_test",
+      NEXT_PUBLIC_CF_BEACON_TOKEN: "cf-test",
+    });
+    const d = directives(contentSecurityPolicy({ observability: on }));
+    expect(d.get("script-src")).toEqual(["'self'", "'unsafe-inline'", "https://static.cloudflareinsights.com"]);
+    expect(d.get("connect-src")).toEqual([
+      "'self'",
+      "https://o42.ingest.us.sentry.io",
+      "https://us.i.posthog.com",
+      "https://cloudflareinsights.com",
+    ]);
+  });
+
+  it("uses the configured PostHog host and ignores malformed or non-https values", () => {
+    expect(
+      observabilityCspHosts({ NEXT_PUBLIC_POSTHOG_KEY: "phc_test", NEXT_PUBLIC_POSTHOG_HOST: "https://eu.i.posthog.com/" })
+        .connectSrc
+    ).toEqual(["https://eu.i.posthog.com"]);
+    expect(observabilityCspHosts({ NEXT_PUBLIC_SENTRY_DSN: "not a url" }).connectSrc).toEqual([]);
+    expect(observabilityCspHosts({ NEXT_PUBLIC_SENTRY_DSN: "http://k@sentry.example/1" }).connectSrc).toEqual([]);
+    // A host without its key adds nothing.
+    expect(observabilityCspHosts({ NEXT_PUBLIC_POSTHOG_HOST: "https://eu.i.posthog.com" }).connectSrc).toEqual([]);
   });
 });
