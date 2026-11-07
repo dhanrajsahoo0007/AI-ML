@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { refreshEntitlement } from "@/features/entitlements/islands.client";
 import { clearLocalProgress, readLocalProgress } from "./local";
 
-// Tiny island on /sign-in/complete: merges signed-out progress into the new session, then continues to
-// `next` (a same-site path only).
+// Tiny island on /sign-in/complete: merges signed-out progress into the new session, refreshes the entitlement
+// cookie, then continues to `next` (a same-site path only).
 
 function safeNext(raw: string | null): string {
   return raw && raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\") ? raw : "/account";
@@ -16,7 +17,8 @@ export function MergeLocalProgress() {
   useEffect(() => {
     const next = safeNext(new URLSearchParams(window.location.search).get("next"));
     const items = readLocalProgress();
-    const done = () => window.location.replace(next);
+    // Issue the entitlement cookie (plan §9.2) before continuing, so a Pro reader lands on full articles.
+    const done = () => void refreshEntitlement().finally(() => window.location.replace(next));
     if (!items.length) return done();
     setStatus("Saving the progress from this browser to your account…");
     fetch("/api/progress/merge", {

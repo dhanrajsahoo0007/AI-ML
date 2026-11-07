@@ -32,6 +32,7 @@ const DATA_FOLDERS = new Set(["question-bank", "pages", "assets"]);
 const SYSTEM_ROUTES = new Set([
   "api",
   "pricing",
+  "checkout",
   "account",
   "sign-in",
   "admin",
