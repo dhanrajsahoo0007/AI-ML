@@ -1,5 +1,4 @@
 import { Heading, Hr, Img, Link, Text } from "@react-email/components";
-import { compileMDX } from "next-mdx-remote/rsc";
 import type { ComponentProps, ReactElement } from "react";
 import remarkGfm from "remark-gfm";
 import { renderEmail, type RenderedEmail } from "../email/render";
@@ -58,6 +57,8 @@ export async function renderIssueEmail(issue: Issue, opts: RenderIssueOptions): 
   const webUrl = absoluteUrl(issue.href);
   let body: ReactElement;
   if (emailCarriesBody(issue)) {
+    // Imported on use: the send script runs as CommonJS under tsx, and the MDX toolchain is ESM-only.
+    const { compileMDX } = await import("next-mdx-remote/rsc");
     const { content } = await compileMDX({
       source: issue.body,
       components: emailComponents,

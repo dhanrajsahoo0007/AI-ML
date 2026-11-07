@@ -1,0 +1,128 @@
+name: Newsletter send
+
+# Sends one newsletter issue (plan §15.2). Manual only: pick the issue slug and type SEND to confirm.
+#
+#   1. test-send  renders the issue from the repo and sends it to the founder (dhanrajsahoo.work@gmail.com) only.
+#   2. broadcast  the real send through Resend Broadcasts, to the segment matching the issue's audience. It runs
+#                 after test-send succeeds; with required reviewers on the `production` environment it waits for a
+#                 second approval, so the reviewer can read the test email first.
+#
+# Both jobs skip with a notice while the RESEND_API_KEY secret does not exist (no Resend account yet). The issue
+# must have status: scheduled for the real send; mark it `sent` in a PR afterwards (this workflow can't push).
+# Secrets (names only): RESEND_API_KEY, RESEND_SEGMENT_ID, RESEND_PRO_SEGMENT_ID, NEXT_PUBLIC_SITE_URL (variable).
+
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: "Issue slug (the file name under apps/web/content/newsletter/<yyyy>/, without .mdx)"
+        required: true
+        type: string
+      confirm:
+        description: "Type SEND to send this issue to every subscriber"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One send at a time, and never cancel a send that has started.
+concurrency:
+  group: newsletter-send
+  cancel-in-progress: false
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  APP_ENV: production
+  # Exported only when set (an empty value would blank every link); see the send steps.
+  SITE_URL_VAR: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+  ISSUE_SLUG: ${{ inputs.slug }}
+
+jobs:
+  test-send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Check the inputs
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "SEND" ]; then
+            echo "::error::Type SEND (in capitals) in the confirm field to send the issue."
+            exit 1
+          fi
+          if ! printf '%s' "$ISSUE_SLUG" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$'; then
+            echo "::error::Invalid issue slug."
+            exit 1
+          fi
+
+      - name: Check that Resend is configured
+        id: resend
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          if [ -z "$RESEND_API_KEY" ]; then
+            echo "::notice::RESEND_API_KEY is not set: skipping the newsletter send (no Resend account yet)."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.resend.outputs.configured == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.resend.outputs.configured == 'true'
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - if: steps.resend.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Render and send the test email to the founder
+        if: steps.resend.outputs.configured == 'true'
+        working-directory: apps/web
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          if [ -n "$SITE_URL_VAR" ]; then export NEXT_PUBLIC_SITE_URL="$SITE_URL_VAR"; fi
+          npx tsx --tsconfig src/features/newsletter/send/tsconfig.json \
+            src/features/newsletter/send/send-issue.tsx "$ISSUE_SLUG" --mode test
+          echo "Test email for \`$ISSUE_SLUG\` sent to the founder. Read it before approving the broadcast." >> "$GITHUB_STEP_SUMMARY"
+
+    outputs:
+      configured: ${{ steps.resend.outputs.configured }}
+
+  broadcast:
+    needs: test-send
+    if: needs.test-send.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Send the issue through Resend Broadcasts
+        working-directory: apps/web
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_SEGMENT_ID: ${{ secrets.RESEND_SEGMENT_ID }}
+          RESEND_PRO_SEGMENT_ID: ${{ secrets.RESEND_PRO_SEGMENT_ID }}
+        run: |
+          if [ -n "$SITE_URL_VAR" ]; then export NEXT_PUBLIC_SITE_URL="$SITE_URL_VAR"; fi
+          npx tsx --tsconfig src/features/newsletter/send/tsconfig.json \
+            src/features/newsletter/send/send-issue.tsx "$ISSUE_SLUG" --mode broadcast
+          echo "Issue \`$ISSUE_SLUG\` sent. Open a PR that sets \`status: sent\` in its frontmatter." >> "$GITHUB_STEP_SUMMARY"
