@@ -2,9 +2,10 @@ import type { NextConfig } from "next";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { PHASE_PRODUCTION_BUILD } from "next/constants";
+import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from "next/constants";
 import { features } from "./src/config/features";
 import { allSections, hiddenRoutes, publicNavLinks, resolveAppEnv } from "./src/features/sections/registry";
+import { securityHeaders } from "./src/features/seo/security-headers";
 
 // Old topic-bank URLs, now category and subsection pages of the question library. Banks whose
 // category is switched off (content/features.yaml) go to the interviews index instead.
@@ -65,12 +66,26 @@ export default function nextConfig(phase: string): NextConfig {
   if (phase === PHASE_PRODUCTION_BUILD) beforeBuild();
   return {
     output: "standalone",
+    poweredByHeader: false,
     outputFileTracingRoot: path.join(__dirname, "../.."),
     // Resolved once at build: the environment the section states were built for, and the `on`
     // sections' header links (client components read these; hidden and off sections never ship).
     env: {
       APP_ENV: resolveAppEnv(),
       SECTION_NAV: JSON.stringify(publicNavLinks()),
+    },
+    // Security headers on every response (plan §11.4). /_next/static/* already gets
+    // `public, max-age=31536000, immutable` from Next itself, so no Cache-Control rule is added for it.
+    async headers() {
+      return [
+        {
+          source: "/:path*",
+          headers: securityHeaders({
+            dev: phase === PHASE_DEVELOPMENT_SERVER,
+            indexable: resolveAppEnv() === "production",
+          }),
+        },
+      ];
     },
     async redirects() {
       return [
