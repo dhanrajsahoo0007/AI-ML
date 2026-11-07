@@ -252,7 +252,8 @@ answer MoR KYC; set prices and free articles.
 `APP_ENV` (`local | preview | staging | production`, set per Wrangler environment). Database: `DATABASE_URL`,
 `DATABASE_URL_DIRECT` (CI migrations). Auth: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `TRUSTED_ORIGINS`,
 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`; test only: `ENABLE_TEST_LOGIN`, `TEST_LOGIN_KEY`. Edge:
-`ENTITLEMENT_SECRET`, `ENTITLEMENT_SECRET_PREVIOUS`, `SECTIONS_KILL`. Newsletter/email: `NEWSLETTER_TOKEN_SECRET`,
+`ENTITLEMENT_SECRET`, `ENTITLEMENT_SECRET_PREVIOUS`, `SECTIONS_KILL`, `SMOKE_KEY` (deploy smoke tests reach
+production on workers.dev; every other non-canonical host redirects to `BETTER_AUTH_URL`). Newsletter/email: `NEWSLETTER_TOKEN_SECRET`,
 `RESEND_API_KEY`, `RESEND_SEGMENT_ID`, `RESEND_PRO_SEGMENT_ID`. Observability (all optional, off when unset):
 `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_DSN`, `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`,
 `NEXT_PUBLIC_CF_BEACON_TOKEN`, `SENTRY_AUTH_TOKEN`. Deploy: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (GitHub

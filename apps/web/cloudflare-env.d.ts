@@ -21,6 +21,10 @@ interface CloudflareEnv {
   DODO_ENVIRONMENT?: "test_mode" | "live_mode";
   DODO_PRODUCT_PRO_MONTHLY?: string;
   DODO_PRODUCT_PRO_YEARLY?: string;
+  /** Var: the public origin; production redirects other hosts to it (src/server/edge/host-guard.ts). */
+  BETTER_AUTH_URL?: string;
+  /** Secret: lets the deploy smoke tests reach production on workers.dev (src/server/edge/host-guard.ts). */
+  SMOKE_KEY?: string;
   /** Workers Rate Limiting, one per named limit (src/server/rate-limit.ts, wrangler.jsonc `ratelimits`). */
   RL_AUTH?: WorkersRateLimitBinding;
   RL_SESSION?: WorkersRateLimitBinding;

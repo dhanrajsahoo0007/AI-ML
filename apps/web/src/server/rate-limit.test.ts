@@ -1,6 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readWranglerConfig } from "../../tests/unit/wrangler-config";
 import { bindingRateLimiter, MemoryRateLimiter, RATE_LIMITS, type RateLimitName } from "./rate-limit";
 
 // H1 (security review): every named limit actually limits, through the Workers binding when present and the
@@ -60,31 +59,9 @@ describe("bindingRateLimiter", () => {
   });
 });
 
-/** Minimal JSONC reader: drops comments outside strings and trailing commas. */
-function readJsonc(file: string): unknown {
-  const src = fs.readFileSync(file, "utf8");
-  let out = "";
-  for (let i = 0; i < src.length; i++) {
-    const c = src[i]!;
-    if (c === '"') {
-      let j = i + 1;
-      while (src[j] !== '"') j += src[j] === "\\" ? 2 : 1;
-      out += src.slice(i, j + 1);
-      i = j;
-    } else if (c === "/" && src[i + 1] === "/") {
-      while (i < src.length && src[i] !== "\n") i++;
-      out += "\n";
-    } else out += c;
-  }
-  return JSON.parse(out.replace(/,(\s*[\]}])/g, "$1"));
-}
-
 describe("wrangler.jsonc ratelimits", () => {
   type Rl = { name: string; namespace_id: string; simple: { limit: number; period: number } };
-  const config = readJsonc(path.join(__dirname, "../../wrangler.jsonc")) as {
-    ratelimits: Rl[];
-    env: Record<string, { ratelimits?: Rl[] }>;
-  };
+  const config = readWranglerConfig() as { ratelimits: Rl[]; env: Record<string, { ratelimits?: Rl[] }> };
   const scopes: [string, Rl[] | undefined][] = [
     ["top level", config.ratelimits],
     ...Object.entries(config.env).map(([name, e]) => [name, e.ratelimits] as [string, Rl[] | undefined]),
