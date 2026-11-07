@@ -3,7 +3,7 @@ import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { getNavTree } from "@/lib/nav-tree";
-import { THEME_SCRIPT, ThemedToaster } from "@/components/theme";
+import { THEME_SCRIPT } from "@/components/theme";
 import { siteConfig } from "@/config/site";
 import "katex/dist/katex.min.css";
 import "./globals.css";
@@ -64,7 +64,6 @@ export default async function RootLayout({
           {children}
         </main>
         <SiteFooter />
-        <ThemedToaster />
       </body>
     </html>
   );

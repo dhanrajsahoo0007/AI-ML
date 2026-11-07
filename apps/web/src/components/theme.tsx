@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
-import { Toaster } from "sonner";
 import { cn } from "@/lib/utils";
 
 // The theme is the `dark` class on <html>. A saved choice ("light" or "dark") wins; without one
@@ -70,7 +69,3 @@ export function ThemeToggle({ className }: { className?: string }) {
   );
 }
 
-export function ThemedToaster() {
-  const dark = useIsDark();
-  return <Toaster theme={dark ? "dark" : "light"} position="bottom-right" />;
-}
