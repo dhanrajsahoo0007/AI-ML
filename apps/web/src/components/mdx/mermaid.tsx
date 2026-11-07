@@ -2,61 +2,13 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useIsDark } from "@/components/theme";
+import { mermaidConfig, prepareSource } from "@/lib/mermaid-theme.mjs";
 
-// Ported from dhanraj-portfolio/components/Mermaid.tsx so diagrams share the editorial theme.
+// Dev-only fallback: production diagrams are pre-rendered to SVG at build time (scripts/render-mermaid.mjs
+// and src/lib/rehype-mermaid-svg.ts). `next dev` uses this for diagrams edited since the last
+// `npm run mermaid`; code-block.tsx only imports it when NODE_ENV is "development".
 
 type Mode = "light" | "dark";
-
-const PALETTES = {
-  light: {
-    accent: { fill: "#1e3a8a", text: "#faf9f6" },
-    vars: {
-      background: "#faf9f6",
-      primaryColor: "#faf9f6",
-      primaryTextColor: "#111111",
-      primaryBorderColor: "#bdb9b0",
-      secondaryColor: "#e8ecf6",
-      tertiaryColor: "#f2f0eb",
-      lineColor: "#8a8780",
-      textColor: "#2b2b2b",
-      clusterBkg: "#f2f0eb",
-      clusterBorder: "#dcd9d2",
-      edgeLabelBackground: "#faf9f6",
-      actorBkg: "#faf9f6",
-      actorBorder: "#bdb9b0",
-      signalColor: "#6b6b6b",
-      noteBkgColor: "#e8ecf6",
-      noteBorderColor: "#1e3a8a",
-    },
-  },
-  dark: {
-    accent: { fill: "#93b1f5", text: "#141413" },
-    vars: {
-      background: "#141413",
-      primaryColor: "#1d1c1a",
-      primaryTextColor: "#f2f0eb",
-      primaryBorderColor: "#4a4843",
-      secondaryColor: "#1b2440",
-      tertiaryColor: "#1d1c1a",
-      lineColor: "#8a8780",
-      textColor: "#d4d1ca",
-      clusterBkg: "#1a1918",
-      clusterBorder: "#3a3935",
-      edgeLabelBackground: "#141413",
-      actorBkg: "#1d1c1a",
-      actorBorder: "#4a4843",
-      signalColor: "#b5b2ab",
-      noteBkgColor: "#1b2440",
-      noteBorderColor: "#93b1f5",
-    },
-  },
-} as const;
-
-// Shared styling for every flowchart: mark key nodes with `:::accent`.
-function accentClass(mode: Mode) {
-  const { fill, text } = PALETTES[mode].accent;
-  return `\nclassDef accent fill:${fill},stroke:${fill},color:${text},font-weight:500`;
-}
 
 let initializedFor: Mode | null = null;
 // Mermaid's render() keeps shared state and hangs when called concurrently, so renders run one at a time.
@@ -71,15 +23,7 @@ function renderQueued(id: string, source: string, mode: Mode) {
 async function getMermaid(mode: Mode) {
   const mermaid = (await import("mermaid")).default;
   if (initializedFor !== mode) {
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: "strict",
-      theme: "base",
-      fontFamily: "var(--font-inter), ui-sans-serif, system-ui, sans-serif",
-      themeVariables: { fontSize: "14px", darkMode: mode === "dark", ...PALETTES[mode].vars },
-      flowchart: { curve: "basis", padding: 14, nodeSpacing: 36, rankSpacing: 48 },
-      sequence: { mirrorActors: false, actorMargin: 40 },
-    });
+    mermaid.initialize(mermaidConfig(mode) as Parameters<typeof mermaid.initialize>[0]);
     initializedFor = mode;
   }
   return mermaid;
@@ -116,8 +60,7 @@ export function Mermaid({
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
-    const trimmed = chart.trim();
-    const source = /^(flowchart|graph)\b/.test(trimmed) ? trimmed + accentClass(mode) : trimmed;
+    const source = prepareSource(chart, mode);
     renderQueued(`${id}${mode}`, source, mode)
       .then(({ svg }) => !cancelled && setSvg(svg))
       .catch(() => !cancelled && setError(true));

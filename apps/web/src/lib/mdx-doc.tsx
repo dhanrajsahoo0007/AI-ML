@@ -8,9 +8,10 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { rehypeHeadingIds, type DocHeading } from "@/lib/doc-headings";
+import { rehypeMermaidSvg } from "@/lib/rehype-mermaid-svg";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
-import { Pre, Figure } from "@/components/mdx/code-block";
+import { Pre, Figure, MermaidSvg } from "@/components/mdx/code-block";
 import type { ContentSection, ContentMeta, ContentGroupDef } from "@/types/content";
 import { Diagram } from "@/components/diagrams/diagram";
 import { DatabasePicker } from "@/components/db/database-picker";
@@ -56,13 +57,15 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
   const raw = await fs.readFile(filePath, "utf8");
   const { data, content } = matter(raw);
   const headings: DocHeading[] = [];
+  // Lines taken up by the frontmatter, so plugin errors point at the right line of the file.
+  const lineOffset = raw.split("\n").length - content.split("\n").length;
   const { content: mdxBody } = await compileMDX({
     source: content,
     options: {
       parseFrontmatter: false,
       mdxOptions: {
         remarkPlugins: [remarkGfm, remarkMath],
-        rehypePlugins: [rehypeKatex, [rehypeHeadingIds, { headings }]],
+        rehypePlugins: [[rehypeMermaidSvg, { filePath, lineOffset }], rehypeKatex, [rehypeHeadingIds, { headings }]],
       },
     },
     components: {
@@ -72,6 +75,7 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
       InterviewQuestions,
       InterviewQuestion,
       Figure,
+      MermaidSvg,
       AnimatedDiagram: Diagram,
       DatabasePicker,
       DatabaseWorkloadMatrix,
