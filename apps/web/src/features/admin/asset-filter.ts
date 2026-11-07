@@ -2,7 +2,7 @@ import { ASSET_TYPES, type AssetEntry, type AssetType } from "@/lib/asset-schema
 
 // Search and snippets for the /admin/assets browser. Pure (no file system), so it is unit-tested.
 
-export interface AssetQuery {
+interface AssetQuery {
   /** Words matched against the id, title, alt, caption and tags (all must match). */
   q: string;
   type: AssetType | null;

@@ -8,7 +8,7 @@ export const REFUND_RATE_TARGET = 0.05;
 /** Dispute rate alert (plan §10.5): card networks start penalising merchants around 0.75%. */
 export const DISPUTE_RATE_ALERT = 0.0075;
 /** No succeeded payment for this long, while there are paying subscribers, may mean a provider pause (§10.5). */
-export const NO_PAYMENT_ALERT_MS = 6 * 60 * 60 * 1000;
+const NO_PAYMENT_ALERT_MS = 6 * 60 * 60 * 1000;
 
 // ── Currency ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -63,7 +63,7 @@ export interface Breakdown {
   share: number;
 }
 
-export interface MrrSummary {
+interface MrrSummary {
   /** Active subscriptions only; on_hold is reported separately as at risk. */
   mrrUsdMinor: number;
   arrUsdMinor: number;
@@ -138,7 +138,7 @@ export function computeMrr(rows: readonly LiveSubscriptionRow[]): MrrSummary {
 
 // ── Churn ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-export interface ChurnSummary {
+interface ChurnSummary {
   created: number;
   churned: number;
   /** Cancelled by the subscriber (cancelled, or expired at the end of a cancelled period). */
@@ -179,7 +179,7 @@ const CHARGED: readonly PaymentStatus[] = [
 const REFUNDED: readonly PaymentStatus[] = ["refunded", "partially_refunded"];
 const DISPUTED: readonly PaymentStatus[] = ["disputed", "dispute_won", "dispute_lost"];
 
-export interface PaymentRates {
+interface PaymentRates {
   /** Payments that took money (everything but `failed`). */
   charged: number;
   failed: number;

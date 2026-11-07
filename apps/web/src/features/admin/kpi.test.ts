@@ -85,7 +85,7 @@ describe("computeMrr", () => {
     expect(mrr.by.country.map((b) => b.key)).toEqual(["GB", "US", "IN"]);
     expect(mrr.by.currency.map((b) => b.key)).toEqual(["GBP", "USD", "INR"]);
     // Breakdown amounts are rounded to whole cents; shares use the unrounded amounts.
-    expect(mrr.by.priceTier.map(({ share, ...b }) => b)).toEqual([
+    expect(mrr.by.priceTier.map((b) => ({ key: b.key, subscribers: b.subscribers, mrrUsdMinor: b.mrrUsdMinor }))).toEqual([
       { key: "A", subscribers: 2, mrrUsdMinor: 1838 },
       { key: "C", subscribers: 1, mrrUsdMinor: 300 },
     ]);

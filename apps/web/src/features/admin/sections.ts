@@ -10,7 +10,7 @@ import { APP_ENVS, type AppEnv, type ReleaseState } from "@/features/sections/sc
 // Workers there is no request-time file system, so the page shows the load error instead (see the stream R
 // hand-over note: the build should emit a snapshot for it).
 
-export interface SectionRow {
+interface SectionRow {
   key: string;
   label: string;
   kind: string;

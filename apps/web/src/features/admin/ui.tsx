@@ -77,7 +77,7 @@ export function Panel({
   );
 }
 
-export type Tone = "ok" | "warn" | "alert" | undefined;
+type Tone = "ok" | "warn" | "alert" | undefined;
 
 const toneClass: Record<NonNullable<Tone>, string> = {
   ok: "border-emerald-600/30",

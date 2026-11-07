@@ -12,20 +12,20 @@ import type { RequestSessionInfo } from "@/server/http";
 // - admin whose sign-in is older than 10 minutes → sign in again (the same re-auth flow as /account/data)
 // - every admin view, and every refused attempt by a signed-in user, is written to audit_log
 
-export type AdminGate = "ok" | "not_found" | "reauth";
+type AdminGate = "ok" | "not_found" | "reauth";
 
 export function adminGate(auth: RequestSessionInfo | null, now = Date.now()): AdminGate {
   if (!auth || auth.user.role !== "admin") return "not_found";
   return isFreshSession(auth.session.createdAt, now) ? "ok" : "reauth";
 }
 
-export const AUDIT_ACTIONS = {
+const AUDIT_ACTIONS = {
   view: "admin.view",
   denied: "admin.denied",
   reauth: "admin.reauth_required",
 } as const;
 
-export interface AdminViewer {
+interface AdminViewer {
   id: string;
   email: string;
   sessionId: string;

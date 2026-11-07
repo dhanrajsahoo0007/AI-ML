@@ -9,7 +9,6 @@ import { auditLog, newsletterSubscriber, payment, subscription, user, webhookEve
 
 // ── Subscriptions ─────────────────────────────────────────────────────────────────────────────────────────────
 
-export type SubscriptionStatus = (typeof subscription.status.enumValues)[number];
 export type PaymentStatus = (typeof payment.status.enumValues)[number];
 
 /** A live (active or on_hold) subscription with what's needed to convert its price to USD. */
@@ -102,7 +101,7 @@ export async function subscriptionMovement(db: Db, since: Date): Promise<Subscri
 
 // ── Payments ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-export interface PaymentWindowStats {
+interface PaymentWindowStats {
   /** Payments created since `since`, by current status (refunds and disputes are status changes). */
   byStatus: Partial<Record<PaymentStatus, number>>;
   /** Refunds whose status changed within 7 days of the payment: the money-back guarantee window. */
@@ -111,7 +110,7 @@ export interface PaymentWindowStats {
   lastSucceededAt: Date | null;
 }
 
-export const GUARANTEE_DAYS = 7;
+const GUARANTEE_DAYS = 7;
 
 export async function paymentWindowStats(db: Db, since: Date): Promise<PaymentWindowStats> {
   const rows = await db
@@ -140,7 +139,7 @@ export async function paymentWindowStats(db: Db, since: Date): Promise<PaymentWi
   };
 }
 
-export interface DailyRevenueRow {
+interface DailyRevenueRow {
   /** YYYY-MM-DD (UTC). */
   day: string;
   usdMinor: number;
@@ -168,7 +167,7 @@ export async function dailyRevenue(db: Db, since: Date): Promise<DailyRevenueRow
 
 // ── Mailing list ──────────────────────────────────────────────────────────────────────────────────────────────
 
-export type SubscriberStatus = (typeof newsletterSubscriber.status.enumValues)[number];
+type SubscriberStatus = (typeof newsletterSubscriber.status.enumValues)[number];
 
 export async function subscriberCounts(db: Db): Promise<Partial<Record<SubscriberStatus, number>>> {
   const rows = await db
@@ -180,7 +179,7 @@ export async function subscriberCounts(db: Db): Promise<Partial<Record<Subscribe
 
 // ── Webhooks ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-export interface WebhookProviderHealth {
+interface WebhookProviderHealth {
   provider: string;
   received: number;
   /** Not processed and no error yet. */
@@ -219,7 +218,7 @@ export async function webhookHealth(db: Db): Promise<WebhookProviderHealth[]> {
   }));
 }
 
-export interface WebhookErrorRow {
+interface WebhookErrorRow {
   id: string;
   provider: string;
   eventId: string;
@@ -259,7 +258,7 @@ export async function staleWebhookCount(db: Db, olderThan: Date): Promise<number
 
 // ── Audit log ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-export interface AuditEntry {
+interface AuditEntry {
   actor: string;
   action: string;
   target?: string | null;
@@ -275,7 +274,7 @@ export async function writeAudit(db: Db, entry: AuditEntry): Promise<void> {
   });
 }
 
-export interface AuditRow {
+interface AuditRow {
   id: string;
   at: Date;
   actor: string;

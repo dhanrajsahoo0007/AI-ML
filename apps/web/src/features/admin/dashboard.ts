@@ -15,7 +15,7 @@ import { computeChurn, computeMrr, computePaymentRates, dailySeries, noRecentPay
 // Loads and computes what each admin page shows. Queries run one after another: a page holds a single
 // one-connection pool (server/db/client.ts).
 
-export const WINDOW_DAYS = 30;
+const WINDOW_DAYS = 30;
 const DAY_MS = 86_400_000;
 
 export async function loadKpis(db: Db, now = Date.now()) {
@@ -56,10 +56,8 @@ export async function loadKpis(db: Db, now = Date.now()) {
   };
 }
 
-export type Kpis = Awaited<ReturnType<typeof loadKpis>>;
-
 /** The webhook SLO (plan §10.6): processed within one minute. */
-export const WEBHOOK_SLO_MS = 60_000;
+const WEBHOOK_SLO_MS = 60_000;
 
 export async function loadWebhooks(db: Db, now = Date.now()) {
   return {
