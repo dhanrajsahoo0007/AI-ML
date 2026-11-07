@@ -6,7 +6,7 @@ import path from "node:path";
 // except production, so production never builds, lists or ships them. Build-time module (relative imports
 // only): read by features/docs/source.ts.
 
-export const FIXTURE_CONTENT_DIR = path.join("tests", "fixtures", "content");
+const FIXTURE_CONTENT_DIR = path.join("tests", "fixtures", "content");
 
 function walk(dir: string, base = ""): string[] {
   if (!fs.existsSync(dir)) return [];

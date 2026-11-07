@@ -27,10 +27,10 @@ import {
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type Exec = Db | Tx;
 
-export type ProcessResult = "processed" | "duplicate";
+type ProcessResult = "processed" | "duplicate";
 
 /** What webhook_event.payload keeps: the normalised event (no names, emails or card data). */
-export function storedPayload(event: BillingEvent) {
+function storedPayload(event: BillingEvent) {
   const ref =
     event.kind === "subscription"
       ? { subscriptionId: event.subscription.providerSubscriptionId }
@@ -106,7 +106,7 @@ async function lastAppliedAt(tx: Exec, provider: ProviderId, providerSubscriptio
   return row?.at ? new Date(row.at) : null;
 }
 
-export interface ApplyContext {
+interface ApplyContext {
   provider: ProviderId;
   /** `webhook:dodo`, or `system:reconcile`. */
   actor: string;
@@ -298,7 +298,7 @@ async function applyMoneyEvent(tx: Exec, ctx: ApplyContext, event: Extract<Billi
 }
 
 /** Applies one event inside the caller's transaction. */
-export async function applyEvent(tx: Exec, ctx: ApplyContext, event: BillingEvent): Promise<void> {
+async function applyEvent(tx: Exec, ctx: ApplyContext, event: BillingEvent): Promise<void> {
   switch (event.kind) {
     case "subscription":
       await applySubscriptionSnapshot(tx, ctx, event);

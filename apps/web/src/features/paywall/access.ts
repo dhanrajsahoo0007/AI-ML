@@ -47,10 +47,6 @@ export function premiumAnswerCategories(): { slug: string; subsections: string[]
     .map((c) => ({ slug: c.slug, subsections: c.subsections.map((s) => s.slug) }));
 }
 
-export function isPremiumAnswerCategory(slug: string): boolean {
-  return premiumAnswerCategories().some((c) => c.slug === slug);
-}
-
 export interface PremiumRoutesManifest {
   env: AppEnv;
   paywall: boolean;

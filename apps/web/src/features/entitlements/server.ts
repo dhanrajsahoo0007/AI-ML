@@ -21,7 +21,7 @@ function readCookie(request: Request, name: string): string | undefined {
   return pair?.slice(name.length + 1);
 }
 
-export async function loadEntitlement(db: Db, userId: string): Promise<StoredEntitlement & { hold: boolean } | null> {
+async function loadEntitlement(db: Db, userId: string): Promise<StoredEntitlement & { hold: boolean } | null> {
   const [row] = await db
     .select({ tier: currentEntitlement.tier, validUntil: currentEntitlement.validUntil, version: currentEntitlement.version })
     .from(currentEntitlement)
@@ -35,7 +35,7 @@ export async function loadEntitlement(db: Db, userId: string): Promise<StoredEnt
   return row ? { ...row, hold: Boolean(held) } : null;
 }
 
-export interface RefreshInput {
+interface RefreshInput {
   request: Request;
   db: Db;
   user: { id: string; role: "user" | "admin" } | null;
@@ -44,7 +44,7 @@ export interface RefreshInput {
   now?: Date;
 }
 
-export type RefreshResult =
+type RefreshResult =
   | { ok: true; body: { tier: "free" | "pro"; exp: number; v: number; hold: boolean; stale: boolean }; setCookies: string[] }
   | { ok: false; error: HttpError; setCookies: string[] };
 

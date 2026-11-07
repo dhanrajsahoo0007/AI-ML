@@ -31,5 +31,3 @@ export async function billingOverview(db: Db, userId: string) {
     .limit(12);
   return { subscription: sub ?? null, tier: ent?.tier ?? "free", validUntil: ent?.validUntil ?? null, payments };
 }
-
-export type BillingOverview = Awaited<ReturnType<typeof billingOverview>>;

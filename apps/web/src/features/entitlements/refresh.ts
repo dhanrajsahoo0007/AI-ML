@@ -16,7 +16,7 @@ export interface StoredEntitlement {
   version: number;
 }
 
-export type RefreshDecision =
+type RefreshDecision =
   | { ok: true; claims: Omit<EntitlementClaims, "iat">; stale: boolean }
   | { ok: false; reason: "user_mismatch" | "version_rollback" };
 

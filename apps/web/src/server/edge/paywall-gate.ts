@@ -60,8 +60,8 @@ export function decidePaywall(input: {
  * The pricing page has a second prerendered variant whose "Go Pro" opens checkout. Middleware serves it only
  * when the paywall is on and the payment provider is configured; otherwise "Go Pro" says "Launching soon".
  */
-export const PRICING_PATH = "/pricing";
-export const PRICING_LIVE_PATH = "/pricing/live";
+const PRICING_PATH = "/pricing";
+const PRICING_LIVE_PATH = "/pricing/live";
 
 export function pricingRewrite(pathname: string, input: { paywall: boolean; billingConfigured: boolean }) {
   return input.paywall && input.billingConfigured && normalizePath(pathname) === PRICING_PATH

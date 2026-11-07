@@ -105,7 +105,7 @@ function userIdFrom(meta: Record<string, unknown> | null | undefined): string | 
   return parsed.success ? parsed.data : null;
 }
 
-export function toSubscriptionSnapshot(raw: unknown, products: ProductIds): SubscriptionSnapshot {
+function toSubscriptionSnapshot(raw: unknown, products: ProductIds): SubscriptionSnapshot {
   const s = subscriptionSchema.parse(raw);
   return {
     providerSubscriptionId: s.subscription_id,

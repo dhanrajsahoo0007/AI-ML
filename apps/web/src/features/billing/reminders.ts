@@ -11,7 +11,7 @@ import { formatMoney } from "./plans";
 // every yearly subscription renewing 7 to 8 days from now, once per renewal date (audit_log remembers), so it can
 // run daily from a script or, later, the Worker's Cron Trigger.
 
-export const REMINDER_DAYS = 7;
+const REMINDER_DAYS = 7;
 const DAY = 86_400_000;
 const ACTION = "billing.renewal_reminder";
 

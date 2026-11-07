@@ -10,7 +10,7 @@ import type { PaymentProvider } from "./port";
 // through the same state machine as a webhook and written to audit_log. Callable from scripts/billing-reconcile.ts;
 // a daily Cron Trigger in the Worker entry is deferred until the Worker has one.
 
-export interface ReconcileReport {
+interface ReconcileReport {
   provider: string;
   checked: number;
   corrected: { providerSubscriptionId: string; fields: string[] }[];

@@ -43,7 +43,7 @@ export interface EntitlementChange {
 
 type SubscriptionEvent = Extract<BillingEvent, { kind: "subscription" }>;
 
-export type SubscriptionTransition =
+type SubscriptionTransition =
   | { apply: false; reason: "pending" | "no_user" | "unknown_plan" | "stale" | "terminal" }
   | {
       apply: true;

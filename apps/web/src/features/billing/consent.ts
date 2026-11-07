@@ -20,5 +20,5 @@ export const CHECKOUT_CONSENTS = {
   },
 } as const;
 
-export type CheckoutConsentKey = keyof typeof CHECKOUT_CONSENTS;
+type CheckoutConsentKey = keyof typeof CHECKOUT_CONSENTS;
 export const CHECKOUT_CONSENT_KEYS = Object.keys(CHECKOUT_CONSENTS) as CheckoutConsentKey[];

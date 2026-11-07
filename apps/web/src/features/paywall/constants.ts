@@ -14,5 +14,3 @@ export const DEFAULT_PREVIEW_BLOCKS = 3;
 
 /** MDX marker that ends the preview where it stands (wins over the `preview` block count). */
 export const PREMIUM_BREAK = "PremiumBreak";
-
-export const previewPathOf = (path: string) => `${path.replace(/\/+$/, "")}/${PREVIEW_SEGMENT}`;
