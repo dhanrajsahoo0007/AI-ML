@@ -90,7 +90,7 @@ export function SiteFooter() {
           <span className="shrink-0 text-xs font-semibold uppercase tracking-[0.08em]">
             &copy; {new Date().getFullYear()} {business.BRAND}. All rights reserved.
           </span>
-          <span className="max-w-2xl md:text-right">{MOR_NOTICE} All sales are final.</span>
+          <span className="max-w-2xl md:text-right">{MOR_NOTICE} 7-day money-back guarantee.</span>
         </Container>
       </div>
     </footer>
