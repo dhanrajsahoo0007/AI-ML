@@ -1,0 +1,125 @@
+# The section registry: the only place a section is declared (plan §5.1).
+# Validated by src/features/sections/registry.ts. Shared code (header, sidebar, home counts,
+# route generation, Interview Practice and Company Questions aggregation) only iterates this list.
+#
+# release: state per environment (APP_ENV = local | preview | staging | production)
+#   on     pages built, shown in nav, home counts, sitemap and aggregators
+#   hidden pages built, but left out of nav, home, sitemap and aggregators; listed in
+#          hidden-routes.json so middleware can admit admins only; noindex
+#   off    pages not built (404)
+#
+# Moving a section to production: change only release.production, in its own PR (plan §5.1.1).
+#
+# icon: a key from src/lib/icons.ts. navGroup: learn | practice | more (header mega-menu groups).
+# hub: title and subtitle on the section's index page (docs kind).
+# redirects: old URLs that move into this section; `fallback` is used while the section is not on.
+
+- key: ai-system-design
+  kind: docs
+  label: GenAI & LLM Systems
+  href: /ai-system-design
+  icon: sparkles
+  navGroup: learn
+  order: 1
+  release: { local: on, preview: on, staging: on, production: on }
+  access: { default: premium, alwaysFree: [hubs, outlines] }
+  questions: true
+  owner: dhanraj
+  hub:
+    title: GenAI & LLM Systems
+    subtitle: Interview deep-dives on transformers, LLMs, RAG, knowledge graphs, agents and production AI systems, with architecture diagrams and practice questions.
+
+- key: system-design
+  kind: docs
+  label: Classic System Design
+  href: /system-design
+  icon: layers
+  navGroup: learn
+  order: 2
+  release: { local: on, preview: on, staging: on, production: on }
+  access: { default: premium, alwaysFree: [hubs, outlines] }
+  questions: true
+  owner: dhanraj
+  hub:
+    title: Classic System Design
+    subtitle: The fundamentals behind every large system, from APIs and databases to replication, plus classic interview case studies such as WhatsApp, YouTube and a URL shortener.
+
+- key: cloud
+  kind: docs
+  label: Cloud
+  href: /cloud
+  icon: cloud
+  navGroup: learn
+  order: 3
+  release: { local: on, preview: on, staging: on, production: hidden }
+  access: { default: premium, alwaysFree: [hubs, outlines] }
+  questions: true
+  owner: dhanraj
+  hub:
+    title: Cloud
+    subtitle: AWS, Google Cloud and Azure services grouped by job, what each one is, when to use it, and the matching service on the other two clouds.
+
+- key: interviews
+  kind: question-bank
+  label: Interview Practice
+  href: /interviews
+  icon: brain
+  navGroup: practice
+  order: 4
+  release: { local: on, preview: on, staging: on, production: on }
+  access: { default: free, premiumAnswers: per-category }
+  companyTags: true
+  owner: dhanraj
+
+- key: companies
+  kind: directory
+  label: Company Questions
+  href: /companies
+  icon: users
+  navGroup: practice
+  order: 5
+  release: { local: on, preview: on, staging: on, production: on }
+  access: { default: free }
+  aggregates: [interviews, dsa]
+  owner: dhanraj
+
+- key: dsa
+  kind: problems
+  label: DSA
+  href: /dsa
+  icon: code2
+  navGroup: practice
+  order: 6
+  release: { local: on, preview: on, staging: on, production: off }
+  access: { default: premium, alwaysFree: [topics, easy-problems] }
+  companyTags: true
+  owner: dhanraj
+
+- key: newsletter
+  kind: newsletter
+  label: Newsletter
+  href: /newsletter
+  icon: file-text
+  navGroup: more
+  order: 7
+  release: { local: on, preview: on, staging: on, production: off }
+  access: { default: free }
+  owner: dhanraj
+
+- key: ml-system-design
+  kind: docs
+  label: ML System Design
+  href: /ml-system-design
+  icon: server
+  navGroup: learn
+  order: 9
+  release: { local: on, preview: off, staging: off, production: off }
+  access: { default: premium, alwaysFree: [hubs, outlines] }
+  questions: true
+  owner: dhanraj
+  hub:
+    title: ML System Design
+    subtitle: Architecture notes focused on reliability, data movement, and the interfaces between research and production.
+  redirects:
+    - { from: /system-design/ml-system-design, to: /ml-system-design/components, fallback: /ai-system-design }
+    - { from: "/system-design/ml-system-design/:path*", to: "/ml-system-design/components/:path*", fallback: /ai-system-design }
