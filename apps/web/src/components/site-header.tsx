@@ -16,26 +16,27 @@ import { getIconComponent } from "@/lib/icons";
 import { siteConfig } from "@/config/site";
 import { ThemeToggle } from "@/components/theme";
 import { ProfileMenu } from "@/components/profile-menu";
-import { CompanyLogo } from "@/components/company-logo";
 import { NAV_GROUP_LABELS, SUBSCRIBE_KIND } from "@/features/sections/public";
 import type { NavGroupName } from "@/features/sections/schema";
-import type { NavGroup, NavSection } from "@/lib/nav-tree";
+import type { HeaderNavSection } from "@/features/sections/public";
 
 // Header mega-menu: one trigger per nav group (Learn, Practice, More) from content/sections.yaml.
-// A group's panel lists its sections on the left; hovering one shows that section's groups and pages.
+// A group's panel lists its sections on the left; hovering one shows that section's first-level groups.
+// The header is on every page, so it gets only that slim list (HeaderNavSection); each article list
+// lives in its own section's sidebar.
 
 const GROUP_ORDER: NavGroupName[] = ["learn", "practice", "more"];
 
 interface MenuGroup {
   name: NavGroupName;
   label: string;
-  sections: NavSection[];
+  sections: HeaderNavSection[];
   extras: { href: string; label: string }[];
 }
 
 const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
-function menuGroups(navTree: NavSection[]): MenuGroup[] {
+function menuGroups(navTree: HeaderNavSection[]): MenuGroup[] {
   return GROUP_ORDER.map((name) => ({
     name,
     label: NAV_GROUP_LABELS[name],
@@ -44,7 +45,7 @@ function menuGroups(navTree: NavSection[]): MenuGroup[] {
   })).filter((g) => g.sections.length + g.extras.length > 0);
 }
 
-export function SiteHeader({ navTree }: { navTree: NavSection[] }) {
+export function SiteHeader({ navTree }: { navTree: HeaderNavSection[] }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [openName, setOpenName] = useState<NavGroupName | null>(null);
@@ -288,7 +289,7 @@ function MegaPanel({
 }) {
   const section = group.sections.find((s) => s.key === activeKey) ?? group.sections[0];
   return (
-    <div className="absolute left-1/2 top-full z-50 w-[64rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-hairline bg-paper shadow-[0_24px_48px_-24px_rgba(17,17,17,0.45)]">
+    <div className="fixed left-1/2 top-16 z-50 w-[64rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-hairline bg-paper shadow-[0_24px_48px_-24px_rgba(17,17,17,0.45)]">
       <div className="grid max-h-[calc(100vh-6rem)] grid-cols-[14rem_1fr]">
         <ul className="space-y-0.5 overflow-y-auto border-r border-hairline bg-paper-2/60 p-3">
           {group.sections.map((s) => {
@@ -347,10 +348,7 @@ function MegaPanel({
   );
 }
 
-function SectionPanel({ section }: { section: NavSection }) {
-  const [activeGroup, setActiveGroup] = useState<string | null>(null);
-  const shownGroup = section.groups.find((g) => g.slug === activeGroup) ?? section.groups[0];
-
+function SectionPanel({ section }: { section: HeaderNavSection }) {
   if (section.comingSoon) {
     return (
       <div>
@@ -360,6 +358,7 @@ function SectionPanel({ section }: { section: NavSection }) {
     );
   }
 
+  const unit = section.kind === "directory" ? "listed" : "pages";
   return (
     <div>
       <div className="mb-5 flex items-baseline justify-between gap-4 border-b border-hairline pb-3">
@@ -368,80 +367,31 @@ function SectionPanel({ section }: { section: NavSection }) {
           View all <ArrowRight aria-hidden className="size-3.5" />
         </Link>
       </div>
-      {section.kind === "directory" ? (
-        <ul className="grid grid-cols-2 gap-2 md:grid-cols-3">
-          {section.groups
-            .flatMap((g) => g.items ?? [])
-            .map((c) => (
-              <li key={c.slug}>
+      {section.groups.length > 0 && (
+        <ul className="grid grid-cols-2 gap-2 xl:grid-cols-3">
+          {section.groups.map((group) => {
+            const Icon = group.icon ? getIconComponent(group.icon) : undefined;
+            return (
+              <li key={group.slug}>
                 <Link
-                  href={c.href}
-                  className="flex items-center gap-3 rounded-lg border border-hairline px-3 py-2.5 text-sm text-ink-2 transition-colors hover:border-ink hover:bg-paper-2 hover:text-ink"
+                  href={group.href}
+                  className="group/card flex h-full items-start gap-3 rounded-lg border border-hairline px-3 py-2.5 transition-colors hover:border-ink hover:bg-paper-2"
                 >
-                  <CompanyLogo company={{ slug: c.slug, name: c.title }} className="size-6 shrink-0 text-[9px]" />
-                  <span className="truncate">{c.title}</span>
+                  {Icon && <Icon aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground group-hover/card:text-primary" />}
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-ink">{group.title}</span>
+                    {group.count > 0 && (
+                      <span className="block text-xs text-muted-foreground">
+                        {group.count} {unit}
+                      </span>
+                    )}
+                  </span>
                 </Link>
               </li>
-            ))}
+            );
+          })}
         </ul>
-      ) : section.groups.length > 0 ? (
-        <div className="grid grid-cols-[13rem_1fr] gap-8">
-          <ul className="space-y-0.5 border-r border-hairline pr-4">
-            {section.groups.map((group) => {
-              const active = group.slug === shownGroup?.slug;
-              return (
-                <li key={group.slug}>
-                  <Link
-                    href={group.href}
-                    onMouseEnter={() => setActiveGroup(group.slug)}
-                    onFocus={() => setActiveGroup(group.slug)}
-                    className={cn(
-                      "flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm transition-colors",
-                      active ? "bg-paper-2 font-medium text-ink" : "text-ink-2 hover:text-ink"
-                    )}
-                  >
-                    <span className="truncate">{group.title}</span>
-                    <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-          {shownGroup && <MegaGroup key={shownGroup.slug} group={shownGroup} />}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function MegaGroup({ group }: { group: NavGroup }) {
-  const sections = group.categories ?? (group.items ? [{ title: "", items: group.items }] : []);
-  return (
-    <div className="min-w-0">
-      <Link href={group.href} className="mb-3 block truncate text-sm font-semibold text-ink hover:text-primary">
-        {group.title} &rarr;
-      </Link>
-      <div className="grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
-        {sections.map((cat) => (
-          <div key={cat.title}>
-            {cat.title && (
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{cat.title}</p>
-            )}
-            <ul className="mt-1 space-y-0.5">
-              {cat.items.map((item) => (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className="block truncate py-0.5 text-sm text-ink-2 transition-colors hover:text-primary"
-                  >
-                    {item.title}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
+      )}
     </div>
   );
 }

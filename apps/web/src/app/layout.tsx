@@ -3,7 +3,7 @@ import { ContentProtection } from "@/features/content-protection/content-protect
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
-import { getNavTree } from "@/lib/nav-tree";
+import { getHeaderNav } from "@/lib/nav-tree";
 import { THEME_SCRIPT } from "@/components/theme";
 import { siteConfig } from "@/config/site";
 import "./globals.css";
@@ -48,7 +48,8 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const navTree = await getNavTree();
+  // Slim list (sections and their first-level groups): this is serialized into every page.
+  const headerNav = await getHeaderNav();
   return (
     <html
       lang="en"
@@ -66,7 +67,7 @@ export default async function RootLayout({
         >
           Skip to content
         </a>
-        <SiteHeader navTree={navTree} />
+        <SiteHeader navTree={headerNav} />
         <ContentProtection />
         <main id="main" className="w-full flex-1">
           {children}

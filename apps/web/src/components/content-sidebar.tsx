@@ -6,12 +6,7 @@ import { usePathname } from "next/navigation";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
-import type {
-  NavSection,
-  NavGroup,
-  NavCategory,
-  NavItem,
-} from "@/lib/nav-tree";
+import type { NavSection, NavGroup, NavCategory } from "@/lib/nav-tree";
 
 interface ContentSidebarProps {
   navTree: NavSection[];
