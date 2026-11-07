@@ -146,7 +146,7 @@ export function indexAssets(assetsDir: string, appDir = path.dirname(assetsDir))
       problems.push({
         file: relOf(rel),
         level: "error",
-        message: "file type not allowed in this folder (see assets/README.md)",
+        message: "file type not allowed in this folder (see assets/AGENTS.md)",
       });
       continue;
     }
