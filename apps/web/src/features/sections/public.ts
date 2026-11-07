@@ -31,3 +31,55 @@ export function publicNav(): PublicNavLink[] {
   parsed ??= JSON.parse(process.env.SECTION_NAV ?? "[]") as PublicNavLink[];
   return parsed;
 }
+
+/** One first-level group in the header mega-menu: a link and a page count, never its pages. */
+interface HeaderNavGroup {
+  slug: string;
+  title: string;
+  href: string;
+  icon?: string;
+  /** Pages (or companies) in the group, shown as a hint. */
+  count: number;
+}
+
+/**
+ * A section as the header gets it on every page: the top-level link plus its first-level groups. The
+ * item-level tree (every article) is left out; only that section's own sidebar receives it.
+ */
+export interface HeaderNavSection extends Omit<PublicNavLink, "comingSoon"> {
+  groups: HeaderNavGroup[];
+  comingSoon?: boolean;
+}
+
+/** Structural input for headerNavSection (a NavSection from the section kinds). */
+interface FullNavSection extends Omit<HeaderNavSection, "groups"> {
+  groups: {
+    slug: string;
+    title: string;
+    href: string;
+    icon?: string;
+    items?: unknown[];
+    categories?: { items: unknown[] }[];
+  }[];
+}
+
+/** Strips a section's nav down to what the header shows. */
+export function headerNavSection(nav: FullNavSection): HeaderNavSection {
+  const { key, kind, label, href, icon, navGroup, comingSoon } = nav;
+  return {
+    key,
+    kind,
+    label,
+    href,
+    icon,
+    navGroup,
+    ...(comingSoon ? { comingSoon } : {}),
+    groups: nav.groups.map((g) => ({
+      slug: g.slug,
+      title: g.title,
+      href: g.href,
+      ...(g.icon ? { icon: g.icon } : {}),
+      count: (g.items?.length ?? 0) + (g.categories ?? []).reduce((n, c) => n + c.items.length, 0),
+    })),
+  };
+}
