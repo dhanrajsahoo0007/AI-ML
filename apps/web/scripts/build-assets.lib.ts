@@ -555,7 +555,7 @@ const GEOMETRY_ATTRS =
  * Optimises an SVG asset: SVGO for structure (metadata, comments, editor data, empty groups), with every
  * plugin that rewrites numbers or path data turned off, then the tokenizing number rounding from
  * render-mermaid.svg.mjs (which never merges adjacent numbers), then every id prefixed with `prefix` so
- * several inline SVGs on one page can't collide. viewBox is always kept.
+ * several inline SVGs on one page can't collide. viewBox is always kept; scripts and event handlers never are.
  */
 export function optimizeSvg(svg: string, prefix: string, decimals = 3): string {
   const { data } = svgo(svg, {
@@ -576,6 +576,8 @@ export function optimizeSvg(svg: string, prefix: string, decimals = 3): string {
           },
         },
       },
+      // Library SVGs are inlined into pages: strip <script>, on* handlers and javascript: links (security review L3).
+      "removeScripts",
     ],
   });
   const rounded = data.replace(

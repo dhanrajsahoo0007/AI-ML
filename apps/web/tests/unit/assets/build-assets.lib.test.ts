@@ -339,6 +339,17 @@ describe("SVG optimisation", () => {
     expect(out).not.toMatch(/id="g"/);
   });
 
+  it("strips scripts, event handlers and javascript: links from inlined SVGs (security review L3)", () => {
+    const out = optimizeSvg(
+      SVG(
+        '<script>alert(1)</script><path onclick="alert(2)" onload="alert(3)" d="M0 0h1"/><a href="javascript:alert(4)"><path d="M1 1h1"/></a>'
+      ),
+      "p"
+    );
+    expect(out).not.toMatch(/<script|alert|onclick|onload|javascript:/i);
+    expect(out).toContain('d="M1 1h1"');
+  });
+
   it("never merges or corrupts path numbers", () => {
     const d = "M.5.5l.25.125.0004-.0006a.998.998 0 00-.998 0L1.893 5.68c0 .296.032.535.088.71z";
     const out = optimizeSvg(SVG(`<path d="${d}"/>`), "p");
