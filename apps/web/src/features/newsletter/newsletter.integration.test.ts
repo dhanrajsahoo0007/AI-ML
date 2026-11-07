@@ -5,8 +5,10 @@ import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { call, setupAuthTestEnv, testLoginAs } from "@/features/auth/test-helpers";
 import { testUserEmail } from "@/server/db/test-users";
+import type { NextRouteHandler } from "@/server/http";
 import { testDatabaseAvailable } from "@/server/db/testing";
 import { signWebhook } from "../email/webhook-signature";
+import { NEWSLETTER_KIND } from "./kind";
 
 // The newsletter API end to end against Docker Postgres (`npm run db:up -w web`; skipped without it): the
 // anonymous double opt-in with consent_log, the signed-in one click, the Resend webhook (signature, idempotency,
@@ -15,7 +17,7 @@ import { signWebhook } from "../email/webhook-signature";
 const available = await testDatabaseAvailable();
 
 const SECTION_NAV = JSON.stringify([
-  { key: "newsletter", kind: "newsletter", label: "Newsletter", href: "/newsletter", icon: "mail", navGroup: "more" },
+  { key: NEWSLETTER_KIND, kind: NEWSLETTER_KIND, label: "Newsletter", href: "/newsletter", icon: "mail", navGroup: "more" },
 ]);
 const WEBHOOK_SECRET = `whsec_${Buffer.from("integration-webhook-secret-0123456789").toString("base64")}`;
 
@@ -279,7 +281,7 @@ describe.skipIf(!available)("newsletter API (integration)", () => {
   it("every newsletter route is a 404 when the section is off", async () => {
     vi.resetModules();
     vi.stubEnv("SECTION_NAV", "[]");
-    const routes: [string, (r: Request, c: { params: Promise<Record<string, string>> }) => Promise<Response>][] = [
+    const routes: [string, NextRouteHandler][] = [
       ["/api/newsletter/subscribe", (await import("@/app/api/newsletter/subscribe/route")).POST],
       ["/api/newsletter/confirm", (await import("@/app/api/newsletter/confirm/route")).POST],
       ["/api/newsletter/unsubscribe", (await import("@/app/api/newsletter/unsubscribe/route")).POST],

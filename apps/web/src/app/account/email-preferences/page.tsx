@@ -27,8 +27,8 @@ export default async function EmailPreferencesPage() {
         title="Email preferences"
         lead="Choose which emails we send you. Service emails about your account or subscription are always sent."
       />
-      <section aria-labelledby="newsletter" className="rounded-2xl border border-hairline bg-paper p-6 sm:p-8">
-        <h2 id="newsletter" className="font-display text-2xl tracking-tight">
+      <section aria-labelledby="newsletter-prefs" className="rounded-2xl border border-hairline bg-paper p-6 sm:p-8">
+        <h2 id="newsletter-prefs" className="font-display text-2xl tracking-tight">
           <Link href={href} className="hover:text-primary">
             Newsletter
           </Link>
