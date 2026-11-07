@@ -71,31 +71,42 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
   useEffect(() => {
     if (!wanted) return;
     let cancelled = false;
-    import("./editor.client").then(
-      ({ createEditor }) => {
-        if (cancelled || !host.current) return;
-        // Show the host before mounting, so the editor measures itself and can take focus in this frame.
-        host.current.hidden = false;
-        editor.current?.destroy();
-        editor.current = createEditor({
-          parent: host.current,
+    import("./editor.client")
+      .then(({ createEditor }) =>
+        createEditor({
+          parent: host.current!,
           doc: codes.current[language] ?? "",
           language,
           label: `${LANGUAGE_LABELS[language]} solution for ${title}`,
+          describedBy: "editor-keys",
           onChange: (value) => {
             codes.current[language] = value;
           },
-        });
-        setReady(true);
-        if (wantFocus.current) editor.current.focus();
-        wantFocus.current = false;
-      },
-      () => {
-        if (cancelled) return;
-        setFailed(true);
-        setWanted(false);
-      }
-    );
+          // The previous editor stays until the new language's grammar has loaded. The host is shown before
+          // mounting, so the editor measures itself and can take focus straight away.
+          beforeMount: () => {
+            if (cancelled || !host.current) return false;
+            editor.current?.destroy();
+            editor.current = null;
+            host.current.hidden = false;
+            return true;
+          },
+        })
+      )
+      .then(
+        (created) => {
+          if (!created) return;
+          editor.current = created;
+          setReady(true);
+          if (wantFocus.current) created.focus();
+          wantFocus.current = false;
+        },
+        () => {
+          if (cancelled) return;
+          setFailed(true);
+          setWanted(false);
+        }
+      );
     return () => {
       cancelled = true;
     };
@@ -212,6 +223,9 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
           Reset code
         </button>
         <p className="text-xs text-muted-foreground">Runs the {tests.length} public tests in your browser. Your code never leaves this page.</p>
+        <p id="editor-keys" className="sr-only">
+          Tab indents code. Press Escape, then Tab, to move out of the editor.
+        </p>
       </div>
       {failed && <p className="mt-3 text-sm text-rose-700 dark:text-rose-400">The editor could not be loaded. Check your connection and try again.</p>}
 

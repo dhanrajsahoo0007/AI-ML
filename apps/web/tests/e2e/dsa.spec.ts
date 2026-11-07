@@ -147,6 +147,14 @@ test.describe(`DSA, APP_ENV=${env} @core`, () => {
     await page.keyboard.type("// typed");
     await expect(editor).toContainText("// typed");
 
+    // Tab indents inside the editor; Escape then Tab leaves it (no keyboard trap).
+    await page.keyboard.press("Tab");
+    await expect(editor).toBeFocused();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Tab");
+    await expect(editor).not.toBeFocused();
+    await editor.click();
+
     await page.keyboard.press("ControlOrMeta+a");
     expect(await page.evaluate(() => getSelection()?.toString() ?? "")).toContain("function twoSum");
 
