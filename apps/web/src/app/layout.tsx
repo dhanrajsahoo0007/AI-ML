@@ -6,6 +6,7 @@ import { SiteFooter } from "@/components/site-footer";
 import { getNavTree } from "@/lib/nav-tree";
 import { THEME_SCRIPT } from "@/components/theme";
 import { siteConfig } from "@/config/site";
+import { SITE_URL } from "@/config/business";
 import "./globals.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
@@ -18,7 +19,12 @@ const mono = JetBrains_Mono({
   subsets: ["latin"],
 });
 
+// Defaults for every page. Pages set their own canonical URL (never here: it would be inherited by every
+// page) through features/seo. The Open Graph image comes from app/opengraph-image.tsx
+// and the favicon from app/favicon.ico (file conventions).
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
+  applicationName: siteConfig.name,
   title: {
     default: siteConfig.name,
     template: `%s · ${siteConfig.name}`,
@@ -27,6 +33,8 @@ export const metadata: Metadata = {
   openGraph: {
     title: siteConfig.name,
     description: siteConfig.description,
+    siteName: siteConfig.name,
+    locale: "en_US",
     type: "website",
   },
   twitter: {
