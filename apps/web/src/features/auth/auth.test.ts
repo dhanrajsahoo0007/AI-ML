@@ -77,6 +77,26 @@ describe.skipIf(!available)("auth (integration)", () => {
       expect(decoded).toContain('"enc"');
     });
 
+    it("sign-out (and sign out everywhere) also clears the entitlement cookies (plan §11.3)", async () => {
+      const cleared = (res: Response) =>
+        ["oa_ent", "oa_ent_hint"].every((name) =>
+          res.headers.getSetCookie().some((c) => c.startsWith(`${name}=;`) && /Max-Age=0/i.test(c))
+        );
+      const { POST } = await import("@/app/api/auth/[...all]/route");
+      const cookie = await testLoginAs("pro_monthly");
+      const out = await call(POST, "/api/auth/sign-out", { method: "POST", body: {}, cookie });
+      expect(out.status).toBe(200);
+      expect(cleared(out)).toBe(true);
+
+      const { DELETE } = await import("@/app/api/account/sessions/route");
+      const everywhere = await call(DELETE, "/api/account/sessions", {
+        method: "DELETE",
+        cookie: await testLoginAs("pro_monthly"),
+      });
+      expect(everywhere.status).toBe(200);
+      expect(cleared(everywhere)).toBe(true);
+    });
+
     it("is not registered unless APP_ENV allows it and ENABLE_TEST_LOGIN=1", () => {
       const base = { ENABLE_TEST_LOGIN: "1", TEST_LOGIN_KEY: TEST_KEY, BETTER_AUTH_SECRET: "s".repeat(32) };
       const prod = { ...base, BETTER_AUTH_URL: "https://example.com" };
