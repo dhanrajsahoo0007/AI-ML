@@ -1,6 +1,7 @@
-// The pre-checkout consent texts (plan §9.7, legal-drafts/02-refunds.md). Shown on /checkout, required for
-// every purchase (simpler and safer than detecting EU/UK buyers, whose withdrawal waiver is mandatory), and
-// logged in consent_log with their text version on every checkout start. Change the wording → bump the version.
+// The pre-checkout consent texts (plan §9.7; refund policy 2026-11-07: 7-day money-back guarantee). Shown on
+// /checkout, required for every purchase (simpler and safer than detecting EU/UK buyers, whose withdrawal waiver
+// is mandatory; the guarantee applies on top of it), and logged in consent_log with their text version on every
+// checkout start. Change the wording → bump the version.
 
 export const CHECKOUT_CONSENTS = {
   terms: {
@@ -13,10 +14,10 @@ export const CHECKOUT_CONSENTS = {
     version: "withdrawal-waiver-2026-11",
     text: "I want my Pro access to start immediately, and I understand that I therefore lose my right to withdraw from the purchase (the 14-day withdrawal right for EU, EEA and UK buyers).",
   },
-  finalSale: {
+  moneyBackGuarantee: {
     kind: "terms",
-    version: "final-sale-2026-11",
-    text: "I understand that all sales are final: payments are non-refundable, except for billing errors, failure to deliver and where the law requires a refund.",
+    version: "money-back-2026-11",
+    text: "I understand the refund policy: a 7-day money-back guarantee on my first payment (and on a yearly renewal, within 7 days of the renewal charge), once per customer. Monthly renewals after the first month aren't refundable; I can cancel any time.",
   },
 } as const;
 

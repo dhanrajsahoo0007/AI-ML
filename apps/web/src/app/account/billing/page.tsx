@@ -3,7 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Container, PageHeader } from "@/components/ui/editorial";
 import { withPageSession } from "@/features/auth";
-import { GRACE_PERIOD_DAYS, PLANS, billingOverview, formatMoney } from "@/features/billing";
+import { business } from "@/config/business";
+import { GRACE_PERIOD_DAYS, GUARANTEE_DAYS, PLANS, billingOverview, formatMoney } from "@/features/billing";
 import { CheckoutReturn } from "@/features/billing/billing-status.client";
 
 // Account → Billing (plan §9.3): plan, the price in the currency paid, the renewal or end date, a manage button
@@ -41,7 +42,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
   const success = (await searchParams).status === "success";
   const data = await withPageSession(async (auth, db) => billingOverview(db, auth.user.id));
   if (!data) redirect("/sign-in?callbackURL=%2Faccount%2Fbilling");
-  const { subscription: sub, tier, validUntil, payments } = data;
+  const { subscription: sub, tier, validUntil, payments, guarantee } = data;
+  // The refund itself is issued by the owner at the merchant of record; this only starts the request.
+  const refundHref = `mailto:${business.BILLING_EMAIL}?subject=${encodeURIComponent("Refund request (7-day money-back guarantee)")}`;
   const pro = tier === "pro";
   const live = sub && (sub.status === "active" || sub.status === "on_hold");
 
@@ -114,9 +117,20 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
             <PortalButton className="text-sm text-ink underline underline-offset-2">Invoices and receipts</PortalButton>
           )}
         </div>
+        {guarantee.eligible && (
+          <p className="mt-5 text-[15px] text-ink" data-testid="refund-request">
+            Not what you expected? Your {guarantee.kind === "yearly_renewal" ? "yearly renewal" : "first payment"} is
+            covered by our {GUARANTEE_DAYS}-day money-back guarantee until {date(guarantee.until)}.{" "}
+            <a href={refundHref} className="underline underline-offset-2">
+              Request a refund
+            </a>
+            . Pro ends when the refund is issued.
+          </p>
+        )}
         <p className="mt-4 text-[13px] text-muted-foreground">
           Payment method, invoices and cancellation are handled by our reseller, Dodo Payments. Cancelling stops
-          future renewals; you keep Pro until the end of the period you&apos;ve paid for. All sales are final (
+          future renewals; you keep Pro until the end of the period you&apos;ve paid for. 7-day money-back guarantee
+          on your first payment (
           <Link href="/legal/refunds" className="underline underline-offset-2">
             refund policy
           </Link>

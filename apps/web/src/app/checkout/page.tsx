@@ -9,7 +9,7 @@ import { CheckoutForm } from "@/features/billing/checkout-form.client";
 import { serverEnv } from "@/server/env";
 
 // The pre-checkout consent step (plan §9.7): terms, "access starts immediately and I lose the withdrawal right",
-// and "all sales are final", each logged with its text version when the buyer continues. Dynamic (per request:
+// and the 7-day money-back guarantee terms, each logged with its text version when the buyer continues. Dynamic (per request:
 // session cookie and provider configuration), but it never reads the database: the checkout API checks the
 // session and logs the consents.
 

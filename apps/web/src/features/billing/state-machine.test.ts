@@ -259,10 +259,11 @@ describe("payments, refunds and disputes", () => {
     expect(paymentStatusAfter(current, event)).toBe(expected);
   });
 
-  it("revokes access on a full refund or a lost dispute only", () => {
+  it("revokes access on any refund or a lost dispute", () => {
     expect(revokesAccess("refunded")).toBe(true);
+    expect(revokesAccess("partially_refunded")).toBe(true);
     expect(revokesAccess("dispute_lost")).toBe(true);
-    for (const s of ["succeeded", "failed", "partially_refunded", "disputed", "dispute_won"] as const) {
+    for (const s of ["succeeded", "failed", "disputed", "dispute_won"] as const) {
       expect(revokesAccess(s)).toBe(false);
     }
   });

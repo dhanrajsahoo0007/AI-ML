@@ -38,7 +38,7 @@ export function RenewalReminderEmail({ name, renewsOn, price, manageUrl }: Renew
           { style: s.text },
           "Nothing to do if you want to keep Pro. To stop the renewal, cancel before that date from ",
           h(Link, { href: manageUrl, style: s.link }, "Account → Billing"),
-          ". You keep Pro until the end of the period you've paid for. Payments are non-refundable, so please cancel in time if you don't want to renew."
+          ". You keep Pro until the end of the period you've paid for. If the renewal goes through and you didn't want it, you can ask for a refund within 7 days of the charge."
         ),
         h(Hr, { style: s.hr }),
         h(

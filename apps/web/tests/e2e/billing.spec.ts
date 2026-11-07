@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { dbE2E, loginAs, origin, reseed, SKIP_REASON } from "../fixtures/users";
-import { dodoSubscription } from "../fixtures/billing/dodo";
+import { dodoPayment, dodoRefund, dodoSubscription } from "../fixtures/billing/dodo";
 import { postWebhook, query, userId, webhookSecret } from "../fixtures/billing/e2e";
 import { FIXTURE_ROUTE, paywallBuilt, startDodoStub } from "../fixtures/paywall";
 
@@ -65,7 +65,7 @@ test.describe("billing journey @core", () => {
     );
     expect(consents.map((c) => c.text_version).sort()).toEqual([
       "checkout-terms-2026-11",
-      "final-sale-2026-11",
+      "money-back-2026-11",
       "withdrawal-waiver-2026-11",
     ]);
 
@@ -139,6 +139,46 @@ test.describe("billing journey @core", () => {
     await page.goto("/account/billing");
     await page.getByTestId("billing-manage").click();
     await expect(page.getByRole("heading", { name: "Stub portal" })).toBeVisible();
+  });
+
+  test("7-day money-back guarantee: the request link while eligible, and a refund ends access", async ({
+    page,
+    context,
+  }) => {
+    reseed("free");
+    const id = await userId("free");
+    const subId = `sub_refund_${Date.now()}`;
+    const payId = `pay_refund_${Date.now()}`;
+    const t = Date.now() - 60_000;
+    await postWebhook(page.request, "subscription.active", dodoSubscription({ subscriptionId: subId, userId: id }), {
+      at: new Date(t),
+    });
+    await postWebhook(page.request, "payment.succeeded", dodoPayment({ paymentId: payId, subscriptionId: subId }), {
+      at: new Date(t + 500),
+    });
+    await loginAs(context, "free");
+    expect(await (await refresh(page)).json()).toMatchObject({ tier: "pro" });
+    await page.goto("/account/billing");
+    await expect(page.getByTestId("refund-request")).toContainText("7-day money-back guarantee");
+    await expect(page.getByRole("link", { name: "Request a refund" })).toHaveAttribute("href", /^mailto:/);
+
+    // The owner issues the refund in the Dodo dashboard; its webhook ends access at once.
+    expect(
+      (
+        await postWebhook(
+          page.request,
+          "refund.succeeded",
+          dodoRefund({ refundId: `re_${Date.now()}`, paymentId: payId }),
+          { at: new Date(t + 1000) }
+        )
+      ).status()
+    ).toBe(200);
+    expect(await (await refresh(page)).json()).toMatchObject({ tier: "free", stale: true });
+    await page.goto(FIXTURE_ROUTE);
+    await expect(page.getByTestId("paywall")).toBeVisible();
+    // Once per customer: no second request.
+    await page.goto("/account/billing");
+    await expect(page.getByTestId("refund-request")).toHaveCount(0);
   });
 
   test("payment failed → on hold with the 7-day grace banner", async ({ page, context }) => {

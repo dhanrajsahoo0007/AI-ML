@@ -1,17 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Root, RootContent } from "mdast";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PREVIEW_SEGMENT } from "./constants";
 import { fixtureDocsFor } from "./fixtures";
-import { previewNodes, remarkPremium } from "./remark-premium";
+import { previewNodes, remarkPremium, type MdNode } from "./remark-premium";
 
-const p = (text: string) => ({ type: "paragraph", children: [{ type: "text", value: text }] }) as RootContent;
-const h = (text: string) => ({ type: "heading", depth: 2, children: [{ type: "text", value: text }] }) as RootContent;
-const esm = { type: "mdxjsEsm", value: "export const x = 1" } as unknown as RootContent;
-const brk = { type: "mdxJsxFlowElement", name: "PremiumBreak", attributes: [], children: [] } as unknown as RootContent;
-const texts = (nodes: RootContent[]) =>
-  nodes.map((n) => ("children" in n ? (n.children[0] as { value: string }).value : n.type));
+const p = (text: string) => ({ type: "paragraph", children: [{ type: "text", value: text }] }) as MdNode;
+const h = (text: string) => ({ type: "heading", depth: 2, children: [{ type: "text", value: text }] }) as MdNode;
+const esm = { type: "mdxjsEsm", value: "export const x = 1" } as unknown as MdNode;
+const brk = { type: "mdxJsxFlowElement", name: "PremiumBreak", attributes: [], children: [] } as unknown as MdNode;
+const texts = (nodes: MdNode[]) =>
+  nodes.map((n) => ("children" in n ? ((n as { children: { value: string }[] }).children[0]).value : n.type));
 
 describe("preview truncation", () => {
   const body = [p("intro"), h("Free"), p("free text"), h("Premium"), p("SECRET")];
@@ -37,7 +36,7 @@ describe("preview truncation", () => {
   });
 
   it("the plugin cuts previews and strips the marker from the full page", () => {
-    const tree = (): Root => ({ type: "root", children: [p("a"), brk, p("SECRET")] });
+    const tree = () => ({ type: "root", children: [p("a"), brk, p("SECRET")] });
     const preview = tree();
     remarkPremium({ mode: "preview" })(preview);
     expect(JSON.stringify(preview)).not.toContain("SECRET");
@@ -48,11 +47,14 @@ describe("preview truncation", () => {
 });
 
 describe("test-only fixture content", () => {
+  // The section the fixtures join is their folder name under tests/fixtures/content/.
+  const section = fs.readdirSync(path.join(process.cwd(), "tests", "fixtures", "content"))[0];
+
   it("is published in every environment but production", () => {
-    const docs = fixtureDocsFor("system-design", "preview");
+    const docs = fixtureDocsFor(section, "preview");
     expect(docs.map((d) => d.slug)).toContain("leak-canary/premium-article");
     expect(fs.readFileSync(docs[0].file, "utf8")).toMatch(/LEAK-CANARY-/);
-    expect(fixtureDocsFor("system-design", "production")).toEqual([]);
+    expect(fixtureDocsFor(section, "production")).toEqual([]);
     expect(fixtureDocsFor("no-such-section", "local")).toEqual([]);
   });
 });

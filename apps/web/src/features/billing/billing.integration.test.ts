@@ -185,7 +185,7 @@ describe.skipIf(!available)("billing (integration)", () => {
     expect((await ent(userId)).tier).toBe("pro");
   });
 
-  it("payments are recorded; a billing-error refund or a lost dispute removes access", async () => {
+  it("payments are recorded; any refund (guarantee or billing error, even partial) or a lost dispute ends access", async () => {
     const userId = await freshUser();
     const id = uid("sub");
     await process(parse("subscription.active", dodoSubscription({ subscriptionId: id, userId })));
@@ -194,9 +194,10 @@ describe.skipIf(!available)("billing (integration)", () => {
     const [p] = await db.select().from(payment).where(eq(payment.providerPaymentId, pay));
     expect(p).toMatchObject({ status: "succeeded", userId, amountMinor: 900, taxMinor: 81, amountUsdMinor: 900, method: "card" });
 
-    await process(parse("refund.succeeded", dodoRefund({ refundId: uid("re"), paymentId: pay, amount: 100, partial: true })));
-    expect((await ent(userId)).tier).toBe("pro");
     const v = (await ent(userId)).version;
+    await process(parse("refund.succeeded", dodoRefund({ refundId: uid("re"), paymentId: pay, amount: 100, partial: true })));
+    expect(await ent(userId)).toMatchObject({ tier: "free", version: v + 1 });
+    // A second refund on the same payment changes nothing more.
     await process(parse("refund.succeeded", dodoRefund({ refundId: uid("re"), paymentId: pay })));
     expect(await ent(userId)).toMatchObject({ tier: "free", version: v + 1 });
     expect((await db.select().from(payment).where(eq(payment.providerPaymentId, pay)))[0].status).toBe("refunded");
@@ -342,7 +343,7 @@ describe.skipIf(!available)("billing (integration)", () => {
 
     it("refuses outdated consent texts, missing consents, existing subscribers and signed-out users", async () => {
       const cookie = await testLoginAs("free");
-      const outdated = await call(checkoutPOST, "/api/billing/checkout", { method: "POST", cookie, body: { plan: "pro_monthly", consents: { ...consents, finalSale: "old" } } });
+      const outdated = await call(checkoutPOST, "/api/billing/checkout", { method: "POST", cookie, body: { plan: "pro_monthly", consents: { ...consents, moneyBackGuarantee: "old" } } });
       expect(outdated.status).toBe(409);
       const missing = await call(checkoutPOST, "/api/billing/checkout", { method: "POST", cookie, body: { plan: "pro_monthly", consents: { terms: consents.terms } } });
       expect(missing.status).toBe(400);

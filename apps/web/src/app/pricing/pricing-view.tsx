@@ -33,6 +33,7 @@ const PRO_FEATURES: React.ReactNode[] = [
   "Progress tracking and bookmarks across devices",
   "New articles every month",
   "Cancel any time; you keep Pro until the end of the period you've paid for",
+  "7-day money-back guarantee on your first payment",
 ];
 
 function FeatureList({ items }: { items: React.ReactNode[] }) {
@@ -67,7 +68,7 @@ function GoPro({ live }: { live: boolean }) {
         {link("pro_monthly", "Go Pro monthly", "inline-flex group-data-[period=yearly]:hidden")}
         {link("pro_yearly", "Go Pro yearly", "hidden group-data-[period=yearly]:inline-flex")}
         <p className="mt-3 text-center text-[13px] text-muted-foreground">
-          Renews automatically; cancel any time. All sales are final.
+          Renews automatically; cancel any time. 7-day money-back guarantee on your first payment.
         </p>
       </>
     );
@@ -163,7 +164,7 @@ export async function PricingView({ live = false }: { live?: boolean }) {
         </div>
 
         <p className="mx-auto mt-16 max-w-3xl border-t border-hairline pt-6 text-[13px] italic leading-relaxed text-muted-foreground">
-          {MOR_NOTICE} All sales are final.{" "}
+          {MOR_NOTICE} 7-day money-back guarantee.{" "}
           <Link href="/legal/terms" className="underline underline-offset-2 hover:text-ink">
             Terms
           </Link>{" "}

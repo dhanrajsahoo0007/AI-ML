@@ -8,3 +8,4 @@ export { PLANS, PLAN_IDS, formatMoney } from "./plans";
 export { WebhookVerificationError } from "./port";
 export { checkoutConfigured, primaryProvider, providerFor } from "./provider";
 export { GRACE_PERIOD_DAYS } from "./state-machine";
+export { GUARANTEE_DAYS } from "./guarantee";

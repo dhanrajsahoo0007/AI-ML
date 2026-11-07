@@ -7,6 +7,7 @@ import type { BillingEvent, Plan, SubscriptionSnapshot, SubscriptionStatus } fro
 //   a no-op and the final state doesn't depend on delivery order
 // - an event older than the newest one already applied to that subscription is stale and changes nothing
 // - cancelled, expired and failed are terminal: a late `active` can't bring a subscription back
+// - any refund or a lost dispute ends access (see revokesAccess)
 // - entitlement: active → Pro until the period end (plus a day for the renewal webhook unless it ends);
 //   on_hold → Pro for a 7-day grace period from when the hold began; cancelled → Pro until the paid period ends;
 //   expired / failed → free. Cancel, refund and dispute-lost bump the entitlement version (`oa_ent` `v`)
@@ -164,7 +165,10 @@ export function paymentStatusAfter(current: PaymentStatus | null, event: MoneyEv
   }
 }
 
-/** A full refund (billing errors only, per the refund policy) or a lost dispute removes access. */
+/**
+ * Any refund (money-back guarantee, billing error, full or partial) or a lost dispute ends access at once
+ * (refund policy, 2026-11-07).
+ */
 export function revokesAccess(status: PaymentStatus): boolean {
-  return status === "refunded" || status === "dispute_lost";
+  return status === "refunded" || status === "partially_refunded" || status === "dispute_lost";
 }
