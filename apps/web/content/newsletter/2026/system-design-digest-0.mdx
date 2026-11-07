@@ -1,0 +1,34 @@
+---
+title: "System design digest #0"
+date: "2026-11-07"
+summary: "A first look at the digest: why B-trees and LSM trees make opposite trade-offs, and how back pressure keeps a busy system standing."
+access: free
+status: draft
+audience: all
+---
+
+Welcome to issue zero. This is the shape every digest will take: one theme, three pieces from the library, and a
+question to take into your next design review.
+
+## This week's theme: where the writes go
+
+Most storage choices come down to one question: do you pay for a write now, or later? The two answers sit at the
+heart of nearly every database you will be asked about in an interview.
+
+**[B-Trees](/system-design/databases/b-trees)** pay up front. Every write finds its page and updates it in place,
+so reads stay cheap and predictable. That is why relational databases have relied on them for decades.
+
+**[LSM Trees](/system-design/databases/lsm-trees)** pay later. Writes land in memory and are flushed as sorted,
+immutable files, and background compaction tidies up afterwards. Write throughput goes up; the bill arrives as
+read and space amplification.
+
+Whichever you pick, a write-heavy system eventually meets more demand than it can absorb. **[Back Pressure and
+Load Shedding](/system-design/patterns/back-pressure)** covers what to do next: bounded queues, telling producers
+to slow down, and deciding which work is safe to drop.
+
+## A question to take with you
+
+Your service ingests a burst of events ten times its normal rate for five minutes. Which part of the design
+absorbs the burst, which part slows the producers down, and what do you drop first if both fill up?
+
+Reply to this email with your answer. We read every one.

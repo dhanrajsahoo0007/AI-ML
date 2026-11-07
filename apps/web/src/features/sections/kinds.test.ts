@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "./test-runner";
 import { allSections, builtSectionsOfKind } from "./registry";
 import { kindOf } from "./kinds";
+import { KINDS_WITH_ROUTES, SECTION_KINDS } from "./schema";
 import { loadNavIndex } from "../docs/source";
 
 describe("docs kind", () => {
@@ -37,7 +38,8 @@ describe("kinds", () => {
     }
   });
   it("planned kinds load nothing and are marked coming soon", async () => {
-    for (const section of builtSectionsOfKind("newsletter")) {
+    const planned = SECTION_KINDS.filter((k) => !KINDS_WITH_ROUTES.includes(k));
+    for (const section of planned.flatMap((k) => builtSectionsOfKind(k))) {
       const kind = kindOf(section);
       assert.deepEqual(await kind.load(section), []);
       assert.equal(kind.nav(section, []).comingSoon, true);

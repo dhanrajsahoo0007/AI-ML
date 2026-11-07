@@ -3,8 +3,8 @@ import type { SectionKindName } from "./schema";
 import { docsKind } from "../docs/kind";
 import { questionBankKind } from "./kinds/question-bank";
 import { directoryKind, aggregateCompanyRefs } from "./kinds/directory";
-import { newsletterKind } from "./kinds/stubs";
 import { problemsKind } from "../dsa/kind";
+import { newsletterKind } from "../newsletter/kind";
 import { getSection } from "./registry";
 
 // Maps each kind name to its module. Shared code goes registry entry → kindOf(entry) → contract.
