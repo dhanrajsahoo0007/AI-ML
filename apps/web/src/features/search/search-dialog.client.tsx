@@ -41,7 +41,7 @@ export function SearchButton({ compact = false }: { compact?: boolean }) {
         type="button"
         onClick={() => setOpen(true)}
         onMouseEnter={() => void loadIndex()}
-        aria-label="Search articles"
+        aria-label={compact ? "Search articles" : undefined}
         aria-haspopup="dialog"
         className={cn(
           "inline-flex items-center gap-2 rounded-full border border-hairline text-muted-foreground transition-colors hover:border-ink hover:text-ink",
@@ -51,8 +51,10 @@ export function SearchButton({ compact = false }: { compact?: boolean }) {
         <Search aria-hidden className="size-4" />
         {!compact && (
           <>
-            <span className="hidden 2xl:inline">Search articles</span>
-            <kbd className="hidden rounded border border-hairline px-1.5 font-sans text-[11px] xl:inline">⌘K</kbd>
+            <span className="sr-only 2xl:not-sr-only">Search articles</span>
+            <kbd aria-hidden className="hidden rounded border border-hairline px-1.5 font-sans text-[11px] xl:inline">
+              ⌘K
+            </kbd>
           </>
         )}
       </button>

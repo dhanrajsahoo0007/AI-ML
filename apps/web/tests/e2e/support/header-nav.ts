@@ -1,8 +1,8 @@
 import { expect, type Page } from "@playwright/test";
 
-// Reads the section entries the site header offers, the way a visitor sees them: the desktop mega-menu (each
-// group's panel lists its sections in the left column) and the mobile sheet. The header renders its menus only
-// when opened, so the server HTML alone doesn't show them.
+// Reads the section entries the site header offers, the way a visitor sees them: on desktop every visible section
+// is its own item in the top bar (a link, or a non-link "coming soon" item, with the full label as its title),
+// followed by plain links such as Pricing; on mobile, the sheet.
 
 export interface HeaderEntry {
   label: string;
@@ -13,23 +13,14 @@ export interface HeaderEntry {
 export async function desktopHeaderEntries(page: Page): Promise<HeaderEntry[]> {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/");
-  const groups = page.locator("header nav button[aria-haspopup='true']");
-  await expect(groups.first()).toBeVisible();
+  const bar = page.locator("header nav[aria-label='Main'] > div").nth(0);
+  const items = bar.locator(":scope > [aria-haspopup='true'], :scope > span[title], :scope > a[href]");
+  await expect(items.first()).toBeVisible();
   const entries: HeaderEntry[] = [];
-  for (let i = 0; i < (await groups.count()); i++) {
-    await groups.nth(i).focus();
-    const column = page.locator("header ul").first();
-    await expect(column).toBeVisible();
-    for (const item of await column.locator(":scope > li").all()) {
-      const link = item.locator(":scope > a");
-      const label = (await item.innerText()).replace(/\s*Soon\s*$/i, "").trim();
-      entries.push({ label, href: (await link.count()) ? await link.getAttribute("href") : null });
-    }
-    await page.keyboard.press("Escape");
-  }
-  // Groups that are a single plain link (More → Pricing) are links in the bar itself.
-  for (const link of await page.locator("header nav > div:first-of-type > a[href]").all()) {
-    entries.push({ label: (await link.innerText()).trim(), href: await link.getAttribute("href") });
+  for (const item of await items.all()) {
+    const title = await item.getAttribute("title");
+    const label = (title ?? (await item.innerText())).trim();
+    entries.push({ label, href: await item.getAttribute("href") });
   }
   return entries;
 }
