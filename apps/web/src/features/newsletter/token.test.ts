@@ -20,6 +20,18 @@ describe("newsletter tokens", () => {
     expect(Object.keys(payload).sort()).toEqual(["exp", "iat", "p", "sid", "v"]);
   });
 
+  it("confirm tokens carry the consent text version (no email address)", async () => {
+    const token = await signToken(SECRET, {
+      subscriberId: "sub-1",
+      purpose: "confirm",
+      now: T0,
+      consentVersion: "2026-11-07",
+    });
+    const payload = JSON.parse(Buffer.from(token.split(".")[0], "base64url").toString("utf8"));
+    expect(Object.keys(payload).sort()).toEqual(["cv", "exp", "iat", "p", "sid", "v"]);
+    expect(await verifyToken(SECRET, token, "confirm", T0)).toMatchObject({ ok: true, consentVersion: "2026-11-07" });
+  });
+
   it("confirm tokens expire after 48 hours", async () => {
     expect(CONFIRM_TTL_SECONDS).toBe(48 * 3600);
     const token = await signToken(SECRET, { subscriberId: "sub-1", purpose: "confirm", now: T0 });

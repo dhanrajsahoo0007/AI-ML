@@ -21,10 +21,15 @@ interface Payload {
   iat: number;
   /** Expires at, Unix seconds; absent for tokens that don't expire. */
   exp?: number;
+  /**
+   * Confirm tokens: the consent text version the person agreed to when signing up (consent.ts). It travels in
+   * the signed token because `newsletter_subscriber` has no column for it; confirming writes it to consent_log.
+   */
+  cv?: string;
 }
 
 type VerifyResult =
-  | { ok: true; subscriberId: string; issuedAt: number }
+  | { ok: true; subscriberId: string; issuedAt: number; consentVersion?: string }
   | { ok: false; reason: "malformed" | "bad-signature" | "wrong-purpose" | "expired" };
 
 const encoder = new TextEncoder();
@@ -58,11 +63,18 @@ const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 export async function signToken(
   secret: string,
-  input: { subscriberId: string; purpose: TokenPurpose; ttlSeconds?: number; now?: number }
+  input: { subscriberId: string; purpose: TokenPurpose; ttlSeconds?: number; now?: number; consentVersion?: string }
 ): Promise<string> {
   const iat = input.now ?? nowSeconds();
   const ttl = input.ttlSeconds ?? (input.purpose === "confirm" ? CONFIRM_TTL_SECONDS : undefined);
-  const payload: Payload = { v: 1, sid: input.subscriberId, p: input.purpose, iat, ...(ttl ? { exp: iat + ttl } : {}) };
+  const payload: Payload = {
+    v: 1,
+    sid: input.subscriberId,
+    p: input.purpose,
+    iat,
+    ...(ttl ? { exp: iat + ttl } : {}),
+    ...(input.consentVersion ? { cv: input.consentVersion } : {}),
+  };
   const body = toBase64Url(encoder.encode(JSON.stringify(payload)));
   const sig = new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(secret), encoder.encode(body)));
   return `${body}.${toBase64Url(sig)}`;
@@ -93,5 +105,10 @@ export async function verifyToken(
   }
   if (payload.p !== purpose) return { ok: false, reason: "wrong-purpose" };
   if (payload.exp !== undefined && now >= payload.exp) return { ok: false, reason: "expired" };
-  return { ok: true, subscriberId: payload.sid, issuedAt: payload.iat };
+  return {
+    ok: true,
+    subscriberId: payload.sid,
+    issuedAt: payload.iat,
+    ...(typeof payload.cv === "string" ? { consentVersion: payload.cv } : {}),
+  };
 }
