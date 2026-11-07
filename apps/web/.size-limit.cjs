@@ -56,6 +56,9 @@ const ROUTES = [
   ],
   ["companies", "/companies/page", [ROOT, "/companies/layout"], "145 kB", "195 kB"],
   ["pricing", "/pricing/page", [ROOT], "125 kB", "185 kB"],
+  // Plan §15.1: ≤ 130 kB without the editor. CodeMirror and the runner workers load on interaction, in chunks
+  // of their own that no page entry lists.
+  ["DSA problem /dsa/problems/[slug]", "/dsa/problems/[slug]/page", [ROOT, "/dsa/layout"], "130 kB", "190 kB"],
 ];
 
 module.exports = [
