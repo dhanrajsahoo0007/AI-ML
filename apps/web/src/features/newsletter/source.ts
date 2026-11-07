@@ -35,7 +35,8 @@ export function issuesDir(section: Pick<SectionDef, "key">) {
 
 const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-function readIssue(section: Pick<SectionDef, "href">, file: string, year: string): Issue {
+/** Reads one issue file; `year` is the folder it sits in. */
+export function readIssueFile(section: Pick<SectionDef, "href">, file: string, year: string): Issue {
   const slug = path.basename(file, ".mdx");
   const { data, content } = matter(fs.readFileSync(file, "utf8"));
   const parsed = issueFrontmatterSchema.safeParse(data);
@@ -73,7 +74,7 @@ export function loadIssues(section: Pick<SectionDef, "key" | "href">): Issue[] {
       const yearDir = path.join(dir, year);
       if (!fs.statSync(yearDir).isDirectory()) continue;
       for (const name of fs.readdirSync(yearDir).sort()) {
-        if (name.endsWith(".mdx")) issues.push(readIssue(section, path.join(yearDir, name), year));
+        if (name.endsWith(".mdx")) issues.push(readIssueFile(section, path.join(yearDir, name), year));
       }
     }
   }

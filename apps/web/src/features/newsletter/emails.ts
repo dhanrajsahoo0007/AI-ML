@@ -1,3 +1,4 @@
+import { createElement as h } from "react";
 import { business } from "../../config/business";
 import { renderEmail } from "../email/render";
 import type { EmailMessage } from "../email/sender";
@@ -24,11 +25,11 @@ export interface SubscriberLinks {
 
 export async function confirmationEmail(to: string, links: SubscriberLinks): Promise<EmailMessage> {
   const { html, text } = await renderEmail(
-    <ConfirmSubscriptionEmail
-      confirmUrl={links.confirmUrl}
-      unsubscribeUrl={links.unsubscribeUrl}
-      validFor={CONFIRM_TTL_LABEL}
-    />
+    h(ConfirmSubscriptionEmail, {
+      confirmUrl: links.confirmUrl,
+      unsubscribeUrl: links.unsubscribeUrl,
+      validFor: CONFIRM_TTL_LABEL,
+    })
   );
   return {
     to,
@@ -43,7 +44,7 @@ export async function confirmationEmail(to: string, links: SubscriberLinks): Pro
 
 export async function welcomeEmail(to: string, links: SubscriberLinks): Promise<EmailMessage> {
   const { html, text } = await renderEmail(
-    <WelcomeEmail archiveUrl={links.archiveUrl} unsubscribeUrl={links.unsubscribeUrl} />
+    h(WelcomeEmail, { archiveUrl: links.archiveUrl, unsubscribeUrl: links.unsubscribeUrl })
   );
   return {
     to,

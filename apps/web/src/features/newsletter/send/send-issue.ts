@@ -1,8 +1,8 @@
 // Sends one newsletter issue through Resend. Run by .github/workflows/newsletter-send.yml (plan §15.2):
 //
-//   npx tsx src/features/newsletter/send/send-issue.tsx <slug> --mode test       # to the founder only
-//   npx tsx src/features/newsletter/send/send-issue.tsx <slug> --mode broadcast  # Resend Broadcast to the segment
-//   npx tsx src/features/newsletter/send/send-issue.tsx <slug> --dry-run         # render to .build/newsletter/
+//   npx tsx src/features/newsletter/send/send-issue.ts <slug> --mode test       # to the founder only
+//   npx tsx src/features/newsletter/send/send-issue.ts <slug> --mode broadcast  # Resend Broadcast to the segment
+//   npx tsx src/features/newsletter/send/send-issue.ts <slug> --dry-run         # render to .build/newsletter/
 //
 // The issue's MDX is rendered to HTML and text here (build time), the issue is validated by the newsletter kind
 // first, and a broadcast needs status: scheduled. Env: RESEND_API_KEY, RESEND_SEGMENT_ID (everyone),
