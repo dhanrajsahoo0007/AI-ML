@@ -9,7 +9,9 @@ Stack: **Next.js 15 (App Router)**, MDX content compiled at build time. Pages ne
 - `apps/web`: the Next.js app and all content (deploy this app)
 - `packages/*`: reserved for shared packages (optional)
 
-**Documentation:** humans read this README; coding agents read [`AGENTS.md`](AGENTS.md) (root), plus short `AGENTS.md` files inside `apps/web/src/features/<x>/` when a feature has non-obvious rules. `CLAUDE.md` only points to `AGENTS.md`. No other prose docs.
+**Documentation:** humans read this README; coding agents read [`AGENTS.md`](AGENTS.md) (product, decisions, architecture, rules, runbooks), plus short `AGENTS.md` files next to the code (`apps/web/src/features/<x>/`, `apps/web/src/server/{db,edge}/`, `apps/web/content/`, `apps/web/assets/`) and step-by-step skills in `.claude/skills/`. `CLAUDE.md` only points to `AGENTS.md`. No other prose docs.
+
+`npm run check:agents-md` (in CI) fails when an agent doc names a path or npm script that doesn't exist.
 
 ## Local development
 
