@@ -7,16 +7,12 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import sharp from "sharp";
 import type { Browser, Page } from "playwright";
-import { IMAGE_WIDTHS, type AssetVariant } from "../src/lib/asset-schema";
+import { IMAGE_WIDTHS } from "../src/lib/asset-schema";
+import type { RenderedFile } from "./build-assets.lib";
 import { mermaidConfig, prepareSource } from "../src/lib/mermaid-theme.mjs";
 import { optimize as optimizeMermaid, uniquifyIds } from "./render-mermaid.svg.mjs";
 
 const require = createRequire(import.meta.url);
-
-/** A rendered file in an asset's cache folder, plus how it is described in the manifest. */
-export interface RenderedFile extends AssetVariant {
-  name: string;
-}
 
 /** Background behind PNG variants (for email and social, where transparency reads badly). Matches --paper. */
 export const PNG_BACKGROUND = { light: "#faf9f6", dark: "#141413" } as const;

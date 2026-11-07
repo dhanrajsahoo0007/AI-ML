@@ -22,7 +22,9 @@ import {
   resolveAssetRef,
   sidecarSchema,
   type AssetEntry,
+  type AssetManifest,
   type AssetRefComponent,
+  type AssetVariant,
   type AssetType,
   type LicenseEntry,
   type RemoteAsset,
@@ -429,6 +431,99 @@ export function duplicateMermaidFences(contentDir: string, appDir: string): Prob
     }
   }
   return problems;
+}
+
+// ── Publish ──────────────────────────────────────────────────────────────────────────────────────
+
+/** A file rendered into an asset's cache folder (.build-cache/assets/<hash>/<name>). */
+export type RenderedFile = AssetVariant & { name: string };
+
+/** What rendering produced for one asset. */
+export interface Rendered {
+  files: RenderedFile[];
+  width?: number;
+  height?: number;
+  placeholder?: string;
+}
+
+/** Files that become URLs when published. Inline SVGs are drawn into the page and never get a URL. */
+const isPublishable = (f: AssetVariant) => f.format !== "svg";
+
+function copy(from: string, to: string) {
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  fs.copyFileSync(from, to);
+}
+
+/**
+ * Copies rendered files out of the cache and builds the manifest (plan §5.6 steps 5–6). Premium assets go
+ * only to `privateDir/<id>/` (for the future R2 upload); free assets that are public in this environment go
+ * to `publicDir/<hash>/` and get a URL; everything else stays in the cache. Both output folders are emptied
+ * first, so nothing from an earlier run or another environment lingers.
+ */
+export function publishAssets(opts: {
+  env: string;
+  assets: IndexedAsset[];
+  rendered: Map<string, Rendered>;
+  refs: AssetRef[];
+  cacheDir: string;
+  publicDir: string;
+  privateDir: string;
+}): { manifest: AssetManifest; publicFiles: number; privateFiles: number } {
+  const { env, assets, rendered, refs, cacheDir, publicDir, privateDir } = opts;
+  fs.rmSync(publicDir, { recursive: true, force: true });
+  fs.rmSync(privateDir, { recursive: true, force: true });
+  const index = new Map(assets.map((a) => [a.id, a]));
+  const usedBy = usedByOf(index, refs);
+  const manifest: AssetManifest = { version: 1, env, assets: {} };
+  let publicFiles = 0;
+  let privateFiles = 0;
+  for (const a of assets) {
+    const r = rendered.get(a.id) ?? { files: [] };
+    const pub = isPublic(a, refs);
+    const variants = r.files.map(({ name, ...v }): AssetVariant => {
+      const from = path.join(cacheDir, a.hash, name);
+      if (a.access === "premium") {
+        copy(from, path.join(privateDir, a.id, name));
+        privateFiles++;
+        return v;
+      }
+      if (pub && isPublishable(v)) {
+        copy(from, path.join(publicDir, a.hash, name));
+        publicFiles++;
+        return { ...v, url: `/_a/${a.hash}/${name}` };
+      }
+      return v;
+    });
+    const { sidecar: _sidecar, ...meta } = a;
+    void _sidecar;
+    manifest.assets[a.id] = {
+      ...meta,
+      ...(r.width && r.height ? { width: r.width, height: r.height } : {}),
+      ...(r.placeholder ? { placeholder: r.placeholder } : {}),
+      variants,
+      usedBy: usedBy.get(a.id) ?? [],
+      public: pub,
+    };
+  }
+  return { manifest, publicFiles, privateFiles };
+}
+
+/** Throws if `publicDir` (public/_a) holds anything that isn't a file of a public, free asset in the manifest. */
+export function assertNoLeaks(manifest: AssetManifest, publicDir: string) {
+  if (!fs.existsSync(publicDir)) return;
+  const allowed = new Map(
+    Object.values(manifest.assets)
+      .filter((a) => a.public && a.access === "free")
+      .map((a) => [a.hash, new Set(a.variants.flatMap((v) => (v.url ? [path.basename(v.url)] : [])))])
+  );
+  for (const dir of fs.readdirSync(publicDir)) {
+    const names = allowed.get(dir);
+    const full = path.join(publicDir, dir);
+    const files = fs.statSync(full).isDirectory() ? fs.readdirSync(full) : [""];
+    for (const f of files) {
+      if (!names?.has(f)) throw new Error(`public/_a/${dir}${f ? `/${f}` : ""} is not a public free asset; refusing to continue`);
+    }
+  }
 }
 
 // ── SVG ──────────────────────────────────────────────────────────────────────────────────────────

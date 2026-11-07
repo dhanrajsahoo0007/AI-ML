@@ -26,18 +26,17 @@ import {
   assetSlug,
   assetTypeOf,
   isKebab,
-  type AssetEntry,
-  type AssetManifest,
 } from "../src/lib/asset-schema";
 import {
   SIDECAR_SUFFIX,
+  assertNoLeaks,
   checkAssets,
   contentPages,
   generatedModules,
   indexAssets,
-  isPublic,
   logoPrefix,
   optimizeSvg,
+  publishAssets,
   scanUsage,
   sha256,
   snippetFor,
@@ -45,8 +44,10 @@ import {
   usedByOf,
   type IndexedAsset,
   type Problem,
+  type Rendered,
+  type RenderedFile,
 } from "./build-assets.lib";
-import { DiagramRenderer, PNG_BACKGROUND, excalidrawVersion, renderImage, svgToPng, type RenderedFile } from "./build-assets.render";
+import { DiagramRenderer, PNG_BACKGROUND, excalidrawVersion, renderImage, svgToPng } from "./build-assets.render";
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.chdir(APP_DIR);
@@ -71,16 +72,6 @@ function printProblems(problems: Problem[]) {
 }
 
 // ── build ────────────────────────────────────────────────────────────────────────────────────────
-
-interface Rendered {
-  files: RenderedFile[];
-  width?: number;
-  height?: number;
-  placeholder?: string;
-}
-
-/** Files that become URLs when published. Inline SVGs are drawn into the page and never get a URL. */
-const isPublishable = (f: RenderedFile) => f.format !== "svg";
 
 async function build() {
   const { resolveAppEnv } = await import("../src/features/sections/registry");
@@ -144,41 +135,15 @@ async function build() {
     await renderer.close();
   }
 
-  // Publish.
-  fs.rmSync(PUBLIC_DIR, { recursive: true, force: true });
-  fs.rmSync(PRIVATE_DIR, { recursive: true, force: true });
-  const usedBy = usedByOf(index.assets, refs);
-  const manifest: AssetManifest = { version: 1, env, assets: {} };
-  let publicFiles = 0;
-  let privateFiles = 0;
-  for (const a of assets) {
-    const r = rendered.get(a.id)!;
-    const pub = isPublic(a, refs);
-    const variants = r.files.map(({ name, ...v }) => {
-      const from = path.join(CACHE_DIR, a.hash, name);
-      if (a.access === "premium") {
-        copy(from, path.join(PRIVATE_DIR, a.id, name));
-        privateFiles++;
-        return v;
-      }
-      if (pub && isPublishable({ name, ...v })) {
-        copy(from, path.join(PUBLIC_DIR, a.hash, name));
-        publicFiles++;
-        return { ...v, url: `/_a/${a.hash}/${name}` };
-      }
-      return v;
-    });
-    const { sidecar: _sidecar, ...meta } = a;
-    void _sidecar;
-    manifest.assets[a.id] = {
-      ...meta,
-      ...(r.width && r.height ? { width: r.width, height: r.height } : {}),
-      ...(r.placeholder ? { placeholder: r.placeholder } : {}),
-      variants,
-      usedBy: usedBy.get(a.id) ?? [],
-      public: pub,
-    } satisfies AssetEntry;
-  }
+  const { manifest, publicFiles, privateFiles } = publishAssets({
+    env,
+    assets,
+    rendered,
+    refs,
+    cacheDir: CACHE_DIR,
+    publicDir: PUBLIC_DIR,
+    privateDir: PRIVATE_DIR,
+  });
   fs.mkdirSync(path.dirname(MANIFEST_FILE), { recursive: true });
   fs.writeFileSync(MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`);
 
@@ -190,18 +155,13 @@ async function build() {
     }
   }
 
-  assertNoLeaks(manifest);
+  assertNoLeaks(manifest, PUBLIC_DIR);
   const premium = assets.filter((a) => a.access === "premium").length;
   console.log(
     `assets: ${assets.length} assets (${renderedCount} rendered, ${premium} premium) for ${env}; ` +
       `${publicFiles} public file(s) in public/_a, ${privateFiles} private file(s) in .build/private-assets; ` +
       `manifest ${rel(MANIFEST_FILE)}`
   );
-}
-
-function copy(from: string, to: string) {
-  fs.mkdirSync(path.dirname(to), { recursive: true });
-  fs.copyFileSync(from, to);
 }
 
 async function renderAsset(
@@ -280,22 +240,6 @@ async function renderAsset(
     }
     case "animated":
       return { files: [] };
-  }
-}
-
-/** Fails the build if public/_a holds anything that isn't a public, free asset of this manifest. */
-function assertNoLeaks(manifest: AssetManifest) {
-  if (!fs.existsSync(PUBLIC_DIR)) return;
-  const allowed = new Map(
-    Object.values(manifest.assets)
-      .filter((a) => a.public && a.access === "free")
-      .map((a) => [a.hash, new Set(a.variants.flatMap((v) => (v.url ? [path.basename(v.url)] : [])))])
-  );
-  for (const dir of fs.readdirSync(PUBLIC_DIR)) {
-    const names = allowed.get(dir);
-    for (const f of fs.readdirSync(path.join(PUBLIC_DIR, dir))) {
-      if (!names?.has(f)) throw new Error(`assets: public/_a/${dir}/${f} is not a public free asset; refusing to continue`);
-    }
   }
 }
 
