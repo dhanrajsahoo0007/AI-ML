@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { ContentProtection } from "@/features/content-protection/content-protection";
-import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { getNavTree } from "@/lib/nav-tree";
@@ -8,14 +8,21 @@ import { THEME_SCRIPT } from "@/components/theme";
 import { siteConfig } from "@/config/site";
 import "./globals.css";
 
-const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
-const display = Plus_Jakarta_Sans({
-  variable: "--font-display-face",
+// Two families (plan §6 P6): Inter for body text and headings (globals.css gives headings their weight
+// and tracking), JetBrains Mono for code. Only Inter is preloaded; code blocks are rarely above the fold.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
+  display: "swap",
+  adjustFontFallback: true,
+  preload: true,
 });
 const mono = JetBrains_Mono({
   variable: "--font-mono-code",
   subsets: ["latin"],
+  display: "swap",
+  adjustFontFallback: true,
+  preload: false,
 });
 
 export const metadata: Metadata = {
@@ -46,7 +53,7 @@ export default async function RootLayout({
     <html
       lang="en"
       data-scroll-behavior="smooth"
-      className={`${inter.variable} ${display.variable} ${mono.variable}`}
+      className={`${inter.variable} ${mono.variable}`}
       suppressHydrationWarning
     >
       <head>
