@@ -13,7 +13,8 @@ import { describe, expect, it } from "vitest";
 // The same failure happens on <main> and <body>: `children`, the footer and the observability island are separate
 // RSC rows that can arrive after hydration has started. A host element that suspends during hydration outside a
 // Suspense boundary is replayed without restoring React's DOM cursor, so the root layout wraps those slots in
-// <Suspense> (React then hydrates them later, from the boundary's own markers).
+// <HydrationSlot> (a pass-through client component: the suspension then happens on a function-component fiber).
+// Not <Suspense>: notFound() inside a boundary is streamed and the page is served with status 200 instead of 404.
 //
 // Rule: a module without "use client" may import only components (PascalCase) from a "use client" module.
 // Constants, helpers and config shared by both sides belong in a plain module (e.g. components/theme-script.ts).
@@ -99,9 +100,11 @@ describe("server → client module boundary", () => {
     expect(layout).toMatch(/import \{ THEME_SCRIPT \} from "@\/components\/theme-script"/);
   });
 
-  it("the root layout gives late RSC rows a Suspense boundary instead of <main>/<body>", () => {
+  it("the root layout wraps late RSC rows in HydrationSlot, not <main>/<body> directly and not <Suspense>", () => {
     const layout = fs.readFileSync(path.join(SRC, "app/layout.tsx"), "utf8");
-    expect(layout).toMatch(/<main[^>]*>\s*<Suspense>\{children\}<\/Suspense>\s*<\/main>/);
-    expect(layout).toMatch(/<Suspense>\s*<SiteFooter \/>\s*<Observability \/>\s*<\/Suspense>/);
+    expect(layout).toMatch(/<main[^>]*>\s*<HydrationSlot>\{children\}<\/HydrationSlot>\s*<\/main>/);
+    expect(layout).toMatch(/<HydrationSlot>\s*<SiteFooter \/>\s*<Observability \/>\s*<\/HydrationSlot>/);
+    // A Suspense boundary around the page would serve notFound() pages with status 200 (streamed error).
+    expect(layout).not.toMatch(/<Suspense/);
   });
 });

@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
 import { ContentProtection } from "@/features/content-protection/content-protection";
 import { Observability } from "@/features/observability/observability";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { HydrationSlot } from "@/components/hydration-slot";
 import { getHeaderNav } from "@/lib/nav-tree";
 import { THEME_SCRIPT } from "@/components/theme-script";
 import { siteConfig } from "@/config/site";
@@ -79,18 +79,15 @@ export default async function RootLayout({
         </a>
         <SiteHeader navTree={headerNav} />
         <ContentProtection />
-        {/* Hydration boundaries (React #418 fix, see tests/unit/client-boundary.test.ts): `children`, the footer and
-            the observability island reach the browser as separate RSC rows. If hydration starts before a row has
-            arrived (slow CPU or network), React suspends; outside a Suspense boundary that happens on <main> or
-            <body> and React loses its place in the server HTML, then re-renders the whole document. Inside a
-            boundary React just hydrates that part later. No fallback: the HTML is already there. */}
+        {/* HydrationSlot: these arrive as separate RSC rows that may land after hydration starts; see
+            components/hydration-slot.tsx (React #418). Not a Suspense boundary: that would turn notFound() 404s into 200s. */}
         <main id="main" className="w-full flex-1">
-          <Suspense>{children}</Suspense>
+          <HydrationSlot>{children}</HydrationSlot>
         </main>
-        <Suspense>
+        <HydrationSlot>
           <SiteFooter />
           <Observability />
-        </Suspense>
+        </HydrationSlot>
       </body>
     </html>
   );
