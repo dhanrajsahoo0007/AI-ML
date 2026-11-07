@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 
 type Phase = "loading" | "ready" | "missing" | "working" | "done" | "failed";
 
-export interface TokenActionProps {
+interface TokenActionProps {
   endpoint: string;
   button: string;
   done: string;

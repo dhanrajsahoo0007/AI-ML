@@ -29,7 +29,7 @@ export interface Issue {
   audience: IssueAudience;
 }
 
-export function issuesDir(section: Pick<SectionDef, "key">) {
+function issuesDir(section: Pick<SectionDef, "key">) {
   return path.join(CONTENT_DIR, section.key);
 }
 

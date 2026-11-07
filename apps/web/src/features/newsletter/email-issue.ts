@@ -32,7 +32,7 @@ const emailComponents = {
   },
 };
 
-export interface RenderIssueOptions {
+interface RenderIssueOptions {
   /** Footer unsubscribe link: Resend's {{{RESEND_UNSUBSCRIBE_URL}}} placeholder for broadcasts. */
   unsubscribeUrl: string;
 }

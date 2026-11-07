@@ -6,7 +6,7 @@ import { s } from "./styles";
 
 // Double opt-in (plan §15.2 step 3): the subscriber is `pending` until they open this link.
 
-export interface ConfirmSubscriptionProps {
+interface ConfirmSubscriptionProps {
   confirmUrl: string;
   unsubscribeUrl: string;
   /** How long the link works, e.g. "48 hours". */

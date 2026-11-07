@@ -1,7 +1,7 @@
 // Link and image extraction from an issue's MDX body, for validate() (links resolve, PNG-only images) and the
 // email renderer. Pure string functions; no MDX parser needed for the plain Markdown issues are written in.
 
-export interface FoundRef {
+interface FoundRef {
   url: string;
   /** 1-based line in the body. */
   line: number;

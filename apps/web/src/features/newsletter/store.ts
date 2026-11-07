@@ -11,8 +11,7 @@
 //
 // bounced and complained are terminal: upsertPending reports them as suppressed and sends nothing.
 
-export const SUBSCRIBER_STATUSES = ["pending", "active", "unsubscribed", "bounced", "complained"] as const;
-export type SubscriberStatus = (typeof SUBSCRIBER_STATUSES)[number];
+type SubscriberStatus = "pending" | "active" | "unsubscribed" | "bounced" | "complained";
 export type SuppressReason = "bounced" | "complained";
 
 export interface Subscriber {
@@ -55,7 +54,7 @@ export interface NewsletterStore {
   suppress(email: string, reason: SuppressReason): Promise<Subscriber>;
 }
 
-export const normalizeEmail = (email: string) => email.trim().toLowerCase();
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 const isSuppressed = (s: Subscriber) => s.status === "bounced" || s.status === "complained";
 

@@ -7,7 +7,7 @@
 // `confirm` tokens expire after 48 hours (double opt-in). `unsubscribe` tokens don't expire: an unsubscribe link
 // in an old email must keep working (CAN-SPAM needs at least 30 days; we never want it to fail).
 
-export type TokenPurpose = "confirm" | "unsubscribe";
+type TokenPurpose = "confirm" | "unsubscribe";
 
 export const CONFIRM_TTL_SECONDS = 48 * 60 * 60;
 export const CONFIRM_TTL_LABEL = "48 hours";
@@ -23,7 +23,7 @@ interface Payload {
   exp?: number;
 }
 
-export type VerifyResult =
+type VerifyResult =
   | { ok: true; subscriberId: string; issuedAt: number }
   | { ok: false; reason: "malformed" | "bad-signature" | "wrong-purpose" | "expired" };
 

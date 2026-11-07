@@ -6,7 +6,7 @@ import { s } from "./styles";
 
 // Sent once, after the subscriber confirms.
 
-export interface WelcomeProps {
+interface WelcomeProps {
   archiveUrl: string;
   unsubscribeUrl: string;
 }

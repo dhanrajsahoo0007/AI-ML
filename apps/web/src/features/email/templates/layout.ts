@@ -10,7 +10,7 @@ import { s } from "./styles";
 // Templates use createElement rather than JSX: the app compiles JSX through Next, but the unit tests (Vite, with
 // the app's `jsx: preserve`) and the send script (tsx, plain Node) load these files directly.
 
-export interface EmailFooterProps {
+interface EmailFooterProps {
   /** Unsubscribe page for this recipient (or Resend's {{{RESEND_UNSUBSCRIBE_URL}}} placeholder in broadcasts). */
   unsubscribeUrl: string;
   /** Why the recipient gets this email. */

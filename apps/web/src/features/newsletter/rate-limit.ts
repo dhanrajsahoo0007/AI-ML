@@ -13,7 +13,7 @@ export interface RateLimiter {
   hit(key: string): Promise<RateLimitResult>;
 }
 
-export const SUBSCRIBE_LIMIT = { requests: 5, windowSeconds: 60 * 60 };
+const SUBSCRIBE_LIMIT = { requests: 5, windowSeconds: 60 * 60 };
 
 /** Fixed-window counter per key, in process memory. */
 export class MemoryRateLimiter implements RateLimiter {

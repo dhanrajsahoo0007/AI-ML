@@ -7,7 +7,7 @@ import { useState, type FormEvent } from "react";
 
 type State = { kind: "idle" | "sending" | "sent" } | { kind: "error"; message: string };
 
-export interface SignupFormProps {
+interface SignupFormProps {
   endpoint: string;
   consentText: string;
   consentVersion: string;

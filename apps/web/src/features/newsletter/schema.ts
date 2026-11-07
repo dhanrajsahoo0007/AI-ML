@@ -40,5 +40,3 @@ export const issueFrontmatterSchema = z
       ctx.addIssue({ code: "custom", path: ["sendAt"], message: "scheduled issues need sendAt" });
     }
   });
-
-export type IssueFrontmatter = z.infer<typeof issueFrontmatterSchema>;

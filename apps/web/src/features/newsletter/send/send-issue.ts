@@ -2,7 +2,7 @@
 //
 //   npx tsx src/features/newsletter/send/send-issue.ts <slug> --mode test       # to the founder only
 //   npx tsx src/features/newsletter/send/send-issue.ts <slug> --mode broadcast  # Resend Broadcast to the segment
-//   npx tsx src/features/newsletter/send/send-issue.ts <slug> --dry-run         # render to .build/newsletter/
+//   npx tsx src/features/newsletter/send/send-issue.ts <slug> --dry-run         # render to .build/mail/issue-<slug>.eml
 //
 // The issue's MDX is rendered to HTML and text here (build time), the issue is validated by the newsletter kind
 // first, and a broadcast needs status: scheduled. Env: RESEND_API_KEY, RESEND_SEGMENT_ID (everyone),
@@ -14,6 +14,8 @@ import { parseArgs } from "node:util";
 import { z } from "zod";
 import { business, SITE_URL } from "../../../config/business";
 import { sectionOfKind } from "../../sections/registry";
+import { DEFAULT_DEV_MAIL_DIR } from "../../email/dev-sender";
+import { toEml } from "../../email/eml";
 import { renderIssueEmail } from "../email-issue";
 import { NEWSLETTER_FROM, NEWSLETTER_REPLY_TO } from "../emails";
 import { NEWSLETTER_KIND, newsletterKind } from "../kind";
@@ -72,11 +74,20 @@ async function main() {
   const { html, text } = await renderIssueEmail(issue, { unsubscribeUrl });
 
   if (dryRun) {
-    const out = path.resolve(".build", "newsletter");
+    // Same .eml format as the dev outbox (Prettier and git ignore it there).
+    const out = path.resolve(process.env.DEV_MAIL_DIR ?? DEFAULT_DEV_MAIL_DIR);
     fs.mkdirSync(out, { recursive: true });
-    fs.writeFileSync(path.join(out, `${slug}.html`), html);
-    fs.writeFileSync(path.join(out, `${slug}.txt`), text);
-    console.log(`rendered ${slug} → ${path.relative(process.cwd(), out)}/${slug}.{html,txt}`);
+    const file = path.join(out, `issue-${slug}.eml`);
+    const message = {
+      to: business.FOUNDER_EMAIL,
+      from: NEWSLETTER_FROM,
+      subject: issue.title,
+      html,
+      text,
+      template: "issue",
+    };
+    fs.writeFileSync(file, toEml(message, { date: new Date(), messageId: `issue-${slug}@dev.local` }));
+    console.log(`rendered ${slug} → ${path.relative(process.cwd(), file)}`);
     return;
   }
 

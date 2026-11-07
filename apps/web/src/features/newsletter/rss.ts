@@ -7,7 +7,7 @@ import { isPublished, type Issue } from "./source";
 const escapeXml = (s: string) =>
   s.replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[c]!);
 
-export interface FeedInfo {
+interface FeedInfo {
   title: string;
   description: string;
   /** Site path of the archive, e.g. the section href. */

@@ -21,7 +21,7 @@ import { MemoryNewsletterStore, type NewsletterStore } from "./store";
 export class NotConfiguredError extends Error {}
 
 /** Site path of the API routes (app/api/newsletter). */
-export const API_BASE = "/api/newsletter";
+const API_BASE = "/api/newsletter";
 
 /**
  * The environment this build was made for. next.config.ts inlines APP_ENV into the server bundles; the registry

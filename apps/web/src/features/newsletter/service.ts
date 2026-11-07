@@ -18,7 +18,7 @@ export interface NewsletterDeps {
   links(tokens: { confirm: string; unsubscribe: string }): SubscriberLinks;
 }
 
-export interface SubscribeInput {
+interface SubscribeInput {
   email: string;
   source: string;
   consentVersion: string;
@@ -27,7 +27,7 @@ export interface SubscribeInput {
   ip: string;
 }
 
-export type SubscribeResult = { kind: "accepted" } | { kind: "rate-limited"; retryAfterSeconds: number };
+type SubscribeResult = { kind: "accepted" } | { kind: "rate-limited"; retryAfterSeconds: number };
 
 async function tokensFor(deps: NewsletterDeps, subscriberId: string) {
   const [confirm, unsubscribe] = await Promise.all([
@@ -57,7 +57,7 @@ export async function subscribe(deps: NewsletterDeps, input: SubscribeInput): Pr
   return { kind: "accepted" };
 }
 
-export type ConfirmResult = { kind: "active" } | { kind: "invalid" } | { kind: "expired" } | { kind: "not-pending" };
+type ConfirmResult = { kind: "active" } | { kind: "invalid" } | { kind: "expired" } | { kind: "not-pending" };
 
 /** Confirms a subscription from a confirm token and sends the welcome email the first time. */
 export async function confirmSubscription(deps: NewsletterDeps, token: string): Promise<ConfirmResult> {
@@ -78,7 +78,7 @@ export async function confirmSubscription(deps: NewsletterDeps, token: string): 
   return { kind: "active" };
 }
 
-export type UnsubscribeResult = { kind: "unsubscribed" } | { kind: "invalid" };
+type UnsubscribeResult = { kind: "unsubscribed" } | { kind: "invalid" };
 
 /** Unsubscribes from an unsubscribe token. Idempotent: a second request also answers "unsubscribed". */
 export async function unsubscribeWithToken(deps: NewsletterDeps, token: string): Promise<UnsubscribeResult> {

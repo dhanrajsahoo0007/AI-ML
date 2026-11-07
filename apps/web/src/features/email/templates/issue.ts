@@ -7,7 +7,7 @@ import { s } from "./styles";
 // One newsletter issue. The body is the issue's MDX compiled with the email components
 // (features/newsletter/email-issue.ts), so the web page and the email come from the same file.
 
-export interface IssueEmailProps {
+interface IssueEmailProps {
   title: string;
   summary: string;
   webUrl: string;
