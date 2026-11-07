@@ -1,0 +1,103 @@
+---
+title: Two Sum
+description: Find the two positions in an array whose values add up to a target, in a single pass.
+difficulty: easy
+patterns: [hash-map, complement-lookup]
+topics: [hash-maps]
+companies: [amazon, meta, apple, microsoft]
+access: free
+languages: [javascript, python]
+entry: { javascript: twoSum, python: two_sum }
+starter:
+  javascript: |
+    /**
+     * @param {number[]} nums
+     * @param {number} target
+     * @return {number[]} [i, j] with i < j
+     */
+    function twoSum(nums, target) {
+      // Your code here
+    }
+  python: |
+    def two_sum(nums: list[int], target: int) -> list[int]:
+        # Return [i, j] with i < j
+        pass
+tests: { public: tests/two-sum.public.json, hidden: tests/two-sum.hidden.json }
+complexity: { time: "O(n)", space: "O(n)" }
+related: [/dsa/hash-maps, /dsa/problems/lru-cache]
+order: 1
+---
+
+You are given an array of integers `nums` and an integer `target`. Exactly two different positions in the array
+hold values that add up to `target`. Return those two positions as `[i, j]` with `i < j`.
+
+You may not use the same position twice, but two different positions may hold the same value.
+
+## Examples
+
+```text
+nums = [2, 7, 11, 15], target = 9   →  [0, 1]     (2 + 7 = 9)
+nums = [3, 2, 4],      target = 6   →  [1, 2]     (2 + 4 = 6)
+nums = [3, 3],         target = 6   →  [0, 1]
+```
+
+## Constraints
+
+- `2 ≤ nums.length ≤ 10⁴`
+- `-10⁹ ≤ nums[i], target ≤ 10⁹`
+- Exactly one valid pair exists.
+
+**Follow-up:** checking every pair is O(n²). Can you do it in one pass?
+
+<PremiumBreak />
+
+## Brute force: check every pair
+
+Try each `i` with each `j > i` and return the first pair that sums to `target`. It is correct and needs no extra
+memory, but for 10⁴ numbers it does about 5 × 10⁷ additions. That is the answer to give first in an interview,
+then improve.
+
+## One pass with a hash map
+
+Walk the array once. For the value `x` at position `j`, the partner you need is `target − x`. If that partner has
+already been seen, its position `i` is smaller than `j` and you are done. If not, remember `x → j` and move on.
+
+Ask the map about the partner *before* storing `x`. Otherwise, with `nums = [3, 2, 4]` and `target = 6`, the
+first `3` would find itself.
+
+```javascript
+function twoSum(nums, target) {
+  const seen = new Map(); // value → index
+  for (let j = 0; j < nums.length; j++) {
+    const i = seen.get(target - nums[j]);
+    if (i !== undefined) return [i, j];
+    seen.set(nums[j], j);
+  }
+  return [];
+}
+```
+
+```python
+def two_sum(nums, target):
+    seen = {}  # value -> index
+    for j, x in enumerate(nums):
+        i = seen.get(target - x)
+        if i is not None:
+            return [i, j]
+        seen[x] = j
+    return []
+```
+
+Note the explicit `undefined` / `None` checks: index `0` is a valid answer, so a truthiness test would miss it.
+
+## Why it works
+
+Every pair `(i, j)` with `i < j` is examined exactly once, at the moment the loop reaches `j`, because `nums[i]`
+is already in the map by then. Duplicates are fine: if a value appears twice, the map holds the earlier position,
+which is the one you want.
+
+## Variations to expect
+
+- **Sorted input:** two pointers from both ends find the pair in O(1) extra space.
+- **Return the values, or all pairs:** the same map works; collect instead of returning.
+- **Three Sum:** sort, fix one element, run the two-pointer search on the rest: O(n²).

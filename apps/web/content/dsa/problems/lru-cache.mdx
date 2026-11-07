@@ -1,0 +1,178 @@
+---
+title: LRU Cache
+description: Design a fixed-size key–value cache whose get and put both run in constant time and evict the least recently used key.
+difficulty: medium
+patterns: [design, hash-map, linked-list]
+topics: [hash-maps]
+companies: [amazon, microsoft, meta, apple]
+languages: [javascript, python]
+mode: class
+entry: { javascript: LRUCache, python: LRUCache }
+starter:
+  javascript: |
+    class LRUCache {
+      /** @param {number} capacity */
+      constructor(capacity) {
+        // Your code here
+      }
+
+      /** @param {number} key  @return {number} the value, or -1 */
+      get(key) {
+        // Your code here
+      }
+
+      /** @param {number} key  @param {number} value */
+      put(key, value) {
+        // Your code here
+      }
+    }
+  python: |
+    class LRUCache:
+        def __init__(self, capacity: int):
+            pass
+
+        def get(self, key: int) -> int:
+            # Return the value, or -1
+            pass
+
+        def put(self, key: int, value: int) -> None:
+            pass
+tests: { public: tests/lru-cache.public.json, hidden: tests/lru-cache.hidden.json }
+complexity: { time: "O(1) per operation", space: "O(capacity)" }
+related: [/system-design/patterns/caching, /dsa/hash-maps]
+order: 3
+---
+
+Design a cache that holds at most `capacity` key–value pairs and, when it is full, makes room by discarding the
+**least recently used** key. Implement the class `LRUCache`:
+
+- `LRUCache(capacity)` creates an empty cache with a positive capacity.
+- `get(key)` returns the value stored for `key`, or `-1` if the key is not in the cache. A successful `get`
+  counts as a use of `key`.
+- `put(key, value)` stores `value` under `key`, replacing any old value; this also counts as a use. If the cache
+  then holds more than `capacity` keys, remove the one that was used least recently.
+
+Both `get` and `put` must run in O(1) average time.
+
+## Example
+
+```text
+cache = LRUCache(2)
+cache.put(1, 1)
+cache.put(2, 2)
+cache.get(1)      → 1       (1 is now the most recent)
+cache.put(3, 3)   evicts 2
+cache.get(2)      → -1
+cache.put(4, 4)   evicts 1
+cache.get(1)      → -1
+cache.get(3)      → 3
+cache.get(4)      → 4
+```
+
+The tests describe a run as a list of operations and their arguments, and compare the list of results
+(`null` for the constructor and for `put`).
+
+## Constraints
+
+- `1 ≤ capacity ≤ 3000`, `0 ≤ key ≤ 10⁴`, `0 ≤ value ≤ 10⁵`
+- At most `2 × 10⁵` calls to `get` and `put`.
+
+<PremiumBreak />
+
+## Two structures, one job each
+
+A hash map finds a key in O(1) but knows nothing about order. A **doubly linked list** keeps keys in order of use
+and can unlink any node in O(1) if you already hold a pointer to it. Combine them: the map goes from key to list
+node, and the list runs from least recent (head) to most recent (tail).
+
+- `get(key)`: look the node up in the map; if found, move it to the tail and return its value.
+- `put(key, value)`: if the key exists, update the value and move the node to the tail. Otherwise append a new node
+  and, if the cache is over capacity, unlink the head node and delete its key from the map.
+
+Sentinel head and tail nodes remove every "is the list empty?" special case.
+
+```python
+class Node:
+    __slots__ = ("key", "value", "prev", "next")
+
+    def __init__(self, key=0, value=0):
+        self.key, self.value = key, value
+        self.prev = self.next = None
+
+
+class LRUCache:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.nodes = {}
+        self.head, self.tail = Node(), Node()  # sentinels: head.next is the least recent
+        self.head.next, self.tail.prev = self.tail, self.head
+
+    def _unlink(self, node):
+        node.prev.next, node.next.prev = node.next, node.prev
+
+    def _append(self, node):
+        node.prev, node.next = self.tail.prev, self.tail
+        self.tail.prev.next = node
+        self.tail.prev = node
+
+    def get(self, key):
+        node = self.nodes.get(key)
+        if node is None:
+            return -1
+        self._unlink(node)
+        self._append(node)
+        return node.value
+
+    def put(self, key, value):
+        node = self.nodes.get(key)
+        if node is not None:
+            node.value = value
+            self._unlink(node)
+        else:
+            node = self.nodes[key] = Node(key, value)
+        self._append(node)
+        if len(self.nodes) > self.capacity:
+            oldest = self.head.next
+            self._unlink(oldest)
+            del self.nodes[oldest.key]
+```
+
+## The shortcut: an ordered map
+
+JavaScript's `Map` and Python's `OrderedDict` already remember insertion order. Deleting and re-inserting a key
+moves it to the end, and the first key is the least recent. Say in the interview that this hides the linked list
+inside the library; many interviewers then ask you to build the list yourself.
+
+```javascript
+class LRUCache {
+  constructor(capacity) {
+    this.capacity = capacity;
+    this.map = new Map();
+  }
+
+  get(key) {
+    if (!this.map.has(key)) return -1;
+    const value = this.map.get(key);
+    this.map.delete(key);
+    this.map.set(key, value);
+    return value;
+  }
+
+  put(key, value) {
+    this.map.delete(key);
+    this.map.set(key, value);
+    if (this.map.size > this.capacity) this.map.delete(this.map.keys().next().value);
+  }
+}
+```
+
+## Mistakes the tests catch
+
+- Forgetting that `put` on an existing key is a use (it must move to the most recent end).
+- Treating a stored `0` as a miss: check membership, not the truthiness of the value.
+- Letting a `get` miss change the order.
+
+## Beyond the interview
+
+Real caches add expiry times, size in bytes instead of a key count, and sharding for concurrency. See the
+caching pattern for how LRU fits next to LFU and TTL-based eviction in a distributed system.
