@@ -3,7 +3,7 @@
 // script can import it without a TypeScript loader.
 
 /** Bump when the config or post-processing changes, so every cached diagram is re-rendered. */
-export const THEME_VERSION = "2";
+export const THEME_VERSION = "3";
 
 export const PALETTES = {
   light: {

@@ -24,6 +24,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { mermaidConfig, prepareSource } from "../src/lib/mermaid-theme.mjs";
 import { CACHE_DIR, diagramHash, readDiagram, writeDiagram } from "../src/lib/mermaid-cache.mjs";
+import { optimize, uniquifyIds } from "./render-mermaid.svg.mjs";
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.chdir(APP_DIR);
@@ -68,37 +69,6 @@ async function collect(file) {
     mdxOptions: { remarkPlugins: [remarkGfm, remarkMath], rehypePlugins: [collector] },
   });
   return found.map((d) => ({ ...d, file: path.relative(APP_DIR, file) }));
-}
-
-// Mermaid ids sub-elements (markers, gradients) without the diagram id in some diagram types. The light
-// and dark copies sit in the same page, so give every id the diagram's own prefix to keep them unique.
-function uniquifyIds(svg, prefix) {
-  const ids = new Set([...svg.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]).filter((id) => !id.startsWith(prefix)));
-  let out = svg;
-  for (const id of ids) {
-    const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    out = out
-      .replace(new RegExp(`(\\sid=")${esc}"`, "g"), `$1${prefix}-${id}"`)
-      .replace(new RegExp(`url\\(#${esc}\\)`, "g"), `url(#${prefix}-${id})`)
-      .replace(new RegExp(`((?:xlink:)?href=")#${esc}"`, "g"), `$1#${prefix}-${id}"`);
-  }
-  return out;
-}
-
-// Interaction-only data (data-points, data-id, ...), unused marker definitions, ids nothing points at and
-// sub-pixel precision add ~30% to each SVG without changing how it looks.
-const GEOMETRY_ATTRS = /(\s(?:d|transform|x|y|x1|y1|x2|y2|cx|cy|r|rx|ry|width|height|viewBox|points|refX|refY)=")([^"]*)"/g;
-function optimize(svg, rootId) {
-  let out = svg.replace(/\sdata-[\w-]+="[^"]*"/g, "");
-  const referenced = () => new Set([...out.matchAll(/url\(#([^)]+)\)|href="#([^"]+)"/g)].map((m) => m[1] ?? m[2]));
-  let refs = referenced();
-  out = out.replace(/<marker\b[^>]*\sid="([^"]+)"[\s\S]*?<\/marker>/g, (m, id) => (refs.has(id) ? m : ""));
-  refs = referenced();
-  out = out.replace(/\sid="([^"]+)"/g, (m, id) => (id === rootId || refs.has(id) ? m : ""));
-  out = out.replace(GEOMETRY_ATTRS, (_, attr, value) =>
-    `${attr}${value.replace(/-?\d*\.\d{3,}/g, (n) => String(Math.round(Number(n) * 100) / 100))}"`,
-  );
-  return out;
 }
 
 async function main() {
@@ -172,6 +142,30 @@ async function main() {
           job[mode] = optimize(uniquifyIds(r.svg, rootId), rootId);
         }
       });
+    }
+    // Parse every optimized SVG in the browser: Chromium logs a console error for any attribute it
+    // can't read (e.g. broken path data), which fails the run instead of shipping a broken diagram.
+    const ok = jobs.filter((j) => !j.failed);
+    for (const [i, job] of ok.entries()) {
+      for (const mode of ["light", "dark"]) {
+        const errors = [];
+        const onConsole = (msg) => msg.type() === "error" && errors.push(msg.text());
+        page.on("console", onConsole);
+        await page.evaluate((svg) => {
+          const host = document.createElement("div");
+          host.innerHTML = svg;
+          document.body.append(host);
+          host.getBoundingClientRect();
+          host.remove();
+        }, job[mode]);
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+        page.off("console", onConsole);
+        if (errors.length) {
+          failures.push(`${job.file}:${job.line}: optimized ${mode} SVG is invalid: ${errors[0].slice(0, 160)}`);
+          job.failed = true;
+        }
+      }
+      if (i % 50 === 49) console.log(`mermaid: validated ${i + 1}/${ok.length}`);
     }
     await browser.close();
     for (const job of jobs) if (!job.failed) writeDiagram(job.hash, { light: job.light, dark: job.dark });
