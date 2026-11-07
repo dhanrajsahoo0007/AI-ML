@@ -127,7 +127,8 @@ test.describe("error pages @core", () => {
       route.fulfill({ contentType: "application/javascript", body: 'throw new Error("e2e: broken chunk")' })
     );
     await page.goto("/", { waitUntil: "load" });
-    await page.getByRole("banner").getByRole("link", { name: "Pricing" }).click();
+    // The footer link exists in every build profile (the header may tuck Pricing into a menu).
+    await page.getByRole("contentinfo").getByRole("link", { name: "Pricing", exact: true }).click();
     const alert = page.getByRole("alert").filter({ hasText: "Something went wrong" });
     await expect(alert).toBeVisible();
     await expect(alert.getByRole("button", { name: "Try again" })).toBeVisible();

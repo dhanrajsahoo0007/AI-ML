@@ -86,6 +86,9 @@ test.describe("sign-in with the database @core", () => {
     await profileButton(page).click();
     await page.getByRole("menuitem", { name: "Sign out" }).filter({ visible: true }).click();
     await page.waitForLoadState("load");
+    // Signing out on /account redirects to /sign-in, so check the signed-out menu from a content page.
+    await expect(page).not.toHaveURL(/\/account$/);
+    await page.goto("/");
     expect(await profileName(page)).toBe("Guest learner");
     await page.goto("/account");
     await expect(page).toHaveURL(/\/sign-in\?callbackURL=%2Faccount/);
