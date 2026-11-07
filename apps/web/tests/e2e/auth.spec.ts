@@ -21,7 +21,7 @@ test.describe("sign-in never redirects off the site @core", () => {
     "/..//example.com",
   ]) {
     test(`/sign-in/complete?next=${next}`, async ({ page, baseURL }) => {
-      await page.route(/example\.com/, (r) => r.abort());
+      await page.route((u) => u.hostname.endsWith("example.com"), (r) => r.abort());
       await page.goto(`/sign-in/complete?next=${next}`);
       await page.waitForURL((u) => u.pathname !== "/sign-in/complete" || u.origin !== new URL(baseURL!).origin);
       expect(new URL(page.url()).origin).toBe(new URL(baseURL!).origin);
