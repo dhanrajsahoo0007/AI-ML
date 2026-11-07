@@ -1,9 +1,9 @@
 import { navSection, type SectionKind } from "../kind";
 
-// Kinds that are planned but not built yet (plan §15.1 DSA, §15.2 Newsletter). They load nothing and
-// have no routes; their sections show as "coming soon" in the nav until the real module lands.
+// Kinds that are planned but not built yet (plan §15.1 DSA). They load nothing and have no routes; their
+// sections show as "coming soon" in the nav until the real module lands.
 
-function stub(kind: "problems" | "newsletter"): SectionKind<never> {
+function stub(kind: "problems"): SectionKind<never> {
   return {
     kind,
     async load() {
@@ -21,4 +21,3 @@ function stub(kind: "problems" | "newsletter"): SectionKind<never> {
 }
 
 export const problemsKind = stub("problems");
-export const newsletterKind = stub("newsletter");
