@@ -1,4 +1,4 @@
-import type { DiagramSpec } from "../../types";
+import type { DiagramSpec } from "@/components/diagrams/types";
 
 // Uber Eats architecture, built up one requirement at a time (see CASE-STUDY-FORMAT.md).
 //
@@ -6,7 +6,7 @@ import type { DiagramSpec } from "../../types";
 // gateway -> order service -> payment + orders DB -> event bus -> notifier -> socket gateway ->
 // restaurant / customer; dispatch = bus -> dispatch <-> location; tracking = courier -> socket
 // gateway -> location -> geo index + bus.
-export const uberEatsArchitecture: DiagramSpec = {
+const spec: DiagramSpec = {
   title: "Uber Eats high-level architecture",
   width: 1200,
   height: 790,
@@ -82,3 +82,5 @@ export const uberEatsArchitecture: DiagramSpec = {
     { from: "location", to: "eta", tone: "green", dashed: true },
   ],
 };
+
+export default spec;

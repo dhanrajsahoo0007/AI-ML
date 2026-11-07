@@ -1,4 +1,4 @@
-import type { DiagramSpec } from "../../types";
+import type { DiagramSpec } from "@/components/diagrams/types";
 
 // Messenger architecture, built up one requirement at a time. Each node and edge says which build step
 // introduces it; edges with `until` are early shortcuts that a later step replaces (chat server writing
@@ -6,7 +6,7 @@ import type { DiagramSpec } from "../../types";
 //
 // Full main path (packets, in order): sender -> load balancer -> chat servers -> message bus -> store +
 // fan-out -> recipient's chat server -> recipient, with offline recipients going through the push service.
-export const messengerArchitecture: DiagramSpec = {
+const spec: DiagramSpec = {
   title: "Facebook Messenger high-level architecture",
   width: 1200,
   height: 740,
@@ -95,3 +95,5 @@ export const messengerArchitecture: DiagramSpec = {
     { from: "history", to: "store", label: "read pages", tone: "violet", dashed: true, via: [[575, 722], [1192, 722], [1192, 120]], labelAt: 0.35 },
   ],
 };
+
+export default spec;

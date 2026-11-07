@@ -1,4 +1,4 @@
-import type { DiagramSpec } from "../../types";
+import type { DiagramSpec } from "@/components/diagrams/types";
 
 // Messenger deployed on AWS: the same eight build steps as messenger/architecture, drawn as a deployment.
 // Layout, left to right: clients | global edge | Region { VPC { public | private app | private data subnets } |
@@ -7,7 +7,7 @@ import type { DiagramSpec } from "../../types";
 // Lanes: y=728 inside the subnets (history → DynamoDB); y=772 and y=790 below the VPC (CloudFront → S3, SNS → APNs/FCM),
 // with matching right lanes x=1318, 1338, 1358. The top lane y=86, between the VPC edge and the subnets, carries the
 // early direct persist (steps 1–4) and later the presence heartbeats (step 6+), which never show together.
-export const messengerAws: DiagramSpec = {
+const spec: DiagramSpec = {
   title: "Facebook Messenger on AWS",
   width: 1400,
   height: 820,
@@ -112,3 +112,5 @@ export const messengerAws: DiagramSpec = {
     { from: "history", to: "dynamo", label: "read pages", tone: "violet", dashed: true, via: [[830, 690], [830, 728], [1318, 728], [1318, 170]], labelAt: 0.35 },
   ],
 };
+
+export default spec;

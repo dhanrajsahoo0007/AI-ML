@@ -1,8 +1,8 @@
-import type { DiagramSpec } from "../../types";
+import type { DiagramSpec } from "@/components/diagrams/types";
 
 // Building and querying an inverted index: analyze documents into terms, store a postings list per term,
 // then analyze the query the same way, look up each term's postings, combine and rank.
-export const invertedIndex: DiagramSpec = {
+const spec: DiagramSpec = {
   title: "Inverted index: index time and query time",
   width: 960,
   height: 540,
@@ -42,3 +42,5 @@ export const invertedIndex: DiagramSpec = {
     { from: "merge", to: "ranked", tone: "green", flow: true, packet: true, delay: 1.8 },
   ],
 };
+
+export default spec;

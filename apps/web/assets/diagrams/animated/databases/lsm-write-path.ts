@@ -1,8 +1,8 @@
-import type { DiagramSpec } from "../../types";
+import type { DiagramSpec } from "@/components/diagrams/types";
 
 // The LSM-tree write and read paths: append to the WAL, insert into the memtable, flush sorted runs
 // (SSTables) to disk, merge them in the background, and on reads check newest data first.
-export const lsmWritePath: DiagramSpec = {
+const spec: DiagramSpec = {
   title: "LSM-tree write and read path",
   width: 1000,
   height: 560,
@@ -39,3 +39,5 @@ export const lsmWritePath: DiagramSpec = {
     { from: "bloom", to: "l1", label: "maybe", tone: "green", dashed: true, labelAt: 0.5 },
   ],
 };
+
+export default spec;

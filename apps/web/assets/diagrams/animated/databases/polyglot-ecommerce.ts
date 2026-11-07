@@ -1,9 +1,9 @@
-import type { DiagramSpec } from "../../types";
+import type { DiagramSpec } from "@/components/diagrams/types";
 
 // An e-commerce backend that uses one store per access pattern, built up one store at a time. Postgres is the
 // source of truth; Redis takes hot reads, Elasticsearch and ClickHouse are fed from Postgres by change data
 // capture through Kafka, and product images live in S3 behind a CDN.
-export const polyglotEcommerce: DiagramSpec = {
+const spec: DiagramSpec = {
   title: "Polyglot persistence in an e-commerce backend",
   width: 1200,
   height: 790,
@@ -67,3 +67,5 @@ export const polyglotEcommerce: DiagramSpec = {
     { from: "bi", to: "ch", label: "GROUP BY over billions", tone: "teal", dashed: true, labelAt: 0.3 },
   ],
 };
+
+export default spec;

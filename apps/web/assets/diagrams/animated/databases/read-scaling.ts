@@ -1,8 +1,8 @@
-import type { DiagramSpec } from "../../types";
+import type { DiagramSpec } from "@/components/diagrams/types";
 
 // Scaling a read-heavy relational database one layer at a time: a single primary, then read replicas, then a
 // cache in front, then a CDN for anything cacheable at the edge.
-export const readScaling: DiagramSpec = {
+const spec: DiagramSpec = {
   title: "Scaling reads on a relational database",
   width: 880,
   height: 540,
@@ -38,3 +38,5 @@ export const readScaling: DiagramSpec = {
     { from: "client", to: "cdn", label: "static / public", tone: "blue", flow: true, packet: true, delay: 0, via: [[100, 115]], labelAt: 0.3 },
   ],
 };
+
+export default spec;

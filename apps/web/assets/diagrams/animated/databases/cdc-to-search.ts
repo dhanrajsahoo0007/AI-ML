@@ -1,9 +1,9 @@
-import type { DiagramSpec } from "../../types";
+import type { DiagramSpec } from "@/components/diagrams/types";
 
 // Keeping a derived store (here a search index) in sync with the source of truth by change data capture:
 // the app writes only to Postgres, a connector tails the WAL into Kafka, and an indexer upserts into
 // Elasticsearch. Searches read the index, which trails the database by about a second.
-export const cdcToSearch: DiagramSpec = {
+const spec: DiagramSpec = {
   title: "Change data capture from Postgres into a search index",
   width: 960,
   height: 500,
@@ -37,3 +37,5 @@ export const cdcToSearch: DiagramSpec = {
     { from: "searchapi", to: "es", label: "query", tone: "violet", dashed: true, flow: true },
   ],
 };
+
+export default spec;

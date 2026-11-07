@@ -1,8 +1,8 @@
-import type { DiagramSpec } from "../../types";
+import type { DiagramSpec } from "@/components/diagrams/types";
 
 // A B-tree point lookup: start at the root page, follow the child pointer whose key range contains the
 // search key, and land on a leaf. Writes are logged to the WAL before pages change.
-export const btreeLookup: DiagramSpec = {
+const spec: DiagramSpec = {
   title: "B-tree lookup for id = 342",
   width: 960,
   height: 520,
@@ -37,3 +37,5 @@ export const btreeLookup: DiagramSpec = {
     { from: "leaf2", to: "wal", label: "log, then write page", tone: "orange", dashed: true, via: [[868, 420]], labelAt: 0.3 },
   ],
 };
+
+export default spec;
