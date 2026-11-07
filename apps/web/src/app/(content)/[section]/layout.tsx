@@ -1,9 +1,10 @@
 import { ContentShell } from "@/components/content-shell";
+import { SpeculationRules } from "@/components/speculation-rules";
 import { getSectionNav } from "@/lib/nav-tree";
 import { docsSection, docsSectionParams, sectionRobots, type SectionParams } from "@/features/docs/routes";
 
 // Shared layout for every docs section (content/sections.yaml entries with kind: docs). The sidebar
-// gets only this section's nav.
+// gets only this section's nav; speculation rules prefetch same-section links on hover.
 
 export const dynamicParams = false;
 
@@ -25,5 +26,10 @@ export default async function DocsSectionLayout({
 }) {
   const section = docsSection((await params).section);
   const nav = await getSectionNav(section.key);
-  return <ContentShell navTree={[nav]}>{children}</ContentShell>;
+  return (
+    <>
+      <ContentShell navTree={[nav]}>{children}</ContentShell>
+      <SpeculationRules sectionHref={section.href} />
+    </>
+  );
 }
