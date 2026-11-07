@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { ContentProtection } from "@/features/content-protection/content-protection";
 import { Observability } from "@/features/observability/observability";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { getHeaderNav } from "@/lib/nav-tree";
-import { THEME_SCRIPT } from "@/components/theme";
+import { THEME_SCRIPT } from "@/components/theme-script";
 import { siteConfig } from "@/config/site";
 import { SITE_URL } from "@/config/business";
 import "./globals.css";
@@ -78,11 +79,18 @@ export default async function RootLayout({
         </a>
         <SiteHeader navTree={headerNav} />
         <ContentProtection />
+        {/* Hydration boundaries (React #418 fix, see tests/unit/client-boundary.test.ts): `children`, the footer and
+            the observability island reach the browser as separate RSC rows. If hydration starts before a row has
+            arrived (slow CPU or network), React suspends; outside a Suspense boundary that happens on <main> or
+            <body> and React loses its place in the server HTML, then re-renders the whole document. Inside a
+            boundary React just hydrates that part later. No fallback: the HTML is already there. */}
         <main id="main" className="w-full flex-1">
-          {children}
+          <Suspense>{children}</Suspense>
         </main>
-        <SiteFooter />
-        <Observability />
+        <Suspense>
+          <SiteFooter />
+          <Observability />
+        </Suspense>
       </body>
     </html>
   );

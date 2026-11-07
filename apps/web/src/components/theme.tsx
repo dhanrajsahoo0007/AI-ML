@@ -3,12 +3,10 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { THEME_STORAGE_KEY as STORAGE_KEY } from "@/components/theme-script";
 
-// The theme is the `dark` class on <html>. A saved choice ("light" or "dark") wins; without one
-// the site follows the operating system. THEME_SCRIPT runs before paint so pages never flash.
-const STORAGE_KEY = "theme";
-
-export const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem("${STORAGE_KEY}");var d=t?t==="dark":window.matchMedia("(prefers-color-scheme: dark)").matches;document.documentElement.classList.toggle("dark",d)}catch(e){}})();`;
+// The theme toggle. The pre-paint script that applies a saved theme lives in theme-script.ts (a server-safe
+// module, so the root layout inlines it as a string rather than a client reference).
 
 function readSaved(): string | null {
   try {
