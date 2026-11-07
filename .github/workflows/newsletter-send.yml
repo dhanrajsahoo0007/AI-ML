@@ -7,6 +7,12 @@ name: Newsletter send
 #                 after test-send succeeds; with required reviewers on the `production` environment it waits for a
 #                 second approval, so the reviewer can read the test email first.
 #
+# Only from `main` (security review M5): the send script runs with the production Resend key and the segment IDs,
+# so code from any other branch must never run here. The jobs are guarded with `if: github.ref == 'refs/heads/main'`
+# (a dispatch from another branch fails in the `refuse` job and never requests the `production` environment), and
+# the owner restricts the `production` environment's deployment branches to `main` in the repository settings
+# (Settings → Environments → production → Deployment branches: Selected → `main`).
+#
 # Both jobs skip with a notice while the RESEND_API_KEY secret does not exist (no Resend account yet). The issue
 # must have status: scheduled for the real send; mark it `sent` in a PR afterwards (this workflow can't push).
 # Secrets (names only): RESEND_API_KEY, RESEND_SEGMENT_ID, RESEND_PRO_SEGMENT_ID, NEXT_PUBLIC_SITE_URL (variable).
@@ -39,7 +45,17 @@ env:
   ISSUE_SLUG: ${{ inputs.slug }}
 
 jobs:
+  refuse:
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: |
+          echo "::error::Newsletter sends run only from main (this run is on ${GITHUB_REF})."
+          exit 1
+
   test-send:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
@@ -98,7 +114,7 @@ jobs:
 
   broadcast:
     needs: test-send
-    if: needs.test-send.outputs.configured == 'true'
+    if: github.ref == 'refs/heads/main' && needs.test-send.outputs.configured == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production
