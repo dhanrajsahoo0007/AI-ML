@@ -1,54 +1,28 @@
-"use client";
-
-import { motion, useReducedMotion } from "framer-motion";
-import React from "react";
+import React, { type CSSProperties } from "react";
 import { cn } from "@/lib/utils";
-import { EASE_OUT } from "@/components/motion/fade-in";
-
-const containerVariants = {
-  hidden: {},
-  visible: (staggerDelay: number) => ({
-    transition: { staggerChildren: staggerDelay },
-  }),
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 18 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.7, ease: EASE_OUT },
-  },
-};
+import styles from "@/components/motion/motion.module.css";
 
 interface StaggerChildrenProps {
   children: React.ReactNode;
   className?: string;
   itemClassName?: string;
+  /** Seconds between one child's entry and the next. */
   staggerDelay?: number;
 }
 
-export function StaggerChildren({
-  children,
-  className,
-  itemClassName,
-  staggerDelay = 0.08,
-}: StaggerChildrenProps) {
-  const reduce = useReducedMotion();
+// Children enter one after another (CSS only, see motion.module.css). The delay is capped so long lists
+// don't keep the last items waiting.
+export function StaggerChildren({ children, className, itemClassName, staggerDelay = 0.06 }: StaggerChildrenProps) {
   return (
-    <motion.div
-      variants={containerVariants}
-      initial={reduce ? false : "hidden"}
-      whileInView="visible"
-      viewport={{ once: true, margin: "-60px" }}
-      custom={staggerDelay}
-      className={cn(className)}
-    >
-      {React.Children.map(children, (child) => (
-        <motion.div variants={itemVariants} className={itemClassName}>
+    <div className={className}>
+      {React.Children.map(children, (child, i) => (
+        <div
+          className={cn(styles.enter, itemClassName)}
+          style={{ "--motion-delay": `${Math.min(i, 8) * staggerDelay}s` } as CSSProperties}
+        >
           {child}
-        </motion.div>
+        </div>
       ))}
-    </motion.div>
+    </div>
   );
 }

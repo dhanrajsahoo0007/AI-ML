@@ -1,5 +1,3 @@
-"use client";
-
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { FadeIn } from "@/components/motion/fade-in";
@@ -18,7 +16,7 @@ export function Features() {
       intro={features.subtitle}
       className="bg-paper-2/50"
     >
-      <FadeIn>
+      <FadeIn inView>
         <div className="grid gap-px overflow-hidden rounded-xl border border-hairline bg-hairline md:grid-cols-2 lg:grid-cols-4">
           {features.items.map((feature, i) => {
             const Icon = getIconComponent(feature.icon);

@@ -7,26 +7,42 @@ import { compileMDX } from "next-mdx-remote/rsc";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import type { Root as MdastRoot } from "mdast";
 import { rehypeHeadingIds, type DocHeading } from "@/lib/doc-headings";
+import { rehypeMermaidSvg } from "@/lib/rehype-mermaid-svg";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
-import { Pre, Figure } from "@/components/mdx/code-block";
+import { Pre, Figure, MermaidSvg } from "@/components/mdx/code-block";
+import { KatexStyles } from "@/components/article/katex-styles";
 import type { ContentSection, ContentMeta, ContentGroupDef } from "@/types/content";
 import { Diagram } from "@/components/diagrams/diagram";
-import { DatabasePicker } from "@/components/db/database-picker";
-import { DatabaseWorkloadMatrix } from "@/components/db/workload-matrix";
-import { CompareDatabases } from "@/components/db/compare-databases";
+import {
+  DatabasePicker,
+  DatabaseWorkloadMatrix,
+  CompareDatabases,
+  DataModelView,
+  DataModelTab,
+  ScenarioCard,
+  ScenarioGrid,
+  CloudDecisionTree,
+  CloudEquivalenceMatrix,
+} from "@/lib/mdx-lazy-widgets";
 import { DbProfile } from "@/components/db/db-profile";
-import { DataModelView, DataModelTab } from "@/components/db/data-model-view";
-import { ScenarioCard, ScenarioGrid } from "@/components/db/scenario-card";
 import { Callout, StepCards, StepCard } from "@/components/db/callouts";
 import { CloudGroupTable } from "@/components/cloud/cloud-group-table";
 import { CloudServiceProfile } from "@/components/cloud/cloud-service-profile";
-import { CloudDecisionTree } from "@/components/cloud/cloud-decision-tree";
 import { ResponsibilityGrid } from "@/components/cloud/responsibility-grid";
-import { CloudEquivalenceMatrix } from "@/components/cloud/cloud-equivalence-matrix";
 import { CloudMapping } from "@/components/cloud/cloud-mapping";
 import { CloudOnly } from "@/components/cloud/cloud-only";
+
+// Records whether the document has any math, so the KaTeX stylesheet is only loaded where it is needed.
+function remarkDetectMath(flags: { math: boolean }) {
+  return (tree: MdastRoot) => {
+    const visit = (node: { type: string; children?: unknown[] }): boolean =>
+      node.type === "math" || node.type === "inlineMath" || (node.children ?? []).some((c) => visit(c as typeof node));
+    flags.math = visit(tree);
+  };
+}
 
 export type { ContentSection };
 
@@ -56,13 +72,16 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
   const raw = await fs.readFile(filePath, "utf8");
   const { data, content } = matter(raw);
   const headings: DocHeading[] = [];
+  const flags = { math: false };
+  // Lines taken up by the frontmatter, so plugin errors point at the right line of the file.
+  const lineOffset = raw.split("\n").length - content.split("\n").length;
   const { content: mdxBody } = await compileMDX({
     source: content,
     options: {
       parseFrontmatter: false,
       mdxOptions: {
-        remarkPlugins: [remarkGfm, remarkMath],
-        rehypePlugins: [rehypeKatex, [rehypeHeadingIds, { headings }]],
+        remarkPlugins: [remarkGfm, remarkMath, [remarkDetectMath, flags]],
+        rehypePlugins: [[rehypeMermaidSvg, { filePath, lineOffset }], rehypeKatex, [rehypeHeadingIds, { headings }]],
       },
     },
     components: {
@@ -72,6 +91,7 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
       InterviewQuestions,
       InterviewQuestion,
       Figure,
+      MermaidSvg,
       AnimatedDiagram: Diagram,
       DatabasePicker,
       DatabaseWorkloadMatrix,
@@ -100,12 +120,20 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
       description?: string;
       icon?: string;
       categories?: string[];
-      /** "classic" opts an article out of the docs-style layout (table of contents, updated date, copy for LLM). */
+      /** "classic" opts an article out of the docs-style layout (table of contents, updated date). */
       layout?: string;
-      /** Overrides the last-updated date taken from git, as YYYY-MM-DD. */
+      /** Overrides the last-updated date taken from git history at build time, as YYYY-MM-DD. */
       updated?: string | Date;
     },
-    body: mdxBody as ReactElement,
+    body: (flags.math ? (
+      <>
+        <KatexStyles />
+        {mdxBody}
+      </>
+    ) : (
+      mdxBody
+    )) as ReactElement,
+    hasMath: flags.math,
     headings,
     filePath,
   };

@@ -1,5 +1,3 @@
-"use client";
-
 import { AnimatedCounter } from "@/components/motion/animated-counter";
 import { Container } from "@/components/ui/editorial";
 

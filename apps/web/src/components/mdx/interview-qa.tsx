@@ -1,23 +1,16 @@
-"use client";
-
-import React, { useState, useCallback, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import React from "react";
 import Link from "next/link";
 import { ArrowUpRight, ListCollapse, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CompanyChip, type CompanyTag } from "@/components/company-logo";
+import { InterviewQuestion, QaController, type InterviewQuestionProps, type Level } from "@/components/mdx/interview-qa-island";
 
-type Level = "Junior" | "Mid" | "Senior";
+export { InterviewQuestion };
 
-interface InterviewQuestionProps {
-  question: string;
-  category?: string;
-  level?: Level;
-  companies?: CompanyTag[];
-  related?: { href: string; title: string };
-  refs?: { title: string; url: string }[];
-  children: React.ReactNode;
-}
+// The question list is plain server-rendered HTML: every question is a <details> element, so answers open
+// without JavaScript and are in the page for search engines and find-in-page. Search, the filter chips and
+// "Expand all" are handled by QaController, a small client island that only toggles attributes on this
+// markup. This file has no "use client" so it also works inside client components (company-explorer.tsx).
 
 const LEVELS: Level[] = ["Junior", "Mid", "Senior"];
 // Show the search box only on banks large enough to need it.
@@ -26,24 +19,13 @@ const SEARCH_THRESHOLD = 10;
 const TAGS_SHOWN = 6;
 const COMPANY_FILTERS_SHOWN = 10;
 
-// Plain text of an answer, so search can match answer bodies as well as questions.
-function nodeText(node: React.ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(nodeText).join(" ");
-  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
-    return nodeText(node.props.children);
-  }
-  return "";
-}
-
-function chipClass(active: boolean) {
-  return cn(
-    "rounded-full border px-3 py-1 text-[13px] transition-colors",
-    active
-      ? "border-ink bg-ink text-paper"
-      : "border-hairline bg-paper text-ink-2 hover:border-ink/40"
-  );
-}
+// Filter chips. The island sets aria-pressed, which drives the active style.
+const chipClass =
+  "rounded-full border border-hairline bg-paper px-3 py-1 text-[13px] text-ink-2 transition-colors hover:border-ink/40 aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-paper";
+// Company chips draw their own pill; this restyles it when pressed.
+const companyChipClass =
+  "rounded-full [&[aria-pressed=true]>span]:border-ink [&[aria-pressed=true]>span]:bg-ink [&[aria-pressed=true]>span]:text-paper";
+const labelClass = "mr-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
 
 interface InterviewQuestionsProps {
   title?: string;
@@ -62,32 +44,21 @@ function QuestionItem({
   related,
   refs,
   children,
-  isOpen,
-  onToggle,
-}: InterviewQuestionProps & {
-  index: number;
-  isOpen: boolean;
-  onToggle: () => void;
-}) {
+}: InterviewQuestionProps & { index: number }) {
   return (
-    <div
-      className={cn(
-        "border-b border-hairline transition-colors duration-200",
-        isOpen && "bg-paper-2/50"
-      )}
+    <details
+      data-qa-item
+      data-cat={category ?? ""}
+      data-level={level ?? ""}
+      data-companies={(companies ?? []).map((c) => c.slug).join(" ")}
+      className="group border-b border-hairline transition-colors duration-200 open:bg-paper-2/50"
     >
-      <button
-        onClick={onToggle}
-        aria-expanded={isOpen}
-        className="group flex w-full items-start gap-4 px-1 py-5 text-left sm:gap-6 sm:px-3"
-      >
-        <span className="w-6 shrink-0 pt-1.5 font-mono text-xs text-primary">
-          {String(index).padStart(2, "0")}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="font-display text-lg leading-snug text-ink transition-colors group-hover:text-primary">
+      <summary className="group/q flex w-full cursor-pointer list-none items-start gap-4 px-1 py-5 text-left sm:gap-6 sm:px-3 [&::-webkit-details-marker]:hidden">
+        <span className="w-6 shrink-0 pt-1.5 font-mono text-xs text-primary">{String(index).padStart(2, "0")}</span>
+        <span className="block min-w-0 flex-1">
+          <span className="block font-display text-lg leading-snug text-ink transition-colors group-hover/q:text-primary">
             {question}
-          </p>
+          </span>
           {(category || level) && (
             <span className="mt-2 flex flex-wrap items-center gap-x-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               {category && <span>{category}</span>}
@@ -101,196 +72,115 @@ function QuestionItem({
                 <CompanyChip key={c.slug} company={c} />
               ))}
               {companies.length > TAGS_SHOWN && (
-                <span className="text-[12.5px] text-muted-foreground">
-                  +{companies.length - TAGS_SHOWN} more
-                </span>
+                <span className="text-[12.5px] text-muted-foreground">+{companies.length - TAGS_SHOWN} more</span>
               )}
             </span>
           )}
-        </div>
-        <motion.span
-          animate={{ rotate: isOpen ? 45 : 0 }}
-          transition={{ duration: 0.2 }}
-          className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full border border-hairline text-ink transition-colors group-hover:border-ink"
+        </span>
+        <span
+          aria-hidden
+          className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full border border-hairline text-ink transition-[color,border-color,transform] duration-200 group-open:rotate-45 group-hover/q:border-ink"
         >
           <Plus className="size-3.5" />
-        </motion.span>
-      </button>
+        </span>
+      </summary>
 
-      <AnimatePresence initial={false}>
-        {isOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
-            className="overflow-hidden"
-          >
-            <div className="pr-4 pb-6 pl-11 sm:pr-14 sm:pl-[3.75rem]">
-              <div className="text-[15px] leading-relaxed text-ink-2 [&>*+*]:mt-3">
-                {children}
-              </div>
-              {(related || (refs && refs.length > 0)) && (
-                <div className="mt-4 space-y-1.5 border-t border-hairline pt-3 text-[13px]">
-                  {related && (
-                    <p>
-                      <span className="text-muted-foreground">Deep-dive: </span>
-                      <Link href={related.href} className="text-primary underline underline-offset-2">
-                        {related.title}
-                      </Link>
-                    </p>
-                  )}
-                  {refs && refs.length > 0 && (
-                    <p className="text-muted-foreground">
-                      Further reading (Outcome School):{" "}
-                      {refs.map((r, i) => (
-                        <span key={r.url}>
-                          {i > 0 && " · "}
-                          <a
-                            href={r.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-0.5 text-ink-2 underline underline-offset-2 hover:text-primary"
-                          >
-                            {r.title}
-                            <ArrowUpRight aria-hidden className="size-3" />
-                          </a>
-                        </span>
-                      ))}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          </motion.div>
+      <div className="pr-4 pb-6 pl-11 sm:pr-14 sm:pl-[3.75rem]">
+        <div className="text-[15px] leading-relaxed text-ink-2 [&>*+*]:mt-3">{children}</div>
+        {(related || (refs && refs.length > 0)) && (
+          <div className="mt-4 space-y-1.5 border-t border-hairline pt-3 text-[13px]">
+            {related && (
+              <p>
+                <span className="text-muted-foreground">Deep-dive: </span>
+                <Link href={related.href} className="text-primary underline underline-offset-2">
+                  {related.title}
+                </Link>
+              </p>
+            )}
+            {refs && refs.length > 0 && (
+              <p className="text-muted-foreground">
+                Further reading (Outcome School):{" "}
+                {refs.map((r, i) => (
+                  <span key={r.url}>
+                    {i > 0 && " · "}
+                    <a
+                      href={r.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-0.5 text-ink-2 underline underline-offset-2 hover:text-primary"
+                    >
+                      {r.title}
+                      <ArrowUpRight aria-hidden className="size-3" />
+                    </a>
+                  </span>
+                ))}
+              </p>
+            )}
+          </div>
         )}
-      </AnimatePresence>
-    </div>
+      </div>
+    </details>
   );
 }
 
-export function InterviewQuestion(_props: InterviewQuestionProps) {
-  return null;
+function FilterChip({ group, value, children }: { group: string; value: string; children: React.ReactNode }) {
+  return (
+    <button type="button" data-qa-filter={group} data-value={value} aria-pressed={value === ""} className={chipClass}>
+      {children}
+    </button>
+  );
 }
 
 export function InterviewQuestions({ title, footer, company, children }: InterviewQuestionsProps) {
   const questions = React.Children.toArray(children).filter(
-    (child): child is React.ReactElement<InterviewQuestionProps> =>
-      React.isValidElement(child)
+    (child): child is React.ReactElement<InterviewQuestionProps> => React.isValidElement(child),
   );
 
-  const [openSet, setOpenSet] = useState<Set<number>>(() => new Set());
-  const [activeTag, setActiveTag] = useState<string | null>(null);
-  const [activeLevel, setActiveLevel] = useState<Level | null>(null);
-  const [query, setQuery] = useState("");
-  const [chosenCompany, setActiveCompany] = useState("");
-  const activeCompany = company ?? chosenCompany;
-  const [showAllCompanies, setShowAllCompanies] = useState(false);
-
-  const searchIndex = useMemo(
-    () =>
-      questions.map((q) =>
-        `${q.props.question} ${q.props.category ?? ""} ${(q.props.companies ?? []).map((c) => c.name).join(" ")} ${nodeText(q.props.children)}`.toLowerCase()
-      ),
-    [questions]
-  );
-
-  const levels = useMemo(
-    () => LEVELS.filter((l) => questions.some((q) => q.props.level === l)),
-    [questions]
-  );
+  const levels = LEVELS.filter((l) => questions.some((q) => q.props.level === l));
 
   // Companies by how many questions they tag, most first.
-  const companyOptions = useMemo(() => {
-    const seen = new Map<string, { company: CompanyTag; count: number }>();
-    for (const q of questions)
-      for (const c of q.props.companies ?? []) {
-        const entry = seen.get(c.slug) ?? { company: c, count: 0 };
-        entry.count += 1;
-        seen.set(c.slug, entry);
-      }
-    return Array.from(seen.values()).sort(
-      (a, b) => b.count - a.count || a.company.name.localeCompare(b.company.name)
-    );
-  }, [questions]);
-
-  // Topic counts follow the company filter, so they match what a click on the chip shows.
-  const tags = useMemo(() => {
-    const seen = new Map<string, number>();
-    for (const q of questions) {
-      if (activeCompany && !(q.props.companies ?? []).some((c) => c.slug === activeCompany)) continue;
-      const cat = q.props.category;
-      if (cat) seen.set(cat, (seen.get(cat) ?? 0) + 1);
+  const seen = new Map<string, { company: CompanyTag; count: number }>();
+  for (const q of questions)
+    for (const c of q.props.companies ?? []) {
+      const entry = seen.get(c.slug) ?? { company: c, count: 0 };
+      entry.count += 1;
+      seen.set(c.slug, entry);
     }
-    return Array.from(seen.entries()).map(([name, count]) => ({ name, count }));
-  }, [questions, activeCompany]);
+  const companyOptions = Array.from(seen.values()).sort(
+    (a, b) => b.count - a.count || a.company.name.localeCompare(b.company.name),
+  );
 
-  const filtered = useMemo(() => {
-    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return questions
-      .map((q, i) => ({ q, originalIndex: i }))
-      .filter(
-        ({ q, originalIndex }) =>
-          (!activeTag || q.props.category === activeTag) &&
-          (!activeLevel || q.props.level === activeLevel) &&
-          (!activeCompany || (q.props.companies ?? []).some((c) => c.slug === activeCompany)) &&
-          terms.every((t) => searchIndex[originalIndex].includes(t))
-      );
-  }, [questions, activeTag, activeLevel, activeCompany, query, searchIndex]);
-
-  const isFiltered = filtered.length !== questions.length;
-
-  const allFilteredOpen = filtered.length > 0 && filtered.every(({ originalIndex }) => openSet.has(originalIndex));
-
-  const toggleAll = useCallback(() => {
-    if (allFilteredOpen) {
-      setOpenSet((prev) => {
-        const next = new Set(prev);
-        for (const { originalIndex } of filtered) next.delete(originalIndex);
-        return next;
-      });
-    } else {
-      setOpenSet((prev) => {
-        const next = new Set(prev);
-        for (const { originalIndex } of filtered) next.add(originalIndex);
-        return next;
-      });
-    }
-  }, [allFilteredOpen, filtered]);
-
-  const toggleOne = useCallback((index: number) => {
-    setOpenSet((prev) => {
-      const next = new Set(prev);
-      if (next.has(index)) {
-        next.delete(index);
-      } else {
-        next.add(index);
-      }
-      return next;
-    });
-  }, []);
+  const tagCounts = new Map<string, number>();
+  for (const q of questions) {
+    const cat = q.props.category;
+    if (cat) tagCounts.set(cat, (tagCounts.get(cat) ?? 0) + 1);
+  }
+  const tags = Array.from(tagCounts.entries()).map(([name, count]) => ({ name, count }));
 
   return (
-    <section className="mt-10">
+    <section className="mt-10" data-qa>
+      <QaController company={company} />
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4 border-b border-ink pb-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
             {title ?? "Interview questions"}
           </p>
           <p className="mt-1 font-display text-2xl text-ink">
-            {filtered.length}
-            {isFiltered && (
-              <span className="text-muted-foreground"> / {questions.length}</span>
-            )}{" "}
+            <span data-qa-count>{questions.length}</span>
+            <span data-qa-of hidden className="text-muted-foreground">
+              {" "}
+              / {questions.length}
+            </span>{" "}
             <span className="text-muted-foreground">questions</span>
           </p>
         </div>
         <button
-          onClick={toggleAll}
+          type="button"
+          data-qa-expand
           className="inline-flex items-center gap-1.5 rounded-full border border-ink/20 px-3.5 py-1.5 text-xs font-medium text-ink transition-colors hover:border-ink hover:bg-ink hover:text-paper"
         >
           <ListCollapse className="size-3.5" />
-          {allFilteredOpen ? "Collapse all" : "Expand all"}
+          <span data-qa-expand-label>Expand all</span>
         </button>
       </div>
 
@@ -300,8 +190,7 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
           <span className="sr-only">Search questions</span>
           <input
             type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            data-qa-search
             placeholder="Search questions and answers"
             className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted-foreground"
           />
@@ -310,32 +199,31 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
 
       {company === undefined && companyOptions.length > 1 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="mr-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            Company
-          </span>
-          <button onClick={() => setActiveCompany("")} className={chipClass(activeCompany === "")}>
+          <span className={labelClass}>Company</span>
+          <FilterChip group="company" value="">
             Any
-          </button>
-          {(showAllCompanies
-            ? companyOptions
-            : companyOptions.filter(
-                (o, i) => i < COMPANY_FILTERS_SHOWN || o.company.slug === activeCompany
-              )
-          ).map(({ company, count }) => (
-            <CompanyChip
-              key={company.slug}
-              company={company}
-              count={count}
-              active={activeCompany === company.slug}
-              onClick={() => setActiveCompany(activeCompany === company.slug ? "" : company.slug)}
-            />
+          </FilterChip>
+          {companyOptions.map(({ company: c, count }, i) => (
+            <button
+              key={c.slug}
+              type="button"
+              data-qa-filter="company"
+              data-value={c.slug}
+              data-qa-extra={i >= COMPANY_FILTERS_SHOWN ? "" : undefined}
+              hidden={i >= COMPANY_FILTERS_SHOWN}
+              aria-pressed={false}
+              className={companyChipClass}
+            >
+              <CompanyChip company={c} count={count} />
+            </button>
           ))}
           {companyOptions.length > COMPANY_FILTERS_SHOWN && (
             <button
-              onClick={() => setShowAllCompanies(!showAllCompanies)}
+              type="button"
+              data-qa-more={companyOptions.length}
               className="text-[13px] text-primary underline underline-offset-2"
             >
-              {showAllCompanies ? "Show fewer" : `Show all ${companyOptions.length}`}
+              Show all {companyOptions.length}
             </button>
           )}
         </div>
@@ -343,84 +231,43 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
 
       {levels.length > 1 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="mr-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            Level
-          </span>
-          <button
-            onClick={() => setActiveLevel(null)}
-            className={chipClass(activeLevel === null)}
-          >
+          <span className={labelClass}>Level</span>
+          <FilterChip group="level" value="">
             Any
-          </button>
+          </FilterChip>
           {levels.map((l) => (
-            <button
-              key={l}
-              onClick={() => setActiveLevel(activeLevel === l ? null : l)}
-              className={chipClass(activeLevel === l)}
-            >
+            <FilterChip key={l} group="level" value={l}>
               {l}
-            </button>
+            </FilterChip>
           ))}
         </div>
       )}
 
       {tags.length > 1 && (
         <div className="mb-6 flex flex-wrap gap-2">
-          <button
-            onClick={() => setActiveTag(null)}
-            className={chipClass(activeTag === null)}
-          >
+          <FilterChip group="tag" value="">
             All
-          </button>
+          </FilterChip>
           {tags.map(({ name, count }) => (
-            <button
-              key={name}
-              onClick={() => setActiveTag(activeTag === name ? null : name)}
-              className={chipClass(activeTag === name)}
-            >
+            <FilterChip key={name} group="tag" value={name}>
               {name}
-              <span className="ml-1.5 opacity-60">{count}</span>
-            </button>
+              <span data-qa-tag-count className="ml-1.5 opacity-60">
+                {count}
+              </span>
+            </FilterChip>
           ))}
         </div>
       )}
 
       <div className="flex flex-col">
-        <AnimatePresence initial={false}>
-          {filtered.map(({ q, originalIndex }) => (
-            <motion.div
-              key={originalIndex}
-              layout
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
-            >
-              <QuestionItem
-                index={originalIndex + 1}
-                question={q.props.question}
-                category={q.props.category}
-                level={q.props.level}
-                companies={q.props.companies}
-                related={q.props.related}
-                refs={q.props.refs}
-                isOpen={openSet.has(originalIndex)}
-                onToggle={() => toggleOne(originalIndex)}
-              >
-                {q.props.children}
-              </QuestionItem>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-        {filtered.length === 0 && (
-          <p className="py-10 text-center text-sm text-muted-foreground">
-            No questions match. Try a different search or filter.
-          </p>
-        )}
+        {questions.map((q, i) => (
+          <QuestionItem key={i} index={i + 1} {...q.props} />
+        ))}
+        <p data-qa-empty hidden className={cn("py-10 text-center text-sm text-muted-foreground")}>
+          No questions match. Try a different search or filter.
+        </p>
       </div>
-      {footer && (
-        <div className="mt-6 text-xs leading-relaxed text-muted-foreground">{footer}</div>
-      )}
+      {footer && <div className="mt-6 text-xs leading-relaxed text-muted-foreground">{footer}</div>}
     </section>
   );
 }

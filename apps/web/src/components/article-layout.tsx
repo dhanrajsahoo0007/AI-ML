@@ -1,10 +1,7 @@
-"use client";
-
 import { FadeIn } from "@/components/motion/fade-in";
 import { ScrollProgress } from "@/components/motion/scroll-progress";
 import { PageHeader } from "@/components/ui/editorial";
 import { OnThisPage, OnThisPageMobile } from "@/components/article/on-this-page";
-import { CopyForLlm } from "@/components/article/copy-for-llm";
 import { UpdatedDate } from "@/components/article/updated-date";
 import type { DocHeading } from "@/lib/doc-headings";
 
@@ -12,10 +9,12 @@ export interface DocsLayoutProps {
   headings: DocHeading[];
   /** ISO date of the last change, or null to hide the "Updated" line. */
   updated: string | null;
-  /** Site path of the page, used for the Markdown export. */
-  pagePath: string;
+  /** Site path of the page. */
+  pagePath?: string;
 }
 
+// Server component: the header and article arrive as plain HTML; only the table of contents, the relative
+// "updated" date and the progress bar's scroll timeline are interactive.
 export function ArticleLayout({
   title,
   description,
@@ -24,7 +23,7 @@ export function ArticleLayout({
 }: {
   title: string;
   description?: string;
-  /** Docs-style layout: "On this page" rail, updated date and "Copy for LLM". */
+  /** Docs-style layout: "On this page" rail and updated date. */
   docs?: DocsLayoutProps;
   children: React.ReactNode;
 }) {
@@ -48,10 +47,11 @@ export function ArticleLayout({
           <FadeIn>
             <div className="mb-10 border-b border-hairline pb-8">
               <PageHeader title={title} lead={description} />
-              <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-                {docs.updated ? <UpdatedDate iso={docs.updated} /> : <span />}
-                <CopyForLlm pagePath={docs.pagePath} />
-              </div>
+              {docs.updated && (
+                <div className="mt-6">
+                  <UpdatedDate iso={docs.updated} />
+                </div>
+              )}
             </div>
           </FadeIn>
           <div className="xl:hidden">
