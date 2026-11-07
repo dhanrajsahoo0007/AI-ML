@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// Finds backticked repo paths and npm scripts in AGENTS.md that don't exist, so agent docs can't silently drift
-// from the code. Sections under a heading containing "Planned" are skipped (target structure not built yet).
+// Finds backticked repo paths and npm scripts in agent docs (every AGENTS.md and every .claude/skills/*/SKILL.md)
+// that don't exist, so agent docs can't silently drift from the code. Sections under a heading containing
+// "Planned" are skipped (target structure not built yet). Build outputs (GENERATED_PREFIXES) are not checked:
+// they don't exist in a fresh checkout.
 
 export interface Problem {
   line: number;
@@ -12,12 +14,31 @@ export interface Problem {
 
 export interface CheckContext {
   repoRoot: string;
+  /** Folder of the file being checked: relative paths such as `./kind.ts` or `index.ts` are tried here first. */
+  fileDir?: string;
   /** Workspace folders to try when a path isn't found from the repo root, e.g. ["apps/web"]. */
   workspaceDirs: string[];
   rootScripts: Record<string, string>;
   /** Scripts per workspace name, e.g. { web: {...} }, for `npm run x -w web`. */
   workspaceScripts: Record<string, Record<string, string>>;
 }
+
+/** Folders written by the build (gitignored): named in docs, but absent in a fresh checkout, so never checked. */
+export const GENERATED_PREFIXES = [
+  "src/generated/",
+  "apps/web/src/generated/",
+  "public/_a/",
+  "apps/web/public/_a/",
+  ".build-cache/",
+  "apps/web/.build-cache/",
+  ".build/",
+  "apps/web/.build/",
+  ".next/",
+  ".open-next/",
+];
+
+export const isGenerated = (token: string) =>
+  GENERATED_PREFIXES.some((prefix) => token === prefix.slice(0, -1) || token.startsWith(prefix));
 
 const PATH_EXTENSIONS = /\.(md|mdx|ts|tsx|js|mjs|cjs|json|jsonc|ya?ml|toml|css)$/;
 
@@ -42,7 +63,11 @@ function expandBraces(token: string): string[] {
 function pathExists(token: string, ctx: CheckContext): boolean {
   // Placeholders such as `content/<section>/<slug>.mdx`: the part before the first placeholder must exist.
   const concrete = token.includes("<") ? token.slice(0, token.indexOf("<")) : token;
-  const bases = [ctx.repoRoot, ...ctx.workspaceDirs.map((dir) => path.join(ctx.repoRoot, dir))];
+  const bases = [
+    ...(ctx.fileDir ? [ctx.fileDir] : []),
+    ctx.repoRoot,
+    ...ctx.workspaceDirs.map((dir) => path.join(ctx.repoRoot, dir)),
+  ];
   return expandBraces(concrete).every((candidate) =>
     bases.some((base) =>
       candidate.includes("*")
@@ -101,10 +126,72 @@ export function findProblems(markdown: string, ctx: CheckContext): Problem[] {
         }
         continue;
       }
-      if (looksLikePath(token) && !pathExists(token, ctx)) {
+      if (looksLikePath(token) && !isGenerated(token.replace(/^\.\//, "")) && !pathExists(token, ctx)) {
         problems.push({ line, token, reason: "path does not exist" });
       }
     }
   });
+  return problems;
+}
+
+// ── Files to check ──────────────────────────────────────────────────────────────────────────────────────────
+
+/** Folders never searched for agent docs: dependencies, build output and other worktrees' checkouts. */
+const SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".next",
+  ".open-next",
+  ".wrangler",
+  ".build",
+  ".build-cache",
+  "test-results",
+  "playwright-report",
+  "coverage",
+  "worktrees",
+]);
+
+/** Every AGENTS.md in the repo and every .claude/skills/<name>/SKILL.md, as repo-relative paths, sorted. */
+export function findAgentDocs(repoRoot: string): string[] {
+  const found: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(path.join(repoRoot, dir), { withFileTypes: true })) {
+      const rel = dir ? `${dir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRS.has(entry.name)) walk(rel);
+      } else if (entry.name === "AGENTS.md") {
+        found.push(rel);
+      } else if (entry.name === "SKILL.md" && /^\.claude\/skills\/[^/]+\/SKILL\.md$/.test(rel)) {
+        found.push(rel);
+      }
+    }
+  };
+  walk("");
+  return found.sort();
+}
+
+// ── Skills ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Checks a SKILL.md's frontmatter: `name` equal to its folder name and a `description` that starts with
+ * "Use when", so agents can tell from the description alone when to load it.
+ */
+export function findSkillProblems(markdown: string, folderName: string): Problem[] {
+  const fm = markdown.match(/^---\n([\s\S]*?)\n---\n/);
+  if (!fm) return [{ line: 1, token: "---", reason: "missing YAML frontmatter with name and description" }];
+  const field = (key: string) =>
+    fm[1]
+      .match(new RegExp(`^${key}:\\s*(.*)$`, "m"))?.[1]
+      .trim()
+      .replace(/^["']|["']$/g, "");
+  const problems: Problem[] = [];
+  const name = field("name");
+  if (name !== folderName) {
+    problems.push({ line: 2, token: `name: ${name ?? ""}`, reason: `name must be the folder name "${folderName}"` });
+  }
+  const description = field("description");
+  if (!description?.startsWith("Use when")) {
+    problems.push({ line: 3, token: "description", reason: 'description must start with "Use when"' });
+  }
   return problems;
 }
