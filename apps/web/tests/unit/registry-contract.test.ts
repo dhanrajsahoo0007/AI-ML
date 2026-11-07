@@ -14,7 +14,7 @@ const registryFile = path.join(webRoot, "content", "sections.yaml");
 const entries = parseRegistry(fs.readFileSync(registryFile, "utf8"), registryFile);
 
 /** Top-level routes that are not sections. Add one here only for a page that must never be a section. */
-const SYSTEM_ROUTES = new Set(["pricing", "contact", "security", "legal", "api", "account", "admin"]);
+const SYSTEM_ROUTES = new Set(["pricing", "contact", "security", "legal", "api", "account", "sign-in", "admin"]);
 /** The route group that serves every `docs` section through one dynamic `[section]` segment. */
 const DOCS_GROUP = "(content)";
 
