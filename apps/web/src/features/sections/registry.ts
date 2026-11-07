@@ -63,11 +63,20 @@ export function resolveSections(entries: SectionEntry[], env: AppEnv): SectionDe
 
 let cache: { env: AppEnv; sections: SectionDef[] } | null = null;
 
+/**
+ * The registry source. Inside the Next.js bundles `process.env.SECTIONS_YAML` is inlined at build by next.config.ts,
+ * so pages rendered per request (account, sign-in, API routes) never read the filesystem, which doesn't exist on
+ * Cloudflare Workers. Scripts and tests that run outside Next read the file.
+ */
+function registryText(): string {
+  return process.env.SECTIONS_YAML || fs.readFileSync(REGISTRY_FILE, "utf8");
+}
+
 /** Every registry entry with its resolved state, in `order` (including `off` ones). */
 export function allSections(): SectionDef[] {
   const env = resolveAppEnv();
   if (cache?.env !== env) {
-    cache = { env, sections: resolveSections(parseRegistry(fs.readFileSync(REGISTRY_FILE, "utf8")), env) };
+    cache = { env, sections: resolveSections(parseRegistry(registryText()), env) };
   }
   return cache.sections;
 }

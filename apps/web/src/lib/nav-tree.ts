@@ -31,6 +31,8 @@ export async function getNavTree(): Promise<NavSection[]> {
 
 /** Nav for the header mega-menu: every `on` section without its item-level tree. */
 export async function getHeaderNav(): Promise<HeaderNavSection[]> {
+  // Inlined at build (scripts/gen-header-nav.ts → next.config.ts): no filesystem reads at request time on Workers.
+  if (process.env.HEADER_NAV) return JSON.parse(process.env.HEADER_NAV) as HeaderNavSection[];
   return (await getNavTree()).map(headerNavSection);
 }
 

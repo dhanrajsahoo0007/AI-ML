@@ -65,6 +65,11 @@ function beforeBuild() {
   );
 }
 
+function readGenerated(file: string): string {
+  const p = path.join(__dirname, "src", "generated", file);
+  return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
+}
+
 function nextConfig(phase: string): NextConfig {
   if (phase === PHASE_PRODUCTION_BUILD) beforeBuild();
   return {
@@ -76,6 +81,11 @@ function nextConfig(phase: string): NextConfig {
     env: {
       APP_ENV: resolveAppEnv(),
       SECTION_NAV: JSON.stringify(publicNavLinks()),
+      // Registry and switch sources, inlined so request-time code never reads content/*.yaml (no fs on Workers).
+      SECTIONS_YAML: fs.readFileSync(path.join(__dirname, "content", "sections.yaml"), "utf8"),
+      FEATURES_YAML: fs.readFileSync(path.join(__dirname, "content", "features.yaml"), "utf8"),
+      // Written by `prebuild` (scripts/gen-header-nav.ts); "" in `next dev`, where the layout reads content directly.
+      HEADER_NAV: readGenerated("header-nav.json"),
       // The paywall switch (content/features.yaml) this build was made with: "on" | "off" (plan §9).
       PAYWALL: features.paywall ? "on" : "off",
       // "" when unset: inlined as constants so the gated Sentry/PostHog imports are dead code and never ship

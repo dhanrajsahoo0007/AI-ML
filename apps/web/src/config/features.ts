@@ -11,7 +11,9 @@ import { isPathVisible, resolveAppEnv } from "../features/sections/registry";
 const FILE = path.join(process.cwd(), "content", "features.yaml");
 
 function loadFeatures(): Record<string, boolean> {
-  const result = featuresSchema.safeParse(yaml.load(fs.readFileSync(FILE, "utf8")));
+  // Inlined at build by next.config.ts (no filesystem on Workers); scripts and tests outside Next read the file.
+  const text = process.env.FEATURES_YAML || fs.readFileSync(FILE, "utf8");
+  const result = featuresSchema.safeParse(yaml.load(text));
   if (!result.success) {
     const lines = result.error.issues.map((i) => `  ${FILE} [${i.path.join(".")}]: ${i.message}`);
     throw new Error(`Invalid feature switches:\n${lines.join("\n")}`);
