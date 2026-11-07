@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import { inArray } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { createDb, type Db } from "./client";
 import { assertLocalDatabase } from "./config";
 import { CONSENT_VERSIONS } from "./consent";
@@ -18,6 +18,8 @@ export async function seedTestUsers(
   const emails = keys.map(testUserEmail);
   const ids = {} as Record<TestUserKey, string>;
   await db.transaction(async (tx) => {
+    // Concurrent seeds (parallel test workers) take turns instead of racing on the unique emails.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('origins:seed-test-users'))`);
     // Cascades to sessions, subscriptions, entitlements, progress, consent.
     await tx.delete(user).where(inArray(user.email, emails));
     for (const key of keys) {
