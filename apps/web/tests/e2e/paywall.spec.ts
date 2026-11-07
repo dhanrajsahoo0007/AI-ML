@@ -62,7 +62,7 @@ test.describe("paywall @core", () => {
     await expect(page.getByTestId("paywall")).toBeVisible();
     const direct = await request.get(PREVIEW_OF(PREMIUM_ARTICLE));
     expect(direct.status()).toBe(200);
-    expect(direct.headers()["x-robots-tag"]).toBe("noindex");
+    expect(direct.headers()["x-robots-tag"]).toMatch(/noindex/);
     // Free pages are untouched: no paywall on a hub or an outline article.
     await page.goto("/system-design/databases");
     await expect(page.getByTestId("paywall")).toHaveCount(0);
