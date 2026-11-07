@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -62,7 +63,7 @@ function beforeBuild() {
   );
 }
 
-export default function nextConfig(phase: string): NextConfig {
+function nextConfig(phase: string): NextConfig {
   if (phase === PHASE_PRODUCTION_BUILD) beforeBuild();
   return {
     output: "standalone",
@@ -73,6 +74,13 @@ export default function nextConfig(phase: string): NextConfig {
     env: {
       APP_ENV: resolveAppEnv(),
       SECTION_NAV: JSON.stringify(publicNavLinks()),
+      // "" when unset: inlined as constants so the gated Sentry/PostHog imports are dead code and never ship
+      // (plan §10; see src/features/observability/public-env.ts).
+      NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN ?? "",
+      NEXT_PUBLIC_GIT_SHA: process.env.NEXT_PUBLIC_GIT_SHA ?? "",
+      NEXT_PUBLIC_POSTHOG_KEY: process.env.NEXT_PUBLIC_POSTHOG_KEY ?? "",
+      NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "",
+      NEXT_PUBLIC_CF_BEACON_TOKEN: process.env.NEXT_PUBLIC_CF_BEACON_TOKEN ?? "",
     },
     // Security headers on every response (plan §11.4). /_next/static/* already gets
     // `public, max-age=31536000, immutable` from Next itself, so no Cache-Control rule is added for it.
@@ -83,6 +91,15 @@ export default function nextConfig(phase: string): NextConfig {
           headers: securityHeaders({
             dev: phase === PHASE_DEVELOPMENT_SERVER,
             indexable: resolveAppEnv() === "production",
+          }),
+        },
+        {
+          // DSA runner workers only (later rules override the same header key).
+          source: "/_next/static/chunks/:file(dsa-(?:js|python)-runner.*)",
+          headers: securityHeaders({
+            dev: phase === PHASE_DEVELOPMENT_SERVER,
+            indexable: resolveAppEnv() === "production",
+            dsaRunner: true,
           }),
         },
       ];
@@ -109,3 +126,18 @@ export default function nextConfig(phase: string): NextConfig {
     },
   };
 }
+
+// Source maps are uploaded only in deploy builds that have a Sentry token and DSN; every other build is unchanged.
+export default process.env.SENTRY_AUTH_TOKEN && process.env.NEXT_PUBLIC_SENTRY_DSN
+  ? (phase: string) =>
+      withSentryConfig(nextConfig(phase), {
+        org: process.env.SENTRY_ORG,
+        project: process.env.SENTRY_PROJECT,
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        release: { name: process.env.NEXT_PUBLIC_GIT_SHA },
+        sourcemaps: { deleteSourcemapsAfterUpload: true },
+        widenClientFileUpload: true,
+        telemetry: false,
+        silent: !process.env.CI,
+      })
+  : nextConfig;

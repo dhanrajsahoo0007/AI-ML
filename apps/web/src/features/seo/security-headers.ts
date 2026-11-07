@@ -37,7 +37,15 @@ interface CspOptions {
   reportEndpoint?: string | null;
   /** Hosts of the observability tools that are on. Default: read from the build environment. */
   observability?: ObservabilityCspHosts;
+  /**
+   * The DSA runner workers (plan §15.1 stage B): user code runs with `new Function` (JS) and Pyodide WebAssembly
+   * (Python, from the pinned jsDelivr build). A worker's CSP comes from its own script response, so this relaxed
+   * policy is applied only to the runner chunks, never to pages.
+   */
+  dsaRunner?: boolean;
 }
+
+const PYODIDE_CDN = "https://cdn.jsdelivr.net";
 
 /**
  * The Content-Security-Policy from §11.4. `'unsafe-inline'` scripts are a known trade-off: nonces would force
@@ -51,6 +59,7 @@ export function contentSecurityPolicy({
   dev = false,
   reportEndpoint = CSP_REPORT_ENDPOINT,
   observability = observabilityCspHosts(process.env as PublicObservabilityEnv),
+  dsaRunner = false,
 }: CspOptions = {}): string {
   const h = CSP_HOSTS;
   const o = observability;
@@ -60,10 +69,12 @@ export function contentSecurityPolicy({
       "script-src",
       "'self'",
       "'unsafe-inline'",
-      ...(dev ? ["'unsafe-eval'"] : []),
+      ...(dev || dsaRunner ? ["'unsafe-eval'"] : []),
+      ...(dsaRunner ? ["'wasm-unsafe-eval'", PYODIDE_CDN] : []),
       ...o.scriptSrc,
     ],
-    ["connect-src", "'self'", ...o.connectSrc],
+    ["connect-src", "'self'", ...o.connectSrc, ...(dsaRunner ? [PYODIDE_CDN] : [])],
+    ["worker-src", "'self'", "blob:"],
     ["img-src", "'self'", "data:", h.googleAvatars],
     ["style-src", "'self'", "'unsafe-inline'"],
     ["font-src", "'self'"],
