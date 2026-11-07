@@ -7,11 +7,13 @@ import { compileMDX } from "next-mdx-remote/rsc";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import type { Root as MdastRoot } from "mdast";
 import { rehypeHeadingIds, type DocHeading } from "@/lib/doc-headings";
 import { rehypeMermaidSvg } from "@/lib/rehype-mermaid-svg";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
 import { Pre, Figure, MermaidSvg } from "@/components/mdx/code-block";
+import { KatexStyles } from "@/components/article/katex-styles";
 import type { ContentSection, ContentMeta, ContentGroupDef } from "@/types/content";
 import { Diagram } from "@/components/diagrams/diagram";
 import {
@@ -32,6 +34,15 @@ import { CloudServiceProfile } from "@/components/cloud/cloud-service-profile";
 import { ResponsibilityGrid } from "@/components/cloud/responsibility-grid";
 import { CloudMapping } from "@/components/cloud/cloud-mapping";
 import { CloudOnly } from "@/components/cloud/cloud-only";
+
+// Records whether the document has any math, so the KaTeX stylesheet is only loaded where it is needed.
+function remarkDetectMath(flags: { math: boolean }) {
+  return (tree: MdastRoot) => {
+    const visit = (node: { type: string; children?: unknown[] }): boolean =>
+      node.type === "math" || node.type === "inlineMath" || (node.children ?? []).some((c) => visit(c as typeof node));
+    flags.math = visit(tree);
+  };
+}
 
 export type { ContentSection };
 
@@ -61,6 +72,7 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
   const raw = await fs.readFile(filePath, "utf8");
   const { data, content } = matter(raw);
   const headings: DocHeading[] = [];
+  const flags = { math: false };
   // Lines taken up by the frontmatter, so plugin errors point at the right line of the file.
   const lineOffset = raw.split("\n").length - content.split("\n").length;
   const { content: mdxBody } = await compileMDX({
@@ -68,7 +80,7 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
     options: {
       parseFrontmatter: false,
       mdxOptions: {
-        remarkPlugins: [remarkGfm, remarkMath],
+        remarkPlugins: [remarkGfm, remarkMath, [remarkDetectMath, flags]],
         rehypePlugins: [[rehypeMermaidSvg, { filePath, lineOffset }], rehypeKatex, [rehypeHeadingIds, { headings }]],
       },
     },
@@ -113,7 +125,15 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
       /** Overrides the last-updated date taken from git, as YYYY-MM-DD. */
       updated?: string | Date;
     },
-    body: mdxBody as ReactElement,
+    body: (flags.math ? (
+      <>
+        <KatexStyles />
+        {mdxBody}
+      </>
+    ) : (
+      mdxBody
+    )) as ReactElement,
+    hasMath: flags.math,
     headings,
     filePath,
   };

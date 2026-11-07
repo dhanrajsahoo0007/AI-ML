@@ -5,7 +5,6 @@ import { SiteFooter } from "@/components/site-footer";
 import { getNavTree } from "@/lib/nav-tree";
 import { THEME_SCRIPT, ThemedToaster } from "@/components/theme";
 import { siteConfig } from "@/config/site";
-import "katex/dist/katex.min.css";
 import "./globals.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
