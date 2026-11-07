@@ -1,20 +1,68 @@
 import { describe, expect, it } from "vitest";
-import { WITHDRAWN_VERSION, type NewsletterStore } from "./store";
+import { CONFIRMATION_COOLDOWN_MS, CONFIRMATION_MAX_PER_DAY, WITHDRAWN_VERSION, type NewsletterStore } from "./store";
 
 // The NewsletterStore contract, run against every implementation: store.test.ts (memory) and
-// store-postgres.test.ts (Docker Postgres). `makeStore` returns a store over empty state.
+// store-postgres.test.ts (Docker Postgres). `makeStore` returns a store over empty state that reads the time
+// from `now` (the tests move the clock).
 
 const input = (email: string) => ({ email, source: "archive" });
 const V = { consentVersion: "2026-11-07" };
 const USER_ID = "0190f0f0-0000-7000-8000-000000000001";
 
-export function describeStoreContract(name: string, makeStore: () => Promise<NewsletterStore> | NewsletterStore) {
+const MINUTE = 60 * 1000;
+
+export function describeStoreContract(
+  name: string,
+  makeStoreWithClock: (now: () => Date) => Promise<NewsletterStore> | NewsletterStore
+) {
   describe(`${name}: NewsletterStore contract`, () => {
+    let clock = Date.parse("2026-11-08T10:00:00Z");
+    const advance = (ms: number) => {
+      clock += ms;
+    };
+    const makeStore = () => {
+      clock = Date.parse("2026-11-08T10:00:00Z");
+      return makeStoreWithClock(() => new Date(clock));
+    };
+
+    it("re-sends a pending address's confirmation only after the cool-down, at most 3 a day (H2)", async () => {
+      const store = await makeStore();
+      expect((await store.upsertPending(input("victim@example.com"))).outcome).toBe("send-confirmation");
+      // A burst of sign-ups for the same address sends nothing more.
+      for (let i = 0; i < 5; i++)
+        expect((await store.upsertPending(input("victim@example.com"))).outcome).toBe("cooldown");
+      advance(CONFIRMATION_COOLDOWN_MS);
+      expect((await store.upsertPending(input("victim@example.com"))).outcome).toBe("send-confirmation");
+      advance(CONFIRMATION_COOLDOWN_MS);
+      expect((await store.upsertPending(input("victim@example.com"))).outcome).toBe("send-confirmation");
+      // That was the third: no more until a day after the last one.
+      expect(CONFIRMATION_MAX_PER_DAY).toBe(3);
+      advance(CONFIRMATION_COOLDOWN_MS);
+      expect((await store.upsertPending(input("victim@example.com"))).outcome).toBe("cooldown");
+      advance(23 * 60 * MINUTE);
+      expect((await store.upsertPending(input("victim@example.com"))).outcome).toBe("cooldown");
+      advance(60 * MINUTE);
+      expect((await store.upsertPending(input("victim@example.com"))).outcome).toBe("send-confirmation");
+    });
+
+    it("an unsubscribed address in its cool-down stays unsubscribed and gets no email", async () => {
+      const store = await makeStore();
+      const { subscriber } = await store.upsertPending(input("u@example.com"));
+      await store.unsubscribe(subscriber.id);
+      const again = await store.upsertPending(input("u@example.com"));
+      expect(again.outcome).toBe("cooldown");
+      expect(again.subscriber.status).toBe("unsubscribed");
+    });
     it("new address → pending, normalised", async () => {
       const store = await makeStore();
       const { subscriber, outcome } = await store.upsertPending(input("  Ada@Example.COM "));
       expect(outcome).toBe("send-confirmation");
-      expect(subscriber).toMatchObject({ email: "ada@example.com", status: "pending", source: "archive", userId: null });
+      expect(subscriber).toMatchObject({
+        email: "ada@example.com",
+        status: "pending",
+        source: "archive",
+        userId: null,
+      });
       expect(await store.findByEmail("ADA@example.com")).toMatchObject({ id: subscriber.id });
     });
 
@@ -59,6 +107,7 @@ export function describeStoreContract(name: string, makeStore: () => Promise<New
       const store = await makeStore();
       const { subscriber } = await store.upsertPending(input("a@example.com"));
       await store.unsubscribe(subscriber.id);
+      advance(CONFIRMATION_COOLDOWN_MS);
       const again = await store.upsertPending({ email: "a@example.com", source: "issue" });
       expect(again.outcome).toBe("send-confirmation");
       expect(again.subscriber).toMatchObject({ id: subscriber.id, status: "pending", source: "issue" });
@@ -73,7 +122,12 @@ export function describeStoreContract(name: string, makeStore: () => Promise<New
       expect((await store.upsertPending(input("a@example.com"))).outcome).toBe("suppressed");
       expect((await store.confirm(subscriber.id, V))?.subscriber.status).toBe("complained");
       expect((await store.unsubscribe(subscriber.id))?.changed).toBe(false);
-      const verified = await store.subscribeVerified({ email: "a@example.com", userId: USER_ID, source: "account", ...V });
+      const verified = await store.subscribeVerified({
+        email: "a@example.com",
+        userId: USER_ID,
+        source: "account",
+        ...V,
+      });
       expect(verified).toMatchObject({ changed: false, subscriber: { status: "complained" } });
       // An address that bounces before it ever signs up is suppressed too.
       expect((await store.suppress("new@example.com", "bounced")).status).toBe("bounced");
@@ -97,7 +151,12 @@ export function describeStoreContract(name: string, makeStore: () => Promise<New
       expect(result.subscriber.confirmedAt).toBeInstanceOf(Date);
       expect(await store.consentHistory(result.subscriber.id)).toMatchObject([{ event: "opt-in" }]);
       expect((await store.findForUser(USER_ID, "other@example.com"))?.id).toBe(result.subscriber.id);
-      const again = await store.subscribeVerified({ email: "member@example.com", userId: USER_ID, source: "account", ...V });
+      const again = await store.subscribeVerified({
+        email: "member@example.com",
+        userId: USER_ID,
+        source: "account",
+        ...V,
+      });
       expect(again.changed).toBe(false);
       expect(await store.consentHistory(result.subscriber.id)).toHaveLength(1);
     });
@@ -105,14 +164,25 @@ export function describeStoreContract(name: string, makeStore: () => Promise<New
     it("signed-in one click: pending or unsubscribed → active; an active anonymous row is only linked", async () => {
       const store = await makeStore();
       const pending = (await store.upsertPending(input("p@example.com"))).subscriber;
-      const fromPending = await store.subscribeVerified({ email: "p@example.com", userId: USER_ID, source: "account", ...V });
-      expect(fromPending).toMatchObject({ changed: true, subscriber: { id: pending.id, status: "active", userId: USER_ID } });
+      const fromPending = await store.subscribeVerified({
+        email: "p@example.com",
+        userId: USER_ID,
+        source: "account",
+        ...V,
+      });
+      expect(fromPending).toMatchObject({
+        changed: true,
+        subscriber: { id: pending.id, status: "active", userId: USER_ID },
+      });
 
       const other = "0190f0f0-0000-7000-8000-000000000002";
       const anon = (await store.upsertPending(input("q@example.com"))).subscriber;
       await store.confirm(anon.id, V);
       const linked = await store.subscribeVerified({ email: "q@example.com", userId: other, source: "account", ...V });
-      expect(linked).toMatchObject({ changed: false, subscriber: { status: "active", userId: other, source: "archive" } });
+      expect(linked).toMatchObject({
+        changed: false,
+        subscriber: { status: "active", userId: other, source: "archive" },
+      });
       expect(await store.consentHistory(anon.id)).toHaveLength(1);
 
       await store.unsubscribe(anon.id);

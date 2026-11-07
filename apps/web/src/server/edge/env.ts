@@ -12,6 +12,10 @@ import { z } from "zod";
 //                                        effect without a rebuild, `wrangler secret delete` undoes it
 //   DODO_API_KEY                 secret  Dodo Payments API key; middleware reads only whether it is set, to
 //                                        pick the pricing variant whose "Go Pro" opens checkout (plan §9.3)
+//   BETTER_AUTH_URL              var     the public origin; in production, page requests on any other host
+//                                        (workers.dev, version preview URLs) redirect to it (host-guard.ts)
+//   SMOKE_KEY                    secret  ≥ 32 chars; deploy smoke tests send it as `x-smoke-key` to reach
+//                                        production on workers.dev (owner: set it before the domain goes live)
 //   NEXT_PUBLIC_GIT_SHA          build   commit SHA, inlined by Next.js at build (set by deploy.yml)
 //   APP_ENV                      build   inlined by next.config.ts (section states are per build)
 
@@ -31,6 +35,8 @@ export const edgeEnvSchema = z.object({
   ENTITLEMENT_SECRET: optional,
   ENTITLEMENT_SECRET_PREVIOUS: optional,
   DODO_API_KEY: optional,
+  BETTER_AUTH_URL: optional,
+  SMOKE_KEY: optional,
 });
 
 type EdgeEnv = z.infer<typeof edgeEnvSchema>;
@@ -47,6 +53,8 @@ export function readEdgeEnv(): EdgeEnv {
     ENTITLEMENT_SECRET: process.env.ENTITLEMENT_SECRET,
     ENTITLEMENT_SECRET_PREVIOUS: process.env.ENTITLEMENT_SECRET_PREVIOUS,
     DODO_API_KEY: process.env.DODO_API_KEY,
+    BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
+    SMOKE_KEY: process.env.SMOKE_KEY,
   });
 }
 

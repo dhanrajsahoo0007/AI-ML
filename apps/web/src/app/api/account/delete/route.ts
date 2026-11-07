@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { authFor, isFreshSession, route } from "@/features/auth";
+import { authConfig, authFor, isFreshSession, route } from "@/features/auth";
+import { clearEntitlementCookies } from "@/features/entitlements/cookies";
 import { deleteAccount, LiveSubscriptionError } from "@/features/account";
 import { HttpError } from "@/server/http";
 // Registers the provider-backed canceller: live subscriptions are cancelled at the provider first.
@@ -24,7 +25,7 @@ export const POST = route({
     }
     // Clear this browser's auth cookies (Better Auth's sign-out; the session row is already gone).
     const { headers } = await authFor(request, db).api.signOut({ headers: request.headers, returnHeaders: true });
-    setCookies.push(...headers.getSetCookie());
+    setCookies.push(...headers.getSetCookie(), ...clearEntitlementCookies(authConfig().secureCookies));
     return { deleted: true };
   },
 });

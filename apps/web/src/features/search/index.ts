@@ -1,2 +1,2 @@
 export { searchEntries, type SearchEntry } from "./search";
-export { pageInfo } from "./titles";
+export { hasPageIndex, pageInfo } from "./titles";

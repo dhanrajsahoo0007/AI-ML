@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { observabilityCspHosts } from "../observability/csp-hosts";
-import { contentSecurityPolicy, securityHeaders } from "./security-headers";
+import {
+  contentSecurityPolicy,
+  CSP_REPORT_ENDPOINT,
+  DSA_RUNNER_CHUNKS,
+  securityHeaders,
+  staticAssetHeadersFile,
+} from "./security-headers";
 
 const asMap = (headers: { key: string; value: string }[]) => new Map(headers.map((h) => [h.key, h.value]));
 
@@ -41,13 +47,56 @@ describe("securityHeaders", () => {
     expect(asMap(securityHeaders({ indexable: false })).get("X-Robots-Tag")).toBe("noindex, nofollow, noai, noimageai");
   });
 
-  it("adds Reporting-Endpoints and report-to only when a report endpoint is set", () => {
-    expect(h.has("Reporting-Endpoints")).toBe(false);
-    const withReports = asMap(securityHeaders({ reportEndpoint: "https://r.test/csp" }));
-    expect(withReports.get("Reporting-Endpoints")).toBe('csp="https://r.test/csp"');
-    const d = directives(withReports.get("Content-Security-Policy-Report-Only")!);
+  it("reports violations to /api/csp-report (security review M3)", () => {
+    expect(CSP_REPORT_ENDPOINT).toBe("/api/csp-report");
+    expect(h.get("Reporting-Endpoints")).toBe('csp="/api/csp-report"');
+    const d = directives(h.get("Content-Security-Policy-Report-Only")!);
     expect(d.get("report-to")).toEqual(["csp"]);
-    expect(d.get("report-uri")).toEqual(["https://r.test/csp"]);
+    expect(d.get("report-uri")).toEqual(["/api/csp-report"]);
+    const none = asMap(securityHeaders({ reportEndpoint: null }));
+    expect(none.has("Reporting-Endpoints")).toBe(false);
+    expect(directives(none.get("Content-Security-Policy-Report-Only")!).has("report-uri")).toBe(false);
+  });
+
+  it("relaxes the CSP for the DSA runner workers only, never for pages (security review M3)", () => {
+    const runner = directives(asMap(securityHeaders({ dsaRunner: true })).get("Content-Security-Policy-Report-Only")!);
+    expect(runner.get("script-src")).toEqual(
+      expect.arrayContaining(["'unsafe-eval'", "'wasm-unsafe-eval'", "https://cdn.jsdelivr.net"])
+    );
+    expect(runner.get("connect-src")).toContain("https://cdn.jsdelivr.net");
+    const page = directives(h.get("Content-Security-Policy-Report-Only")!);
+    for (const v of ["'unsafe-eval'", "'wasm-unsafe-eval'", "https://cdn.jsdelivr.net"]) {
+      expect(page.get("script-src")).not.toContain(v);
+    }
+  });
+});
+
+describe("staticAssetHeadersFile (Workers Static Assets _headers)", () => {
+  const file = staticAssetHeadersFile({ indexable: false });
+  const rules = new Map<string, string[]>();
+  let current = "";
+  for (const line of file.split("\n")) {
+    if (!line || line.startsWith("#")) continue;
+    if (!line.startsWith(" ")) rules.set((current = line), []);
+    else rules.get(current)!.push(line.trim());
+  }
+
+  it("gives every static file the baseline headers and the page CSP", () => {
+    const all = rules.get("/*")!;
+    expect(all).toContain("Strict-Transport-Security: max-age=63072000; includeSubDomains; preload");
+    expect(all).toContain("X-Content-Type-Options: nosniff");
+    expect(all).toContain("X-Robots-Tag: noindex, nofollow, noai, noimageai");
+    const csp = all.find((l) => l.startsWith("Content-Security-Policy-Report-Only:"))!;
+    expect(csp).not.toContain("unsafe-eval");
+  });
+
+  it("swaps in the runner policy for each runner chunk", () => {
+    for (const chunk of DSA_RUNNER_CHUNKS) {
+      const rule = rules.get(`/_next/static/chunks/${chunk}.*`)!;
+      expect(rule[0]).toBe("! Content-Security-Policy-Report-Only");
+      expect(rule[1]).toMatch(/^Content-Security-Policy-Report-Only: .*'wasm-unsafe-eval'/);
+      expect(rule).toHaveLength(2);
+    }
   });
 });
 
@@ -71,7 +120,6 @@ describe("contentSecurityPolicy", () => {
 
   it("leaves out directives that browsers reject in report-only mode", () => {
     expect(d.has("upgrade-insecure-requests")).toBe(false);
-    expect(d.has("report-to")).toBe(false);
   });
 
   it("allows eval only for the dev server", () => {
@@ -99,8 +147,10 @@ describe("observability hosts in the CSP", () => {
 
   it("uses the configured PostHog host and ignores malformed or non-https values", () => {
     expect(
-      observabilityCspHosts({ NEXT_PUBLIC_POSTHOG_KEY: "phc_test", NEXT_PUBLIC_POSTHOG_HOST: "https://eu.i.posthog.com/" })
-        .connectSrc
+      observabilityCspHosts({
+        NEXT_PUBLIC_POSTHOG_KEY: "phc_test",
+        NEXT_PUBLIC_POSTHOG_HOST: "https://eu.i.posthog.com/",
+      }).connectSrc
     ).toEqual(["https://eu.i.posthog.com"]);
     expect(observabilityCspHosts({ NEXT_PUBLIC_SENTRY_DSN: "not a url" }).connectSrc).toEqual([]);
     expect(observabilityCspHosts({ NEXT_PUBLIC_SENTRY_DSN: "http://k@sentry.example/1" }).connectSrc).toEqual([]);

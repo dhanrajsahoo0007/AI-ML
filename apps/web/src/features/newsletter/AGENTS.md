@@ -34,8 +34,14 @@ carry a non-expiring `unsubscribe` token; mail providers POST `List-Unsubscribe=
 - GET never changes state (link scanners open links); confirm and unsubscribe happen on POST after a click.
 - Tokens carry the subscriber id, never the email. **`NEWSLETTER_TOKEN_SECRET` has a single key**: rotating it breaks
   every unsubscribe link already sent. A fixed dev secret is allowed only with `APP_ENV=local`.
-- Today the store and rate limiter are in memory (per isolate) and the API routes use the helpers in `http.ts`, not
-  the shared `route()` wrapper; moving them onto `route` and Postgres is stream S's job.
+- **No email-bombing (security review H2):** sign-up is limited per IP (`signup`) and per hashed address
+  (`signupEmail`) on the shared limiter (`apps/web/src/server/rate-limit.ts`), Turnstile is required when
+  `TURNSTILE_SECRET_KEY` is set, and the store sends at most one confirmation per address per 15 minutes and 3 a
+  day (`nextConfirmation()`, columns `confirmation_sent_at` / `confirmation_count`). Suppressed addresses get nothing.
+  Every answer is the same 202, so none of this reveals an address.
+- The memory store is for `APP_ENV=local` only; elsewhere a missing database is a 503 `not_configured`, because the
+  cool-down has to survive isolates. Routes go through `newsletterRoute()` / `serverToServerRoute()` (`route()`
+  behind the section gate; the second with `origin: false` for mail systems).
 - Issues are plain Markdown (no JSX components) so one file renders to the web and to email; email images must be
   PNG with absolute URLs. A premium issue sent to everyone carries only its summary and a link.
 - Drafts and scheduled issues get a `noindex` review page outside production only.

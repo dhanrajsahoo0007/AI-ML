@@ -1,18 +1,13 @@
 import "server-only";
 import type { z } from "zod";
 import { route } from "@/features/auth";
-import {
-  createRoute,
-  HttpError,
-  notFoundRoute,
-  type AuthLevel,
-  type NextRouteHandler,
-  type RouteOptions,
-} from "@/server/http";
-import { newsletterHref, NotConfiguredError } from "./server";
+import { HttpError, notFoundRoute, type AuthLevel, type NextRouteHandler, type RouteOptions } from "@/server/http";
+import { log } from "@/server/log";
+import { newsletterHref, newsletterKilled, NotConfiguredError } from "./server";
 
 // The newsletter's API routes go through the shared route() wrapper (src/server/http.ts, plan §11.6), plus:
-// - a section gate: every route answers the uniform 404 while the newsletter is not `on` in this build
+// - a section gate: every route answers the uniform 404 while the newsletter is not `on` in this build, and 503
+//   while SECTIONS_KILL names it (the kill switch; middleware only covers pages)
 // - NotConfiguredError (a missing secret or sender) becomes a 503 `not_configured`
 
 // Same as server/http.ts: any zod object; the wrapper makes it strict.
@@ -28,7 +23,7 @@ function withConfigErrors<S extends BodySchema | undefined, A extends AuthLevel>
         return await options.handler(ctx);
       } catch (e) {
         if (e instanceof NotConfiguredError) {
-          console.error(`[newsletter] not configured: ${e.message}`);
+          log.error("newsletter_not_configured", { request_id: ctx.requestId, error: e.message });
           throw new HttpError(503, "not_configured", "This feature is not configured yet");
         }
         throw e;
@@ -39,8 +34,16 @@ function withConfigErrors<S extends BodySchema | undefined, A extends AuthLevel>
 
 const gated =
   (handler: NextRouteHandler): NextRouteHandler =>
-  (request, context) =>
-    newsletterHref() ? handler(request, context) : notFoundRoute(request, context);
+  async (request, context) => {
+    if (!newsletterHref()) return notFoundRoute(request, context);
+    if (newsletterKilled()) {
+      return Response.json(
+        { error: { code: "maintenance", message: "This section is temporarily unavailable" } },
+        { status: 503, headers: { "cache-control": "no-store", "retry-after": "300" } }
+      );
+    }
+    return handler(request, context);
+  };
 
 /** A newsletter API route: the shared wrapper (Origin check, auth, zod body, no-store) behind the section gate. */
 export function newsletterRoute<S extends BodySchema | undefined = undefined, A extends AuthLevel = "none">(
@@ -51,45 +54,17 @@ export function newsletterRoute<S extends BodySchema | undefined = undefined, A 
 
 // ── Server-to-server routes ──────────────────────────────────────────────────────────────────────────────────
 // The Resend webhook and the RFC 8058 one-click unsubscribe are POSTed by mail systems, which send no Origin
-// header, so the wrapper's Origin check must be off for them. They authenticate otherwise (webhook signature,
-// signed unsubscribe token) and never read cookies or a session.
-//
-// TODO(after stream L merges): L adds `origin: false` to route() (src/server/http.ts). Replace this shim with
-// `route({ origin: false, ... })`. Until then the shim is a wrapper with no sessions whose only allowed origin
-// is a reserved placeholder it sets on the request itself.
-
-const SERVER_TO_SERVER_ORIGIN = "https://server-to-server.invalid";
-
-const s2sRoute = createRoute({
-  getSession: async () => ({ info: null }),
-  allowedOrigins: () => [SERVER_TO_SERVER_ORIGIN],
-});
+// header, so the wrapper's Origin check is off for them (`origin: false`). They authenticate otherwise (webhook
+// signature, signed unsubscribe token), and with `auth: "none"` the wrapper never reads cookies or a session.
 
 /** Largest body these routes accept (the webhook's limit); larger requests are refused before reading. */
 const MAX_SERVER_TO_SERVER_BODY = 256 * 1024;
-
-/**
- * A copy of the request with the placeholder Origin and no cookies. The body is buffered (it is small and
- * capped): re-wrapping a streamed body with `new Request(request, …)` can stall under `next start`.
- */
-async function withPlaceholderOrigin(request: Request): Promise<Request> {
-  const headers = new Headers(request.headers);
-  headers.set("origin", SERVER_TO_SERVER_ORIGIN);
-  // Cookies are never used by these routes; drop them so nothing downstream can act on a browser session.
-  headers.delete("cookie");
-  const hasBody = request.method !== "GET" && request.method !== "HEAD";
-  return new Request(request.url, {
-    method: request.method,
-    headers,
-    body: hasBody ? await request.arrayBuffer() : undefined,
-  });
-}
 
 /** A newsletter route called by mail systems: the shared wrapper with the Origin check off and no sessions. */
 export function serverToServerRoute<S extends BodySchema | undefined = undefined>(
   options: RouteOptions<S, "none">
 ): NextRouteHandler {
-  const handler = s2sRoute(withConfigErrors({ ...options, auth: "none" }));
+  const handler = route(withConfigErrors({ ...options, auth: "none", origin: false }));
   return gated(async (request, context) => {
     if (Number(request.headers.get("content-length") ?? "0") > MAX_SERVER_TO_SERVER_BODY) {
       return Response.json(
@@ -97,7 +72,7 @@ export function serverToServerRoute<S extends BodySchema | undefined = undefined
         { status: 413, headers: { "cache-control": "no-store" } }
       );
     }
-    return handler(await withPlaceholderOrigin(request), context);
+    return handler(request, context);
   });
 }
 

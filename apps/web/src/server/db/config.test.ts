@@ -39,6 +39,16 @@ describe("boot guard (plan §8.1)", () => {
     expect(() => assertDatabaseAllowed(`${LOCAL}?host=ep-x.neon.tech`, "local")).toThrow(/ep-x\.neon\.tech/);
   });
 
+  it("requires TLS for remote hosts, except Hyperdrive's local endpoint (security review L7)", () => {
+    const plain = NEON.replace("?sslmode=require", "");
+    for (const url of [plain, `${plain}?sslmode=prefer`, `${plain}?sslmode=disable`]) {
+      expect(() => assertDatabaseAllowed(url, "production")).toThrow(/without TLS/);
+    }
+    expect(() => assertDatabaseAllowed(`${plain}?sslmode=verify-full`, "production")).not.toThrow();
+    expect(() => assertDatabaseAllowed(HYPERDRIVE, "production")).not.toThrow();
+    expect(() => assertDatabaseAllowed(LOCAL, "production")).not.toThrow();
+  });
+
   it("rejects malformed and non-Postgres URLs", () => {
     expect(() => assertDatabaseAllowed("not a url", "local")).toThrow(/not a valid URL/);
     expect(() => assertDatabaseAllowed("mysql://localhost/db", "local")).toThrow(/Unsupported/);

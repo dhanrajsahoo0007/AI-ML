@@ -30,10 +30,7 @@ export function premiumIndex(manifest: PremiumManifest): ReadonlySet<string> {
 }
 
 type PaywallDecision =
-  | { action: "pass" }
-  | { action: "entitled" }
-  | { action: "preview"; to: string }
-  | { action: "preview-direct" };
+  { action: "pass" } | { action: "entitled" } | { action: "preview"; to: string } | { action: "preview-direct" };
 
 export function isPremiumPath(pathname: string, premium: ReadonlySet<string>): boolean {
   return premium.has(normalizePath(pathname));

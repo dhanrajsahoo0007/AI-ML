@@ -57,7 +57,15 @@ describe("POST /api/vitals", () => {
   afterEach(() => restore());
 
   const post = (body: string, headers: Record<string, string> = {}) =>
-    POST(new Request("http://localhost/api/vitals", { method: "POST", body, headers }));
+    POST(new Request("http://localhost/api/vitals", { method: "POST", body, headers }), { params: Promise.resolve({}) });
+
+  it("is rate-limited per IP (60/min) through route()", async () => {
+    const ip = { "cf-connecting-ip": "198.51.100.77" };
+    for (let i = 0; i < 60; i++) expect((await post(JSON.stringify(valid), ip)).status).toBe(204);
+    const limited = await post(JSON.stringify(valid), ip);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBeTruthy();
+  });
 
   it("answers 204 and logs one line with the metrics", async () => {
     const res = await post(JSON.stringify(valid), { "cf-ray": "8f1c2a3b4d5e6f70-BOM" });

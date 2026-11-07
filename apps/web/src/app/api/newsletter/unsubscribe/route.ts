@@ -46,6 +46,7 @@ async function tokenFrom(request: Request): Promise<string | null> {
 }
 
 export const POST = serverToServerRoute({
+  rateLimit: { name: "emailLink", by: "ip" },
   handler: async ({ request, db }) => {
     const token = await tokenFrom(request);
     if (!token) throw new HttpError(400, "invalid_request", "Send the unsubscribe token");

@@ -81,16 +81,11 @@ export interface SubscriptionMovement {
 }
 
 export async function subscriptionMovement(db: Db, since: Date): Promise<SubscriptionMovement> {
-  const [created] = await db
-    .select({ n: count() })
-    .from(subscription)
-    .where(gte(subscription.createdAt, since));
+  const [created] = await db.select({ n: count() }).from(subscription).where(gte(subscription.createdAt, since));
   const ended = await db
     .select({ status: subscription.status, n: count() })
     .from(subscription)
-    .where(
-      and(inArray(subscription.status, ["cancelled", "expired", "failed"]), gte(subscription.updatedAt, since))
-    )
+    .where(and(inArray(subscription.status, ["cancelled", "expired", "failed"]), gte(subscription.updatedAt, since)))
     .groupBy(subscription.status);
   const by = Object.fromEntries(ended.map((r) => [r.status, r.n]));
   return {

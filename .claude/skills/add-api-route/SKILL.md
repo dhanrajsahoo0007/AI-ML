@@ -33,8 +33,10 @@ Background: `apps/web/src/server/http.ts` (the wrapper) and `apps/web/src/featur
 3. **Choose the auth level deliberately:** `none`, `optional`, `user` or `admin`. Admin checks happen on the server
    for every request; never trust a client flag. Sensitive actions also check `isFreshSession()`.
 
-4. **Rate-limit every route** with a named limit (`RateLimitName` in `apps/web/src/server/http.ts`); add a new name
-   there if none fits, keyed `by: "user"` when signed in, else `"ip"`.
+4. **Rate-limit every route** with a named limit (`RATE_LIMITS` in `apps/web/src/server/rate-limit.ts`). A new name
+   needs a matching `ratelimits` binding in every environment of `apps/web/wrangler.jsonc` (the test in
+   `apps/web/src/server/rate-limit.test.ts` fails otherwise). Key it `by: "user"` when signed in, else `"ip"`.
+   Limits apply everywhere: the Workers binding on Cloudflare, a per-isolate memory counter elsewhere.
 
 5. **Zod for every input**: body (made strict by the wrapper), query and params. No `any`, no unchecked casts.
 

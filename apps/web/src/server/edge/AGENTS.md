@@ -16,6 +16,9 @@ and zod only. Middleware runs on every content request before the page cache, wi
   `ENTITLEMENT_SECRET`, `ENTITLEMENT_SECRET_PREVIOUS`), `appVersion()`.
 - `maintenance.ts`: `maintenanceResponse()` (503, `Retry-After: 300`, `noindex`, self-contained HTML).
 - `health.ts`: `healthHandler()` behind `GET /api/health` → `{status, version, env, region}`.
+- `host-guard.ts`: `decideHost()`: in production a page request on a host other than `BETTER_AUTH_URL`'s
+  (workers.dev, version preview URLs, which skip the zone's WAF and bot rules) → 308 to the canonical host, unless
+  it carries `x-smoke-key` = `SMOKE_KEY` (deploy smoke tests; passes with `noindex`).
 
 ## Data flow
 

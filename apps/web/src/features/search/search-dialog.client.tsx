@@ -176,7 +176,9 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
                       {r.d ? ` · ${r.d}` : ""}
                     </span>
                   </span>
-                  {i === active && <CornerDownLeft aria-hidden className="mt-1 size-3.5 shrink-0 text-muted-foreground" />}
+                  {i === active && (
+                    <CornerDownLeft aria-hidden className="mt-1 size-3.5 shrink-0 text-muted-foreground" />
+                  )}
                 </li>
               ))}
             </ul>

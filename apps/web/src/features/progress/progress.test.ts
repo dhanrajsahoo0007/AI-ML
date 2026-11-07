@@ -1,7 +1,33 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { testDatabaseAvailable } from "@/server/db/testing";
 import { call, setupAuthTestEnv, testLoginAs } from "@/features/auth/test-helpers";
-import { contentKeySchema } from "./content-key";
+import { contentKeySchema, isKnownContentKey } from "./content-key";
+
+// The page list a build inlines (next.config.ts SEARCH_INDEX); tests set their own.
+const PAGES = ["system-design/caching/cdn", "cloud/aws/s3", "cloud/aws/ec2"];
+const withPages = (keys: string[] = PAGES) => {
+  process.env.SEARCH_INDEX = JSON.stringify(keys.map((k) => ({ t: k, h: `/${k}`, s: "x" })));
+};
+
+describe("content keys must name a page of the build (security review M7)", () => {
+  afterEach(() => {
+    delete process.env.SEARCH_INDEX;
+    (process.env as Record<string, string>).NODE_ENV = "test";
+  });
+
+  it("accepts pages in the index and refuses everything else", () => {
+    withPages();
+    expect(isKnownContentKey("system-design/caching/cdn")).toBe(true);
+    expect(contentKeySchema.safeParse("zzz/not-a-real-article-123").success).toBe(false);
+    expect(contentKeySchema.safeParse("system-design/caching").success).toBe(false);
+  });
+
+  it("fails closed in a production bundle without an index, and passes well-formed keys in dev and tests", () => {
+    expect(isKnownContentKey("anything/well-formed")).toBe(true);
+    (process.env as Record<string, string>).NODE_ENV = "production";
+    expect(isKnownContentKey("system-design/caching/cdn")).toBe(false);
+  });
+});
 
 describe("content keys", () => {
   it("accept section/slug paths only", () => {
@@ -20,8 +46,10 @@ describe.skipIf(!available)("progress API (integration)", () => {
   beforeAll(async () => {
     env = await setupAuthTestEnv();
     cookie = await testLoginAs("pro_monthly");
+    withPages();
   });
   afterAll(async () => {
+    delete process.env.SEARCH_INDEX;
     await env?.teardown();
   });
 
@@ -66,6 +94,26 @@ describe.skipIf(!available)("progress API (integration)", () => {
     ]) {
       expect((await call(POST, "/api/progress", { method: "POST", body, cookie })).status).toBe(400);
     }
+  });
+
+  it("refuses keys of pages that don't exist with 400, in POST, DELETE and merge (M7)", async () => {
+    const { POST, DELETE } = await api();
+    const body = { contentKey: "zzz/not-a-real-article-123", kind: "complete" };
+    expect((await call(POST, "/api/progress", { method: "POST", body, cookie })).status).toBe(400);
+    expect((await call(DELETE, "/api/progress", { method: "DELETE", body, cookie })).status).toBe(400);
+    const merged = await call(await merge(), "/api/progress/merge", {
+      method: "POST",
+      cookie,
+      body: {
+        items: [{ contentKey: "cloud/aws/s3" }, { contentKey: "zzz/junk-1", completedAt: "2026-01-01T00:00:00.000Z" }],
+      },
+    });
+    expect(merged.status).toBe(400);
+    // The island drops the refused items by index and sends the rest again.
+    expect((await merged.json()).error.details).toEqual([expect.objectContaining({ path: "items.1.contentKey" })]);
+    const state = await list();
+    expect(state.progress.map((p) => p.contentKey)).not.toContain("zzz/not-a-real-article-123");
+    expect(state.progress.map((p) => p.contentKey)).not.toContain("zzz/junk-1");
   });
 
   it("merges signed-out progress, keeping the earliest completion and clamping future dates", async () => {

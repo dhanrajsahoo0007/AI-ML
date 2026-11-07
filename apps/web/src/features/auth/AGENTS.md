@@ -10,6 +10,8 @@ wrapper every API handler uses. Code-owner review required (`.github/CODEOWNERS`
 - `withPageSession(fn)`: session + DB handle for the dynamic account pages only (null when signed out).
 - `authConfig()`, `isGoogleConfigured()`: zod-validated env, read per request.
 - `ageCookie()`, `isFreshSession()`, `revokeAllSessions()`, `MAX_SESSIONS_PER_USER` (3), `safeNextPath()`.
+- `public.ts`: client-safe exports for islands in other features (`safeNextPath()`, which refuses control
+  characters, backslashes, `//` and dot-segment tricks, and returns the URL parser's own same-origin path).
 - Client island by path: `sign-in-form.client.tsx` (never re-exported from the index, so server tests don't parse
   JSX).
 
@@ -22,7 +24,7 @@ Google callback → session row created → hooks: keep the newest 3 sessions, r
 
 ## Invariants and gotchas
 
-- **Session cookie cache:** Better Auth's `cookieCache` (5 min, `compact`) is on, but API routes and account pages
+- **Session cookie cache:** Better Auth's `cookieCache` (5 min, `jwe`: encrypted, since it holds name, email and role) is on, but API routes and account pages
   pass `disableCookieCache` and read the database, so a revoked session stops working at once. Don't rely on the
   cached cookie for authorisation.
 - `route`'s session lookup skips Better Auth and the DB entirely when no `oa.session_token` cookie is present.
@@ -33,7 +35,9 @@ Google callback → session row created → hooks: keep the newest 3 sessions, r
 - `role` is `input: false`: admins are promoted in the database, never from a request.
 - Disabled Better Auth endpoints: update-user, change-email, delete-user, link/unlink; account changes go through
   `apps/web/src/features/account/`.
-- Better Auth's own rate limiter is off (per isolate on Workers); limits come from `route`'s `rateLimit` hook.
+- Limits: `route()`'s `rateLimit` (`authRateLimit()`: `auth` 10/min/IP for sign-in paths, `session` for the rest),
+  backed by the Workers binding. Better Auth's own limiter is a second, per-isolate layer, on only on Cloudflare
+  (it keys by `cf-connecting-ip`, which `next start` doesn't have).
 - **Test-login** (`test-login.ts`): `POST /api/test/login` with header `x-test-login-key` signs in a seeded user
   (`npm run db:seed:test -w web`). Registered only when `APP_ENV` isn't production, `ENABLE_TEST_LOGIN=1` and
   `TEST_LOGIN_KEY` are set; production builds export a plain 404 (`apps/web/tests/e2e/auth.spec.ts` asserts no bundle

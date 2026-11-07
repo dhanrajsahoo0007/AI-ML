@@ -1,11 +1,20 @@
+import { route } from "@/features/auth";
 import { log, requestContext, type LogFields } from "@/server/log";
 import { VITALS_MAX_BYTES, vitalsPayload } from "@/features/observability/vitals-schema";
 
 // Real-user web vitals beacons (plan §10.3), sent by features/observability/vitals.client.ts. No database: each
 // beacon becomes one structured log line now, and an Analytics Engine data point once the Worker binding exists.
-// Abuse protection is a Cloudflare rate-limiting rule on this path (plan §11.6), not code here.
+// Through route() for its rate limit (60/min/IP) and no-store; plus a Cloudflare zone rule on this path (plan
+// §11.6). The Origin check is off: beacons are anonymous log writes that read no cookie or session, so there is
+// nothing to forge, and sendBeacon from older browsers may omit Origin.
 
-export async function POST(request: Request): Promise<Response> {
+export const POST = route({
+  origin: false,
+  rateLimit: { name: "vitals", by: "ip" },
+  handler: ({ request }) => vitals(request),
+});
+
+async function vitals(request: Request): Promise<Response> {
   const started = Date.now();
   const ctx = { ...requestContext(request.headers), route: "/api/vitals" };
 

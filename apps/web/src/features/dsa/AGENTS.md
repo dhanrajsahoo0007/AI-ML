@@ -21,9 +21,10 @@ No index file; import the files directly.
 ## Data flow
 
 `content/dsa/problems/<slug>.mdx` (statement, `<PremiumBreak/>`, editorial) + `content/dsa/tests/<slug>.public.json`
-+ `<slug>.hidden.json` → validated at build → the problem page gets the statement, starter code, entry names and
-**public** cases as props → "Run tests" lazy-loads `runner/run.ts`, which spawns a Web Worker per run and compares
-results with `runner/compare.ts`. Nothing is sent to the server.
+
+- `<slug>.hidden.json` → validated at build → the problem page gets the statement, starter code, entry names and
+  **public** cases as props → "Run tests" lazy-loads `runner/run.ts`, which spawns a Web Worker per run and compares
+  results with `runner/compare.ts`. Nothing is sent to the server.
 
 ## Invariants and gotchas
 
@@ -35,8 +36,10 @@ results with `runner/compare.ts`. Nothing is sent to the server.
   Topics and easy problems are always free (`alwaysFree` in the registry).
 - **Runner CSP:** only the runner worker chunks (`dsa-js-runner*`, `dsa-python-runner*`) get `'unsafe-eval'`,
   `'wasm-unsafe-eval'` and the Pyodide CDN, through the second header rule in `apps/web/next.config.ts` and the
-  `dsaRunner` option of `apps/web/src/features/seo/security-headers.ts`. The chunk names come from the `name`
-  passed to `new Worker(...)` in `runner/run.ts`: rename one and the runner breaks under the CSP.
+  `dsaRunner` option of `apps/web/src/features/seo/security-headers.ts` (on Cloudflare, the generated
+  `_headers` file, since static assets skip `next.config.ts`). The chunk names come from the `name` passed to
+  `new Worker(...)` in `runner/run.ts` and are listed in `DSA_RUNNER_CHUNKS`: rename one and the runner breaks under
+  the CSP (the E2E test in `apps/web/tests/e2e/seo.spec.ts` fetches the built chunks and checks their policy).
 - `runner/lockdown.ts` deletes network and storage globals in the worker before user code runs; CSP `connect-src` is the
   second fence. Each case has a wall-clock limit; on timeout the worker is terminated (the only way to stop a loop).
 - No editor or runner JS in first load: CodeMirror loads on first interaction, the runner on "Run tests". The

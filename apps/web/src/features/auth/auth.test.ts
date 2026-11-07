@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { consentLog, session } from "@/server/db/schema";
 import { testDatabaseAvailable } from "@/server/db/testing";
 import { CONSENT_VERSIONS } from "@/server/db/consent";
+import { testUserEmail } from "@/server/db/test-users";
 import { authConfig } from "./config";
 import { call, cookieHeader, setupAuthTestEnv, TEST_KEY, testLoginAs } from "./test-helpers";
 import { TEST_LOGIN_HEADER } from "./test-login";
@@ -55,6 +56,45 @@ describe.skipIf(!available)("auth (integration)", () => {
       expect(token).toMatch(/SameSite=Lax/i);
       expect(token).not.toMatch(/Domain=/i);
       expect(await sessionsOf(env.ids.pro_monthly)).toHaveLength(1);
+    });
+
+    it("keeps the cached session encrypted: no email or name readable in oa.session_data (L2)", async () => {
+      const { POST } = await import("@/app/api/test/login/route");
+      const res = await call(POST, "/api/test/login", {
+        method: "POST",
+        body: { userKey: "free" },
+        headers: { [TEST_LOGIN_HEADER]: TEST_KEY },
+      });
+      const data = res.headers.getSetCookie().find((c) => c.startsWith("oa.session_data="));
+      expect(data).toBeDefined();
+      const value = decodeURIComponent(data!.split(";")[0]!.slice("oa.session_data=".length));
+      const decoded = value
+        .split(".")
+        .map((part) => Buffer.from(part, "base64url").toString("latin1"))
+        .join("|");
+      expect(decoded).not.toContain(testUserEmail("free"));
+      expect(decoded).not.toContain('"email"');
+      expect(decoded).toContain('"enc"');
+    });
+
+    it("sign-out (and sign out everywhere) also clears the entitlement cookies (plan §11.3)", async () => {
+      const cleared = (res: Response) =>
+        ["oa_ent", "oa_ent_hint"].every((name) =>
+          res.headers.getSetCookie().some((c) => c.startsWith(`${name}=;`) && /Max-Age=0/i.test(c))
+        );
+      const { POST } = await import("@/app/api/auth/[...all]/route");
+      const cookie = await testLoginAs("pro_monthly");
+      const out = await call(POST, "/api/auth/sign-out", { method: "POST", body: {}, cookie });
+      expect(out.status).toBe(200);
+      expect(cleared(out)).toBe(true);
+
+      const { DELETE } = await import("@/app/api/account/sessions/route");
+      const everywhere = await call(DELETE, "/api/account/sessions", {
+        method: "DELETE",
+        cookie: await testLoginAs("pro_monthly"),
+      });
+      expect(everywhere.status).toBe(200);
+      expect(cleared(everywhere)).toBe(true);
     });
 
     it("is not registered unless APP_ENV allows it and ENABLE_TEST_LOGIN=1", () => {

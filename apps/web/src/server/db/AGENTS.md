@@ -27,7 +27,8 @@ Route handlers don't create handles themselves: `route()` (`apps/web/src/server/
 - **Never import this from a page render, a layout, middleware or anything under `apps/web/src/server/edge/`.**
   `apps/web/tests/e2e/auth.spec.ts` uses the query log (`DB_QUERY_LOG_FILE`) to prove content pages make zero queries.
 - No module-level pool: a Workers connection can't outlive its request. Requests that never query never connect.
-- **Boot guard:** a non-local host is refused unless `APP_ENV` is preview, staging or production. Seed, truncate and
+- **Boot guard:** a non-local host is refused unless `APP_ENV` is preview, staging or production, and then only with
+  `sslmode=require` (or `verify-ca` / `verify-full`; Hyperdrive's `*.hyperdrive.local` endpoint is exempt). Seed, truncate and
   reset scripts refuse any non-local host whatever `APP_ENV` says. Never run destructive SQL against a remote DB.
 - `APP_ENV` here also accepts `test`; `readAppEnv()` reads the literal `process.env.APP_ENV` so production builds
   inline it.

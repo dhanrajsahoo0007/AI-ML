@@ -30,7 +30,10 @@ describe("Turnstile verifier", () => {
 
   it("refuses a missing token without calling Cloudflare", async () => {
     const { impl, calls } = fakeFetch({ success: true });
-    expect(await new TurnstileVerifier("secret", impl).verify(undefined, "ip")).toEqual({ ok: false, reason: "missing" });
+    expect(await new TurnstileVerifier("secret", impl).verify(undefined, "ip")).toEqual({
+      ok: false,
+      reason: "missing",
+    });
     expect(calls).toHaveLength(0);
   });
 

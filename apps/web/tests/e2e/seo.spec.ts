@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 // @core SEO metadata, JSON-LD and security headers (plan §6 P11, §11.4). Runs against a production build
@@ -209,5 +211,52 @@ test.describe("security headers @core", () => {
     await page.goto("/system-design");
     await expect(page.locator("html")).toHaveClass(/\bdark\b/);
     expect(await violations()).toEqual([]);
+  });
+});
+
+// Security review M3: violations are reported to our endpoint, pages never get eval, and the DSA runner workers (as
+// served) get the relaxed policy they need. On Cloudflare the same policies come from .open-next/assets/_headers.
+test.describe("CSP reporting and the DSA runner policy @core", () => {
+  const cspOf = (h: Record<string, string>) =>
+    h["content-security-policy-report-only"] ?? h["content-security-policy"] ?? "";
+
+  test("pages report to /api/csp-report and never allow eval", async ({ request }) => {
+    for (const p of ["/", "/system-design"]) {
+      const res = await request.get(p);
+      const csp = cspOf(res.headers());
+      expect(csp).toContain("report-uri /api/csp-report");
+      expect(csp).toContain("report-to csp");
+      expect(csp).not.toContain("'unsafe-eval'");
+      expect(csp).not.toContain("'wasm-unsafe-eval'");
+      expect(res.headers()["reporting-endpoints"]).toBe('csp="/api/csp-report"');
+    }
+  });
+
+  test("the runner worker chunks get 'unsafe-eval', 'wasm-unsafe-eval' and the Pyodide CDN", async ({ request }) => {
+    const chunks = path.resolve(__dirname, "../../.next/static/chunks");
+    const runners = fs.readdirSync(chunks).filter((f) => /^dsa-(?:js|python)-runner\..+\.js$/.test(f));
+    test.skip(runners.length === 0, "this build has no DSA runner (the section is off)");
+    for (const file of runners) {
+      const csp = cspOf((await request.get(`/_next/static/chunks/${file}`)).headers());
+      expect(csp, file).toContain("'unsafe-eval'");
+      expect(csp, file).toContain("'wasm-unsafe-eval'");
+      expect(csp, file).toContain("https://cdn.jsdelivr.net");
+    }
+  });
+
+  test("/api/csp-report accepts a report and refuses junk", async ({ request }) => {
+    const report = {
+      "csp-report": { "document-uri": "http://127.0.0.1/", "blocked-uri": "eval", "effective-directive": "script-src" },
+    };
+    const ok = await request.post("/api/csp-report", {
+      data: JSON.stringify(report),
+      headers: { "content-type": "application/csp-report", "cf-connecting-ip": "198.51.100.200" },
+    });
+    expect(ok.status()).toBe(204);
+    const junk = await request.post("/api/csp-report", {
+      data: "{}",
+      headers: { "content-type": "application/csp-report", "cf-connecting-ip": "198.51.100.200" },
+    });
+    expect(junk.status()).toBe(400);
   });
 });

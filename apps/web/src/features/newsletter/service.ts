@@ -1,7 +1,8 @@
+import { log } from "@/server/log";
 import type { EmailSender } from "../email/sender";
 import { CURRENT_CONSENT_VERSION, FIRST_CONSENT_VERSION, isConsentVersion } from "./consent";
 import { confirmationEmail, welcomeEmail, type SubscriberLinks } from "./emails";
-import type { RateLimiter } from "./rate-limit";
+import { emailKey, type RateLimiter } from "./rate-limit";
 import { isSuppressed, type NewsletterStore, type Subscriber } from "./store";
 import type { CaptchaVerifier } from "./turnstile";
 import { signToken, verifyToken } from "./token";
@@ -51,22 +52,27 @@ async function sendWelcome(deps: NewsletterDeps, subscriber: Subscriber) {
     await deps.sender.send(await welcomeEmail(subscriber.email, await tokensFor(deps, subscriber.id)));
   } catch (e) {
     // The subscription stands either way; a missing welcome email is not worth failing it for.
-    console.error(`[newsletter] welcome email failed: ${(e as Error).message}`);
+    // Through log.ts: provider errors can repeat the address, which redact() masks.
+    log.error("newsletter_welcome_failed", { error: e });
   }
 }
 
 /**
  * Stores a pending subscriber and sends the double opt-in email. The answer is the same whether the address is
- * new, already subscribed, suppressed or a bot's (honeypot), so the endpoint can't be used to test addresses.
+ * new, already subscribed, suppressed, in its cool-down, over its per-address limit or a bot's (honeypot), so the
+ * endpoint can't be used to test addresses, nor to flood one inbox (security review H2): per IP and per address
+ * limits, Turnstile when configured, and the store's per-address cool-down.
  */
 export async function subscribe(deps: NewsletterDeps, input: SubscribeInput): Promise<SubscribeResult> {
-  const limit = await deps.limiter.hit(`subscribe:${input.ip}`);
+  const limit = await deps.limiter.hit("ip", input.ip);
   if (!limit.allowed) return { kind: "rate-limited", retryAfterSeconds: limit.retryAfterSeconds };
   if (deps.captcha) {
     const check = await deps.captcha.verify(input.turnstileToken, input.ip);
     if (!check.ok) return { kind: "captcha-failed", reason: check.reason };
   }
   if (input.website.trim() !== "") return { kind: "accepted" };
+  // Over the per-address limit: answer as usual and send nothing.
+  if (!(await deps.limiter.hit("email", await emailKey(input.email))).allowed) return { kind: "accepted" };
 
   const { subscriber, outcome } = await deps.store.upsertPending({
     email: input.email,

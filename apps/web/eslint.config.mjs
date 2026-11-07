@@ -215,7 +215,12 @@ const eslintConfig = [
       "origins/api-route-wrapper": [
         "error",
         {
-          wrappers: [{ name: "route", from: ["@/features/auth"] }],
+          wrappers: [
+            { name: "route", from: ["@/features/auth"] },
+            // route() behind the newsletter section gate (features/newsletter/http.ts).
+            { name: "newsletterRoute", from: ["@/features/newsletter/http"] },
+            { name: "serverToServerRoute", from: ["@/features/newsletter/http"] },
+          ],
           handlers: [{ name: "notFoundRoute", from: ["@/server/http"] }],
           // Routes that can't use route(). Keep this list short; every entry needs a reason.
           allow: [
@@ -224,27 +229,10 @@ const eslintConfig = [
               reason:
                 "Deploy smoke test and uptime probe: GET only, no body, no session, no DB; served by server/edge/health.",
             },
-            {
-              route: "/api/vitals",
-              reason:
-                "navigator.sendBeacon web-vitals sink: text/plain body, no session, no DB; own size cap and zod schema, rate-limited by a Cloudflare rule (plan §10.3, §11.6).",
-            },
           ],
         },
       ],
     },
-  },
-  {
-    // TODO(S newsletter): the newsletter routes use their own guarded()/error() helpers instead of route().
-    // Move them onto route() (or extend route() with what they need), then delete this block.
-    files: ["src/app/api/newsletter/**/route.ts", "src/app/api/webhooks/**/route.ts"],
-    rules: { "origins/api-route-wrapper": "warn" },
-  },
-  {
-    // TODO(L billing): the billing webhook needs the raw body and has no Origin header, which route() refuses
-    // today. Add a webhook mode to route() (signature check instead of Origin) or allow-list it with a reason.
-    files: ["src/app/api/billing/**/route.ts", "src/app/api/entitlements/**/route.ts"],
-    rules: { "origins/api-route-wrapper": "warn" },
   },
 ];
 

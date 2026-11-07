@@ -61,7 +61,7 @@ LCP ≤ 1.5 s, INP ≤ 100 ms, CLS ≤ 0.05; 99.9% availability; zero premium by
    protection (`apps/web/src/features/content-protection/`) stays on for content areas (owner decision 2026-11-07).
 8. **Zod at every trust boundary** (env, frontmatter, request bodies, webhook payloads); no `any`. Every API route
    goes through the `route()` wrapper (`apps/web/src/server/http.ts`, bound to sessions as `route` in
-   `apps/web/src/features/auth/index.ts`): zod body, auth/role, Origin check, rate-limit hook, `no-store`, uniform
+   `apps/web/src/features/auth/index.ts`): zod body, auth/role, Origin check, rate limit, `no-store`, uniform
    errors.
 9. **Every bug fix lands with a test that would have caught it.**
 10. Keep the dependency surface small: `npm run knip` must stay clean; add a dependency only when it's used.
@@ -160,7 +160,8 @@ only). Build outputs (src/generated/, .build-cache/, public/\_a/) are gitignored
 ```
 AGENTS.md · CLAUDE.md (@AGENTS.md) · README.md · knip.ts · .claude/skills/
 .github/workflows/      ci.yml (checks, two build profiles, E2E with Postgres, visual, a11y, leak, size,
-                        Lighthouse, gitleaks, semgrep, osv), deploy.yml + preview.yml, newsletter-send.yml
+                        Lighthouse, gitleaks, semgrep, osv), deploy.yml, preview.yml (unprivileged PR build) +
+                        preview-deploy.yml (trusted workflow_run upload), newsletter-send.yml (main only)
 apps/web/
   content/              sections.yaml, features.yaml, one folder per section, question-bank, companies, pages
   assets/               asset library (brand, images, diagrams, logos, icons, og, downloads, LICENSES.yaml)
@@ -224,7 +225,7 @@ runs it.
   `npx wrangler deployments list --env production`, then `npx wrangler rollback <version-id> --env production
 --message "<why>"` from `apps/web`. Then revert the bad commit on `main`.
 - **Section kill switch:** `npx wrangler secret put SECTIONS_KILL --env production` with `dsa` (comma-separated
-  keys); 503 immediately. Undo with `npx wrangler secret delete SECTIONS_KILL --env production`. Follow up with a PR
+  keys); 503 immediately (pages through middleware; the newsletter API checks it too). Undo with `npx wrangler secret delete SECTIONS_KILL --env production`. Follow up with a PR
   setting the section's `release.production` to `off` (`.claude/skills/release-section/SKILL.md`).
 - **Neon outage:** content pages, middleware and the paywall gate keep working (no database). Sign-in, account,
   progress and newsletter APIs return 5xx; Pro readers keep access until their `oa_ent` expires (≤ 15 min) and
@@ -252,7 +253,8 @@ answer MoR KYC; set prices and free articles.
 `APP_ENV` (`local | preview | staging | production`, set per Wrangler environment). Database: `DATABASE_URL`,
 `DATABASE_URL_DIRECT` (CI migrations). Auth: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `TRUSTED_ORIGINS`,
 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`; test only: `ENABLE_TEST_LOGIN`, `TEST_LOGIN_KEY`. Edge:
-`ENTITLEMENT_SECRET`, `ENTITLEMENT_SECRET_PREVIOUS`, `SECTIONS_KILL`. Newsletter/email: `NEWSLETTER_TOKEN_SECRET`,
+`ENTITLEMENT_SECRET`, `ENTITLEMENT_SECRET_PREVIOUS`, `SECTIONS_KILL`, `SMOKE_KEY` (deploy smoke tests reach
+production on workers.dev; every other non-canonical host redirects to `BETTER_AUTH_URL`). Newsletter/email: `NEWSLETTER_TOKEN_SECRET`,
 `RESEND_API_KEY`, `RESEND_SEGMENT_ID`, `RESEND_PRO_SEGMENT_ID`. Observability (all optional, off when unset):
 `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_DSN`, `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`,
 `NEXT_PUBLIC_CF_BEACON_TOKEN`, `SENTRY_AUTH_TOKEN`. Deploy: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (GitHub
@@ -287,4 +289,4 @@ and the section registry need code-owner review (`.github/CODEOWNERS`).
   subscriptions keep a 7-day grace; switch `BILLING_PRIMARY` to the standby once one exists).
 - `/admin` dashboards; nightly `pg_dump` backup workflow and restore drill; DSA stage C judge; newsletter Turnstile,
   Postgres store, bounce webhooks; `eslint-plugin-boundaries`; Analytics Engine; Sentry on the Worker entry;
-  R2 + regional cache; Hyperdrive and rate-limit bindings.
+  R2 + regional cache; Hyperdrive binding.

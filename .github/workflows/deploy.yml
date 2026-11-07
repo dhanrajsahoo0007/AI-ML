@@ -7,11 +7,18 @@ name: Deploy
 #   → gradual deploy 10% → smoke tests pinned to the new version → 100% → smoke tests → (on failure) rollback
 #
 # Needs the secrets CLOUDFLARE_API_TOKEN (Workers Scripts: Edit, Account Settings: Read) and
-# CLOUDFLARE_ACCOUNT_ID, as environment secrets of `staging` and `production`. Until they exist the job
+# CLOUDFLARE_ACCOUNT_ID, as environment secrets of `staging` and `production`. Cloudflare can't scope a Workers
+# token to one script, so the token can deploy over every Worker in its account: keep the `preview` environment's
+# token separate (ideally on a separate Cloudflare account with no production Worker, security review M4), and
+# restrict each environment's deployment branches (production → main, staging → development). Until they exist the job
 # succeeds with a notice and deploys nothing. The first run on an environment with no Worker yet does a plain
 # `wrangler deploy` (nothing to roll back to).
 #
 # Smoke tests use the workers.dev hostname: Bot Fight Mode on the custom domain blocks CI runners (plan §7.5).
+# In production, middleware redirects workers.dev page requests to BETTER_AUTH_URL's host (security review M2), so
+# the smoke tests send the SMOKE_KEY environment secret as `x-smoke-key`. Owner: set SMOKE_KEY (≥ 32 random
+# characters) as a `production` environment secret and with `wrangler secret put SMOKE_KEY --env production`
+# before pointing BETTER_AUTH_URL at the custom domain.
 
 on:
   push:
@@ -132,6 +139,7 @@ jobs:
           ua="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
           args=(-sS -A "$ua" --max-time 20)
           [ -n "$pin" ] && args+=(-H "Cloudflare-Workers-Version-Overrides: ${WORKER}=\"${pin}\"")
+          if [ -n "${SMOKE_KEY:-}" ]; then args+=(-H "x-smoke-key: ${SMOKE_KEY}"); fi
           body="$RUNNER_TEMP/smoke-body"; head="$RUNNER_TEMP/smoke-head"; fails=0
           fetch() { curl "${args[@]}" -o "$body" -D "$head" -w '%{http_code}' "$base$1" || echo 000; }
           fail() { echo "::error title=Smoke test::$1"; fails=$((fails + 1)); }
@@ -190,6 +198,7 @@ jobs:
         if: steps.creds.outputs.ready == 'true' && steps.live.outputs.previous == ''
         env:
           WORKER: ${{ steps.live.outputs.worker }}
+          SMOKE_KEY: ${{ secrets.SMOKE_KEY }}
         run: '"$RUNNER_TEMP/smoke.sh" "${{ steps.live.outputs.url }}"'
 
       # ── Gradual rollout ──────────────────────────────────────────────────────────────────────────────
@@ -223,6 +232,7 @@ jobs:
         if: steps.upload.outcome == 'success'
         env:
           WORKER: ${{ steps.live.outputs.worker }}
+          SMOKE_KEY: ${{ secrets.SMOKE_KEY }}
         run: '"$RUNNER_TEMP/smoke.sh" "${{ steps.live.outputs.url }}" "${{ steps.upload.outputs.version }}"'
 
       - name: Deploy 100%
@@ -240,6 +250,7 @@ jobs:
         if: steps.promote.outcome == 'success'
         env:
           WORKER: ${{ steps.live.outputs.worker }}
+          SMOKE_KEY: ${{ secrets.SMOKE_KEY }}
         run: '"$RUNNER_TEMP/smoke.sh" "${{ steps.live.outputs.url }}"'
 
       - name: Roll back to the previous version

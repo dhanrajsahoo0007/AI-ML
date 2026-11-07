@@ -8,12 +8,18 @@ import { useState } from "react";
 type AccountStatus = "none" | "pending" | "active" | "unsubscribed" | "suppressed";
 
 const LABELS: Record<AccountStatus, { title: string; detail: string }> = {
-  none: { title: "Not subscribed", detail: "Subscribe with one click: your Google sign-in already verified this address." },
+  none: {
+    title: "Not subscribed",
+    detail: "Subscribe with one click: your Google sign-in already verified this address.",
+  },
   pending: {
     title: "Waiting for confirmation",
     detail: "A confirmation email was sent earlier. You can skip it and subscribe here with one click.",
   },
-  active: { title: "Subscribed", detail: "You get one short email per issue. Every email has a one-click unsubscribe link." },
+  active: {
+    title: "Subscribed",
+    detail: "You get one short email per issue. Every email has a one-click unsubscribe link.",
+  },
   unsubscribed: { title: "Unsubscribed", detail: "You won't get the newsletter. Subscribe again any time." },
   suppressed: {
     title: "Paused",

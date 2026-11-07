@@ -7,6 +7,7 @@
 //
 //   (new)          ─upsertPending────►  pending
 //   unsubscribed   ─upsertPending────►  pending            (a new sign-up is new consent)
+//   pending        ─upsertPending────►  pending            confirmation re-sent, unless within the cool-down
 //   pending        ─confirm──────────►  active             consent: opt-in, with the consent text version
 //   (new)|pending|unsubscribed
 //                  ─subscribeVerified►  active             signed-in one click (email verified by Google)
@@ -54,8 +55,34 @@ export interface Transition {
   changed: boolean;
 }
 
-/** What the caller should do after upsertPending. */
-export type UpsertOutcome = "send-confirmation" | "already-active" | "suppressed";
+/**
+ * What the caller should do after upsertPending. `cooldown`: a confirmation went to this address too recently, so
+ * none is sent now (security review H2: the sign-up form must not be usable to email-bomb an address).
+ */
+export type UpsertOutcome = "send-confirmation" | "already-active" | "suppressed" | "cooldown";
+
+/** At most one double opt-in email per address in this many minutes… */
+export const CONFIRMATION_COOLDOWN_MS = 15 * 60 * 1000;
+/** …and at most this many in a run, where a run ends 24 hours after its last email. */
+export const CONFIRMATION_MAX_PER_DAY = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The confirmation-email bookkeeping of a subscriber row. */
+interface ConfirmationSends {
+  sentAt: Date | null;
+  count: number;
+}
+
+/**
+ * Whether another confirmation may go to an address now, and the bookkeeping after sending it. Shared by both
+ * stores so they apply the same rule.
+ */
+export function nextConfirmation(prev: ConfirmationSends, now: Date): ConfirmationSends | null {
+  if (!prev.sentAt || now.getTime() - prev.sentAt.getTime() >= DAY_MS) return { sentAt: now, count: 1 };
+  if (now.getTime() - prev.sentAt.getTime() < CONFIRMATION_COOLDOWN_MS) return null;
+  if (prev.count >= CONFIRMATION_MAX_PER_DAY) return null;
+  return { sentAt: now, count: prev.count + 1 };
+}
 
 /** One consent_log entry for a subscriber: an opt-in with the text version, or a withdrawal. */
 export interface ConsentEvent {
@@ -72,7 +99,10 @@ export interface ConsentEvent {
 export const WITHDRAWN_VERSION = "withdrawn";
 
 export interface NewsletterStore {
-  /** Creates or re-arms a pending subscriber. Never downgrades an active one or revives a suppressed one. */
+  /**
+   * Creates or re-arms a pending subscriber. Never downgrades an active one or revives a suppressed one. Answers
+   * `send-confirmation` only when the cool-down allows another email (and records it); else `cooldown`.
+   */
   upsertPending(input: PendingInput): Promise<{ subscriber: Subscriber; outcome: UpsertOutcome }>;
   /**
    * pending → active, recording the opt-in with `consentVersion`. `changed` is false when it was not pending;
@@ -105,6 +135,7 @@ export class MemoryNewsletterStore implements NewsletterStore {
   private readonly byId = new Map<string, Subscriber>();
   private readonly idByEmail = new Map<string, string>();
   private readonly consents = new Map<string, ConsentEvent[]>();
+  private readonly sends = new Map<string, ConfirmationSends>();
 
   constructor(private readonly now: () => Date = () => new Date()) {}
 
@@ -131,10 +162,14 @@ export class MemoryNewsletterStore implements NewsletterStore {
     const existing = this.byEmail(email);
     if (!existing) {
       const subscriber = this.create(email, { status: "pending", source: input.source, userId: null });
+      this.sends.set(subscriber.id, { sentAt: this.now(), count: 1 });
       return { subscriber: { ...subscriber }, outcome: "send-confirmation" as const };
     }
     if (isSuppressed(existing)) return { subscriber: { ...existing }, outcome: "suppressed" as const };
     if (existing.status === "active") return { subscriber: { ...existing }, outcome: "already-active" as const };
+    const next = nextConfirmation(this.sends.get(existing.id) ?? { sentAt: null, count: 0 }, this.now());
+    if (!next) return { subscriber: { ...existing }, outcome: "cooldown" as const };
+    this.sends.set(existing.id, next);
     existing.status = "pending";
     existing.source = input.source;
     existing.unsubscribedAt = undefined;

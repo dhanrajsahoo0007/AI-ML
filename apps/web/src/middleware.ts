@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ENTITLEMENT_COOKIE, isAdmin, keyringFromEnv, verifyEntitlement } from "@/server/edge/entitlement";
 import { appVersion, readEdgeEnv } from "@/server/edge/env";
+import { decideHost, SMOKE_KEY_HEADER } from "@/server/edge/host-guard";
 import { maintenanceResponse } from "@/server/edge/maintenance";
 import {
   EMPTY_PREMIUM_MANIFEST,
@@ -24,6 +25,8 @@ import {
 // NO database and no Node APIs here (AGENTS.md rule 1): only the build manifest, env vars and the
 // signed `oa_ent` cookie. Imports are limited to src/server/edge/** and build manifests.
 //
+// - production on a host other than BETTER_AUTH_URL's (workers.dev, version preview URLs) → 308 to the canonical
+//   host, unless the deploy smoke key is presented (server/edge/host-guard.ts, security review M2)
 // - SECTIONS_KILL sections → 503 maintenance page
 // - `off` sections → 404 (their pages are not built)
 // - `hidden` sections → 404 unless `oa_ent` carries role=admin; admitted responses are never cached
@@ -48,6 +51,20 @@ const VERSION_HEADER = "x-app-version";
 export async function middleware(request: NextRequest) {
   const env = readEdgeEnv();
   const { pathname } = request.nextUrl;
+
+  const host = decideHost({
+    appEnv: env.APP_ENV,
+    url: new URL(request.url),
+    canonicalUrl: env.BETTER_AUTH_URL,
+    smokeKey: env.SMOKE_KEY,
+    presentedKey: request.headers.get(SMOKE_KEY_HEADER),
+  });
+  if (host.action === "redirect") {
+    const redirect = NextResponse.redirect(host.location, 308);
+    redirect.headers.set("X-Robots-Tag", "noindex");
+    redirect.headers.set(VERSION_HEADER, appVersion(env));
+    return redirect;
+  }
 
   // The cookie is verified only on paths that need it (HS256 with jose, well under 1 ms).
   let claims: Awaited<ReturnType<typeof verifyEntitlement>> = null;
@@ -79,6 +96,7 @@ export async function middleware(request: NextRequest) {
       }
       break;
   }
+  if (host.action === "pass-noindex") response.headers.set("X-Robots-Tag", "noindex");
   response.headers.set(VERSION_HEADER, appVersion(env));
   return response;
 }

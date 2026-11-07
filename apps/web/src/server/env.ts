@@ -31,7 +31,10 @@ const serverEnvSchema = edgeEnvSchema.extend({
   BILLING_PRIMARY: z.enum(["dodo"]).catch("dodo"),
   DODO_WEBHOOK_SECRET: optional,
   DODO_ENVIRONMENT: z.enum(["test_mode", "live_mode"]).catch("test_mode"),
-  DODO_API_BASE_URL: z.url({ protocol: /^https?$/ }).optional().catch(undefined),
+  DODO_API_BASE_URL: z
+    .url({ protocol: /^https?$/ })
+    .optional()
+    .catch(undefined),
   DODO_PRODUCT_PRO_MONTHLY: optional,
   DODO_PRODUCT_PRO_YEARLY: optional,
   // Phase 4+ (names only): BETTER_AUTH_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SENTRY_DSN.

@@ -4,6 +4,7 @@ import type { Db } from "@/server/db/client";
 import { consentLog, newsletterSubscriber } from "@/server/db/schema";
 import {
   isSuppressed,
+  nextConfirmation,
   normalizeEmail,
   WITHDRAWN_VERSION,
   type ConsentEvent,
@@ -30,7 +31,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CONSENT_KIND = "newsletter_opt_in" as const;
 
 /** The country columns are char(2): keep only clean ISO codes (Cloudflare sends XX and T1 for unknown/Tor). */
-const cleanCountry = (c: string | null | undefined) => (c && /^[A-Z]{2}$/.test(c) && c !== "XX" && c !== "T1" ? c : null);
+const cleanCountry = (c: string | null | undefined) =>
+  c && /^[A-Z]{2}$/.test(c) && c !== "XX" && c !== "T1" ? c : null;
 
 function toSubscriber(row: Row): Subscriber {
   return {
@@ -98,15 +100,29 @@ export class PostgresNewsletterStore implements NewsletterStore {
         source: input.source,
         country: cleanCountry(input.country),
         createdAt: this.now(),
+        confirmationSentAt: this.now(),
+        confirmationCount: 1,
       });
       if (created) return { subscriber: toSubscriber(created), outcome: "send-confirmation" as const };
 
       const existing = (await this.lockByEmail(tx, email))!;
       if (isSuppressed(existing)) return { subscriber: toSubscriber(existing), outcome: "suppressed" as const };
-      if (existing.status === "active") return { subscriber: toSubscriber(existing), outcome: "already-active" as const };
+      if (existing.status === "active")
+        return { subscriber: toSubscriber(existing), outcome: "already-active" as const };
+      const next = nextConfirmation(
+        { sentAt: existing.confirmationSentAt, count: existing.confirmationCount },
+        this.now()
+      );
+      if (!next) return { subscriber: toSubscriber(existing), outcome: "cooldown" as const };
       const [updated] = await tx
         .update(newsletterSubscriber)
-        .set({ status: "pending", source: input.source, unsubscribedAt: null })
+        .set({
+          status: "pending",
+          source: input.source,
+          unsubscribedAt: null,
+          confirmationSentAt: next.sentAt,
+          confirmationCount: next.count,
+        })
         .where(eq(newsletterSubscriber.id, existing.id))
         .returning();
       return { subscriber: toSubscriber(updated!), outcome: "send-confirmation" as const };

@@ -6,6 +6,7 @@ import type { Db } from "@/server/db/client";
 import { recordConsentOnce } from "@/server/db/consent";
 import { account, session, user, verification } from "@/server/db/schema";
 import { uuidv7 } from "@/server/db/uuid";
+import { cloudflareBindings } from "@/server/env";
 import { AGE_TEXT_VERSION, ageCookieName, requestCountry } from "./age-consent";
 import { authConfig, type AuthConfig } from "./config";
 import { enforceSessionLimit } from "./sessions";
@@ -16,7 +17,14 @@ import { testLogin } from "./test-login";
 
 const DAY = 60 * 60 * 24;
 
-export function createAuth(db: Db, config: AuthConfig = authConfig()) {
+/**
+ * Better Auth's limiter keys by the client IP. On Cloudflare `cf-connecting-ip` is set by the edge and can't be
+ * spoofed; elsewhere (`next start`, tests) there is no trusted IP and every request would share one bucket, so
+ * it is on only where the Worker runs, unless a caller (a test) says otherwise.
+ */
+const onCloudflare = () => cloudflareBindings() !== null;
+
+export function createAuth(db: Db, config: AuthConfig = authConfig(), options: { rateLimit?: boolean } = {}) {
   return betterAuth({
     appName: "Origins AI Learn",
     baseURL: config.baseURL,
@@ -59,7 +67,8 @@ export function createAuth(db: Db, config: AuthConfig = authConfig()) {
       updateAge: DAY,
       // Re-auth window for Better Auth's own sensitive endpoints; ours check it in features/account.
       freshAge: 10 * 60,
-      cookieCache: { enabled: true, maxAge: 5 * 60, strategy: "compact" },
+      // Encrypted (JWE), not just signed: the cached session carries the name, email and role (security review L2).
+      cookieCache: { enabled: true, maxAge: 5 * 60, strategy: "jwe" },
     },
 
     account: {
@@ -67,8 +76,24 @@ export function createAuth(db: Db, config: AuthConfig = authConfig()) {
       accountLinking: { enabled: true, trustedProviders: ["google"] },
     },
 
-    // Endpoints we don't offer: account changes go through our own routes (features/account).
-    disabledPaths: ["/update-user", "/change-email", "/delete-user", "/link-social", "/unlink-account"],
+    // Endpoints we don't offer: account changes go through our own routes (features/account). Session listing and
+    // revocation ("sign out everywhere" is /api/account/sessions) and the Google token endpoints are off too, so
+    // no script on the page can read session tokens or OAuth tokens (security review L1).
+    disabledPaths: [
+      "/update-user",
+      "/change-email",
+      "/delete-user",
+      "/link-social",
+      "/unlink-account",
+      "/list-sessions",
+      "/revoke-session",
+      "/revoke-sessions",
+      "/revoke-other-sessions",
+      "/get-access-token",
+      "/refresh-token",
+      "/account-info",
+      "/list-accounts",
+    ],
 
     advanced: {
       useSecureCookies: config.secureCookies,
@@ -80,9 +105,18 @@ export function createAuth(db: Db, config: AuthConfig = authConfig()) {
       ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
     },
 
-    // Limits are applied by the route() wrapper's rate-limit hook (the Workers Rate Limiting binding, plan
-    // §11.6) and Cloudflare rules; Better Auth's in-memory limiter is per isolate and so not meaningful there.
-    rateLimit: { enabled: false },
+    // The main limits are the route() wrapper's (the Workers Rate Limiting binding, plan §11.6) and Cloudflare
+    // zone rules. Better Auth's in-memory limiter is per isolate, so it is only a second layer here.
+    rateLimit: {
+      enabled: options.rateLimit ?? onCloudflare(),
+      storage: "memory",
+      window: 60,
+      max: 120,
+      customRules: {
+        "/sign-in/*": { window: 60, max: 10 },
+        "/callback/*": { window: 60, max: 10 },
+      },
+    },
     telemetry: { enabled: false },
 
     databaseHooks: {
