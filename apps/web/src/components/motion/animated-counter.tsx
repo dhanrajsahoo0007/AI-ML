@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { animate, useInView, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { EASE_OUT } from "@/components/motion/fade-in";
 
 interface AnimatedCounterProps {
   from?: number;
@@ -13,31 +11,42 @@ interface AnimatedCounterProps {
   suffix?: string;
 }
 
-export function AnimatedCounter({
-  from = 0,
-  to,
-  duration = 1.4,
-  className,
-  suffix = "",
-}: AnimatedCounterProps) {
+const easeOut = (t: number) => 1 - Math.pow(1 - t, 4);
+
+// Counts up to `to` when scrolled into view. The server renders the final number, so it is correct
+// without JavaScript, and the count only runs if the number starts off screen (no flash back to zero).
+export function AnimatedCounter({ from = 0, to, duration = 1.4, className, suffix = "" }: AnimatedCounterProps) {
   const ref = useRef<HTMLSpanElement>(null);
-  const isInView = useInView(ref, { once: true });
-  const reduce = useReducedMotion();
-  const [value, setValue] = useState(reduce ? to : from);
+  const [value, setValue] = useState(to);
 
   useEffect(() => {
-    if (!isInView) return;
-    if (reduce) {
-      setValue(to);
-      return;
-    }
-    const controls = animate(from, to, {
-      duration,
-      ease: EASE_OUT,
-      onUpdate: (v) => setValue(Math.round(v)),
+    const el = ref.current;
+    if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let frame = 0;
+    let first = true;
+    const io = new IntersectionObserver(([entry]) => {
+      if (first) {
+        first = false;
+        if (entry.isIntersecting) return io.disconnect();
+        setValue(from);
+        return;
+      }
+      if (!entry.isIntersecting) return;
+      io.disconnect();
+      const start = performance.now();
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - start) / (duration * 1000));
+        setValue(Math.round(from + (to - from) * easeOut(t)));
+        if (t < 1) frame = requestAnimationFrame(tick);
+      };
+      frame = requestAnimationFrame(tick);
     });
-    return () => controls.stop();
-  }, [isInView, reduce, from, to, duration]);
+    io.observe(el);
+    return () => {
+      io.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [from, to, duration]);
 
   return (
     <span ref={ref} className={cn("tabular-nums", className)}>

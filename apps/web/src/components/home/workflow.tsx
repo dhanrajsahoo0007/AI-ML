@@ -1,5 +1,3 @@
-"use client";
-
 import { FadeIn } from "@/components/motion/fade-in";
 import { MonoIndex, Section } from "@/components/ui/editorial";
 import { siteConfig } from "@/config/site";
@@ -16,10 +14,10 @@ export function Workflow() {
       intro={workflow.subtitle}
     >
       <div className="grid gap-10 md:grid-cols-3 md:gap-8">
-        {workflow.steps.map((step, i) => {
+        {workflow.steps.map((step) => {
           const Icon = getIconComponent(step.icon);
           return (
-            <FadeIn key={step.num} delay={i * 0.08}>
+            <FadeIn key={step.num} inView>
               <div className="border-t border-ink pt-6">
                 <div className="flex items-center justify-between">
                   <MonoIndex value={step.num} />

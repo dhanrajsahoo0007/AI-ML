@@ -1,5 +1,3 @@
-"use client";
-
 import { FadeIn } from "@/components/motion/fade-in";
 import { ButtonLink, Container } from "@/components/ui/editorial";
 import { siteConfig } from "@/config/site";
@@ -26,14 +24,14 @@ export function Hero() {
           </span>
         </FadeIn>
 
-        <FadeIn delay={0.05}>
+        <FadeIn delay={0.04}>
           <h1 className="mt-8 max-w-4xl font-display text-[clamp(2.75rem,6.5vw,5.25rem)] leading-[1.02] text-balance">
             {hero.headline[0]}{" "}
             <em className="text-primary">{hero.headline[1]}</em>
           </h1>
         </FadeIn>
 
-        <FadeIn delay={0.12}>
+        <FadeIn delay={0.08}>
           <p className="mt-8 max-w-2xl text-lg leading-relaxed text-pretty text-muted-foreground sm:text-xl">
             {descriptionParts.map((part, i) =>
               i % 2 === 1 ? (
@@ -47,7 +45,7 @@ export function Hero() {
           </p>
         </FadeIn>
 
-        <FadeIn delay={0.2}>
+        <FadeIn delay={0.12}>
           <div className="mt-10 flex flex-wrap gap-3">
             <ButtonLink href={hero.primaryCta.href}>
               {hero.primaryCta.label}

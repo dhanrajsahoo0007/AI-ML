@@ -1,0 +1,68 @@
+/* Entry effects for server-rendered content, in CSS so nothing waits for JavaScript.
+ *
+ * .enter   plays once on load. It never starts fully transparent, so text above the fold is painted (and
+ *          counted for LCP) in the first frame, and the effect stays decorative.
+ * .reveal  fades in as the element scrolls into view, using a scroll-driven animation. Browsers without
+ *          `animation-timeline` just show the content.
+ * .progress  the reading-progress bar, driven by the page's scroll position.
+ * Reduced motion turns all of them off. */
+
+@keyframes enter {
+  from {
+    opacity: 0.4;
+    transform: translateY(var(--motion-y, 12px));
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-y, 18px));
+  }
+}
+
+@keyframes progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.enter {
+  animation: enter var(--motion-duration, 0.6s) cubic-bezier(0.22, 1, 0.36, 1) var(--motion-delay, 0s) both;
+}
+
+@supports (animation-timeline: view()) {
+  .reveal {
+    animation: reveal linear both;
+    animation-timeline: view();
+    animation-range: entry 0% entry 60%;
+  }
+}
+
+.progress {
+  display: none;
+}
+
+@supports (animation-timeline: scroll()) {
+  .progress {
+    display: block;
+    position: fixed;
+    inset: 0 0 auto 0;
+    z-index: 60;
+    height: 1px;
+    transform-origin: left;
+    background: var(--primary);
+    animation: progress linear both;
+    animation-timeline: scroll(root block);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter,
+  .reveal {
+    animation: none;
+  }
+}
