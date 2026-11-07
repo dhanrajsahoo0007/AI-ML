@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from "next/constants";
 import { features } from "./src/config/features";
+import { premiumRoutes } from "./src/features/paywall/access";
 import { allSections, hiddenRoutes, publicNavLinks, resolveAppEnv } from "./src/features/sections/registry";
 import { securityHeaders } from "./src/features/seo/security-headers";
 
@@ -46,14 +47,15 @@ function sectionRedirects() {
   );
 }
 
-// Once per build (config is loaded again in build workers): write the hidden-route manifest for the
-// middleware (plan §5.1.1) and run the content checks before any page is rendered.
+// Once per build (config is loaded again in build workers): write the hidden-route and premium-route manifests
+// for the middleware (plan §5.1.1, §9.2) and run the content checks before any page is rendered.
 function beforeBuild() {
   if (process.env.SECTIONS_PREBUILD_DONE) return;
   process.env.SECTIONS_PREBUILD_DONE = "1";
   const dir = path.join(__dirname, "src", "generated");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "hidden-routes.json"), `${JSON.stringify(hiddenRoutes(), null, 2)}\n`);
+  fs.writeFileSync(path.join(dir, "premium-routes.json"), `${JSON.stringify(premiumRoutes(), null, 2)}\n`);
   if (process.env.SKIP_CONTENT_CHECK) return;
   // Cloud's practice questions are not filed in articles.yaml yet: reported, but not blocking.
   execFileSync(
@@ -74,6 +76,8 @@ function nextConfig(phase: string): NextConfig {
     env: {
       APP_ENV: resolveAppEnv(),
       SECTION_NAV: JSON.stringify(publicNavLinks()),
+      // The paywall switch (content/features.yaml) this build was made with: "on" | "off" (plan §9).
+      PAYWALL: features.paywall ? "on" : "off",
       // "" when unset: inlined as constants so the gated Sentry/PostHog imports are dead code and never ship
       // (plan §10; see src/features/observability/public-env.ts).
       NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN ?? "",

@@ -13,6 +13,14 @@ interface CloudflareEnv {
   /** Secrets: `<kid>:<base64url key>` for the `oa_ent` cookie (plan §11.3). */
   ENTITLEMENT_SECRET?: string;
   ENTITLEMENT_SECRET_PREVIOUS?: string;
+  /** Billing (plan §9.3, §9.6): secrets DODO_API_KEY, DODO_WEBHOOK_SECRET; vars BILLING_PRIMARY,
+   *  DODO_ENVIRONMENT, DODO_PRODUCT_PRO_MONTHLY, DODO_PRODUCT_PRO_YEARLY. */
+  DODO_API_KEY?: string;
+  DODO_WEBHOOK_SECRET?: string;
+  BILLING_PRIMARY?: string;
+  DODO_ENVIRONMENT?: "test_mode" | "live_mode";
+  DODO_PRODUCT_PRO_MONTHLY?: string;
+  DODO_PRODUCT_PRO_YEARLY?: string;
   // TODO(account): uncomment with the bindings in wrangler.jsonc.
   // MEDIA_PUBLIC: R2Bucket;
   // MEDIA_PRIVATE: R2Bucket;

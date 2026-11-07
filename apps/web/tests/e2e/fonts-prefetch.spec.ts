@@ -69,7 +69,11 @@ test.describe("fonts @core", () => {
     expect(await family("h1")).toMatch(/^['"]?Inter\b/);
     expect(await family("article h2")).toMatch(/^['"]?Inter\b/);
     expect(await family("article p")).toMatch(/^['"]?Inter\b/);
-    expect(await family("article pre code")).toMatch(/^['"]?JetBrains Mono\b/);
+    // With the paywall on (preview profile) anonymous visitors get the article's preview, which ends before its
+    // code block; the production-profile run checks the code font.
+    if ((await page.getByTestId("paywall").count()) === 0) {
+      expect(await family("article pre code")).toMatch(/^['"]?JetBrains Mono\b/);
+    }
   });
 });
 

@@ -10,6 +10,8 @@ import { z } from "zod";
 //   SECTIONS_KILL                secret  comma-separated section keys → 503 maintenance (plan §5.1.1);
 //                                        `wrangler secret put SECTIONS_KILL --env production` takes
 //                                        effect without a rebuild, `wrangler secret delete` undoes it
+//   DODO_API_KEY                 secret  Dodo Payments API key; middleware reads only whether it is set, to
+//                                        pick the pricing variant whose "Go Pro" opens checkout (plan §9.3)
 //   NEXT_PUBLIC_GIT_SHA          build   commit SHA, inlined by Next.js at build (set by deploy.yml)
 //   APP_ENV                      build   inlined by next.config.ts (section states are per build)
 
@@ -28,6 +30,7 @@ export const edgeEnvSchema = z.object({
   SECTIONS_KILL: optional,
   ENTITLEMENT_SECRET: optional,
   ENTITLEMENT_SECRET_PREVIOUS: optional,
+  DODO_API_KEY: optional,
 });
 
 type EdgeEnv = z.infer<typeof edgeEnvSchema>;
@@ -43,6 +46,7 @@ export function readEdgeEnv(): EdgeEnv {
     SECTIONS_KILL: process.env.SECTIONS_KILL,
     ENTITLEMENT_SECRET: process.env.ENTITLEMENT_SECRET,
     ENTITLEMENT_SECRET_PREVIOUS: process.env.ENTITLEMENT_SECRET_PREVIOUS,
+    DODO_API_KEY: process.env.DODO_API_KEY,
   });
 }
 

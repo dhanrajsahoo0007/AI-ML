@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { useCanonicalPathname } from "@/features/paywall/use-canonical-pathname";
 import { loadAnalytics, track } from "../analytics";
 import { routeOf, sectionOf } from "./route-info";
 import { startVitals } from "./vitals.client";
@@ -32,7 +32,7 @@ function whenIdle(fn: () => void, timeout: number): () => void {
 }
 
 export function ObservabilityIsland() {
-  const pathname = usePathname();
+  const pathname = useCanonicalPathname();
 
   useEffect(() => {
     const stop: (() => void)[] = [whenIdle(() => startVitals(), 5000)];

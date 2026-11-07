@@ -75,6 +75,10 @@ export default async function AccountPage() {
                   </Link>
                 </>
               )}
+              {" · "}
+              <Link href="/account/billing" className="underline underline-offset-2">
+                Billing
+              </Link>
             </dd>
           </div>
           <div>

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useCanonicalPathname } from "@/features/paywall/use-canonical-pathname";
 import { BookOpen, Github, LogIn, LogOut, User } from "lucide-react";
 import { siteConfig } from "@/config/site";
 
@@ -16,7 +16,7 @@ export function ProfileMenu() {
   const [open, setOpen] = React.useState(false);
   const [me, setMe] = React.useState<Me | undefined>(undefined);
   const ref = React.useRef<HTMLDivElement>(null);
-  const pathname = usePathname();
+  const pathname = useCanonicalPathname();
 
   React.useEffect(() => {
     if (!open) return;

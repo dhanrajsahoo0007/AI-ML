@@ -29,8 +29,14 @@
   // deploy never resets it: `wrangler secret put SECTIONS_KILL --env production` (e.g. "dsa,cloud").
   "vars": { "APP_ENV": "local" },
 
+  // R2 incremental cache (open-next.config.ts): used by builds with the paywall on, so full premium pages are
+  // never public static assets (plan §9.2). Locally (`npm run preview -w web`) wrangler simulates the bucket;
+  // nothing is created in any account.
+  "r2_buckets": [{ "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "origins-ai-learn-cache-local" }],
+
   // ── Account-bound bindings (uncomment per environment once the resources exist) ──────────────────
-  // TODO(account): R2 incremental cache for the Phase 5 R2 + regional cache (open-next.config.ts).
+  // TODO(account): per environment, the R2 cache bucket (required for preview and staging, which build
+  // with the paywall on) plus the media buckets:
   // "r2_buckets": [
   //   { "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "origins-ai-learn-cache-<env>" },
   //   // Public media (media.<domain>), large free assets (plan §5.6).

@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 import yaml from "js-yaml";
-import { CONTENT_DIR } from "../sections/registry";
+import { fixtureDocsFor } from "../paywall/fixtures";
+import { CONTENT_DIR, resolveAppEnv } from "../sections/registry";
 import { navIndexSchema, type NavIndex, type SectionDef } from "../sections/schema";
 
 // Reads a docs section from disk: content/<key>/<hub>.mdx hubs and content/<key>/<hub>/<article>.mdx
@@ -55,8 +56,12 @@ export function loadDocItems(section: Pick<SectionDef, "key" | "href">): DocItem
   const hit = cache.get(section.key);
   if (hit) return hit;
   const dir = sectionDir(section);
-  const items = walk(dir).map((slug): DocItem => {
-    const file = path.join(dir, `${slug}.mdx`);
+  // Test-only fixture pages (the leak canary) join the section in every environment but production.
+  const sources = [
+    ...walk(dir).map((slug) => ({ slug, file: path.join(dir, `${slug}.mdx`) })),
+    ...fixtureDocsFor(section.key, resolveAppEnv()),
+  ];
+  const items = sources.map(({ slug, file }): DocItem => {
     const { data, content } = matter(fs.readFileSync(file, "utf8"));
     const segments = slug.split("/");
     const status = data.status === "outline" || data.status === "draft" ? data.status : "published";

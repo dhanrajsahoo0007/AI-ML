@@ -1,4 +1,5 @@
 import { ContentShell } from "@/components/content-shell";
+import { EntitlementKeeper } from "@/features/entitlements/islands.client";
 import { SpeculationRules } from "@/components/speculation-rules";
 import { getSectionNav } from "@/lib/nav-tree";
 import { docsSection, docsSectionParams, sectionRobots, type SectionParams } from "@/features/docs/routes";
@@ -28,6 +29,8 @@ export default async function DocsSectionLayout({
   const nav = await getSectionNav(section.key);
   return (
     <>
+      {/* Keeps a signed-in reader's entitlement cookie fresh; shows the payment-on-hold banner (plan §9.2, §9.3). */}
+      <EntitlementKeeper />
       <ContentShell navTree={[nav]}>{children}</ContentShell>
       <SpeculationRules sectionHref={section.href} />
     </>

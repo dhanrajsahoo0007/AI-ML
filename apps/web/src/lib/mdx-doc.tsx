@@ -11,6 +11,7 @@ import type { Root as MdastRoot } from "mdast";
 import { rehypeHeadingIds, type DocHeading } from "@/lib/doc-headings";
 import { rehypeMermaidSvg } from "@/lib/rehype-mermaid-svg";
 import { remarkAssetRefs } from "@/lib/remark-asset-refs";
+import { remarkPremium, type PremiumSplit } from "@/features/paywall/remark-premium";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
 import { Pre, MermaidSvg } from "@/components/mdx/code-block";
@@ -68,9 +69,18 @@ export async function getContentSlugs(section: ContentSection): Promise<string[]
   return walk(dir, "");
 }
 
-export async function loadMdxDoc(section: ContentSection, slug: string | string[]) {
+export async function loadMdxDoc(section: ContentSection, slug: string | string[], options?: LoadMdxOptions) {
   const slugPath = Array.isArray(slug) ? slug.join("/") : slug;
-  const filePath = path.join(process.cwd(), "content", section, `${slugPath}.mdx`);
+  return loadMdxFile(path.join(process.cwd(), "content", section, `${slugPath}.mdx`), options);
+}
+
+export interface LoadMdxOptions {
+  /** `preview` compiles only the free preview of a premium article (plan §9.2); default: the whole file. */
+  premium?: PremiumSplit;
+}
+
+/** Compiles one MDX file (build time). */
+export async function loadMdxFile(filePath: string, options: LoadMdxOptions = {}) {
   const raw = await fs.readFile(filePath, "utf8");
   const { data, content } = matter(raw);
   const headings: DocHeading[] = [];
@@ -82,7 +92,14 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
     options: {
       parseFrontmatter: false,
       mdxOptions: {
-        remarkPlugins: [remarkGfm, remarkMath, [remarkDetectMath, flags], remarkAssetRefs],
+        // remarkPremium runs first: a preview drops the premium part before any other plugin sees it.
+        remarkPlugins: [
+          [remarkPremium, options.premium ?? { mode: "full" }],
+          remarkGfm,
+          remarkMath,
+          [remarkDetectMath, flags],
+          remarkAssetRefs,
+        ],
         rehypePlugins: [[rehypeMermaidSvg, { filePath, lineOffset }], rehypeKatex, [rehypeHeadingIds, { headings }]],
       },
     },
@@ -132,6 +149,8 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
       layout?: string;
       /** Overrides the last-updated date taken from git history at build time, as YYYY-MM-DD. */
       updated?: string | Date;
+      /** Top-level blocks shown in the preview of a premium article (plan §5.3). */
+      preview?: number;
     },
     body: (flags.math ? (
       <>

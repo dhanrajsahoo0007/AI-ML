@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { useCanonicalPathname } from "@/features/paywall/use-canonical-pathname";
 import { createHandlers, copyNotice } from "./protection";
 import { domEnv } from "./dom-env";
 import "./content-protection.css";
@@ -9,7 +9,7 @@ import "./content-protection.css";
 // Client island for copy protection layer 1 (plan §11.10). Listens once on the document; screen readers,
 // keyboard navigation, zoom and form controls are untouched.
 export function ContentProtectionIsland({ brand }: { brand: string }) {
-  const pathname = usePathname();
+  const pathname = useCanonicalPathname();
 
   useEffect(() => {
     const h = createHandlers(domEnv(brand));

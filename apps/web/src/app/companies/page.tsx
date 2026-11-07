@@ -4,6 +4,7 @@ import { CompanyExplorer } from "@/components/company-explorer";
 import { FadeIn } from "@/components/motion/fade-in";
 import { PageHeader } from "@/components/ui/editorial";
 import { questionItems, SourceCredit } from "@/components/mdx/question-bank";
+import { premiumAnswerCategories } from "@/features/paywall/access";
 import { COMPANY_GROUPS, getCategories, getCompanies, getQuestions } from "@/lib/question-bank";
 import { routeSection } from "@/features/sections/route-helpers";
 import { directoryRefs } from "@/features/sections/kinds";
@@ -42,6 +43,8 @@ export default async function CompaniesPage() {
     count: refs.filter((r) => r.company === c.slug).length,
   }));
   const categoryTitles = new Map(getCategories().map((c) => [c.slug, c.title]));
+  // Answers of premium-answer categories stay on their (gated) category pages, never on this public one.
+  const premiumAnswers = new Set(premiumAnswerCategories().map((c) => c.slug));
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8">
@@ -56,7 +59,11 @@ export default async function CompaniesPage() {
       </FadeIn>
       <Suspense>
       <CompanyExplorer groups={COMPANY_GROUPS} companies={companies} footer={<SourceCredit />}>
-        {questionItems(tagged, (q) => categoryTitles.get(q.category)!)}
+        {questionItems(
+          tagged,
+          (q) => categoryTitles.get(q.category)!,
+          (q) => premiumAnswers.has(q.category)
+        )}
       </CompanyExplorer>
       </Suspense>
     </div>

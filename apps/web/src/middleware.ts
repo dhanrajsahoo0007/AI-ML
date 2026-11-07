@@ -3,6 +3,15 @@ import { ENTITLEMENT_COOKIE, isAdmin, keyringFromEnv, verifyEntitlement } from "
 import { appVersion, readEdgeEnv } from "@/server/edge/env";
 import { maintenanceResponse } from "@/server/edge/maintenance";
 import {
+  EMPTY_PREMIUM_MANIFEST,
+  decidePaywall,
+  isPremiumPath,
+  premiumIndex,
+  premiumManifestSchema,
+  pricingRewrite,
+  type PremiumManifest,
+} from "@/server/edge/paywall-gate";
+import {
   EMPTY_MANIFEST,
   decideGate,
   needsAdmin,
@@ -19,8 +28,16 @@ import {
 // - `off` sections → 404 (their pages are not built)
 // - `hidden` sections → 404 unless `oa_ent` carries role=admin; admitted responses are never cached
 //   by shared caches
+// - premium pages (src/generated/premium-routes.json, plan §9.2) → the full page only with a valid `oa_ent`
+//   carrying tier=pro (private, never stored by shared caches); everyone else gets the public preview, by a
+//   rewrite to `<path>/_preview`. HTML, RSC (`RSC: 1`, `?_rsc=`) and prefetch requests all hit the page path,
+//   so they are gated alike. The full page is prerendered into the server-only cache (R2 on Cloudflare,
+//   .next/server under `next start`), never into public static assets (open-next.config.ts).
+// - /pricing → /pricing/live (checkout enabled) when the paywall is on and DODO_API_KEY is set
 
 const manifest = loadManifest();
+const premiumManifest = loadPremiumManifest();
+const premium = premiumIndex(premiumManifest);
 
 /** A path no route serves: rewriting to it renders the site's 404 page (for RSC requests too). */
 const NOT_FOUND_PATH = "/_edge-gate/not-found";
@@ -32,11 +49,13 @@ export async function middleware(request: NextRequest) {
   const env = readEdgeEnv();
   const { pathname } = request.nextUrl;
 
-  let admin = false;
-  if (needsAdmin(pathname, manifest)) {
+  // The cookie is verified only on paths that need it (HS256 with jose, well under 1 ms).
+  let claims: Awaited<ReturnType<typeof verifyEntitlement>> = null;
+  if (needsAdmin(pathname, manifest) || isPremiumPath(pathname, premium)) {
     const keyring = keyringFromEnv(env.ENTITLEMENT_SECRET, env.ENTITLEMENT_SECRET_PREVIOUS);
-    admin = isAdmin(await verifyEntitlement(request.cookies.get(ENTITLEMENT_COOKIE)?.value, keyring));
+    claims = await verifyEntitlement(request.cookies.get(ENTITLEMENT_COOKIE)?.value, keyring);
   }
+  const admin = isAdmin(claims);
 
   const decision = decideGate({ pathname, manifest, killed: parseKillList(env.SECTIONS_KILL), isAdmin: admin });
   let response: Response;
@@ -52,7 +71,7 @@ export async function middleware(request: NextRequest) {
       response.headers.set("X-Robots-Tag", "noindex");
       break;
     case "pass":
-      response = NextResponse.next();
+      response = paywallResponse(request, claims?.tier ?? null, Boolean(env.DODO_API_KEY));
       if (decision.gated) {
         // A hidden page shown to an admin: keep it out of every shared cache.
         response.headers.set("Cache-Control", "private, no-store");
@@ -62,6 +81,44 @@ export async function middleware(request: NextRequest) {
   }
   response.headers.set(VERSION_HEADER, appVersion(env));
   return response;
+}
+
+function paywallResponse(request: NextRequest, tier: "free" | "pro" | null, billingConfigured: boolean): Response {
+  const { pathname } = request.nextUrl;
+  const paywall = decidePaywall({ pathname, premium, tier });
+  switch (paywall.action) {
+    case "entitled": {
+      // The full premium page: per-user, so no shared cache may store it under the public URL.
+      const response = NextResponse.next();
+      response.headers.set("Cache-Control", "private, no-store");
+      response.headers.set("Vary", "Cookie");
+      return response;
+    }
+    case "preview": {
+      const url = request.nextUrl.clone();
+      url.pathname = paywall.to;
+      const response = NextResponse.rewrite(url);
+      // The preview under the canonical URL: Pro readers share that URL, so it isn't shared-cacheable either.
+      response.headers.set("Cache-Control", "private, no-cache");
+      response.headers.set("Vary", "Cookie");
+      return response;
+    }
+    case "preview-direct": {
+      const response = NextResponse.next();
+      response.headers.set("X-Robots-Tag", "noindex");
+      return response;
+    }
+    case "pass": {
+      const live = pricingRewrite(pathname, {
+        paywall: premiumManifest.paywall,
+        billingConfigured,
+      });
+      if (!live) return NextResponse.next();
+      const url = request.nextUrl.clone();
+      url.pathname = live;
+      return NextResponse.rewrite(url);
+    }
+  }
 }
 
 export const config = {
@@ -87,4 +144,17 @@ function loadManifest(): SectionManifest {
     return EMPTY_MANIFEST;
   }
   return sectionManifestSchema.parse(json);
+}
+
+/** src/generated/premium-routes.json, written by next.config.ts with hidden-routes.json (same rules). */
+function loadPremiumManifest(): PremiumManifest {
+  let json: unknown;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    json = require("@/generated/premium-routes.json");
+  } catch {
+    if (process.env.NODE_ENV === "production") throw new Error("src/generated/premium-routes.json is missing");
+    return EMPTY_PREMIUM_MANIFEST;
+  }
+  return premiumManifestSchema.parse(json);
 }

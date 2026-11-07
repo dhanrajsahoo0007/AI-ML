@@ -1,105 +1,41 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Breadcrumb } from "@/components/breadcrumb";
-import { FadeIn } from "@/components/motion/fade-in";
-import { PageHeader } from "@/components/ui/editorial";
-import { QuestionList } from "@/components/mdx/question-bank";
-import { cn } from "@/lib/utils";
-import { isRouteBuilt, routeSection } from "@/features/sections/route-helpers";
-import { getCategories, getCategory, getQuestions } from "@/lib/question-bank";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { listingPageSeo } from "@/features/seo/pages";
+import { CategoryView, categorySeo } from "@/components/interviews/category-view";
+import { resolveSubsection, SubsectionView, subsectionSeo } from "@/components/interviews/subsection-view";
+import { premiumAnswerCategories } from "@/features/paywall/access";
+import { PREVIEW_SEGMENT } from "@/features/paywall/constants";
+import { isRouteBuilt } from "@/features/sections/route-helpers";
+import { getCategories, getCategory } from "@/lib/question-bank";
 
 type Params = Promise<{ category: string; subsection: string }>;
 
+// `/interviews/<category>/_preview` is the public preview of a category whose answers are premium (plan §9.1,
+// §9.2); middleware serves it at the category's URL to visitors without Pro.
 export function generateStaticParams() {
   if (!isRouteBuilt("question-bank")) return [];
-  return getCategories().flatMap((c) =>
-    c.subsections.map((s) => ({ category: c.slug, subsection: s.slug }))
-  );
+  return [
+    ...getCategories().flatMap((c) => c.subsections.map((s) => ({ category: c.slug, subsection: s.slug }))),
+    ...premiumAnswerCategories().map((c) => ({ category: c.slug, subsection: PREVIEW_SEGMENT })),
+  ];
 }
 
-function resolve(categorySlug: string, subsectionSlug: string) {
-  const category = getCategory(categorySlug);
-  const subsection = category?.subsections.find((s) => s.slug === subsectionSlug);
-  return category && subsection ? { category, subsection } : null;
-}
-
-function subsectionSeo({ category, subsection }: NonNullable<ReturnType<typeof resolve>>) {
-  const section = routeSection("question-bank");
-  return listingPageSeo({
-    kind: "question-bank",
-    image: { path: `${section.href}/opengraph-image`, alt: section.label },
-    path: `${section.href}/${category.slug}/${subsection.slug}`,
-    title: `${subsection.title} interview questions`,
-    description: subsection.description,
-    crumbs: [
-      { label: "Home", href: "/" },
-      { label: section.label, href: section.href },
-      { label: category.title, href: `${section.href}/${category.slug}` },
-      { label: subsection.title },
-    ],
-  });
-}
+const isCategoryPreview = (p: Awaited<Params>) =>
+  p.subsection === PREVIEW_SEGMENT && premiumAnswerCategories().some((c) => c.slug === p.category);
 
 export async function generateMetadata({ params }: { params: Params }) {
   const p = await params;
-  const found = resolve(p.category, p.subsection);
+  if (isCategoryPreview(p)) return categorySeo(p.category)?.metadata ?? {};
+  const found = resolveSubsection(p.category, p.subsection);
   return found ? subsectionSeo(found).metadata : {};
 }
 
 export default async function SubsectionPage({ params }: { params: Params }) {
   const p = await params;
-  const found = resolve(p.category, p.subsection);
+  if (isCategoryPreview(p)) {
+    const category = getCategory(p.category);
+    if (!category) notFound();
+    return <CategoryView category={category} preview />;
+  }
+  const found = resolveSubsection(p.category, p.subsection);
   if (!found) notFound();
-  const section = routeSection("question-bank");
-  const { category, subsection } = found;
-  const questions = getQuestions({ category: category.slug, subcategory: subsection.slug });
-
-  return (
-    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
-      <JsonLd data={subsectionSeo(found).jsonLd} />
-      <Breadcrumb
-        items={[
-          { label: "Home", href: "/" },
-          { label: section.label, href: section.href },
-          { label: category.title, href: `/interviews/${category.slug}` },
-          { label: subsection.title },
-        ]}
-      />
-      <FadeIn>
-        <PageHeader
-          className="mt-10 mb-8 border-b border-hairline pb-10"
-          title={subsection.title}
-          lead={subsection.description}
-        />
-      </FadeIn>
-
-      <nav aria-label={`${category.title} subsections`} className="flex flex-wrap gap-2">
-        <Link
-          href={`/interviews/${category.slug}`}
-          className="rounded-full border border-hairline px-3 py-1 text-[13px] text-ink-2 hover:border-ink/40"
-        >
-          All {category.title}
-        </Link>
-        {category.subsections.map((s) => (
-          <Link
-            key={s.slug}
-            href={`/interviews/${category.slug}/${s.slug}`}
-            aria-current={s.slug === subsection.slug ? "page" : undefined}
-            className={cn(
-              "rounded-full border px-3 py-1 text-[13px] transition-colors",
-              s.slug === subsection.slug
-                ? "border-ink bg-ink text-paper"
-                : "border-hairline text-ink-2 hover:border-ink/40"
-            )}
-          >
-            {s.title}
-          </Link>
-        ))}
-      </nav>
-
-      <QuestionList questions={questions} title={`${subsection.title} questions`} />
-    </div>
-  );
+  return <SubsectionView found={found} />;
 }

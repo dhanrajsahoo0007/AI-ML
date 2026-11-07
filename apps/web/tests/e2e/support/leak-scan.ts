@@ -8,7 +8,15 @@ import type { APIRequestContext } from "@playwright/test";
 
 const webRoot = path.resolve(__dirname, "../../..");
 
-export const LEAK_FIXTURE = path.join(webRoot, "tests", "fixtures", "leak-canary", "premium-article.mdx");
+export const LEAK_FIXTURE = path.join(
+  webRoot,
+  "tests",
+  "fixtures",
+  "content",
+  "system-design",
+  "leak-canary",
+  "premium-article.mdx"
+);
 
 /** Matches any canary, so a canary from another fixture or an older build is caught too. */
 export const ANY_CANARY = /LEAK-CANARY-[A-Za-z0-9]{8,}/;
