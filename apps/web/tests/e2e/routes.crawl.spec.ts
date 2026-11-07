@@ -14,7 +14,7 @@ test("the build lists the expected pages @core", () => {
 
 // Console errors that are known and tracked elsewhere; each one is recorded as a test annotation instead of
 // failing the crawl. Keep this empty: React #418 (hydration mismatch under load) was listed here until it was
-// fixed on 2026-11-07 (root layout: THEME_SCRIPT from a plain module + Suspense around the late RSC rows; see
+// fixed on 2026-11-07 (root layout: THEME_SCRIPT from a plain module + HydrationSlot around the late RSC rows; see
 // tests/unit/client-boundary.test.ts). Add an entry only with a linked issue and an owner.
 const KNOWN_CONSOLE_ERRORS: RegExp[] = [];
 
