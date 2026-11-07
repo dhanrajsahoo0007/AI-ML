@@ -6,7 +6,7 @@ import { routeOf, sectionOf } from "./route-info";
 // The metrics belong to the page the visitor landed on: LCP and TTFB happen there, and client-side navigations
 // don't restart them.
 
-export const VITALS_SAMPLE_RATE = 0.1;
+const VITALS_SAMPLE_RATE = 0.1;
 const ENDPOINT = "/api/vitals";
 
 type Sent = Pick<Metric, "name" | "value" | "rating"> & { navigation_type: Metric["navigationType"] };

@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { loadAnalytics, track } from "../analytics/track";
+import { loadAnalytics, track } from "../analytics";
 import { routeOf, sectionOf } from "./route-info";
 import { startVitals } from "./vitals.client";
 

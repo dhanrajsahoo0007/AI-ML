@@ -18,16 +18,12 @@ function origin(url: string | undefined): string | null {
   }
 }
 
-/** The origin a Sentry DSN sends to: `https://<key>@o1.ingest.us.sentry.io/2` → `https://o1.ingest.us.sentry.io`. */
-export function sentryIngestOrigin(dsn: string | undefined): string | null {
-  return origin(dsn);
-}
-
 export function observabilityCspHosts(env: PublicObservabilityEnv): ObservabilityCspHosts {
   const scriptSrc: string[] = [];
   const connectSrc: string[] = [];
 
-  const sentry = sentryIngestOrigin(env.NEXT_PUBLIC_SENTRY_DSN);
+  // A DSN `https://<key>@o1.ingest.us.sentry.io/2` sends to `https://o1.ingest.us.sentry.io`.
+  const sentry = origin(env.NEXT_PUBLIC_SENTRY_DSN);
   if (sentry) connectSrc.push(sentry);
 
   // posthog-js is bundled (no-external build), so PostHog needs connect-src only, no script-src.
