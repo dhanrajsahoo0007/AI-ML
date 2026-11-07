@@ -7,6 +7,8 @@ import { QuestionList } from "@/components/mdx/question-bank";
 import { cn } from "@/lib/utils";
 import { isRouteBuilt, routeSection } from "@/features/sections/route-helpers";
 import { getCategories, getCategory, getQuestions } from "@/lib/question-bank";
+import { JsonLd } from "@/features/seo/json-ld-script";
+import { listingPageSeo } from "@/features/seo/pages";
 
 type Params = Promise<{ category: string; subsection: string }>;
 
@@ -23,12 +25,27 @@ function resolve(categorySlug: string, subsectionSlug: string) {
   return category && subsection ? { category, subsection } : null;
 }
 
+function subsectionSeo({ category, subsection }: NonNullable<ReturnType<typeof resolve>>) {
+  const section = routeSection("question-bank");
+  return listingPageSeo({
+    kind: "question-bank",
+    image: { path: `${section.href}/opengraph-image`, alt: section.label },
+    path: `${section.href}/${category.slug}/${subsection.slug}`,
+    title: `${subsection.title} interview questions`,
+    description: subsection.description,
+    crumbs: [
+      { label: "Home", href: "/" },
+      { label: section.label, href: section.href },
+      { label: category.title, href: `${section.href}/${category.slug}` },
+      { label: subsection.title },
+    ],
+  });
+}
+
 export async function generateMetadata({ params }: { params: Params }) {
   const p = await params;
   const found = resolve(p.category, p.subsection);
-  return found
-    ? { title: `${found.subsection.title} interview questions`, description: found.subsection.description }
-    : {};
+  return found ? subsectionSeo(found).metadata : {};
 }
 
 export default async function SubsectionPage({ params }: { params: Params }) {
@@ -41,6 +58,7 @@ export default async function SubsectionPage({ params }: { params: Params }) {
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
+      <JsonLd data={subsectionSeo(found).jsonLd} />
       <Breadcrumb
         items={[
           { label: "Home", href: "/" },

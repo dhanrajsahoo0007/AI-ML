@@ -8,11 +8,24 @@ import { COMPANY_GROUPS, getCategories, getCompanies, getQuestions } from "@/lib
 import { routeSection } from "@/features/sections/route-helpers";
 import { directoryRefs } from "@/features/sections/kinds";
 import { getSection } from "@/features/sections/registry";
+import { JsonLd } from "@/features/seo/json-ld-script";
+import { listingPageSeo } from "@/features/seo/pages";
 
-export const metadata = {
-  title: "Interview questions by company",
-  description: "Interview questions publicly reported at top AI companies, with our answers.",
-};
+function companiesSeo() {
+  const section = routeSection("directory");
+  return listingPageSeo({
+    kind: "directory",
+    path: section.href,
+    title: "Interview questions by company",
+    description: "Interview questions publicly reported at top AI companies, with our answers.",
+    crumbs: [{ label: "Home", href: "/" }, { label: section.label }],
+  });
+}
+
+// The social image comes from ./opengraph-image.tsx in this folder (Next merges it into this page).
+export function generateMetadata() {
+  return companiesSeo().metadata;
+}
 
 export default async function CompaniesPage() {
   const section = routeSection("directory");
@@ -32,6 +45,7 @@ export default async function CompaniesPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8">
+      <JsonLd data={companiesSeo().jsonLd} />
       <Breadcrumb items={[{ label: "Home", href: "/" }, { label: section.label }]} />
       <FadeIn>
         <PageHeader

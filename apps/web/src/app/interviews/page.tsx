@@ -6,6 +6,24 @@ import { Eyebrow, PageHeader } from "@/components/ui/editorial";
 import { getIconComponent } from "@/lib/icons";
 import { routeSection } from "@/features/sections/route-helpers";
 import { CATEGORY_GROUPS, getCategories, getQuestions } from "@/lib/question-bank";
+import { JsonLd } from "@/features/seo/json-ld-script";
+import { listingPageSeo } from "@/features/seo/pages";
+
+function interviewsSeo() {
+  const section = routeSection("question-bank");
+  return listingPageSeo({
+    kind: "question-bank",
+    path: section.href,
+    title: "AI interview questions",
+    description: `${getQuestions().length.toLocaleString("en-US")} AI interview questions with clear answers, organized by topic and tagged with the companies reported to ask them.`,
+    crumbs: [{ label: "Home", href: "/" }, { label: section.label }],
+  });
+}
+
+// The social image comes from ./opengraph-image.tsx in this folder (Next merges it into this page).
+export function generateMetadata() {
+  return interviewsSeo().metadata;
+}
 
 export default function InterviewsIndexPage() {
   const section = routeSection("question-bank");
@@ -16,6 +34,7 @@ export default function InterviewsIndexPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8">
+      <JsonLd data={interviewsSeo().jsonLd} />
       <Breadcrumb items={[{ label: "Home", href: "/" }, { label: section.label }]} />
 
       <FadeIn>

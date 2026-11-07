@@ -7,15 +7,30 @@ import { PageHeader } from "@/components/ui/editorial";
 import { QuestionList } from "@/components/mdx/question-bank";
 import { isRouteBuilt, routeSection } from "@/features/sections/route-helpers";
 import { getCategories, getCategory, getQuestions } from "@/lib/question-bank";
+import { JsonLd } from "@/features/seo/json-ld-script";
+import { listingPageSeo } from "@/features/seo/pages";
 
 export function generateStaticParams() {
   if (!isRouteBuilt("question-bank")) return [];
   return getCategories().map((c) => ({ category: c.slug }));
 }
 
+function categorySeo(slug: string) {
+  const c = getCategory(slug);
+  if (!c) return null;
+  const section = routeSection("question-bank");
+  return listingPageSeo({
+    kind: "question-bank",
+    image: { path: `${section.href}/opengraph-image`, alt: section.label },
+    path: `${section.href}/${c.slug}`,
+    title: `${c.title} interview questions`,
+    description: c.description,
+    crumbs: [{ label: "Home", href: "/" }, { label: section.label, href: section.href }, { label: c.title }],
+  });
+}
+
 export async function generateMetadata({ params }: { params: Promise<{ category: string }> }) {
-  const c = getCategory((await params).category);
-  return c ? { title: `${c.title} interview questions`, description: c.description } : {};
+  return categorySeo((await params).category)?.metadata ?? {};
 }
 
 export default async function CategoryPage({ params }: { params: Promise<{ category: string }> }) {
@@ -24,9 +39,11 @@ export default async function CategoryPage({ params }: { params: Promise<{ categ
   const section = routeSection("question-bank");
   const questions = getQuestions({ category: category.slug });
   const titles = new Map(category.subsections.map((s) => [s.slug, s.title]));
+  const seo = categorySeo(category.slug);
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
+      {seo && <JsonLd data={seo.jsonLd} />}
       <Breadcrumb
         items={[
           { label: "Home", href: "/" },

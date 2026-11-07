@@ -6,6 +6,13 @@ import { CtaBanner } from "@/components/home/cta-banner";
 import { visibleSections } from "@/features/sections/registry";
 import { loadSection } from "@/features/sections/kinds";
 import type { SectionKindName } from "@/features/sections/schema";
+import { JsonLd } from "@/features/seo/json-ld-script";
+import { homeSeo } from "@/features/seo/pages";
+
+// The social image comes from ./opengraph-image.tsx (Next merges it into this page).
+export function generateMetadata() {
+  return homeSeo().metadata;
+}
 
 export default async function HomePage() {
   // Stats count only `on` sections, each through its kind's counts().
@@ -17,6 +24,7 @@ export default async function HomePage() {
 
   return (
     <>
+      <JsonLd data={homeSeo().jsonLd} />
       <Hero />
       <Workflow />
       <Features />
