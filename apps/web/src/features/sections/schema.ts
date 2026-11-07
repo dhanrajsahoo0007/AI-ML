@@ -30,6 +30,8 @@ export const sectionEntrySchema = z
     key: slug,
     kind: z.enum(SECTION_KINDS),
     label: z.string().min(1),
+    /** Shorter label for the header bar; `label` is used everywhere else. */
+    shortLabel: z.string().min(1).max(16).optional(),
     href: z.string().regex(/^\/[a-z0-9-]+$/, "must be a top-level path such as /cloud"),
     icon: z.string().min(1),
     navGroup: z.enum(NAV_GROUPS),

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { ArrowUpRight } from "lucide-react";
 import { Container, Eyebrow } from "@/components/ui/editorial";
 import { siteConfig } from "@/config/site";
 import { business, MOR_NOTICE } from "@/config/business";
@@ -64,19 +63,6 @@ export function SiteFooter() {
         <nav aria-label="Company" className="md:col-span-2">
           <Eyebrow>Company</Eyebrow>
           <LinkList links={companyLinks} />
-          <ul className="mt-2.5 space-y-2.5 text-[15px]">
-            <li>
-              <a
-                href={siteConfig.github}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-ink-2 transition-colors hover:text-primary"
-              >
-                GitHub
-                <ArrowUpRight aria-hidden className="size-3.5" />
-              </a>
-            </li>
-          </ul>
         </nav>
 
         <nav aria-label="Legal" className="md:col-span-3">

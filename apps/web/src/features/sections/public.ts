@@ -9,6 +9,8 @@ export interface PublicNavLink {
   key: string;
   kind: SectionKindName;
   label: string;
+  /** Shorter label for the header bar (sections.yaml `shortLabel`). */
+  shortLabel?: string;
   href: string;
   icon: string;
   navGroup: NavGroupName;
@@ -65,11 +67,12 @@ interface FullNavSection extends Omit<HeaderNavSection, "groups"> {
 
 /** Strips a section's nav down to what the header shows. */
 export function headerNavSection(nav: FullNavSection): HeaderNavSection {
-  const { key, kind, label, href, icon, navGroup, comingSoon } = nav;
+  const { key, kind, label, shortLabel, href, icon, navGroup, comingSoon } = nav;
   return {
     key,
     kind,
     label,
+    ...(shortLabel ? { shortLabel } : {}),
     href,
     icon,
     navGroup,

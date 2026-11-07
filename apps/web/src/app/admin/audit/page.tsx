@@ -1,7 +1,7 @@
 import { adminPage } from "@/features/admin/access";
 import { formatDateTime } from "@/features/admin/format";
 import { AdminShell, Panel, Table } from "@/features/admin/ui";
-import { auditSpan, recentAudit } from "@/server/db/admin-queries";
+import { auditSpan, recentAudit } from "@/features/admin/audit";
 
 const PATH = "/admin/audit";
 const LIMIT = 100;

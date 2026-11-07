@@ -14,7 +14,6 @@ export const siteConfig = {
   tagline: "AI system design",
   description:
     "Origins AI Learn is a one-stop place to prepare for AI and system design interviews: deep-dives on LLMs, RAG, agents and production AI systems, classic system design case studies, and interview questions tagged with the companies that ask them.",
-  github: "https://github.com/dhanrajsahoo0007",
   nav,
   extraNav,
   hero: {

@@ -35,6 +35,7 @@ export interface NavSection {
   key: string;
   kind: SectionKindName;
   label: string;
+  shortLabel?: string;
   href: string;
   icon: string;
   navGroup: NavGroupName;
@@ -97,7 +98,17 @@ export interface SectionKind<Item> {
 
 /** Builds a NavSection from a registry entry and its groups. */
 export function navSection(section: SectionDef, groups: NavGroup[]): NavSection {
-  const { key, kind, label, href, icon, navGroup } = section;
+  const { key, kind, label, shortLabel, href, icon, navGroup } = section;
   const comingSoon = !KINDS_WITH_ROUTES.includes(kind);
-  return { key, kind, label, href, icon, navGroup, groups, ...(comingSoon ? { comingSoon } : {}) };
+  return {
+    key,
+    kind,
+    label,
+    ...(shortLabel ? { shortLabel } : {}),
+    href,
+    icon,
+    navGroup,
+    groups,
+    ...(comingSoon ? { comingSoon } : {}),
+  };
 }

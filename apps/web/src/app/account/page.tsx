@@ -5,6 +5,7 @@ import { Container, Eyebrow, PageHeader } from "@/components/ui/editorial";
 import { MAX_SESSIONS_PER_USER, withPageSession } from "@/features/auth";
 import { accountOverview, describeDevice } from "@/features/account";
 import { SignOutEverywhereButton } from "@/features/account/account-actions.client";
+import { pageInfo } from "@/features/search";
 
 export const metadata: Metadata = { title: "Your account" };
 
@@ -106,12 +107,17 @@ export default async function AccountPage() {
             {overview.completed.slice(0, 10).map((key) => (
               <li key={key}>
                 <Link href={`/${key}`} className="hover:text-ink">
-                  {key}
+                  {pageInfo(`/${key}`)?.t ?? key}
                 </Link>
               </li>
             ))}
           </ul>
         )}
+        <p className="mt-4 text-sm">
+          <Link href="/account/progress" className="underline underline-offset-2">
+            All progress &amp; bookmarks
+          </Link>
+        </p>
       </Panel>
 
       <Panel title="Signed-in devices">

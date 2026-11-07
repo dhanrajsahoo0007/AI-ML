@@ -207,7 +207,7 @@ Before you finish, follow `.claude/skills/review-before-merge/SKILL.md`.
    `@full`.
 6. **Budgets:** client code goes in `*.client.tsx` islands, lazy-loaded where possible; check `npm run size -w web`.
 7. **Leak suite:** anything premium gets a case in `apps/web/tests/e2e/leak.spec.ts` (canary in
-   `apps/web/tests/fixtures/leak-canary/`).
+   `apps/web/tests/fixtures/content/system-design/leak-canary/premium-article.mdx`).
 8. **Copy protection:** content areas stay protected; mark copyable UI with `data-copy-ok`.
 9. **Accessibility:** keyboard, focus, contrast, alt text; `apps/web/tests/e2e/a11y.spec.ts` runs axe.
 10. **Metadata:** every page sets title, description and canonical through `apps/web/src/features/seo/metadata.ts`;

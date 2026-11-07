@@ -3,8 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { useCanonicalPathname } from "@/features/paywall/use-canonical-pathname";
-import { BookOpen, Github, LogIn, LogOut, User } from "lucide-react";
-import { siteConfig } from "@/config/site";
+import { BookmarkCheck, CreditCard, LifeBuoy, LogIn, LogOut, Mail, Shield, Sparkles, User } from "lucide-react";
+import { publicNav, SUBSCRIBE_KIND } from "@/features/sections/public";
 
 // Sign-in state is fetched only when the menu is opened (never on page load), so content pages stay static
 // and make no auth or database requests. Better Auth's 5-minute cookie cache answers most of these without
@@ -17,6 +17,9 @@ export function ProfileMenu() {
   const [me, setMe] = React.useState<Me | undefined>(undefined);
   const ref = React.useRef<HTMLDivElement>(null);
   const pathname = useCanonicalPathname();
+  const close = () => setOpen(false);
+  // Email preferences only exist while the newsletter section is on in this build.
+  const newsletterOn = publicNav().some((s) => s.kind === SUBSCRIBE_KIND && !s.comingSoon);
 
   React.useEffect(() => {
     if (!open) return;
@@ -83,25 +86,44 @@ export function ProfileMenu() {
           </div>
           <div className="py-1.5">
             {me ? (
-              <MenuLink href="/account" icon={User} onClick={() => setOpen(false)}>
-                Your account
-              </MenuLink>
+              <>
+                <MenuLink href="/account" icon={User} onClick={close}>
+                  Your profile
+                </MenuLink>
+                <MenuLink href="/account/progress" icon={BookmarkCheck} onClick={close}>
+                  Progress &amp; bookmarks
+                </MenuLink>
+                <MenuLink href="/account/billing" icon={CreditCard} onClick={close}>
+                  Subscription &amp; billing
+                </MenuLink>
+                {newsletterOn && (
+                  <MenuLink href="/account/email-preferences" icon={Mail} onClick={close}>
+                    Email preferences
+                  </MenuLink>
+                )}
+                <MenuLink href="/account/data" icon={Shield} onClick={close}>
+                  Privacy &amp; your data
+                </MenuLink>
+              </>
             ) : (
               me === null && (
-                <MenuLink
-                  href={`/sign-in?callbackURL=${encodeURIComponent(pathname || "/")}`}
-                  icon={LogIn}
-                  onClick={() => setOpen(false)}
-                >
-                  Sign in
-                </MenuLink>
+                <>
+                  <MenuLink
+                    href={`/sign-in?callbackURL=${encodeURIComponent(pathname || "/")}`}
+                    icon={LogIn}
+                    onClick={close}
+                  >
+                    Sign in
+                  </MenuLink>
+                  <MenuLink href="/pricing" icon={Sparkles} onClick={close}>
+                    Plans &amp; pricing
+                  </MenuLink>
+                </>
               )
             )}
-            <MenuLink href="/interviews" icon={BookOpen} onClick={() => setOpen(false)}>
-              Interview practice
-            </MenuLink>
-            <MenuLink href={siteConfig.github} icon={Github} external onClick={() => setOpen(false)}>
-              GitHub
+            <div className="my-1.5 border-t border-hairline" />
+            <MenuLink href="/contact" icon={LifeBuoy} onClick={close}>
+              Help &amp; contact
             </MenuLink>
             {me && (
               <button
