@@ -1,27 +1,52 @@
 # Origins AI Learn
 
-**Origins AI Learn** is a one-stop place to prepare for **AI system design** and **system design** interviews: deep-dives on transformers, LLMs, RAG, agents and production AI systems, classic system design fundamentals and case studies, and an interview question library tagged with the companies that ask each question.
+**Origins AI Learn** is a one-stop place to prepare for **AI system design**, **system design** and **cloud architecture** interviews: deep-dives on transformers, LLMs, RAG, agents and production AI systems, classic system design fundamentals and case studies, AWS / Google Cloud / Azure guides, and an interview question library tagged with the companies that ask each question.
 
-Stack: **Next.js (App Router)**, **PostgreSQL**, **Redis**.
+Stack: **Next.js 15 (App Router)**, MDX content compiled at build time. Pages never touch a database, and the build needs no environment variables. Planned: Cloudflare Workers (OpenNext) hosting, Neon Postgres for sign-in and billing only.
 
 ## Structure
 
-- `apps/web` — Next.js UI, MDX content, and `/api/v1/*` route handlers (deploy this app)
-- `packages/*` — reserved for shared packages (optional)
+- `apps/web`: the Next.js app and all content (deploy this app)
+- `packages/*`: reserved for shared packages (optional)
 
-**Documentation:** keep in-repo prose in **this README only** (no extra markdown guides under `docs/` or elsewhere).
+**Documentation:** humans read this README; coding agents read [`AGENTS.md`](AGENTS.md) (root), plus short `AGENTS.md` files inside `apps/web/src/features/<x>/` when a feature has non-obvious rules. `CLAUDE.md` only points to `AGENTS.md`. No other prose docs.
+
+## Local development
+
+Requires Node 22 (see `.nvmrc`) and npm.
+
+```bash
+npm ci
+npm run dev
+```
+
+Open [http://localhost:3001](http://localhost:3001).
+
+| Command                                   | What it does                                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `npm run dev`                             | Dev server on port 3001                                                                     |
+| `npm run build` / `npm run start`         | Production build / serve it                                                                 |
+| `npm run typecheck`                       | TypeScript check                                                                            |
+| `npm run lint`                            | ESLint                                                                                      |
+| `npm run format` / `npm run format:check` | Prettier                                                                                    |
+| `npm test`                                | Unit tests (Vitest)                                                                         |
+| `npm run e2e`                             | End-to-end tests (Playwright; run `npm run build` first, and `npx playwright install` once) |
+| `npm run knip`                            | Unused files, dependencies and exports                                                      |
+
+Optional: install the secret-scanning git hook with `pipx install pre-commit && pre-commit install`.
 
 ## Content
 
 All content lives in `apps/web/content` as MDX and YAML:
 
-| Folder | Site section |
-| --- | --- |
-| `ai-system-design/` | AI System Design deep-dives (`/ai-system-design`) |
-| `system-design/` | System Design fundamentals and case studies (`/system-design`) |
-| `question-bank/` | Interview question library: `taxonomy.yaml` (categories and subsections), one YAML file per category, `articles.yaml` (files practice questions inside articles under a subsection) |
-| `companies/` | Company records used for tags and `/companies` |
-| `ml-system-design/` | ML System Design, parked (see feature flags) |
+| Folder              | Site section                                                                                                                                                                        |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ai-system-design/` | AI System Design deep-dives (`/ai-system-design`)                                                                                                                                   |
+| `system-design/`    | System Design fundamentals and case studies (`/system-design`)                                                                                                                      |
+| `cloud/`            | Cloud Architecture: AWS, Google Cloud and Azure guides (`/cloud`), dev only for now (see feature flags)                                                                             |
+| `question-bank/`    | Interview question library: `taxonomy.yaml` (categories and subsections), one YAML file per category, `articles.yaml` (files practice questions inside articles under a subsection) |
+| `companies/`        | Company records used for tags and `/companies`                                                                                                                                      |
+| `ml-system-design/` | ML System Design, parked (see feature flags)                                                                                                                                        |
 
 ### Feature flags
 
@@ -29,6 +54,7 @@ All content lives in `apps/web/content` as MDX and YAML:
 
 - `mlSystemDesign` shows the `/ml-system-design` section and the practice questions from its articles.
 - `mlInterviews` shows the interview categories marked `flag: mlInterviews` in `taxonomy.yaml` (ML Fundamentals, Deep Learning, Statistics & Data Science).
+- `cloud` shows the `/cloud` section. It is on under `npm run dev` and off in production builds until the pilot pages are approved.
 
 Set a flag to `true` and rebuild to bring that content back in the nav, pages, interview library, companies page and home counts.
 
@@ -43,124 +69,10 @@ This repo is the only home for system design content. The old [System-Design](ht
 - **Interview questions:** the build fails if an article with `<InterviewQuestion>` blocks is not mapped in `question-bank/articles.yaml`. When the first System Design article gets questions, add a "System Design" category to `taxonomy.yaml` with subsections mirroring the hubs, then map each article to its subsection.
 - **Writing order:** (1) requirements and APIs, (2) client-server communication, (3) storage data structures, (4) replication, (5) distributed infrastructure case studies (rate limiter, key-value store, URL shortener, message queue, typeahead), (6) the remaining case study groups, (7) design patterns, networking and security.
 
-### Follow-ups
-
-- The database still has the old learning-path catalog (`learning_paths` and `modules` tables, `/api/v1/catalog`, `scripts/seed.mjs`), which the site no longer shows. Removing it needs a migration.
-
-## Full stack in Docker (Postgres + Redis + Next.js)
-
-Runs migrations and catalog seed on container start, then the production Next server.
-
-From the **repository root**:
-
-```bash
-cp .env.example .env   # optional: tune WEB_HOST_PORT
-docker compose --profile app up --build
-```
-
-Open the app at **http://localhost:3000** by default.
-
-### If port 3000 is already in use
-
-Docker will fail to bind `0.0.0.0:3000`. Set a free host port in `.env`:
-
-```bash
-WEB_HOST_PORT=3001
-```
-
-Then run Compose again and open **http://localhost:3001** (host port maps to container port 3000).
-
-- Postgres is also exposed on the host at **localhost:5433** and Redis at **localhost:6380** (for local tooling or `npm run dev` workflows).
-- To skip seeding on start, set `RUN_DB_SEED=0` on the `web` service (for example in a `docker-compose.override.yml`).
-
-Stop everything:
-
-```bash
-docker compose --profile app down
-```
-
-### Web image only (no Compose)
-
-Build from the **repository root**:
-
-```bash
-docker build -f apps/web/Dockerfile .
-```
-
-Run with `DATABASE_URL` and `REDIS_URL` pointing at your Postgres and Redis instances.
-
-## Local development (Next on host, DBs in Docker)
-
-1. Copy environment file:
-
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Start **Postgres and Redis** only (no `app` profile):
-
-   ```bash
-   docker compose up -d
-   ```
-
-3. Install dependencies, migrate, and seed the catalog (from repo root):
-
-   ```bash
-   npm install
-   npm run db:migrate -w web
-   npm run db:seed -w web
-   npm run dev -w web
-   ```
-
-   Local services use host ports **5433** (Postgres) and **6380** (Redis) to avoid clashes with existing installs.
-
-4. Open [http://localhost:3000](http://localhost:3000).
-
-## Push to GitHub ([dhanrajsahoo0007](https://github.com/dhanrajsahoo0007))
-
-The remote repo must be created with **your** GitHub authentication (browser or [GitHub CLI](https://cli.github.com/) `gh auth login`). Suggested repository name: **`origins-ai-learn`** (matches this workspace package name).
-
-### One-time: authenticate
-
-```bash
-gh auth login
-```
-
-### New repository (recommended repo name)
-
-From your local clone at the repository root (replace nothing if you use the suggested name):
-
-```bash
-# If you do not yet have git initialized:
-git init
-git checkout -b main
-git add .
-git commit -m "Initial commit: Origins AI Learn"
-
-# Create GitHub repo and push main
-gh repo create dhanrajsahoo0007/origins-ai-learn --public --source=. --remote=origin --push
-```
-
-### Push the `development` branch
-
-```bash
-git checkout development  # create if missing: git checkout -b development
-git merge main            # optional: keep development up to date with main
-git push -u origin development
-```
-
-### If the empty repo already exists on GitHub
-
-```bash
-git remote add origin https://github.com/dhanrajsahoo0007/origins-ai-learn.git
-git branch -M main
-git push -u origin main
-git checkout -b development
-git push -u origin development
-```
-
-On GitHub: **Settings → General → Default branch** should be **main**. Use **development** for ongoing feature work.
-
 ## CI
 
-GitHub Actions runs install, lint, and build for `apps/web` on push and pull request.
+GitHub Actions (`.github/workflows/ci.yml`) runs on every pull request to `development` and `main`: typecheck, lint, format check, unit tests, knip, a production build with no environment variables, the Playwright route crawl and accessibility checks (Chromium), and security scans (gitleaks, Semgrep, OSV-Scanner). Renovate opens weekly grouped dependency updates and immediate security fixes.
+
+## Branches
+
+Work on a feature branch from `development` and open a PR into `development`. `main` is the release branch. Repository: [dhanrajsahoo0007/AI-ML](https://github.com/dhanrajsahoo0007/AI-ML).
