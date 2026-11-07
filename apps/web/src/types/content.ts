@@ -1,10 +1,5 @@
-export type ContentSection =
-  | "interviews"
-  | "system-design"
-  | "cloud"
-  | "ai-system-design"
-  | "ml-system-design"
-  | "companies";
+/** A section key from content/sections.yaml (validated by src/features/sections/registry.ts). */
+export type ContentSection = string;
 
 export interface ContentGroupDef {
   name: string;
@@ -19,6 +14,7 @@ export interface ContentMeta {
   icon?: string;
   categories?: string[];
   groups?: ContentGroupDef[];
+  /** @deprecated unused; dropped from the frontmatter schema (plan §5.3). */
   area?: string;
   order?: number;
 }
