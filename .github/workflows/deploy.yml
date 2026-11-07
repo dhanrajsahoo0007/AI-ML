@@ -1,0 +1,263 @@
+name: Deploy
+
+# Deploys the Worker (plan §7.7): push to `development` → staging, push to `main` → production (through the
+# `production` GitHub environment, which carries the required reviewer).
+#
+#   verify → OpenNext build (APP_ENV per environment, NEXT_PUBLIC_GIT_SHA) → wrangler versions upload
+#   → gradual deploy 10% → smoke tests pinned to the new version → 100% → smoke tests → (on failure) rollback
+#
+# Needs the secrets CLOUDFLARE_API_TOKEN (Workers Scripts: Edit, Account Settings: Read) and
+# CLOUDFLARE_ACCOUNT_ID, as environment secrets of `staging` and `production`. Until they exist the job
+# succeeds with a notice and deploys nothing. The first run on an environment with no Worker yet does a plain
+# `wrangler deploy` (nothing to roll back to).
+#
+# Smoke tests use the workers.dev hostname: Bot Fight Mode on the custom domain blocks CI runners (plan §7.5).
+
+on:
+  push:
+    branches: [development, main]
+  workflow_dispatch:
+
+# Least privilege by default (plan §11.7).
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  # Response headers every HTML page must carry (security headers come from next.config.ts, the version
+  # header from middleware).
+  SMOKE_REQUIRED_HEADERS: "x-content-type-options strict-transport-security x-app-version"
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    if: github.ref_name == 'main' || github.ref_name == 'development'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    env:
+      APP_ENV: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+      WRANGLER_ENV: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+      NEXT_PUBLIC_GIT_SHA: ${{ github.sha }}
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: Check Cloudflare credentials
+        id: creds
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice title=Deploy skipped::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not set for the ${WRANGLER_ENV} environment. Nothing was deployed."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.creds.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: the build derives "updated" dates from git (scripts/content-dates.mjs).
+          fetch-depth: 0
+          persist-credentials: false
+      - if: steps.creds.outputs.ready == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - if: steps.creds.outputs.ready == 'true'
+        run: npm ci
+
+      # TODO: replace with `uses: ./.github/workflows/ci.yml` once ci.yml exposes `workflow_call`. Until then
+      # branch protection runs the full CI on the PR and this repeats the fast gates on the merged commit.
+      - name: Verify (typecheck, lint, unit tests)
+        if: steps.creds.outputs.ready == 'true'
+        run: npm run typecheck && npm run lint && npm test
+
+      - name: Install Chromium (Mermaid diagrams are rendered at build)
+        if: steps.creds.outputs.ready == 'true'
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      - name: Build for Workers (OpenNext)
+        if: steps.creds.outputs.ready == 'true'
+        run: npm run cf:build -w web
+
+      # Copies the prerendered pages into the assets under cdn-cgi/_next_cache/ (static-assets cache). With
+      # the Phase 5 R2 cache this same command uploads them to the bucket instead.
+      - name: Populate the incremental cache
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx opennextjs-cloudflare populateCache remote --env "$WRANGLER_ENV"
+        working-directory: apps/web
+
+      - name: Find the Worker, its workers.dev URL and the live version
+        if: steps.creds.outputs.ready == 'true'
+        id: live
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          worker="origins-ai-learn-${WRANGLER_ENV}"
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          sub=$(curl -sSf "${auth[@]}" "${api}/workers/subdomain" | jq -r '.result.subdomain')
+          echo "worker=${worker}" >> "$GITHUB_OUTPUT"
+          echo "url=https://${worker}.${sub}.workers.dev" >> "$GITHUB_OUTPUT"
+          code=$(curl -sS -o "$RUNNER_TEMP/deployments.json" -w '%{http_code}' "${auth[@]}" "${api}/workers/scripts/${worker}/deployments")
+          previous=""
+          if [ "$code" = "200" ]; then
+            # The version currently serving the most traffic.
+            previous=$(jq -r '.result.deployments[0].versions // [] | sort_by(-.percentage) | .[0].version_id // ""' "$RUNNER_TEMP/deployments.json")
+          fi
+          echo "previous=${previous}" >> "$GITHUB_OUTPUT"
+          echo "Worker ${worker}; live version: ${previous:-none (first deploy)}"
+
+      - name: Write the smoke test
+        if: steps.creds.outputs.ready == 'true'
+        run: |
+          cat > "$RUNNER_TEMP/smoke.sh" <<'SMOKE'
+          #!/usr/bin/env bash
+          # smoke.sh <base-url> [version-id to pin]   (plan §7.7.5)
+          # Browser User-Agent, responses saved to files and grepped there (never `echo | grep -q` under pipefail).
+          set -euo pipefail
+          base="$1"; pin="${2:-}"
+          ua="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+          args=(-sS -A "$ua" --max-time 20)
+          [ -n "$pin" ] && args+=(-H "Cloudflare-Workers-Version-Overrides: ${WORKER}=\"${pin}\"")
+          body="$RUNNER_TEMP/smoke-body"; head="$RUNNER_TEMP/smoke-head"; fails=0
+          fetch() { curl "${args[@]}" -o "$body" -D "$head" -w '%{http_code}' "$base$1" || echo 000; }
+          fail() { echo "::error title=Smoke test::$1"; fails=$((fails + 1)); }
+
+          # The new version is live: the home page answers with its commit (retry while traffic shifts).
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(fetch /)
+            if [ "$code" = "200" ] && grep -qi "^x-app-version: ${NEXT_PUBLIC_GIT_SHA}" "$head"; then break; fi
+            [ "$i" = 10 ] && fail "/ returned ${code} without x-app-version ${NEXT_PUBLIC_GIT_SHA}"
+            sleep 6
+          done
+          for h in $SMOKE_REQUIRED_HEADERS; do grep -qi "^${h}:" "$head" || fail "/ is missing the ${h} header"; done
+
+          # Free hubs render.
+          for p in /ai-system-design /system-design /interviews /companies; do
+            code=$(fetch "$p"); [ "$code" = "200" ] || fail "$p returned ${code}"
+            grep -q "<h1" "$body" || fail "$p has no <h1>"
+          done
+
+          # Hidden and off sections (from the manifest this build used) are 404 without a cookie.
+          manifest=apps/web/src/generated/hidden-routes.json
+          for p in $(jq -r '.hidden[], .off[]' "$manifest"); do
+            code=$(fetch "$p"); [ "$code" = "404" ] || fail "$p (hidden/off) returned ${code}, expected 404"
+            code=$(curl "${args[@]}" -H "RSC: 1" -o /dev/null -w '%{http_code}' "$base$p" || echo 000)
+            [ "$code" = "404" ] || fail "$p (hidden/off, RSC) returned ${code}, expected 404"
+          done
+
+          # robots.txt and sitemap.xml are valid.
+          code=$(fetch /robots.txt); [ "$code" = "200" ] && grep -qi "^user-agent:" "$body" || fail "robots.txt invalid (${code})"
+          code=$(fetch /sitemap.xml); [ "$code" = "200" ] && grep -q "<urlset" "$body" || fail "sitemap.xml invalid (${code})"
+
+          # /api/health once it is mounted (src/server/edge/health.ts): its version must match too.
+          code=$(fetch /api/health)
+          if [ "$code" = "200" ]; then
+            [ "$(jq -r .version "$body")" = "$NEXT_PUBLIC_GIT_SHA" ] || fail "/api/health reports another version"
+          fi
+
+          [ "$fails" = 0 ] || { echo "${fails} smoke check(s) failed against ${base}"; exit 1; }
+          echo "Smoke tests passed against ${base}${pin:+ (pinned to ${pin})}"
+          SMOKE
+          chmod +x "$RUNNER_TEMP/smoke.sh"
+
+      # ── First deploy of this environment: nothing to roll back to ────────────────────────────────────
+      - name: First deploy (no live version yet)
+        if: steps.creds.outputs.ready == 'true' && steps.live.outputs.previous == ''
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: >-
+          npx wrangler deploy --env "$WRANGLER_ENV"
+          --message "First deploy of ${GITHUB_SHA::7}"
+        working-directory: apps/web
+      - name: Smoke test (first deploy)
+        if: steps.creds.outputs.ready == 'true' && steps.live.outputs.previous == ''
+        env:
+          WORKER: ${{ steps.live.outputs.worker }}
+        run: '"$RUNNER_TEMP/smoke.sh" "${{ steps.live.outputs.url }}"'
+
+      # ── Gradual rollout ──────────────────────────────────────────────────────────────────────────────
+      - name: Upload the new version
+        if: steps.creds.outputs.ready == 'true' && steps.live.outputs.previous != ''
+        id: upload
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-upload.ndjson
+        run: |
+          set -euo pipefail
+          npx wrangler versions upload --env "$WRANGLER_ENV" --tag "${GITHUB_SHA::12}" --message "${GITHUB_REF_NAME} ${GITHUB_SHA::7}"
+          version=$(jq -r 'select(.type == "version-upload") | .version_id' "$WRANGLER_OUTPUT_FILE_PATH" | tail -n1)
+          [ -n "$version" ] && [ "$version" != "null" ] || { echo "::error::No version id in the wrangler output"; exit 1; }
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy 10%
+        if: steps.upload.outcome == 'success'
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: >-
+          npx wrangler versions deploy
+          "${{ steps.upload.outputs.version }}@10%" "${{ steps.live.outputs.previous }}@90%"
+          --env "$WRANGLER_ENV" --message "Canary ${GITHUB_SHA::7}" --yes
+
+      - name: Smoke test the new version (pinned)
+        if: steps.upload.outcome == 'success'
+        env:
+          WORKER: ${{ steps.live.outputs.worker }}
+        run: '"$RUNNER_TEMP/smoke.sh" "${{ steps.live.outputs.url }}" "${{ steps.upload.outputs.version }}"'
+
+      - name: Deploy 100%
+        id: promote
+        if: steps.upload.outcome == 'success'
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: >-
+          npx wrangler versions deploy "${{ steps.upload.outputs.version }}@100%"
+          --env "$WRANGLER_ENV" --message "Release ${GITHUB_SHA::7}" --yes
+
+      - name: Smoke test at 100%
+        if: steps.promote.outcome == 'success'
+        env:
+          WORKER: ${{ steps.live.outputs.worker }}
+        run: '"$RUNNER_TEMP/smoke.sh" "${{ steps.live.outputs.url }}"'
+
+      - name: Roll back to the previous version
+        if: failure() && steps.upload.outcome == 'success' && steps.live.outputs.previous != ''
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: >-
+          npx wrangler rollback "${{ steps.live.outputs.previous }}"
+          --env "$WRANGLER_ENV" --message "Automatic rollback: ${GITHUB_SHA::7} failed its smoke tests" --yes
+
+      - name: Summary
+        if: always() && steps.creds.outputs.ready == 'true'
+        run: |
+          {
+            echo "### ${WRANGLER_ENV}: ${{ job.status }}"
+            echo "- commit: \`${GITHUB_SHA}\`"
+            echo "- new version: \`${{ steps.upload.outputs.version || 'n/a (first deploy)' }}\`"
+            echo "- previous version: \`${{ steps.live.outputs.previous || 'none' }}\`"
+            echo "- URL: ${{ steps.live.outputs.url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+      # TODO(plan §7.7.6-7): notify on rollback (Slack/email) and create the Sentry release with source maps.
