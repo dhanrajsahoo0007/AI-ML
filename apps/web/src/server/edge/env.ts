@@ -30,7 +30,7 @@ export const edgeEnvSchema = z.object({
   ENTITLEMENT_SECRET_PREVIOUS: optional,
 });
 
-export type EdgeEnv = z.infer<typeof edgeEnvSchema>;
+type EdgeEnv = z.infer<typeof edgeEnvSchema>;
 
 /**
  * Reads the edge env. Each variable is named literally so Next.js can inline the build-time ones

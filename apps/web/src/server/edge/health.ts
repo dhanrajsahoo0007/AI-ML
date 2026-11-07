@@ -12,7 +12,7 @@ import { appVersion, readEdgeEnv } from "./env";
 //
 // (Wrap it in the `route()` helper from src/server/http.ts once that exists, plan §11.6.)
 
-export interface Health {
+interface Health {
   status: "ok";
   version: string;
   env: string;

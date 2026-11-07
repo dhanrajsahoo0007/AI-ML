@@ -13,7 +13,7 @@ export const ENTITLEMENT_COOKIE = "oa_ent";
 export const CLOCK_TOLERANCE_SEC = 120;
 
 /** Lifetime of an issued cookie (plan §9.2: 15 minutes). */
-export const ENTITLEMENT_TTL_SEC = 15 * 60;
+const ENTITLEMENT_TTL_SEC = 15 * 60;
 
 const claimsSchema = z.object({
   sub: z.string().min(1),
@@ -25,7 +25,7 @@ const claimsSchema = z.object({
   v: z.number().int().nonnegative(),
 });
 
-export type EntitlementClaims = z.infer<typeof claimsSchema>;
+type EntitlementClaims = z.infer<typeof claimsSchema>;
 
 export interface EntitlementKey {
   kid: string;
@@ -33,7 +33,7 @@ export interface EntitlementKey {
 }
 
 /** Current key first; the previous key only verifies (never signs). */
-export interface Keyring {
+interface Keyring {
   current: EntitlementKey;
   previous?: EntitlementKey;
 }

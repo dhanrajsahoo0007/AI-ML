@@ -14,13 +14,13 @@ import { edgeEnvSchema } from "./edge/env";
 //
 // The build never needs any of these (AGENTS.md rule 1): read them inside handlers, not at module load.
 
-export const serverEnvSchema = edgeEnvSchema.extend({
+const serverEnvSchema = edgeEnvSchema.extend({
   // Phase 4+ (names only; values come from `wrangler secret put` / GitHub environment secrets):
   // BETTER_AUTH_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, DODO_API_KEY, DODO_WEBHOOK_SECRET,
   // SENTRY_DSN. Add each here as it is introduced.
 });
 
-export type ServerEnv = z.infer<typeof serverEnvSchema>;
+type ServerEnv = z.infer<typeof serverEnvSchema>;
 
 export function serverEnv(): ServerEnv {
   return serverEnvSchema.parse({

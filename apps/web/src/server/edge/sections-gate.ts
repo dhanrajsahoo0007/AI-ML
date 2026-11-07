@@ -21,7 +21,7 @@ export type SectionManifest = z.infer<typeof sectionManifestSchema>;
 /** No section gated: what middleware uses when the manifest has not been generated yet (`next dev`). */
 export const EMPTY_MANIFEST: SectionManifest = { env: "local", hidden: [], off: [] };
 
-export type GateDecision =
+type GateDecision =
   { action: "pass"; gated: boolean } | { action: "not-found" } | { action: "maintenance"; prefix: string };
 
 const SECTION_KEY = /^[a-z0-9]+(-[a-z0-9]+)*$/;
