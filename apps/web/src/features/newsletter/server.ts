@@ -8,6 +8,7 @@ import { publicNav, SUBSCRIBE_KIND as NEWSLETTER_KIND } from "../sections/public
 import { APP_ENVS, type AppEnv } from "../sections/schema";
 import type { Db } from "@/server/db/client";
 import { databaseUrl } from "@/server/db/config";
+import { parseKillList } from "@/server/edge/sections-gate";
 import { checkRateLimit } from "@/server/http";
 import type { RateLimiter } from "./rate-limit";
 import type { NewsletterDeps } from "./service";
@@ -51,6 +52,15 @@ const envSchema = z.object({
 /** The section's href when it is `on` in this build (next.config.ts inlines the public nav), else null. */
 export function newsletterHref(): string | null {
   return publicNav().find((l) => l.kind === NEWSLETTER_KIND)?.href ?? null;
+}
+
+/**
+ * Whether the SECTIONS_KILL kill switch names the newsletter section. Middleware only covers pages, so the API
+ * routes check it themselves (security review L8).
+ */
+export function newsletterKilled(killList: string | undefined = process.env.SECTIONS_KILL): boolean {
+  const key = publicNav().find((l) => l.kind === NEWSLETTER_KIND)?.key;
+  return Boolean(key) && parseKillList(killList).includes(`/${key}`);
 }
 
 export function tokenSecret(env: NodeJS.ProcessEnv = process.env, appEnv = currentAppEnv()): string {

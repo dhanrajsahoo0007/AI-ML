@@ -3,10 +3,11 @@ import type { z } from "zod";
 import { route } from "@/features/auth";
 import { HttpError, notFoundRoute, type AuthLevel, type NextRouteHandler, type RouteOptions } from "@/server/http";
 import { log } from "@/server/log";
-import { newsletterHref, NotConfiguredError } from "./server";
+import { newsletterHref, newsletterKilled, NotConfiguredError } from "./server";
 
 // The newsletter's API routes go through the shared route() wrapper (src/server/http.ts, plan §11.6), plus:
-// - a section gate: every route answers the uniform 404 while the newsletter is not `on` in this build
+// - a section gate: every route answers the uniform 404 while the newsletter is not `on` in this build, and 503
+//   while SECTIONS_KILL names it (the kill switch; middleware only covers pages)
 // - NotConfiguredError (a missing secret or sender) becomes a 503 `not_configured`
 
 // Same as server/http.ts: any zod object; the wrapper makes it strict.
@@ -33,8 +34,16 @@ function withConfigErrors<S extends BodySchema | undefined, A extends AuthLevel>
 
 const gated =
   (handler: NextRouteHandler): NextRouteHandler =>
-  (request, context) =>
-    newsletterHref() ? handler(request, context) : notFoundRoute(request, context);
+  async (request, context) => {
+    if (!newsletterHref()) return notFoundRoute(request, context);
+    if (newsletterKilled()) {
+      return Response.json(
+        { error: { code: "maintenance", message: "This section is temporarily unavailable" } },
+        { status: 503, headers: { "cache-control": "no-store", "retry-after": "300" } }
+      );
+    }
+    return handler(request, context);
+  };
 
 /** A newsletter API route: the shared wrapper (Origin check, auth, zod body, no-store) behind the section gate. */
 export function newsletterRoute<S extends BodySchema | undefined = undefined, A extends AuthLevel = "none">(

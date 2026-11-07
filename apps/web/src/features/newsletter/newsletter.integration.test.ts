@@ -305,6 +305,25 @@ describe.skipIf(!available)("newsletter API (integration)", () => {
     });
   });
 
+  it("every newsletter route is a 503 while SECTIONS_KILL names the section (security review L8)", async () => {
+    vi.stubEnv("SECTIONS_KILL", `dsa, ${NEWSLETTER_KIND}`);
+    try {
+      const routes: [string, NextRouteHandler][] = [
+        ["/api/newsletter/subscribe", (await import("@/app/api/newsletter/subscribe/route")).POST],
+        ["/api/newsletter/confirm", (await import("@/app/api/newsletter/confirm/route")).POST],
+        ["/api/newsletter/unsubscribe", (await import("@/app/api/newsletter/unsubscribe/route")).POST],
+        ["/api/webhooks/resend", (await import("@/app/api/webhooks/resend/route")).POST],
+      ];
+      for (const [url, handler] of routes) {
+        const res = await call(handler, url, { method: "POST", body: { email: "killed@example.com", token: "x" } });
+        expect(res.status, url).toBe(503);
+      }
+      expect(await subscriberRow("killed@example.com")).toBeUndefined();
+    } finally {
+      vi.stubEnv("SECTIONS_KILL", "");
+    }
+  });
+
   it("every newsletter route is a 404 when the section is off", async () => {
     vi.resetModules();
     vi.stubEnv("SECTION_NAV", "[]");

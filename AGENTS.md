@@ -225,7 +225,7 @@ runs it.
   `npx wrangler deployments list --env production`, then `npx wrangler rollback <version-id> --env production
 --message "<why>"` from `apps/web`. Then revert the bad commit on `main`.
 - **Section kill switch:** `npx wrangler secret put SECTIONS_KILL --env production` with `dsa` (comma-separated
-  keys); 503 immediately. Undo with `npx wrangler secret delete SECTIONS_KILL --env production`. Follow up with a PR
+  keys); 503 immediately (pages through middleware; the newsletter API checks it too). Undo with `npx wrangler secret delete SECTIONS_KILL --env production`. Follow up with a PR
   setting the section's `release.production` to `off` (`.claude/skills/release-section/SKILL.md`).
 - **Neon outage:** content pages, middleware and the paywall gate keep working (no database). Sign-in, account,
   progress and newsletter APIs return 5xx; Pro readers keep access until their `oa_ent` expires (≤ 15 min) and
