@@ -1,0 +1,32 @@
+# Local Postgres for development and tests ONLY (plan §8). Production uses Neon through Hyperdrive.
+#
+#   npm run db:up -w web          # start (waits until healthy)
+#   docker compose -f apps/web/docker-compose.dev.yml down -v   # stop and wipe
+#
+# The credentials below are throwaway local values, not secrets. The port is bound to 127.0.0.1 only and is
+# deliberately not 5432 so it never collides with another local Postgres.
+#
+#   DATABASE_URL=postgres://origins:origins@127.0.0.1:54329/origins_dev
+#
+# Integration tests (Vitest) create and drop their own database on this server (see src/server/db/testing.ts).
+name: origins-ai-learn-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: origins
+      POSTGRES_PASSWORD: origins
+      POSTGRES_DB: origins_dev
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U origins -d origins_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:
