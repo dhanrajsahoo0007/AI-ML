@@ -50,7 +50,7 @@ const reportingSchema = z
   )
   .max(100);
 
-export interface CspViolation {
+interface CspViolation {
   document: string | null;
   blocked: string | null;
   directive: string | null;

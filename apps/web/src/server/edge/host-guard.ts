@@ -11,7 +11,7 @@
 
 export const SMOKE_KEY_HEADER = "x-smoke-key";
 
-export type HostDecision = { action: "pass" } | { action: "pass-noindex" } | { action: "redirect"; location: string };
+type HostDecision = { action: "pass" } | { action: "pass-noindex" } | { action: "redirect"; location: string };
 
 interface HostInput {
   appEnv: string;

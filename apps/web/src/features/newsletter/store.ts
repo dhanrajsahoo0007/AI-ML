@@ -68,7 +68,7 @@ export const CONFIRMATION_MAX_PER_DAY = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The confirmation-email bookkeeping of a subscriber row. */
-export interface ConfirmationSends {
+interface ConfirmationSends {
   sentAt: Date | null;
   count: number;
 }

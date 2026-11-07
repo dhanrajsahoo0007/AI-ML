@@ -4,7 +4,7 @@ import { createDb, type Db, type DbHandle } from "./db/client";
 import { log } from "./log";
 import { bindingRateLimiter, type RateLimiter, type RateLimitName } from "./rate-limit";
 
-export type { RateLimitName, RateLimiter } from "./rate-limit";
+export type { RateLimitName } from "./rate-limit";
 
 // The one wrapper every API route handler goes through (plan §11.6):
 // - an Origin allow-list check on state-changing methods (CSRF); GET never changes state
@@ -83,7 +83,7 @@ export function checkRateLimit(name: RateLimitName, key: string) {
 }
 
 /** Counts one request against `name` for `key`; throws the uniform 429 (with Retry-After) when over. */
-export async function enforceRateLimit(name: RateLimitName, key: string): Promise<void> {
+async function enforceRateLimit(name: RateLimitName, key: string): Promise<void> {
   const decision = await checkRateLimit(name, key);
   if (!decision.success) {
     throw new HttpError(429, "rate_limited", "Too many requests, try again shortly", undefined, {
