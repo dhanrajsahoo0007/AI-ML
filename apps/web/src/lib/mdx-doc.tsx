@@ -10,9 +10,11 @@ import rehypeKatex from "rehype-katex";
 import type { Root as MdastRoot } from "mdast";
 import { rehypeHeadingIds, type DocHeading } from "@/lib/doc-headings";
 import { rehypeMermaidSvg } from "@/lib/rehype-mermaid-svg";
+import { remarkAssetRefs } from "@/lib/remark-asset-refs";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
-import { Pre, Figure, MermaidSvg } from "@/components/mdx/code-block";
+import { Pre, MermaidSvg } from "@/components/mdx/code-block";
+import { Img, Figure, Diagram as AssetDiagram, Mermaid, TechIcon, Download } from "@/components/mdx/assets";
 import { KatexStyles } from "@/components/article/katex-styles";
 import type { ContentSection, ContentMeta, ContentGroupDef } from "@/types/content";
 import { Diagram } from "@/components/diagrams/diagram";
@@ -80,7 +82,7 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
     options: {
       parseFrontmatter: false,
       mdxOptions: {
-        remarkPlugins: [remarkGfm, remarkMath, [remarkDetectMath, flags]],
+        remarkPlugins: [remarkGfm, remarkMath, [remarkDetectMath, flags], remarkAssetRefs],
         rehypePlugins: [[rehypeMermaidSvg, { filePath, lineOffset }], rehypeKatex, [rehypeHeadingIds, { headings }]],
       },
     },
@@ -93,6 +95,12 @@ export async function loadMdxDoc(section: ContentSection, slug: string | string[
       Figure,
       MermaidSvg,
       AnimatedDiagram: Diagram,
+      // Asset library (plan §5.6): reusable media by ID from apps/web/assets/.
+      Img,
+      Diagram: AssetDiagram,
+      Mermaid,
+      TechIcon,
+      Download,
       DatabasePicker,
       DatabaseWorkloadMatrix,
       CompareDatabases,

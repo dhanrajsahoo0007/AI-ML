@@ -4,7 +4,9 @@
 //
 // Validates the section registry against content folders and route folders, every section through
 // its kind's validate() (frontmatter schema, icons, nav index ↔ files), the interview question library,
-// question mapping for every section with `questions: true`, and internal links. Prints
+// question mapping for every section with `questions: true`, internal links, and the asset library (plan §5.6:
+// IDs exist, alt text, licences, size limits, duplicates, no premium asset on a free page, generated files
+// up to date; unused assets and repeated Mermaid fences are warnings). Prints
 // `file:line: level: message` and exits 1 when there are errors.
 //
 // --warn-cloud-questions  report cloud articles with practice questions that are not filed in
@@ -219,6 +221,17 @@ async function main() {
         }
       }
     }
+  }
+
+  // Asset library (plan §5.6), with the same rules scripts/build-assets.ts enforces before the build.
+  const assetsLib = await import("./build-assets.lib");
+  const assetIndex = assetsLib.indexAssets(path.join(ROOT, "assets"), ROOT);
+  const assetRefs = assetsLib.scanUsage(CONTENT_DIR, await assetsLib.contentPages(CONTENT_DIR), ROOT);
+  problems.push(...assetsLib.checkAssets(assetIndex, assetRefs));
+  problems.push(...assetsLib.duplicateMermaidFences(CONTENT_DIR, ROOT));
+  for (const g of assetsLib.generatedModules(assetIndex, ROOT)) {
+    const current = fs.existsSync(path.join(ROOT, g.file)) ? fs.readFileSync(path.join(ROOT, g.file), "utf8") : "";
+    if (current !== g.content) report(g.file, "generated from assets/ but out of date; run `npm run assets`");
   }
 
   // Print.

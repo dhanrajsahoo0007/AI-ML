@@ -6,7 +6,7 @@ type MermaidProps = { chart: string; caption?: string };
 // Mermaid fences are rendered to SVG at build time (src/lib/rehype-mermaid-svg.ts). Only `next dev` keeps
 // a client-side renderer, for diagrams edited since the last `npm run mermaid`. The condition is a
 // compile-time constant, so production bundles never reference mermaid.tsx or the mermaid package.
-const DevMermaid: React.ComponentType<MermaidProps> | null =
+export const DevMermaid: React.ComponentType<MermaidProps> | null =
   process.env.NODE_ENV === "development"
     ? // eslint-disable-next-line @typescript-eslint/no-require-imports
       require("@/components/mdx/mermaid").Mermaid
@@ -24,7 +24,7 @@ function mermaidChart(node: React.ReactNode): string | null {
   return className?.split(" ").includes("language-mermaid") ? codeText(children) : null;
 }
 
-const captionClass = "mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+export const captionClass = "mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
 
 // A pre-rendered diagram: the light and dark SVGs are both inline and CSS shows the one matching the
 // `.dark` class, so there is no JavaScript and no flash when the theme changes.
@@ -32,11 +32,14 @@ export function MermaidSvg({
   light,
   dark,
   caption,
+  alt,
   minWidth = 560,
 }: {
   light: string;
   dark: string;
   caption?: string;
+  /** What the diagram shows, for screen readers (asset diagrams take it from their sidecar). */
+  alt?: string;
   minWidth?: number;
 }) {
   return (
@@ -44,7 +47,7 @@ export function MermaidSvg({
       <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <div
           role="img"
-          aria-label={caption ?? "Architecture diagram"}
+          aria-label={alt ?? caption ?? "Architecture diagram"}
           style={{ minWidth }}
           className="flex min-h-[200px] items-center justify-center rounded-xl border border-hairline bg-paper p-4 sm:p-6 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full"
         >

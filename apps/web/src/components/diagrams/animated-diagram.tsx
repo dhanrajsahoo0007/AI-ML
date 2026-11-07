@@ -21,7 +21,6 @@ import {
 } from "lucide-react";
 import { getIconComponent } from "@/lib/icons";
 import { cn } from "@/lib/utils";
-import { DIAGRAMS } from "./specs";
 import { GLYPH_SIZE, NODE_H, NODE_W, edgePoints, nodeBox, pathD, pointAt } from "./geometry";
 import { Glyph, isGlyph } from "./glyphs";
 import type { CloudProvider, CloudRef, DiagramEdge, DiagramNode, DiagramSpec, DiagramZone, Tone } from "./types";
@@ -118,18 +117,22 @@ function buildView(spec: DiagramSpec, step: number | undefined) {
   return { nodes, edges: timed, zones };
 }
 
-// Architecture diagram drawn from a spec in ./specs, with marching dashes and packets travelling along
-// the edges. `step` draws the design as it stands after that build step, highlighting what the step added;
-// `stepper` adds controls to walk through every step. Animation runs only on screen and not for reduced motion.
+// Architecture diagram drawn from a spec (assets/diagrams/animated, resolved by ./diagram.tsx), with marching
+// dashes and packets travelling along the edges. `step` draws the design as it stands after that build step,
+// highlighting what the step added; `stepper` adds controls to walk through every step. Animation runs only on
+// screen and not for reduced motion.
 export function AnimatedDiagram({
-  name,
+  spec,
+  alt,
   caption,
   step,
   stepper = false,
   minWidth = 680,
   cloudNames = {},
 }: {
-  name: string;
+  spec: DiagramSpec;
+  /** Longer description from the asset's sidecar, for screen readers. */
+  alt?: string;
   caption?: string;
   step?: number;
   stepper?: boolean;
@@ -137,7 +140,6 @@ export function AnimatedDiagram({
   /** Short service names for the catalog ids used in node.cloud, resolved on the server (see ./diagram.tsx). */
   cloudNames?: Record<string, string>;
 }) {
-  const spec = DIAGRAMS[name];
   const uid = `dg${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const figRef = useRef<HTMLElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -163,10 +165,6 @@ export function AnimatedDiagram({
     if (running) svg.unpauseAnimations();
     else svg.pauseAnimations();
   }, [running, current]);
-
-  if (!spec) {
-    return <p className="text-sm text-muted-foreground">Unknown diagram: {name}</p>;
-  }
 
   const view = buildView(spec, current);
   const steps = spec.steps ?? [];
@@ -251,6 +249,7 @@ export function AnimatedDiagram({
             className="dg h-auto w-full font-sans"
           >
             <title>{label}</title>
+            {alt && <desc>{alt}</desc>}
             <Defs uid={uid} />
             {view.zones.map(({ zone, phase }) => (
               <Zone key={zone.id} zone={zone} phase={phase} />
