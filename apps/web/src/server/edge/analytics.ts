@@ -21,7 +21,7 @@ import { normalizePath } from "./sections-gate";
 // Privacy: labels only, never a user ID, an email, a query string or article text (same rules as
 // features/analytics/events.ts). Country is the edge's `cf-ipcountry`.
 
-export type AnalyticsPoint =
+type AnalyticsPoint =
   | {
       event: "paywall_preview";
       /** The premium page's path (normalised, no query). */
@@ -58,14 +58,14 @@ export type AnalyticsPoint =
       value: number;
     };
 
-export interface AnalyticsDataPoint {
+interface AnalyticsDataPoint {
   indexes: string[];
   blobs: string[];
   doubles: number[];
 }
 
 /** The binding's runtime API (wrangler.jsonc `analytics_engine_datasets`). */
-export interface AnalyticsDataset {
+interface AnalyticsDataset {
   writeDataPoint(point: AnalyticsDataPoint): void;
 }
 

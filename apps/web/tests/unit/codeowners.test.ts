@@ -32,6 +32,7 @@ const CRITICAL = [
   "apps/web/package.json",
   "apps/web/wrangler.jsonc",
   "apps/web/open-next.config.ts",
+  "apps/web/worker.mjs",
   "apps/web/next.config.ts",
   "apps/web/eslint.config.mjs",
   "apps/web/src/middleware.ts",
