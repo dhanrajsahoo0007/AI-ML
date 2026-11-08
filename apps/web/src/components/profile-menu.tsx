@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useCanonicalPathname } from "@/features/paywall/use-canonical-pathname";
+import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
 import { BookmarkCheck, CreditCard, LifeBuoy, LogIn, LogOut, Mail, Shield, Sparkles, User } from "lucide-react";
 import { publicNav, SUBSCRIBE_KIND } from "@/features/sections/public";
 

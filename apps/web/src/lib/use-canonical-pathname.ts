@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { PREVIEW_SEGMENT } from "./constants";
+import { PREVIEW_SEGMENT } from "./preview-segment";
 
 // usePathname() for components that render from it. Middleware serves a premium page's preview at the page's
 // own URL (a rewrite, plan §9.2), so the preview is prerendered at `<path>/_preview` while the browser shows

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useCanonicalPathname } from "@/features/paywall/use-canonical-pathname";
+import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
 import { createHandlers, copyNotice } from "./protection";
 import { domEnv } from "./dom-env";
 import "./content-protection.css";

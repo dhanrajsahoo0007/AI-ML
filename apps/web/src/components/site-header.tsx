@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useCanonicalPathname } from "@/features/paywall/use-canonical-pathname";
+import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
 import { ArrowRight, ChevronDown, Menu } from "lucide-react";
 import {
   Sheet,

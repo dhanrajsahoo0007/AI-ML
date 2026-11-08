@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useCanonicalPathname } from "@/features/paywall/use-canonical-pathname";
+import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
