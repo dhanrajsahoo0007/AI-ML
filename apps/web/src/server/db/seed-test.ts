@@ -3,33 +3,52 @@ import { inArray, sql } from "drizzle-orm";
 import { createDb, type Db } from "./client";
 import { assertLocalDatabase } from "./config";
 import { CONSENT_VERSIONS } from "./consent";
-import { consentLog, entitlement, subscription, user } from "./schema";
+import { bookmark, consentLog, customer, entitlement, payment, progress, subscription, user } from "./schema";
 import { daysFromNow, TEST_USER_KEYS, TEST_USERS, testUserEmail, type TestUserKey } from "./test-users";
 
-// `npm run db:seed:test -w web`: (re)creates the seeded test users with their subscription and entitlement
-// rows. Local databases only (plan §8.1: no seed scripts against non-local hosts). Re-running resets them.
+// `npm run db:seed:test -w web`: creates the seeded test users with their subscription and entitlement rows, or
+// resets them to that state. Local databases only (plan §8.1: no seed scripts against non-local hosts).
 // Pass user keys to reset only those: `npm run db:seed:test -w web -- free admin`.
+//
+// A reset keeps the `user` row (same id) and its sessions. Browser specs run in parallel and share these users:
+// deleting and re-inserting a user while another spec is signing in as them made that sign-in's session insert
+// fail its foreign key, and changed the id other specs had just read. Only what a test can change is reset:
+// billing rows, the entitlement, progress, bookmarks and consent.
 
 export async function seedTestUsers(
   db: Db,
   keys: readonly TestUserKey[] = TEST_USER_KEYS,
   now = Date.now()
 ): Promise<Record<TestUserKey, string>> {
-  const emails = keys.map(testUserEmail);
   const ids = {} as Record<TestUserKey, string>;
   await db.transaction(async (tx) => {
     // Concurrent seeds (parallel test workers) take turns instead of racing on the unique emails.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('origins:seed-test-users'))`);
-    // Cascades to sessions, subscriptions, entitlements, progress, consent.
-    await tx.delete(user).where(inArray(user.email, emails));
     for (const key of keys) {
       const spec = TEST_USERS[key];
       const [row] = await tx
         .insert(user)
         .values({ name: spec.name, email: testUserEmail(key), emailVerified: true, role: spec.role })
+        .onConflictDoUpdate({
+          target: user.email,
+          set: { name: spec.name, emailVerified: true, role: spec.role, image: null, updatedAt: new Date(now) },
+        })
         .returning({ id: user.id });
-      const userId = row!.id;
-      ids[key] = userId;
+      ids[key] = row!.id;
+    }
+    const userIds = keys.map((key) => ids[key]);
+    // Child rows a test can change, in dependency order (entitlement and payment reference subscription).
+    await tx.delete(entitlement).where(inArray(entitlement.userId, userIds));
+    await tx.delete(payment).where(inArray(payment.userId, userIds));
+    await tx.delete(subscription).where(inArray(subscription.userId, userIds));
+    await tx.delete(customer).where(inArray(customer.userId, userIds));
+    await tx.delete(progress).where(inArray(progress.userId, userIds));
+    await tx.delete(bookmark).where(inArray(bookmark.userId, userIds));
+    await tx.delete(consentLog).where(inArray(consentLog.userId, userIds));
+
+    for (const key of keys) {
+      const spec = TEST_USERS[key];
+      const userId = ids[key];
       await tx
         .insert(consentLog)
         .values({ userId, kind: "age_confirmation", textVersion: CONSENT_VERSIONS.age_confirmation });

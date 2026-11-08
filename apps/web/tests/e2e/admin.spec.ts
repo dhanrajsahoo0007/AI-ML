@@ -52,8 +52,9 @@ async function sessionToken(context: BrowserContext): Promise<string> {
 }
 
 /**
- * Opens an admin page as the seeded admin. auth.spec.ts reseeds the admin user once per run, which deletes
- * sessions made just before it; on a 404 this signs in again and retries once (a real access bug 404s twice).
+ * Opens an admin page as the seeded admin. Several tests here sign in as the admin at the same time, and a user
+ * keeps only the newest MAX_SESSIONS_PER_USER sessions, so a session made just before another test's sign-in
+ * can be revoked; on a 404 this signs in again and retries once (a real access bug 404s twice).
  */
 async function gotoAsAdmin(context: BrowserContext, page: Page, path: string) {
   const res = await page.goto(path);
@@ -64,9 +65,9 @@ async function gotoAsAdmin(context: BrowserContext, page: Page, path: string) {
 
 test.describe("admin with the database @core", () => {
   test.skip(!dbE2E, SKIP_REASON);
-  // admin and free are seeded once per run (auth.spec.ts reseeds them in its beforeAll); this file never
-  // reseeds or edits other sessions, so it can't disturb auth.spec.ts. A reseed racing a test here drops the
-  // session it just made, hence the retries.
+  // admin and free are seeded once per run (auth.spec.ts reseeds them in its beforeAll; a reseed leaves sessions
+  // alone); this file never reseeds or edits other sessions, so it can't disturb auth.spec.ts. The session cap
+  // can still revoke a session made here while other tests sign in as the admin, hence the retries.
   test.describe.configure({ retries: 2 });
 
   test("an admin sees every page, uncached and noindex", async ({ page, context }) => {
@@ -145,8 +146,9 @@ test.describe("admin with the database @core", () => {
   });
 
   test("an admin signed in more than 10 minutes ago must sign in again", async ({ page, context }) => {
-    // Age only this context's session, so other tests' admin sessions stay fresh. A reseed racing this test
-    // deletes the session (the page then 404s as for anyone signed out): sign in and age it once more.
+    // Age only this context's session, so other tests' admin sessions stay fresh. The session cap can revoke it
+    // while other tests sign in as the admin (the page then 404s as for anyone signed out): sign in and age it
+    // once more.
     for (let attempt = 0; attempt < 2; attempt++) {
       await loginAs(context, "admin");
       await query(`update session set created_at = now() - interval '11 minutes' where token = $1`, [

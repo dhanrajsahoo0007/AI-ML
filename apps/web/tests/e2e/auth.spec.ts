@@ -91,7 +91,8 @@ async function profileName(page: Page): Promise<string> {
 test.describe("sign-in with the database @core", () => {
   test.skip(!dbE2E, SKIP_REASON);
   // One worker runs these in order (so the reseed runs once); each test still uses its own seeded user, and
-  // account.spec.ts uses different ones, so no test revokes another's sessions.
+  // account.spec.ts uses different ones, so no test revokes another's sessions. A reseed resets billing and
+  // progress rows only; sessions other specs hold on these users survive it.
   test.describe.configure({ mode: "serial" });
   test.beforeAll(() => reseed("free", "pro_monthly", "pro_yearly", "admin"));
 
@@ -124,14 +125,18 @@ test.describe("sign-in with the database @core", () => {
   });
 
   test("sign out everywhere revokes the sessions on other devices", async ({ browser }) => {
+    // pro_yearly is signed in by this file only (paywall.spec.ts also uses pro_monthly), so the device list here
+    // holds these two sessions plus, at most, leftovers of an earlier local run; the sign-out below clears those too.
     const laptop = await browser.newContext();
     const phone = await browser.newContext();
-    await loginAs(laptop, "pro_monthly");
-    await loginAs(phone, "pro_monthly");
+    await loginAs(laptop, "pro_yearly");
+    await loginAs(phone, "pro_yearly");
 
     const a = await laptop.newPage();
     await a.goto("/account");
-    await expect(a.getByTestId("account-sessions").locator("li")).toHaveCount(2);
+    const devices = a.getByTestId("account-sessions").locator("li");
+    await expect(devices.first()).toBeVisible();
+    expect(await devices.count()).toBeGreaterThanOrEqual(2);
     await a.getByRole("button", { name: "Sign out everywhere" }).click();
     await expect(a).toHaveURL(new RegExp(`${origin()}/$`));
 

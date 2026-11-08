@@ -85,7 +85,7 @@ LCP ≤ 1.5 s, INP ≤ 100 ms, CLS ≤ 0.05; 99.9% availability; zero premium by
 | 2026-11-07 | Fonts 3 → 2: keep Inter, drop Plus Jakarta Sans                                                            |
 | 2026-11-07 | Docs rule: `README.md` for humans, `AGENTS.md` files for agents, no other prose docs                       |
 | 2026-11-07 | Copy protection stays on for content areas; legal, pricing and contact pages stay copyable                 |
-| Later      | Email via Resend, Razorpay for India, search, i18n (not started)                                           |
+| Later      | Razorpay for India, i18n, a standby merchant of record (not started). Email (Resend + queue) and search exist |
 
 Open: domain and brand, prices, which articles are free, seller entity, Neon region, GitHub org, launch sections.
 

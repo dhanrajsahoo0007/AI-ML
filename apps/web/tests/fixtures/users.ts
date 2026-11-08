@@ -25,7 +25,11 @@ export const SKIP_REASON = "needs E2E_DB=1 with Postgres and the test-login prov
 
 const webRoot = path.resolve(__dirname, "../..");
 
-/** Resets the given seeded users (and only them) to their initial state. */
+/**
+ * Resets the given seeded users (and only them) to their initial state: billing rows, entitlement, progress,
+ * bookmarks and consent. The user row keeps its id and its sessions survive, so a reseed in one spec never
+ * breaks a sign-in or a signed-in page in a spec running at the same time.
+ */
 export function reseed(...keys: TestUserKey[]): void {
   execFileSync("npm", ["run", "--silent", "db:seed:test", "--", ...keys], { cwd: webRoot, stdio: "pipe" });
 }
