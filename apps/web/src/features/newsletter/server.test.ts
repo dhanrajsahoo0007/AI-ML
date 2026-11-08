@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DevEmailSender } from "../email/dev-sender";
 import { ResendEmailSender } from "../email/resend-sender";
-import { emailSender, NotConfiguredError, resendWebhookSecret, tokenSecret } from "./server";
+import { emailQueue, emailSender, NotConfiguredError, resendWebhookSecret, tokenSecret } from "./server";
 
 const env = (vars: Record<string, string>) => vars as unknown as NodeJS.ProcessEnv;
 
@@ -26,6 +26,10 @@ describe("newsletter wiring", () => {
     expect(emailSender(env({ RESEND_API_KEY: "re_test" }), "production")).toBeInstanceOf(ResendEmailSender);
     expect(emailSender(env({}), "preview")).toBeInstanceOf(DevEmailSender);
     expect(() => emailSender(env({}), "production")).toThrow(NotConfiguredError);
+  });
+
+  it("has no email queue outside a Worker with the EMAIL_QUEUE binding, so emails are sent inline", () => {
+    expect(emailQueue()).toBeNull();
   });
 
   it("needs a whsec_ RESEND_WEBHOOK_SECRET for the webhook", () => {

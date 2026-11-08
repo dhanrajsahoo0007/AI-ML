@@ -1,13 +1,14 @@
 import "server-only";
 import { z } from "zod";
 import { SITE_URL } from "../../config/business";
-import { DevEmailSender } from "../email/dev-sender";
-import { ResendEmailSender } from "../email/resend-sender";
+import type { EmailQueueProducer } from "../email/queue";
 import type { EmailSender } from "../email/sender";
+import { EmailNotConfiguredError, emailSenderFor } from "../email/senders";
 import { publicNav, SUBSCRIBE_KIND as NEWSLETTER_KIND } from "../sections/public";
 import { APP_ENVS, type AppEnv } from "../sections/schema";
 import type { Db } from "@/server/db/client";
 import { databaseUrl } from "@/server/db/config";
+import { cloudflareBindings } from "@/server/env";
 import { parseKillList } from "@/server/edge/sections-gate";
 import { checkRateLimit } from "@/server/http";
 import type { RateLimiter } from "./rate-limit";
@@ -20,7 +21,9 @@ import { turnstileFromEnv } from "./turnstile";
 //   store    Postgres (PostgresNewsletterStore) whenever a database is configured (DATABASE_URL or the
 //            Hyperdrive binding); in-memory, per process, only for APP_ENV=local without a database (the
 //            per-address cool-down must survive isolates, so deployed environments refuse the memory store)
-//   sender   Resend when RESEND_API_KEY is set, otherwise the dev sender (logs + .eml outbox) outside production
+//   queue    the EMAIL_QUEUE binding when the Worker has one; emails then go through the queue consumer
+//   sender   Resend when RESEND_API_KEY is set, otherwise the dev sender (logs + .eml outbox) outside production;
+//            used for inline sends, i.e. whenever there is no queue binding
 //   limiter  the route() wrapper's limiter (server/rate-limit.ts: Workers binding, memory fallback)
 //   captcha  Turnstile when TURNSTILE_SECRET_KEY is set, otherwise none
 //   secret   NEWSLETTER_TOKEN_SECRET; a fixed dev secret is allowed only when APP_ENV=local
@@ -45,7 +48,6 @@ const DEV_SECRET = "local-dev-only-newsletter-token-secret-0000";
 
 const envSchema = z.object({
   NEWSLETTER_TOKEN_SECRET: z.string().min(32, "NEWSLETTER_TOKEN_SECRET must be at least 32 characters").optional(),
-  RESEND_API_KEY: z.string().min(1).optional(),
   RESEND_WEBHOOK_SECRET: z.string().startsWith("whsec_", "RESEND_WEBHOOK_SECRET must start with whsec_").optional(),
 });
 
@@ -78,10 +80,18 @@ export function resendWebhookSecret(env: NodeJS.ProcessEnv = process.env): strin
 }
 
 export function emailSender(env: NodeJS.ProcessEnv = process.env, appEnv = currentAppEnv()): EmailSender {
-  const parsed = envSchema.parse({ RESEND_API_KEY: env.RESEND_API_KEY || undefined });
-  if (parsed.RESEND_API_KEY) return new ResendEmailSender(parsed.RESEND_API_KEY);
-  if (appEnv === "production") throw new NotConfiguredError("RESEND_API_KEY is not set in production");
-  return new DevEmailSender();
+  try {
+    return emailSenderFor({ RESEND_API_KEY: env.RESEND_API_KEY }, appEnv);
+  } catch (e) {
+    // → 503 not_configured through http.ts, as for the other missing settings.
+    if (e instanceof EmailNotConfiguredError) throw new NotConfiguredError(e.message);
+    throw e;
+  }
+}
+
+/** The EMAIL_QUEUE producer binding, or null outside a Worker that has one (then emails are sent inline). */
+export function emailQueue(): EmailQueueProducer | null {
+  return cloudflareBindings()?.EMAIL_QUEUE ?? null;
 }
 
 // One memory store per process (local runs only). Kept on globalThis because Next can load a module once per
@@ -129,6 +139,9 @@ export function newsletterDeps(href: string, db?: () => Db): NewsletterDeps {
     // Built on first use, so unsubscribing works even where no sender is configured.
     get sender() {
       return emailSender();
+    },
+    get queue() {
+      return emailQueue();
     },
     secret: tokenSecret(),
     links: ({ confirm, unsubscribe }) => {

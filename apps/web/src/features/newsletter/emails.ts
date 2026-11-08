@@ -23,7 +23,10 @@ export interface SubscriberLinks {
   archiveUrl: string;
 }
 
-export async function confirmationEmail(to: string, links: SubscriberLinks): Promise<EmailMessage> {
+export async function confirmationEmail(
+  to: string,
+  links: Pick<SubscriberLinks, "confirmUrl" | "unsubscribeUrl">
+): Promise<EmailMessage> {
   const { html, text } = await renderEmail(
     h(ConfirmSubscriptionEmail, {
       confirmUrl: links.confirmUrl,
@@ -42,7 +45,10 @@ export async function confirmationEmail(to: string, links: SubscriberLinks): Pro
   };
 }
 
-export async function welcomeEmail(to: string, links: SubscriberLinks): Promise<EmailMessage> {
+export async function welcomeEmail(
+  to: string,
+  links: Pick<SubscriberLinks, "archiveUrl" | "unsubscribeUrl" | "oneClickUrl">
+): Promise<EmailMessage> {
   const { html, text } = await renderEmail(
     h(WelcomeEmail, { archiveUrl: links.archiveUrl, unsubscribeUrl: links.unsubscribeUrl })
   );
