@@ -55,6 +55,8 @@ function SidebarSection({
 
   React.useEffect(() => {
     if (isActive && !open) setOpen(true);
+    // Runs only when the path becomes active: depending on `open` would reopen a section the reader just closed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive]);
 
   const SectionIcon = getIconComponent(section.icon);
@@ -169,6 +171,8 @@ function SidebarGroup({
 
   React.useEffect(() => {
     if (isGroupActive && !open) setOpen(true);
+    // Runs only when the path becomes active: depending on `open` would reopen a section the reader just closed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGroupActive]);
 
   const GroupIcon = group.icon ? getIconComponent(group.icon) : null;
@@ -254,6 +258,8 @@ function SidebarCategory({
 
   React.useEffect(() => {
     if (hasActive && !open) setOpen(true);
+    // Runs only when the path becomes active: depending on `open` would reopen a section the reader just closed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasActive]);
 
   return (

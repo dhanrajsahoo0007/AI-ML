@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { authConfig, isGoogleConfigured } from "./config";
 import { safeNextPath } from "./next-path";
-import { safeEqual } from "./safe-equal";
 
 const SECRET = "s".repeat(32);
 
