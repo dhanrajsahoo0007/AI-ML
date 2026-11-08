@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { paywallPreviewPoint, writeAnalytics } from "@/server/edge/analytics";
 import { ENTITLEMENT_COOKIE, isAdmin, keyringFromEnv, verifyEntitlement } from "@/server/edge/entitlement";
 import { appVersion, readEdgeEnv } from "@/server/edge/env";
 import { decideHost, SMOKE_KEY_HEADER } from "@/server/edge/host-guard";
@@ -137,6 +138,10 @@ function paywallResponse(request: NextRequest, tier: "free" | "pro" | null, bill
       // The preview under the canonical URL: Pro readers share that URL, so it isn't shared-cacheable either.
       response.headers.set("Cache-Control", "private, no-cache");
       response.headers.set("Vary", "Cookie");
+      // Paywall view metric: only on this branch, one non-blocking Analytics Engine write (no-op without the
+      // binding). Middleware is the one place that sees every preview: the rewrite is private, so no cache answers.
+      const view = paywallPreviewPoint({ pathname, headers: request.headers, tier });
+      if (view) writeAnalytics(view);
       return response;
     }
     case "preview-direct": {

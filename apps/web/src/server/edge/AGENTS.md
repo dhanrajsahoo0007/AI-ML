@@ -16,6 +16,10 @@ and zod only. Middleware runs on every content request before the page cache, wi
   `ENTITLEMENT_SECRET`, `ENTITLEMENT_SECRET_PREVIOUS`), `appVersion()`.
 - `maintenance.ts`: `maintenanceResponse()` (503, `Retry-After: 300`, `noindex`, self-contained HTML).
 - `health.ts`: `healthHandler()` behind `GET /api/health` → `{status, version, env, region}`.
+- `analytics.ts`: Workers Analytics Engine writes (`ANALYTICS` binding, plan §10.5): `writeAnalytics(point)` (no-op
+  without the binding, never throws, never awaited), `toDataPoint()` (the column layout in the file header),
+  `paywallPreviewPoint()`, `edgeCountry()`, `analyticsDataset()`. Used by middleware (paywall previews) and by
+  `/api/vitals`, `/api/billing/checkout` and `/api/billing/webhook/[provider]`.
 - `host-guard.ts`: `decideHost()`: in production a page request on a host other than `BETTER_AUTH_URL`'s
   (workers.dev, version preview URLs, which skip the zone's WAF and bot rules) → 308 to the canonical host, unless
   it carries `x-smoke-key` = `SMOKE_KEY` (deploy smoke tests; passes with `noindex`).
@@ -44,6 +48,12 @@ get `Cache-Control: private, no-store`). Every response gets `x-app-version` (th
 - Middleware's matcher skips `/api/`, `/_next/`, `/cdn-cgi/` and files with an extension.
 - Security headers are **not** set here; they come from `apps/web/next.config.ts`.
 - `health.ts` reads no database (it proves the Worker version is live, not that Neon is up).
+- Middleware's only metric is on the paywall `preview` branch: a pure `paywallPreviewPoint()` plus one
+  `writeDataPoint`, which is non-blocking by design (queued, sent after the response), so no `waitUntil`. Router
+  prefetches are skipped. Middleware is the one place that sees every preview (the rewrite is `private`, so no
+  cache answers it). Don't add metrics to other branches; content pages pass through untouched.
+- Analytics points carry labels only (path, section, tier, country, outcome), never a user ID or email; the
+  column positions are a contract with saved SQL queries, so append new blobs, never reorder.
 
 ## Planned
 
@@ -52,5 +62,6 @@ gate, using the same keyring.
 
 ## Tests
 
-`sections-gate.test.ts`, `entitlement.test.ts` (forged, wrong kid, expired, rotation, skew), `health.test.ts`; E2E
+`sections-gate.test.ts`, `entitlement.test.ts` (forged, wrong kid, expired, rotation, skew), `health.test.ts`,
+`analytics.test.ts` (column layout, no-op without the binding, prefetch skipping); E2E
 `apps/web/tests/e2e/edge-gate.spec.ts`.

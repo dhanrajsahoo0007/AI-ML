@@ -30,7 +30,8 @@ No index file; import the files directly.
   emails; `redact()` runs on every field.
 - Route labels use the path only, never the query string.
 - `/api/vitals` (`apps/web/src/app/api/vitals/route.ts`) writes one log line per beacon, through `route()` with the
-  `vitals` rate limit and the Origin check off (no session, no DB). Analytics Engine writes come with the binding.
+  `vitals` rate limit and the Origin check off (no session, no DB), plus one Analytics Engine `web_vital` point
+  per metric when the Worker has the `ANALYTICS` binding (`apps/web/src/server/edge/analytics.ts`).
 - On Workers the Sentry server SDK must wrap the Worker entry (`@sentry/nextjs/cloudflare`); not wired yet.
 - The CSP gets a tool's hosts only when its variable is set (`csp-hosts.ts`).
 

@@ -1,9 +1,11 @@
 import { route } from "@/features/auth";
+import { writeAnalytics } from "@/server/edge/analytics";
 import { log, requestContext, type LogFields } from "@/server/log";
 import { VITALS_MAX_BYTES, vitalsPayload } from "@/features/observability/vitals-schema";
 
 // Real-user web vitals beacons (plan §10.3), sent by features/observability/vitals.client.ts. No database: each
-// beacon becomes one structured log line now, and an Analytics Engine data point once the Worker binding exists.
+// beacon becomes one structured log line, plus one Analytics Engine point per metric when the Worker has the
+// ANALYTICS binding (server/edge/analytics.ts), so per-route p75 trends can be queried with SQL.
 // Through route() for its rate limit (60/min/IP) and no-store; plus a Cloudflare zone rule on this path (plan
 // §11.6). The Origin check is off: beacons are anonymous log writes that read no cookie or session, so there is
 // nothing to forge, and sendBeacon from older browsers may omit Origin.
@@ -34,11 +36,17 @@ async function vitals(request: Request): Promise<Response> {
   if (!parsed.success) return reply(400, ctx, started);
 
   const { route, section, metrics } = parsed.data;
-  // TODO(Phase 6, needs the Worker binding): also write one Analytics Engine data point per metric, e.g.
-  //   getCloudflareContext().env.VITALS?.writeDataPoint({
-  //     indexes: [section], blobs: [route, m.name, m.rating, m.navigation_type ?? ""], doubles: [m.value],
-  //   });
-  // so per-route p75 trends can be queried with SQL (plan §10.3).
+  for (const m of metrics) {
+    writeAnalytics({
+      event: "web_vital",
+      route,
+      section,
+      metric: m.name,
+      rating: m.rating,
+      navigationType: m.navigation_type ?? "",
+      value: m.value,
+    });
+  }
   log.info("web_vitals", {
     ...ctx,
     status: 204,
