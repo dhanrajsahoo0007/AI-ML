@@ -70,21 +70,21 @@ LCP ≤ 1.5 s, INP ≤ 100 ms, CLS ≤ 0.05; 99.9% availability; zero premium by
 
 ## Decision log (owner decisions)
 
-| Date       | Decision                                                                                                   |
-| ---------- | ---------------------------------------------------------------------------------------------------------- |
-| 2026-11-07 | International buyers are the primary income; sell through a merchant of record (Dodo primary)              |
-| 2026-11-07 | Standby MoR to be chosen; Paddle ruled out (needs ≥ 14-day refunds)                                        |
-| 2026-11-07 | Freemium per article; Pro monthly and yearly; regional price tiers A/B/C; prices still open                |
-| 2026-11-07 | Refunds: 7-day money-back guarantee, once per customer; EU/UK withdrawal waiver still captured at checkout |
-| 2026-11-07 | All ages; under-18 accounts need parental permission (logged in `consent_log`); under-13 supervised        |
-| 2026-11-07 | No copying: browser deterrents, AI-crawler blocking, watermarks, takedowns; Copy for LLM removed           |
-| 2026-11-07 | Founder email `dhanrajsahoo.work@gmail.com` on Contact, Refund, Terms and Privacy pages                    |
-| 2026-11-07 | Monitoring on free tiers: Sentry, Cloudflare Web Analytics + Workers Observability, PostHog, Better Stack  |
-| 2026-11-07 | Hosting: Cloudflare Workers via OpenNext; Neon Postgres via Hyperdrive; Google-only sign-in (Better Auth)  |
-| 2026-11-07 | Separate from Mythical; every account owned by `dhanrajsahoo.work@gmail.com`                               |
-| 2026-11-07 | Fonts 3 → 2: keep Inter, drop Plus Jakarta Sans                                                            |
-| 2026-11-07 | Docs rule: `README.md` for humans, `AGENTS.md` files for agents, no other prose docs                       |
-| 2026-11-07 | Copy protection stays on for content areas; legal, pricing and contact pages stay copyable                 |
+| Date       | Decision                                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------------------- |
+| 2026-11-07 | International buyers are the primary income; sell through a merchant of record (Dodo primary)                 |
+| 2026-11-07 | Standby MoR to be chosen; Paddle ruled out (needs ≥ 14-day refunds)                                           |
+| 2026-11-07 | Freemium per article; Pro monthly and yearly; regional price tiers A/B/C; prices still open                   |
+| 2026-11-07 | Refunds: 7-day money-back guarantee, once per customer; EU/UK withdrawal waiver still captured at checkout    |
+| 2026-11-07 | All ages; under-18 accounts need parental permission (logged in `consent_log`); under-13 supervised           |
+| 2026-11-07 | No copying: browser deterrents, AI-crawler blocking, watermarks, takedowns; Copy for LLM removed              |
+| 2026-11-07 | Founder email `dhanrajsahoo.work@gmail.com` on Contact, Refund, Terms and Privacy pages                       |
+| 2026-11-07 | Monitoring on free tiers: Sentry, Cloudflare Web Analytics + Workers Observability, PostHog, Better Stack     |
+| 2026-11-07 | Hosting: Cloudflare Workers via OpenNext; Neon Postgres via Hyperdrive; Google-only sign-in (Better Auth)     |
+| 2026-11-07 | Separate from Mythical; every account owned by `dhanrajsahoo.work@gmail.com`                                  |
+| 2026-11-07 | Fonts 3 → 2: keep Inter, drop Plus Jakarta Sans                                                               |
+| 2026-11-07 | Docs rule: `README.md` for humans, `AGENTS.md` files for agents, no other prose docs                          |
+| 2026-11-07 | Copy protection stays on for content areas; legal, pricing and contact pages stay copyable                    |
 | Later      | Razorpay for India, i18n, a standby merchant of record (not started). Email (Resend + queue) and search exist |
 
 Open: domain and brand, prices, which articles are free, seller entity, Neon region, GitHub org, launch sections.

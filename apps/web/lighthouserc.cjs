@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- CommonJS config file read by the tool */
 // Lighthouse CI budgets (plan §6): `/`, a section hub, the heaviest diagram article and an interview subsection,
-// mobile emulation with Lighthouse's default simulated throttling, 3 runs each, asserted on the median run.
+// mobile emulation with Lighthouse's default simulated throttling, 5 runs each, asserted on the median run (shared CI
+// runners swing TBT by 5× between runs of the same build; three runs left the median on a single noisy sample).
 // Run after `npm run build` with `npm run lighthouse -w web`. It serves the build with `next start` (static
 // export isn't possible, so `staticDistDir` doesn't apply).
 //
@@ -30,7 +31,7 @@ module.exports = {
       startServerReadyPattern: "Ready in",
       startServerReadyTimeout: 60_000,
       url: PAGES.map((p) => `${base}${p}`),
-      numberOfRuns: 3,
+      numberOfRuns: 5,
       settings: {
         formFactor: "mobile",
         onlyCategories: ["performance", "accessibility", "best-practices", "seo"],
