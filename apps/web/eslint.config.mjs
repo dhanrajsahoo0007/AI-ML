@@ -36,7 +36,7 @@ const FEATURE_ENTRY_POINTS = ["index.ts", "public.ts", "**/*.client.ts", "**/*.c
 const FEATURES_WITHOUT_ENTRY = [
   // TODO(T1 follow-up): no stream owns these right now.
   "content-protection",
-  "docs",
+  "docs", // index.ts exports only SectionDocPage so far; kind, routes and source are still imported by path.
   "dsa",
   "observability",
   "pages",
