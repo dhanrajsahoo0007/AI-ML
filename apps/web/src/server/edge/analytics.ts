@@ -13,7 +13,7 @@ import { normalizePath } from "./sections-gate";
 // index1 = blob1 = the event name and double1 = 1, so `SUM(_sample_interval * double1)` counts events.
 //
 //   event            blob2        blob3     blob4      blob5     blob6            double2
-//   paywall_preview  path         section   tier       country   -                -
+//   paywall_preview  path         section   tier       country   -                -     (full page loads only)
 //   checkout_start   plan         provider  country    outcome   -                -
 //   billing_webhook  provider     type      outcome    -         -                duration ms
 //   web_vital        page route   section   metric     rating    navigation type  value (ms; CLS unitless)
@@ -130,24 +130,29 @@ export function edgeCountry(headers: Headers): string | null {
   return c && COUNTRY.test(c) && c !== "XX" && c !== "T1" ? c : null;
 }
 
-/** Router prefetches and browser speculation: not a view, though they hit the page path like one. */
-function isPrefetch(headers: Headers): boolean {
-  return (
-    headers.has("next-router-prefetch") ||
-    /prefetch|prerender/i.test(headers.get("sec-purpose") ?? headers.get("purpose") ?? "")
-  );
+/**
+ * A page load a reader asked for: a browser document navigation (`Sec-Fetch-Dest: document`), not a speculative
+ * prefetch or prerender (`Sec-Purpose`). Next.js strips its own `RSC` and `Next-Router-Prefetch` headers before
+ * middleware runs, so a client-side navigation can't be told from a router prefetch there; both are left out
+ * (counting prefetches would multiply the numbers and the writes). Requests without the header (curl, most bots)
+ * aren't counted either.
+ */
+function isDocumentView(headers: Headers): boolean {
+  if (headers.get("sec-fetch-dest") !== "document") return false;
+  return !/prefetch|prerender/i.test(headers.get("sec-purpose") ?? headers.get("purpose") ?? "");
 }
 
 /**
- * The paywall_preview point for a request that middleware rewrote to a premium page's preview, or null for a
- * prefetch. Pure, so middleware's cost is this plus one non-blocking write, on the preview branch only.
+ * The paywall_preview point for a request that middleware rewrote to a premium page's preview, or null when it is
+ * not a document view (see isDocumentView). Pure, so middleware's cost is this plus one non-blocking write, on the
+ * preview branch only.
  */
 export function paywallPreviewPoint(input: {
   pathname: string;
   headers: Headers;
   tier: "free" | "pro" | null;
 }): AnalyticsPoint | null {
-  if (isPrefetch(input.headers)) return null;
+  if (!isDocumentView(input.headers)) return null;
   const path = normalizePath(input.pathname);
   return {
     event: "paywall_preview",

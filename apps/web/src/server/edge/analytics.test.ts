@@ -113,29 +113,29 @@ describe("writeAnalytics", () => {
 });
 
 describe("paywallPreviewPoint", () => {
-  const headers = (h: Record<string, string> = {}) => new Headers(h);
+  const doc = (h: Record<string, string> = {}) => new Headers({ "sec-fetch-dest": "document", ...h });
 
   it("labels the view with the normalised path, its section, the tier and the edge country", () => {
     expect(
-      paywallPreviewPoint({ pathname: "/System-Design//Caching/", headers: headers({ "cf-ipcountry": "in" }), tier: null })
+      paywallPreviewPoint({ pathname: "/System-Design//Caching/", headers: doc({ "cf-ipcountry": "in" }), tier: null })
     ).toEqual({ event: "paywall_preview", path: "/system-design/caching", section: "system-design", tier: "anonymous", country: "IN" });
-    expect(paywallPreviewPoint({ pathname: "/cloud/x", headers: headers(), tier: "free" })).toMatchObject({
+    expect(paywallPreviewPoint({ pathname: "/cloud/x", headers: doc(), tier: "free" })).toMatchObject({
       tier: "free",
       country: null,
     });
   });
 
-  it("skips router prefetches and browser speculation, which hit the same path", () => {
-    const prefetches: Record<string, string>[] = [
-      { "next-router-prefetch": "1", rsc: "1" },
-      { "sec-purpose": "prefetch" },
-      { purpose: "prefetch" },
+  it("counts document loads only: not fetches (router prefetches look like navigations in middleware) or speculation", () => {
+    const skipped: Record<string, string>[] = [
+      { "sec-fetch-dest": "empty", "sec-fetch-mode": "cors" },
+      { "sec-fetch-dest": "document", "sec-purpose": "prefetch" },
+      { "sec-fetch-dest": "document", "sec-purpose": "prefetch;prerender" },
+      { "sec-fetch-dest": "document", purpose: "prefetch" },
+      {},
     ];
-    for (const h of prefetches) {
-      expect(paywallPreviewPoint({ pathname: "/cloud/x", headers: headers(h), tier: null })).toBeNull();
+    for (const h of skipped) {
+      expect(paywallPreviewPoint({ pathname: "/cloud/x", headers: new Headers(h), tier: null }), JSON.stringify(h)).toBeNull();
     }
-    // A client-side navigation is an RSC request without the prefetch header: a view.
-    expect(paywallPreviewPoint({ pathname: "/cloud/x", headers: headers({ rsc: "1" }), tier: null })).not.toBeNull();
   });
 });
 

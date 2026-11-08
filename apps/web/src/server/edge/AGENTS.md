@@ -49,9 +49,11 @@ get `Cache-Control: private, no-store`). Every response gets `x-app-version` (th
 - Security headers are **not** set here; they come from `apps/web/next.config.ts`.
 - `health.ts` reads no database (it proves the Worker version is live, not that Neon is up).
 - Middleware's only metric is on the paywall `preview` branch: a pure `paywallPreviewPoint()` plus one
-  `writeDataPoint`, which is non-blocking by design (queued, sent after the response), so no `waitUntil`. Router
-  prefetches are skipped. Middleware is the one place that sees every preview (the rewrite is `private`, so no
-  cache answers it). Don't add metrics to other branches; content pages pass through untouched.
+  `writeDataPoint`, which is non-blocking by design (queued, sent after the response), so no `waitUntil`.
+  Middleware is the one place that sees every preview (the rewrite is `private`, so no cache answers it). Only
+  document loads count (`Sec-Fetch-Dest: document`, no `Sec-Purpose: prefetch`): Next.js strips `RSC` and
+  `Next-Router-Prefetch` before middleware, so client-side navigations can't be told from router prefetches and
+  are left out. Don't add metrics to other branches; content pages pass through untouched.
 - Analytics points carry labels only (path, section, tier, country, outcome), never a user ID or email; the
   column positions are a contract with saved SQL queries, so append new blobs, never reorder.
 
@@ -63,5 +65,5 @@ gate, using the same keyring.
 ## Tests
 
 `sections-gate.test.ts`, `entitlement.test.ts` (forged, wrong kid, expired, rotation, skew), `health.test.ts`,
-`analytics.test.ts` (column layout, no-op without the binding, prefetch skipping); E2E
+`analytics.test.ts` (column layout, no-op without the binding, document loads only); E2E
 `apps/web/tests/e2e/edge-gate.spec.ts`.
