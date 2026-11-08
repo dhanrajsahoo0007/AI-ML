@@ -118,7 +118,10 @@ test.describe("regional pricing @core", () => {
     await context.close();
   });
 
-  test("/pricing stays canonical: variants point to it and are noindex at their own URLs", async ({ page, request }) => {
+  test("/pricing stays canonical: variants point to it and are noindex at their own URLs", async ({
+    page,
+    request,
+  }) => {
     await page.goto("/pricing");
     await expectCanonicalPricing(page);
     if (env === "production") {
