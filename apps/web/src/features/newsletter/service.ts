@@ -1,6 +1,6 @@
 import { log } from "@/server/log";
-import { enqueueEmail, type EmailQueueProducer } from "../email/queue";
-import type { EmailSender } from "../email/sender";
+import { enqueueEmail, type EmailQueueProducer } from "../email";
+import type { EmailSender } from "../email";
 import { CURRENT_CONSENT_VERSION, FIRST_CONSENT_VERSION, isConsentVersion } from "./consent";
 import type { SubscriberLinks } from "./emails";
 import { emailKey, type RateLimiter } from "./rate-limit";

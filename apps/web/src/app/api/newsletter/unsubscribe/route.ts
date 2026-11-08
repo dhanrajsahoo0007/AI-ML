@@ -1,8 +1,11 @@
 import { z } from "zod";
-import { serverToServerRoute } from "@/features/newsletter/http";
-import { newsletterDeps, newsletterHref } from "@/features/newsletter/server";
-import { unsubscribeWithToken } from "@/features/newsletter/service";
-import { isOneClick } from "@/features/newsletter/unsubscribe-headers";
+import {
+  serverToServerRoute,
+  newsletterDeps,
+  newsletterHref,
+  unsubscribeWithToken,
+  isOneClick,
+} from "@/features/newsletter";
 import { HttpError } from "@/server/http";
 
 // Unsubscribe (plan §15.2). Server to server as well as from the page, so the Origin check is off: the signed

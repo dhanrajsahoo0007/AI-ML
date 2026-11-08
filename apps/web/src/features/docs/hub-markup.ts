@@ -1,4 +1,4 @@
-import type { NavIndexCategory } from "../sections/schema";
+import type { NavIndexCategory } from "../sections";
 
 // Reads the <ModelCategory>/<ModelCard> grid out of a hub's MDX. Used by the one-off nav index
 // migration and by content-check to catch a hub whose cards drifted from its _index.yaml (until the

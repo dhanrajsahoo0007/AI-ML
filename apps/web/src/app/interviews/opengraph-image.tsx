@@ -1,5 +1,5 @@
-import { OG_CONTENT_TYPE, OG_SIZE, ogImage } from "@/features/seo/og-image";
-import { routeSection } from "@/features/sections/route-helpers";
+import { OG_CONTENT_TYPE, OG_SIZE, ogImage } from "@/features/seo";
+import { routeSection } from "@/features/sections";
 
 // Social card for Interview Practice and its category and subsection pages (rendered once at build).
 export const alt = "Interview Practice";

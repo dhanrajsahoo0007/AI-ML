@@ -1,7 +1,4 @@
-import { adminPage } from "@/features/admin/access";
-import { formatDateTime } from "@/features/admin/format";
-import { AdminShell, Panel, Table } from "@/features/admin/ui";
-import { auditSpan, recentAudit } from "@/features/admin/audit";
+import { adminPage, formatDateTime, AdminShell, Panel, Table, auditSpan, recentAudit } from "@/features/admin";
 
 const PATH = "/admin/audit";
 const LIMIT = 100;

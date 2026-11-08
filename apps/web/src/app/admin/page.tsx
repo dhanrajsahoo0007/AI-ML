@@ -1,8 +1,20 @@
-import { adminPage } from "@/features/admin/access";
-import { loadKpis } from "@/features/admin/dashboard";
-import { formatAge, formatPercent, formatUsdMinor } from "@/features/admin/format";
-import { DISPUTE_RATE_ALERT, REFUND_RATE_TARGET, type Breakdown } from "@/features/admin/kpi";
-import { AdminShell, Panel, Sparkline, Stat, StatGrid, Table, type Column } from "@/features/admin/ui";
+import {
+  adminPage,
+  loadKpis,
+  formatAge,
+  formatPercent,
+  formatUsdMinor,
+  DISPUTE_RATE_ALERT,
+  REFUND_RATE_TARGET,
+  type Breakdown,
+  AdminShell,
+  Panel,
+  Sparkline,
+  Stat,
+  StatGrid,
+  Table,
+  type Column,
+} from "@/features/admin";
 
 const PATH = "/admin";
 

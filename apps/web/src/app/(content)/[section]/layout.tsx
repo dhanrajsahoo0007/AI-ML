@@ -2,7 +2,7 @@ import { ContentShell } from "@/components/content-shell";
 import { EntitlementKeeper } from "@/features/entitlements/islands.client";
 import { SpeculationRules } from "@/components/speculation-rules";
 import { getSectionNav } from "@/lib/nav-tree";
-import { docsSection, docsSectionParams, sectionRobots, type SectionParams } from "@/features/docs/routes";
+import { docsSection, docsSectionParams, sectionRobots, type SectionParams } from "@/features/docs";
 
 // Shared layout for every docs section (content/sections.yaml entries with kind: docs). The sidebar
 // gets only this section's nav; speculation rules prefetch same-section links on hover.

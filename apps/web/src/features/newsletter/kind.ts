@@ -3,7 +3,7 @@ import path from "node:path";
 import { navSection, type ContentError, type NavGroup, type SectionKind } from "../sections/kind";
 import { SUBSCRIBE_KIND as NEWSLETTER_KIND } from "../sections/public";
 import { allSections } from "../sections/registry";
-import type { SectionDef } from "../sections/schema";
+import type { SectionDef } from "../sections";
 import { loadDocItems } from "../docs/source";
 import { findComponents, findImages, findLinks, internalPath, isPng } from "./links";
 import { issueFrontmatterSchema, SUMMARY_MAX } from "./schema";

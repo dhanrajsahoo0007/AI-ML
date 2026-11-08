@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { authConfig, authFor, isFreshSession, route } from "@/features/auth";
-import { clearEntitlementCookies } from "@/features/entitlements/cookies";
+import { clearEntitlementCookies } from "@/features/entitlements";
 import { deleteAccount, LiveSubscriptionError } from "@/features/account";
 import { HttpError } from "@/server/http";
-// Registers the provider-backed canceller: live subscriptions are cancelled at the provider first.
-import "@/features/billing/register";
+// Registers the provider-backed canceller (features/billing/register.ts, loaded by the billing index): live
+// subscriptions are cancelled at the provider first.
+import "@/features/billing";
 
 // Deletes the signed-in user's account and everything linked to it. Needs a sign-in within the last 10
 // minutes and the typed confirmation.

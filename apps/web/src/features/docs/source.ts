@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 import yaml from "js-yaml";
-import { fixtureDocsFor } from "../paywall/fixtures";
+import { fixtureDocsFor } from "../paywall";
 import { CONTENT_DIR, resolveAppEnv } from "../sections/registry";
 import { navIndexSchema, type NavIndex, type SectionDef } from "../sections/schema";
 

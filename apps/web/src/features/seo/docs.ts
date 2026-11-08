@@ -2,10 +2,8 @@ import "server-only";
 import type { Metadata } from "next";
 import { siteConfig } from "@/config/site";
 import { getUpdatedDate } from "@/lib/doc-meta";
-import { docsKind } from "../docs/kind";
-import { loadDocItems } from "../docs/source";
-import { getSection } from "../sections/registry";
-import { frontmatterSchema, type SectionDef } from "../sections/schema";
+import { docsKind, loadDocItems } from "../docs";
+import { getSection, frontmatterSchema, type SectionDef } from "../sections";
 import {
   articleNode,
   breadcrumbNode,

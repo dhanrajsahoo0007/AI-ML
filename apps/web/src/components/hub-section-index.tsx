@@ -1,7 +1,7 @@
 import { SectionIndex } from "@/components/section-index";
 import { TopicCard } from "@/components/topic-card";
-import { docGroupSchema, type SectionDef } from "@/features/sections/schema";
-import { articlesOf, hubsOf, type DocItem } from "@/features/docs/source";
+import { docGroupSchema, type SectionDef } from "@/features/sections";
+import { articlesOf, hubsOf, type DocItem } from "@/features/docs";
 
 // Index page of a docs section: one card per hub group, else one per hub. Title, subtitle and
 // breadcrumb label come from the section's registry entry.

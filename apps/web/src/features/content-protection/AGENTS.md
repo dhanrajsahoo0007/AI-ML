@@ -7,7 +7,7 @@ blocking in `apps/web/src/app/robots.ts`, rate limits, watermarks later).
 
 ## Public API
 
-No index file; import the files directly.
+`index.ts` exports `ContentProtection` for the root layout; the tests import the files by path.
 
 - `content-protection.tsx`: `<ContentProtection />`, mounted once in the root layout (island + TDM meta).
 - `content-protection.client.tsx`: `ContentProtectionIsland`, one set of document listeners.

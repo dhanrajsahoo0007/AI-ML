@@ -1,7 +1,13 @@
 import { z } from "zod";
-import { newsletterRoute } from "@/features/newsletter/http";
-import { newsletterDeps, newsletterHref, newsletterStore } from "@/features/newsletter/server";
-import { accountStatus, subscribeWithAccount, unsubscribeAccount } from "@/features/newsletter/service";
+import {
+  newsletterRoute,
+  newsletterDeps,
+  newsletterHref,
+  newsletterStore,
+  accountStatus,
+  subscribeWithAccount,
+  unsubscribeAccount,
+} from "@/features/newsletter";
 
 // The signed-in user's newsletter subscription (plan §15.2 step 5).
 //   GET   {signedIn: false} for signed-out visitors (no database work), else {signedIn, email, status}. The

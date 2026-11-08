@@ -1,5 +1,4 @@
-import { SitePage } from "@/features/pages/site-page";
-import { pageMetadata } from "@/features/pages/page-doc";
+import { SitePage, pageMetadata } from "@/features/pages";
 
 export const dynamic = "force-static";
 

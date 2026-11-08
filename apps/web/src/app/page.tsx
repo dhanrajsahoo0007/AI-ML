@@ -3,11 +3,9 @@ import { Workflow } from "@/components/home/workflow";
 import { Features } from "@/components/home/features";
 import { Stats } from "@/components/home/stats";
 import { CtaBanner } from "@/components/home/cta-banner";
-import { visibleSections } from "@/features/sections/registry";
-import { loadSection } from "@/features/sections/kinds";
-import type { SectionKindName } from "@/features/sections/schema";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { homeSeo } from "@/features/seo/pages";
+import { visibleSections, loadSection } from "@/features/sections";
+import type { SectionKindName } from "@/features/sections";
+import { homeSeo, JsonLd } from "@/features/seo";
 
 // The social image comes from ./opengraph-image.tsx (Next merges it into this page).
 export function generateMetadata() {

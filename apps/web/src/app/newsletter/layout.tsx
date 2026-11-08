@@ -1,5 +1,5 @@
-import { routeMetadata, routeSection } from "@/features/sections/route-helpers";
-import { NEWSLETTER_KIND } from "@/features/newsletter/kind";
+import { routeMetadata, routeSection } from "@/features/sections";
+import { NEWSLETTER_KIND } from "@/features/newsletter";
 
 // The newsletter section's routes (plan §15.2). 404 when the section is off in this build (production today).
 

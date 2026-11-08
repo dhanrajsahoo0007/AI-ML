@@ -4,13 +4,10 @@ import { CompanyExplorer } from "@/components/company-explorer";
 import { FadeIn } from "@/components/motion/fade-in";
 import { PageHeader } from "@/components/ui/editorial";
 import { questionItems, SourceCredit } from "@/components/mdx/question-bank";
-import { premiumAnswerCategories } from "@/features/paywall/access";
+import { premiumAnswerCategories } from "@/features/paywall";
 import { COMPANY_GROUPS, getCategories, getCompanies, getQuestions } from "@/lib/question-bank";
-import { routeSection } from "@/features/sections/route-helpers";
-import { directoryRefs } from "@/features/sections/kinds";
-import { getSection } from "@/features/sections/registry";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { listingPageSeo } from "@/features/seo/pages";
+import { routeSection, directoryRefs, getSection } from "@/features/sections";
+import { listingPageSeo, JsonLd } from "@/features/seo";
 
 function companiesSeo() {
   const section = routeSection("directory");

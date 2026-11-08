@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Lock } from "lucide-react";
-import { PAYWALL_CONTAINER_CLASS } from "../seo/site";
+import { PAYWALL_CONTAINER_CLASS } from "../seo/public";
 import { DIFFICULTY_LABELS, type Difficulty } from "./constants";
 import { DIFFICULTY_CLASS } from "./difficulty";
 

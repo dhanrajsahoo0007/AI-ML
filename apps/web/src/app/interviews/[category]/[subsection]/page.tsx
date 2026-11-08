@@ -1,8 +1,7 @@
 import { notFound } from "next/navigation";
 import { CategoryView, categorySeo, resolveSubsection, SubsectionView, subsectionSeo } from "@/features/interviews";
-import { premiumAnswerCategories } from "@/features/paywall/access";
-import { PREVIEW_SEGMENT } from "@/features/paywall/constants";
-import { isRouteBuilt } from "@/features/sections/route-helpers";
+import { premiumAnswerCategories, PREVIEW_SEGMENT } from "@/features/paywall";
+import { isRouteBuilt } from "@/features/sections";
 import { getCategories, getCategory } from "@/lib/question-bank";
 
 type Params = Promise<{ category: string; subsection: string }>;

@@ -11,7 +11,7 @@ import type { Root as MdastRoot } from "mdast";
 import { rehypeHeadingIds, type DocHeading } from "@/lib/doc-headings";
 import { rehypeMermaidSvg } from "@/lib/rehype-mermaid-svg";
 import { remarkAssetRefs } from "@/lib/remark-asset-refs";
-import { remarkPremium, type PremiumSplit } from "@/features/paywall/remark-premium";
+import { remarkPremium, type PremiumSplit } from "@/features/paywall";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
 import { Pre, MermaidSvg } from "@/components/mdx/code-block";

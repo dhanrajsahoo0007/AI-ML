@@ -14,7 +14,7 @@ import {
   type PriceTier,
 } from "@/config/pricing-tiers";
 import { BillingPeriod } from "@/features/pages/billing-period.client";
-import { loadPageDoc } from "@/features/pages/page-doc";
+import { loadPageDoc } from "@/features/pages";
 import { RegionSwitcher } from "@/features/pages/region-switcher.client";
 
 // Base (tier A) prices in USD. Until the real prices are set in config/business.ts, local and preview builds show

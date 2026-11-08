@@ -1,8 +1,8 @@
-import { SectionDocPage } from "@/features/docs";
-import { docSlugParams, docsSection, docVariant, type DocParams } from "@/features/docs/routes";
-import { docPageSeo } from "@/features/seo/docs";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { withParentImages } from "@/features/seo/metadata";
+import { docSlugParams, docsSection, docVariant, type DocParams } from "@/features/docs";
+// By path: the view is JSX and features/docs/index.ts is loaded by plain Node (see the index).
+import { SectionDocPage } from "@/features/docs/section-doc-page";
+import { docPageSeo, JsonLd } from "@/features/seo";
+import { withParentImages } from "@/features/seo/public";
 import type { ResolvingMetadata } from "next";
 
 export const dynamicParams = false;

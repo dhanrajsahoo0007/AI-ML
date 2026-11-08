@@ -3,10 +3,8 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Container, PageHeader } from "@/components/ui/editorial";
 import { withPageSession } from "@/features/auth";
-import { consentText } from "@/features/newsletter/consent";
+import { consentText, newsletterHref, newsletterStore, accountStatus } from "@/features/newsletter";
 import { EmailPreferences } from "@/features/newsletter/email-preferences.client";
-import { newsletterHref, newsletterStore } from "@/features/newsletter/server";
-import { accountStatus } from "@/features/newsletter/service";
 
 // /account/email-preferences (plan §15.2): a signed-in user's newsletter status, with one-click subscribe (no
 // double opt-in: Google verified the address) and unsubscribe. A 404 while the newsletter section is not `on`.

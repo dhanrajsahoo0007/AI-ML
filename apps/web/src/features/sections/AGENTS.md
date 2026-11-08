@@ -7,7 +7,13 @@ generation, aggregators, content-check) only loops over the registry.
 
 ## Public API
 
-There is no index file; import these files directly.
+`index.ts` re-exports the registry, the kind types, `loadSection()`/`directoryRefs()` and the route helpers for the
+app, the other features' route and SEO modules, `apps/web/src/components/` and `apps/web/src/lib/`. The build-time
+modules that plain Node loads (`apps/web/next.config.ts`, the scripts, the section kinds and sources,
+`apps/web/src/config/features.ts`, `apps/web/src/features/paywall/access.ts`, `apps/web/src/lib/nav-tree.ts`,
+`apps/web/src/lib/question-bank.ts`) import `registry.ts`, `schema.ts` and `kind.ts` by path, because
+`route-helpers.ts` is server-only and needs Next's navigation helpers, and `kinds.ts` reaches the server-only
+question bank; see `FEATURES_WITHOUT_ENTRY` in `apps/web/eslint.config.mjs`.
 
 - `registry.ts`: `allSections()`, `visibleSections()` (`on`), `builtSections()` (`on` + `hidden`),
   `getSection(key)`, `sectionState(key)`, `sectionOfKind(kind)`, `sectionForPath(href)`, `isPathVisible(href)`,

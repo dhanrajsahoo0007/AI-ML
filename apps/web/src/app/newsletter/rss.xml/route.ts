@@ -1,9 +1,6 @@
-import { NEWSLETTER_KIND } from "@/features/newsletter/kind";
-import { buildRss } from "@/features/newsletter/rss";
-import { ARCHIVE_DESCRIPTION } from "@/features/newsletter/seo";
-import { loadIssues } from "@/features/newsletter/source";
-import { sectionOfKind } from "@/features/sections/registry";
-import { SITE_NAME } from "@/features/seo/site";
+import { NEWSLETTER_KIND, buildRss, ARCHIVE_DESCRIPTION, loadIssues } from "@/features/newsletter";
+import { sectionOfKind } from "@/features/sections";
+import { SITE_NAME } from "@/features/seo/public";
 
 // /newsletter/rss.xml: titles, links and summaries of sent issues, never their text (plan §11.10). Built once at
 // build time. Only while the section is `on`: a hidden or off section has no public feed.

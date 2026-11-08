@@ -1,6 +1,6 @@
 import { ContentShell } from "@/components/content-shell";
 import { getSectionNav } from "@/lib/nav-tree";
-import { routeMetadata, routeSection } from "@/features/sections/route-helpers";
+import { routeMetadata, routeSection } from "@/features/sections";
 
 // The directory section's routes; the sidebar gets only this section's nav.
 

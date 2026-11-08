@@ -2,10 +2,9 @@ import type { ResolvingMetadata } from "next";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/ui/editorial";
 import { ProblemList } from "@/features/dsa/problem-list.client";
-import { dsaContent, dsaSection, problemIndex } from "@/features/dsa/routes";
-import { hubCrumbs, LIST_DESCRIPTION, LIST_TITLE, listSeo } from "@/features/dsa/seo";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { withParentImages } from "@/features/seo/metadata";
+import { dsaContent, dsaSection, problemIndex, hubCrumbs, LIST_DESCRIPTION, LIST_TITLE, listSeo } from "@/features/dsa";
+import { withParentImages } from "@/features/seo/public";
+import { JsonLd } from "@/features/seo";
 
 export function generateMetadata(_props: unknown, parent: ResolvingMetadata) {
   return withParentImages(listSeo(dsaSection()).metadata, parent);

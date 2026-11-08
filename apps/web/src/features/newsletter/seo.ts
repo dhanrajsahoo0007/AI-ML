@@ -1,9 +1,9 @@
 import "server-only";
-import { articleNode, breadcrumbNode, jsonLdGraph } from "../seo/json-ld";
-import { pageMetadata } from "../seo/metadata";
+import { articleNode, breadcrumbNode, jsonLdGraph, pageMetadata } from "../seo/public";
+// By path: the seo index carries JSX, and this module is reached by the API routes' server-only integration test.
 import { listingPageSeo } from "../seo/pages";
-import type { PageSeo } from "../seo/docs";
-import type { SectionDef } from "../sections/schema";
+import type { PageSeo } from "../seo";
+import type { SectionDef } from "../sections";
 import { NEWSLETTER_KIND, newsletterKind } from "./kind";
 import { isPublished, type Issue } from "./source";
 

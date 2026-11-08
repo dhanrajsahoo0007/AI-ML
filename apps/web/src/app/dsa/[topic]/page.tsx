@@ -4,12 +4,17 @@ import { ArticleLayout } from "@/components/article-layout";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { getUpdatedDate } from "@/lib/doc-meta";
 import { loadMdxDoc } from "@/lib/mdx-doc";
-import { DifficultyLabel } from "@/features/dsa/components";
-import { getTopic, topicParams, type TopicParams } from "@/features/dsa/routes";
-import { hubCrumbs, topicSeo } from "@/features/dsa/seo";
-import { TOPICS_DIR } from "@/features/dsa/source";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { withParentImages } from "@/features/seo/metadata";
+import {
+  DifficultyLabel,
+  getTopic,
+  topicParams,
+  type TopicParams,
+  hubCrumbs,
+  topicSeo,
+  TOPICS_DIR,
+} from "@/features/dsa";
+import { withParentImages } from "@/features/seo/public";
+import { JsonLd } from "@/features/seo";
 
 export const dynamicParams = false;
 

@@ -1,7 +1,7 @@
 import { route } from "@/features/auth";
 import { writeAnalytics } from "@/server/edge/analytics";
 import { log, requestContext, type LogFields } from "@/server/log";
-import { VITALS_MAX_BYTES, vitalsPayload } from "@/features/observability/vitals-schema";
+import { VITALS_MAX_BYTES, vitalsPayload } from "@/features/observability";
 
 // Real-user web vitals beacons (plan §10.3), sent by features/observability/vitals.client.ts. No database: each
 // beacon becomes one structured log line, plus one Analytics Engine point per metric when the Worker has the

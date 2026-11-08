@@ -1,21 +1,25 @@
 import Link from "next/link";
 import type { ResolvingMetadata } from "next";
 import { Breadcrumb } from "@/components/breadcrumb";
-import { DifficultyLabel, ProEditorial, Tags } from "@/features/dsa/components";
-import { problemListHref } from "@/features/dsa/kind";
-import { problemEditorial, problemStatement } from "@/features/dsa/mdx";
-import { ProblemWorkspace } from "@/features/dsa/problem-workspace.client";
 import {
+  DifficultyLabel,
+  ProEditorial,
+  Tags,
+  problemListHref,
+  problemEditorial,
+  problemStatement,
   getProblem,
   problemLabels,
   problemParams,
   relatedLinks,
   workspaceProps,
   type ProblemParams,
-} from "@/features/dsa/routes";
-import { hubCrumbs, problemSeo } from "@/features/dsa/seo";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { withParentImages } from "@/features/seo/metadata";
+  hubCrumbs,
+  problemSeo,
+} from "@/features/dsa";
+import { ProblemWorkspace } from "@/features/dsa/problem-workspace.client";
+import { withParentImages } from "@/features/seo/public";
+import { JsonLd } from "@/features/seo";
 
 export const dynamicParams = false;
 

@@ -6,7 +6,7 @@ security, pricing FAQ), fills in business placeholders, and renders them in a co
 
 ## Public API
 
-No index file; import the files directly.
+`index.ts` exports `loadPageDoc()`, `pageMetadata()` and `SitePage`; the client islands are imported by path.
 
 - `page-doc.tsx`: `loadPageDoc(slug)` (cached; compiles `content/pages/<slug>.mdx`), `pageMetadata(slug)` from its
   frontmatter.

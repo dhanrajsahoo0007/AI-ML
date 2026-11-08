@@ -1,10 +1,9 @@
 import "server-only";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { isPremiumDoc } from "../paywall/access";
-import { PREVIEW_SEGMENT } from "../paywall/constants";
-import { builtSectionsOfKind, getSection } from "../sections/registry";
-import type { SectionDef } from "../sections/schema";
+import { isPremiumDoc, PREVIEW_SEGMENT } from "../paywall";
+import { builtSectionsOfKind, getSection } from "../sections";
+import type { SectionDef } from "../sections";
 import { docsKind } from "./kind";
 
 // Helpers for the shared docs routes, app/(content)/[section]/…: one route pair serves every docs

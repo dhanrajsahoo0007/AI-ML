@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { resolveSubsection, SubsectionView, subsectionSeo } from "@/features/interviews";
-import { premiumAnswerCategories } from "@/features/paywall/access";
-import { PREVIEW_SEGMENT } from "@/features/paywall/constants";
+import { premiumAnswerCategories, PREVIEW_SEGMENT } from "@/features/paywall";
 
 // `/interviews/<category>/<subsection>/_preview`: the public preview of a subsection whose answers are premium
 // (plan §9.1, §9.2). Only built for premium-answer categories while the paywall is on.

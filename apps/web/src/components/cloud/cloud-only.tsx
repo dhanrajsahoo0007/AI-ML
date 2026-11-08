@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { isPathVisible } from "@/features/sections/registry";
+import { isPathVisible } from "@/features/sections";
 
 // Content that links into /cloud (such as a case study's "Running it on AWS" section) renders only while
 // the cloud section is `on` in content/sections.yaml, so published pages never link to a hidden or off

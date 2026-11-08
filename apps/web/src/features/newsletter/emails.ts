@@ -1,9 +1,7 @@
 import { createElement as h } from "react";
 import { business } from "../../config/business";
-import { renderEmail } from "../email/render";
-import type { EmailMessage } from "../email/sender";
-import { ConfirmSubscriptionEmail } from "../email/templates/confirm-subscription";
-import { WelcomeEmail } from "../email/templates/welcome";
+import { renderEmail, ConfirmSubscriptionEmail, WelcomeEmail } from "../email";
+import type { EmailMessage } from "../email";
 import { CONFIRM_TTL_LABEL } from "./token";
 import { listUnsubscribeHeaders } from "./unsubscribe-headers";
 

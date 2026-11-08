@@ -1,5 +1,5 @@
-import { docsSection, docsSectionParams } from "@/features/docs/routes";
-import { OG_CONTENT_TYPE, OG_SIZE, ogImage } from "@/features/seo/og-image";
+import { docsSection, docsSectionParams } from "@/features/docs";
+import { OG_CONTENT_TYPE, OG_SIZE, ogImage } from "@/features/seo";
 
 // Social card for a docs section and every page in it, with the section's title (rendered once at build).
 export const size = OG_SIZE;

@@ -4,11 +4,10 @@ import { FadeIn } from "@/components/motion/fade-in";
 import { PageHeader } from "@/components/ui/editorial";
 import { QuestionList } from "@/components/mdx/question-bank";
 import { cn } from "@/lib/utils";
-import { Paywall } from "@/features/paywall/paywall";
-import { routeSection } from "@/features/sections/route-helpers";
+import { Paywall } from "@/features/paywall/public";
+import { routeSection } from "@/features/sections";
 import { getCategory, getQuestions } from "@/lib/question-bank";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { listingPageSeo } from "@/features/seo/pages";
+import { listingPageSeo, JsonLd } from "@/features/seo";
 
 // An Interview Practice subsection page, full or (premium-answer categories, plan §9.1) its public preview.
 

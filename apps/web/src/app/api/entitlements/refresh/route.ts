@@ -1,5 +1,5 @@
 import { authConfig, route } from "@/features/auth";
-import { refreshEntitlementCookie } from "@/features/entitlements/server";
+import { refreshEntitlementCookie } from "@/features/entitlements";
 import { serverEnv } from "@/server/env";
 
 // Re-issues the `oa_ent` entitlement cookie from the database (plan §9.2, §11.3). Called after sign-in, after

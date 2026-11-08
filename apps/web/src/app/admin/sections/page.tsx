@@ -1,6 +1,4 @@
-import { adminPage } from "@/features/admin/access";
-import { loadSectionStates } from "@/features/admin/sections";
-import { AdminShell, Panel, Table } from "@/features/admin/ui";
+import { adminPage, loadSectionStates, AdminShell, Panel, Table } from "@/features/admin";
 import { cn } from "@/lib/utils";
 
 const PATH = "/admin/sections";
