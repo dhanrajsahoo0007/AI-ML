@@ -3,6 +3,7 @@ import { ContentProtection } from "@/features/content-protection/content-protect
 import { Observability } from "@/features/observability/observability";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
+import { ProfileMenu } from "@/features/account/profile-menu.client";
 import { SiteFooter } from "@/components/site-footer";
 import { HydrationSlot } from "@/components/hydration-slot";
 import { LocalViewSwitch } from "@/components/local-view-switch.client";
@@ -78,7 +79,7 @@ export default async function RootLayout({
         >
           Skip to content
         </a>
-        <SiteHeader navTree={headerNav} />
+        <SiteHeader navTree={headerNav} profileMenu={<ProfileMenu />} />
         <ContentProtection />
         {/* `next dev` only: the paid/unpaid view switch. APP_ENV is inlined at build, so deployed builds drop it. */}
         {process.env.APP_ENV === "local" && <LocalViewSwitch envDefault={process.env.LOCAL_VIEW_AS} />}

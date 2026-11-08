@@ -11,7 +11,8 @@ The account overview, the JSON data export (GDPR art. 15/20, India DPDP) and acc
 - `deleteAccount(db, userId)`: deletes the user; throws `LiveSubscriptionError` while a subscription is live.
 - `setSubscriptionCanceller(fn)`, `LiveSubscription`, `SubscriptionCanceller`: the hook billing registers.
 - `describeDevice(userAgent)`: "Chrome on macOS" labels for the session list.
-- Client island by path: `account-actions.client.tsx`.
+- Client islands by path: `account-actions.client.tsx`; `profile-menu.client.tsx`, the header's profile menu
+  (session fetched only when opened), rendered by `apps/web/src/app/layout.tsx` and passed into `SiteHeader`.
 
 ## Data flow
 

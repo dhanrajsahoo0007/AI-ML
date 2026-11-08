@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
 import { ArrowRight, ChevronDown, Menu } from "lucide-react";
@@ -15,7 +15,6 @@ import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
 import { siteConfig } from "@/config/site";
 import { ThemeToggle } from "@/components/theme";
-import { ProfileMenu } from "@/components/profile-menu";
 import { SearchButton } from "@/features/search/search-dialog.client";
 import { SUBSCRIBE_KIND } from "@/features/sections/public";
 import type { HeaderNavSection } from "@/features/sections/public";
@@ -23,11 +22,12 @@ import type { HeaderNavSection } from "@/features/sections/public";
 // Header: every visible section from content/sections.yaml is its own item in the top bar (in registry order),
 // followed by the extra links (Pricing). Hovering or focusing a section opens a panel with that section's
 // subcategories (its first-level groups). The header is on every page, so it gets only that slim list
-// (HeaderNavSection); each article list lives in its own section's sidebar.
+// (HeaderNavSection); each article list lives in its own section's sidebar. The profile menu is passed in from
+// app/layout.tsx (it lives in features/account, which components/ can't import).
 
 const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
-export function SiteHeader({ navTree }: { navTree: HeaderNavSection[] }) {
+export function SiteHeader({ navTree, profileMenu }: { navTree: HeaderNavSection[]; profileMenu: ReactNode }) {
   const pathname = useCanonicalPathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -161,13 +161,13 @@ export function SiteHeader({ navTree }: { navTree: HeaderNavSection[] }) {
               Subscribe
             </Link>
           )}
-          <ProfileMenu />
+          {profileMenu}
         </div>
 
         <div className="ml-auto flex items-center gap-1 lg:hidden">
           <SearchButton compact />
           <ThemeToggle />
-          <ProfileMenu />
+          {profileMenu}
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger
               className="inline-flex size-10 items-center justify-center rounded-full text-ink transition-colors hover:bg-paper-2"
