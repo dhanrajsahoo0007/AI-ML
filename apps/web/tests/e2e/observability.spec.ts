@@ -81,15 +81,29 @@ test.describe("web vitals beacon @core", () => {
     await page.addInitScript(() => {
       Math.random = () => 0;
     });
+    type Beacon = { route: string; section: string; metrics: { name: string }[] };
+    const beacons: Beacon[] = [];
+    page.on("request", (r) => {
+      if (r.url().endsWith("/api/vitals") && r.method() === "POST") beacons.push(r.postDataJSON() as Beacon);
+    });
     await page.goto(ARTICLE, { waitUntil: "load" });
     await page.waitForLoadState("networkidle");
-    const beacon = page.waitForRequest((r) => r.url().endsWith("/api/vitals") && r.method() === "POST");
-    // What the browser fires when the tab is hidden or closed.
-    await page.evaluate(() => dispatchEvent(new Event("pagehide")));
-    const body = (await beacon).postDataJSON() as { route: string; section: string; metrics: { name: string }[] };
-    expect(body.route).toBe(ARTICLE);
-    expect(body.section).toBe("ai-system-design");
-    expect(body.metrics.map((m) => m.name)).toContain("TTFB");
+    // What the browser fires when the tab is hidden or closed. web-vitals loads lazily and reports TTFB
+    // asynchronously, and a flush with nothing measured yet sends nothing, so on a slow machine a single early
+    // pagehide can find nothing to send. Fire it until a beacon carrying TTFB has gone out.
+    await expect
+      .poll(
+        async () => {
+          await page.evaluate(() => dispatchEvent(new Event("pagehide")));
+          return beacons.flatMap((b) => b.metrics.map((m) => m.name));
+        },
+        { timeout: 20_000, intervals: [250, 500, 1000] }
+      )
+      .toContain("TTFB");
+    for (const body of beacons) {
+      expect(body.route).toBe(ARTICLE);
+      expect(body.section).toBe("ai-system-design");
+    }
   });
 });
 
