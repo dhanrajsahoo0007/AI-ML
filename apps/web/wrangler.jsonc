@@ -68,6 +68,18 @@
   // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id>", "localConnectionString": "postgres://app:app@localhost:5432/app" }],
   // TODO(account): Analytics Engine dataset for paywall/checkout metrics (plan §10.5).
   // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_<env>" }],
+  // TODO(account): Cloudflare Queue for transactional email, so /api/* never waits on Resend. This Worker is both
+  // producer (EMAIL_QUEUE → enqueueEmail() in src/features/email/queue.ts) and consumer (handleEmailQueue() in
+  // src/features/email/queue-consumer.ts, wired as the Worker entry's queue() handler). Messages that still fail
+  // after max_retries (backoff 30 s doubling to 1 h, about 2 h in all) go to the dead-letter queue, kept for
+  // inspection and replay. max_concurrency 1 stays under Resend's default API rate limit. Without the binding
+  // email is sent inline. The owner creates both queues per environment first:
+  // `npx wrangler queues create origins-ai-learn-email-<env>` and `npx wrangler queues create origins-ai-learn-email-dlq-<env>`.
+  // Locally wrangler simulates queues (no account); the local block below waits only for the Worker entry.
+  // "queues": {
+  //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "origins-ai-learn-email-local" }],
+  //   "consumers": [{ "queue": "origins-ai-learn-email-local", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "origins-ai-learn-email-dlq-local" }],
+  // },
 
   "env": {
     // One Worker (origins-ai-learn-preview) holds a version per PR, each with its own preview URL
@@ -92,6 +104,11 @@
         { "name": "RL_VITALS", "namespace_id": "2013", "simple": { "limit": 60, "period": 60 } },
       ],
       // TODO(account): r2_buckets / hyperdrive / analytics_engine_datasets as above (preview names).
+      // TODO(account): the transactional email queue (src/features/email/queue.ts), preview names; see the top level.
+      // "queues": {
+      //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "origins-ai-learn-email-preview" }],
+      //   "consumers": [{ "queue": "origins-ai-learn-email-preview", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "origins-ai-learn-email-dlq-preview" }],
+      // },
     },
     // Deployed from `development`. TODO(account): route `staging.<domain>` once the zone exists:
     // "routes": [{ "pattern": "staging.<domain>", "custom_domain": true }],
@@ -117,6 +134,11 @@
         { "name": "RL_VITALS", "namespace_id": "3013", "simple": { "limit": 60, "period": 60 } },
       ],
       // TODO(account): r2_buckets / hyperdrive / analytics_engine_datasets as above (staging names).
+      // TODO(account): the transactional email queue (src/features/email/queue.ts), staging names; see the top level.
+      // "queues": {
+      //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "origins-ai-learn-email-staging" }],
+      //   "consumers": [{ "queue": "origins-ai-learn-email-staging", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "origins-ai-learn-email-dlq-staging" }],
+      // },
     },
     // Deployed from `main` through the `production` GitHub environment. workers.dev stays on because
     // the deploy smoke tests use it (Bot Fight Mode on the custom domain blocks CI runners); middleware
@@ -144,6 +166,11 @@
         { "name": "RL_VITALS", "namespace_id": "4013", "simple": { "limit": 60, "period": 60 } },
       ],
       // TODO(account): r2_buckets / hyperdrive / analytics_engine_datasets as above (production names).
+      // TODO(account): the transactional email queue (src/features/email/queue.ts), production names; see the top level.
+      // "queues": {
+      //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "origins-ai-learn-email-production" }],
+      //   "consumers": [{ "queue": "origins-ai-learn-email-production", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "origins-ai-learn-email-dlq-production" }],
+      // },
     },
   },
 }
