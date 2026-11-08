@@ -18,6 +18,9 @@ import { z } from "zod";
 //                                        production on workers.dev (owner: set it before the domain goes live)
 //   NEXT_PUBLIC_GIT_SHA          build   commit SHA, inlined by Next.js at build (set by deploy.yml)
 //   APP_ENV                      build   inlined by next.config.ts (section states are per build)
+//   LOCAL_VIEW_AS                var     `next dev` only, the startup default of the local view switch: `paid`
+//                                        shows every premium page in full, `unpaid` always shows the preview and
+//                                        paywall, unset follows the signed-in user. Ignored by non-local builds
 
 const optional = z
   .string()
@@ -37,6 +40,7 @@ export const edgeEnvSchema = z.object({
   DODO_API_KEY: optional,
   BETTER_AUTH_URL: optional,
   SMOKE_KEY: optional,
+  LOCAL_VIEW_AS: z.enum(["paid", "unpaid"]).optional().catch(undefined),
 });
 
 type EdgeEnv = z.infer<typeof edgeEnvSchema>;
@@ -55,6 +59,7 @@ export function readEdgeEnv(): EdgeEnv {
     DODO_API_KEY: process.env.DODO_API_KEY,
     BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
     SMOKE_KEY: process.env.SMOKE_KEY,
+    LOCAL_VIEW_AS: process.env.LOCAL_VIEW_AS || undefined,
   });
 }
 

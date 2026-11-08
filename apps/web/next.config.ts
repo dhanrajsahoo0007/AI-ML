@@ -47,15 +47,23 @@ function sectionRedirects() {
   );
 }
 
-// Once per build (config is loaded again in build workers): write the hidden-route and premium-route manifests
-// for the middleware (plan §5.1.1, §9.2) and run the content checks before any page is rendered.
-function beforeBuild() {
-  if (process.env.SECTIONS_PREBUILD_DONE) return;
-  process.env.SECTIONS_PREBUILD_DONE = "1";
+// The hidden-route and premium-route manifests the middleware reads (plan §5.1.1, §9.2). Written before every
+// build and when `next dev` starts, so local development is gated exactly like a deployed site: premium pages
+// show the preview and the paywall to anyone without Pro. Without them the middleware would treat nothing as
+// premium and `next dev` would show every article in full.
+function writeManifests() {
   const dir = path.join(__dirname, "src", "generated");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "hidden-routes.json"), `${JSON.stringify(hiddenRoutes(), null, 2)}\n`);
   fs.writeFileSync(path.join(dir, "premium-routes.json"), `${JSON.stringify(premiumRoutes(), null, 2)}\n`);
+}
+
+// Once per build (config is loaded again in build workers): write the manifests and run the content checks
+// before any page is rendered.
+function beforeBuild() {
+  if (process.env.SECTIONS_PREBUILD_DONE) return;
+  process.env.SECTIONS_PREBUILD_DONE = "1";
+  writeManifests();
   if (process.env.SKIP_CONTENT_CHECK) return;
   execFileSync(process.execPath, ["--import", "./scripts/ts-hooks.mjs", "scripts/content-check.ts"], {
     cwd: __dirname,
@@ -70,6 +78,7 @@ function readGenerated(file: string): string {
 
 function nextConfig(phase: string): NextConfig {
   if (phase === PHASE_PRODUCTION_BUILD) beforeBuild();
+  if (phase === PHASE_DEVELOPMENT_SERVER) writeManifests();
   return {
     output: "standalone",
     poweredByHeader: false,

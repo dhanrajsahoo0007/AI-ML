@@ -6,3 +6,5 @@ export { authConfig, isGoogleConfigured } from "./config";
 export { ageCookie } from "./age-consent";
 export { isFreshSession, revokeAllSessions, MAX_SESSIONS_PER_USER } from "./sessions";
 export { safeNextPath } from "./next-path";
+export { TEST_LOGIN_HEADER } from "./test-login";
+export { TEST_USER_KEYS, type TestUserKey } from "@/server/db/test-users";

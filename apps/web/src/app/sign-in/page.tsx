@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Container, PageHeader } from "@/components/ui/editorial";
-import { isGoogleConfigured, safeNextPath } from "@/features/auth";
+import { authConfig, isGoogleConfigured, safeNextPath } from "@/features/auth";
+import { LocalSignIn } from "@/features/auth/local-sign-in.client";
 import { SignInForm } from "@/features/auth/sign-in-form.client";
 
 // Dynamic: whether Google is configured is read from the runtime environment. No database here.
@@ -38,6 +39,8 @@ export default async function SignInPage({ searchParams }: { searchParams: Searc
         </p>
       )}
       <SignInForm googleEnabled={isGoogleConfigured()} next={next} />
+      {/* `next dev` only: APP_ENV is inlined at build, so deployed builds drop this branch. */}
+      {process.env.APP_ENV === "local" && authConfig().testLogin && <LocalSignIn next={next} />}
       <p className="mt-8 text-[13px] leading-relaxed text-muted-foreground">
         We ask Google only for your name, email address and profile picture. See the{" "}
         <Link href="/legal/privacy" className="underline underline-offset-2 hover:text-ink">

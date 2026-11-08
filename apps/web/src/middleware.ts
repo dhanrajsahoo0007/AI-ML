@@ -88,7 +88,7 @@ export async function middleware(request: NextRequest) {
       response.headers.set("X-Robots-Tag", "noindex");
       break;
     case "pass":
-      response = paywallResponse(request, claims?.tier ?? null, Boolean(env.DODO_API_KEY));
+      response = paywallResponse(request, viewerTier(request, env, claims?.tier ?? null), Boolean(env.DODO_API_KEY));
       if (decision.gated) {
         // A hidden page shown to an admin: keep it out of every shared cache.
         response.headers.set("Cache-Control", "private, no-store");
@@ -99,6 +99,24 @@ export async function middleware(request: NextRequest) {
   if (host.action === "pass-noindex") response.headers.set("X-Robots-Tag", "noindex");
   response.headers.set(VERSION_HEADER, appVersion(env));
   return response;
+}
+
+/**
+ * The tier the paywall serves. On `next dev` (APP_ENV=local, inlined at build) the site can run with the paid or
+ * the unpaid view without signing in or out: the `oa_local_view` cookie set by the local view switch
+ * (components/local-view-switch.client.tsx), else LOCAL_VIEW_AS from .env.local. `paid` → Pro, `unpaid` → free,
+ * `real` or unset → the signed-in user's own tier. Every other build ignores both.
+ */
+function viewerTier(
+  request: NextRequest,
+  env: ReturnType<typeof readEdgeEnv>,
+  tier: "free" | "pro" | null
+): "free" | "pro" | null {
+  if (process.env.APP_ENV !== "local") return tier;
+  const view = request.cookies.get("oa_local_view")?.value ?? env.LOCAL_VIEW_AS;
+  if (view === "paid") return "pro";
+  if (view === "unpaid") return "free";
+  return tier;
 }
 
 function paywallResponse(request: NextRequest, tier: "free" | "pro" | null, billingConfigured: boolean): Response {

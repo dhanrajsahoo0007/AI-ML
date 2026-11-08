@@ -5,6 +5,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { HydrationSlot } from "@/components/hydration-slot";
+import { LocalViewSwitch } from "@/components/local-view-switch.client";
 import { getHeaderNav } from "@/lib/nav-tree";
 import { THEME_SCRIPT } from "@/components/theme-script";
 import { siteConfig } from "@/config/site";
@@ -79,6 +80,8 @@ export default async function RootLayout({
         </a>
         <SiteHeader navTree={headerNav} />
         <ContentProtection />
+        {/* `next dev` only: the paid/unpaid view switch. APP_ENV is inlined at build, so deployed builds drop it. */}
+        {process.env.APP_ENV === "local" && <LocalViewSwitch envDefault={process.env.LOCAL_VIEW_AS} />}
         {/* HydrationSlot: these arrive as separate RSC rows that may land after hydration starts; see
             components/hydration-slot.tsx (React #418). Not a Suspense boundary: that would turn notFound() 404s into 200s. */}
         <main id="main" className="w-full flex-1">

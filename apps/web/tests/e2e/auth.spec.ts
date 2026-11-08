@@ -49,6 +49,13 @@ test.describe("test-login provider is absent from production @core", () => {
     }
   });
 
+  test("POST /api/dev/login (local test accounts) returns 404 outside `next dev`", async ({ request }) => {
+    test.skip(builtAppEnv() === "local", "local builds serve the local test accounts on purpose");
+    const res = await request.post("/api/dev/login", { data: { userKey: "admin" }, headers: { origin: origin() } });
+    expect(res.status()).toBe(404);
+    expect(res.headers()["set-cookie"]).toBeUndefined();
+  });
+
   test("no client bundle mentions the test-login route", () => {
     test.skip(!!process.env.E2E_BASE_URL, "needs the local build output");
     const staticDir = path.join(webRoot, ".next", "static");
@@ -59,7 +66,7 @@ test.describe("test-login provider is absent from production @core", () => {
         if (entry.isDirectory()) walk(p);
         else if (
           /\.(js|json|html)$/.test(entry.name) &&
-          /test\/login|x-test-login-key/.test(fs.readFileSync(p, "utf8"))
+          /test\/login|x-test-login-key|dev\/login|oa_local_view/.test(fs.readFileSync(p, "utf8"))
         ) {
           offenders.push(path.relative(webRoot, p));
         }

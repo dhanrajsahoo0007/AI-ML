@@ -8,6 +8,15 @@ import { BillingPeriod } from "@/features/pages/billing-period.client";
 import { loadPageDoc } from "@/features/pages/page-doc";
 
 const pricesSet = !business.PRICE_MONTHLY_USD.includes("TODO") && !business.PRICE_YEARLY_USD.includes("TODO");
+// Until the real prices are set in config/business.ts, local and preview builds show sample prices (the same ones
+// the local payments sandbox charges, scripts/dev-payments.ts) so the paid flow can be tried end to end. Staging and
+// production never show a sample: they say "Price announced at launch" instead.
+const SAMPLE_PRICES = process.env.APP_ENV === "local" || process.env.APP_ENV === "preview";
+const prices = pricesSet
+  ? { monthly: business.PRICE_MONTHLY_USD, yearly: business.PRICE_YEARLY_USD, sample: false }
+  : SAMPLE_PRICES
+    ? { monthly: "$9", yearly: "$90", sample: true }
+    : null;
 
 export const pricingMetadata: Metadata = {
   title: "Pricing",
@@ -130,14 +139,14 @@ export async function PricingView({ live = false }: { live?: boolean }) {
               >
                 <Eyebrow className="text-primary">Pro</Eyebrow>
                 <h2 id="plan-pro" className="mt-4 font-display text-4xl tracking-tight">
-                  {pricesSet ? (
+                  {prices ? (
                     <>
                       <span className="group-data-[period=yearly]:hidden">
-                        {business.PRICE_MONTHLY_USD}
+                        {prices.monthly}
                         <span className="text-lg text-muted-foreground">/month</span>
                       </span>
                       <span className="hidden group-data-[period=yearly]:inline">
-                        {business.PRICE_YEARLY_USD}
+                        {prices.yearly}
                         <span className="text-lg text-muted-foreground">/year</span>
                       </span>
                     </>
@@ -147,6 +156,11 @@ export async function PricingView({ live = false }: { live?: boolean }) {
                   )}
                 </h2>
                 <p className="mt-2 text-[15px] text-muted-foreground">For serious interview preparation.</p>
+                {prices?.sample && (
+                  <p className="mt-2 text-[13px] text-muted-foreground" data-testid="sample-price">
+                    Sample price for testing on this build; the real price is set in config/business.ts.
+                  </p>
+                )}
                 <FeatureList items={PRO_FEATURES} />
                 <div className="mt-auto pt-10">
                   <GoPro live={live} />
