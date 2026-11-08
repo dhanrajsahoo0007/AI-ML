@@ -1,7 +1,13 @@
-import { verifyWebhookSignature } from "@/features/email/webhook-signature";
-import { serverToServerRoute } from "@/features/newsletter/http";
-import { processResendEvent, RESEND_PROVIDER, resendEventSchema } from "@/features/newsletter/resend-webhook";
-import { hasDatabase, NotConfiguredError, resendWebhookSecret } from "@/features/newsletter/server";
+import { verifyWebhookSignature } from "@/features/email";
+import {
+  serverToServerRoute,
+  processResendEvent,
+  RESEND_PROVIDER,
+  resendEventSchema,
+  hasDatabase,
+  NotConfiguredError,
+  resendWebhookSecret,
+} from "@/features/newsletter";
 import { HttpError } from "@/server/http";
 import { log } from "@/server/log";
 

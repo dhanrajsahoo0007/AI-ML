@@ -2,8 +2,12 @@
 // only and no `server-only`. The middleware (Phase 3) will set the HTML-specific ones (Cache-Control, Vary)
 // on top of these; the list here is the baseline for every route, static files included.
 
-import { observabilityCspHosts, type ObservabilityCspHosts } from "../observability/csp-hosts";
-import { pinPublicObservabilityEnv, type PublicObservabilityEnv } from "../observability/public-env";
+import {
+  observabilityCspHosts,
+  type ObservabilityCspHosts,
+  pinPublicObservabilityEnv,
+  type PublicObservabilityEnv,
+} from "../observability/public";
 
 // Unset observability variables become "" before Next reads the environment, so their client code is dropped at
 // build (see pinPublicObservabilityEnv). Must run when next.config.ts loads this module.

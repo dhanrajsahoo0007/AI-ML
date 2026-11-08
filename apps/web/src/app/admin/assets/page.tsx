@@ -1,10 +1,20 @@
 import Link from "next/link";
-import { adminPage } from "@/features/admin/access";
-import { assetSnippet, filterAssets, isUnused, parseAssetQuery, tagCounts } from "@/features/admin/asset-filter";
-import { loadAssetManifest } from "@/features/admin/assets";
+import {
+  adminPage,
+  assetSnippet,
+  filterAssets,
+  isUnused,
+  parseAssetQuery,
+  tagCounts,
+  loadAssetManifest,
+  formatBytes,
+  AdminShell,
+  Panel,
+  Stat,
+  StatGrid,
+  Table,
+} from "@/features/admin";
 import { CopySnippetButton } from "@/features/admin/copy-snippet.client";
-import { formatBytes } from "@/features/admin/format";
-import { AdminShell, Panel, Stat, StatGrid, Table } from "@/features/admin/ui";
 import { ASSET_TYPES } from "@/lib/asset-schema";
 
 const PATH = "/admin/assets";

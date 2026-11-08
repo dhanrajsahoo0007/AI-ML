@@ -1,5 +1,5 @@
 import { authConfig, authFor, revokeAllSessions, route } from "@/features/auth";
-import { clearEntitlementCookies } from "@/features/entitlements/cookies";
+import { clearEntitlementCookies } from "@/features/entitlements";
 
 // "Sign out everywhere": revokes every session of the user, including this one.
 export const DELETE = route({

@@ -3,16 +3,12 @@ import { notFound } from "next/navigation";
 import type { ResolvingMetadata } from "next";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/ui/editorial";
+import { NEWSLETTER_KIND, newsletterKind, issueSeo, isBuilt, isPublished, loadIssues } from "@/features/newsletter";
 import { issueBody } from "@/features/newsletter/issue-body";
-import { NEWSLETTER_KIND, newsletterKind } from "@/features/newsletter/kind";
-import { issueSeo } from "@/features/newsletter/seo";
-import { SignupBox } from "@/features/newsletter/signup-box";
-import { isBuilt, isPublished, loadIssues } from "@/features/newsletter/source";
-import { isRouteBuilt, routeSection } from "@/features/sections/route-helpers";
-import { sectionOfKind } from "@/features/sections/registry";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { withParentImages } from "@/features/seo/metadata";
-import { PAYWALL_CONTAINER_CLASS } from "@/features/seo/site";
+import { SignupBox } from "@/features/newsletter/public";
+import { isRouteBuilt, routeSection, sectionOfKind } from "@/features/sections";
+import { withParentImages, PAYWALL_CONTAINER_CLASS } from "@/features/seo/public";
+import { JsonLd } from "@/features/seo";
 
 // The web version of one issue. Premium issues show the summary and a Pro placeholder inside the paywall
 // container; their body is never rendered here (it reaches entitled readers through the §9.2 gate later).

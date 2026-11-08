@@ -1,5 +1,5 @@
 import type { Metadata, ResolvingMetadata } from "next";
-import type { ReleaseState } from "../sections/schema";
+import type { ReleaseState } from "../sections";
 import { absoluteUrl, SITE_NAME } from "./site";
 
 /** Size of every opengraph-image route (features/seo/og-image.tsx). */

@@ -6,7 +6,11 @@ response.
 
 ## Public API
 
-No index file; import the files directly.
+`index.ts` (server side: `docsSectionSeo()`, `docPageSeo()`, `homeSeo()`, `listingPageSeo()`, `<JsonLd>`,
+`ogImage()`) and `public.ts` (client-safe, no JSX: the site constants, `pageMetadata()`, the JSON-LD builders, the
+CSP report parser). The index carries JSX, so modules that server-only tests reach use `public.ts`, and
+`apps/web/src/features/newsletter/seo.ts` imports `pages.ts` by path; `security-headers.ts` is imported by
+`apps/web/next.config.ts`.
 
 - `metadata.ts`: `pageMetadata(input)` (every page uses it), `pageRobots()`, `OG_WIDTH`/`OG_HEIGHT`, and the helper
   that keeps the nearest `opengraph-image` when a page sets its own `openGraph`.

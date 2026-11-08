@@ -9,7 +9,10 @@ workflow (`apps/web/src/features/newsletter/AGENTS.md`).
 
 ## Public API
 
-No index file; import the files directly.
+`index.ts` exports the producer, the senders, the renderer, the templates and the webhook check for the other
+features (no server-only module, no JSX: it is bundled into the Worker entry and loaded by the scripts).
+`queue-consumer.ts` is imported by `apps/web/worker.mjs` by path; `jobs.ts` imports the newsletter and billing
+template builders by path (their indexes are server-only, which throws in the Worker bundle).
 
 - `jobs.ts`: `emailJobSchema` (zod, discriminated on `kind`), `EmailJob`, `EmailJobInput`, `buildEmail()`
   (job → `EmailMessage`), `EMAIL_JOB_VERSION`.

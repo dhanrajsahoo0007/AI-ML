@@ -1,5 +1,5 @@
 import posthog from "posthog-js/dist/module.slim.no-external";
-import { DEFAULT_POSTHOG_HOST } from "../observability/public-env";
+import { DEFAULT_POSTHOG_HOST } from "../observability/public";
 
 // PostHog, cookieless (plan §10.5): state lives in memory only (no cookie, no localStorage, so no consent banner
 // is needed for it), nothing is captured automatically (no autocapture, inputs, heatmaps or session recording),

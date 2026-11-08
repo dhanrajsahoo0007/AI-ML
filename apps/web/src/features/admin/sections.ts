@@ -1,7 +1,5 @@
 import "server-only";
-import { allSections, resolveAppEnv } from "@/features/sections/registry";
-import { loadSection } from "@/features/sections/kinds";
-import { APP_ENVS, type AppEnv, type ReleaseState } from "@/features/sections/schema";
+import { allSections, resolveAppEnv, loadSection, APP_ENVS, type AppEnv, type ReleaseState } from "@/features/sections";
 
 // /admin/sections: every registry entry with its release state in each environment and its item counts, read
 // through the same registry and kind contracts as the rest of the site (no section names in this file).

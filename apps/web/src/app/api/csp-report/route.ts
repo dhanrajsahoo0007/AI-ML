@@ -1,5 +1,5 @@
 import { route } from "@/features/auth";
-import { CSP_REPORT_MAX_BYTES, parseCspReports } from "@/features/seo/csp-report";
+import { CSP_REPORT_MAX_BYTES, parseCspReports } from "@/features/seo/public";
 import { HttpError } from "@/server/http";
 import { log } from "@/server/log";
 

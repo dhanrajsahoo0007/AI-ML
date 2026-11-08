@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ContentProtection } from "@/features/content-protection/content-protection";
+import { ContentProtection } from "@/features/content-protection";
 import { Observability } from "@/features/observability/observability";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";

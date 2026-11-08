@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Lock } from "lucide-react";
 import { PaywallUnlock } from "../entitlements/islands.client";
-import { PAYWALL_CONTAINER_CLASS } from "../seo/site";
+import { PAYWALL_CONTAINER_CLASS } from "../seo/public";
 
 // The paywall at the end of a premium page's public preview (plan §9.2). Server-rendered; the premium part of
 // the page is not in this response at all. The container carries PAYWALL_CONTAINER_CLASS, the selector the

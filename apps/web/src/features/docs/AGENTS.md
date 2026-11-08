@@ -6,10 +6,14 @@ pair serves every docs section: `apps/web/src/app/(content)/[section]/page.tsx` 
 
 ## Public API
 
-- `index.ts`: `SectionDocPage`, the article page view (server component; renders the paywall on previews). The
-  index re-exports JSX, so server-only tests import the files below by path instead.
-
-No other entry point yet; import these files directly:
+- `index.ts`: `docsKind`, the route helpers and the content reader below, for the app, `apps/web/src/components/`
+  and `apps/web/src/features/seo/`. No JSX in it: it is loaded by plain Node through the section kinds.
+- `section-doc-page.tsx`: `SectionDocPage`, the article page view (server component; renders the paywall on
+  previews). Imported by path from `apps/web/src/app/(content)/[section]/[...slug]/page.tsx`, because it is JSX.
+- `apps/web/src/features/sections/kinds.ts`, `apps/web/src/features/newsletter/kind.ts` and
+  `apps/web/src/features/paywall/access.ts` import `kind.ts` and `source.ts` by path (loaded by `apps/web/next.config.ts`
+  and the scripts, which can't load the server-only `routes.ts`); see `FEATURES_WITHOUT_ENTRY` in
+  `apps/web/eslint.config.mjs`.
 
 - `kind.ts`: `docsKind`, the `SectionKind<DocItem>` implementation (load, staticParams, nav, sitemap, search,
   access, questions, counts, validate).

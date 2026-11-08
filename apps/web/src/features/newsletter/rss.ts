@@ -1,4 +1,4 @@
-import { absoluteUrl } from "../seo/site";
+import { absoluteUrl } from "../seo/public";
 import { isPublished, type Issue } from "./source";
 
 // The newsletter feed: titles, links and summaries of sent issues only. Never the body (plan §11.10: feeds carry

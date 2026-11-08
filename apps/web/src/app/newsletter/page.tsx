@@ -1,12 +1,19 @@
 import Link from "next/link";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/ui/editorial";
-import { NEWSLETTER_KIND, newsletterKind } from "@/features/newsletter/kind";
-import { archiveSeo, ARCHIVE_DESCRIPTION, ARCHIVE_TITLE } from "@/features/newsletter/seo";
-import { SignupBox } from "@/features/newsletter/signup-box";
-import { isBuilt, isPublished, loadIssues } from "@/features/newsletter/source";
-import { routeSection } from "@/features/sections/route-helpers";
-import { JsonLd } from "@/features/seo/json-ld-script";
+import {
+  NEWSLETTER_KIND,
+  newsletterKind,
+  archiveSeo,
+  ARCHIVE_DESCRIPTION,
+  ARCHIVE_TITLE,
+  isBuilt,
+  isPublished,
+  loadIssues,
+} from "@/features/newsletter";
+import { SignupBox } from "@/features/newsletter/public";
+import { routeSection } from "@/features/sections";
+import { JsonLd } from "@/features/seo";
 
 export const dynamic = "force-static";
 

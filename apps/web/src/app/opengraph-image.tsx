@@ -1,5 +1,5 @@
 import { siteConfig } from "@/config/site";
-import { OG_CONTENT_TYPE, OG_SIZE, ogImage } from "@/features/seo/og-image";
+import { OG_CONTENT_TYPE, OG_SIZE, ogImage } from "@/features/seo";
 
 // Default social card for every page without a closer one (rendered once at build).
 export const alt = siteConfig.name;

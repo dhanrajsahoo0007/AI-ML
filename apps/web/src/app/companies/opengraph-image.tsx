@@ -1,5 +1,5 @@
-import { OG_CONTENT_TYPE, OG_SIZE, ogImage } from "@/features/seo/og-image";
-import { routeSection } from "@/features/sections/route-helpers";
+import { OG_CONTENT_TYPE, OG_SIZE, ogImage } from "@/features/seo";
+import { routeSection } from "@/features/sections";
 
 // Social card for Company Questions (rendered once at build).
 export const alt = "Company Questions";

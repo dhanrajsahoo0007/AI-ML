@@ -4,10 +4,9 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { FadeIn } from "@/components/motion/fade-in";
 import { PageHeader } from "@/components/ui/editorial";
 import { QuestionList } from "@/components/mdx/question-bank";
-import { Paywall } from "@/features/paywall/paywall";
-import { routeSection } from "@/features/sections/route-helpers";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { listingPageSeo } from "@/features/seo/pages";
+import { Paywall } from "@/features/paywall/public";
+import { routeSection } from "@/features/sections";
+import { listingPageSeo, JsonLd } from "@/features/seo";
 import { getCategory, getQuestions, type Category } from "@/lib/question-bank";
 
 // An Interview Practice category page. For a category whose answers are premium (plan §9.1) the page is built

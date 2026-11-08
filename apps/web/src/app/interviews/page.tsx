@@ -4,10 +4,9 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { FadeIn } from "@/components/motion/fade-in";
 import { Eyebrow, PageHeader } from "@/components/ui/editorial";
 import { getIconComponent } from "@/lib/icons";
-import { routeSection } from "@/features/sections/route-helpers";
+import { routeSection } from "@/features/sections";
 import { CATEGORY_GROUPS, getCategories, getQuestions } from "@/lib/question-bank";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { listingPageSeo } from "@/features/seo/pages";
+import { listingPageSeo, JsonLd } from "@/features/seo";
 
 function interviewsSeo() {
   const section = routeSection("question-bank");

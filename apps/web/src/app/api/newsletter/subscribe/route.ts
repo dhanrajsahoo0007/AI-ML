@@ -1,10 +1,15 @@
 import { z } from "zod";
-import { CURRENT_CONSENT_VERSION, isConsentVersion } from "@/features/newsletter/consent";
-import { errorResponse, newsletterRoute } from "@/features/newsletter/http";
-import { clientIp } from "@/features/newsletter/rate-limit";
-import { newsletterDeps, newsletterHref } from "@/features/newsletter/server";
-import { subscribe } from "@/features/newsletter/service";
-import { TURNSTILE_TOKEN_MAX } from "@/features/newsletter/turnstile";
+import {
+  CURRENT_CONSENT_VERSION,
+  isConsentVersion,
+  errorResponse,
+  newsletterRoute,
+  clientIp,
+  newsletterDeps,
+  newsletterHref,
+  subscribe,
+  TURNSTILE_TOKEN_MAX,
+} from "@/features/newsletter";
 import { HttpError } from "@/server/http";
 
 // POST /api/newsletter/subscribe: zod body, rate limit (5/h/IP), Turnstile (when TURNSTILE_SECRET_KEY is set),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { captureError } from "@/features/observability/capture";
+import { captureError } from "@/features/observability/public";
 
 // Last-resort boundary, for errors in the root layout itself. It replaces the whole document, so the site's
 // stylesheet, header and theme may be missing: plain inline styles that work in light and dark.

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 import { CONTENT_DIR, resolveAppEnv } from "../sections/registry";
-import type { SectionDef } from "../sections/schema";
+import type { SectionDef } from "../sections";
 import { issueFrontmatterSchema, type IssueAudience, type IssueStatus } from "./schema";
 
 // Reads newsletter issues from content/<section>/<yyyy>/<slug>.mdx. Build time only (fs), and no JSX

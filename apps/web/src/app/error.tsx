@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { captureError } from "@/features/observability/capture";
+import { captureError } from "@/features/observability/public";
 
 // Error boundary for every page below the root layout (the header and footer stay). Reports to Sentry when it is
 // switched on; the message never shows the error itself, which could hold internals. Its chunk loads on every

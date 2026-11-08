@@ -1,7 +1,5 @@
 import { z } from "zod";
-import { newsletterRoute } from "@/features/newsletter/http";
-import { newsletterDeps, newsletterHref } from "@/features/newsletter/server";
-import { confirmSubscription } from "@/features/newsletter/service";
+import { newsletterRoute, newsletterDeps, newsletterHref, confirmSubscription } from "@/features/newsletter";
 import { HttpError } from "@/server/http";
 
 // POST /api/newsletter/confirm {token}: the confirm page posts the token from the email link after a click, so a

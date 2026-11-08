@@ -1,9 +1,8 @@
 import "server-only";
 import { getUpdatedDate } from "@/lib/doc-meta";
-import type { SectionDef } from "../sections/schema";
-import type { PageSeo } from "../seo/docs";
-import { articleNode, breadcrumbNode, collectionPageNode, jsonLdGraph, type Crumb } from "../seo/json-ld";
-import { pageMetadata } from "../seo/metadata";
+import type { SectionDef } from "../sections";
+import type { PageSeo } from "../seo";
+import { articleNode, breadcrumbNode, collectionPageNode, jsonLdGraph, type Crumb, pageMetadata } from "../seo/public";
 import { problemListHref } from "./kind";
 import type { ValidProblem, ValidTopic } from "./source";
 

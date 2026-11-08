@@ -2,12 +2,18 @@ import Link from "next/link";
 import type { ResolvingMetadata } from "next";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/ui/editorial";
-import { DifficultyLabel } from "@/features/dsa/components";
-import { problemListHref, problemsForTopic } from "@/features/dsa/kind";
-import { dsaContent, dsaSection } from "@/features/dsa/routes";
-import { HUB_DESCRIPTION, HUB_TITLE, hubSeo } from "@/features/dsa/seo";
-import { JsonLd } from "@/features/seo/json-ld-script";
-import { withParentImages } from "@/features/seo/metadata";
+import {
+  DifficultyLabel,
+  problemListHref,
+  problemsForTopic,
+  dsaContent,
+  dsaSection,
+  HUB_DESCRIPTION,
+  HUB_TITLE,
+  hubSeo,
+} from "@/features/dsa";
+import { withParentImages } from "@/features/seo/public";
+import { JsonLd } from "@/features/seo";
 
 export function generateMetadata(_props: unknown, parent: ResolvingMetadata) {
   return withParentImages(hubSeo(dsaSection()).metadata, parent);

@@ -1,8 +1,8 @@
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 import type { Db } from "@/server/db/client";
 import { auditLog, subscription, user } from "@/server/db/schema";
-import { enqueueEmail, type EmailQueueProducer } from "@/features/email/queue";
-import type { EmailSender } from "@/features/email/sender";
+import { enqueueEmail, type EmailQueueProducer } from "@/features/email";
+import type { EmailSender } from "@/features/email";
 import { formatMoney } from "./plans";
 
 // The T-7 annual renewal reminder (plan §9.7) as a scheduling hook: `sendRenewalReminders(db, sender)` emails

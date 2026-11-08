@@ -1,7 +1,6 @@
 import { HubSectionIndex } from "@/components/hub-section-index";
-import { docsItems, docsSection, type SectionParams } from "@/features/docs/routes";
-import { docsSectionSeo } from "@/features/seo/docs";
-import { JsonLd } from "@/features/seo/json-ld-script";
+import { docsItems, docsSection, type SectionParams } from "@/features/docs";
+import { docsSectionSeo, JsonLd } from "@/features/seo";
 
 export const dynamicParams = false;
 

@@ -3,7 +3,7 @@ import path from "node:path";
 import matter from "gray-matter";
 import yaml from "js-yaml";
 import { CONTENT_DIR } from "../sections/registry";
-import type { SectionDef } from "../sections/schema";
+import type { SectionDef } from "../sections";
 import {
   patternsSchema,
   PREMIUM_BREAK,

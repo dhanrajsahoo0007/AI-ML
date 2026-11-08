@@ -1,8 +1,7 @@
 import { PageHeader } from "@/components/ui/editorial";
-import { NEWSLETTER_KIND } from "@/features/newsletter/kind";
-import { utilityPageMetadata } from "@/features/newsletter/seo";
+import { NEWSLETTER_KIND, utilityPageMetadata } from "@/features/newsletter";
 import { TokenAction } from "@/features/newsletter/token-action.client";
-import { routeSection } from "@/features/sections/route-helpers";
+import { routeSection } from "@/features/sections";
 
 // Static page behind the footer "Unsubscribe" link. Mail apps' own unsubscribe buttons skip it and POST to the
 // one-click endpoint directly (RFC 8058).

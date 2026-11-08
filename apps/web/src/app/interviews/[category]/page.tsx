@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { CategoryView, categorySeo } from "@/features/interviews";
-import { isRouteBuilt } from "@/features/sections/route-helpers";
+import { isRouteBuilt } from "@/features/sections";
 import { getCategories, getCategory } from "@/lib/question-bank";
 
 export function generateStaticParams() {

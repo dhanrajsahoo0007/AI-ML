@@ -1,10 +1,8 @@
 import { Heading, Hr, Img, Link, Text } from "@react-email/components";
 import { createElement as h, Fragment, type ComponentProps, type ReactElement } from "react";
 import remarkGfm from "remark-gfm";
-import { renderEmail, type RenderedEmail } from "../email/render";
-import { IssueEmail } from "../email/templates/issue";
-import { s } from "../email/templates/styles";
-import { absoluteUrl } from "../seo/site";
+import { renderEmail, type RenderedEmail, IssueEmail, s } from "../email";
+import { absoluteUrl } from "../seo/public";
 import { isPng } from "./links";
 import type { Issue } from "./source";
 

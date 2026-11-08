@@ -1,9 +1,8 @@
 import "server-only";
 import { z } from "zod";
 import { SITE_URL } from "../../config/business";
-import type { EmailQueueProducer } from "../email/queue";
-import type { EmailSender } from "../email/sender";
-import { EmailNotConfiguredError, emailSenderFor } from "../email/senders";
+import type { EmailQueueProducer, EmailSender } from "../email";
+import { EmailNotConfiguredError, emailSenderFor } from "../email";
 import { publicNav, SUBSCRIBE_KIND as NEWSLETTER_KIND } from "../sections/public";
 import { APP_ENVS, type AppEnv } from "../sections/schema";
 import type { Db } from "@/server/db/client";

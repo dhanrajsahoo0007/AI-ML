@@ -1,8 +1,7 @@
 import { PageHeader } from "@/components/ui/editorial";
-import { NEWSLETTER_KIND } from "@/features/newsletter/kind";
-import { utilityPageMetadata } from "@/features/newsletter/seo";
+import { NEWSLETTER_KIND, utilityPageMetadata } from "@/features/newsletter";
 import { TokenAction } from "@/features/newsletter/token-action.client";
-import { routeSection } from "@/features/sections/route-helpers";
+import { routeSection } from "@/features/sections";
 
 // Static page: the token stays in the browser until the person clicks the button.
 

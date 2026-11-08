@@ -1,7 +1,7 @@
 import "server-only";
 import { siteConfig } from "@/config/site";
-import { sectionOfKind } from "../sections/registry";
-import type { SectionKindName } from "../sections/schema";
+import { sectionOfKind } from "../sections";
+import type { SectionKindName } from "../sections";
 import type { PageSeo } from "./docs";
 import { breadcrumbNode, collectionPageNode, jsonLdGraph, organizationNode, websiteNode, type Crumb } from "./json-ld";
 import { pageMetadata } from "./metadata";

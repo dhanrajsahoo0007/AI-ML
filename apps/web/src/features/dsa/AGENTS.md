@@ -6,7 +6,9 @@ is `off` in production until released.
 
 ## Public API
 
-No index file; import the files directly.
+`index.ts` exports the route helpers, SEO, MDX renderers and server components the `apps/web/src/app/dsa/` pages
+use; the client islands are imported by path. `apps/web/src/features/sections/kinds.ts` imports `kind.ts` by path
+(plain Node can't load the index's JSX and server-only modules), and the tests import the files by path.
 
 - `kind.ts`: `problemsKind` (`SectionKind<DsaItem>`), registered in `apps/web/src/features/sections/kinds.ts`.
 - `routes.ts`: `dsaSection()` (404 when off), `dsaContent()`, `topicParams()`, `problemParams()`, `getTopic()`.

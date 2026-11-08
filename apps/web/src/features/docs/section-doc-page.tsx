@@ -4,10 +4,10 @@ import { ArticleLayout } from "@/components/article-layout";
 import { loadMdxFile } from "@/lib/mdx-doc";
 import { getUpdatedDate } from "@/lib/doc-meta";
 import { loadDocItems } from "./source";
-import { isPremiumDoc } from "@/features/paywall/access";
-import { Paywall } from "@/features/paywall/paywall";
+import { isPremiumDoc } from "@/features/paywall";
+import { Paywall } from "@/features/paywall/public";
 import { ProgressActions } from "@/features/progress/progress-actions.client";
-import { getSection } from "@/features/sections/registry";
+import { getSection } from "@/features/sections";
 import type { BreadcrumbItem, ContentSection } from "@/types/content";
 
 // Article page for catch-all section routes (/<section>/<hub>/<article>). A premium article (plan §9.2) is built

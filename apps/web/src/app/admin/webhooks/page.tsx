@@ -1,7 +1,14 @@
-import { adminPage } from "@/features/admin/access";
-import { loadWebhooks } from "@/features/admin/dashboard";
-import { formatAge, formatDateTime } from "@/features/admin/format";
-import { AdminShell, Panel, Stat, StatGrid, Table } from "@/features/admin/ui";
+import {
+  adminPage,
+  loadWebhooks,
+  formatAge,
+  formatDateTime,
+  AdminShell,
+  Panel,
+  Stat,
+  StatGrid,
+  Table,
+} from "@/features/admin";
 
 const PATH = "/admin/webhooks";
 

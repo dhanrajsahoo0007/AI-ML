@@ -1,5 +1,5 @@
 import { authConfig, authFor, authRateLimit, route } from "@/features/auth";
-import { clearEntitlementCookies } from "@/features/entitlements/cookies";
+import { clearEntitlementCookies } from "@/features/entitlements";
 
 // Better Auth (Google sign-in, sessions, sign-out). Its own origin and CSRF checks (and its per-isolate limiter)
 // run in addition to the wrapper's. Sign-in paths get the strict `auth` limit, the rest the `session` one.

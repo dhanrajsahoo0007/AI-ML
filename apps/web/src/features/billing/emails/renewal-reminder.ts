@@ -1,9 +1,8 @@
 import { Body, Container, Head, Heading, Hr, Html, Link, Preview, Text } from "@react-email/components";
 import { createElement as h } from "react";
 import { business, SITE_URL } from "../../../config/business";
-import { renderEmail } from "../../email/render";
-import type { EmailMessage } from "../../email/sender";
-import { s } from "../../email/templates/styles";
+import { renderEmail, s } from "../../email";
+import type { EmailMessage } from "../../email";
 
 // The annual renewal reminder (plan §9.7: US auto-renewal laws), sent 7 days before every yearly renewal.
 // Transactional: no unsubscribe link, but the way to cancel is one click away.

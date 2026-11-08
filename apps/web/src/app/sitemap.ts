@@ -1,7 +1,6 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/config/business";
-import { loadSection } from "@/features/sections/kinds";
-import { visibleSections } from "@/features/sections/registry";
+import { loadSection, visibleSections } from "@/features/sections";
 
 // URLs only, never content (plan §11.10). Sections come from the registry: only `on` sections are listed,
 // so `hidden` and `off` sections never appear (plan §5.1.1).

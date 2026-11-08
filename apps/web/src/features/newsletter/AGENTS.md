@@ -6,7 +6,10 @@ logging, Turnstile and bounce webhooks; check its branch before large changes he
 
 ## Public API
 
-No index file; import the files directly.
+`index.ts` (no JSX: the API routes' integration test imports it) exports the kind, the route wrappers and services
+and the archive pages' data and SEO; `public.ts` exports the client-safe `SignupBox`. `issue-body.tsx` (server-only
+JSX) and the client islands are imported by path, and so are `kind.ts` (from `apps/web/src/features/sections/kinds.ts`,
+plain Node) and `emails.ts` (from `apps/web/src/features/email/jobs.ts`, bundled into the Worker).
 
 - `kind.ts`: `newsletterKind` (`SectionKind<Issue>`). `source.ts`: `loadIssues()`, `readIssueFile()`.
 - `schema.ts`: issue frontmatter (`title`, `date`, `summary`, `access`, `status` draft/scheduled/sent, `sendAt`,

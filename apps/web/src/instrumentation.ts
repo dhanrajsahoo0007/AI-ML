@@ -12,7 +12,7 @@ export async function register() {
   const dsn = process.env.SENTRY_DSN;
   if (!dsn || onWorkers()) return;
   if (process.env.NEXT_RUNTIME === "nodejs" || process.env.NEXT_RUNTIME === "edge") {
-    const { initSentryServer } = await import("./features/observability/sentry.server");
+    const { initSentryServer } = await import("./features/observability");
     initSentryServer(dsn);
   }
 }

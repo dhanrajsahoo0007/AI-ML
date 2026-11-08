@@ -5,7 +5,10 @@ its variable is set at build; no account exists yet, and the build needs no env 
 
 ## Public API
 
-No index file; import the files directly.
+`index.ts` (server side: `vitalsPayload`, `VITALS_MAX_BYTES`, `initSentryServer`) and `public.ts` (client-safe:
+`captureError`, `DEFAULT_POSTHOG_HOST`, `pinPublicObservabilityEnv`, `observabilityCspHosts`). `observability.tsx`
+is imported by path from the root layout: it is JSX, while `index.ts` is imported by the vitals route (whose test is
+server-only) and `public.ts` by `apps/web/src/features/seo/security-headers.ts` (loaded by `next.config.ts`).
 
 - `observability.tsx`: `<Observability />`, mounted once in the root layout (Cloudflare beacon + the island).
 - `observability.client.tsx`: `ObservabilityIsland`; starts vitals, Sentry and PostHog only after `load` and idle.

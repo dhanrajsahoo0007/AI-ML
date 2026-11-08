@@ -33,24 +33,36 @@ const FEATURE_ENTRY_POINTS = ["index.ts", "public.ts", "**/*.client.ts", "**/*.c
 // Features that have no public entry point yet, so other code still imports their internals. Deep imports into
 // these are warnings (rule `boundaries-todo/dependencies`), not errors. Add an index.ts, switch the importers to
 // it, then delete the feature from this list. A new feature is not listed, so it gets an index from day one.
+//
+// Every feature has an entry point now. The deep imports still reported are build-time code that three loaders
+// without an RSC bundle run: next.config.ts (Next transpiles its imports with SWC and `require`, which can't load
+// `server-only` or .tsx), the scripts (`node --import ./scripts/ts-hooks.mjs`, plain Node: no .tsx, and no
+// `next/navigation`, which has no ESM entry) and the newsletter send (`npx tsx`, no `server-only` stub). The indexes
+// of the features below contain route helpers (server-only, `next/navigation`) or JSX, so those modules keep
+// importing the build-time files (registry, schema, kind, source) by path until the sections core moves to lib/
+// (the TODO(T1 follow-up) below) or gets a build-time entry of its own.
 const FEATURES_WITHOUT_ENTRY = [
-  // TODO(T1 follow-up): no stream owns these right now.
-  "content-protection",
-  "docs", // index.ts exports only SectionDocPage so far; kind, routes and source are still imported by path.
-  "dsa",
-  "observability",
-  "pages",
+  // config/features.ts, lib/nav-tree.ts, lib/question-bank.ts, paywall/access.ts, newsletter/server.ts and the
+  // section kinds and sources import registry.ts, schema.ts and kind.ts by path (next.config.ts and the scripts).
   "sections",
-  "seo",
-  // TODO(S newsletter): stream S owns these.
-  "email",
+  // sections/kinds.ts, newsletter/kind.ts and paywall/access.ts import kind.ts and source.ts by path (plain Node);
+  // app/(content)/[section]/[...slug]/page.tsx imports section-doc-page.tsx by path (JSX, and index.ts is loaded
+  // by plain Node and server-only tests).
+  "docs",
+  // sections/kinds.ts imports kind.ts by path: index.ts has JSX and server-only modules (plain Node).
+  "dsa",
+  // sections/kinds.ts imports kind.ts by path (plain Node); email/jobs.ts imports emails.ts by path (the Worker
+  // entry bundles it and `server-only` throws there); app/newsletter/[slug]/page.tsx imports issue-body.tsx by path
+  // (server-only JSX, while the API routes' integration test imports index.ts).
   "newsletter",
-  // TODO(L billing): stream L is creating these; drop them here if they land with an index.ts.
+  // The opengraph-image routes import og-image.tsx by path: JSX on `next/og`, so neither index.ts (reached by the
+  // newsletter integration test through newsletter/seo.ts) nor the client-safe public.ts can carry it.
+  "seo",
+  // email/jobs.ts imports emails/renewal-reminder.ts by path (the Worker entry bundles it; index.ts is server-only).
   "billing",
-  "entitlements",
-  "paywall",
-  // TODO(R admin): stream R is creating this.
-  "admin",
+  // app/layout.tsx imports observability.tsx by path: JSX, while index.ts is imported by the vitals route (whose
+  // test is server-only) and public.ts by features/seo/security-headers.ts (loaded by next.config.ts).
+  "observability",
 ];
 
 // Files directly in src/ are one "root" element; `middleware` and `instrumentation` pick them out by name.
@@ -204,9 +216,9 @@ const eslintConfig = [
         {
           wrappers: [
             { name: "route", from: ["@/features/auth"] },
-            // route() behind the newsletter section gate (features/newsletter/http.ts).
-            { name: "newsletterRoute", from: ["@/features/newsletter/http"] },
-            { name: "serverToServerRoute", from: ["@/features/newsletter/http"] },
+            // route() behind the newsletter section gate (features/newsletter/http.ts, through the index).
+            { name: "newsletterRoute", from: ["@/features/newsletter"] },
+            { name: "serverToServerRoute", from: ["@/features/newsletter"] },
           ],
           handlers: [{ name: "notFoundRoute", from: ["@/server/http"] }],
           // Routes that can't use route(). Keep this list short; every entry needs a reason.
