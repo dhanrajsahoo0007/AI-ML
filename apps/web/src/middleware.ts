@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { REGION_COOKIE } from "@/config/pricing-tiers";
 import { ENTITLEMENT_COOKIE, isAdmin, keyringFromEnv, verifyEntitlement } from "@/server/edge/entitlement";
 import { appVersion, readEdgeEnv } from "@/server/edge/env";
 import { decideHost, SMOKE_KEY_HEADER } from "@/server/edge/host-guard";
@@ -9,9 +10,9 @@ import {
   isPremiumPath,
   premiumIndex,
   premiumManifestSchema,
-  pricingRewrite,
   type PremiumManifest,
 } from "@/server/edge/paywall-gate";
+import { COUNTRY_HEADER, decidePricing } from "@/server/edge/pricing-variant";
 import {
   EMPTY_MANIFEST,
   decideGate,
@@ -36,7 +37,8 @@ import {
 //   rewrite to `<path>/_preview`. HTML, RSC (`RSC: 1`, `?_rsc=`) and prefetch requests all hit the page path,
 //   so they are gated alike. The full page is prerendered into the server-only cache (R2 on Cloudflare,
 //   .next/server under `next start`), never into public static assets (open-next.config.ts).
-// - /pricing → /pricing/live (checkout enabled) when the paywall is on and DODO_API_KEY is set
+// - /pricing → its variant for checkout (live when the paywall is on and DODO_API_KEY is set) × the visitor's
+//   regional price tier (`oa_region` cookie, else cf-ipcountry): server/edge/pricing-variant.ts
 
 const manifest = loadManifest();
 const premiumManifest = loadPremiumManifest();
@@ -145,14 +147,19 @@ function paywallResponse(request: NextRequest, tier: "free" | "pro" | null, bill
       return response;
     }
     case "pass": {
-      const live = pricingRewrite(pathname, {
+      const pricing = decidePricing({
+        pathname,
         paywall: premiumManifest.paywall,
         billingConfigured,
+        regionCookie: request.cookies.get(REGION_COOKIE)?.value,
+        country: request.headers.get(COUNTRY_HEADER),
       });
-      if (!live) return NextResponse.next();
+      if (!pricing) return NextResponse.next();
       const url = request.nextUrl.clone();
-      url.pathname = live;
-      return NextResponse.rewrite(url);
+      if (pricing.rewrite) url.pathname = pricing.rewrite;
+      const response = pricing.rewrite ? NextResponse.rewrite(url) : NextResponse.next();
+      for (const [name, value] of Object.entries(pricing.headers)) response.headers.set(name, value);
+      return response;
     }
   }
 }
