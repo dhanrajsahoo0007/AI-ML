@@ -15,6 +15,9 @@ No index file; import the files directly.
 - `placeholders.ts`: `resolvePlaceholders(source, values)`, `placeholderKeys(source)`.
 - `billing-period.client.tsx`: `<BillingPeriod>`, the monthly/yearly switch on the pricing page (sets
   `data-period`; prices are server-rendered and shown with CSS variants).
+- `region-switcher.client.tsx`: `<RegionSwitcher countries>`, "Show prices for" on the pricing page: a select and
+  an "Update prices" button (no reload on change, WCAG 3.2.2) that set or clear the `oa_region` cookie and reload
+  `/pricing`. Country names are made at build time with `Intl.DisplayNames`.
 
 ## Data flow
 
@@ -29,7 +32,13 @@ No index file; import the files directly.
   owner's instruction; the refund policy is the 7-day money-back guarantee (2026-11-07).
 - The founder email `dhanrajsahoo.work@gmail.com` must appear on Contact, Refunds, Terms and Privacy.
 - These pages are deliberately copyable and printable (`data-copy-ok="page"`); content pages are not.
-- Prices shown on `/pricing` are labelled estimates; the checkout (MoR) shows the final amount with tax.
+- Prices shown on `/pricing` are labelled estimates; the checkout (MoR) shows the final amount with tax. The page
+  is prerendered per checkout state and regional price tier (`apps/web/src/app/pricing/pricing-view.tsx`, routes
+  `apps/web/src/app/pricing/[tier]/` and `apps/web/src/app/pricing/live/[tier]/`); middleware picks the visitor's
+  (`apps/web/src/server/edge/AGENTS.md`). A tier's price is the base USD price × its share, rounded (`tierPriceUsd`
+  in `apps/web/src/config/pricing-tiers.ts`). Until `PRICE_MONTHLY_USD` / `PRICE_YEARLY_USD` are set, local and
+  preview builds show sample prices ($9 / $90 base) and staging and production show "Price announced at launch"
+  for every tier.
 - Pages are static: no request data, no database.
 
 ## Extend it

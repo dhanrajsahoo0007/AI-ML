@@ -4,20 +4,63 @@ import { Check } from "lucide-react";
 import { ButtonLink, Container, Eyebrow, PageHeader } from "@/components/ui/editorial";
 import { business, MOR_NOTICE } from "@/config/business";
 import { siteConfig } from "@/config/site";
+import {
+  LISTED_COUNTRIES,
+  TIER_PERCENT,
+  formatUsd,
+  parseUsd,
+  tierPriceUsd,
+  TIER_SLUGS,
+  type PriceTier,
+} from "@/config/pricing-tiers";
 import { BillingPeriod } from "@/features/pages/billing-period.client";
 import { loadPageDoc } from "@/features/pages/page-doc";
+import { RegionSwitcher } from "@/features/pages/region-switcher.client";
 
-const pricesSet = !business.PRICE_MONTHLY_USD.includes("TODO") && !business.PRICE_YEARLY_USD.includes("TODO");
-// Until the real prices are set in config/business.ts, local and preview builds show sample prices (the same ones
-// the local payments sandbox charges, scripts/dev-payments.ts) so the paid flow can be tried end to end. Staging and
-// production never show a sample: they say "Price announced at launch" instead.
+// Base (tier A) prices in USD. Until the real prices are set in config/business.ts, local and preview builds show
+// sample prices (the same ones the local payments sandbox charges, scripts/dev-payments.ts) so the paid flow can be
+// tried end to end. Staging and production never show a sample: they say "Price announced at launch" instead.
 const SAMPLE_PRICES = process.env.APP_ENV === "local" || process.env.APP_ENV === "preview";
-const prices = pricesSet
-  ? { monthly: business.PRICE_MONTHLY_USD, yearly: business.PRICE_YEARLY_USD, sample: false }
-  : SAMPLE_PRICES
-    ? { monthly: "$9", yearly: "$90", sample: true }
-    : null;
+const basePrices = resolveBasePrices();
 
+function resolveBasePrices(): { monthly: number; yearly: number; sample: boolean } | null {
+  const set = !business.PRICE_MONTHLY_USD.includes("TODO") && !business.PRICE_YEARLY_USD.includes("TODO");
+  if (!set) return SAMPLE_PRICES ? { monthly: 9, yearly: 90, sample: true } : null;
+  const monthly = parseUsd(business.PRICE_MONTHLY_USD);
+  const yearly = parseUsd(business.PRICE_YEARLY_USD);
+  // Fails the build rather than showing a price nobody set.
+  if (monthly === null || yearly === null) {
+    throw new Error('config/business.ts: PRICE_MONTHLY_USD and PRICE_YEARLY_USD must be USD amounts such as "$9"');
+  }
+  return { monthly, yearly, sample: false };
+}
+
+/** The tier's estimated prices, formatted; null when prices aren't announced. */
+function pricesFor(tier: PriceTier) {
+  if (!basePrices) return null;
+  return {
+    monthly: formatUsd(tierPriceUsd(basePrices.monthly, tier)),
+    yearly: formatUsd(tierPriceUsd(basePrices.yearly, tier)),
+    sample: basePrices.sample,
+  };
+}
+
+/** The region switcher's countries, named in English at build time (no country list in the client bundle). */
+function switcherCountries() {
+  const names = new Intl.DisplayNames(["en"], { type: "region" });
+  return LISTED_COUNTRIES.map((code) => ({ code, name: names.of(code) ?? code })).sort((a, b) =>
+    a.name.localeCompare(b.name, "en")
+  );
+}
+
+/** Static params of the `[tier]` variant routes: one page each for tiers B and C (tier A is the base route). */
+export function pricingTierParams() {
+  return Object.values(TIER_SLUGS).map((tier) => ({ tier }));
+}
+
+// Every variant shares this, so /pricing stays the canonical URL whichever variant middleware serves there. The
+// variants aren't marked noindex here (that would de-index /pricing itself when middleware serves one at it):
+// requested at their own URLs they get `X-Robots-Tag: noindex` from middleware.
 export const pricingMetadata: Metadata = {
   title: "Pricing",
   description:
@@ -101,8 +144,12 @@ function GoPro({ live }: { live: boolean }) {
   );
 }
 
-export async function PricingView({ live = false }: { live?: boolean }) {
+// One prerendered page per checkout state × price tier; middleware serves the visitor's at /pricing
+// (server/edge/pricing-variant.ts). Every variant's canonical URL is /pricing.
+export async function PricingView({ live = false, tier = "A" }: { live?: boolean; tier?: PriceTier }) {
   const faq = await loadPageDoc("pricing-faq");
+  const prices = pricesFor(tier);
+  const regional = tier !== "A";
   const startHref = siteConfig.nav[0]?.href ?? "/";
 
   return (
@@ -135,6 +182,7 @@ export async function PricingView({ live = false }: { live?: boolean }) {
 
               <section
                 aria-labelledby="plan-pro"
+                data-price-tier={tier}
                 className="relative flex flex-col rounded-2xl border border-ink bg-paper p-8 shadow-[0_1px_0_0_var(--ink)]"
               >
                 <Eyebrow className="text-primary">Pro</Eyebrow>
@@ -155,6 +203,19 @@ export async function PricingView({ live = false }: { live?: boolean }) {
                     <span className="text-3xl">Price announced at launch</span>
                   )}
                 </h2>
+                {prices ? (
+                  <p className="mt-2 text-[13px] text-muted-foreground" data-testid="price-estimate">
+                    {regional
+                      ? `Estimated regional price (about ${TIER_PERCENT[tier]}% of the standard price); the final price is confirmed at checkout.`
+                      : "Estimated price; the final price is confirmed at checkout."}
+                  </p>
+                ) : (
+                  regional && (
+                    <p className="mt-2 text-[13px] text-muted-foreground" data-testid="price-estimate">
+                      Regional pricing applies in your region.
+                    </p>
+                  )
+                )}
                 <p className="mt-2 text-[15px] text-muted-foreground">For serious interview preparation.</p>
                 {prices?.sample && (
                   <p className="mt-2 text-[13px] text-muted-foreground" data-testid="sample-price">
@@ -170,11 +231,21 @@ export async function PricingView({ live = false }: { live?: boolean }) {
           </BillingPeriod>
         </div>
 
-        <p className="mx-auto mt-10 max-w-2xl text-center text-[15px] leading-relaxed text-muted-foreground">
-          Prices are in USD. Your price may be shown in your local currency, and regional pricing applies in some
-          countries. <strong className="font-semibold text-ink">Taxes are calculated at checkout</strong>, and the
-          final price is confirmed before you pay.
-        </p>
+        <section
+          aria-label="Regional pricing"
+          className="mx-auto mt-10 max-w-2xl text-center text-[15px] leading-relaxed text-muted-foreground"
+        >
+          <p data-testid="regional-note">
+            Prices are in US dollars and are an{" "}
+            <strong className="font-semibold text-ink">estimate for your region</strong>: regional pricing lowers the
+            price in many countries. {business.MERCHANT_OF_RECORD}, our merchant of record, sets the final price from the
+            billing country of your payment method and shows it, with any tax, at checkout before you pay. A VPN changes
+            only this estimate, not the price you&apos;re charged.
+          </p>
+          <div className="mt-6">
+            <RegionSwitcher countries={switcherCountries()} />
+          </div>
+        </section>
       </Container>
 
       <Container className="mt-20">
