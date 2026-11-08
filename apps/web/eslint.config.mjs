@@ -187,19 +187,6 @@ const eslintConfig = [
     rules: { "boundaries/dependencies": "warn" },
   },
 
-  {
-    // TODO(integration follow-up): page-level views and shared chrome added by the paywall/billing stream import
-    // features (paywall, sections, seo, docs, auth). Move the views into their features (features/docs,
-    // features/interviews) and pass data into the header/sidebar/profile menu from app/ (plan §3).
-    files: [
-      "src/components/section-doc-page.tsx",
-      "src/components/interviews/**",
-      "src/components/content-sidebar.tsx",
-      "src/components/profile-menu.tsx",
-    ],
-    rules: { "boundaries/dependencies": "warn" },
-  },
-
   // ── Project rules (eslint-rules/, tests in tests/unit/eslint-rules.test.ts) ──
   {
     files: ["src/**/*.{ts,tsx,mts,mjs}"],
