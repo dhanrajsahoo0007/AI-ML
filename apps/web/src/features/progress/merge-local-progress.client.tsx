@@ -15,6 +15,8 @@ export function MergeLocalProgress() {
     const next = safeNextPath(new URLSearchParams(window.location.search).get("next"));
     const items = readLocalProgress();
     // Issue the entitlement cookie (plan §9.2) before continuing, so a Pro reader lands on full articles.
+    // `next` is a same-origin path from safeNextPath above (security review M1), never raw input.
+    // nosemgrep: javascript.browser.security.open-redirect.js-open-redirect
     const done = () => void refreshEntitlement().finally(() => window.location.replace(next));
     if (!items.length) return done();
     setStatus("Saving the progress from this browser to your account…");

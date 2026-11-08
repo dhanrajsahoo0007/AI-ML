@@ -138,10 +138,16 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-production
+          # The build plus the files prebuild/next.config.ts generate (gitignored): the middleware's route manifests
+          # and search index in src/generated (the tests read them too) and the generated public files that
+          # `next start` serves from disk. Their common root is apps/web, so jobs download into apps/web.
           path: |
             apps/web/.next
             !apps/web/.next/cache
             !apps/web/.next/standalone
+            apps/web/src/generated
+            apps/web/public/search-index.json
+            apps/web/public/_a
           include-hidden-files: true
           retention-days: 3
 
@@ -171,10 +177,16 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-preview
+          # The build plus the files prebuild/next.config.ts generate (gitignored): the middleware's route manifests
+          # and search index in src/generated (the tests read them too) and the generated public files that
+          # `next start` serves from disk. Their common root is apps/web, so jobs download into apps/web.
           path: |
             apps/web/.next
             !apps/web/.next/cache
             !apps/web/.next/standalone
+            apps/web/src/generated
+            apps/web/public/search-index.json
+            apps/web/public/_a
           include-hidden-files: true
           retention-days: 3
 
@@ -206,7 +218,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: build-production
-          path: apps/web/.next
+          path: apps/web
       - run: npx playwright install --with-deps chromium
         working-directory: apps/web
       - run: npx playwright test --project=chromium --grep-invert "@a11y|@leak" --shard="$SHARD"
@@ -266,7 +278,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: build-preview
-          path: apps/web/.next
+          path: apps/web
       - name: Generate per-run test secrets
         run: |
           {
@@ -336,7 +348,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: build-preview
-          path: apps/web/.next
+          path: apps/web
       - name: Per-run test secrets (random, masked, never stored)
         run: |
           gen() { node -e "console.log(require('crypto').randomBytes(32).toString(process.argv[1]))" "$1"; }
@@ -402,7 +414,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: build-production
-          path: apps/web/.next
+          path: apps/web
       - run: npx playwright test --project=visual
         working-directory: apps/web
       # On failure the report holds expected, actual and diff images for every changed screenshot.
@@ -431,7 +443,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: build-production
-          path: apps/web/.next
+          path: apps/web
       - run: npx playwright install --with-deps chromium
         working-directory: apps/web
       - run: npx playwright test --project=chromium --grep @a11y
@@ -461,7 +473,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: build-production
-          path: apps/web/.next
+          path: apps/web
       - run: npx playwright install --with-deps chromium
         working-directory: apps/web
       - run: npx playwright test --project=chromium --grep @leak
@@ -492,7 +504,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: build-production
-          path: apps/web/.next
+          path: apps/web
       - run: npm run size -w web
 
   # Lighthouse CI (plan §6) on `next start`: 4 pages, mobile, 3 runs, median. Reports are only kept as a workflow
@@ -513,7 +525,7 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: build-production
-          path: apps/web/.next
+          path: apps/web
       - run: npm run lighthouse -w web
       - if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
