@@ -1,3 +1,4 @@
+import { tierForCountry, type PriceTier } from "@/config/pricing-tiers";
 import type { Plan } from "./events";
 
 // Plans and their provider products (plan §9.1). Prices live in the payment provider; here only the mapping
@@ -27,14 +28,10 @@ export function planForProduct(productId: string | null | undefined, env: Produc
   return null;
 }
 
-// Regional (purchasing-power) tiers from plan §9.5, by billing country. Reporting only: the provider applies
-// the actual country price. Everything not listed is tier A. Final prices are an owner decision (§18).
-const TIER_B = new Set(["PL", "CZ", "HU", "RO", "BG", "HR", "SK", "SI", "LT", "LV", "EE", "MX", "AR", "CL", "CO", "UY", "CR", "SA", "OM", "BH", "KW", "QA", "TR", "MY", "TH", "ZA"]);
-const TIER_C = new Set(["IN", "ID", "PH", "VN", "PK", "NG", "EG", "BR", "BD", "LK", "KE", "GH", "NP", "MA"]);
-
-export function priceTierFor(country: string | null): "A" | "B" | "C" | null {
-  if (!country) return null;
-  return TIER_C.has(country) ? "C" : TIER_B.has(country) ? "B" : "A";
+// Regional (purchasing-power) tier by billing country, for reporting only: the provider applies the actual country
+// price. The country → tier map lives in config/pricing-tiers.ts (plan §9.5), shared with the pricing page.
+export function priceTierFor(country: string | null): PriceTier | null {
+  return country ? tierForCountry(country) : null;
 }
 
 /** "€9.00" / "₹2,999.00": the paid amount in its own currency (plan §9.5: format with Intl). */
