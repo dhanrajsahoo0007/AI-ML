@@ -1,9 +1,10 @@
 import type { Instrumentation } from "next";
 
 // Server-side Sentry (plan §10.1). Without SENTRY_DSN both hooks return at once and the SDK is never loaded.
-// On Cloudflare Workers (OpenNext) the Worker entry is wrapped with `withSentry` from `@sentry/nextjs/cloudflare`,
-// which starts the SDK per request; `register` must not start a second client there, but `onRequestError` still
-// reports through the one the wrapper started.
+// On Cloudflare Workers (OpenNext) the Worker entry (apps/web/worker.mjs) wraps the handler with `withSentry` from
+// `@sentry/nextjs/cloudflare` (features/observability/sentry.worker.ts), which starts the SDK per request when the
+// SENTRY_DSN secret is set; `register` must not start a second client there, but `onRequestError` still reports
+// through the one the wrapper started.
 
 const onWorkers = () => globalThis.navigator?.userAgent === "Cloudflare-Workers";
 

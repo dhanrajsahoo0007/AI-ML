@@ -3,8 +3,15 @@ name: Deploy
 # Deploys the Worker (plan §7.7): push to `development` → staging, push to `main` → production (through the
 # `production` GitHub environment, which carries the required reviewer).
 #
-#   verify → OpenNext build (APP_ENV per environment, NEXT_PUBLIC_GIT_SHA) → wrangler versions upload
+#   verify (the whole CI suite, ci.yml as a reusable workflow) → OpenNext build (APP_ENV per environment,
+#   NEXT_PUBLIC_GIT_SHA, the public NEXT_PUBLIC_* variables of the GitHub environment) → wrangler versions upload
 #   → gradual deploy 10% → smoke tests pinned to the new version → 100% → smoke tests → (on failure) rollback
+#
+# Public build variables (GitHub environment *variables*, not secrets; unset ones stay unset, so their tool stays
+# off): NEXT_PUBLIC_SENTRY_DSN, NEXT_PUBLIC_POSTHOG_KEY, NEXT_PUBLIC_POSTHOG_HOST, NEXT_PUBLIC_CF_BEACON_TOKEN,
+# NEXT_PUBLIC_TURNSTILE_SITE_KEY, NEXT_PUBLIC_SITE_URL. Sentry source maps are uploaded by the build
+# (next.config.ts) only when the SENTRY_AUTH_TOKEN environment secret and NEXT_PUBLIC_SENTRY_DSN are set, with the
+# SENTRY_ORG and SENTRY_PROJECT variables; the Worker gets SENTRY_RELEASE = the commit, the same release name.
 #
 # Needs the secrets CLOUDFLARE_API_TOKEN (Workers Scripts: Edit, Account Settings: Read) and
 # CLOUDFLARE_ACCOUNT_ID, as environment secrets of `staging` and `production`. Cloudflare can't scope a Workers
@@ -40,8 +47,18 @@ env:
   SMOKE_REQUIRED_HEADERS: "x-content-type-options strict-transport-security x-app-version"
 
 jobs:
+  # The full CI suite on the pushed commit (typecheck, lint, unit and integration tests, both build profiles, E2E,
+  # visual, a11y, leak, size, Lighthouse, security scans). Read-only and without secrets, like on a PR.
+  verify:
+    name: Verify
+    if: github.ref_name == 'main' || github.ref_name == 'development'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   deploy:
     name: Deploy to ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    needs: verify
     if: github.ref_name == 'main' || github.ref_name == 'development'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -79,19 +96,47 @@ jobs:
       - if: steps.creds.outputs.ready == 'true'
         run: npm install --global --ignore-scripts npm@11.6.2 && npm ci
 
-      # TODO: replace with `uses: ./.github/workflows/ci.yml` once ci.yml exposes `workflow_call`. Until then
-      # branch protection runs the full CI on the PR and this repeats the fast gates on the merged commit.
-      - name: Verify (typecheck, lint, unit tests)
-        if: steps.creds.outputs.ready == 'true'
-        run: npm run typecheck && npm run lint && npm test
-
       - name: Install Chromium (Mermaid diagrams are rendered at build)
         if: steps.creds.outputs.ready == 'true'
         run: npx playwright install --with-deps chromium
         working-directory: apps/web
 
+      # Only the variables that are set reach the build: an empty NEXT_PUBLIC_SITE_URL would override the default
+      # origin (src/config/business.ts reads it with `??`), and an empty key must read as "off", not "".
+      - name: Public build variables
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          NEXT_PUBLIC_SENTRY_DSN: ${{ vars.NEXT_PUBLIC_SENTRY_DSN }}
+          NEXT_PUBLIC_POSTHOG_KEY: ${{ vars.NEXT_PUBLIC_POSTHOG_KEY }}
+          NEXT_PUBLIC_POSTHOG_HOST: ${{ vars.NEXT_PUBLIC_POSTHOG_HOST }}
+          NEXT_PUBLIC_CF_BEACON_TOKEN: ${{ vars.NEXT_PUBLIC_CF_BEACON_TOKEN }}
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+          HAS_SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          for name in NEXT_PUBLIC_SENTRY_DSN NEXT_PUBLIC_POSTHOG_KEY NEXT_PUBLIC_POSTHOG_HOST \
+            NEXT_PUBLIC_CF_BEACON_TOKEN NEXT_PUBLIC_TURNSTILE_SITE_KEY NEXT_PUBLIC_SITE_URL; do
+            value="${!name}"
+            [ -n "$value" ] || { echo "${name}: not set (off)"; continue; }
+            case "$value" in *$'\n'*) echo "::error::${name} must be a single line"; exit 1 ;; esac
+            echo "${name}=${value}" >> "$GITHUB_ENV"
+            echo "${name}: set"
+          done
+          if [ "$HAS_SENTRY_AUTH_TOKEN" = "true" ] && [ -n "$NEXT_PUBLIC_SENTRY_DSN" ]; then
+            echo "Sentry source maps: uploaded by the build"
+          else
+            echo "Sentry source maps: not uploaded (needs the SENTRY_AUTH_TOKEN secret and NEXT_PUBLIC_SENTRY_DSN)"
+          fi
+
       - name: Build for Workers (OpenNext)
         if: steps.creds.outputs.ready == 'true'
+        env:
+          # Read by next.config.ts, which wraps the build with withSentryConfig (upload, then delete the maps) only
+          # when SENTRY_AUTH_TOKEN and NEXT_PUBLIC_SENTRY_DSN are both set. Empty otherwise: nothing is uploaded.
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
         run: npm run cf:build -w web
 
       # Copies the prerendered pages into the assets under cdn-cgi/_next_cache/ (static-assets cache). With
@@ -191,7 +236,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: >-
-          npx wrangler deploy --env "$WRANGLER_ENV"
+          npx wrangler deploy --env "$WRANGLER_ENV" --var "SENTRY_RELEASE:${GITHUB_SHA}"
           --message "First deploy of ${GITHUB_SHA::7}"
         working-directory: apps/web
       - name: Smoke test (first deploy)
@@ -212,7 +257,8 @@ jobs:
           WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler-upload.ndjson
         run: |
           set -euo pipefail
-          npx wrangler versions upload --env "$WRANGLER_ENV" --tag "${GITHUB_SHA::12}" --message "${GITHUB_REF_NAME} ${GITHUB_SHA::7}"
+          npx wrangler versions upload --env "$WRANGLER_ENV" --var "SENTRY_RELEASE:${GITHUB_SHA}" \
+            --tag "${GITHUB_SHA::12}" --message "${GITHUB_REF_NAME} ${GITHUB_SHA::7}"
           version=$(jq -r 'select(.type == "version-upload") | .version_id' "$WRANGLER_OUTPUT_FILE_PATH" | tail -n1)
           [ -n "$version" ] && [ "$version" != "null" ] || { echo "::error::No version id in the wrangler output"; exit 1; }
           echo "version=${version}" >> "$GITHUB_OUTPUT"
@@ -273,4 +319,5 @@ jobs:
             echo "- previous version: \`${{ steps.live.outputs.previous || 'none' }}\`"
             echo "- URL: ${{ steps.live.outputs.url }}"
           } >> "$GITHUB_STEP_SUMMARY"
-      # TODO(plan §7.7.6-7): notify on rollback (Slack/email) and create the Sentry release with source maps.
+      # TODO(plan §7.7.6-7): notify on rollback (Slack/email). Source maps of the Worker bundle itself (wrangler's
+      # output) are not uploaded to Sentry yet; the Next.js build's are (see the header).

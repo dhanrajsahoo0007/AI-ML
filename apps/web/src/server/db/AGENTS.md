@@ -6,7 +6,8 @@ handlers and the account pages. Code-owner review required (`.github/CODEOWNERS`
 ## Public API
 
 - `client.ts`: `createDb()` → `DbHandle` (one lazy, one-connection pool per request; always closed), `withDb(fn)`,
-  `Db` type, `onQuery()` query-log hook.
+  `Db` type, `onQuery()` query-log hook, `hyperdriveConnectionString()` (registered as the connection-string source
+  when the module loads).
 - `config.ts`: `readAppEnv()`, `databaseUrl()`, `assertDatabaseAllowed()` (boot guard), `assertLocalDatabase()`,
   `setConnectionStringSource()` (Hyperdrive hook), `databaseHost()`.
 - `schema/`: every table, enum and view (`schema/index.ts` re-exports `auth`, `billing`, `newsletter`,
@@ -40,7 +41,13 @@ Route handlers don't create handles themselves: `route()` (`apps/web/src/server/
 - `audit_log` is append-only for `app_rw`. The `current_entitlement` view is what entitlement reads use.
 - Billing tables (`customer`, `subscription`, `entitlement`, `payment`, `fx_rate`, `webhook_event`) exist; the
   logic that writes them is stream L's billing feature (not merged yet).
-- Hyperdrive isn't bound yet (`apps/web/wrangler.jsonc` TODO); without a source `DATABASE_URL` is used.
+- **Connection string:** `client.ts` registers Hyperdrive as the source once per isolate; each request reads
+  `env.HYPERDRIVE.connectionString` (bindings are per request) and falls back to `DATABASE_URL` when the binding is
+  absent (`next dev`, `next start`, CI, and every Worker until the owner creates the Hyperdrive configs; the
+  bindings are commented in `apps/web/wrangler.jsonc` with a TODO). The boot guard runs on whichever string wins.
+- `*.hyperdrive.local` is **not** a local host: it fronts a real (possibly production) database, so `local` and
+  `test` refuse it. It is only exempt from the `sslmode` rule, because the Worker-to-Hyperdrive hop stays inside
+  Cloudflare and Hyperdrive reaches Neon over TLS. Look-alikes (`x.hyperdrive.local.example.com`) get no exemption.
 
 ## Extend it
 
@@ -50,5 +57,6 @@ New table or column: `.claude/skills/add-migration/SKILL.md`. User-owned data al
 
 ## Tests
 
-`schema.test.ts` (constraints against a freshly migrated Postgres), `config.test.ts` (boot guard). DB tests skip
+`schema.test.ts` (constraints against a freshly migrated Postgres), `config.test.ts` (boot guard),
+`hyperdrive.test.ts` (binding vs `DATABASE_URL`, guard on the resolved string; no database needed). DB tests skip
 without Docker unless `REQUIRE_DB=1` (CI). Start Postgres with `npm run db:up -w web`.

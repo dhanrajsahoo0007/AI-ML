@@ -101,11 +101,9 @@ let connectionStringSource: ConnectionStringSource | null = null;
 
 /**
  * Where the per-request connection string comes from. In Workers this is Hyperdrive's
- * `env.HYPERDRIVE.connectionString` (a binding, so not in `process.env`); stream G registers it at startup:
- *
- *   setConnectionStringSource(() => getCloudflareContext().env.HYPERDRIVE?.connectionString);
- *
- * Without a source (Node, `next start`, tests) `DATABASE_URL` is used.
+ * `env.HYPERDRIVE.connectionString` (a binding, so not in `process.env`); client.ts registers that source when it
+ * is loaded. When there is no source, or it returns undefined (no binding: Node, `next start`, tests),
+ * `DATABASE_URL` is used. Whatever the source, createDb() runs `assertDatabaseAllowed()` on the resolved string.
  */
 export function setConnectionStringSource(source: ConnectionStringSource | null): void {
   connectionStringSource = source;

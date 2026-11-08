@@ -11,8 +11,11 @@ No index file; import the files directly.
 - `observability.client.tsx`: `ObservabilityIsland`; starts vitals, Sentry and PostHog only after `load` and idle.
 - `capture.ts`: `captureError()` for `apps/web/src/app/error.tsx` and `apps/web/src/app/global-error.tsx`.
 - `vitals.client.ts` (10% sample, `sendBeacon` to `/api/vitals`) and `vitals-schema.ts` (`vitalsPayload`, zod).
-- `sentry.browser.ts`, `sentry.server.ts` (started from `apps/web/src/instrumentation.ts` when `SENTRY_DSN` is set),
-  `sentry-options.ts` (`DATA_COLLECTION`, `scrubEvent`, `isLocalHost`, `TRACES_SAMPLE_RATE`).
+- `sentry.browser.ts`, `sentry.server.ts` (started from `apps/web/src/instrumentation.ts` when `SENTRY_DSN` is set,
+  Node and `next start` only), `sentry-options.ts` (`DATA_COLLECTION`, `scrubEvent`, `isLocalHost`,
+  `TRACES_SAMPLE_RATE`).
+- `sentry.worker.ts`: `withWorkerSentry(handler)`, `sentryWorkerOptions(env)`: Sentry on Cloudflare Workers, applied
+  by the Worker entry `apps/web/worker.mjs` (wrangler `main`) to OpenNext's generated handler.
 - `public-env.ts`: `PUBLIC_OBSERVABILITY_ENV`, `pinPublicObservabilityEnv()`. `csp-hosts.ts`:
   `observabilityCspHosts()`. `route-info.ts`: `routeOf()`, `sectionOf()` labels.
 - Server logs: `apps/web/src/server/log.ts` (`log`, `redact`, `requestContext`).
@@ -30,8 +33,16 @@ No index file; import the files directly.
   emails; `redact()` runs on every field.
 - Route labels use the path only, never the query string.
 - `/api/vitals` (`apps/web/src/app/api/vitals/route.ts`) writes one log line per beacon, through `route()` with the
-  `vitals` rate limit and the Origin check off (no session, no DB). Analytics Engine writes come with the binding.
-- On Workers the Sentry server SDK must wrap the Worker entry (`@sentry/nextjs/cloudflare`); not wired yet.
+  `vitals` rate limit and the Origin check off (no session, no DB), plus one Analytics Engine `web_vital` point
+  per metric when the Worker has the `ANALYTICS` binding (`apps/web/src/server/edge/analytics.ts`).
+- On Workers, Sentry wraps the Worker entry (`withSentry` from `@sentry/nextjs/cloudflare`), decided per request:
+  without the `SENTRY_DSN` secret the SDK is never imported; with it, it is loaded once per isolate (lazily, so it
+  costs nothing at startup) and starts per request. `register()` in instrumentation does nothing on Workers, so
+  there is one client; `onRequestError` reports through it. `traceLifecycle: "static"` keeps `scrubEvent` on
+  transactions. The SDK adds about 0.3 MB gzip to the Worker bundle.
+- `apps/web/worker.mjs` stays plain JavaScript and wiring only: in TypeScript, `allowJs` would make `tsc` follow its
+  import into the generated `.open-next` bundle. New Worker handlers (the email queue's `queue()`) go in its marked
+  spot and are wrapped by `withWorkerSentry` like `fetch`.
 - The CSP gets a tool's hosts only when its variable is set (`csp-hosts.ts`).
 
 ## Extend it
@@ -42,4 +53,5 @@ behind a literal env check in the island, add its hosts in `csp-hosts.ts`, and e
 
 ## Tests
 
-`sentry-options.test.ts`, `vitals.test.ts`, `log.test.ts`; E2E `apps/web/tests/e2e/observability.spec.ts`.
+`sentry-options.test.ts`, `sentry.worker.test.ts`, `vitals.test.ts`, `log.test.ts`; E2E
+`apps/web/tests/e2e/observability.spec.ts`.

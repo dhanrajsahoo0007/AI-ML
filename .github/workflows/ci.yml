@@ -4,14 +4,19 @@ on:
   pull_request:
     branches: [development, main]
   workflow_dispatch:
+  # deploy.yml runs the whole suite on the pushed commit before deploying it. It needs no secrets: every secret the
+  # E2E jobs use is generated per run.
+  workflow_call:
 
-# Least privilege by default; widen per job only when a job needs it (plan §11.7).
+# Least privilege by default; widen per job only when a job needs it (plan §11.7). A caller must grant at least this.
 permissions:
   contents: read
 
+# In a called run `github.workflow` is the caller's name (Deploy), so its runs never share a group with PR runs, and
+# only PR runs cancel older ones: a deploy's verification is never cancelled by the next push.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Turbo-free monorepo: every job installs with `npm ci` from the committed lockfile, using npm 11.6.2 (package.json

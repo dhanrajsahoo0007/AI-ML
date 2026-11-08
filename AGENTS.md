@@ -170,7 +170,8 @@ apps/web/
   src/app/ · src/features/ · src/server/ · src/components/ · src/lib/ · src/config/ · src/middleware.ts
   scripts/              content-check.ts, build-assets.ts, render-mermaid.mjs, check-agents-md.ts
   drizzle/              SQL migrations · tests/unit/ · tests/e2e/ · tests/fixtures/
-  wrangler.jsonc · open-next.config.ts · next.config.ts · docker-compose.dev.yml (local Postgres only)
+  wrangler.jsonc · worker.mjs (Worker entry: OpenNext's handler + Sentry) · open-next.config.ts · next.config.ts
+  docker-compose.dev.yml (local Postgres only)
 ```
 
 ## Commands
@@ -290,5 +291,5 @@ and the section registry need code-owner review (`.github/CODEOWNERS`).
   Pro access is unaffected because `oa_ent` refresh reads our database; checkout shows "try again later"; `on_hold`
   subscriptions keep a 7-day grace; switch `BILLING_PRIMARY` to the standby once one exists).
 - `/admin` dashboards; nightly `pg_dump` backup workflow and restore drill; DSA stage C judge; newsletter Turnstile,
-  Postgres store, bounce webhooks; `eslint-plugin-boundaries`; Analytics Engine; Sentry on the Worker entry;
-  R2 + regional cache; Hyperdrive binding.
+  Postgres store, bounce webhooks; `eslint-plugin-boundaries`; R2 + regional cache; creating
+  the Hyperdrive configs and Analytics Engine datasets (owner; the code already reads both bindings when present).

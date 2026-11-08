@@ -1,7 +1,8 @@
 import "server-only";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { assertDatabaseAllowed, databaseUrl, readAppEnv, type AppEnv } from "./config";
+import { cloudflareBindings } from "../env";
+import { assertDatabaseAllowed, databaseUrl, readAppEnv, setConnectionStringSource, type AppEnv } from "./config";
 import * as schema from "./schema";
 
 // One database handle per request (plan §8.1). In Workers a connection can't outlive the request that opened
@@ -10,6 +11,21 @@ import * as schema from "./schema";
 // the real pooling in front of Neon.
 
 export type Db = NodePgDatabase<typeof schema>;
+
+// ── Hyperdrive ────────────────────────────────────────────────────────────────────────────────────────────────
+// On Workers the connection string is the HYPERDRIVE binding's, read per request (Cloudflare hands each request
+// its env), so it is registered here, once per isolate when the DB layer is first loaded: only /api/* handlers and
+// the account pages load this module, and registering is a function reference, no I/O. Without the binding
+// (`next dev`, `next start`, CI, a Worker before the account exists) the source returns undefined and
+// `databaseUrl()` falls back to DATABASE_URL. Either way createDb() runs the boot guard on the resolved string.
+
+/** Hyperdrive's connection string for this request, or undefined off Cloudflare or without the binding. */
+export function hyperdriveConnectionString(bindings: CloudflareEnv | null = cloudflareBindings()): string | undefined {
+  const value = bindings?.HYPERDRIVE?.connectionString;
+  return typeof value === "string" && value ? value : undefined;
+}
+
+setConnectionStringSource(() => hyperdriveConnectionString());
 
 export interface DbHandle {
   db: Db;

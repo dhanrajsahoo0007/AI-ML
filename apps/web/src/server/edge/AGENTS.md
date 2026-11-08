@@ -20,6 +20,10 @@ and zod only. Middleware runs on every content request before the page cache, wi
   prerendered pricing page to serve at `/pricing` (`rewrite`, or null for `/pricing` itself) and the headers to set,
   or null off the pricing pages; `COUNTRY_HEADER` (`cf-ipcountry`). Composes `pricingRewrite()` from
   `paywall-gate.ts` (checkout live or not) with the regional price tier from `apps/web/src/config/pricing-tiers.ts`.
+- `analytics.ts`: Workers Analytics Engine writes (`ANALYTICS` binding, plan §10.5): `writeAnalytics(point)` (no-op
+  without the binding, never throws, never awaited), `toDataPoint()` (the column layout in the file header),
+  `paywallPreviewPoint()`, `edgeCountry()`, `analyticsDataset()`. Used by middleware (paywall previews) and by
+  `/api/vitals`, `/api/billing/checkout` and `/api/billing/webhook/[provider]`.
 - `host-guard.ts`: `decideHost()`: in production a page request on a host other than `BETTER_AUTH_URL`'s
   (workers.dev, version preview URLs, which skip the zone's WAF and bot rules) → 308 to the canonical host, unless
   it carries `x-smoke-key` = `SMOKE_KEY` (deploy smoke tests; passes with `noindex`).
@@ -72,6 +76,14 @@ setting, on by default), else A. The country → tier map is `apps/web/src/confi
   that country's price in the Dodo dashboard, and run `npm test -w web`. To change a tier's share, edit
   `TIER_PERCENT` there. A new tier also needs a slug in `TIER_SLUGS` and its pages are generated automatically.
 - `health.ts` reads no database (it proves the Worker version is live, not that Neon is up).
+- Middleware's only metric is on the paywall `preview` branch: a pure `paywallPreviewPoint()` plus one
+  `writeDataPoint`, which is non-blocking by design (queued, sent after the response), so no `waitUntil`.
+  Middleware is the one place that sees every preview (the rewrite is `private`, so no cache answers it). Only
+  document loads count (`Sec-Fetch-Dest: document`, no `Sec-Purpose: prefetch`): Next.js strips `RSC` and
+  `Next-Router-Prefetch` before middleware, so client-side navigations can't be told from router prefetches and
+  are left out. Don't add metrics to other branches; content pages pass through untouched.
+- Analytics points carry labels only (path, section, tier, country, outcome), never a user ID or email; the
+  column positions are a contract with saved SQL queries, so append new blobs, never reorder.
 
 ## Planned
 
@@ -81,6 +93,6 @@ gate, using the same keyring.
 ## Tests
 
 `sections-gate.test.ts`, `entitlement.test.ts` (forged, wrong kid, expired, rotation, skew), `health.test.ts`,
-`pricing-variant.test.ts` (tier × live, cookie override, malformed input, cache headers); E2E
-`apps/web/tests/e2e/edge-gate.spec.ts` and `apps/web/tests/e2e/pricing.spec.ts` (spoofed `cf-ipcountry`, switcher,
-canonical).
+`pricing-variant.test.ts` (tier × live, cookie override, malformed input, cache headers), `analytics.test.ts`
+(column layout, no-op without the binding, document loads only); E2E `apps/web/tests/e2e/edge-gate.spec.ts` and
+`apps/web/tests/e2e/pricing.spec.ts` (spoofed `cf-ipcountry`, switcher, canonical).

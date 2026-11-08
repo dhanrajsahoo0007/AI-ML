@@ -15,8 +15,9 @@ Web Analytics beacon for Core Web Vitals by page and country. Both are off until
 
 ## Data flow
 
-UI code → `track("event", props)` → in-memory queue → `loadAnalytics()` imports PostHog lazily → events sent. No
-server-side capture yet.
+UI code → `track("event", props)` → in-memory queue → `loadAnalytics()` imports PostHog lazily → events sent.
+Server-side counts (paywall previews, checkout starts, webhook outcomes and latency, web vitals) go to Workers
+Analytics Engine instead, through `apps/web/src/server/edge/analytics.ts` (no-op without the `ANALYTICS` binding).
 
 ## Invariants and gotchas
 
