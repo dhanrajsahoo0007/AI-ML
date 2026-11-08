@@ -279,12 +279,18 @@ jobs:
         with:
           name: build-preview
           path: apps/web
+      # The same secrets as the billing job, plus the newsletter's: ENTITLEMENT_SECRET (`<kid>:<base64url key>`)
+      # signs the paywall cookie, so the "paywall with real sessions" specs need it.
       - name: Generate per-run test secrets
         run: |
+          gen() { node -e "console.log(require('crypto').randomBytes(32).toString(process.argv[1]))" "$1"; }
+          ENT="ci:$(gen base64url)"; AUTH="$(gen hex)"; LOGIN="$(gen hex)"; NEWS="$(gen hex)"
+          for v in "$ENT" "$AUTH" "$LOGIN" "$NEWS"; do echo "::add-mask::$v"; done
           {
-            echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)"
-            echo "TEST_LOGIN_KEY=$(openssl rand -hex 24)"
-            echo "NEWSLETTER_TOKEN_SECRET=$(openssl rand -hex 32)"
+            echo "ENTITLEMENT_SECRET=$ENT"
+            echo "BETTER_AUTH_SECRET=$AUTH"
+            echo "TEST_LOGIN_KEY=$LOGIN"
+            echo "NEWSLETTER_TOKEN_SECRET=$NEWS"
           } >> "$GITHUB_ENV"
       - run: npm run db:migrate -w web && npm run db:seed:test -w web
       - run: npx playwright install --with-deps chromium
