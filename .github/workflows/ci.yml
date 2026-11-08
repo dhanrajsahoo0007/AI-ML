@@ -556,12 +556,28 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # The archive is cached, not the binary, so the checksum below is checked on every run, cache hit or not. The
+      # cache is only saved when the job passes, so an archive that fails the checksum is never cached.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/gitleaks.tar.gz
+          key: gitleaks-${{ env.GITLEAKS_VERSION }}-${{ env.GITLEAKS_SHA256 }}
       - name: Install gitleaks (pinned, checksum verified)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -sSfL --retry 5 --retry-delay 5 --retry-all-errors --max-time 60 -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
-          tar -xzf gitleaks.tar.gz gitleaks
-          rm gitleaks.tar.gz
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          asset="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          # GitHub throttles unauthenticated release downloads from runners (HTTP 504 on every retry during its
+          # incidents), so download through the API with the job's token first; the plain URL is the fallback.
+          for attempt in 1 2 3 4; do
+            [ -s "$archive" ] && break
+            gh release download "v${GITLEAKS_VERSION}" --repo gitleaks/gitleaks --pattern "$asset" --output "$archive" --clobber \
+              || curl -sSfL --max-time 60 -o "$archive" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${asset}" \
+              || { rm -f "$archive"; sleep $((attempt * 10)); }
+          done
+          echo "${GITLEAKS_SHA256}  $archive" | sha256sum -c -
+          tar -xzf "$archive" gitleaks
       - name: Scan the full history
         run: ./gitleaks git --redact --no-banner --verbose .
 
