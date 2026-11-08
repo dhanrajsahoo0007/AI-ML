@@ -25,7 +25,7 @@ afterEach(() => {
 describe("toDataPoint: the column layout queries rely on", () => {
   it("puts the event name in index1 and blob1 and a count of 1 in double1, for every event", () => {
     const events: Point[] = [
-      { event: "paywall_preview", path: "/system-design/x", section: "system-design", tier: "anonymous", country: "IN" },
+      { event: "paywall_preview", path: "/topic-a/x", section: "topic-a", tier: "anonymous", country: "IN" },
       { event: "checkout_start", plan: "yearly", provider: "dodo", country: null, outcome: "ok" },
       { event: "billing_webhook", provider: "dodo", type: "subscription.active", outcome: "processed", durationMs: 42 },
       {
@@ -48,8 +48,8 @@ describe("toDataPoint: the column layout queries rely on", () => {
 
   it("writes each event's fields in the documented positions", () => {
     expect(
-      toDataPoint({ event: "paywall_preview", path: "/cloud/a", section: "cloud", tier: "free", country: null })
-    ).toEqual({ indexes: ["paywall_preview"], blobs: ["paywall_preview", "/cloud/a", "cloud", "free", ""], doubles: [1] });
+      toDataPoint({ event: "paywall_preview", path: "/topic-b/a", section: "topic-b", tier: "free", country: null })
+    ).toEqual({ indexes: ["paywall_preview"], blobs: ["paywall_preview", "/topic-b/a", "topic-b", "free", ""], doubles: [1] });
     expect(toDataPoint({ event: "checkout_start", plan: "monthly", provider: "dodo", country: "BR", outcome: "ok" }))
       .toEqual({ indexes: ["checkout_start"], blobs: ["checkout_start", "monthly", "dodo", "BR", "ok"], doubles: [1] });
     expect(
@@ -62,14 +62,14 @@ describe("toDataPoint: the column layout queries rely on", () => {
     expect(
       toDataPoint({
         event: "web_vital",
-        route: "/dsa",
-        section: "dsa",
+        route: "/topic-c",
+        section: "topic-c",
         metric: "CLS",
         rating: "poor",
         navigationType: "",
         value: 0.31,
       })
-    ).toEqual({ indexes: ["web_vital"], blobs: ["web_vital", "/dsa", "dsa", "CLS", "poor", ""], doubles: [1, 0.31] });
+    ).toEqual({ indexes: ["web_vital"], blobs: ["web_vital", "/topic-c", "topic-c", "CLS", "poor", ""], doubles: [1, 0.31] });
   });
 
   it("clips long blobs and never writes NaN or a negative duration", () => {
@@ -117,9 +117,9 @@ describe("paywallPreviewPoint", () => {
 
   it("labels the view with the normalised path, its section, the tier and the edge country", () => {
     expect(
-      paywallPreviewPoint({ pathname: "/System-Design//Caching/", headers: doc({ "cf-ipcountry": "in" }), tier: null })
-    ).toEqual({ event: "paywall_preview", path: "/system-design/caching", section: "system-design", tier: "anonymous", country: "IN" });
-    expect(paywallPreviewPoint({ pathname: "/cloud/x", headers: doc(), tier: "free" })).toMatchObject({
+      paywallPreviewPoint({ pathname: "/Topic-A//Caching/", headers: doc({ "cf-ipcountry": "in" }), tier: null })
+    ).toEqual({ event: "paywall_preview", path: "/topic-a/caching", section: "topic-a", tier: "anonymous", country: "IN" });
+    expect(paywallPreviewPoint({ pathname: "/topic-b/x", headers: doc(), tier: "free" })).toMatchObject({
       tier: "free",
       country: null,
     });
@@ -134,7 +134,7 @@ describe("paywallPreviewPoint", () => {
       {},
     ];
     for (const h of skipped) {
-      expect(paywallPreviewPoint({ pathname: "/cloud/x", headers: new Headers(h), tier: null }), JSON.stringify(h)).toBeNull();
+      expect(paywallPreviewPoint({ pathname: "/topic-b/x", headers: new Headers(h), tier: null }), JSON.stringify(h)).toBeNull();
     }
   });
 });
