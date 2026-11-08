@@ -6,7 +6,10 @@ const confirm: EmailJob = {
   kind: "newsletter.confirm",
   to: "ada@example.com",
   idempotencyKey: "newsletter.confirm:0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
-  data: { confirmUrl: "https://site.example/n/confirm?token=a.b", unsubscribeUrl: "https://site.example/n/unsubscribe?token=c.d" },
+  data: {
+    confirmUrl: "https://site.example/n/confirm?token=a.b",
+    unsubscribeUrl: "https://site.example/n/unsubscribe?token=c.d",
+  },
 };
 
 const welcome: EmailJob = {
@@ -26,7 +29,12 @@ const reminder: EmailJob = {
   kind: "billing.renewal-reminder",
   to: "free@users.origins.test",
   idempotencyKey: "billing.renewal-reminder:sub_9:1763164800000",
-  data: { name: "Ada", renewsOn: "November 15, 2026", price: "€90.00", manageUrl: "https://site.example/account/billing" },
+  data: {
+    name: "Ada",
+    renewsOn: "November 15, 2026",
+    price: "€90.00",
+    manageUrl: "https://site.example/account/billing",
+  },
 };
 
 describe("email job schema", () => {
@@ -55,7 +63,11 @@ describe("email job schema", () => {
 describe("buildEmail", () => {
   it("renders each kind with its template, the recipient and the idempotency key", async () => {
     const m = await buildEmail(confirm);
-    expect(m).toMatchObject({ to: "ada@example.com", template: "confirm-subscription", idempotencyKey: confirm.idempotencyKey });
+    expect(m).toMatchObject({
+      to: "ada@example.com",
+      template: "confirm-subscription",
+      idempotencyKey: confirm.idempotencyKey,
+    });
     expect(m.text).toContain("https://site.example/n/confirm?token=a.b");
 
     const w = await buildEmail(welcome);

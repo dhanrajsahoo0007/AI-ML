@@ -24,9 +24,7 @@ export function ModelCategory({
           Category
         </div>
         <h2 className="!mt-4 !border-0 !pt-0">{title}</h2>
-        {subtitle && (
-          <p className="mt-3 max-w-2xl text-muted-foreground">{subtitle}</p>
-        )}
+        {subtitle && <p className="mt-3 max-w-2xl text-muted-foreground">{subtitle}</p>}
       </div>
       {children}
     </div>
@@ -76,12 +74,8 @@ export function ModelCard({
           />
         </span>
       </div>
-      <h3 className="!mt-5 font-display text-lg leading-snug text-ink">
-        {title}
-      </h3>
-      <p className="!mt-2 text-[15px] leading-relaxed text-muted-foreground">
-        {description}
-      </p>
+      <h3 className="!mt-5 font-display text-lg leading-snug text-ink">{title}</h3>
+      <p className="!mt-2 text-[15px] leading-relaxed text-muted-foreground">{description}</p>
     </Link>
   );
 }

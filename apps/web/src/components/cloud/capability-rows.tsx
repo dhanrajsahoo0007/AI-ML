@@ -29,7 +29,9 @@ export function CapabilityRow({ c, order, groupLabel }: { c: Capability; order: 
     <div className={cn("grid gap-3 px-4 py-4 sm:px-5 md:gap-4", GRID)}>
       <div>
         {groupLabel && (
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{groupLabel}</div>
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            {groupLabel}
+          </div>
         )}
         <div className="font-display font-semibold leading-snug text-ink">{c.title}</div>
         <div className="mt-1 text-[13px] leading-snug text-muted-foreground">{c.summary}</div>
@@ -50,7 +52,9 @@ export function CapabilityRow({ c, order, groupLabel }: { c: Capability; order: 
               ))}
             </div>
             {a.note && (
-              <div className={cn("mt-1.5 text-[13px] leading-snug text-ink-2", i === 0 && "px-2 pb-2 md:p-0")}>{a.note}</div>
+              <div className={cn("mt-1.5 text-[13px] leading-snug text-ink-2", i === 0 && "px-2 pb-2 md:p-0")}>
+                {a.note}
+              </div>
             )}
           </div>
         );

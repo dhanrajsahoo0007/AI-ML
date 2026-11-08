@@ -8,8 +8,10 @@ export const services: CloudService[] = [
     short: "Redshift",
     group: "analytics",
     tagline: "Columnar cloud data warehouse for SQL analytics over terabytes to petabytes.",
-    youManage: "Schemas, distribution and sort keys (or automatic), workload management, and cluster or Serverless capacity.",
-    scaling: "RA3 nodes separate compute from managed storage; Serverless scales by RPU; concurrency scaling adds clusters for bursts.",
+    youManage:
+      "Schemas, distribution and sort keys (or automatic), workload management, and cluster or Serverless capacity.",
+    scaling:
+      "RA3 nodes separate compute from managed storage; Serverless scales by RPU; concurrency scaling adds clusters for bursts.",
     pricing: "Per node-hour, or per RPU-hour for Serverless, plus managed storage.",
     useWhen: [
       "Dashboards and BI over all of history with many concurrent users.",
@@ -98,12 +100,8 @@ export const services: CloudService[] = [
       "Analytics and BI over all history; querying data lake files through BigLake.",
       "Real-time dashboards from streaming inserts or Pub/Sub subscriptions.",
     ],
-    avoidWhen: [
-      "Serving per-user lookups in an app: it is built for scans, not point reads.",
-    ],
-    gotchas: [
-      "Partition and cluster large tables, and select only needed columns, to cut scanned bytes.",
-    ],
+    avoidWhen: ["Serving per-user lookups in an app: it is built for scans, not point reads."],
+    gotchas: ["Partition and cluster large tables, and select only needed columns, to cut scanned bytes."],
     docs: "https://cloud.google.com/bigquery",
     main: "warehouse",
   },
@@ -117,12 +115,8 @@ export const services: CloudService[] = [
     youManage: "Beam pipelines and worker settings.",
     scaling: "Autoscales workers; streaming engine moves state off workers.",
     pricing: "Per vCPU, memory and data processed per hour.",
-    useWhen: [
-      "Streaming ETL from Pub/Sub to BigQuery, windowed aggregations, and batch transforms.",
-    ],
-    avoidWhen: [
-      "Teams invested in Spark: use Dataproc.",
-    ],
+    useWhen: ["Streaming ETL from Pub/Sub to BigQuery, windowed aggregations, and batch transforms."],
+    avoidWhen: ["Teams invested in Spark: use Dataproc."],
     gotchas: [],
     docs: "https://cloud.google.com/dataflow",
     main: "stream-processing",
@@ -137,12 +131,8 @@ export const services: CloudService[] = [
     youManage: "Jobs and, for clusters, sizing and autoscaling policies.",
     scaling: "Cluster autoscaling or serverless batches.",
     pricing: "Compute Engine cost plus a small Dataproc charge, or per DCU-hour for serverless.",
-    useWhen: [
-      "Existing Spark and Hadoop jobs, ML feature pipelines.",
-    ],
-    avoidWhen: [
-      "Pure SQL transforms that BigQuery can run.",
-    ],
+    useWhen: ["Existing Spark and Hadoop jobs, ML feature pipelines."],
+    avoidWhen: ["Pure SQL transforms that BigQuery can run."],
     gotchas: [],
     docs: "https://cloud.google.com/dataproc",
     main: "spark",
@@ -153,19 +143,14 @@ export const services: CloudService[] = [
     name: "Microsoft Fabric",
     short: "Fabric",
     group: "analytics",
-    tagline: "SaaS analytics platform on OneLake: warehouse, lakehouse, Spark, data pipelines, real-time intelligence and Power BI.",
+    tagline:
+      "SaaS analytics platform on OneLake: warehouse, lakehouse, Spark, data pipelines, real-time intelligence and Power BI.",
     youManage: "Workspaces, items (warehouses, lakehouses, pipelines) and capacity.",
     scaling: "Capacity units shared across all workloads.",
     pricing: "Per capacity unit-hour (or reserved), plus OneLake storage.",
-    useWhen: [
-      "A unified Microsoft analytics stack from ingestion to Power BI.",
-    ],
-    avoidWhen: [
-      "Teams that want separate best-of-breed tools for each layer.",
-    ],
-    gotchas: [
-      "Microsoft positions Fabric as the successor to many Synapse scenarios.",
-    ],
+    useWhen: ["A unified Microsoft analytics stack from ingestion to Power BI."],
+    avoidWhen: ["Teams that want separate best-of-breed tools for each layer."],
+    gotchas: ["Microsoft positions Fabric as the successor to many Synapse scenarios."],
     docs: "https://www.microsoft.com/en-us/microsoft-fabric",
     main: "warehouse",
   },
@@ -179,9 +164,7 @@ export const services: CloudService[] = [
     youManage: "Workspaces, clusters or serverless compute, jobs and Unity Catalog.",
     scaling: "Autoscaling clusters and serverless SQL and jobs.",
     pricing: "Per Databricks unit plus the underlying VMs (or serverless).",
-    useWhen: [
-      "Spark-heavy data engineering and ML on Azure.",
-    ],
+    useWhen: ["Spark-heavy data engineering and ML on Azure."],
     avoidWhen: [],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/databricks",
@@ -197,13 +180,9 @@ export const services: CloudService[] = [
     youManage: "Pipelines, linked services, triggers and integration runtimes.",
     scaling: "Fully managed; self-hosted runtimes reach on-prem sources.",
     pricing: "Per activity run and data movement hour.",
-    useWhen: [
-      "Scheduled ingestion from databases, SaaS and on-prem into the lake or warehouse.",
-    ],
+    useWhen: ["Scheduled ingestion from databases, SaaS and on-prem into the lake or warehouse."],
     avoidWhen: [],
-    gotchas: [
-      "Fabric includes Data Factory pipelines for teams on Fabric.",
-    ],
+    gotchas: ["Fabric includes Data Factory pipelines for teams on Fabric."],
     docs: "https://azure.microsoft.com/en-us/products/data-factory",
     main: "etl-catalog",
   },
@@ -269,7 +248,11 @@ export const capabilities: Capability[] = [
     group: "analytics",
     title: "BI dashboards",
     summary: "Dashboards and reports for business users.",
-    aws: { services: ["Amazon Quick Sight"], fit: "direct", note: "Formerly QuickSight; part of Amazon Quick Suite since October 2025." },
+    aws: {
+      services: ["Amazon Quick Sight"],
+      fit: "direct",
+      note: "Formerly QuickSight; part of Amazon Quick Suite since October 2025.",
+    },
     gcp: { services: ["Looker", "Looker Studio"], fit: "direct" },
     azure: { services: ["Power BI"], fit: "direct" },
   },

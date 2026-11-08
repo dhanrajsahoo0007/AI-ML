@@ -12,13 +12,13 @@ All five come from the public [excalidraw-libraries](https://github.com/excalidr
 which is published under the **MIT License** (Copyright (c) 2020 Excalidraw). Keep this README with the files so the
 attribution travels with them.
 
-| File | Library | Author |
-|---|---|---|
-| `software-architecture.excalidrawlib` | Software Architecture | Youri Tjang |
-| `drwnio.excalidrawlib` | Software Logos | drwnio.polyrand.net |
-| `architecture-diagram-components.excalidrawlib` | Architecture diagram components | Anna Pastushko |
-| `db-eng.excalidrawlib` | Database | Stefan Oehrli |
-| `technology-logos.excalidrawlib` | Technology Logos | Matthias Haeussler |
+| File                                            | Library                         | Author              |
+| ----------------------------------------------- | ------------------------------- | ------------------- |
+| `software-architecture.excalidrawlib`           | Software Architecture           | Youri Tjang         |
+| `drwnio.excalidrawlib`                          | Software Logos                  | drwnio.polyrand.net |
+| `architecture-diagram-components.excalidrawlib` | Architecture diagram components | Anna Pastushko      |
+| `db-eng.excalidrawlib`                          | Database                        | Stefan Oehrli       |
+| `technology-logos.excalidrawlib`                | Technology Logos                | Matthias Haeussler  |
 
 ## Product logos
 

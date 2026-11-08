@@ -24,15 +24,27 @@ async function failure(fetchImpl: typeof fetch): Promise<EmailSendError> {
 describe("ResendEmailSender", () => {
   it("posts the message with the Idempotency-Key header and returns Resend's id", async () => {
     let seen: RequestInit | undefined;
-    const fetchImpl = (async (_url: string, init: RequestInit) => ((seen = init), Response.json({ id: "re_1" }))) as unknown as typeof fetch;
+    const fetchImpl = (async (_url: string, init: RequestInit) => (
+      (seen = init),
+      Response.json({ id: "re_1" })
+    )) as unknown as typeof fetch;
     expect(await new ResendEmailSender("re_test", fetchImpl).send(message)).toEqual({ id: "re_1" });
-    expect(seen?.headers).toMatchObject({ Authorization: "Bearer re_test", "Idempotency-Key": "newsletter.welcome:sub_1:1" });
-    expect(JSON.parse(String(seen?.body))).toMatchObject({ to: ["ada@example.com"], tags: [{ name: "template", value: "welcome" }] });
+    expect(seen?.headers).toMatchObject({
+      Authorization: "Bearer re_test",
+      "Idempotency-Key": "newsletter.welcome:sub_1:1",
+    });
+    expect(JSON.parse(String(seen?.body))).toMatchObject({
+      to: ["ada@example.com"],
+      tags: [{ name: "template", value: "welcome" }],
+    });
   });
 
   it("sends no Idempotency-Key when the message has none", async () => {
     let seen: RequestInit | undefined;
-    const fetchImpl = (async (_url: string, init: RequestInit) => ((seen = init), Response.json({ id: "re_1" }))) as unknown as typeof fetch;
+    const fetchImpl = (async (_url: string, init: RequestInit) => (
+      (seen = init),
+      Response.json({ id: "re_1" })
+    )) as unknown as typeof fetch;
     await new ResendEmailSender("re_test", fetchImpl).send({ ...message, idempotencyKey: undefined });
     expect(seen?.headers).not.toHaveProperty("Idempotency-Key");
   });
@@ -49,7 +61,10 @@ describe("ResendEmailSender", () => {
   it("classifies 429 and 5xx as retryable, with Retry-After", async () => {
     const limited = await failure(respond(429, { name: "rate_limit_exceeded" }, { "retry-after": "2" }));
     expect(limited).toMatchObject({ retryable: true, status: 429, retryAfterSeconds: 2 });
-    expect(await failure(respond(500, { name: "internal_server_error" }))).toMatchObject({ retryable: true, status: 500 });
+    expect(await failure(respond(500, { name: "internal_server_error" }))).toMatchObject({
+      retryable: true,
+      status: 500,
+    });
     expect(await failure(respond(503, "not json"))).toMatchObject({ retryable: true, status: 503 });
   });
 
@@ -60,8 +75,14 @@ describe("ResendEmailSender", () => {
   });
 
   it("classifies other 4xx as permanent and keeps the provider's message (which can hold the address) out", async () => {
-    const invalid = await failure(respond(422, { name: "validation_error", message: "Invalid `to` field: ada@example.com" }));
-    expect(invalid).toMatchObject({ retryable: false, status: 422, message: "Resend responded 422 (validation_error)" });
+    const invalid = await failure(
+      respond(422, { name: "validation_error", message: "Invalid `to` field: ada@example.com" })
+    );
+    expect(invalid).toMatchObject({
+      retryable: false,
+      status: 422,
+      message: "Resend responded 422 (validation_error)",
+    });
     expect(await failure(respond(409, { name: "invalid_idempotent_request" }))).toMatchObject({ retryable: false });
     expect(await failure(respond(403, {}))).toMatchObject({ retryable: false, status: 403 });
   });

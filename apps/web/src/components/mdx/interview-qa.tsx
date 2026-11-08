@@ -3,7 +3,12 @@ import Link from "next/link";
 import { ArrowUpRight, ListCollapse, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CompanyChip, type CompanyTag } from "@/components/company-logo";
-import { InterviewQuestion, QaController, type InterviewQuestionProps, type Level } from "@/components/mdx/interview-qa-island";
+import {
+  InterviewQuestion,
+  QaController,
+  type InterviewQuestionProps,
+  type Level,
+} from "@/components/mdx/interview-qa-island";
 
 export { InterviewQuestion };
 
@@ -133,7 +138,7 @@ function FilterChip({ group, value, children }: { group: string; value: string; 
 
 export function InterviewQuestions({ title, footer, company, children }: InterviewQuestionsProps) {
   const questions = React.Children.toArray(children).filter(
-    (child): child is React.ReactElement<InterviewQuestionProps> => React.isValidElement(child),
+    (child): child is React.ReactElement<InterviewQuestionProps> => React.isValidElement(child)
   );
 
   const levels = LEVELS.filter((l) => questions.some((q) => q.props.level === l));
@@ -147,7 +152,7 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
       seen.set(c.slug, entry);
     }
   const companyOptions = Array.from(seen.values()).sort(
-    (a, b) => b.count - a.count || a.company.name.localeCompare(b.company.name),
+    (a, b) => b.count - a.count || a.company.name.localeCompare(b.company.name)
   );
 
   const tagCounts = new Map<string, number>();

@@ -1,12 +1,6 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import {
-  FIT_LABEL,
-  PROVIDER_BY_ID,
-  SERVICE_BY_ID,
-  type Fit,
-  type ProviderId,
-} from "@/lib/cloud-catalog";
+import { FIT_LABEL, PROVIDER_BY_ID, SERVICE_BY_ID, type Fit, type ProviderId } from "@/lib/cloud-catalog";
 import type { Tone } from "@/components/diagrams/types";
 
 // Shared bits for the cloud widgets: provider colours, fit marks and service chips.
@@ -29,7 +23,7 @@ export function ProviderTag({ id, className }: { id: ProviderId; className?: str
     <span
       className={cn(
         "inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-[0.04em]",
-        className,
+        className
       )}
       style={{ background: `var(--dg-${tone}-soft)`, color: `var(--dg-${tone})` }}
     >
@@ -86,7 +80,7 @@ export function ServiceChip({ name, className }: { name: string; className?: str
   const s = SERVICE_BY_ID[name];
   const base = cn(
     "inline-flex items-center rounded-full border border-hairline bg-paper px-2.5 py-0.5 text-[13px] leading-snug text-ink",
-    className,
+    className
   );
   if (!s) return <span className={base}>{name}</span>;
   return (

@@ -13,7 +13,13 @@ export const SECTION_KINDS = ["docs", "question-bank", "directory", "problems", 
 export type SectionKindName = (typeof SECTION_KINDS)[number];
 
 /** Kinds whose module and routes exist. Sections of other kinds show as "coming soon" in the nav. */
-export const KINDS_WITH_ROUTES: readonly SectionKindName[] = ["docs", "question-bank", "directory", "problems", "newsletter"];
+export const KINDS_WITH_ROUTES: readonly SectionKindName[] = [
+  "docs",
+  "question-bank",
+  "directory",
+  "problems",
+  "newsletter",
+];
 
 export const NAV_GROUPS = ["learn", "practice", "more"] as const;
 export type NavGroupName = (typeof NAV_GROUPS)[number];
@@ -21,9 +27,7 @@ export type NavGroupName = (typeof NAV_GROUPS)[number];
 const state = z.enum(RELEASE_STATES);
 const slug = z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "must be lowercase kebab-case");
 
-export const releaseSchema = z
-  .object({ local: state, preview: state, staging: state, production: state })
-  .strict();
+export const releaseSchema = z.object({ local: state, preview: state, staging: state, production: state }).strict();
 
 export const sectionEntrySchema = z
   .object({
@@ -54,7 +58,10 @@ export const sectionEntrySchema = z
     /** Who approves moving it to production. */
     owner: z.string().optional(),
     /** Title and subtitle on the section index page. */
-    hub: z.object({ title: z.string().min(1), subtitle: z.string().min(1) }).strict().optional(),
+    hub: z
+      .object({ title: z.string().min(1), subtitle: z.string().min(1) })
+      .strict()
+      .optional(),
     /** Old URLs that now live in this section; `fallback` is used while the section is not `on`. */
     redirects: z
       .array(z.object({ from: z.string(), to: z.string(), fallback: z.string().optional() }).strict())

@@ -39,7 +39,9 @@ describe("problems kind: contract", () => {
     const problemGroup = nav.groups[1];
     expect(problemGroup.href).toBe(problemListHref(section));
     expect(problemGroup.categories!.map((c) => c.title)).toEqual(["Easy", "Medium"]);
-    expect(problemGroup.categories!.flatMap((c) => c.items.map((i) => i.href)).sort()).toEqual(problems.map((p) => p.href).sort());
+    expect(problemGroup.categories!.flatMap((c) => c.items.map((i) => i.href)).sort()).toEqual(
+      problems.map((p) => p.href).sort()
+    );
   });
   it("lists every page in the sitemap", () => {
     const urls = problemsKind.sitemap(section, items).map((e) => e.url);
@@ -50,7 +52,8 @@ describe("problems kind: contract", () => {
     expect(docs).toHaveLength(items.length);
     const text = JSON.stringify(docs);
     // Words that occur only in statements and editorials.
-    for (const phrase of ["PremiumBreak", "Brute force", "doubly linked list", "Constraints"]) expect(text).not.toContain(phrase);
+    for (const phrase of ["PremiumBreak", "Brute force", "doubly linked list", "Constraints"])
+      expect(text).not.toContain(phrase);
   });
   it("counts published problems as written", () => {
     expect(problemsKind.counts(items)).toEqual({ written: problems.length, outline: 0 });
@@ -85,7 +88,8 @@ describe("problems kind: company refs", () => {
 });
 
 describe("problems kind: validate", () => {
-  const messages = async (list: DsaItem[]) => (await problemsKind.validate(section, list)).filter((e) => e.level === "error").map((e) => e.message);
+  const messages = async (list: DsaItem[]) =>
+    (await problemsKind.validate(section, list)).filter((e) => e.level === "error").map((e) => e.message);
   const broken = (title: string, fm: Partial<ValidProblem["fm"]>, extra: Partial<ValidProblem> = {}) => {
     const p = byTitle(title);
     return items.map((i) => (i === p ? { ...p, ...extra, fm: { ...p.fm, ...fm } } : i));
@@ -101,7 +105,9 @@ describe("problems kind: validate", () => {
     ]);
   });
   it("reports unknown companies, topics and patterns", async () => {
-    expect(await messages(broken("Two Sum", { companies: ["acme-corp"], topics: ["nope"], patterns: ["telepathy"] }))).toEqual([
+    expect(
+      await messages(broken("Two Sum", { companies: ["acme-corp"], topics: ["nope"], patterns: ["telepathy"] }))
+    ).toEqual([
       'unknown pattern "telepathy" (add it to patterns.yaml)',
       'unknown topic "nope" (no topics/nope.mdx)',
       'unknown company "acme-corp" (not in content/companies/companies.yaml)',
@@ -109,24 +115,29 @@ describe("problems kind: validate", () => {
   });
   it("requires a starter and an entry point for every language", async () => {
     const p = byTitle("Two Sum");
-    expect(await messages(broken("Two Sum", { starter: { javascript: p.fm.starter.javascript }, entry: { python: "two_sum" } }))).toEqual([
-      "no entry point for javascript",
-      "no starter code for python",
-    ]);
+    expect(
+      await messages(
+        broken("Two Sum", { starter: { javascript: p.fm.starter.javascript }, entry: { python: "two_sum" } })
+      )
+    ).toEqual(["no entry point for javascript", "no starter code for python"]);
     expect(await messages(broken("Two Sum", { entry: { ...p.fm.entry, javascript: "solve" } }))).toEqual([
       "the javascript starter does not define solve",
     ]);
   });
   it("checks that test files exist and have the right shape", async () => {
-    expect(await messages(broken("Two Sum", { tests: { public: "tests/missing.public.json", hidden: "tests/two-sum.hidden.json" } }))).toEqual([
-      "public tests: tests/missing.public.json does not exist",
-    ]);
+    expect(
+      await messages(
+        broken("Two Sum", { tests: { public: "tests/missing.public.json", hidden: "tests/two-sum.hidden.json" } })
+      )
+    ).toEqual(["public tests: tests/missing.public.json does not exist"]);
     const asClass = await messages(broken("Two Sum", { mode: "class" }));
     expect(asClass.length).toBeGreaterThan(0);
     expect(asClass.every((m) => m.startsWith("case "))).toBe(true);
   });
   it("requires <PremiumBreak/> and existing related pages", async () => {
-    expect(await messages(broken("Two Sum", { related: ["/system-design/patterns/no-such-page"] }, { hasBreak: false }))).toEqual([
+    expect(
+      await messages(broken("Two Sum", { related: ["/system-design/patterns/no-such-page"] }, { hasBreak: false }))
+    ).toEqual([
       "missing <PremiumBreak/> between the statement and the editorial",
       "related page /system-design/patterns/no-such-page does not exist",
     ]);

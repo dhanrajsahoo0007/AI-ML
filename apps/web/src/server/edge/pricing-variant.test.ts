@@ -53,9 +53,11 @@ describe("pricing variant (live × tier)", () => {
 
   it("ignores a malformed cookie and falls back to the IP country", () => {
     for (const regionCookie of ["", "C", "IND", "<b>", "XX", "%49%4E"]) {
-      expect(decidePricing({ pathname: "/pricing", ...soon, country: "IN", regionCookie }), regionCookie).toMatchObject({
-        tier: "C",
-      });
+      expect(decidePricing({ pathname: "/pricing", ...soon, country: "IN", regionCookie }), regionCookie).toMatchObject(
+        {
+          tier: "C",
+        }
+      );
     }
   });
 

@@ -34,7 +34,9 @@ export async function docSlugParams(param: string) {
   const items = await docsKind.load(section);
   // Every premium page also gets its public preview, `<path>/_preview`, which middleware serves to visitors
   // without Pro (plan §9.2).
-  const previews = items.filter((i) => isPremiumDoc(section, i)).map((i) => ({ slug: [...i.segments, PREVIEW_SEGMENT] }));
+  const previews = items
+    .filter((i) => isPremiumDoc(section, i))
+    .map((i) => ({ slug: [...i.segments, PREVIEW_SEGMENT] }));
   return [...(docsKind.staticParams(section, items) as { slug: string[] }[]), ...previews];
 }
 

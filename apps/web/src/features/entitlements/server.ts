@@ -2,12 +2,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@/server/db/client";
 import { currentEntitlement, subscription } from "@/server/db/schema";
-import {
-  ENTITLEMENT_COOKIE,
-  keyringFromEnv,
-  signEntitlement,
-  verifyEntitlement,
-} from "@/server/edge/entitlement";
+import { ENTITLEMENT_COOKIE, keyringFromEnv, signEntitlement, verifyEntitlement } from "@/server/edge/entitlement";
 import { HttpError } from "@/server/http";
 import { clearEntitlementCookies, entitlementCookies } from "./cookies";
 import { decideRefresh, type StoredEntitlement } from "./refresh";
@@ -21,9 +16,13 @@ function readCookie(request: Request, name: string): string | undefined {
   return pair?.slice(name.length + 1);
 }
 
-async function loadEntitlement(db: Db, userId: string): Promise<StoredEntitlement & { hold: boolean } | null> {
+async function loadEntitlement(db: Db, userId: string): Promise<(StoredEntitlement & { hold: boolean }) | null> {
   const [row] = await db
-    .select({ tier: currentEntitlement.tier, validUntil: currentEntitlement.validUntil, version: currentEntitlement.version })
+    .select({
+      tier: currentEntitlement.tier,
+      validUntil: currentEntitlement.validUntil,
+      version: currentEntitlement.version,
+    })
     .from(currentEntitlement)
     .where(eq(currentEntitlement.userId, userId))
     .limit(1);
@@ -45,7 +44,11 @@ interface RefreshInput {
 }
 
 type RefreshResult =
-  | { ok: true; body: { tier: "free" | "pro"; exp: number; v: number; hold: boolean; stale: boolean }; setCookies: string[] }
+  | {
+      ok: true;
+      body: { tier: "free" | "pro"; exp: number; v: number; hold: boolean; stale: boolean };
+      setCookies: string[];
+    }
   | { ok: false; error: HttpError; setCookies: string[] };
 
 /**
@@ -78,7 +81,13 @@ export async function refreshEntitlementCookie(input: RefreshInput): Promise<Ref
   const hint = { exp: decision.claims.exp, tier: decision.claims.tier, hold: Boolean(stored?.hold) };
   return {
     ok: true,
-    body: { tier: decision.claims.tier, exp: decision.claims.exp, v: decision.claims.v, hold: hint.hold, stale: decision.stale },
+    body: {
+      tier: decision.claims.tier,
+      exp: decision.claims.exp,
+      v: decision.claims.v,
+      hold: hint.hold,
+      stale: decision.stale,
+    },
     setCookies: entitlementCookies({ token, hint, nowSec, secure }),
   };
 }

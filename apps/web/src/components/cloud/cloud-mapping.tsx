@@ -61,7 +61,7 @@ function RefCell({ ref_ }: { ref_?: CloudRef }) {
   if (!ref_) return <span className="text-muted-foreground">—</span>;
   const id = typeof ref_ === "string" ? ref_ : ref_.id;
   const s = id ? SERVICE_BY_ID[id] : undefined;
-  const label = typeof ref_ === "string" ? s?.short ?? ref_ : ref_.label;
+  const label = typeof ref_ === "string" ? (s?.short ?? ref_) : ref_.label;
   if (!s) return <span className="text-ink-2">{label}</span>;
   return (
     <Link href={serviceHref(s.id)!} title={s.name} className="font-medium text-ink no-underline! hover:underline!">

@@ -51,7 +51,10 @@ export function FamilyIcon({ id, className }: { id: FamilyId; className?: string
   const tone = FAMILY_TONE[id];
   return (
     <span
-      className={cn("inline-flex size-9 shrink-0 items-center justify-center rounded-lg [&_svg]:size-[18px]", className)}
+      className={cn(
+        "inline-flex size-9 shrink-0 items-center justify-center rounded-lg [&_svg]:size-[18px]",
+        className
+      )}
       style={{ background: `var(--dg-${tone}-soft)`, color: `var(--dg-${tone})` }}
       aria-hidden
     >
@@ -70,7 +73,8 @@ export function FitMark({ fit, className }: { fit: Fit; className?: string }) {
       className={cn("inline-block size-3.5 rounded-full border-2", className)}
       style={{
         borderColor: tone,
-        background: fit === 2 ? tone : fit === 1 ? `linear-gradient(90deg, ${tone} 50%, transparent 50%)` : "transparent",
+        background:
+          fit === 2 ? tone : fit === 1 ? `linear-gradient(90deg, ${tone} 50%, transparent 50%)` : "transparent",
         opacity: fit === 0 ? 0.55 : 1,
       }}
       aria-label={FIT_LABEL[fit]}

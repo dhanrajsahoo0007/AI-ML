@@ -57,7 +57,9 @@ describe("POST /api/vitals", () => {
   afterEach(() => restore());
 
   const post = (body: string, headers: Record<string, string> = {}) =>
-    POST(new Request("http://localhost/api/vitals", { method: "POST", body, headers }), { params: Promise.resolve({}) });
+    POST(new Request("http://localhost/api/vitals", { method: "POST", body, headers }), {
+      params: Promise.resolve({}),
+    });
 
   it("is rate-limited per IP (60/min) through route()", async () => {
     const ip = { "cf-connecting-ip": "198.51.100.77" };

@@ -35,7 +35,8 @@ export const services: CloudService[] = [
     name: "Amazon SNS",
     short: "SNS",
     group: "messaging",
-    tagline: "Pub/sub topics that push each message to every subscriber: queues, functions, HTTP, email, SMS and mobile push.",
+    tagline:
+      "Pub/sub topics that push each message to every subscriber: queues, functions, HTTP, email, SMS and mobile push.",
     youManage: "Topics, subscriptions and filter policies.",
     scaling: "Fully managed; FIFO topics keep order per message group.",
     pricing: "Per million publishes plus per delivery, by endpoint type.",
@@ -56,8 +57,7 @@ export const services: CloudService[] = [
     group: "messaging",
     tagline: "A serverless, sharded log of records that many consumers read in order and can replay.",
     youManage: "Partition keys, capacity mode, retention and consumers.",
-    scaling:
-      "Each shard takes about 1 MB/s or 1,000 records/s in; on-demand mode adds shards automatically.",
+    scaling: "Each shard takes about 1 MB/s or 1,000 records/s in; on-demand mode adds shards automatically.",
     pricing: "On-demand per GB in and out, or provisioned per shard-hour; extended retention extra.",
     useWhen: [
       "Clickstreams, telemetry, location updates and logs consumed by several apps.",
@@ -115,7 +115,8 @@ export const services: CloudService[] = [
     name: "Amazon Data Firehose",
     short: "Firehose",
     group: "messaging",
-    tagline: "Buffers a stream and delivers it to S3, Redshift, OpenSearch, Iceberg tables or HTTP endpoints, with no code.",
+    tagline:
+      "Buffers a stream and delivers it to S3, Redshift, OpenSearch, Iceberg tables or HTTP endpoints, with no code.",
     youManage: "Delivery stream, buffering size and interval, format conversion and optional Lambda transform.",
     scaling: "Fully managed.",
     pricing: "Per GB ingested, plus format conversion and delivery options.",
@@ -138,9 +139,7 @@ export const services: CloudService[] = [
       "Queues, fan-out and event streams on Google Cloud: one product covers all three shapes.",
       "Ingesting events straight into BigQuery or Cloud Storage with export subscriptions.",
     ],
-    avoidWhen: [
-      "You need the Kafka API and ecosystem: use Managed Service for Apache Kafka.",
-    ],
+    avoidWhen: ["You need the Kafka API and ecosystem: use Managed Service for Apache Kafka."],
     gotchas: [
       "Delivery is at least once by default; exactly-once delivery can be enabled on pull subscriptions.",
       "Ordering is per ordering key and must be enabled on the subscription.",
@@ -158,12 +157,8 @@ export const services: CloudService[] = [
     youManage: "Queues, rate and retry settings, and the target handler.",
     scaling: "Fully managed.",
     pricing: "Per million operations with a free tier.",
-    useWhen: [
-      "Dispatching work to Cloud Run or any HTTP service at a controlled rate.",
-    ],
-    avoidWhen: [
-      "Fan-out to many consumers: use Pub/Sub.",
-    ],
+    useWhen: ["Dispatching work to Cloud Run or any HTTP service at a controlled rate."],
+    avoidWhen: ["Fan-out to many consumers: use Pub/Sub."],
     gotchas: [],
     docs: "https://cloud.google.com/tasks",
     main: "queue",
@@ -178,12 +173,8 @@ export const services: CloudService[] = [
     youManage: "Topics, partitions, consumer groups and cluster size.",
     scaling: "Resize clusters; rebalancing is managed.",
     pricing: "Per vCPU and GB-hour plus storage.",
-    useWhen: [
-      "Kafka-native workloads on Google Cloud, or portability with other clouds.",
-    ],
-    avoidWhen: [
-      "Simple pub/sub where Pub/Sub needs no capacity planning.",
-    ],
+    useWhen: ["Kafka-native workloads on Google Cloud, or portability with other clouds."],
+    avoidWhen: ["Simple pub/sub where Pub/Sub needs no capacity planning."],
     gotchas: [],
     docs: "https://cloud.google.com/products/managed-service-for-apache-kafka",
     main: "kafka",
@@ -194,7 +185,8 @@ export const services: CloudService[] = [
     name: "Azure Service Bus",
     short: "Service Bus",
     group: "messaging",
-    tagline: "Enterprise message broker: queues and topics with sessions, transactions, duplicate detection and dead-lettering.",
+    tagline:
+      "Enterprise message broker: queues and topics with sessions, transactions, duplicate detection and dead-lettering.",
     youManage: "Namespaces, queues, topics, subscriptions and filters.",
     scaling: "Standard (shared) or Premium (dedicated messaging units).",
     pricing: "Per operation (Standard) or per messaging unit-hour (Premium).",
@@ -202,12 +194,8 @@ export const services: CloudService[] = [
       "Work queues and pub/sub between services, with ordered processing per session.",
       "AMQP and JMS workloads moving from on-prem brokers.",
     ],
-    avoidWhen: [
-      "Telemetry-scale streams with replay: use Event Hubs.",
-    ],
-    gotchas: [
-      "Sessions give ordered, one-at-a-time processing per key, like SQS FIFO message groups.",
-    ],
+    avoidWhen: ["Telemetry-scale streams with replay: use Event Hubs."],
+    gotchas: ["Sessions give ordered, one-at-a-time processing per key, like SQS FIFO message groups."],
     docs: "https://azure.microsoft.com/en-us/products/service-bus",
     main: "queue",
   },
@@ -221,15 +209,9 @@ export const services: CloudService[] = [
     youManage: "Namespaces, event hubs, partitions, consumer groups and retention.",
     scaling: "Throughput or processing units (Standard), dedicated clusters for very high volume.",
     pricing: "Per throughput unit-hour plus ingress events, by tier.",
-    useWhen: [
-      "Telemetry, clickstreams and logs; Kafka clients without running Kafka.",
-    ],
-    avoidWhen: [
-      "Per-message work queues: use Service Bus.",
-    ],
-    gotchas: [
-      "Capture writes the stream to Blob or Data Lake Storage automatically.",
-    ],
+    useWhen: ["Telemetry, clickstreams and logs; Kafka clients without running Kafka."],
+    avoidWhen: ["Per-message work queues: use Service Bus."],
+    gotchas: ["Capture writes the stream to Blob or Data Lake Storage automatically."],
     docs: "https://azure.microsoft.com/en-us/products/event-hubs",
     main: "streams",
   },
@@ -241,9 +223,21 @@ export const capabilities: Capability[] = [
     group: "messaging",
     title: "Message queue",
     summary: "Producers enqueue work; consumers pull, process and delete it.",
-    aws: { services: ["aws-sqs"], fit: "direct", note: "Standard (at-least-once, best-effort order) or FIFO (ordered, exactly-once processing per group)." },
-    gcp: { services: ["gcp-pubsub", "gcp-cloud-tasks"], fit: "close", note: "Pub/Sub pull subscriptions act as queues; Cloud Tasks for rate-limited HTTP tasks." },
-    azure: { services: ["azure-service-bus", "Queue Storage"], fit: "direct", note: "Service Bus adds sessions, dead-lettering and transactions." },
+    aws: {
+      services: ["aws-sqs"],
+      fit: "direct",
+      note: "Standard (at-least-once, best-effort order) or FIFO (ordered, exactly-once processing per group).",
+    },
+    gcp: {
+      services: ["gcp-pubsub", "gcp-cloud-tasks"],
+      fit: "close",
+      note: "Pub/Sub pull subscriptions act as queues; Cloud Tasks for rate-limited HTTP tasks.",
+    },
+    azure: {
+      services: ["azure-service-bus", "Queue Storage"],
+      fit: "direct",
+      note: "Service Bus adds sessions, dead-lettering and transactions.",
+    },
   },
   {
     id: "topics",
@@ -260,7 +254,11 @@ export const capabilities: Capability[] = [
     title: "Event streaming with replay",
     summary: "An ordered, partitioned log that many consumers read at their own offsets.",
     aws: { services: ["aws-kinesis"], fit: "direct" },
-    gcp: { services: ["gcp-pubsub"], fit: "close", note: "Ordering keys and seek-to-time instead of partitions and offsets." },
+    gcp: {
+      services: ["gcp-pubsub"],
+      fit: "close",
+      note: "Ordering keys and seek-to-time instead of partitions and offsets.",
+    },
     azure: { services: ["azure-event-hubs"], fit: "direct" },
   },
   {
@@ -270,7 +268,11 @@ export const capabilities: Capability[] = [
     summary: "Run Kafka without operating brokers.",
     aws: { services: ["aws-msk"], fit: "direct", note: "Provisioned, Express brokers or Serverless." },
     gcp: { services: ["gcp-managed-kafka"], fit: "direct" },
-    azure: { services: ["azure-event-hubs"], fit: "close", note: "Speaks the Kafka protocol; not every Kafka feature is supported." },
+    azure: {
+      services: ["azure-event-hubs"],
+      fit: "close",
+      note: "Speaks the Kafka protocol; not every Kafka feature is supported.",
+    },
   },
   {
     id: "broker",

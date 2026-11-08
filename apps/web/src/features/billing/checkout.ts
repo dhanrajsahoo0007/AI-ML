@@ -68,7 +68,10 @@ export async function startCheckout(db: Db, provider: PaymentProvider, input: St
 }
 
 /** The provider customer to open the portal for: the provider of the user's latest subscription. */
-export async function portalCustomer(db: Db, userId: string): Promise<{ provider: ProviderId; customerId: string } | null> {
+export async function portalCustomer(
+  db: Db,
+  userId: string
+): Promise<{ provider: ProviderId; customerId: string } | null> {
   const rows = await db
     .select({ provider: customer.provider, customerId: customer.providerCustomerId })
     .from(customer)

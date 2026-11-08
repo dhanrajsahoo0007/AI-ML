@@ -57,7 +57,7 @@ const CLOUD_VIEWS: { id: CloudView; label: string; tone?: Tone }[] = [
 
 // Label for a cloud ref: an explicit label, the catalog short name for an id, or the string itself.
 function cloudLabel(ref: CloudRef, names: Record<string, string>) {
-  return typeof ref === "string" ? names[ref] ?? ref : ref.label;
+  return typeof ref === "string" ? (names[ref] ?? ref) : ref.label;
 }
 
 /** How an element is drawn at the current build step: added in this step, carried over, or full diagram. */
@@ -80,8 +80,7 @@ const nodeStep = (n: DiagramNode) => n.step ?? 1;
 // Which nodes, edges and zones appear at build `step` (undefined = the full diagram), and in which phase.
 function buildView(spec: DiagramSpec, step: number | undefined) {
   const byId = new Map(spec.nodes.map((n) => [n.id, n]));
-  const phase = (introduced: number): Phase =>
-    step === undefined ? "full" : introduced === step ? "new" : "old";
+  const phase = (introduced: number): Phase => (step === undefined ? "full" : introduced === step ? "new" : "old");
 
   const nodes = spec.nodes
     .filter((n) => step === undefined || nodeStep(n) <= step)
@@ -93,7 +92,11 @@ function buildView(spec: DiagramSpec, step: number | undefined) {
     const to = byId.get(edge.to);
     if (!from || !to || !shown.has(from.id) || !shown.has(to.id)) return [];
     const introduced = edge.step ?? Math.max(nodeStep(from), nodeStep(to));
-    if (step === undefined ? edge.until !== undefined : introduced > step || (edge.until !== undefined && step > edge.until)) {
+    if (
+      step === undefined
+        ? edge.until !== undefined
+        : introduced > step || (edge.until !== undefined && step > edge.until)
+    ) {
       return [];
     }
     return [{ edge, from, to, phase: phase(introduced) }];
@@ -103,7 +106,7 @@ function buildView(spec: DiagramSpec, step: number | undefined) {
   const firstDelay = Math.min(...edges.filter((e) => e.phase === "new").map((e) => e.edge.delay ?? 0));
   const timed = edges.map((e) => ({
     ...e,
-    delay: e.phase === "new" ? (e.edge.delay ?? 0) - firstDelay : e.edge.delay ?? 0,
+    delay: e.phase === "new" ? (e.edge.delay ?? 0) - firstDelay : (e.edge.delay ?? 0),
   }));
 
   const inside = (z: DiagramZone, n: DiagramNode) => n.x >= z.x && n.x <= z.x + z.w && n.y >= z.y && n.y <= z.y + z.h;
@@ -111,7 +114,11 @@ function buildView(spec: DiagramSpec, step: number | undefined) {
     .filter((z) => nodes.some((v) => inside(z, v.node)))
     .map((z) => ({
       zone: z,
-      phase: (step === undefined ? "full" : nodes.some((v) => v.phase === "new" && inside(z, v.node)) ? "new" : "old") as Phase,
+      phase: (step === undefined
+        ? "full"
+        : nodes.some((v) => v.phase === "new" && inside(z, v.node))
+          ? "new"
+          : "old") as Phase,
     }));
 
   return { nodes, edges: timed, zones };
@@ -193,7 +200,9 @@ export function AnimatedDiagram({
                 onClick={() => setCloud(v.id)}
                 className={cn(
                   "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
-                  on ? "border-transparent text-paper" : "border-hairline text-muted-foreground hover:border-ink hover:text-ink",
+                  on
+                    ? "border-transparent text-paper"
+                    : "border-hairline text-muted-foreground hover:border-ink hover:text-ink"
                 )}
                 style={on ? { background: v.tone ? stroke(v.tone) : "var(--ink)" } : undefined}
               >
@@ -225,10 +234,7 @@ export function AnimatedDiagram({
         </div>
       )}
       <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-        <div
-          style={{ minWidth }}
-          className="relative rounded-xl border border-hairline bg-paper p-3 sm:p-5"
-        >
+        <div style={{ minWidth }} className="relative rounded-xl border border-hairline bg-paper p-3 sm:p-5">
           {!reduced && (
             <button
               type="button"
@@ -307,7 +313,7 @@ function StepButton({
         "inline-flex h-8 min-w-8 items-center justify-center rounded-full border px-2.5 text-xs font-semibold transition-colors",
         active
           ? "border-ink bg-ink text-paper"
-          : "border-hairline text-muted-foreground hover:border-ink hover:text-ink",
+          : "border-hairline text-muted-foreground hover:border-ink hover:text-ink"
       )}
     >
       {children}
@@ -383,8 +389,24 @@ function BoundaryZone({ zone, phase }: { zone: DiagramZone; phase: Phase }) {
   if (zone.kind === "subnet") {
     return (
       <g opacity={opacity}>
-        <rect x={zone.x} y={zone.y} width={zone.w} height={zone.h} rx={10} style={{ fill: soft(t), stroke: stroke(t) }} strokeWidth={1} strokeOpacity={0.45} />
-        <text x={zone.x + 12} y={zone.y + 20} fontSize={11.5} fontWeight={700} letterSpacing={0.6} style={{ fill: stroke(t) }}>
+        <rect
+          x={zone.x}
+          y={zone.y}
+          width={zone.w}
+          height={zone.h}
+          rx={10}
+          style={{ fill: soft(t), stroke: stroke(t) }}
+          strokeWidth={1}
+          strokeOpacity={0.45}
+        />
+        <text
+          x={zone.x + 12}
+          y={zone.y + 20}
+          fontSize={11.5}
+          fontWeight={700}
+          letterSpacing={0.6}
+          style={{ fill: stroke(t) }}
+        >
           {zone.title.toUpperCase()}
         </text>
       </g>
@@ -404,7 +426,15 @@ function BoundaryZone({ zone, phase }: { zone: DiagramZone; phase: Phase }) {
         fillOpacity={0.35}
         strokeWidth={region ? 1.6 : 1.8}
       />
-      <rect x={zone.x + 14} y={zone.y - 12} width={tabW} height={24} rx={6} style={{ fill: region ? "var(--paper)" : stroke(t), stroke: stroke(t) }} strokeWidth={1.2} />
+      <rect
+        x={zone.x + 14}
+        y={zone.y - 12}
+        width={tabW}
+        height={24}
+        rx={6}
+        style={{ fill: region ? "var(--paper)" : stroke(t), stroke: stroke(t) }}
+        strokeWidth={1.2}
+      />
       <text
         x={zone.x + 14 + tabW / 2}
         y={zone.y + 4.5}
@@ -441,7 +471,15 @@ function NewMarker({ node }: { node: DiagramNode }) {
         strokeDasharray="5 4"
       />
       <rect x={x + w - 40} y={y - 9} width={40} height={18} rx={9} style={{ fill: stroke("green") }} />
-      <text x={x + w - 20} y={y + 4} textAnchor="middle" fontSize={10.5} fontWeight={700} letterSpacing={0.6} style={{ fill: "var(--paper)" }}>
+      <text
+        x={x + w - 20}
+        y={y + 4}
+        textAnchor="middle"
+        fontSize={10.5}
+        fontWeight={700}
+        letterSpacing={0.6}
+        style={{ fill: "var(--paper)" }}
+      >
         NEW
       </text>
     </g>
@@ -482,7 +520,7 @@ function CardNode({ node }: { node: DiagramNode }) {
   const x = node.x - w / 2;
   const y = node.y - h / 2;
   const glyph = isGlyph(node.icon) ? node.icon : undefined;
-  const Icon = !glyph && node.icon ? DIAGRAM_ICONS[node.icon] ?? getIconComponent(node.icon) : undefined;
+  const Icon = !glyph && node.icon ? (DIAGRAM_ICONS[node.icon] ?? getIconComponent(node.icon)) : undefined;
   const hasIcon = !!glyph || !!Icon;
   const textX = hasIcon ? x + 52 : node.x;
   const anchor = hasIcon ? "start" : "middle";
@@ -592,14 +630,7 @@ function Edge({
             style={{ fill: "var(--paper)", stroke: stroke(tone) }}
             strokeOpacity={0.35}
           />
-          <text
-            x={lx}
-            y={ly + 4}
-            textAnchor="middle"
-            fontSize={11.5}
-            fontWeight={500}
-            style={{ fill: stroke(tone) }}
-          >
+          <text x={lx} y={ly + 4} textAnchor="middle" fontSize={11.5} fontWeight={500} style={{ fill: stroke(tone) }}>
             {edge.label}
           </text>
         </g>

@@ -3,7 +3,13 @@ import path from "node:path";
 import matter from "gray-matter";
 import { describe, expect, it } from "vitest";
 import { sectionOfKind } from "../sections/registry";
-import { classCaseSchema, patternsSchema, problemFrontmatterSchema, testFileSchema, topicFrontmatterSchema } from "./schema";
+import {
+  classCaseSchema,
+  patternsSchema,
+  problemFrontmatterSchema,
+  testFileSchema,
+  topicFrontmatterSchema,
+} from "./schema";
 import { dsaDir, splitProblemBody } from "./source";
 
 // Frontmatter and test-file schemas (plan §15.1), checked against a valid fixture and the real content.
@@ -41,8 +47,12 @@ describe("problem frontmatter", () => {
     expect(issuePaths({ ...valid, solution: "x" })).toEqual([""]);
   });
   it("requires test files under tests/ with the right suffix", () => {
-    expect(issuePaths({ ...valid, tests: { public: "two-sum.json", hidden: "tests/two-sum.hidden.json" } })).toEqual(["tests.public"]);
-    expect(issuePaths({ ...valid, tests: { public: "tests/a.public.json", hidden: "tests/a.public.json" } })).toEqual(["tests.hidden"]);
+    expect(issuePaths({ ...valid, tests: { public: "two-sum.json", hidden: "tests/two-sum.hidden.json" } })).toEqual([
+      "tests.public",
+    ]);
+    expect(issuePaths({ ...valid, tests: { public: "tests/a.public.json", hidden: "tests/a.public.json" } })).toEqual([
+      "tests.hidden",
+    ]);
   });
   it("requires kebab-case tags, identifiers as entry points and site paths as related links", () => {
     expect(issuePaths({ ...valid, patterns: ["Hash Map"] })).toEqual(["patterns.0"]);
@@ -51,7 +61,10 @@ describe("problem frontmatter", () => {
   });
   it("validates every problem and topic in the content tree", () => {
     const dir = dsaDir(sectionOfKind("problems"));
-    for (const [sub, schema] of [["problems", problemFrontmatterSchema], ["topics", topicFrontmatterSchema]] as const) {
+    for (const [sub, schema] of [
+      ["problems", problemFrontmatterSchema],
+      ["topics", topicFrontmatterSchema],
+    ] as const) {
       for (const f of fs.readdirSync(path.join(dir, sub))) {
         const r = schema.safeParse(matter(fs.readFileSync(path.join(dir, sub, f), "utf8")).data);
         expect(r.success, `${sub}/${f}: ${r.success ? "" : r.error.message}`).toBe(true);
@@ -68,7 +81,15 @@ describe("test files", () => {
     expect(testFileSchema.safeParse([{ args: [], expected: 1, answer: 1 }]).success).toBe(false);
   });
   it("class cases have one argument list and one expected value per operation", () => {
-    expect(classCaseSchema.safeParse({ args: [["LRUCache", "get"], [[1], [2]]], expected: [null, -1] }).success).toBe(true);
+    expect(
+      classCaseSchema.safeParse({
+        args: [
+          ["LRUCache", "get"],
+          [[1], [2]],
+        ],
+        expected: [null, -1],
+      }).success
+    ).toBe(true);
     expect(classCaseSchema.safeParse({ args: [["LRUCache", "get"], [[1]]], expected: [null, -1] }).success).toBe(false);
     expect(classCaseSchema.safeParse({ args: [["LRUCache"], [[1]]], expected: [null, 1] }).success).toBe(false);
   });
@@ -76,16 +97,27 @@ describe("test files", () => {
 
 describe("patterns", () => {
   it("rejects duplicates", () => {
-    expect(patternsSchema.safeParse([{ slug: "a", label: "A" }, { slug: "a", label: "B" }]).success).toBe(false);
+    expect(
+      patternsSchema.safeParse([
+        { slug: "a", label: "A" },
+        { slug: "a", label: "B" },
+      ]).success
+    ).toBe(false);
   });
 });
 
 describe("splitProblemBody", () => {
   it("splits at <PremiumBreak/> on its own line", () => {
-    expect(splitProblemBody("Statement\n\n<PremiumBreak />\n\nEditorial\n")).toEqual({ statement: "Statement\n\n", editorial: "\n\nEditorial\n" });
+    expect(splitProblemBody("Statement\n\n<PremiumBreak />\n\nEditorial\n")).toEqual({
+      statement: "Statement\n\n",
+      editorial: "\n\nEditorial\n",
+    });
     expect(splitProblemBody("A\n<PremiumBreak/>\nB")).toEqual({ statement: "A\n", editorial: "\nB" });
   });
   it("treats a body without the marker as statement only", () => {
-    expect(splitProblemBody("Only `<PremiumBreak />` inline")).toEqual({ statement: "Only `<PremiumBreak />` inline", editorial: null });
+    expect(splitProblemBody("Only `<PremiumBreak />` inline")).toEqual({
+      statement: "Only `<PremiumBreak />` inline",
+      editorial: null,
+    });
   });
 });

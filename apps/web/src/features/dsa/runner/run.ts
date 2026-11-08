@@ -30,7 +30,10 @@ function pythonWorker(): { worker: Worker; ready: Promise<void> } {
   if (python) return python;
   const worker = new Worker(new URL("./py.worker.ts", import.meta.url), { name: "dsa-python-runner" });
   const ready = new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Python took too long to load. Check your connection and try again.")), PYTHON_LOAD_TIMEOUT_MS);
+    const timer = setTimeout(
+      () => reject(new Error("Python took too long to load. Check your connection and try again.")),
+      PYTHON_LOAD_TIMEOUT_MS
+    );
     const onMessage = (e: MessageEvent<WorkerMessage>) => {
       if (e.data.type === "ready") resolve();
       else if (e.data.type === "fatal") reject(new Error(e.data.message));

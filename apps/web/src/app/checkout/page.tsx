@@ -4,7 +4,14 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { Container, PageHeader } from "@/components/ui/editorial";
 import { MOR_NOTICE } from "@/config/business";
-import { CHECKOUT_CONSENTS, CHECKOUT_CONSENT_KEYS, PLANS, PLAN_IDS, checkoutConfigured, type Plan } from "@/features/billing";
+import {
+  CHECKOUT_CONSENTS,
+  CHECKOUT_CONSENT_KEYS,
+  PLANS,
+  PLAN_IDS,
+  checkoutConfigured,
+  type Plan,
+} from "@/features/billing";
 import { CheckoutForm } from "@/features/billing/checkout-form.client";
 import { serverEnv } from "@/server/env";
 
@@ -39,10 +46,18 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Sea
       {open ? (
         <CheckoutForm
           plan={plan}
-          consents={CHECKOUT_CONSENT_KEYS.map((key) => ({ key, version: CHECKOUT_CONSENTS[key].version, text: CHECKOUT_CONSENTS[key].text }))}
+          consents={CHECKOUT_CONSENT_KEYS.map((key) => ({
+            key,
+            version: CHECKOUT_CONSENTS[key].version,
+            text: CHECKOUT_CONSENTS[key].text,
+          }))}
         />
       ) : (
-        <p role="status" className="mt-8 rounded-xl border border-hairline bg-paper-2 p-4 text-[15px] text-ink" data-testid="checkout-closed">
+        <p
+          role="status"
+          className="mt-8 rounded-xl border border-hairline bg-paper-2 p-4 text-[15px] text-ink"
+          data-testid="checkout-closed"
+        >
           Payments aren&apos;t open yet. Everything free is open now.
         </p>
       )}

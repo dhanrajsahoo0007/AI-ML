@@ -41,7 +41,10 @@ export function Callout({
       className="my-8 rounded-xl border-l-4 p-4 sm:p-5"
       style={{ background: `var(--dg-${tone}-soft)`, borderColor: `var(--dg-${tone})` }}
     >
-      <div className={cn("flex items-center gap-2 font-display font-semibold [&_svg]:size-4")} style={{ color: `var(--dg-${tone})` }}>
+      <div
+        className={cn("flex items-center gap-2 font-display font-semibold [&_svg]:size-4")}
+        style={{ color: `var(--dg-${tone})` }}
+      >
         {icon && resolveIcon(icon)}
         {title}
       </div>

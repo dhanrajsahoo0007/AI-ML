@@ -16,7 +16,10 @@ export const HUB_DESCRIPTION =
 export const LIST_TITLE = "DSA problems";
 export const LIST_DESCRIPTION = "Coding interview problems by difficulty, pattern and company, with in-browser tests.";
 
-export const hubCrumbs = (section: SectionDef): Crumb[] => [{ label: "Home", href: "/" }, { label: section.label, href: section.href }];
+export const hubCrumbs = (section: SectionDef): Crumb[] => [
+  { label: "Home", href: "/" },
+  { label: section.label, href: section.href },
+];
 
 function listing(section: SectionDef, path: string, title: string, description: string, crumbs: Crumb[]): PageSeo {
   return {
@@ -26,11 +29,17 @@ function listing(section: SectionDef, path: string, title: string, description: 
 }
 
 export function hubSeo(section: SectionDef): PageSeo {
-  return listing(section, section.href, HUB_TITLE, HUB_DESCRIPTION, [{ label: "Home", href: "/" }, { label: section.label }]);
+  return listing(section, section.href, HUB_TITLE, HUB_DESCRIPTION, [
+    { label: "Home", href: "/" },
+    { label: section.label },
+  ]);
 }
 
 export function listSeo(section: SectionDef): PageSeo {
-  return listing(section, problemListHref(section), LIST_TITLE, LIST_DESCRIPTION, [...hubCrumbs(section), { label: "Problems" }]);
+  return listing(section, problemListHref(section), LIST_TITLE, LIST_DESCRIPTION, [
+    ...hubCrumbs(section),
+    { label: "Problems" },
+  ]);
 }
 
 async function articleSeo(
@@ -65,6 +74,10 @@ export function topicSeo(section: SectionDef, topic: ValidTopic) {
 /** A premium problem carries the paywalled-content markup: its editorial sits in the paywall container. */
 export function problemSeo(section: SectionDef, problem: ValidProblem, access: "free" | "premium") {
   const item = { href: problem.href, title: problem.fm.title, file: problem.file, description: problem.fm.description };
-  const crumbs = [...hubCrumbs(section), { label: "Problems", href: problemListHref(section) }, { label: problem.fm.title }];
+  const crumbs = [
+    ...hubCrumbs(section),
+    { label: "Problems", href: problemListHref(section) },
+    { label: problem.fm.title },
+  ];
   return articleSeo(section, item, access, crumbs);
 }

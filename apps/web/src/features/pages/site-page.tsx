@@ -19,14 +19,8 @@ export async function SitePage({
   const sections = doc.headings.filter((h) => h.level === 2);
   return (
     <div data-copy-ok="page" className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
-      <Breadcrumb
-        items={[{ label: "Home", href: "/" }, ...(crumb ? [{ label: crumb }] : []), { label: doc.title }]}
-      />
-      <PageHeader
-        className="mt-10 mb-10 border-b border-hairline pb-10"
-        title={doc.title}
-        lead={doc.description}
-      />
+      <Breadcrumb items={[{ label: "Home", href: "/" }, ...(crumb ? [{ label: crumb }] : []), { label: doc.title }]} />
+      <PageHeader className="mt-10 mb-10 border-b border-hairline pb-10" title={doc.title} lead={doc.description} />
       {contents && sections.length > 3 && (
         <nav aria-label="Contents" className="mb-12 rounded-2xl border border-hairline bg-paper-2/60 p-6">
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Contents</p>
@@ -41,9 +35,7 @@ export async function SitePage({
           </ol>
         </nav>
       )}
-      <div className="prose-editorial max-w-[72ch] [&_:is(h2,h3)]:scroll-mt-24">
-        {doc.body}
-      </div>
+      <div className="prose-editorial max-w-[72ch] [&_:is(h2,h3)]:scroll-mt-24">{doc.body}</div>
     </div>
   );
 }

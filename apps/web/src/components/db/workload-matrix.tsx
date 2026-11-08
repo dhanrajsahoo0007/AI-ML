@@ -15,14 +15,13 @@ export function DatabaseWorkloadMatrix({ compact = false }: { compact?: boolean 
   const [picked, setPicked] = useState<ScenarioId[]>([]);
   const [cell, setCell] = useState<{ family: FamilyId; scenario: ScenarioId } | null>(null);
 
-  const toggle = (id: ScenarioId) =>
-    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const toggle = (id: ScenarioId) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
   // Score = sum of fits over the picked workloads; a family is "best" when no other family scores higher.
   const ranked = useMemo(() => {
     if (picked.length === 0) return FAMILIES.map((f) => ({ f, score: 0 }));
     return FAMILIES.map((f) => ({ f, score: picked.reduce((s, id) => s + f.fit[id][0], 0) })).sort(
-      (a, b) => b.score - a.score,
+      (a, b) => b.score - a.score
     );
   }, [picked]);
   const top = ranked[0]?.score ?? 0;
@@ -54,7 +53,7 @@ export function DatabaseWorkloadMatrix({ compact = false }: { compact?: boolean 
               onClick={() => toggle(s.id)}
               className={cn(
                 "rounded-full border px-3 py-1 text-[13px] transition-colors",
-                on ? "border-ink bg-ink text-paper" : "border-hairline bg-paper text-ink-2 hover:border-ink/40",
+                on ? "border-ink bg-ink text-paper" : "border-hairline bg-paper text-ink-2 hover:border-ink/40"
               )}
             >
               {s.label}
@@ -74,8 +73,14 @@ export function DatabaseWorkloadMatrix({ compact = false }: { compact?: boolean 
 
       <div className="-mx-4 mt-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
         <div role="table" aria-label="Database families by workload fit" className="min-w-[640px] text-sm">
-          <div role="row" className="grid grid-cols-[minmax(130px,1.2fr)_repeat(10,minmax(42px,1fr))] border-b border-ink pb-2">
-            <span role="columnheader" className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+          <div
+            role="row"
+            className="grid grid-cols-[minmax(130px,1.2fr)_repeat(10,minmax(42px,1fr))] border-b border-ink pb-2"
+          >
+            <span
+              role="columnheader"
+              className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground"
+            >
               Family
             </span>
             {SCENARIOS.map((s) => (
@@ -85,7 +90,7 @@ export function DatabaseWorkloadMatrix({ compact = false }: { compact?: boolean 
                 title={s.label}
                 className={cn(
                   "text-center text-[11px] font-semibold uppercase tracking-[0.04em]",
-                  picked.includes(s.id) ? "text-ink" : "text-muted-foreground",
+                  picked.includes(s.id) ? "text-ink" : "text-muted-foreground"
                 )}
               >
                 {s.short}
@@ -105,7 +110,7 @@ export function DatabaseWorkloadMatrix({ compact = false }: { compact?: boolean 
                 className={cn(
                   "grid grid-cols-[minmax(130px,1.2fr)_repeat(10,minmax(42px,1fr))] items-center border-b border-hairline py-1.5 transition-opacity",
                   dim && "opacity-35",
-                  best && "bg-paper-2/70",
+                  best && "bg-paper-2/70"
                 )}
               >
                 <span role="rowheader" className="flex items-center gap-2 pr-2">
@@ -135,7 +140,7 @@ export function DatabaseWorkloadMatrix({ compact = false }: { compact?: boolean 
                         className={cn(
                           "inline-flex size-8 items-center justify-center rounded-full transition-colors hover:bg-paper-2",
                           selected && "ring-2 ring-ink",
-                          picked.includes(s.id) && "bg-paper-2",
+                          picked.includes(s.id) && "bg-paper-2"
                         )}
                       >
                         <FitMark fit={fit} />

@@ -45,25 +45,49 @@ export default async function AdminKpisPage() {
           />
         </StatGrid>
         {k.mrr.unconverted.subscribers > 0 && (
-          <p role="status" className="mt-3 text-[13px] text-amber-700 dark:text-amber-400" data-testid="kpi-unconverted">
-            {k.mrr.unconverted.subscribers} active subscription(s) in {k.mrr.unconverted.currencies.join(", ")} have
-            no USD rate yet and are left out of MRR.
+          <p
+            role="status"
+            className="mt-3 text-[13px] text-amber-700 dark:text-amber-400"
+            data-testid="kpi-unconverted"
+          >
+            {k.mrr.unconverted.subscribers} active subscription(s) in {k.mrr.unconverted.currencies.join(", ")} have no
+            USD rate yet and are left out of MRR.
           </p>
         )}
       </Panel>
 
       <div className="grid gap-8 lg:grid-cols-2">
         <Panel title="MRR by country">
-          <Table testId="mrr-by-country" columns={breakdownColumns("Country")} rows={k.mrr.by.country} rowKey={(b) => b.key} />
+          <Table
+            testId="mrr-by-country"
+            columns={breakdownColumns("Country")}
+            rows={k.mrr.by.country}
+            rowKey={(b) => b.key}
+          />
         </Panel>
         <Panel title="MRR by currency">
-          <Table testId="mrr-by-currency" columns={breakdownColumns("Currency")} rows={k.mrr.by.currency} rowKey={(b) => b.key} />
+          <Table
+            testId="mrr-by-currency"
+            columns={breakdownColumns("Currency")}
+            rows={k.mrr.by.currency}
+            rowKey={(b) => b.key}
+          />
         </Panel>
         <Panel title="MRR by price tier">
-          <Table testId="mrr-by-tier" columns={breakdownColumns("Tier")} rows={k.mrr.by.priceTier} rowKey={(b) => b.key} />
+          <Table
+            testId="mrr-by-tier"
+            columns={breakdownColumns("Tier")}
+            rows={k.mrr.by.priceTier}
+            rowKey={(b) => b.key}
+          />
         </Panel>
         <Panel title="MRR by provider">
-          <Table testId="mrr-by-provider" columns={breakdownColumns("Provider")} rows={k.mrr.by.provider} rowKey={(b) => b.key} />
+          <Table
+            testId="mrr-by-provider"
+            columns={breakdownColumns("Provider")}
+            rows={k.mrr.by.provider}
+            rowKey={(b) => b.key}
+          />
         </Panel>
       </div>
 
@@ -76,7 +100,11 @@ export default async function AdminKpisPage() {
             value={k.churn.rate === null && k.churn.churned === 0 ? null : k.churn.churned}
             hint={k.churn.rate === null ? undefined : `${formatPercent(k.churn.rate)} of subscribers at the start`}
           />
-          <Stat label="Voluntary (cancelled)" testId="kpi-voluntary" value={k.churn.churned > 0 ? k.churn.voluntary : null} />
+          <Stat
+            label="Voluntary (cancelled)"
+            testId="kpi-voluntary"
+            value={k.churn.churned > 0 ? k.churn.voluntary : null}
+          />
           <Stat
             label="Involuntary (on hold → failed)"
             testId="kpi-involuntary"

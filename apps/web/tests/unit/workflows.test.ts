@@ -66,7 +66,9 @@ describe("deploy verifies with the whole CI suite", () => {
 
   it("installs npm 11.6.2 before every npm ci (Node 22's npm 10 rejects the lockfile)", () => {
     for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".yml"))) {
-      for (const line of raw(file).split("\n").filter((l) => /\bnpm ci\b/.test(l) && !l.trim().startsWith("#"))) {
+      for (const line of raw(file)
+        .split("\n")
+        .filter((l) => /\bnpm ci\b/.test(l) && !l.trim().startsWith("#"))) {
         expect(line, file).toMatch(/npm install --global --ignore-scripts npm@11\.6\.2 && npm ci\b/);
       }
     }

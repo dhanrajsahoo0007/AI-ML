@@ -19,10 +19,7 @@ export function Stats({ questions, articles, companies }: StatsProps) {
       <Container>
         <dl className="grid divide-y divide-paper/10 dark:divide-hairline sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           {stats.map((stat) => (
-            <div
-              key={stat.label}
-              className="flex flex-col-reverse py-10 sm:px-8 sm:py-14 sm:first:pl-0"
-            >
+            <div key={stat.label} className="flex flex-col-reverse py-10 sm:px-8 sm:py-14 sm:first:pl-0">
               <dt className="mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-paper/70 dark:text-muted-foreground">
                 {stat.label}
               </dt>

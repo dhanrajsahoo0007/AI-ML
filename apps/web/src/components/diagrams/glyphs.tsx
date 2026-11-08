@@ -34,7 +34,12 @@ const GLYPHS: Record<GlyphName, (t: Tone) => ReactNode> = {
   database: (t) => (
     <>
       <path d="M7 11 V37 A17 6 0 0 0 41 37 V11" style={{ fill: ink(t), stroke: ink(t) }} />
-      <path d="M7 20 A17 6 0 0 0 41 20 M7 28.5 A17 6 0 0 0 41 28.5" fill="none" style={{ stroke: PAPER }} strokeOpacity={0.75} />
+      <path
+        d="M7 20 A17 6 0 0 0 41 20 M7 28.5 A17 6 0 0 0 41 28.5"
+        fill="none"
+        style={{ stroke: PAPER }}
+        strokeOpacity={0.75}
+      />
       <ellipse cx={24} cy={11} rx={17} ry={6} style={{ fill: soft(t), stroke: ink(t) }} />
     </>
   ),
@@ -54,7 +59,12 @@ const GLYPHS: Record<GlyphName, (t: Tone) => ReactNode> = {
     <>
       <path d="M9 13 H39 A5 11 0 0 1 39 35 H9 A5 11 0 0 1 9 13 Z" style={{ fill: soft(t), stroke: ink(t) }} />
       {[13, 21, 29].map((x) => (
-        <path key={x} d={`M${x} 13.5 A4 10.5 0 0 0 ${x} 34.5 H${x + 6} A4 10.5 0 0 1 ${x + 6} 13.5 Z`} style={{ fill: ink(t) }} fillOpacity={0.45} />
+        <path
+          key={x}
+          d={`M${x} 13.5 A4 10.5 0 0 0 ${x} 34.5 H${x + 6} A4 10.5 0 0 1 ${x + 6} 13.5 Z`}
+          style={{ fill: ink(t) }}
+          fillOpacity={0.45}
+        />
       ))}
       <ellipse cx={39} cy={24} rx={5} ry={11} style={{ fill: PAPER, stroke: ink(t) }} />
     </>
@@ -76,8 +86,21 @@ const GLYPHS: Record<GlyphName, (t: Tone) => ReactNode> = {
   "load-balancer": (t) => (
     <>
       <circle cx={24} cy={24} r={18} style={{ fill: soft(t), stroke: ink(t) }} />
-      <path d="M12 24 H20 M20 24 L33 15 M20 24 H33 M20 24 L33 33" fill="none" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinecap="round" />
-      <path d="M31 12 L35 14.5 L32 18 M31 21 L35 24 L31 27 M32 30 L35 33.5 L31 36" fill="none" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M12 24 H20 M20 24 L33 15 M20 24 H33 M20 24 L33 33"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <path
+        d="M31 12 L35 14.5 L32 18 M31 21 L35 24 L31 27 M32 30 L35 33.5 L31 36"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <circle cx={12} cy={24} r={2.6} style={{ fill: ink(t) }} />
     </>
   ),
@@ -103,9 +126,21 @@ const GLYPHS: Record<GlyphName, (t: Tone) => ReactNode> = {
   ),
   chat: (t) => (
     <>
-      <path d="M5 9 H31 A3 3 0 0 1 34 12 V26 A3 3 0 0 1 31 29 H15 L9 34 V29 H8 A3 3 0 0 1 5 26 V12 A3 3 0 0 1 8 9 Z" style={{ fill: soft(t), stroke: ink(t) }} />
-      <path d="M17 20 H40 A3 3 0 0 1 43 23 V35 A3 3 0 0 1 40 38 H39 V43 L33 38 H20 A3 3 0 0 1 17 35 Z" style={{ fill: ink(t), stroke: ink(t) }} />
-      <path d="M23 29 H37" style={{ stroke: PAPER }} strokeLinecap="round" strokeDasharray="0.1 4.5" strokeWidth={2.6} />
+      <path
+        d="M5 9 H31 A3 3 0 0 1 34 12 V26 A3 3 0 0 1 31 29 H15 L9 34 V29 H8 A3 3 0 0 1 5 26 V12 A3 3 0 0 1 8 9 Z"
+        style={{ fill: soft(t), stroke: ink(t) }}
+      />
+      <path
+        d="M17 20 H40 A3 3 0 0 1 43 23 V35 A3 3 0 0 1 40 38 H39 V43 L33 38 H20 A3 3 0 0 1 17 35 Z"
+        style={{ fill: ink(t), stroke: ink(t) }}
+      />
+      <path
+        d="M23 29 H37"
+        style={{ stroke: PAPER }}
+        strokeLinecap="round"
+        strokeDasharray="0.1 4.5"
+        strokeWidth={2.6}
+      />
     </>
   ),
   registry: (t) => (
@@ -123,13 +158,24 @@ const GLYPHS: Record<GlyphName, (t: Tone) => ReactNode> = {
   presence: (t) => (
     <>
       <circle cx={24} cy={24} r={18} style={{ fill: soft(t), stroke: ink(t) }} />
-      <path d="M8 25 H16 L19 17 L24 33 L28 21 L30 25 H40" fill="none" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+      <path
+        d="M8 25 H16 L19 17 L24 33 L28 21 L30 25 H40"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
       <circle cx={36} cy={12} r={4} style={{ fill: ink(t), stroke: PAPER }} />
     </>
   ),
   bell: (t) => (
     <>
-      <path d="M12 33 V22 A12 12 0 0 1 36 22 V33 L39 36 H9 Z" style={{ fill: ink(t), stroke: ink(t) }} strokeLinejoin="round" />
+      <path
+        d="M12 33 V22 A12 12 0 0 1 36 22 V33 L39 36 H9 Z"
+        style={{ fill: ink(t), stroke: ink(t) }}
+        strokeLinejoin="round"
+      />
       <path d="M20 39 A4 4 0 0 0 28 39" fill="none" style={{ stroke: ink(t) }} strokeWidth={2} />
       <circle cx={35} cy={12} r={5} style={{ fill: soft(t), stroke: ink(t) }} />
     </>
@@ -155,20 +201,39 @@ const GLYPHS: Record<GlyphName, (t: Tone) => ReactNode> = {
   gateway: (t) => (
     <>
       <path d="M24 5 L40 11 V23 C40 33 33 40 24 43 C15 40 8 33 8 23 V11 Z" style={{ fill: soft(t), stroke: ink(t) }} />
-      <path d="M17 24 L22 29 L32 18" fill="none" style={{ stroke: ink(t) }} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M17 24 L22 29 L32 18"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </>
   ),
   media: (t) => (
     <>
       <rect x={5} y={9} width={38} height={30} rx={4} style={{ fill: soft(t), stroke: ink(t) }} />
-      <path d="M5 34 L17 22 L26 31 L31 26 L43 36" fill="none" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinejoin="round" />
+      <path
+        d="M5 34 L17 22 L26 31 L31 26 L43 36"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2}
+        strokeLinejoin="round"
+      />
       <circle cx={33} cy={17} r={3.5} style={{ fill: ink(t) }} />
     </>
   ),
   bag: (t) => (
     <>
       <path d="M8 16 H40 L37 43 H11 Z" style={{ fill: ink(t), stroke: ink(t) }} strokeLinejoin="round" />
-      <path d="M17 20 V13 A7 7 0 0 1 31 13 V20" fill="none" style={{ stroke: ink(t) }} strokeWidth={2.2} strokeLinecap="round" />
+      <path
+        d="M17 20 V13 A7 7 0 0 1 31 13 V20"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      />
       <path d="M16 29 H32 M18 35 H30" style={{ stroke: PAPER }} strokeLinecap="round" strokeOpacity={0.8} />
     </>
   ),
@@ -183,9 +248,23 @@ const GLYPHS: Record<GlyphName, (t: Tone) => ReactNode> = {
   history: (t) => (
     <>
       <circle cx={25} cy={24} r={16} style={{ fill: soft(t), stroke: ink(t) }} />
-      <path d="M25 15 V24 L31 28" fill="none" style={{ stroke: ink(t) }} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M25 15 V24 L31 28"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <path d="M9 24 A16 16 0 0 1 14 12.5" fill="none" style={{ stroke: ink(t) }} strokeWidth={2.2} />
-      <path d="M5 21 L9 26 L13 21" fill="none" style={{ stroke: ink(t) }} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M5 21 L9 26 L13 21"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </>
   ),
 };
@@ -195,7 +274,19 @@ export function isGlyph(name: string | undefined): name is GlyphName {
 }
 
 /** Draws glyph `name` centred on (cx, cy), `size` units wide. */
-export function Glyph({ name, tone, cx, cy, size }: { name: GlyphName; tone: Tone; cx: number; cy: number; size: number }) {
+export function Glyph({
+  name,
+  tone,
+  cx,
+  cy,
+  size,
+}: {
+  name: GlyphName;
+  tone: Tone;
+  cx: number;
+  cy: number;
+  size: number;
+}) {
   const s = size / 48;
   return (
     <g transform={`translate(${cx - size / 2} ${cy - size / 2}) scale(${s})`} strokeWidth={1.5}>

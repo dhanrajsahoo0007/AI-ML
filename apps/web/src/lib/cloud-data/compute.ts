@@ -104,15 +104,9 @@ export const services: CloudService[] = [
     youManage: "Your code, app.yaml settings and scaling limits.",
     scaling: "Automatic, basic or manual scaling of instances.",
     pricing: "Per instance-hour by instance class; the standard environment has a free tier.",
-    useWhen: [
-      "Existing App Engine apps, or simple web apps that fit its runtimes.",
-    ],
-    avoidWhen: [
-      "New container-based services: Cloud Run is Google's recommended default.",
-    ],
-    gotchas: [
-      "Google steers new workloads to Cloud Run, which runs any container.",
-    ],
+    useWhen: ["Existing App Engine apps, or simple web apps that fit its runtimes."],
+    avoidWhen: ["New container-based services: Cloud Run is Google's recommended default."],
+    gotchas: ["Google steers new workloads to Cloud Run, which runs any container."],
     docs: "https://cloud.google.com/appengine",
     main: "vm-paas",
   },
@@ -126,12 +120,8 @@ export const services: CloudService[] = [
     youManage: "Job definitions, container or script, and resource requirements.",
     scaling: "Provisions VMs per job and releases them after.",
     pricing: "No charge for Batch; you pay for the VMs.",
-    useWhen: [
-      "Rendering, simulations, genomics and other batch work on Google Cloud.",
-    ],
-    avoidWhen: [
-      "Spark or Beam pipelines: Dataproc and Dataflow fit better.",
-    ],
+    useWhen: ["Rendering, simulations, genomics and other batch work on Google Cloud."],
+    avoidWhen: ["Spark or Beam pipelines: Dataproc and Dataflow fit better."],
     gotchas: [],
     docs: "https://cloud.google.com/batch",
     main: "batch",
@@ -146,15 +136,9 @@ export const services: CloudService[] = [
     youManage: "Your app, the App Service plan size and scale rules.",
     scaling: "Scale out instances in a plan, manually or by rules.",
     pricing: "Per App Service plan instance-hour by tier.",
-    useWhen: [
-      "Classic web apps and APIs, especially .NET, with little infrastructure work.",
-    ],
-    avoidWhen: [
-      "Event-driven microservices that should scale to zero: use Container Apps or Functions.",
-    ],
-    gotchas: [
-      "Deployment slots let you warm up a release and swap it into production with no downtime.",
-    ],
+    useWhen: ["Classic web apps and APIs, especially .NET, with little infrastructure work."],
+    avoidWhen: ["Event-driven microservices that should scale to zero: use Container Apps or Functions."],
+    gotchas: ["Deployment slots let you warm up a release and swap it into production with no downtime."],
     docs: "https://azure.microsoft.com/en-us/products/app-service",
     main: "vm-paas",
   },
@@ -168,12 +152,8 @@ export const services: CloudService[] = [
     youManage: "Pools, jobs, tasks and their applications.",
     scaling: "Autoscale formulas grow and shrink pools.",
     pricing: "No charge for Batch; you pay for the VMs.",
-    useWhen: [
-      "Rendering, simulations and other embarrassingly parallel work on Azure.",
-    ],
-    avoidWhen: [
-      "Spark jobs: use Databricks or Fabric.",
-    ],
+    useWhen: ["Rendering, simulations and other embarrassingly parallel work on Azure."],
+    avoidWhen: ["Spark jobs: use Databricks or Fabric."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/batch",
     main: "batch",
@@ -187,7 +167,11 @@ export const capabilities: Capability[] = [
     title: "Virtual machines",
     summary: "Rent a VM by the second and control the OS.",
     aws: { services: ["aws-ec2"], fit: "direct" },
-    gcp: { services: ["gcp-compute-engine"], fit: "direct", note: "Custom machine shapes: pick vCPU and memory freely." },
+    gcp: {
+      services: ["gcp-compute-engine"],
+      fit: "direct",
+      note: "Custom machine shapes: pick vCPU and memory freely.",
+    },
     azure: { services: ["azure-vm"], fit: "direct" },
   },
   {
@@ -196,7 +180,11 @@ export const capabilities: Capability[] = [
     title: "Autoscaling VM fleets",
     summary: "A group of identical VMs that grows, shrinks and replaces unhealthy members.",
     aws: { services: ["EC2 Auto Scaling groups"], fit: "direct" },
-    gcp: { services: ["Managed instance groups"], fit: "direct", note: "Regional MIGs spread across zones in one resource." },
+    gcp: {
+      services: ["Managed instance groups"],
+      fit: "direct",
+      note: "Regional MIGs spread across zones in one resource.",
+    },
     azure: { services: ["Virtual Machine Scale Sets"], fit: "direct" },
   },
   {
@@ -213,13 +201,21 @@ export const capabilities: Capability[] = [
     group: "compute",
     title: "Commitment discounts",
     summary: "Commit to 1–3 years of spend or capacity for a lower rate.",
-    aws: { services: ["Savings Plans", "Reserved Instances"], fit: "direct", note: "Compute Savings Plans also cover Fargate and Lambda." },
+    aws: {
+      services: ["Savings Plans", "Reserved Instances"],
+      fit: "direct",
+      note: "Compute Savings Plans also cover Fargate and Lambda.",
+    },
     gcp: {
       services: ["Committed use discounts"],
       fit: "direct",
       note: "Some older machine families also get automatic sustained-use discounts.",
     },
-    azure: { services: ["Reservations", "Savings plan for compute"], fit: "direct", note: "Azure Hybrid Benefit reuses Windows and SQL licences." },
+    azure: {
+      services: ["Reservations", "Savings plan for compute"],
+      fit: "direct",
+      note: "Azure Hybrid Benefit reuses Windows and SQL licences.",
+    },
   },
   {
     id: "arm",
@@ -236,8 +232,16 @@ export const capabilities: Capability[] = [
     title: "Code-to-VM web platform",
     summary: "Upload code; the platform builds the VMs, load balancer and scaling.",
     aws: { services: ["aws-elastic-beanstalk"], fit: "direct" },
-    gcp: { services: ["gcp-app-engine"], fit: "close", note: "Standard environment scales to zero; flexible runs on VMs." },
-    azure: { services: ["azure-app-service"], fit: "direct", note: "The most widely used option of the three; also runs containers." },
+    gcp: {
+      services: ["gcp-app-engine"],
+      fit: "close",
+      note: "Standard environment scales to zero; flexible runs on VMs.",
+    },
+    azure: {
+      services: ["azure-app-service"],
+      fit: "direct",
+      note: "The most widely used option of the three; also runs containers.",
+    },
   },
   {
     id: "batch",
@@ -264,6 +268,10 @@ export const capabilities: Capability[] = [
     summary: "The provider's stack running in your data centre or at the edge.",
     aws: { services: ["Outposts", "Local Zones"], fit: "direct" },
     gcp: { services: ["Google Distributed Cloud"], fit: "close" },
-    azure: { services: ["Azure Local", "Azure Arc"], fit: "close", note: "Arc also manages servers and clusters running anywhere." },
+    azure: {
+      services: ["Azure Local", "Azure Arc"],
+      fit: "close",
+      note: "Arc also manages servers and clusters running anywhere.",
+    },
   },
 ];

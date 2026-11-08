@@ -15,9 +15,7 @@ export function CtaBanner() {
           </h2>
         </FadeIn>
         <FadeIn inView className="md:col-span-7 md:pt-10">
-          <p className="max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">
-            {cta.description}
-          </p>
+          <p className="max-w-xl text-lg leading-relaxed text-pretty text-muted-foreground">{cta.description}</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <ButtonLink href={cta.button.href}>{cta.button.label}</ButtonLink>
             <ButtonLink href="/system-design" variant="secondary">

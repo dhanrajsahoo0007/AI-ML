@@ -30,7 +30,8 @@ export const services: CloudService[] = [
     name: "Elastic Load Balancing",
     short: "ALB / NLB",
     group: "networking",
-    tagline: "Managed load balancers: Application (HTTP, layer 7), Network (TCP/UDP, layer 4) and Gateway (inline appliances).",
+    tagline:
+      "Managed load balancers: Application (HTTP, layer 7), Network (TCP/UDP, layer 4) and Gateway (inline appliances).",
     youManage: "Listeners, rules, target groups and health checks.",
     scaling: "Scales automatically; NLB handles sudden spikes and millions of connections without warm-up.",
     pricing: "Per hour plus load balancer capacity units (LCUs) based on connections, requests and bytes.",
@@ -124,9 +125,7 @@ export const services: CloudService[] = [
     youManage: "Subnets, firewall rules and policies, routes, Cloud NAT and Cloud Router.",
     scaling: "Global by design; Shared VPC lets many projects use one network.",
     pricing: "The VPC is free; you pay for egress, NAT, load balancing and inter-zone or inter-region traffic.",
-    useWhen: [
-      "Every Compute Engine, GKE, Cloud SQL or Memorystore resource lives in a VPC.",
-    ],
+    useWhen: ["Every Compute Engine, GKE, Cloud SQL or Memorystore resource lives in a VPC."],
     avoidWhen: [],
     gotchas: [
       "Because the VPC is global, VMs in different Regions talk privately with no peering or transit hub.",
@@ -167,9 +166,7 @@ export const services: CloudService[] = [
     youManage: "Endpoints (consumer) or service attachments (producer).",
     scaling: "Fully managed.",
     pricing: "Per endpoint-hour plus per GB processed.",
-    useWhen: [
-      "Private access to Cloud SQL, AlloyDB, Vertex AI or a partner SaaS without peering networks.",
-    ],
+    useWhen: ["Private access to Cloud SQL, AlloyDB, Vertex AI or a partner SaaS without peering networks."],
     avoidWhen: [],
     gotchas: [],
     docs: "https://cloud.google.com/vpc/docs/private-service-connect",
@@ -185,12 +182,8 @@ export const services: CloudService[] = [
     youManage: "Connections, VLAN attachments and Cloud Router BGP sessions.",
     scaling: "10 or 100 Gbps dedicated circuits; partner links from 50 Mbps.",
     pricing: "Per attachment and circuit, plus reduced egress.",
-    useWhen: [
-      "Large, steady hybrid traffic or predictable latency to on-prem.",
-    ],
-    avoidWhen: [
-      "Small or occasional traffic: Cloud VPN is cheaper.",
-    ],
+    useWhen: ["Large, steady hybrid traffic or predictable latency to on-prem."],
+    avoidWhen: ["Small or occasional traffic: Cloud VPN is cheaper."],
     gotchas: [],
     docs: "https://cloud.google.com/network-connectivity/docs/interconnect",
     main: "dedicated-link",
@@ -205,9 +198,7 @@ export const services: CloudService[] = [
     youManage: "Address space, subnets, NSGs, route tables, NAT Gateway and peering.",
     scaling: "Regional; connect Regions with global VNet peering or Virtual WAN.",
     pricing: "The VNet is free; peering, NAT, gateways and data transfer are charged.",
-    useWhen: [
-      "Every VM, AKS cluster and private endpoint lives in a VNet.",
-    ],
+    useWhen: ["Every VM, AKS cluster and private endpoint lives in a VNet."],
     avoidWhen: [],
     gotchas: [
       "Subnets are regional, not zonal, so you don't need one subnet per zone as on AWS.",
@@ -226,12 +217,8 @@ export const services: CloudService[] = [
     youManage: "Listeners, rules, backend pools, probes and WAF policy.",
     scaling: "Autoscaling v2 SKU across zones.",
     pricing: "Per gateway-hour plus capacity units.",
-    useWhen: [
-      "HTTP apps within one Region, and as the ingress for AKS (Application Gateway for Containers).",
-    ],
-    avoidWhen: [
-      "Global entry across Regions: use Front Door.",
-    ],
+    useWhen: ["HTTP apps within one Region, and as the ingress for AKS (Application Gateway for Containers)."],
+    avoidWhen: ["Global entry across Regions: use Front Door."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/application-gateway",
     main: "l7-lb",
@@ -246,9 +233,7 @@ export const services: CloudService[] = [
     youManage: "Frontends, backend pools, rules and health probes.",
     scaling: "Millions of flows; cross-region tier for global layer-4 failover.",
     pricing: "Per rule-hour plus data processed (Standard SKU).",
-    useWhen: [
-      "Non-HTTP traffic, very high connection counts, and internal service load balancing.",
-    ],
+    useWhen: ["Non-HTTP traffic, very high connection counts, and internal service load balancing."],
     avoidWhen: [],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/load-balancer",
@@ -264,13 +249,9 @@ export const services: CloudService[] = [
     youManage: "Private endpoints, private DNS zones and Private Link services.",
     scaling: "Fully managed.",
     pricing: "Per endpoint-hour plus per GB processed.",
-    useWhen: [
-      "Locking Storage, SQL, Cosmos DB and Key Vault to private access only.",
-    ],
+    useWhen: ["Locking Storage, SQL, Cosmos DB and Key Vault to private access only."],
     avoidWhen: [],
-    gotchas: [
-      "Private DNS zones are needed so service hostnames resolve to the private IP.",
-    ],
+    gotchas: ["Private DNS zones are needed so service hostnames resolve to the private IP."],
     docs: "https://azure.microsoft.com/en-us/products/private-link",
     main: "private-endpoints",
   },
@@ -284,12 +265,8 @@ export const services: CloudService[] = [
     youManage: "Circuits, peering and gateways.",
     scaling: "Circuits from 50 Mbps to 100 Gbps (ExpressRoute Direct).",
     pricing: "Per circuit per month, metered or unlimited data.",
-    useWhen: [
-      "Large or latency-sensitive hybrid traffic.",
-    ],
-    avoidWhen: [
-      "Small traffic: VPN Gateway is cheaper.",
-    ],
+    useWhen: ["Large or latency-sensitive hybrid traffic."],
+    avoidWhen: ["Small traffic: VPN Gateway is cheaper."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/expressroute",
     main: "dedicated-link",
@@ -312,8 +289,16 @@ export const capabilities: Capability[] = [
     title: "Resource-level firewall rules",
     summary: "Allow or deny traffic to individual resources or subnets.",
     aws: { services: ["Security groups", "Network ACLs"], fit: "direct" },
-    gcp: { services: ["VPC firewall rules and policies"], fit: "direct", note: "Target by network tags or service accounts." },
-    azure: { services: ["Network security groups"], fit: "direct", note: "Application security groups group VMs by role." },
+    gcp: {
+      services: ["VPC firewall rules and policies"],
+      fit: "direct",
+      note: "Target by network tags or service accounts.",
+    },
+    azure: {
+      services: ["Network security groups"],
+      fit: "direct",
+      note: "Application security groups group VMs by role.",
+    },
   },
   {
     id: "managed-firewall",
@@ -348,7 +333,11 @@ export const capabilities: Capability[] = [
       fit: "direct",
       note: "Global external option gives one anycast IP for every Region.",
     },
-    azure: { services: ["azure-app-gateway", "azure-front-door"], fit: "direct", note: "Application Gateway is regional; Front Door is global." },
+    azure: {
+      services: ["azure-app-gateway", "azure-front-door"],
+      fit: "direct",
+      note: "Application Gateway is regional; Front Door is global.",
+    },
   },
   {
     id: "l4-lb",
@@ -374,7 +363,11 @@ export const capabilities: Capability[] = [
     title: "Network peering",
     summary: "Join two networks directly so they route to each other privately.",
     aws: { services: ["VPC peering"], fit: "direct" },
-    gcp: { services: ["VPC Network Peering", "Shared VPC"], fit: "direct", note: "Shared VPC lets projects share one network." },
+    gcp: {
+      services: ["VPC Network Peering", "Shared VPC"],
+      fit: "direct",
+      note: "Shared VPC lets projects share one network.",
+    },
     azure: { services: ["VNet peering"], fit: "direct" },
   },
   {

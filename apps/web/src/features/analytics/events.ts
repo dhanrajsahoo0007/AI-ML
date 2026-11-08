@@ -33,4 +33,3 @@ export interface AnalyticsEvents {
 }
 
 export type AnalyticsEventName = keyof AnalyticsEvents;
-

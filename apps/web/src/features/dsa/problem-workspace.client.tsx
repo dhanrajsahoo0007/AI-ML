@@ -165,7 +165,11 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
   const passed = done.filter((r) => r.status === "pass").length;
 
   return (
-    <section aria-labelledby="workspace-heading" className="my-12 rounded-xl border border-hairline bg-paper-2 p-4 sm:p-5" data-dsa-workspace>
+    <section
+      aria-labelledby="workspace-heading"
+      className="my-12 rounded-xl border border-hairline bg-paper-2 p-4 sm:p-5"
+      data-dsa-workspace
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="workspace-heading" className="font-display text-lg font-semibold text-ink">
           Your solution
@@ -219,15 +223,25 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
             {wanted ? "Loading editor…" : "Edit code"}
           </button>
         )}
-        <button type="button" onClick={reset} className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-ink">
+        <button
+          type="button"
+          onClick={reset}
+          className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-ink"
+        >
           Reset code
         </button>
-        <p className="text-xs text-muted-foreground">Runs the {tests.length} public tests in your browser. Your code never leaves this page.</p>
+        <p className="text-xs text-muted-foreground">
+          Runs the {tests.length} public tests in your browser. Your code never leaves this page.
+        </p>
         <p id="editor-keys" className="sr-only">
           Tab indents code. Press Escape, then Tab, to move out of the editor.
         </p>
       </div>
-      {failed && <p className="mt-3 text-sm text-rose-700 dark:text-rose-400">The editor could not be loaded. Check your connection and try again.</p>}
+      {failed && (
+        <p className="mt-3 text-sm text-rose-700 dark:text-rose-400">
+          The editor could not be loaded. Check your connection and try again.
+        </p>
+      )}
 
       <div aria-live="polite" className="mt-4">
         {status && <p className="text-sm text-muted-foreground">{status}</p>}
@@ -243,7 +257,11 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
           {tests.map((tc, i) => {
             const r = results[i];
             return (
-              <li key={i} className="rounded-lg border border-hairline bg-paper p-3 text-sm" data-case-status={r?.status ?? "pending"}>
+              <li
+                key={i}
+                className="rounded-lg border border-hairline bg-paper p-3 text-sm"
+                data-case-status={r?.status ?? "pending"}
+              >
                 <p className="flex flex-wrap items-baseline gap-x-2">
                   <span className="font-semibold text-ink">Case {i + 1}</span>
                   {tc.name && <span className="text-muted-foreground">{tc.name}</span>}
@@ -273,7 +291,10 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
                   </dl>
                 )}
                 {r?.logs && r.logs.length > 0 && (
-                  <pre className="mt-2 max-h-40 overflow-auto rounded bg-paper-2 p-2 font-mono text-xs text-ink-2" aria-label="Console output">
+                  <pre
+                    className="mt-2 max-h-40 overflow-auto rounded bg-paper-2 p-2 font-mono text-xs text-ink-2"
+                    aria-label="Console output"
+                  >
                     {r.logs.join("\n")}
                   </pre>
                 )}

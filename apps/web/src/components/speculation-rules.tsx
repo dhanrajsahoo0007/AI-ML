@@ -21,10 +21,7 @@ function speculationRules(sectionHref: string) {
         where: {
           and: [
             {
-              or: [
-                { href_matches: `${sectionHref}/*` },
-                { selector_matches: 'a[rel~="prev"], a[rel~="next"]' },
-              ],
+              or: [{ href_matches: `${sectionHref}/*` }, { selector_matches: 'a[rel~="prev"], a[rel~="next"]' }],
             },
             ...exclude,
             { not: { selector_matches: '[rel~="nofollow"], [data-no-prefetch]' } },

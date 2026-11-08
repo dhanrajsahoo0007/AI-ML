@@ -54,7 +54,10 @@ export function ScenarioCard({
             className="overflow-hidden"
           >
             <div className="mt-3 rounded-lg border-l-2 bg-paper-2/60 p-3" style={{ borderColor: "var(--dg-green)" }}>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--dg-green)" }}>
+              <div
+                className="text-[11px] font-semibold uppercase tracking-[0.08em]"
+                style={{ color: "var(--dg-green)" }}
+              >
                 Pick
               </div>
               <div className="mt-0.5 font-semibold text-ink">{pick}</div>

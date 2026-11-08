@@ -118,7 +118,12 @@ export const docsKind: SectionKind<DocItem> = {
     const push = (file: string, message: string, line?: number, level: ContentError["level"] = "error") =>
       errors.push({ file: rel(file), line, message, level });
     const checkIcon = (file: string, icon: string | undefined, where: string) => {
-      if (icon && !(icon in iconMap)) push(file, `unknown icon "${icon}" (${where}); add it to src/lib/icons.ts`, lineOf(file, new RegExp(`icon[=:]\\s*"?${escape(icon)}`)));
+      if (icon && !(icon in iconMap))
+        push(
+          file,
+          `unknown icon "${icon}" (${where}); add it to src/lib/icons.ts`,
+          lineOf(file, new RegExp(`icon[=:]\\s*"?${escape(icon)}`))
+        );
     };
 
     // Frontmatter (§5.3).
@@ -127,19 +132,32 @@ export const docsKind: SectionKind<DocItem> = {
       if (!result.success) {
         for (const issue of result.error.issues) {
           const key = String(issue.path[0] ?? "");
-          const message = issue.code === "unrecognized_keys" ? `frontmatter: ${issue.message}` : `frontmatter ${issue.path.join(".")}: ${issue.message}`;
+          const message =
+            issue.code === "unrecognized_keys"
+              ? `frontmatter: ${issue.message}`
+              : `frontmatter ${issue.path.join(".")}: ${issue.message}`;
           push(item.file, message, key ? lineOf(item.file, new RegExp(`^${escape(key)}:`)) : 1);
         }
       }
       if (item.description && item.description.length > DESCRIPTION_MAX) {
-        push(item.file, `description is ${item.description.length} characters (max ${DESCRIPTION_MAX} for <meta>)`, lineOf(item.file, /^description:/), "warning");
+        push(
+          item.file,
+          `description is ${item.description.length} characters (max ${DESCRIPTION_MAX} for <meta>)`,
+          lineOf(item.file, /^description:/),
+          "warning"
+        );
       }
       checkIcon(item.file, item.icon, "frontmatter");
       for (const g of hubGroups(item)) {
         checkIcon(item.file, g.icon, `group ${g.name}`);
         const known = new Set(Array.isArray(item.data.categories) ? (item.data.categories as string[]) : []);
         for (const c of g.categories) {
-          if (!known.has(c)) push(item.file, `group "${g.name}" lists category "${c}", which is not in categories`, lineOf(item.file, new RegExp(escape(c))));
+          if (!known.has(c))
+            push(
+              item.file,
+              `group "${g.name}" lists category "${c}", which is not in categories`,
+              lineOf(item.file, new RegExp(escape(c)))
+            );
         }
       }
     }
@@ -158,7 +176,11 @@ export const docsKind: SectionKind<DocItem> = {
     for (const hub of index.hubs) {
       const hubItem = hubs.get(hub.slug);
       if (!hubItem) {
-        push(indexFile, `hub "${hub.slug}" has no ${hub.slug}.mdx`, lineOf(indexFile, new RegExp(`slug: ${escape(hub.slug)}$`)));
+        push(
+          indexFile,
+          `hub "${hub.slug}" has no ${hub.slug}.mdx`,
+          lineOf(indexFile, new RegExp(`slug: ${escape(hub.slug)}$`))
+        );
         continue;
       }
       for (const cat of hub.categories) {
@@ -171,18 +193,27 @@ export const docsKind: SectionKind<DocItem> = {
           if (!target) push(indexFile, `card "${card.title}" links to ${card.href}, which has no MDX file`, line);
           else if (target.hub !== hub.slug) push(indexFile, `card ${card.href} is listed under hub ${hub.slug}`, line);
           else if ((card.status ?? "published") !== target.status) {
-            push(indexFile, `card ${card.href} has status ${card.status ?? "published"} but the page is ${target.status}`, line, "warning");
+            push(
+              indexFile,
+              `card ${card.href} has status ${card.status ?? "published"} but the page is ${target.status}`,
+              line,
+              "warning"
+            );
           }
         }
       }
       const markup = JSON.stringify(parseHubMarkup(fs.readFileSync(hubItem.file, "utf8")));
       if (markup !== JSON.stringify(hub.categories)) {
-        push(indexFile, `hub ${hub.slug}: _index.yaml differs from the cards in ${rel(hubItem.file)} (run scripts/migrate-nav-index.ts)`);
+        push(
+          indexFile,
+          `hub ${hub.slug}: _index.yaml differs from the cards in ${rel(hubItem.file)} (run scripts/migrate-nav-index.ts)`
+        );
       }
     }
     for (const article of articlesOf(items)) {
       const hubIndexed = index.hubs.some((h) => h.slug === article.hub);
-      if (hubIndexed && !listed.has(article.href)) push(article.file, `orphan page: not on any card in ${rel(indexFile)}`, 1);
+      if (hubIndexed && !listed.has(article.href))
+        push(article.file, `orphan page: not on any card in ${rel(indexFile)}`, 1);
     }
     for (const hub of hubsOf(items)) {
       if (articlesOf(items, hub.slug).length > 0 && !index.hubs.some((h) => h.slug === hub.slug)) {

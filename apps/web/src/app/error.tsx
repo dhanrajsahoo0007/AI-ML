@@ -15,9 +15,7 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
   return (
     <div role="alert" className="mx-auto w-full max-w-2xl px-4 py-24 text-center md:px-8">
       <h1 className="text-3xl text-ink md:text-4xl">Something went wrong</h1>
-      <p className="mt-4 text-ink-2">
-        This page didn&apos;t load properly. Please try again in a moment.
-      </p>
+      <p className="mt-4 text-ink-2">This page didn&apos;t load properly. Please try again in a moment.</p>
       <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
         <button
           type="button"

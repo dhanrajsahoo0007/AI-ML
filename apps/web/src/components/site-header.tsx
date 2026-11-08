@@ -4,13 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
 import { ArrowRight, ChevronDown, Menu } from "lucide-react";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
 import { siteConfig } from "@/config/site";
@@ -97,7 +91,10 @@ export function SiteHeader({ navTree, profileMenu }: { navTree: HeaderNavSection
                 {label}
                 <ChevronDown
                   aria-hidden
-                  className={cn("hidden size-3 transition-transform duration-200 xl:block", openKey === section.key && "rotate-180")}
+                  className={cn(
+                    "hidden size-3 transition-transform duration-200 xl:block",
+                    openKey === section.key && "rotate-180"
+                  )}
                 />
               </>
             );
@@ -257,7 +254,10 @@ function MobileLink({
       href={href}
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
-      className={cn("font-display text-2xl transition-colors", active ? "text-ink" : "text-muted-foreground hover:text-ink")}
+      className={cn(
+        "font-display text-2xl transition-colors",
+        active ? "text-ink" : "text-muted-foreground hover:text-ink"
+      )}
     >
       {label}
     </Link>
@@ -301,7 +301,12 @@ function SectionPanel({ section }: { section: HeaderNavSection }) {
                   href={group.href}
                   className="group/card flex h-full items-start gap-3 rounded-lg border border-hairline px-3 py-2.5 transition-colors hover:border-ink hover:bg-paper-2"
                 >
-                  {Icon && <Icon aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground group-hover/card:text-primary" />}
+                  {Icon && (
+                    <Icon
+                      aria-hidden
+                      className="mt-0.5 size-4 shrink-0 text-muted-foreground group-hover/card:text-primary"
+                    />
+                  )}
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-medium text-ink">{group.title}</span>
                     {group.count > 0 && (

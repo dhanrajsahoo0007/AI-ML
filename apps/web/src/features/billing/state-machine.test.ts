@@ -78,40 +78,60 @@ describe("targetStatus", () => {
 describe("entitlementFor", () => {
   const base = { heldUntil: null, occurredAt: now, now };
   it("active: Pro until period end plus the renewal leeway, exactly the end when cancelling", () => {
-    expect(entitlementFor({ ...base, status: "active", snapshot: { currentPeriodEnd: at(30), cancelAtPeriodEnd: false } })).toEqual({
+    expect(
+      entitlementFor({ ...base, status: "active", snapshot: { currentPeriodEnd: at(30), cancelAtPeriodEnd: false } })
+    ).toEqual({
       tier: "pro",
       validUntil: new Date(at(30).getTime() + RENEWAL_LEEWAY_MS),
     });
-    expect(entitlementFor({ ...base, status: "active", snapshot: { currentPeriodEnd: at(30), cancelAtPeriodEnd: true } })).toEqual({
+    expect(
+      entitlementFor({ ...base, status: "active", snapshot: { currentPeriodEnd: at(30), cancelAtPeriodEnd: true } })
+    ).toEqual({
       tier: "pro",
       validUntil: at(30),
     });
-    expect(entitlementFor({ ...base, status: "active", snapshot: { currentPeriodEnd: null, cancelAtPeriodEnd: false } })).toEqual({
+    expect(
+      entitlementFor({ ...base, status: "active", snapshot: { currentPeriodEnd: null, cancelAtPeriodEnd: false } })
+    ).toEqual({
       tier: "pro",
       validUntil: new Date(now.getTime() + RENEWAL_LEEWAY_MS),
     });
   });
   it("on_hold: a 7-day grace period from when the hold began, kept on repeats", () => {
     const s = { currentPeriodEnd: at(-1), cancelAtPeriodEnd: false };
-    expect(entitlementFor({ ...base, status: "on_hold", snapshot: s })).toEqual({ tier: "pro", validUntil: at(GRACE_PERIOD_DAYS) });
-    expect(entitlementFor({ ...base, status: "on_hold", snapshot: s, heldUntil: at(3) })).toEqual({ tier: "pro", validUntil: at(3) });
+    expect(entitlementFor({ ...base, status: "on_hold", snapshot: s })).toEqual({
+      tier: "pro",
+      validUntil: at(GRACE_PERIOD_DAYS),
+    });
+    expect(entitlementFor({ ...base, status: "on_hold", snapshot: s, heldUntil: at(3) })).toEqual({
+      tier: "pro",
+      validUntil: at(3),
+    });
   });
   it("cancelled: Pro until the paid period ends, free once it has", () => {
-    expect(entitlementFor({ ...base, status: "cancelled", snapshot: { currentPeriodEnd: at(5), cancelAtPeriodEnd: true } })).toEqual({
+    expect(
+      entitlementFor({ ...base, status: "cancelled", snapshot: { currentPeriodEnd: at(5), cancelAtPeriodEnd: true } })
+    ).toEqual({
       tier: "pro",
       validUntil: at(5),
     });
-    expect(entitlementFor({ ...base, status: "cancelled", snapshot: { currentPeriodEnd: at(-1), cancelAtPeriodEnd: true } })).toEqual({
+    expect(
+      entitlementFor({ ...base, status: "cancelled", snapshot: { currentPeriodEnd: at(-1), cancelAtPeriodEnd: true } })
+    ).toEqual({
       tier: "free",
       validUntil: now,
     });
-    expect(entitlementFor({ ...base, status: "cancelled", snapshot: { currentPeriodEnd: null, cancelAtPeriodEnd: false } })).toEqual({
+    expect(
+      entitlementFor({ ...base, status: "cancelled", snapshot: { currentPeriodEnd: null, cancelAtPeriodEnd: false } })
+    ).toEqual({
       tier: "free",
       validUntil: now,
     });
   });
   it.each(["expired", "failed"] as const)("%s: free now", (status) => {
-    expect(entitlementFor({ ...base, status, snapshot: { currentPeriodEnd: at(5), cancelAtPeriodEnd: false } })).toEqual({
+    expect(
+      entitlementFor({ ...base, status, snapshot: { currentPeriodEnd: at(5), cancelAtPeriodEnd: false } })
+    ).toEqual({
       tier: "free",
       validUntil: now,
     });
@@ -142,38 +162,62 @@ describe("subscriptionTransition", () => {
   });
 
   it("ignores events older than the newest applied one (out-of-order delivery)", () => {
-    expect(run(ev("active", {}, at(-1)), { current: stored(), lastAppliedAt: now })).toEqual({ apply: false, reason: "stale" });
+    expect(run(ev("active", {}, at(-1)), { current: stored(), lastAppliedAt: now })).toEqual({
+      apply: false,
+      reason: "stale",
+    });
     // Same instant is not stale (replays of the newest event are idempotent).
     expect(run(ev("renewed"), { current: stored(), lastAppliedAt: now }).apply).toBe(true);
   });
 
   it.each(["cancelled", "expired", "failed"] as const)("never revives a %s subscription", (status) => {
     expect(run(ev("active", {}, at(1)), { current: stored({ status }) })).toEqual({ apply: false, reason: "terminal" });
-    expect(run(ev("on_hold", {}, at(1)), { current: stored({ status }) })).toEqual({ apply: false, reason: "terminal" });
+    expect(run(ev("on_hold", {}, at(1)), { current: stored({ status }) })).toEqual({
+      apply: false,
+      reason: "terminal",
+    });
   });
 
   it("cancel-at-period-end keeps Pro to the period end and bumps the version once", () => {
     const t = run(ev("renewed", { cancelAtPeriodEnd: true }), { current: stored(), entitlement: ent() });
-    expect(t).toMatchObject({ apply: true, status: "active", entitlement: { tier: "pro", validUntil: at(30) }, bumpVersion: true });
-    const again = run(ev("renewed", { cancelAtPeriodEnd: true }), { current: stored({ cancelAtPeriodEnd: true }), entitlement: ent() });
+    expect(t).toMatchObject({
+      apply: true,
+      status: "active",
+      entitlement: { tier: "pro", validUntil: at(30) },
+      bumpVersion: true,
+    });
+    const again = run(ev("renewed", { cancelAtPeriodEnd: true }), {
+      current: stored({ cancelAtPeriodEnd: true }),
+      entitlement: ent(),
+    });
     expect(again).toMatchObject({ bumpVersion: false });
   });
 
   it("on_hold keeps the original grace end across repeated holds", () => {
     const first = run(ev("on_hold", { currentPeriodEnd: at(-1) }), { current: stored(), entitlement: ent() });
-    expect(first).toMatchObject({ status: "on_hold", entitlement: { tier: "pro", validUntil: at(7) }, bumpVersion: false });
+    expect(first).toMatchObject({
+      status: "on_hold",
+      entitlement: { tier: "pro", validUntil: at(7) },
+      bumpVersion: false,
+    });
     const repeat = run(ev("on_hold", {}, at(2)), {
       current: stored({ status: "on_hold" }),
       entitlement: ent({ validUntil: at(7) }),
     });
     expect(repeat).toMatchObject({ entitlement: { validUntil: at(7) } });
     // A hold whose entitlement belongs to another subscription starts its own grace period.
-    const other = run(ev("on_hold"), { current: stored({ status: "on_hold" }), entitlement: ent({ subscriptionId: "s9" }) });
+    const other = run(ev("on_hold"), {
+      current: stored({ status: "on_hold" }),
+      entitlement: ent({ subscriptionId: "s9" }),
+    });
     expect(other).toMatchObject({ entitlement: { validUntil: at(7) } });
   });
 
   it("recovers from on_hold to active", () => {
-    const t = run(ev("renewed", {}, at(1)), { current: stored({ status: "on_hold" }), entitlement: ent({ validUntil: at(7) }) });
+    const t = run(ev("renewed", {}, at(1)), {
+      current: stored({ status: "on_hold" }),
+      entitlement: ent({ validUntil: at(7) }),
+    });
     expect(t).toMatchObject({ status: "active", entitlement: { tier: "pro" } });
   });
 
@@ -187,7 +231,11 @@ describe("subscriptionTransition", () => {
   });
 
   it("leaves the entitlement alone when another live subscription owns it", () => {
-    const t = run(ev("expired"), { current: stored({ id: "old" }), otherLive: true, entitlement: ent({ subscriptionId: "new" }) });
+    const t = run(ev("expired"), {
+      current: stored({ id: "old" }),
+      otherLive: true,
+      entitlement: ent({ subscriptionId: "new" }),
+    });
     expect(t).toMatchObject({ apply: true, status: "expired", entitlement: null, bumpVersion: false });
     // But a live one always takes it over.
     expect(run(ev("active"), { otherLive: true })).toMatchObject({ entitlement: { tier: "pro" } });

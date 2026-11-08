@@ -353,7 +353,7 @@ export const FAMILIES: DbFamily[] = [
     examples: ["pgvector", "Qdrant", "Pinecone"],
     useWhen: [
       "Search by meaning, not keywords (RAG, semantic search)",
-      "\"More like this\" recommendations and image similarity",
+      '"More like this" recommendations and image similarity',
       "Corpus is large enough that brute force is too slow",
     ],
     avoidWhen: [
@@ -555,7 +555,11 @@ export const PICKER_QUESTIONS: PickerQuestion[] = [
     prompt: "What kind of consistency do you need across regions?",
     options: [
       { label: "Strong, everywhere", hint: "global payments, inventory", next: "r-newsql" },
-      { label: "Data splits cleanly by tenant or user", hint: "each shard can be its own Postgres", next: "r-sql-sharded" },
+      {
+        label: "Data splits cleanly by tenant or user",
+        hint: "each shard can be its own Postgres",
+        next: "r-sql-sharded",
+      },
     ],
   },
   {

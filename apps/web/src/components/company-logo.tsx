@@ -10,7 +10,10 @@ export interface CompanyTag {
 const MONOGRAM_COLORS = ["#2563eb", "#7c3aed", "#db2777", "#ea580c", "#0d9488", "#4f46e5", "#16a34a", "#c026d3"];
 
 function monogram(name: string) {
-  const words = name.replace(/[^A-Za-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+  const words = name
+    .replace(/[^A-Za-z0-9 ]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
   return (words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase();
 }
 
@@ -64,9 +67,7 @@ export function CompanyChip({
 }) {
   const className = cn(
     "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12.5px] leading-none transition-colors",
-    active
-      ? "border-ink bg-ink text-paper"
-      : "border-hairline bg-paper text-ink-2",
+    active ? "border-ink bg-ink text-paper" : "border-hairline bg-paper text-ink-2",
     (onClick || href) && !active && "hover:border-ink/40"
   );
   const body = (

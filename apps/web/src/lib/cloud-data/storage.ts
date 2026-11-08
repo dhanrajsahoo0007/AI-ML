@@ -36,7 +36,8 @@ export const services: CloudService[] = [
     name: "Amazon EBS",
     short: "EBS",
     group: "storage",
-    tagline: "Network block volumes for EC2: the disks under databases, boot volumes and anything that needs a file system on one instance.",
+    tagline:
+      "Network block volumes for EC2: the disks under databases, boot volumes and anything that needs a file system on one instance.",
     youManage: "Volume type, size, IOPS and throughput, snapshots and encryption.",
     scaling: "Resize and change performance online; io2 Block Express reaches hundreds of thousands of IOPS.",
     pricing: "Per GB-month provisioned, plus provisioned IOPS and throughput above the baseline (gp3, io2).",
@@ -58,7 +59,9 @@ export const services: CloudService[] = [
     youManage: "File systems, access points, throughput mode and lifecycle to cheaper classes.",
     scaling: "Grows and shrinks with the data; elastic throughput scales with load.",
     pricing: "Per GB-month stored by storage class plus data access charges.",
-    useWhen: ["Shared content for a web fleet, home directories, CMS uploads, ML notebooks, container persistent volumes."],
+    useWhen: [
+      "Shared content for a web fleet, home directories, CMS uploads, ML notebooks, container persistent volumes.",
+    ],
     avoidWhen: ["Latency-sensitive databases (use EBS) or very high-throughput HPC (use FSx for Lustre)."],
     gotchas: ["Regional by default: survives the loss of a zone."],
     docs: "https://aws.amazon.com/efs/",
@@ -92,12 +95,8 @@ export const services: CloudService[] = [
     youManage: "Buckets, location type, storage class or Autoclass, lifecycle rules and IAM.",
     scaling: "Effectively unlimited; strongly consistent reads after writes and listings.",
     pricing: "Per GB-month by class and location, per operation, and per GB of egress.",
-    useWhen: [
-      "Uploads, media, backups, logs and the data lake under BigQuery and Dataproc.",
-    ],
-    avoidWhen: [
-      "Disks for databases (use Persistent Disk or Hyperdisk) or shared POSIX files (use Filestore).",
-    ],
+    useWhen: ["Uploads, media, backups, logs and the data lake under BigQuery and Dataproc."],
+    avoidWhen: ["Disks for databases (use Persistent Disk or Hyperdisk) or shared POSIX files (use Filestore)."],
     gotchas: [
       "Dual- and multi-region buckets replicate across Regions with no extra setup, unlike S3 replication rules.",
       "Signed URLs give clients direct, time-limited upload and download access.",
@@ -115,15 +114,9 @@ export const services: CloudService[] = [
     youManage: "Disk type, size, performance, snapshots and replication (regional disks).",
     scaling: "Resize online; Hyperdisk scales performance independently of size.",
     pricing: "Per GB-month plus provisioned performance for Hyperdisk.",
-    useWhen: [
-      "Boot disks and databases on VMs or GKE persistent volumes.",
-    ],
-    avoidWhen: [
-      "Data shared by many machines: use Filestore or Cloud Storage.",
-    ],
-    gotchas: [
-      "Regional persistent disks replicate synchronously across two zones, which EBS does not offer.",
-    ],
+    useWhen: ["Boot disks and databases on VMs or GKE persistent volumes."],
+    avoidWhen: ["Data shared by many machines: use Filestore or Cloud Storage."],
+    gotchas: ["Regional persistent disks replicate synchronously across two zones, which EBS does not offer."],
     docs: "https://cloud.google.com/persistent-disk",
     main: "block-storage",
   },
@@ -137,12 +130,8 @@ export const services: CloudService[] = [
     youManage: "Tier, capacity and backups.",
     scaling: "Tiers from basic to zonal and regional (high availability) instances.",
     pricing: "Per GB-month provisioned, by tier.",
-    useWhen: [
-      "Shared files for a web fleet, CMS uploads, GKE ReadWriteMany volumes.",
-    ],
-    avoidWhen: [
-      "HPC-scale throughput: use Managed Lustre.",
-    ],
+    useWhen: ["Shared files for a web fleet, CMS uploads, GKE ReadWriteMany volumes."],
+    avoidWhen: ["HPC-scale throughput: use Managed Lustre."],
     gotchas: [],
     docs: "https://cloud.google.com/filestore",
     main: "shared-files",
@@ -157,12 +146,8 @@ export const services: CloudService[] = [
     youManage: "Storage accounts, redundancy option, tiers, lifecycle policies and access.",
     scaling: "Per storage account limits, which are high; use several accounts for extreme scale.",
     pricing: "Per GB-month by tier and redundancy, per operation, and egress.",
-    useWhen: [
-      "Uploads, media, backups, logs and the data lake for Fabric, Synapse and Databricks.",
-    ],
-    avoidWhen: [
-      "Disks for VMs (Managed Disks) or SMB/NFS shares (Azure Files).",
-    ],
+    useWhen: ["Uploads, media, backups, logs and the data lake for Fabric, Synapse and Databricks."],
+    avoidWhen: ["Disks for VMs (Managed Disks) or SMB/NFS shares (Azure Files)."],
     gotchas: [
       "Redundancy is chosen per account: LRS, ZRS, GRS or GZRS (geo-replicated across Regions).",
       "Shared access signatures (SAS) give clients direct, time-limited access, like pre-signed URLs.",
@@ -180,15 +165,9 @@ export const services: CloudService[] = [
     youManage: "Disk type, size, performance and snapshots.",
     scaling: "Premium SSD v2 and Ultra let you set IOPS and throughput independently.",
     pricing: "Per disk size per month, plus provisioned performance for v2 and Ultra.",
-    useWhen: [
-      "VM boot and data disks, databases on VMs, AKS persistent volumes.",
-    ],
-    avoidWhen: [
-      "Files shared across many VMs: use Azure Files.",
-    ],
-    gotchas: [
-      "Zone-redundant disks (ZRS) replicate synchronously across zones.",
-    ],
+    useWhen: ["VM boot and data disks, databases on VMs, AKS persistent volumes."],
+    avoidWhen: ["Files shared across many VMs: use Azure Files."],
+    gotchas: ["Zone-redundant disks (ZRS) replicate synchronously across zones."],
     docs: "https://azure.microsoft.com/en-us/products/storage/disks",
     main: "block-storage",
   },
@@ -202,12 +181,8 @@ export const services: CloudService[] = [
     youManage: "Shares, tiers, quotas and identity-based access.",
     scaling: "Premium shares scale performance with provisioned size.",
     pricing: "Per GB provisioned (Premium) or used plus transactions (Standard).",
-    useWhen: [
-      "Lift-and-shift file shares, Windows apps, shared config and content.",
-    ],
-    avoidWhen: [
-      "HPC throughput: use Azure Managed Lustre or Azure NetApp Files.",
-    ],
+    useWhen: ["Lift-and-shift file shares, Windows apps, shared config and content."],
+    avoidWhen: ["HPC throughput: use Azure Managed Lustre or Azure NetApp Files."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/storage/files",
     main: "shared-files",
@@ -221,7 +196,11 @@ export const capabilities: Capability[] = [
     title: "Object storage",
     summary: "Durable storage for files of any size, addressed by key.",
     aws: { services: ["aws-s3"], fit: "direct" },
-    gcp: { services: ["gcp-cloud-storage"], fit: "direct", note: "Dual- and multi-region buckets replicate across Regions." },
+    gcp: {
+      services: ["gcp-cloud-storage"],
+      fit: "direct",
+      note: "Dual- and multi-region buckets replicate across Regions.",
+    },
     azure: { services: ["azure-blob"], fit: "direct" },
   },
   {

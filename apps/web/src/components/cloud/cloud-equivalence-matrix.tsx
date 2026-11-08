@@ -30,17 +30,17 @@ export function CloudEquivalenceMatrix() {
       new Map(
         CAPABILITIES.map((c) => {
           const names = (["aws", "gcp", "azure"] as ProviderId[]).flatMap((p) =>
-            c[p].services.map((s) => (SERVICE_BY_ID[s] ? `${SERVICE_BY_ID[s].name} ${SERVICE_BY_ID[s].short}` : s)),
+            c[p].services.map((s) => (SERVICE_BY_ID[s] ? `${SERVICE_BY_ID[s].name} ${SERVICE_BY_ID[s].short}` : s))
           );
           return [c.id, `${c.title} ${c.summary} ${names.join(" ")}`.toLowerCase()];
-        }),
+        })
       ),
-    [],
+    []
   );
 
   const q = query.trim().toLowerCase();
   const rows = CAPABILITIES.filter(
-    (c) => (group === "all" || c.group === group) && (!q || haystack.get(c.id)!.includes(q)),
+    (c) => (group === "all" || c.group === group) && (!q || haystack.get(c.id)!.includes(q))
   );
   // Groups that have capability rows, so filter chips never lead to an empty list.
   const groupsWithRows = GROUPS.filter((g) => CAPABILITIES.some((c) => c.group === g.id));
@@ -60,7 +60,11 @@ export function CloudEquivalenceMatrix() {
               className="w-full rounded-full border border-hairline bg-paper py-1.5 pr-3 pl-9 text-sm text-ink outline-none placeholder:text-muted-foreground focus:border-ink"
             />
           </label>
-          <div className="flex items-center gap-1 rounded-full border border-hairline bg-paper p-0.5" role="group" aria-label="List first">
+          <div
+            className="flex items-center gap-1 rounded-full border border-hairline bg-paper p-0.5"
+            role="group"
+            aria-label="List first"
+          >
             {PROVIDERS.map((p) => (
               <button
                 key={p.id}
@@ -69,7 +73,7 @@ export function CloudEquivalenceMatrix() {
                 onClick={() => setLead(p.id)}
                 className={cn(
                   "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
-                  lead === p.id ? "text-paper" : "text-muted-foreground hover:text-ink",
+                  lead === p.id ? "text-paper" : "text-muted-foreground hover:text-ink"
                 )}
                 style={lead === p.id ? { background: `var(--dg-${PROVIDER_TONE[p.id]})` } : undefined}
               >
@@ -89,7 +93,7 @@ export function CloudEquivalenceMatrix() {
                 onClick={() => setGroup(g.id)}
                 className={cn(
                   "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
-                  on ? "border-ink bg-ink text-paper" : "border-hairline bg-paper text-ink-2 hover:border-ink/40",
+                  on ? "border-ink bg-ink text-paper" : "border-hairline bg-paper text-ink-2 hover:border-ink/40"
                 )}
               >
                 {g.title}
@@ -108,7 +112,12 @@ export function CloudEquivalenceMatrix() {
       <CapabilityHeader order={order} />
       <div className="divide-y divide-hairline" aria-live="polite">
         {rows.map((c) => (
-          <CapabilityRow key={c.id} c={c} order={order} groupLabel={group === "all" ? GROUP_BY_ID[c.group].title : undefined} />
+          <CapabilityRow
+            key={c.id}
+            c={c}
+            order={order}
+            groupLabel={group === "all" ? GROUP_BY_ID[c.group].title : undefined}
+          />
         ))}
         {rows.length === 0 && (
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">No capability matches “{query}”.</p>

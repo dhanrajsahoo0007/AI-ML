@@ -36,7 +36,7 @@ export function priceTierFor(country: string | null): PriceTier | null {
 
 /** "€9.00" / "₹2,999.00": the paid amount in its own currency (plan §9.5: format with Intl). */
 export function formatMoney(amountMinor: number, currency: string, locale = "en"): string {
-  const digits = new Intl.NumberFormat(locale, { style: "currency", currency }).resolvedOptions()
-    .maximumFractionDigits ?? 2;
+  const digits =
+    new Intl.NumberFormat(locale, { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? 2;
   return new Intl.NumberFormat(locale, { style: "currency", currency }).format(amountMinor / 10 ** digits);
 }

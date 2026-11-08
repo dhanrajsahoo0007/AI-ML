@@ -18,7 +18,10 @@ export function DbProfile({ id, useAvoid = true }: { id: FamilyId; useAvoid?: bo
 
   return (
     <div className="my-8 overflow-hidden rounded-xl border border-hairline bg-paper">
-      <div className="flex items-start gap-3 border-b border-hairline p-4 sm:p-5" style={{ background: `var(--dg-${tone}-soft)` }}>
+      <div
+        className="flex items-start gap-3 border-b border-hairline p-4 sm:p-5"
+        style={{ background: `var(--dg-${tone}-soft)` }}
+      >
         <FamilyIcon id={id} className="bg-paper" />
         <div className="min-w-0">
           <div className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">At a glance</div>

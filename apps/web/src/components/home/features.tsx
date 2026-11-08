@@ -28,16 +28,10 @@ export function Features() {
               >
                 <div className="flex items-center justify-between">
                   <MonoIndex value={i + 1} />
-                  {Icon && (
-                    <Icon aria-hidden className="size-5 text-primary" />
-                  )}
+                  {Icon && <Icon aria-hidden className="size-5 text-primary" />}
                 </div>
-                <h3 className="mt-10 font-display text-2xl leading-tight">
-                  {feature.title}
-                </h3>
-                <p className="mt-3 flex-1 text-[15px] leading-relaxed text-muted-foreground">
-                  {feature.description}
-                </p>
+                <h3 className="mt-10 font-display text-2xl leading-tight">{feature.title}</h3>
+                <p className="mt-3 flex-1 text-[15px] leading-relaxed text-muted-foreground">{feature.description}</p>
                 <span className="mt-8 inline-flex items-center gap-1.5 text-sm font-medium text-ink">
                   Explore
                   <ArrowRight

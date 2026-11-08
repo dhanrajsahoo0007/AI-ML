@@ -151,7 +151,7 @@ function ResultCard({ id }: { id: string }) {
               <span key={s.label} className="rounded-full border border-hairline px-2.5 py-0.5 text-xs text-ink-2">
                 {s.label}
               </span>
-            ),
+            )
           )}
         </div>
       )}

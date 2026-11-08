@@ -24,7 +24,13 @@ export const POST = route({
     const started = Date.now();
     let type = "unknown";
     const metric = (outcome: string) =>
-      writeAnalytics({ event: "billing_webhook", provider: provider.id, type, outcome, durationMs: Date.now() - started });
+      writeAnalytics({
+        event: "billing_webhook",
+        provider: provider.id,
+        type,
+        outcome,
+        durationMs: Date.now() - started,
+      });
     try {
       const body = await request.text();
       if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES) {

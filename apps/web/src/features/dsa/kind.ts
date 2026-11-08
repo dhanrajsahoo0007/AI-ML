@@ -67,10 +67,7 @@ export const problemsKind: SectionKind<DsaItem> = {
   },
 
   staticParams(_section, items) {
-    return [
-      ...topicsOf(items).map((t) => ({ topic: t.slug })),
-      ...problemsOf(items).map((p) => ({ slug: p.slug })),
-    ];
+    return [...topicsOf(items).map((t) => ({ topic: t.slug })), ...problemsOf(items).map((p) => ({ slug: p.slug }))];
   },
 
   // Two groups: the topics, and the problems by difficulty.
@@ -89,7 +86,9 @@ export const problemsKind: SectionKind<DsaItem> = {
         href: problemListHref(section),
         categories: DIFFICULTIES.map((d) => ({
           title: DIFFICULTY_LABELS[d],
-          items: problems.filter((p) => p.fm.difficulty === d).map((p) => ({ slug: p.slug, title: p.title, href: p.href })),
+          items: problems
+            .filter((p) => p.fm.difficulty === d)
+            .map((p) => ({ slug: p.slug, title: p.title, href: p.href })),
         })).filter((c) => c.items.length > 0),
       },
     ]);
@@ -140,15 +139,23 @@ export const problemsKind: SectionKind<DsaItem> = {
       }
       if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(item.slug)) push(item.file, "file name must be lowercase kebab-case");
       if (item.description && item.description.length > DESCRIPTION_MAX) {
-        push(item.file, `description is ${item.description.length} characters (max ${DESCRIPTION_MAX} for <meta>)`, fieldLine(item.file, "description"), "warning");
+        push(
+          item.file,
+          `description is ${item.description.length} characters (max ${DESCRIPTION_MAX} for <meta>)`,
+          fieldLine(item.file, "description"),
+          "warning"
+        );
       }
     }
 
     for (const topic of topicsOf(items)) {
-      if (topic.slug === PROBLEMS_SEGMENT) push(topic.file, `a topic cannot be called "${PROBLEMS_SEGMENT}" (that URL is the problem list)`);
-      if (PREMIUM_BREAK.test(fs.readFileSync(topic.file, "utf8"))) push(topic.file, "topics are free: remove <PremiumBreak/>");
+      if (topic.slug === PROBLEMS_SEGMENT)
+        push(topic.file, `a topic cannot be called "${PROBLEMS_SEGMENT}" (that URL is the problem list)`);
+      if (PREMIUM_BREAK.test(fs.readFileSync(topic.file, "utf8")))
+        push(topic.file, "topics are free: remove <PremiumBreak/>");
       const icon = topic.fm?.icon;
-      if (icon && !(icon in iconMap)) push(topic.file, `unknown icon "${icon}"; add it to src/lib/icons.ts`, fieldLine(topic.file, "icon"));
+      if (icon && !(icon in iconMap))
+        push(topic.file, `unknown icon "${icon}"; add it to src/lib/icons.ts`, fieldLine(topic.file, "icon"));
     }
 
     for (const problem of problemsOf(items)) {
@@ -170,13 +177,17 @@ interface Checks {
 
 function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProblem, c: Checks) {
   const { fm, file } = problem;
-  const valueLine = (value: string, key: string) => lineOf(file, new RegExp(`\\b${escape(value)}\\b`)) ?? c.fieldLine(file, key);
+  const valueLine = (value: string, key: string) =>
+    lineOf(file, new RegExp(`\\b${escape(value)}\\b`)) ?? c.fieldLine(file, key);
 
   // Tags: each value must exist in its list.
   const tags = {
     patterns: { known: c.patterns, message: (v: string) => `unknown pattern "${v}" (add it to ${PATTERNS_FILE})` },
     topics: { known: c.topicSlugs, message: (v: string) => `unknown topic "${v}" (no topics/${v}.mdx)` },
-    companies: { known: c.companies, message: (v: string) => `unknown company "${v}" (not in content/companies/companies.yaml)` },
+    companies: {
+      known: c.companies,
+      message: (v: string) => `unknown company "${v}" (not in content/companies/companies.yaml)`,
+    },
   };
   for (const [field, { known, message }] of Object.entries(tags)) {
     for (const v of fm[field as keyof typeof tags]) if (!known.has(v)) c.push(file, message(v), valueLine(v, field));
@@ -192,7 +203,12 @@ function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProbl
   }
   for (const lang of LANGUAGES) {
     if (!fm.languages.includes(lang) && (fm.starter[lang] || fm.entry[lang])) {
-      c.push(file, `starter or entry for ${lang}, which is not in languages`, c.fieldLine(file, "languages"), "warning");
+      c.push(
+        file,
+        `starter or entry for ${lang}, which is not in languages`,
+        c.fieldLine(file, "languages"),
+        "warning"
+      );
     }
   }
 
@@ -205,7 +221,8 @@ function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProbl
       continue;
     }
     try {
-      const cases = kind === "public" ? readPublicTests(section, problem) : readHiddenTestsForValidation(section, problem);
+      const cases =
+        kind === "public" ? readPublicTests(section, problem) : readHiddenTestsForValidation(section, problem);
       loaded[kind] = cases;
       if (fm.mode === "class") {
         cases.forEach((tc, i) => {
@@ -221,16 +238,23 @@ function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProbl
     }
   }
   if (loaded.hidden && loaded.hidden.length < MIN_HIDDEN_TESTS) {
-    c.push(file, `only ${loaded.hidden.length} hidden tests (at least ${MIN_HIDDEN_TESTS} expected)`, c.fieldLine(file, "tests"), "warning");
+    c.push(
+      file,
+      `only ${loaded.hidden.length} hidden tests (at least ${MIN_HIDDEN_TESTS} expected)`,
+      c.fieldLine(file, "tests"),
+      "warning"
+    );
   }
   if (loaded.public && loaded.hidden) {
     const key = (tc: unknown) => JSON.stringify((tc as { args: unknown }).args);
     const pub = new Set(loaded.public.map(key));
-    if (loaded.hidden.some((tc) => pub.has(key(tc)))) c.push(file, "a hidden test repeats a public one", c.fieldLine(file, "tests"), "warning");
+    if (loaded.hidden.some((tc) => pub.has(key(tc))))
+      c.push(file, "a hidden test repeats a public one", c.fieldLine(file, "tests"), "warning");
   }
 
   for (const href of fm.related) {
-    if (!relatedExists(section, items, href)) c.push(file, `related page ${href} does not exist`, valueLine(href, "related"));
+    if (!relatedExists(section, items, href))
+      c.push(file, `related page ${href} does not exist`, valueLine(href, "related"));
   }
 }
 

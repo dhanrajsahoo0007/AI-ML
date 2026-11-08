@@ -55,7 +55,13 @@ function asset(over: Partial<AssetEntry> & Pick<AssetEntry, "id" | "type">): Ass
 
 describe("asset browser", () => {
   const assets = [
-    asset({ id: "diagrams/mermaid/caching/cdn", type: "mermaid", tags: ["caching"], usedBy: ["/x"], title: "CDN edge" }),
+    asset({
+      id: "diagrams/mermaid/caching/cdn",
+      type: "mermaid",
+      tags: ["caching"],
+      usedBy: ["/x"],
+      title: "CDN edge",
+    }),
     asset({ id: "logos/tech/aws/lambda", type: "tech-icon", tags: ["aws", "serverless"], usedBy: ["/y"] }),
     asset({ id: "images/old-photo", type: "image", tags: ["caching"], alt: "Rack of servers" }),
     asset({ id: "downloads/cheatsheet", type: "download" }),

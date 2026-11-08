@@ -9,16 +9,18 @@ import dynamic from "next/dynamic";
 
 export const DatabasePicker = dynamic(() => import("@/components/db/database-picker").then((m) => m.DatabasePicker));
 export const DatabaseWorkloadMatrix = dynamic(() =>
-  import("@/components/db/workload-matrix").then((m) => m.DatabaseWorkloadMatrix),
+  import("@/components/db/workload-matrix").then((m) => m.DatabaseWorkloadMatrix)
 );
-export const CompareDatabases = dynamic(() => import("@/components/db/compare-databases").then((m) => m.CompareDatabases));
+export const CompareDatabases = dynamic(() =>
+  import("@/components/db/compare-databases").then((m) => m.CompareDatabases)
+);
 export const DataModelView = dynamic(() => import("@/components/db/data-model-view").then((m) => m.DataModelView));
 export const DataModelTab = dynamic(() => import("@/components/db/data-model-view").then((m) => m.DataModelTab));
 export const ScenarioCard = dynamic(() => import("@/components/db/scenario-card").then((m) => m.ScenarioCard));
 export const ScenarioGrid = dynamic(() => import("@/components/db/scenario-card").then((m) => m.ScenarioGrid));
 export const CloudDecisionTree = dynamic(() =>
-  import("@/components/cloud/cloud-decision-tree").then((m) => m.CloudDecisionTree),
+  import("@/components/cloud/cloud-decision-tree").then((m) => m.CloudDecisionTree)
 );
 export const CloudEquivalenceMatrix = dynamic(() =>
-  import("@/components/cloud/cloud-equivalence-matrix").then((m) => m.CloudEquivalenceMatrix),
+  import("@/components/cloud/cloud-equivalence-matrix").then((m) => m.CloudEquivalenceMatrix)
 );

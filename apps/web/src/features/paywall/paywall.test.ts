@@ -10,7 +10,7 @@ const h = (text: string) => ({ type: "heading", depth: 2, children: [{ type: "te
 const esm = { type: "mdxjsEsm", value: "export const x = 1" } as unknown as MdNode;
 const brk = { type: "mdxJsxFlowElement", name: "PremiumBreak", attributes: [], children: [] } as unknown as MdNode;
 const texts = (nodes: MdNode[]) =>
-  nodes.map((n) => ("children" in n ? ((n as { children: { value: string }[] }).children[0]).value : n.type));
+  nodes.map((n) => ("children" in n ? (n as { children: { value: string }[] }).children[0].value : n.type));
 
 describe("preview truncation", () => {
   const body = [p("intro"), h("Free"), p("free text"), h("Premium"), p("SECRET")];

@@ -16,9 +16,7 @@ interface ContentSidebarProps {
 export function ContentSidebar({ navTree, onNavigate }: ContentSidebarProps) {
   const pathname = useCanonicalPathname();
   // Show only the section being read; fall back to every section on pages outside them.
-  const current = navTree.filter(
-    (s) => pathname === s.href || pathname.startsWith(`${s.href}/`)
-  );
+  const current = navTree.filter((s) => pathname === s.href || pathname.startsWith(`${s.href}/`));
   const sections = current.length ? current : navTree;
 
   return (
@@ -69,18 +67,11 @@ function SidebarSection({
         className={cn(
           "flex w-full items-center gap-2.5 border-b px-2 py-2.5 text-left font-display text-base transition-colors",
           pinnedOpen && "cursor-default",
-          isActive
-            ? "border-ink text-ink"
-            : "border-hairline text-ink-2 hover:text-ink"
+          isActive ? "border-ink text-ink" : "border-hairline text-ink-2 hover:text-ink"
         )}
       >
         {SectionIcon && (
-          <SectionIcon
-            className={cn(
-              "size-4 shrink-0",
-              isActive ? "text-primary" : "text-muted-foreground"
-            )}
-          />
+          <SectionIcon className={cn("size-4 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
         )}
         <span className="flex-1">{section.label}</span>
         {!pinnedOpen && (
@@ -98,19 +89,13 @@ function SidebarSection({
           {section.groups.map((group) => {
             const isSoleGroup = section.groups.length === 1;
             const hasChildren =
-              (group.categories && group.categories.length > 0) ||
-              (group.items && group.items.length > 0);
+              (group.categories && group.categories.length > 0) || (group.items && group.items.length > 0);
 
             if (isSoleGroup && hasChildren) {
               return (
                 <div key={group.slug} className="ml-1 mt-0.5">
                   {group.categories?.map((cat) => (
-                    <SidebarCategory
-                      key={cat.title}
-                      category={cat}
-                      pathname={pathname}
-                      onNavigate={onNavigate}
-                    />
+                    <SidebarCategory key={cat.title} category={cat} pathname={pathname} onNavigate={onNavigate} />
                   ))}
                   {group.items?.map((item) => (
                     <NavLink
@@ -125,14 +110,7 @@ function SidebarSection({
               );
             }
 
-            return (
-              <SidebarGroup
-                key={group.slug}
-                group={group}
-                pathname={pathname}
-                onNavigate={onNavigate}
-              />
-            );
+            return <SidebarGroup key={group.slug} group={group} pathname={pathname} onNavigate={onNavigate} />;
           })}
         </div>
       )}
@@ -152,21 +130,9 @@ function groupContainsPath(group: NavGroup, pathname: string): boolean {
   return false;
 }
 
-function SidebarGroup({
-  group,
-  pathname,
-  onNavigate,
-}: {
-  group: NavGroup;
-  pathname: string;
-  onNavigate?: () => void;
-}) {
-  const hasChildren =
-    (group.categories && group.categories.length > 0) ||
-    (group.items && group.items.length > 0);
-  const isGroupActive = hasChildren
-    ? groupContainsPath(group, pathname)
-    : pathname === group.href;
+function SidebarGroup({ group, pathname, onNavigate }: { group: NavGroup; pathname: string; onNavigate?: () => void }) {
+  const hasChildren = (group.categories && group.categories.length > 0) || (group.items && group.items.length > 0);
+  const isGroupActive = hasChildren ? groupContainsPath(group, pathname) : pathname === group.href;
   const [open, setOpen] = React.useState(hasChildren ? true : isGroupActive);
 
   React.useEffect(() => {
@@ -201,16 +167,9 @@ function SidebarGroup({
         )}
       >
         {GroupIcon && (
-          <GroupIcon
-            className={cn(
-              "size-4 shrink-0",
-              isGroupActive ? "text-primary" : "text-muted-foreground"
-            )}
-          />
+          <GroupIcon className={cn("size-4 shrink-0", isGroupActive ? "text-primary" : "text-muted-foreground")} />
         )}
-        <span className="flex-1 truncate text-sm font-semibold">
-          {group.title}
-        </span>
+        <span className="flex-1 truncate text-sm font-semibold">{group.title}</span>
         <ChevronDown
           className={cn(
             "size-3.5 shrink-0 text-muted-foreground transition-transform duration-200",
@@ -222,12 +181,7 @@ function SidebarGroup({
       {open && (
         <div className="ml-4 border-l border-hairline">
           {group.categories?.map((cat) => (
-            <SidebarCategory
-              key={cat.title}
-              category={cat}
-              pathname={pathname}
-              onNavigate={onNavigate}
-            />
+            <SidebarCategory key={cat.title} category={cat} pathname={pathname} onNavigate={onNavigate} />
           ))}
           {group.items?.map((item) => (
             <NavLink
@@ -270,10 +224,7 @@ function SidebarCategory({
         className="flex w-full items-center gap-2 px-3 py-1.5 text-left"
       >
         <ChevronRight
-          className={cn(
-            "size-3 shrink-0 text-muted-foreground transition-transform duration-200",
-            open && "rotate-90"
-          )}
+          className={cn("size-3 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-90")}
         />
         <span
           className={cn(
@@ -330,14 +281,7 @@ function NavLink({
           : "border-transparent text-muted-foreground hover:border-ink/30 hover:text-ink"
       )}
     >
-      {Icon && (
-        <Icon
-          className={cn(
-            "size-4 shrink-0",
-            active ? "text-primary" : "text-muted-foreground"
-          )}
-        />
-      )}
+      {Icon && <Icon className={cn("size-4 shrink-0", active ? "text-primary" : "text-muted-foreground")} />}
       <span className="truncate">{label}</span>
     </Link>
   );

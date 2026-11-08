@@ -29,11 +29,13 @@ export const services: CloudService[] = [
     name: "Amazon Aurora",
     short: "Aurora",
     group: "databases",
-    tagline: "PostgreSQL- and MySQL-compatible database on a distributed storage layer that keeps six copies across three zones.",
+    tagline:
+      "PostgreSQL- and MySQL-compatible database on a distributed storage layer that keeps six copies across three zones.",
     youManage: "Schema, queries, instance sizes (or Serverless v2 capacity range) and replicas.",
     scaling:
       "Up to 15 low-lag readers sharing one storage volume; Serverless v2 scales capacity in seconds (and down to zero); Limitless Database shards PostgreSQL writes.",
-    pricing: "Per instance-hour or per ACU-hour (Serverless v2), plus storage, and I/O unless you choose I/O-Optimized.",
+    pricing:
+      "Per instance-hour or per ACU-hour (Serverless v2), plus storage, and I/O unless you choose I/O-Optimized.",
     useWhen: [
       "Relational workloads that need faster failover, more read replicas and higher throughput than RDS.",
       "Spiky or dev/test databases on Serverless v2.",
@@ -161,12 +163,8 @@ export const services: CloudService[] = [
     youManage: "Schema, queries, machine size, flags and replicas.",
     scaling: "Vertical, plus read replicas; Enterprise Plus edition adds faster failover and data cache.",
     pricing: "Per vCPU and GB of memory per hour, plus storage.",
-    useWhen: [
-      "The default relational database on Google Cloud for business records.",
-    ],
-    avoidWhen: [
-      "Writes beyond one primary, or global strong consistency: use AlloyDB or Spanner.",
-    ],
+    useWhen: ["The default relational database on Google Cloud for business records."],
+    avoidWhen: ["Writes beyond one primary, or global strong consistency: use AlloyDB or Spanner."],
     gotchas: [],
     docs: "https://cloud.google.com/sql",
     main: "managed-sql",
@@ -181,15 +179,9 @@ export const services: CloudService[] = [
     youManage: "Schema, queries, primary and read pool sizes.",
     scaling: "Read pool nodes for reads; storage scales automatically.",
     pricing: "Per vCPU and memory-hour plus storage.",
-    useWhen: [
-      "Demanding PostgreSQL workloads, and mixed transactional plus analytical queries.",
-    ],
-    avoidWhen: [
-      "Small databases where Cloud SQL costs less.",
-    ],
-    gotchas: [
-      "Includes vector search (ScaNN index) next to relational data.",
-    ],
+    useWhen: ["Demanding PostgreSQL workloads, and mixed transactional plus analytical queries."],
+    avoidWhen: ["Small databases where Cloud SQL costs less."],
+    gotchas: ["Includes vector search (ScaNN index) next to relational data."],
     docs: "https://cloud.google.com/alloydb",
     main: "cloud-native-sql",
   },
@@ -207,9 +199,7 @@ export const services: CloudService[] = [
       "Relational data that outgrows one primary, or must survive a Region failure with no data loss.",
       "Global inventory, ledgers, games and user data that need transactions at scale.",
     ],
-    avoidWhen: [
-      "Small apps: Cloud SQL is far cheaper below the scale where Spanner pays off.",
-    ],
+    avoidWhen: ["Small apps: Cloud SQL is far cheaper below the scale where Spanner pays off."],
     gotchas: [
       "Monotonically increasing primary keys create write hotspots; use UUIDs or bit-reversed sequences.",
       "Supports GoogleSQL and a PostgreSQL interface, plus graph (Spanner Graph), full-text and vector search.",
@@ -227,12 +217,8 @@ export const services: CloudService[] = [
     youManage: "Collections, indexes and security rules.",
     scaling: "Automatic; regional or multi-region locations.",
     pricing: "Per document read, write and delete, plus storage, with a free tier.",
-    useWhen: [
-      "Mobile and web app data with live updates, and serverless backends.",
-    ],
-    avoidWhen: [
-      "Write-heavy time-series or analytics at very high volume: use Bigtable or BigQuery.",
-    ],
+    useWhen: ["Mobile and web app data with live updates, and serverless backends."],
+    avoidWhen: ["Write-heavy time-series or analytics at very high volume: use Bigtable or BigQuery."],
     gotchas: [
       "Sustained writes to one document, or to sequential keys, are rate-limited; spread hot counters.",
       "A MongoDB-compatible API lets MongoDB drivers and tools work against Firestore.",
@@ -250,15 +236,9 @@ export const services: CloudService[] = [
     youManage: "Row key design, column families and node count (or autoscaling).",
     scaling: "Add nodes for linear throughput; replication across clusters and Regions.",
     pricing: "Per node-hour plus storage.",
-    useWhen: [
-      "Time series, IoT, ad-tech, personalisation features and chat history at very high write rates.",
-    ],
-    avoidWhen: [
-      "Ad-hoc queries or transactions across rows.",
-    ],
-    gotchas: [
-      "Row key design is everything: reads are by key or key range, and sequential keys create hotspots.",
-    ],
+    useWhen: ["Time series, IoT, ad-tech, personalisation features and chat history at very high write rates."],
+    avoidWhen: ["Ad-hoc queries or transactions across rows."],
+    gotchas: ["Row key design is everything: reads are by key or key range, and sequential keys create hotspots."],
     docs: "https://cloud.google.com/bigtable",
     main: "wide-column",
   },
@@ -270,17 +250,12 @@ export const services: CloudService[] = [
     group: "databases",
     tagline: "Managed SQL Server engine as a database service, with Hyperscale for very large databases.",
     youManage: "Schema, queries, service tier and compute size (or serverless range).",
-    scaling: "Vertical, read replicas, Hyperscale up to 128 TB with fast scale-out readers, elastic pools for many databases.",
+    scaling:
+      "Vertical, read replicas, Hyperscale up to 128 TB with fast scale-out readers, elastic pools for many databases.",
     pricing: "Per vCore-hour (or serverless per vCore-second) plus storage.",
-    useWhen: [
-      "SQL Server workloads and .NET apps; multi-tenant SaaS with elastic pools.",
-    ],
-    avoidWhen: [
-      "Teams standardised on PostgreSQL: use Azure Database for PostgreSQL.",
-    ],
-    gotchas: [
-      "SQL Managed Instance gives near-full SQL Server compatibility for lift-and-shift.",
-    ],
+    useWhen: ["SQL Server workloads and .NET apps; multi-tenant SaaS with elastic pools."],
+    avoidWhen: ["Teams standardised on PostgreSQL: use Azure Database for PostgreSQL."],
+    gotchas: ["SQL Managed Instance gives near-full SQL Server compatibility for lift-and-shift."],
     docs: "https://azure.microsoft.com/en-us/products/azure-sql/database",
     main: "managed-sql",
   },
@@ -294,13 +269,9 @@ export const services: CloudService[] = [
     youManage: "Schema, queries, compute tier and replicas.",
     scaling: "Vertical plus read replicas; elastic clusters shard with Citus.",
     pricing: "Per vCore-hour plus storage.",
-    useWhen: [
-      "The default open-source relational database on Azure.",
-    ],
+    useWhen: ["The default open-source relational database on Azure."],
     avoidWhen: [],
-    gotchas: [
-      "HorizonDB, a new scale-out PostgreSQL service, was announced in November 2025 and is in preview.",
-    ],
+    gotchas: ["HorizonDB, a new scale-out PostgreSQL service, was announced in November 2025 and is in preview."],
     docs: "https://azure.microsoft.com/en-us/products/postgresql",
     main: "managed-sql",
   },
@@ -310,7 +281,8 @@ export const services: CloudService[] = [
     name: "Azure Cosmos DB",
     short: "Cosmos DB",
     group: "databases",
-    tagline: "Globally distributed NoSQL with single-digit-millisecond latency, five consistency levels and several APIs.",
+    tagline:
+      "Globally distributed NoSQL with single-digit-millisecond latency, five consistency levels and several APIs.",
     youManage: "Partition key, indexing policy, consistency level, Regions and throughput (RU/s).",
     scaling: "Provisioned, autoscale or serverless request units; add Regions with a click; multi-Region writes.",
     pricing: "Per request unit (provisioned per hour or consumed) plus storage.",
@@ -318,9 +290,7 @@ export const services: CloudService[] = [
       "Key-value and document data at global scale with low latency in every Region.",
       "Picking a consistency level per workload (session consistency is the common default).",
     ],
-    avoidWhen: [
-      "Relational joins and ad-hoc analytics: use Azure SQL or Fabric.",
-    ],
+    avoidWhen: ["Relational joins and ad-hoc analytics: use Azure SQL or Fabric."],
     gotchas: [
       "Every operation costs request units; a query that fans out across partitions costs far more than a point read.",
       "Multi-Region writes cannot use strong consistency.",
@@ -335,19 +305,14 @@ export const services: CloudService[] = [
     name: "Azure DocumentDB",
     short: "Azure DocumentDB",
     group: "databases",
-    tagline: "MongoDB-compatible document database on the open-source DocumentDB engine (formerly Cosmos DB for MongoDB vCore).",
+    tagline:
+      "MongoDB-compatible document database on the open-source DocumentDB engine (formerly Cosmos DB for MongoDB vCore).",
     youManage: "Cluster tier, shards, indexes and high availability.",
     scaling: "Scale compute per shard and add shards.",
     pricing: "Per cluster tier-hour plus storage.",
-    useWhen: [
-      "MongoDB apps moving to Azure that want familiar vCore sizing and MongoDB tooling.",
-    ],
-    avoidWhen: [
-      "Global multi-Region writes with RU billing: use Cosmos DB for MongoDB (RU).",
-    ],
-    gotchas: [
-      "Generally available under this name since November 2025.",
-    ],
+    useWhen: ["MongoDB apps moving to Azure that want familiar vCore sizing and MongoDB tooling."],
+    avoidWhen: ["Global multi-Region writes with RU billing: use Cosmos DB for MongoDB (RU)."],
+    gotchas: ["Generally available under this name since November 2025."],
     docs: "https://azure.microsoft.com/en-us/products/documentdb",
     main: "document-db",
   },
@@ -361,12 +326,8 @@ export const services: CloudService[] = [
     youManage: "Indexes, indexers or push ingestion, scoring profiles and replicas/partitions.",
     scaling: "Partitions for storage, replicas for query throughput.",
     pricing: "Per search unit per hour by tier.",
-    useWhen: [
-      "Product and document search, and the retrieval layer for RAG on Azure.",
-    ],
-    avoidWhen: [
-      "As the system of record.",
-    ],
+    useWhen: ["Product and document search, and the retrieval layer for RAG on Azure."],
+    avoidWhen: ["As the system of record."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/ai-services/ai-search",
     main: "search",
@@ -405,7 +366,11 @@ export const capabilities: Capability[] = [
     title: "Distributed SQL across Regions",
     summary: "Relational transactions with strong consistency and writes in more than one Region.",
     aws: { services: ["aws-aurora-dsql"], fit: "direct" },
-    gcp: { services: ["gcp-spanner"], fit: "direct", note: "The original: external consistency with TrueTime, since 2017." },
+    gcp: {
+      services: ["gcp-spanner"],
+      fit: "direct",
+      note: "The original: external consistency with TrueTime, since 2017.",
+    },
     azure: {
       services: ["Azure Cosmos DB for PostgreSQL"],
       fit: "partial",
@@ -418,7 +383,11 @@ export const capabilities: Capability[] = [
     title: "Serverless key-value / document NoSQL",
     summary: "Single-digit-millisecond reads and writes by key, with no servers to size.",
     aws: { services: ["aws-dynamodb"], fit: "direct" },
-    gcp: { services: ["gcp-firestore", "gcp-bigtable"], fit: "close", note: "Firestore for app data; Bigtable for huge write-heavy tables." },
+    gcp: {
+      services: ["gcp-firestore", "gcp-bigtable"],
+      fit: "close",
+      note: "Firestore for app data; Bigtable for huge write-heavy tables.",
+    },
     azure: { services: ["azure-cosmos-db"], fit: "direct", note: "Five consistency levels and multi-Region writes." },
   },
   {
@@ -437,7 +406,11 @@ export const capabilities: Capability[] = [
     summary: "JSON documents with the MongoDB API.",
     aws: { services: ["aws-documentdb"], fit: "direct" },
     gcp: { services: ["gcp-firestore"], fit: "close" },
-    azure: { services: ["azure-documentdb", "Azure Cosmos DB for MongoDB (RU)"], fit: "direct", note: "Azure DocumentDB is the former Cosmos DB for MongoDB (vCore), renamed in November 2025." },
+    azure: {
+      services: ["azure-documentdb", "Azure Cosmos DB for MongoDB (RU)"],
+      fit: "direct",
+      note: "Azure DocumentDB is the former Cosmos DB for MongoDB (vCore), renamed in November 2025.",
+    },
   },
   {
     id: "graph-db",
@@ -458,7 +431,11 @@ export const capabilities: Capability[] = [
       fit: "direct",
       note: "Timestream for LiveAnalytics closed to new customers on June 20, 2025.",
     },
-    gcp: { services: ["gcp-bigtable", "gcp-bigquery"], fit: "partial", note: "No dedicated time-series database service." },
+    gcp: {
+      services: ["gcp-bigtable", "gcp-bigquery"],
+      fit: "partial",
+      note: "No dedicated time-series database service.",
+    },
     azure: { services: ["Azure Data Explorer"], fit: "close" },
   },
   {
@@ -467,7 +444,11 @@ export const capabilities: Capability[] = [
     title: "Search engine",
     summary: "Full-text search, relevance ranking, facets and log search.",
     aws: { services: ["aws-opensearch"], fit: "direct" },
-    gcp: { services: ["Vertex AI Search", "Elastic Cloud (Marketplace)"], fit: "partial", note: "No managed OpenSearch/Elasticsearch of its own." },
+    gcp: {
+      services: ["Vertex AI Search", "Elastic Cloud (Marketplace)"],
+      fit: "partial",
+      note: "No managed OpenSearch/Elasticsearch of its own.",
+    },
     azure: { services: ["azure-ai-search"], fit: "direct" },
   },
   {

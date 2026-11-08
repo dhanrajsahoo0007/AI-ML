@@ -43,8 +43,7 @@ scope.onmessage = async (event: MessageEvent) => {
     const tc = req.cases[i];
     const start = performance.now();
     const raw = JSON.parse(String(runCase(req.code, req.entry, req.mode, JSON.stringify(tc)))) as
-      | { ok: true; actual: unknown; logs: string }
-      | { ok: false; error: string; logs: string };
+      { ok: true; actual: unknown; logs: string } | { ok: false; error: string; logs: string };
     const logs = raw.logs ? raw.logs.replace(/\n$/, "").split("\n") : [];
     const ms = Math.round(performance.now() - start);
     const result: CaseResult = raw.ok

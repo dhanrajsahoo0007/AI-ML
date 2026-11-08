@@ -15,7 +15,11 @@ export const dynamic = "force-dynamic";
 
 const body = z.object({
   email: z.string().trim().max(254).pipe(z.email()),
-  consentVersion: z.string().max(32).refine(isConsentVersion, "unknown consent version").default(CURRENT_CONSENT_VERSION),
+  consentVersion: z
+    .string()
+    .max(32)
+    .refine(isConsentVersion, "unknown consent version")
+    .default(CURRENT_CONSENT_VERSION),
   source: z.enum(["archive", "issue"]).default("archive"),
   /** Honeypot: hidden from people, filled in by naive bots. */
   website: z.string().max(200).default(""),

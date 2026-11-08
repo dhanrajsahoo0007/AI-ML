@@ -136,13 +136,7 @@ export function subscriptionTransition(input: {
 // ── Payments, refunds, disputes ──────────────────────────────────────────────────────────────────────────────
 
 export type PaymentStatus =
-  | "succeeded"
-  | "failed"
-  | "refunded"
-  | "partially_refunded"
-  | "disputed"
-  | "dispute_won"
-  | "dispute_lost";
+  "succeeded" | "failed" | "refunded" | "partially_refunded" | "disputed" | "dispute_won" | "dispute_lost";
 
 type MoneyEvent = Extract<BillingEvent, { kind: "payment" | "refund" | "dispute" }>;
 

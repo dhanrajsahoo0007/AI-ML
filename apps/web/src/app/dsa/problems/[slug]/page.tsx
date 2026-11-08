@@ -41,13 +41,17 @@ export default async function ProblemPage({ params }: { params: ProblemParams })
   return (
     <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
       <JsonLd data={seo.jsonLd} />
-      <Breadcrumb items={[...hubCrumbs(section), { label: "Problems", href: problemListHref(section) }, { label: fm.title }]} />
+      <Breadcrumb
+        items={[...hubCrumbs(section), { label: "Problems", href: problemListHref(section) }, { label: fm.title }]}
+      />
 
       <header className="mt-10 mb-8 space-y-4 border-b border-hairline pb-8">
         <h1 className="font-display text-4xl leading-[1.05] tracking-tight text-balance sm:text-5xl">{fm.title}</h1>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <DifficultyLabel difficulty={fm.difficulty} />
-          <span className="text-sm text-muted-foreground">{access === "free" ? "Free editorial" : "Pro editorial"}</span>
+          <span className="text-sm text-muted-foreground">
+            {access === "free" ? "Free editorial" : "Pro editorial"}
+          </span>
         </div>
         <Tags label="Patterns" items={labels.patterns} />
         <Tags label="Asked at" items={labels.companies} />

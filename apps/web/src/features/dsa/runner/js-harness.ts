@@ -65,7 +65,8 @@ export async function runJsCase(code: string, entry: string, mode: HarnessMode, 
       return { status: "error", error: `${entry} is not defined. Keep the ${what} name from the starter code.`, logs };
     }
     const args = structuredClone(tc.args);
-    let out: unknown = mode === "class" ? construct(target, args, entry) : (target as (...a: unknown[]) => unknown)(...args);
+    let out: unknown =
+      mode === "class" ? construct(target, args, entry) : (target as (...a: unknown[]) => unknown)(...args);
     if (out && typeof (out as Promise<unknown>).then === "function") out = await out;
     const actual = toJsonValue(out);
     return { status: sameValue(actual, tc.expected) ? "pass" : "fail", actual: formatValue(actual), logs, ms: ms() };

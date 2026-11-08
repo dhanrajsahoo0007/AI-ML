@@ -7,7 +7,9 @@ import { DIFFICULTY_CLASS } from "./difficulty";
 // Server components shared by the problems-kind pages.
 
 export function DifficultyLabel({ difficulty }: { difficulty: Difficulty }) {
-  return <span className={`text-sm font-semibold ${DIFFICULTY_CLASS[difficulty]}`}>{DIFFICULTY_LABELS[difficulty]}</span>;
+  return (
+    <span className={`text-sm font-semibold ${DIFFICULTY_CLASS[difficulty]}`}>{DIFFICULTY_LABELS[difficulty]}</span>
+  );
 }
 
 export function Tags({ label, items }: { label: string; items: { slug: string; label: string }[] }) {
@@ -35,8 +37,8 @@ export function ProEditorial() {
       <div className="flex items-start gap-3 rounded-xl border border-dashed border-hairline bg-paper-2 px-5 py-6 text-sm text-ink-2">
         <Lock aria-hidden className="mt-0.5 size-4 shrink-0" />
         <p>
-          <span className="font-semibold text-ink">Pro</span> The editorial walks through the approaches, the
-          complexity and a tested solution in every language.{" "}
+          <span className="font-semibold text-ink">Pro</span> The editorial walks through the approaches, the complexity
+          and a tested solution in every language.{" "}
           <Link href="/pricing" className="underline underline-offset-2">
             Available with Pro
           </Link>

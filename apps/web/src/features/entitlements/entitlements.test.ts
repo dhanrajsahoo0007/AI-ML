@@ -107,7 +107,10 @@ describe("oa_ent sign / verify", () => {
     const token = await signEntitlement({ ...claims, tier: "free" }, ring.current, now);
     const [h, p, s] = token.split(".");
     const payload = JSON.parse(atob(p.replace(/-/g, "+").replace(/_/g, "/")));
-    const forged = btoa(JSON.stringify({ ...payload, tier: "pro" })).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+    const forged = btoa(JSON.stringify({ ...payload, tier: "pro" }))
+      .replace(/=+$/, "")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
     expect(await verifyEntitlement(`${h}.${forged}.${s}`, ring, now)).toBeNull();
     const other = keyringFromEnv(`k9:${secret()}`, undefined)!;
     expect(await verifyEntitlement(await signEntitlement(claims, other.current, now), ring, now)).toBeNull();

@@ -33,4 +33,3 @@ export const vitalsPayload = z
     message: "each metric at most once",
     path: ["metrics"],
   });
-

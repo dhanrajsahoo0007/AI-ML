@@ -62,7 +62,11 @@ export default async function AccountProgressPage() {
       <section aria-label="Completed" className="rounded-2xl border border-hairline bg-paper p-6 sm:p-8">
         <h2 className="font-display text-2xl tracking-tight">Completed · {completed.length}</h2>
         <div className="mt-4">
-          <ContentList rows={completed} empty="Mark articles complete to track them here." testId="progress-completed" />
+          <ContentList
+            rows={completed}
+            empty="Mark articles complete to track them here."
+            testId="progress-completed"
+          />
         </div>
       </section>
       <p className="text-sm text-muted-foreground">

@@ -298,31 +298,66 @@ export const AWS_COMPUTE_OPTIONS: ResponsibilityOption[] = [
     id: "ecs-ec2",
     label: "ECS on EC2",
     sub: "your instances",
-    owners: { code: "you", scaling: "shared", upgrades: "shared", orchestrator: "provider", capacity: "shared", os: "you" },
+    owners: {
+      code: "you",
+      scaling: "shared",
+      upgrades: "shared",
+      orchestrator: "provider",
+      capacity: "shared",
+      os: "you",
+    },
   },
   {
     id: "eks",
     label: "EKS",
     sub: "managed node groups",
-    owners: { code: "you", scaling: "you", upgrades: "you", orchestrator: "provider", capacity: "shared", os: "shared" },
+    owners: {
+      code: "you",
+      scaling: "you",
+      upgrades: "you",
+      orchestrator: "provider",
+      capacity: "shared",
+      os: "shared",
+    },
   },
   {
     id: "eks-auto",
     label: "EKS Auto Mode",
     sub: "AWS runs nodes",
-    owners: { code: "you", scaling: "shared", upgrades: "shared", orchestrator: "provider", capacity: "provider", os: "provider" },
+    owners: {
+      code: "you",
+      scaling: "shared",
+      upgrades: "shared",
+      orchestrator: "provider",
+      capacity: "provider",
+      os: "provider",
+    },
   },
   {
     id: "fargate",
     label: "ECS on Fargate",
     sub: "no hosts",
-    owners: { code: "you", scaling: "shared", upgrades: "provider", orchestrator: "provider", capacity: "provider", os: "provider" },
+    owners: {
+      code: "you",
+      scaling: "shared",
+      upgrades: "provider",
+      orchestrator: "provider",
+      capacity: "provider",
+      os: "provider",
+    },
   },
   {
     id: "lambda",
     label: "Lambda",
     sub: "functions",
-    owners: { code: "you", scaling: "provider", upgrades: "shared", orchestrator: "provider", capacity: "provider", os: "provider" },
+    owners: {
+      code: "you",
+      scaling: "provider",
+      upgrades: "shared",
+      orchestrator: "provider",
+      capacity: "provider",
+      os: "provider",
+    },
   },
 ];
 
@@ -367,9 +402,21 @@ export const DECISION_TREES: Record<string, DecisionTree> = {
         id: "fate",
         prompt: "What should happen to each message?",
         options: [
-          { label: "One worker handles it, then it's gone", hint: "jobs: emails, thumbnails, payments to capture", next: "order" },
-          { label: "Several services each react to it", hint: "OrderPlaced → billing, email, analytics", next: "fanout" },
-          { label: "Many readers, in order, with replay", hint: "clickstreams, telemetry, a chat message bus", next: "stream" },
+          {
+            label: "One worker handles it, then it's gone",
+            hint: "jobs: emails, thumbnails, payments to capture",
+            next: "order",
+          },
+          {
+            label: "Several services each react to it",
+            hint: "OrderPlaced → billing, email, analytics",
+            next: "fanout",
+          },
+          {
+            label: "Many readers, in order, with replay",
+            hint: "clickstreams, telemetry, a chat message bus",
+            next: "stream",
+          },
         ],
       },
       {
@@ -385,7 +432,11 @@ export const DECISION_TREES: Record<string, DecisionTree> = {
         prompt: "How do subscribers pick their events?",
         options: [
           { label: "By type and content", hint: "many teams, AWS and SaaS sources", next: "r-eventbridge" },
-          { label: "Each subscriber takes everything", hint: "high volume, simple fan-out to queues", next: "r-sns-sqs" },
+          {
+            label: "Each subscriber takes everything",
+            hint: "high volume, simple fan-out to queues",
+            next: "r-sns-sqs",
+          },
         ],
       },
       {
@@ -401,7 +452,11 @@ export const DECISION_TREES: Record<string, DecisionTree> = {
       {
         id: "r-sqs",
         headline: "Amazon SQS (standard queue)",
-        answer: { aws: ["aws-sqs"], gcp: ["gcp-pubsub", "gcp-cloud-tasks"], azure: ["azure-service-bus", "Queue Storage"] },
+        answer: {
+          aws: ["aws-sqs"],
+          gcp: ["gcp-pubsub", "gcp-cloud-tasks"],
+          azure: ["azure-service-bus", "Queue Storage"],
+        },
         why: "Absorbs bursts, scales without limits, and each message is processed by one consumer, with retries and a dead-letter queue.",
         tradeoff: "At-least-once and only roughly ordered, so consumers must be idempotent.",
       },
@@ -438,7 +493,8 @@ export const DECISION_TREES: Record<string, DecisionTree> = {
         headline: "Amazon MSK",
         answer: { aws: ["aws-msk"], gcp: ["gcp-managed-kafka"], azure: ["azure-event-hubs"] },
         why: "Real Kafka: consumer groups, compaction, Connect and Streams, and the same clients on any cloud.",
-        tradeoff: "More to tune than Kinesis (partitions, retention, broker sizing), unless you use Serverless or Express brokers.",
+        tradeoff:
+          "More to tune than Kinesis (partitions, retention, broker sizing), unless you use Serverless or Express brokers.",
       },
     ],
   },
@@ -450,10 +506,18 @@ export const DECISION_TREES: Record<string, DecisionTree> = {
         id: "shape",
         prompt: "What are you running?",
         options: [
-          { label: "Short, event-driven tasks", hint: "uploads, queue messages, webhooks, cron; each run under 15 min", next: "fn-load" },
+          {
+            label: "Short, event-driven tasks",
+            hint: "uploads, queue messages, webhooks, cron; each run under 15 min",
+            next: "fn-load",
+          },
           { label: "A long-running service", hint: "APIs, web apps, WebSocket servers, consumers", next: "service" },
           { label: "Batch or scheduled jobs", hint: "ETL, rendering, simulations, training", next: "r-batch" },
-          { label: "Something that needs the whole machine", hint: "GPUs, licensed software, custom kernel, legacy app", next: "r-ec2" },
+          {
+            label: "Something that needs the whole machine",
+            hint: "GPUs, licensed software, custom kernel, legacy app",
+            next: "r-ec2",
+          },
         ],
       },
       {
@@ -515,7 +579,8 @@ export const DECISION_TREES: Record<string, DecisionTree> = {
         headline: "AWS Batch on Spot",
         answer: { aws: ["aws-batch"], gcp: ["gcp-batch"], azure: ["azure-batch"] },
         why: "Batch queues jobs, starts EC2, Spot or Fargate capacity for them and scales back to zero. Spot cuts the bill sharply for jobs that can retry.",
-        tradeoff: "Spot capacity can be reclaimed with 2 minutes' notice, so jobs must checkpoint and be safe to rerun.",
+        tradeoff:
+          "Spot capacity can be reclaimed with 2 minutes' notice, so jobs must checkpoint and be safe to rerun.",
       },
       {
         id: "r-ec2",
@@ -537,7 +602,8 @@ export const DECISION_TREES: Record<string, DecisionTree> = {
         headline: "ECS on Fargate",
         answer: { aws: ["aws-ecs", "aws-fargate"], gcp: ["gcp-cloud-run"], azure: ["azure-container-apps"] },
         why: "Each task gets its own right-sized micro-VM; there are no hosts, AMIs or cluster capacity to manage, and ECS has no control-plane fee.",
-        tradeoff: "Costs more per vCPU-hour than EC2 at steady high load, no GPUs, and tasks top out at 16 vCPU / 120 GB.",
+        tradeoff:
+          "Costs more per vCPU-hour than EC2 at steady high load, no GPUs, and tasks top out at 16 vCPU / 120 GB.",
       },
       {
         id: "r-ecs-ec2",
@@ -548,7 +614,8 @@ export const DECISION_TREES: Record<string, DecisionTree> = {
           azure: ["azure-aks", "Container Apps dedicated profiles"],
         },
         why: "You choose instance types (GPU, memory-heavy, Graviton), pack many tasks per host, and use Spot and Savings Plans. Managed Instances let AWS patch and replace those hosts.",
-        tradeoff: "Capacity providers and host sizing are yours; Managed Instances remove the host work but add a management fee.",
+        tradeoff:
+          "Capacity providers and host sizing are yours; Managed Instances remove the host work but add a management fee.",
       },
       {
         id: "r-eks-auto",

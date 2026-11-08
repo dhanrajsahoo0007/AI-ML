@@ -29,9 +29,7 @@ export function AdminShell({
     // data-copy-ok="page": the admin pages are tools, not content, so copy protection stays out of the way.
     <div data-copy-ok="page" data-testid="admin-page" className="mx-auto w-full max-w-[1200px] px-4 py-10 sm:px-8">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-          Admin · read-only
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Admin · read-only</p>
         <p className="text-[13px] text-muted-foreground">Signed in as {viewer.email}</p>
       </div>
       <nav aria-label="Admin" className="mt-4 flex flex-wrap gap-2 border-b border-hairline pb-4">
@@ -175,7 +173,10 @@ export function Table<Row>({
 }) {
   if (rows.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-hairline p-4 text-[14px] text-muted-foreground" data-testid={testId}>
+      <p
+        className="rounded-xl border border-dashed border-hairline p-4 text-[14px] text-muted-foreground"
+        data-testid={testId}
+      >
         {empty}
       </p>
     );
@@ -186,7 +187,11 @@ export function Table<Row>({
         <thead className="bg-paper-2 text-left text-[12px] uppercase tracking-wide text-muted-foreground">
           <tr>
             {columns.map((c) => (
-              <th key={c.header} scope="col" className={cn("px-3 py-2 font-medium", c.align === "right" && "text-right")}>
+              <th
+                key={c.header}
+                scope="col"
+                className={cn("px-3 py-2 font-medium", c.align === "right" && "text-right")}
+              >
                 {c.header}
               </th>
             ))}

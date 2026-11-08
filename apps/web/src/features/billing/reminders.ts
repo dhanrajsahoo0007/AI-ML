@@ -50,10 +50,21 @@ export async function sendRenewalReminders(
     const [already] = await db
       .select({ id: auditLog.id })
       .from(auditLog)
-      .where(and(eq(auditLog.action, ACTION), eq(auditLog.target, `subscription:${sub.id}`), sql`${auditLog.meta}->>'periodEnd' = ${periodEnd}`))
+      .where(
+        and(
+          eq(auditLog.action, ACTION),
+          eq(auditLog.target, `subscription:${sub.id}`),
+          sql`${auditLog.meta}->>'periodEnd' = ${periodEnd}`
+        )
+      )
       .limit(1);
     if (already) continue;
-    const renewsOn = sub.periodEnd!.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+    const renewsOn = sub.periodEnd!.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    });
     await enqueueEmail(
       {
         kind: "billing.renewal-reminder",
@@ -68,7 +79,9 @@ export async function sendRenewalReminders(
       },
       { queue: options.queue, sender }
     );
-    await db.insert(auditLog).values({ actor: "system:reminders", action: ACTION, target: `subscription:${sub.id}`, meta: { periodEnd } });
+    await db
+      .insert(auditLog)
+      .values({ actor: "system:reminders", action: ACTION, target: `subscription:${sub.id}`, meta: { periodEnd } });
     sent++;
   }
   return { sent };

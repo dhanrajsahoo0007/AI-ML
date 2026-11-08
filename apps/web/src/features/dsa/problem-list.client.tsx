@@ -24,9 +24,16 @@ export function ProblemList({ index }: { index: ProblemIndex }) {
 
   return (
     <div>
-      <form className="flex flex-wrap items-end gap-3" aria-label="Filter problems" onSubmit={(e) => e.preventDefault()}>
+      <form
+        className="flex flex-wrap items-end gap-3"
+        aria-label="Filter problems"
+        onSubmit={(e) => e.preventDefault()}
+      >
         {FILTERS.map(({ key, label, all }) => (
-          <label key={key} className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          <label
+            key={key}
+            className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground"
+          >
             {label}
             <select
               name={key}
@@ -44,14 +51,20 @@ export function ProblemList({ index }: { index: ProblemIndex }) {
           </label>
         ))}
         {active && (
-          <button type="button" onClick={() => setFilters({})} className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-ink">
+          <button
+            type="button"
+            onClick={() => setFilters({})}
+            className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-ink"
+          >
             Clear filters
           </button>
         )}
       </form>
 
       <p className="mt-6 text-sm text-muted-foreground" aria-live="polite" data-problem-count>
-        {shown.length === index.problems.length ? `${shown.length} problems` : `${shown.length} of ${index.problems.length} problems`}
+        {shown.length === index.problems.length
+          ? `${shown.length} problems`
+          : `${shown.length} of ${index.problems.length} problems`}
       </p>
 
       <ul className="mt-3 divide-y divide-hairline border-y border-hairline" aria-label="Problems">
@@ -60,8 +73,14 @@ export function ProblemList({ index }: { index: ProblemIndex }) {
             <Link href={p.href} className="font-semibold text-ink underline-offset-4 hover:underline">
               {p.title}
             </Link>
-            <span className={`text-xs font-semibold ${DIFFICULTY_CLASS[p.difficulty]}`}>{DIFFICULTY_LABELS[p.difficulty]}</span>
-            {p.access === "premium" && <span className="rounded-full border border-hairline px-2 text-xs text-muted-foreground">Pro editorial</span>}
+            <span className={`text-xs font-semibold ${DIFFICULTY_CLASS[p.difficulty]}`}>
+              {DIFFICULTY_LABELS[p.difficulty]}
+            </span>
+            {p.access === "premium" && (
+              <span className="rounded-full border border-hairline px-2 text-xs text-muted-foreground">
+                Pro editorial
+              </span>
+            )}
             <span className="w-full text-sm text-muted-foreground sm:ml-auto sm:w-auto">
               {p.patterns.map((s) => patternLabels.get(s) ?? s).join(" · ")}
             </span>

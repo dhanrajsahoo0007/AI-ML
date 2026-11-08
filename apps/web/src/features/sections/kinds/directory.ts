@@ -35,7 +35,12 @@ export const directoryKind: SectionKind<Company> = {
   sitemap: (section) => [{ url: section.href }],
 
   search(section, items) {
-    return items.map((c) => ({ href: `${section.href}?company=${c.slug}`, title: c.name, description: c.roles, section: section.key }));
+    return items.map((c) => ({
+      href: `${section.href}?company=${c.slug}`,
+      title: c.name,
+      description: c.roles,
+      section: section.key,
+    }));
   },
 
   access: (section) => section.access?.default ?? "free",

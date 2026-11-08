@@ -38,11 +38,7 @@ export function CategoryView({ category, preview = false }: { category: Category
     <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
       {seo && <JsonLd data={seo.jsonLd} />}
       <Breadcrumb
-        items={[
-          { label: "Home", href: "/" },
-          { label: section.label, href: section.href },
-          { label: category.title },
-        ]}
+        items={[{ label: "Home", href: "/" }, { label: section.label, href: section.href }, { label: category.title }]}
       />
       <FadeIn>
         <PageHeader
@@ -74,16 +70,12 @@ export function CategoryView({ category, preview = false }: { category: Category
             className="group flex flex-col rounded-xl border border-hairline bg-paper p-5 transition-colors hover:border-ink/30"
           >
             <span className="flex items-baseline justify-between gap-3">
-              <span className="font-display text-lg leading-snug text-ink group-hover:text-primary">
-                {s.title}
-              </span>
+              <span className="font-display text-lg leading-snug text-ink group-hover:text-primary">{s.title}</span>
               <span className="shrink-0 font-mono text-xs text-muted-foreground">
                 {getQuestions({ category: category.slug, subcategory: s.slug }).length}
               </span>
             </span>
-            <span className="mt-1.5 flex-1 text-sm leading-relaxed text-muted-foreground">
-              {s.description}
-            </span>
+            <span className="mt-1.5 flex-1 text-sm leading-relaxed text-muted-foreground">{s.description}</span>
             <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-ink">
               Practice
               <ArrowRight aria-hidden className="size-3.5 transition-transform group-hover:translate-x-0.5" />

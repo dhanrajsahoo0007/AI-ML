@@ -18,15 +18,73 @@ export const TIER_PERCENT: Readonly<Record<PriceTier, number>> = { A: 100, B: 70
 
 /** ~70%: Eastern Europe, upper-middle-income Latin America, the Gulf except the UAE, upper-middle Asia. */
 const TIER_B_COUNTRIES = [
-  "AL", "AM", "AR", "AZ", "BA", "BG", "BH", "CL", "CN", "CO", "CR", "CZ", "DO", "EC", "EE", "GE", "HR", "HU", "KW",
-  "KZ", "LT", "LV", "MD", "ME", "MK", "MX", "MY", "OM", "PA", "PE", "PL", "QA", "RO", "RS", "SA", "SI", "SK", "TH",
-  "TR", "UA", "UY", "ZA",
+  "AL",
+  "AM",
+  "AR",
+  "AZ",
+  "BA",
+  "BG",
+  "BH",
+  "CL",
+  "CN",
+  "CO",
+  "CR",
+  "CZ",
+  "DO",
+  "EC",
+  "EE",
+  "GE",
+  "HR",
+  "HU",
+  "KW",
+  "KZ",
+  "LT",
+  "LV",
+  "MD",
+  "ME",
+  "MK",
+  "MX",
+  "MY",
+  "OM",
+  "PA",
+  "PE",
+  "PL",
+  "QA",
+  "RO",
+  "RS",
+  "SA",
+  "SI",
+  "SK",
+  "TH",
+  "TR",
+  "UA",
+  "UY",
+  "ZA",
 ] as const;
 
 /** ~40–50%: South and South-East Asia, most of Africa, Egypt, Brazil. */
 const TIER_C_COUNTRIES = [
-  "BD", "BR", "DZ", "EG", "ET", "GH", "ID", "IN", "KE", "KH", "LK", "MA", "MM", "NG", "NP", "PH", "PK", "TN", "TZ",
-  "UG", "VN",
+  "BD",
+  "BR",
+  "DZ",
+  "EG",
+  "ET",
+  "GH",
+  "ID",
+  "IN",
+  "KE",
+  "KH",
+  "LK",
+  "MA",
+  "MM",
+  "NG",
+  "NP",
+  "PH",
+  "PK",
+  "TN",
+  "TZ",
+  "UG",
+  "VN",
 ] as const;
 
 /**
@@ -34,8 +92,37 @@ const TIER_C_COUNTRIES = [
  * America, the UK, Western and Southern Europe, Australia and New Zealand, Singapore, the UAE, Japan, and so on.
  */
 const TIER_A_COUNTRIES = [
-  "AE", "AT", "AU", "BE", "CA", "CH", "CY", "DE", "DK", "ES", "FI", "FR", "GB", "GR", "HK", "IE", "IL", "IS", "IT",
-  "JP", "KR", "LU", "MT", "NL", "NO", "NZ", "PT", "SE", "SG", "TW", "US",
+  "AE",
+  "AT",
+  "AU",
+  "BE",
+  "CA",
+  "CH",
+  "CY",
+  "DE",
+  "DK",
+  "ES",
+  "FI",
+  "FR",
+  "GB",
+  "GR",
+  "HK",
+  "IE",
+  "IL",
+  "IS",
+  "IT",
+  "JP",
+  "KR",
+  "LU",
+  "MT",
+  "NL",
+  "NO",
+  "NZ",
+  "PT",
+  "SE",
+  "SG",
+  "TW",
+  "US",
 ] as const;
 
 const TIER_OF = new Map<string, PriceTier>([
@@ -44,7 +131,11 @@ const TIER_OF = new Map<string, PriceTier>([
 ]);
 
 /** Every country the region switcher lists, A, B and C together, by code. */
-export const LISTED_COUNTRIES: readonly string[] = [...TIER_A_COUNTRIES, ...TIER_B_COUNTRIES, ...TIER_C_COUNTRIES].sort();
+export const LISTED_COUNTRIES: readonly string[] = [
+  ...TIER_A_COUNTRIES,
+  ...TIER_B_COUNTRIES,
+  ...TIER_C_COUNTRIES,
+].sort();
 
 const COUNTRY_CODE = /^[A-Z]{2}$/;
 

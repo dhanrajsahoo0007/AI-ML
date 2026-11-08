@@ -82,7 +82,12 @@ describe("runJsCase", () => {
     });
   });
   it("captures console output", async () => {
-    const r = await runJsCase('function twoSum(n, t) { console.log("n =", n, t); return [0, 1]; }', "twoSum", "function", tc);
+    const r = await runJsCase(
+      'function twoSum(n, t) { console.log("n =", n, t); return [0, 1]; }',
+      "twoSum",
+      "function",
+      tc
+    );
     expect(r.logs).toEqual(["n = [2,7,11,15] 9"]);
   });
   it("gives every case a fresh copy of the arguments and fresh module state", async () => {
@@ -93,15 +98,23 @@ describe("runJsCase", () => {
     expect(c.args).toEqual([[]]);
   });
   it("shadows network globals inside user code", async () => {
-    const r = await runJsCase("function f() { return [typeof fetch, typeof XMLHttpRequest, typeof WebSocket]; }", "f", "function", {
-      args: [],
-      expected: ["undefined", "undefined", "undefined"],
-    });
+    const r = await runJsCase(
+      "function f() { return [typeof fetch, typeof XMLHttpRequest, typeof WebSocket]; }",
+      "f",
+      "function",
+      {
+        args: [],
+        expected: ["undefined", "undefined", "undefined"],
+      }
+    );
     expect(r.status).toBe("pass");
   });
   it("drives a class through a list of operations", async () => {
     const r = await runJsCase(REFERENCE["LRU Cache"], "LRUCache", "class", {
-      args: [["LRUCache", "put", "get", "get"], [[1], [1, 5], [1], [2]]],
+      args: [
+        ["LRUCache", "put", "get", "get"],
+        [[1], [1, 5], [1], [2]],
+      ],
       expected: [null, null, 5, -1],
     });
     expect(r.status).toBe("pass");
@@ -120,7 +133,12 @@ describe("reference solutions against the content's test files", () => {
       }
     });
     it(`${p.fm.title}: the starter code fails the public cases`, async () => {
-      const r = await runJsCase(p.fm.starter.javascript!, p.fm.entry.javascript!, p.fm.mode, readPublicTests(section, p)[0]);
+      const r = await runJsCase(
+        p.fm.starter.javascript!,
+        p.fm.entry.javascript!,
+        p.fm.mode,
+        readPublicTests(section, p)[0]
+      );
       expect(r.status).not.toBe("pass");
     });
   }
@@ -129,7 +147,11 @@ describe("reference solutions against the content's test files", () => {
 describe("lockdown", () => {
   it("removes network APIs from the scope and its prototypes", () => {
     const proto = { fetch: () => "net", keep: 1 };
-    const scope = Object.assign(Object.create(proto), { XMLHttpRequest: class {}, WebSocket: class {}, importScripts: () => {} });
+    const scope = Object.assign(Object.create(proto), {
+      XMLHttpRequest: class {},
+      WebSocket: class {},
+      importScripts: () => {},
+    });
     lockdown(scope);
     for (const name of BLOCKED_GLOBALS) expect(scope[name], name).toBeUndefined();
     expect("fetch" in proto).toBe(false);

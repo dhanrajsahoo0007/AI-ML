@@ -18,9 +18,7 @@ export default async function HomePage() {
   // Stats count only `on` sections, each through its kind's counts().
   const loaded = await Promise.all(visibleSections().map(loadSection));
   const written = (kind: SectionKindName) =>
-    loaded
-      .filter((l) => l.section.kind === kind)
-      .reduce((n, l) => n + l.kind.counts(l.items).written, 0);
+    loaded.filter((l) => l.section.kind === kind).reduce((n, l) => n + l.kind.counts(l.items).written, 0);
 
   return (
     <>

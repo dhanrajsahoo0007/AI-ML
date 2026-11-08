@@ -7,10 +7,13 @@ export const services: CloudService[] = [
     name: "Amazon Bedrock",
     short: "Bedrock",
     group: "ai-ml",
-    tagline: "One API for foundation models from Anthropic (Claude), Amazon, Meta, Mistral and others, with guardrails and RAG.",
+    tagline:
+      "One API for foundation models from Anthropic (Claude), Amazon, Meta, Mistral and others, with guardrails and RAG.",
     youManage: "Model choice, prompts, guardrails, knowledge bases and quotas.",
-    scaling: "On-demand per-token quotas per Region; cross-Region inference spreads load; provisioned throughput for reserved capacity.",
-    pricing: "Per input and output token on demand; batch inference at a discount; prompt caching lowers repeated-prefix cost.",
+    scaling:
+      "On-demand per-token quotas per Region; cross-Region inference spreads load; provisioned throughput for reserved capacity.",
+    pricing:
+      "Per input and output token on demand; batch inference at a discount; prompt caching lowers repeated-prefix cost.",
     useWhen: [
       "Adding LLM features (chat, summarisation, extraction, agents) with data staying in your AWS account and VPC.",
       "Grounding answers in your documents with Knowledge Bases, and filtering with Guardrails.",
@@ -45,13 +48,16 @@ export const services: CloudService[] = [
     name: "Amazon SageMaker AI",
     short: "SageMaker AI",
     group: "ai-ml",
-    tagline: "Build, train, tune and deploy your own ML models: notebooks, training jobs, HyperPod clusters and endpoints.",
+    tagline:
+      "Build, train, tune and deploy your own ML models: notebooks, training jobs, HyperPod clusters and endpoints.",
     youManage: "Data, training code, instance types and endpoint scaling.",
     scaling: "Training jobs and HyperPod clusters across many GPUs or Trainium chips; endpoints autoscale.",
     pricing: "Per instance-second for notebooks, training and endpoints.",
     useWhen: ["Training or fine-tuning your own models, and hosting them behind managed endpoints."],
     avoidWhen: ["Calling an existing foundation model: Bedrock is simpler."],
-    gotchas: ["Renamed from Amazon SageMaker in December 2024; \"SageMaker\" now also names the wider data and AI platform."],
+    gotchas: [
+      'Renamed from Amazon SageMaker in December 2024; "SageMaker" now also names the wider data and AI platform.',
+    ],
     docs: "https://aws.amazon.com/sagemaker/ai/",
     main: "ml-platform",
   },
@@ -61,13 +67,12 @@ export const services: CloudService[] = [
     name: "Vertex AI",
     short: "Vertex AI",
     group: "ai-ml",
-    tagline: "Google's AI platform: Gemini, Claude and open models through Model Garden, plus training, tuning and serving your own.",
+    tagline:
+      "Google's AI platform: Gemini, Claude and open models through Model Garden, plus training, tuning and serving your own.",
     youManage: "Model choice, prompts, endpoints, pipelines and quotas.",
     scaling: "Per-model quotas, provisioned throughput, and autoscaling endpoints.",
     pricing: "Per token for foundation models; per node-hour for training and custom endpoints.",
-    useWhen: [
-      "LLM features on Google Cloud, and full ML lifecycles from training to serving.",
-    ],
+    useWhen: ["LLM features on Google Cloud, and full ML lifecycles from training to serving."],
     avoidWhen: [],
     gotchas: [
       "Claude models are available on Vertex AI alongside Gemini, so the same Anthropic models run on all three clouds.",
@@ -85,9 +90,7 @@ export const services: CloudService[] = [
     youManage: "Agent code (ADK, LangGraph and other frameworks) and its tools.",
     scaling: "Fully managed.",
     pricing: "Per vCPU and GiB-hour of runtime, plus memory and session usage.",
-    useWhen: [
-      "Deploying agents to production on Google Cloud.",
-    ],
+    useWhen: ["Deploying agents to production on Google Cloud."],
     avoidWhen: [],
     gotchas: [],
     docs: "https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview",
@@ -103,12 +106,8 @@ export const services: CloudService[] = [
     youManage: "TPU slices, frameworks (JAX, PyTorch/XLA) and scheduling.",
     scaling: "From single hosts to large pods; usable from GKE and Vertex AI.",
     pricing: "Per chip-hour, with Spot and committed-use discounts.",
-    useWhen: [
-      "Large training or inference jobs where TPUs give better price-performance than GPUs.",
-    ],
-    avoidWhen: [
-      "Code tied to CUDA-only libraries.",
-    ],
+    useWhen: ["Large training or inference jobs where TPUs give better price-performance than GPUs."],
+    avoidWhen: ["Code tied to CUDA-only libraries."],
     gotchas: [],
     docs: "https://cloud.google.com/tpu",
     main: "ai-chips",
@@ -119,13 +118,12 @@ export const services: CloudService[] = [
     name: "Microsoft Foundry",
     short: "Microsoft Foundry",
     group: "ai-ml",
-    tagline: "Azure's AI platform (formerly Azure AI Foundry): OpenAI, Claude and many other models, agents, evaluation and safety.",
+    tagline:
+      "Azure's AI platform (formerly Azure AI Foundry): OpenAI, Claude and many other models, agents, evaluation and safety.",
     youManage: "Model deployments, prompts, agents, evaluations and content filters.",
     scaling: "Per-deployment token quotas; provisioned throughput units for reserved capacity.",
     pricing: "Per token on standard deployments; per PTU for provisioned throughput.",
-    useWhen: [
-      "LLM features and agents on Azure, with Entra ID, private networking and content safety built in.",
-    ],
+    useWhen: ["LLM features and agents on Azure, with Entra ID, private networking and content safety built in."],
     avoidWhen: [],
     gotchas: [
       "Renamed from Azure AI Foundry at Ignite in November 2025; Azure AI Services became Foundry Tools.",
@@ -144,12 +142,8 @@ export const services: CloudService[] = [
     youManage: "Workspaces, compute clusters, jobs, registries and endpoints.",
     scaling: "Compute clusters scale to zero; managed online endpoints autoscale.",
     pricing: "Per VM-hour for compute and endpoints.",
-    useWhen: [
-      "Custom model training, fine-tuning and MLOps on Azure.",
-    ],
-    avoidWhen: [
-      "Calling existing foundation models: use Microsoft Foundry.",
-    ],
+    useWhen: ["Custom model training, fine-tuning and MLOps on Azure."],
+    avoidWhen: ["Calling existing foundation models: use Microsoft Foundry."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/machine-learning",
     main: "ml-platform",
@@ -164,7 +158,11 @@ export const capabilities: Capability[] = [
     summary: "API access to many models, including Claude, with guardrails and evaluation.",
     aws: { services: ["aws-bedrock"], fit: "direct" },
     gcp: { services: ["gcp-vertex-ai"], fit: "direct" },
-    azure: { services: ["azure-foundry"], fit: "direct", note: "Formerly Azure AI Foundry; renamed at Ignite in November 2025." },
+    azure: {
+      services: ["azure-foundry"],
+      fit: "direct",
+      note: "Formerly Azure AI Foundry; renamed at Ignite in November 2025.",
+    },
   },
   {
     id: "agents",
@@ -209,6 +207,10 @@ export const capabilities: Capability[] = [
     summary: "Vision, speech, translation and document extraction as APIs.",
     aws: { services: ["Rekognition", "Transcribe", "Textract", "Translate"], fit: "direct" },
     gcp: { services: ["Vision AI", "Speech-to-Text", "Document AI", "Translation"], fit: "direct" },
-    azure: { services: ["azure-foundry"], fit: "direct", note: "Formerly Azure AI Services: Vision, Speech, Document Intelligence, Translator." },
+    azure: {
+      services: ["azure-foundry"],
+      fit: "direct",
+      note: "Formerly Azure AI Services: Vision, Speech, Document Intelligence, Translator.",
+    },
   },
 ];

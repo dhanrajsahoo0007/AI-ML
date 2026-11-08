@@ -66,7 +66,8 @@ describe("buildProblemIndex", () => {
   });
   it("never carries starters, tests, complexity or editorial fields", () => {
     const json = JSON.stringify(index);
-    for (const field of ["starter", "tests", "complexity", "entry", "related", "file"]) expect(json).not.toContain(`"${field}"`);
+    for (const field of ["starter", "tests", "complexity", "entry", "related", "file"])
+      expect(json).not.toContain(`"${field}"`);
   });
   it("builds facets with labels and counts; difficulties in easy → hard order", () => {
     expect(index.facets.difficulty.map((f) => f.value)).toEqual(["easy", "medium", "hard"]);

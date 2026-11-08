@@ -45,7 +45,9 @@ export const problemFrontmatterSchema = z
     tests: z.object({ public: testPath("public"), hidden: testPath("hidden") }).strict(),
     complexity: z.object({ time: z.string().min(1), space: z.string().min(1) }).strict(),
     /** Site paths of related pages, e.g. /system-design/patterns/caching or /dsa/problems/two-sum. */
-    related: z.array(z.string().regex(/^\/[a-z0-9/-]+$/, "must be a site path such as /system-design/patterns/caching")).default([]),
+    related: z
+      .array(z.string().regex(/^\/[a-z0-9/-]+$/, "must be a site path such as /system-design/patterns/caching"))
+      .default([]),
     status: z.enum(["draft", "published"]).default("published"),
     order: z.number().optional(),
   })

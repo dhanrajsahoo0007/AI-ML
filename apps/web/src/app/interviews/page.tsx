@@ -29,8 +29,7 @@ export default function InterviewsIndexPage() {
   const section = routeSection("question-bank");
   const categories = getCategories();
   const total = getQuestions().length;
-  const count = (category: string, subcategory?: string) =>
-    getQuestions({ category, subcategory }).length;
+  const count = (category: string, subcategory?: string) => getQuestions({ category, subcategory }).length;
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8">
@@ -65,18 +64,14 @@ export default function InterviewsIndexPage() {
                         <div className="flex size-10 items-center justify-center rounded-lg bg-paper-2 text-primary">
                           {Icon && <Icon aria-hidden className="size-5" />}
                         </div>
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {count(c.slug)} questions
-                        </span>
+                        <span className="font-mono text-xs text-muted-foreground">{count(c.slug)} questions</span>
                       </div>
                       <h2 className="mt-6 font-display text-2xl leading-tight">
                         <Link href={`/interviews/${c.slug}`} className="hover:text-primary">
                           {c.title}
                         </Link>
                       </h2>
-                      <p className="mt-3 text-[15px] leading-relaxed text-muted-foreground">
-                        {c.description}
-                      </p>
+                      <p className="mt-3 text-[15px] leading-relaxed text-muted-foreground">{c.description}</p>
                       <ul className="mt-5 flex flex-1 flex-wrap content-start gap-1.5">
                         {c.subsections.map((s) => (
                           <li key={s.slug}>

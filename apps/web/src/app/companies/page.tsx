@@ -58,13 +58,13 @@ export default async function CompaniesPage() {
         />
       </FadeIn>
       <Suspense>
-      <CompanyExplorer groups={COMPANY_GROUPS} companies={companies} footer={<SourceCredit />}>
-        {questionItems(
-          tagged,
-          (q) => categoryTitles.get(q.category)!,
-          (q) => premiumAnswers.has(q.category)
-        )}
-      </CompanyExplorer>
+        <CompanyExplorer groups={COMPANY_GROUPS} companies={companies} footer={<SourceCredit />}>
+          {questionItems(
+            tagged,
+            (q) => categoryTitles.get(q.category)!,
+            (q) => premiumAnswers.has(q.category)
+          )}
+        </CompanyExplorer>
       </Suspense>
     </div>
   );

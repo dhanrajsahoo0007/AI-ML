@@ -26,8 +26,7 @@ export function Hero() {
 
         <FadeIn delay={0.04}>
           <h1 className="mt-8 max-w-4xl font-display text-[clamp(2.75rem,6.5vw,5.25rem)] leading-[1.02] text-balance">
-            {hero.headline[0]}{" "}
-            <em className="text-primary">{hero.headline[1]}</em>
+            {hero.headline[0]} <em className="text-primary">{hero.headline[1]}</em>
           </h1>
         </FadeIn>
 
@@ -47,9 +46,7 @@ export function Hero() {
 
         <FadeIn delay={0.12}>
           <div className="mt-10 flex flex-wrap gap-3">
-            <ButtonLink href={hero.primaryCta.href}>
-              {hero.primaryCta.label}
-            </ButtonLink>
+            <ButtonLink href={hero.primaryCta.href}>{hero.primaryCta.label}</ButtonLink>
             <ButtonLink href={hero.secondaryCta.href} variant="secondary">
               {hero.secondaryCta.label}
             </ButtonLink>

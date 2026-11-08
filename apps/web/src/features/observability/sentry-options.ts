@@ -31,7 +31,8 @@ export function isLocalHost(hostname: string): boolean {
   return LOCAL_HOSTS.has(hostname) || hostname.endsWith(".localhost") || hostname.endsWith(".test");
 }
 
-const SENSITIVE_HEADER = /^(cookie|set-cookie|authorization|proxy-authorization|x-api-key|cf-connecting-ip|x-forwarded-for|x-real-ip|true-client-ip)$/i;
+const SENSITIVE_HEADER =
+  /^(cookie|set-cookie|authorization|proxy-authorization|x-api-key|cf-connecting-ip|x-forwarded-for|x-real-ip|true-client-ip)$/i;
 
 function stripQuery(url: string): string {
   const i = url.search(/[?#]/);

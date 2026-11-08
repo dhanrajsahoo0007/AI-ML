@@ -17,7 +17,7 @@ type TabElement = React.ReactElement<{ label: string; note?: string; children: R
 
 export function DataModelView({ title, children }: { title?: string; children: React.ReactNode }) {
   const tabs = React.Children.toArray(children).filter(
-    (c): c is TabElement => React.isValidElement(c) && typeof (c.props as { label?: unknown }).label === "string",
+    (c): c is TabElement => React.isValidElement(c) && typeof (c.props as { label?: unknown }).label === "string"
   );
   const [active, setActive] = useState(0);
   const current = tabs[active];
@@ -26,7 +26,9 @@ export function DataModelView({ title, children }: { title?: string; children: R
     <div className="my-8 overflow-hidden rounded-xl border border-hairline bg-paper">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline px-4 pt-3 sm:px-5">
         {title && (
-          <span className="pb-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">{title}</span>
+          <span className="pb-2.5 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            {title}
+          </span>
         )}
         <div role="tablist" aria-label={title ?? "Data model"} className="flex flex-wrap gap-1">
           {tabs.map((t, i) => (
@@ -40,7 +42,7 @@ export function DataModelView({ title, children }: { title?: string; children: R
                 "-mb-px border-b-2 px-3 pb-2.5 pt-1 text-sm transition-colors",
                 i === active
                   ? "border-ink font-semibold text-ink"
-                  : "border-transparent text-muted-foreground hover:text-ink",
+                  : "border-transparent text-muted-foreground hover:text-ink"
               )}
             >
               {t.props.label}

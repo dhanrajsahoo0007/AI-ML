@@ -24,7 +24,8 @@ function differences(row: Row | undefined, snap: SubscriptionSnapshot): string[]
   if (!row) return ["missing"];
   const out: string[] = [];
   if (snap.status !== "pending" && row.status !== snap.status) out.push("status");
-  if ((row.currentPeriodEnd?.getTime() ?? null) !== (snap.currentPeriodEnd?.getTime() ?? null)) out.push("currentPeriodEnd");
+  if ((row.currentPeriodEnd?.getTime() ?? null) !== (snap.currentPeriodEnd?.getTime() ?? null))
+    out.push("currentPeriodEnd");
   if (row.cancelAtPeriodEnd !== snap.cancelAtPeriodEnd) out.push("cancelAtPeriodEnd");
   if (snap.plan && row.plan !== snap.plan) out.push("plan");
   return out;
@@ -42,7 +43,12 @@ export async function reconcile(db: Db, provider: PaymentProvider, now: Date = n
     const [row] = await db
       .select()
       .from(subscription)
-      .where(and(eq(subscription.provider, provider.id), eq(subscription.providerSubscriptionId, snap.providerSubscriptionId)))
+      .where(
+        and(
+          eq(subscription.provider, provider.id),
+          eq(subscription.providerSubscriptionId, snap.providerSubscriptionId)
+        )
+      )
       .limit(1);
     const fields = differences(row, snap);
     if (fields.length === 0 || snap.status === "pending") return;

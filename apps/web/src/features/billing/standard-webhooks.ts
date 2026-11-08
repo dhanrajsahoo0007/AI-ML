@@ -31,9 +31,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 async function hmacKey(secret: string): Promise<CryptoKey> {
   const raw = base64ToBytes(secret.startsWith("whsec_") ? secret.slice(6) : secret);
   if (!raw || raw.byteLength < 16) throw new WebhookVerificationError("invalid webhook secret");
-  return crypto.subtle.importKey("raw", raw as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, [
-    "sign",
-  ]);
+  return crypto.subtle.importKey("raw", raw as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 }
 
 /** `v1,<base64>` for the given message; exported for test fixtures. */

@@ -56,9 +56,7 @@ export function parseRegistry(text: string, file = REGISTRY_FILE): SectionEntry[
 
 /** Each entry with its state for `env`, in `order`. */
 export function resolveSections(entries: SectionEntry[], env: AppEnv): SectionDef[] {
-  return entries
-    .map((s) => ({ ...s, state: s.release[env] }))
-    .sort((a, b) => a.order - b.order);
+  return entries.map((s) => ({ ...s, state: s.release[env] })).sort((a, b) => a.order - b.order);
 }
 
 let cache: { env: AppEnv; sections: SectionDef[] } | null = null;

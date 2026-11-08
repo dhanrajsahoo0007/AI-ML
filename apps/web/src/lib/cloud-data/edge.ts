@@ -15,7 +15,9 @@ export const services: CloudService[] = [
       "DNS for anything on AWS, including private zones inside VPCs.",
       "Multi-Region designs: latency-based, geolocation, weighted and failover routing.",
     ],
-    avoidWhen: ["You need instant failover: DNS answers are cached for the record's TTL, so clients move over gradually."],
+    avoidWhen: [
+      "You need instant failover: DNS answers are cached for the record's TTL, so clients move over gradually.",
+    ],
     gotchas: [
       "Alias records point a zone apex (example.com) at a load balancer or CloudFront, which plain CNAMEs cannot.",
       "Failover speed is bounded by TTLs and client caching; keep TTLs short on records that may fail over.",
@@ -54,7 +56,8 @@ export const services: CloudService[] = [
     name: "AWS Global Accelerator",
     short: "Global Accelerator",
     group: "edge",
-    tagline: "Two static anycast IPs that carry users onto the AWS backbone at the nearest edge and to the healthiest Region.",
+    tagline:
+      "Two static anycast IPs that carry users onto the AWS backbone at the nearest edge and to the healthiest Region.",
     youManage: "Listeners, endpoint groups per Region and traffic dials.",
     scaling: "Fully managed.",
     pricing: "Per accelerator-hour plus a premium per GB.",
@@ -77,9 +80,7 @@ export const services: CloudService[] = [
     youManage: "Zones, records, routing policies and health checks.",
     scaling: "Global, with a 100% availability SLA.",
     pricing: "Per zone per month plus per million queries.",
-    useWhen: [
-      "DNS for anything on Google Cloud, including private zones and geolocation or failover routing.",
-    ],
+    useWhen: ["DNS for anything on Google Cloud, including private zones and geolocation or failover routing."],
     avoidWhen: [],
     gotchas: [],
     docs: "https://cloud.google.com/dns",
@@ -95,13 +96,9 @@ export const services: CloudService[] = [
     youManage: "Cache modes, cache keys, signed URLs and origins.",
     scaling: "Global edge network.",
     pricing: "Per GB served and per cache-fill, varying by region.",
-    useWhen: [
-      "Static assets, images and media for a global audience.",
-    ],
+    useWhen: ["Static assets, images and media for a global audience."],
     avoidWhen: [],
-    gotchas: [
-      "Cloud CDN is switched on per backend of the external Application Load Balancer.",
-    ],
+    gotchas: ["Cloud CDN is switched on per backend of the external Application Load Balancer."],
     docs: "https://cloud.google.com/cdn",
     main: "cdn",
   },
@@ -115,12 +112,8 @@ export const services: CloudService[] = [
     youManage: "Endpoints, routes, origin groups, caching rules and WAF policy.",
     scaling: "Microsoft's global edge network.",
     pricing: "Standard or Premium base fee plus requests and data transfer.",
-    useWhen: [
-      "Any global web app or API on Azure; multi-Region failover for HTTP.",
-    ],
-    avoidWhen: [
-      "Non-HTTP traffic: use the cross-region Load Balancer or Traffic Manager.",
-    ],
+    useWhen: ["Any global web app or API on Azure; multi-Region failover for HTTP."],
+    avoidWhen: ["Non-HTTP traffic: use the cross-region Load Balancer or Traffic Manager."],
     gotchas: [
       "Front Door (classic) retires on March 31, 2027 and Azure CDN Standard from Microsoft (classic) on September 30, 2027; use Front Door Standard or Premium.",
     ],
@@ -137,12 +130,8 @@ export const services: CloudService[] = [
     youManage: "Zones and records.",
     scaling: "Global.",
     pricing: "Per zone per month plus per million queries.",
-    useWhen: [
-      "DNS for Azure resources, including private zones for private endpoints.",
-    ],
-    avoidWhen: [
-      "Latency or geographic steering: add Traffic Manager or Front Door.",
-    ],
+    useWhen: ["DNS for Azure resources, including private zones for private endpoints."],
+    avoidWhen: ["Latency or geographic steering: add Traffic Manager or Front Door."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/dns",
     main: "dns",
@@ -157,12 +146,8 @@ export const services: CloudService[] = [
     youManage: "Profiles, endpoints and health monitoring.",
     scaling: "Global DNS.",
     pricing: "Per million queries and per monitored endpoint.",
-    useWhen: [
-      "Failover or latency routing for non-HTTP endpoints across Regions or clouds.",
-    ],
-    avoidWhen: [
-      "HTTP apps: Front Door fails over faster and adds caching and WAF.",
-    ],
+    useWhen: ["Failover or latency routing for non-HTTP endpoints across Regions or clouds."],
+    avoidWhen: ["HTTP apps: Front Door fails over faster and adds caching and WAF."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/traffic-manager",
     main: "dns-steering",
@@ -194,8 +179,16 @@ export const capabilities: Capability[] = [
     title: "Content delivery network",
     summary: "Cache content at edge locations close to users.",
     aws: { services: ["aws-cloudfront"], fit: "direct" },
-    gcp: { services: ["gcp-cloud-cdn"], fit: "direct", note: "Media CDN is built for large video and download traffic." },
-    azure: { services: ["azure-front-door"], fit: "direct", note: "Front Door combines CDN, global load balancing and WAF." },
+    gcp: {
+      services: ["gcp-cloud-cdn"],
+      fit: "direct",
+      note: "Media CDN is built for large video and download traffic.",
+    },
+    azure: {
+      services: ["azure-front-door"],
+      fit: "direct",
+      note: "Front Door combines CDN, global load balancing and WAF.",
+    },
   },
   {
     id: "anycast-entry",

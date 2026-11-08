@@ -21,20 +21,28 @@ class CapturingSender implements EmailSender {
 const input: EmailJobInput = {
   kind: "newsletter.confirm",
   to: "ada@example.com",
-  data: { confirmUrl: "https://site.example/n/confirm?token=a.b", unsubscribeUrl: "https://site.example/n/unsubscribe?token=c.d" },
+  data: {
+    confirmUrl: "https://site.example/n/confirm?token=a.b",
+    unsubscribeUrl: "https://site.example/n/unsubscribe?token=c.d",
+  },
 };
 
 describe("enqueueEmail", () => {
   it("puts a validated, versioned job on the queue and never builds the inline sender", async () => {
     const queue = new FakeQueue();
-    const result = await enqueueEmail({ ...input, idempotencyKey: "newsletter.confirm:k1" }, {
-      queue,
-      sender: () => {
-        throw new Error("the inline sender must not be built when a queue exists");
-      },
-    });
+    const result = await enqueueEmail(
+      { ...input, idempotencyKey: "newsletter.confirm:k1" },
+      {
+        queue,
+        sender: () => {
+          throw new Error("the inline sender must not be built when a queue exists");
+        },
+      }
+    );
     expect(result).toEqual({ via: "queue", idempotencyKey: "newsletter.confirm:k1" });
-    expect(queue.sent).toEqual([{ body: { v: 1, ...input, idempotencyKey: "newsletter.confirm:k1" }, options: { contentType: "json" } }]);
+    expect(queue.sent).toEqual([
+      { body: { v: 1, ...input, idempotencyKey: "newsletter.confirm:k1" }, options: { contentType: "json" } },
+    ]);
   });
 
   it("without a queue binding, renders and sends inline with the job's idempotency key", async () => {
@@ -44,7 +52,11 @@ describe("enqueueEmail", () => {
       expect(result.via).toBe("inline");
     }
     expect(sender.sent).toHaveLength(2);
-    expect(sender.sent[0]).toMatchObject({ to: "ada@example.com", template: "confirm-subscription", idempotencyKey: "newsletter.confirm:k2" });
+    expect(sender.sent[0]).toMatchObject({
+      to: "ada@example.com",
+      template: "confirm-subscription",
+      idempotencyKey: "newsletter.confirm:k2",
+    });
     expect(sender.sent[0].text).toContain("https://site.example/n/confirm?token=a.b");
   });
 
@@ -77,7 +89,9 @@ describe("enqueueEmail", () => {
 
   it("lets a failed queue send or inline send reach the caller", async () => {
     const failingQueue: EmailQueueProducer = { send: async () => Promise.reject(new Error("queue down")) };
-    await expect(enqueueEmail(input, { queue: failingQueue, sender: new CapturingSender() })).rejects.toThrow("queue down");
+    await expect(enqueueEmail(input, { queue: failingQueue, sender: new CapturingSender() })).rejects.toThrow(
+      "queue down"
+    );
     const failingSender: EmailSender = { send: async () => Promise.reject(new Error("provider down")) };
     await expect(enqueueEmail(input, { sender: failingSender })).rejects.toThrow("provider down");
   });

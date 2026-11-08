@@ -39,7 +39,11 @@ export function CheckoutReturn({ alreadyPro }: { alreadyPro: boolean }) {
     slow: "Your payment is still being confirmed. This page will show Pro as soon as it is; you can also refresh in a minute.",
   }[state];
   return (
-    <p role="status" data-testid="checkout-return" className="rounded-xl border border-hairline bg-paper-2 p-4 text-[15px] text-ink">
+    <p
+      role="status"
+      data-testid="checkout-return"
+      className="rounded-xl border border-hairline bg-paper-2 p-4 text-[15px] text-ink"
+    >
       {text}
     </p>
   );

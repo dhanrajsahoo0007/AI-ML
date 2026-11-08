@@ -53,7 +53,7 @@ export function rehypeMermaidSvg({ filePath, lineOffset = 0 }: Options) {
       if (isDev) return null;
       const line = ("position" in at && at.position?.start.line ? at.position.start.line : 0) + lineOffset;
       throw new Error(
-        `${file}:${line}: Mermaid diagram has no pre-rendered SVG. Run \`npm run mermaid\` (it also runs before \`npm run build\`).`,
+        `${file}:${line}: Mermaid diagram has no pre-rendered SVG. Run \`npm run mermaid\` (it also runs before \`npm run build\`).`
       );
     }
     const attributes: MdxAttribute[] = [

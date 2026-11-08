@@ -19,7 +19,10 @@ function hiddenNeedles() {
   return problems.flatMap((p) =>
     readHiddenTestsForValidation(section, p).flatMap((tc) => {
       const args = JSON.stringify(tc.args);
-      return [...(tc.name ? [tc.name] : []), ...(args.length >= 12 ? [args] : [])].map((needle) => ({ problem: p.slug, needle }));
+      return [...(tc.name ? [tc.name] : []), ...(args.length >= 12 ? [args] : [])].map((needle) => ({
+        problem: p.slug,
+        needle,
+      }));
     })
   );
 }
@@ -36,11 +39,18 @@ describe("hidden tests stay on the build machine", () => {
   const needles = hiddenNeedles();
 
   it("every problem has hidden cases to look for", () => {
-    for (const p of problems) expect(needles.some((n) => n.problem === p.slug), p.slug).toBe(true);
+    for (const p of problems)
+      expect(
+        needles.some((n) => n.problem === p.slug),
+        p.slug
+      ).toBe(true);
   });
 
   it("are not in the workspace props or the problem index", () => {
-    const shipped = JSON.stringify([...problems.map((p) => workspaceProps(section, p)), problemIndex(section, problems)]);
+    const shipped = JSON.stringify([
+      ...problems.map((p) => workspaceProps(section, p)),
+      problemIndex(section, problems),
+    ]);
     expect(needles.filter((n) => shipped.includes(n.needle))).toEqual([]);
     // The props carry the public cases and nothing that points at the hidden file.
     expect(shipped).not.toContain("hidden");

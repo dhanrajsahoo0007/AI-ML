@@ -14,7 +14,11 @@ const stateClass = {
 function State({ value, current }: { value: keyof typeof stateClass; current?: boolean }) {
   return (
     <span
-      className={cn("rounded-full px-2 py-0.5 text-[12px] font-medium", stateClass[value], current && "ring-1 ring-ink")}
+      className={cn(
+        "rounded-full px-2 py-0.5 text-[12px] font-medium",
+        stateClass[value],
+        current && "ring-1 ring-ink"
+      )}
     >
       {value}
     </span>

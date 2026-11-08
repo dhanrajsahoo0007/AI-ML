@@ -94,9 +94,7 @@ export function SubsectionView({
         title={`${subsection.title} questions`}
         locked={preview ? () => true : undefined}
       />
-      {preview && (
-        <Paywall path={`${section.href}/${category.slug}/${subsection.slug}`} what="set of answers" />
-      )}
+      {preview && <Paywall path={`${section.href}/${category.slug}/${subsection.slug}`} what="set of answers" />}
     </div>
   );
 }

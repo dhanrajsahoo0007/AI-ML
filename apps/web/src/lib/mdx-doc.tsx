@@ -51,7 +51,7 @@ export type { ContentSection };
 
 export async function getContentSlugs(section: ContentSection): Promise<string[]> {
   const dir = path.join(process.cwd(), "content", section);
-  
+
   async function walk(currentDir: string, basePath: string): Promise<string[]> {
     const entries = await fs.readdir(currentDir, { withFileTypes: true }).catch(() => []);
     let slugs: string[] = [];
@@ -65,7 +65,7 @@ export async function getContentSlugs(section: ContentSection): Promise<string[]
     }
     return slugs;
   }
-  
+
   return walk(dir, "");
 }
 
@@ -166,9 +166,7 @@ export async function loadMdxFile(filePath: string, options: LoadMdxOptions = {}
   };
 }
 
-export function partitionSlugs(
-  slugs: string[]
-): { topLevel: string[]; children: Record<string, string[]> } {
+export function partitionSlugs(slugs: string[]): { topLevel: string[]; children: Record<string, string[]> } {
   const topLevel: string[] = [];
   const children: Record<string, string[]> = {};
   for (const s of slugs) {
@@ -183,9 +181,7 @@ export function partitionSlugs(
   return { topLevel, children };
 }
 
-export async function getTopLevelMeta(
-  section: ContentSection
-): Promise<ContentMeta[]> {
+export async function getTopLevelMeta(section: ContentSection): Promise<ContentMeta[]> {
   const slugs = await getContentSlugs(section);
   const { topLevel } = partitionSlugs(slugs);
   const dir = path.join(process.cwd(), "content", section);

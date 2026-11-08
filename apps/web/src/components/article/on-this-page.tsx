@@ -78,7 +78,7 @@ function TocList({
                 h.level === 3 ? "pl-6" : "pl-3",
                 isActive
                   ? "border-ink font-medium text-ink"
-                  : "border-transparent text-muted-foreground hover:border-ink/30 hover:text-ink",
+                  : "border-transparent text-muted-foreground hover:border-ink/30 hover:text-ink"
               )}
             >
               {h.text}

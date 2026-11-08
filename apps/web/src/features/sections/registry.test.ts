@@ -59,12 +59,16 @@ describe("content/sections.yaml", () => {
   });
   it("orders sections by `order`", () => {
     const orders = resolveSections(entries, "local").map((s) => s.order);
-    assert.deepEqual(orders, [...orders].sort((a, b) => a - b));
+    assert.deepEqual(
+      orders,
+      [...orders].sort((a, b) => a - b)
+    );
   });
 });
 
 describe("parseRegistry", () => {
-  const base = "- { key: a, kind: docs, label: A, href: /a, icon: x, navGroup: learn, order: 1, hub: { title: A, subtitle: B }, release: { local: on, preview: on, staging: on, production: on } }\n";
+  const base =
+    "- { key: a, kind: docs, label: A, href: /a, icon: x, navGroup: learn, order: 1, hub: { title: A, subtitle: B }, release: { local: on, preview: on, staging: on, production: on } }\n";
   it("accepts a valid entry", () => {
     assert.equal(parseRegistry(base, "t.yaml").length, 1);
   });
@@ -72,7 +76,10 @@ describe("parseRegistry", () => {
     assert.throws(() => parseRegistry(base + base, "t.yaml"), /duplicate key a/);
   });
   it("rejects unknown release states and missing environments", () => {
-    assert.throws(() => parseRegistry(base.replace("production: on", "production: maybe"), "t.yaml"), /release\.production/);
+    assert.throws(
+      () => parseRegistry(base.replace("production: on", "production: maybe"), "t.yaml"),
+      /release\.production/
+    );
     assert.throws(() => parseRegistry(base.replace(", production: on", ""), "t.yaml"), /release\.production/);
   });
   it("requires href to be /<key>", () => {

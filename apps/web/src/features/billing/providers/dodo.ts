@@ -41,7 +41,10 @@ const iso = z.string().transform((s, ctx) => {
   }
   return d;
 });
-const currency = z.string().regex(/^[A-Za-z]{3}$/).transform((c) => c.toUpperCase());
+const currency = z
+  .string()
+  .regex(/^[A-Za-z]{3}$/)
+  .transform((c) => c.toUpperCase());
 const country = z
   .string()
   .regex(/^[A-Za-z]{2}$/)

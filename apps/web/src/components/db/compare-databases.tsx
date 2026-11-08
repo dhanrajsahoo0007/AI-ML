@@ -90,7 +90,9 @@ export function CompareDatabases({ a = "relational", b = "document" }: { a?: Fam
           <div className="divide-y divide-hairline border-b border-hairline">
             {facts.map(([label, get]) => (
               <div key={label} className="px-4 py-2.5 sm:px-5">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">{label}</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                  {label}
+                </div>
                 <div className="mt-1 grid grid-cols-2 gap-4 text-sm text-ink-2">
                   <span>{get(L)}</span>
                   <span>{get(R)}</span>
@@ -130,15 +132,7 @@ export function CompareDatabases({ a = "relational", b = "document" }: { a?: Fam
   );
 }
 
-function FamilySelect({
-  value,
-  onChange,
-  label,
-}: {
-  value: FamilyId;
-  onChange: (v: FamilyId) => void;
-  label: string;
-}) {
+function FamilySelect({ value, onChange, label }: { value: FamilyId; onChange: (v: FamilyId) => void; label: string }) {
   return (
     <select
       aria-label={label}
@@ -167,7 +161,9 @@ function Bar({ value, tone, flip = false, win }: { value: number; tone: string; 
           transition={{ duration: 0.4, ease: "easeOut" }}
         />
       </div>
-      <span className={cn("w-3 text-center text-xs tabular-nums", win ? "font-semibold text-ink" : "text-muted-foreground")}>
+      <span
+        className={cn("w-3 text-center text-xs tabular-nums", win ? "font-semibold text-ink" : "text-muted-foreground")}
+      >
         {value}
       </span>
     </div>

@@ -39,8 +39,7 @@ export const siteConfig = {
         num: "02",
         icon: "target",
         title: "Practice Interviews",
-        description:
-          "Drill questions by topic, difficulty and company, with answers hidden until you are ready.",
+        description: "Drill questions by topic, difficulty and company, with answers hidden until you are ready.",
       },
       {
         num: "03",
@@ -73,22 +72,19 @@ export const siteConfig = {
         href: "/interviews",
         icon: "brain",
         title: "Interview Prep",
-        description:
-          "AI interview questions organized by topic and subtopic, filterable by difficulty and company.",
+        description: "AI interview questions organized by topic and subtopic, filterable by difficulty and company.",
       },
       {
         href: "/companies",
         icon: "users",
         title: "Companies",
-        description:
-          "See what top AI companies are reported to ask, with their interview loops and our answers.",
+        description: "See what top AI companies are reported to ask, with their interview loops and our answers.",
       },
     ],
   },
   cta: {
     headline: "Ready to master AI?",
-    description:
-      "Start with the deep-dives, then practice the questions top AI companies ask.",
+    description: "Start with the deep-dives, then practice the questions top AI companies ask.",
     button: { label: "Explore GenAI & LLM Systems", href: "/ai-system-design" },
   },
 };

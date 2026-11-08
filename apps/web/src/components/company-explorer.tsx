@@ -66,9 +66,7 @@ export function CompanyExplorer({
                     aria-pressed={selected === c.slug}
                     className={cn(
                       "flex items-center gap-3 rounded-xl border p-3.5 text-left transition-colors",
-                      selected === c.slug
-                        ? "border-ink bg-paper-2"
-                        : "border-hairline bg-paper hover:border-ink/30"
+                      selected === c.slug ? "border-ink bg-paper-2" : "border-hairline bg-paper hover:border-ink/30"
                     )}
                   >
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background">

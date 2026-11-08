@@ -32,7 +32,11 @@ export const POST = serverToServerRoute({
     const verified = await verifyWebhookSignature({ secret, headers: request.headers, body });
     if (!verified.ok) {
       // Counted by the alert on signature failures (plan §11.8): > 5 in 10 minutes.
-      log.warn("webhook signature rejected", { request_id: requestId, provider: RESEND_PROVIDER, reason: verified.reason });
+      log.warn("webhook signature rejected", {
+        request_id: requestId,
+        provider: RESEND_PROVIDER,
+        reason: verified.reason,
+      });
       throw new HttpError(401, "invalid_signature", "Webhook signature verification failed");
     }
 

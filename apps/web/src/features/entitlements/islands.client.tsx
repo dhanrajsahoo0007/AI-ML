@@ -80,7 +80,11 @@ export function EntitlementKeeper() {
 
   if (!hint?.hold) return null;
   return (
-    <div role="status" data-testid="on-hold-banner" className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-center text-[14px] text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+    <div
+      role="status"
+      data-testid="on-hold-banner"
+      className="border-b border-amber-300 bg-amber-50 px-4 py-2 text-center text-[14px] text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+    >
       Your last payment didn&apos;t go through. Pro stays on for a few days while you{" "}
       <Link href="/account/billing" className="font-medium underline underline-offset-2">
         update your payment method

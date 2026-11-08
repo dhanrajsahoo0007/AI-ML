@@ -50,7 +50,12 @@ export const questionBankKind: SectionKind<Category> = {
   },
 
   search(section, items) {
-    return items.map((c) => ({ href: categoryHref(section, c), title: c.title, description: c.description, section: section.key }));
+    return items.map((c) => ({
+      href: categoryHref(section, c),
+      title: c.title,
+      description: c.description,
+      section: section.key,
+    }));
   },
 
   access(section) {
@@ -69,6 +74,10 @@ export const questionBankKind: SectionKind<Category> = {
   },
 
   validate() {
-    return validateLibrary().map((message) => ({ file: "content/question-bank", message: message.trim(), level: "error" as const }));
+    return validateLibrary().map((message) => ({
+      file: "content/question-bank",
+      message: message.trim(),
+      level: "error" as const,
+    }));
   },
 };

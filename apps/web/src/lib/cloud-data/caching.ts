@@ -11,8 +11,7 @@ export const services: CloudService[] = [
     youManage: "Engine, node type and shard count (or nothing, with Serverless), key design, TTLs and eviction policy.",
     scaling:
       "Cluster mode spreads 16,384 hash slots across shards and reshards online; Serverless scales automatically.",
-    pricing:
-      "Per node-hour, or per GB-hour stored and per ECPU for Serverless. Valkey is priced lower than Redis OSS.",
+    pricing: "Per node-hour, or per GB-hour stored and per ECPU for Serverless. Valkey is priced lower than Redis OSS.",
     useWhen: [
       "Cache-aside in front of a database, session stores, rate-limit counters, leaderboards (sorted sets).",
       "Ephemeral real-time state: presence, a user-to-server registry, pub/sub between servers.",
@@ -37,9 +36,13 @@ export const services: CloudService[] = [
     youManage: "Node type, shards and data model.",
     scaling: "Shards for writes, replicas for reads.",
     pricing: "Per node-hour plus per GB written to the transaction log.",
-    useWhen: ["You want Redis data structures as the primary database, with microsecond reads and no data loss on failover."],
+    useWhen: [
+      "You want Redis data structures as the primary database, with microsecond reads and no data loss on failover.",
+    ],
     avoidWhen: ["Plain caching: ElastiCache is cheaper and writes are faster."],
-    gotchas: ["Writes take single-digit milliseconds because they are committed to the log across zones before acknowledging."],
+    gotchas: [
+      "Writes take single-digit milliseconds because they are committed to the log across zones before acknowledging.",
+    ],
     docs: "https://aws.amazon.com/memorydb/",
   },
   {
@@ -67,12 +70,8 @@ export const services: CloudService[] = [
     youManage: "Engine, shard and replica counts, and persistence.",
     scaling: "Valkey and Redis Cluster scale shards online.",
     pricing: "Per node-hour or per GB-hour by tier.",
-    useWhen: [
-      "Caching, sessions, rate limits, leaderboards and presence on Google Cloud.",
-    ],
-    avoidWhen: [
-      "Data you cannot lose without a durable source behind it.",
-    ],
+    useWhen: ["Caching, sessions, rate limits, leaderboards and presence on Google Cloud."],
+    avoidWhen: ["Data you cannot lose without a durable source behind it."],
     gotchas: [
       "Memorystore for Valkey has been generally available since April 2025 and is the default for new caches.",
     ],
@@ -89,9 +88,7 @@ export const services: CloudService[] = [
     youManage: "Tier and size, clustering policy, persistence and geo-replication.",
     scaling: "Pick a memory size and tier; active geo-replication across Regions.",
     pricing: "Per instance-hour by tier and memory size.",
-    useWhen: [
-      "Caching, sessions, rate limits and real-time state on Azure.",
-    ],
+    useWhen: ["Caching, sessions, rate limits and real-time state on Azure."],
     avoidWhen: [],
     gotchas: [
       "Azure Cache for Redis is closed to new customers; Basic, Standard and Premium retire September 30, 2028, Enterprise tiers March 31, 2027.",

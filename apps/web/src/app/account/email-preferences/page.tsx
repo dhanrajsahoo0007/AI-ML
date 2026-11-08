@@ -17,7 +17,12 @@ export const metadata: Metadata = { title: "Email preferences" };
 export default async function EmailPreferencesPage() {
   const href = newsletterHref();
   if (!href) notFound();
-  const data = await withPageSession(async (auth, db) => accountStatus(newsletterStore(() => db), auth.user));
+  const data = await withPageSession(async (auth, db) =>
+    accountStatus(
+      newsletterStore(() => db),
+      auth.user
+    )
+  );
   if (!data) redirect("/sign-in?callbackURL=%2Faccount%2Femail-preferences");
 
   return (

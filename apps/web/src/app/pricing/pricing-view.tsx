@@ -166,7 +166,10 @@ export async function PricingView({ live = false, tier = "A" }: { live?: boolean
         <div className="mt-12">
           <BillingPeriod>
             <div className="mx-auto mt-10 grid max-w-4xl gap-6 md:grid-cols-2">
-              <section aria-labelledby="plan-free" className="flex flex-col rounded-2xl border border-hairline bg-paper p-8">
+              <section
+                aria-labelledby="plan-free"
+                className="flex flex-col rounded-2xl border border-hairline bg-paper p-8"
+              >
                 <Eyebrow>Free</Eyebrow>
                 <h2 id="plan-free" className="mt-4 font-display text-4xl tracking-tight">
                   $0
@@ -238,9 +241,9 @@ export async function PricingView({ live = false, tier = "A" }: { live?: boolean
           <p data-testid="regional-note">
             Prices are in US dollars and are an{" "}
             <strong className="font-semibold text-ink">estimate for your region</strong>: regional pricing lowers the
-            price in many countries. {business.MERCHANT_OF_RECORD}, our merchant of record, sets the final price from the
-            billing country of your payment method and shows it, with any tax, at checkout before you pay. A VPN changes
-            only this estimate, not the price you&apos;re charged.
+            price in many countries. {business.MERCHANT_OF_RECORD}, our merchant of record, sets the final price from
+            the billing country of your payment method and shows it, with any tax, at checkout before you pay. A VPN
+            changes only this estimate, not the price you&apos;re charged.
           </p>
           <div className="mt-6">
             <RegionSwitcher countries={switcherCountries()} />
@@ -252,9 +255,7 @@ export async function PricingView({ live = false, tier = "A" }: { live?: boolean
         <div className="mx-auto max-w-3xl border-t border-hairline pt-14">
           <Eyebrow>FAQ</Eyebrow>
           <h2 className="mt-4 font-display text-3xl tracking-tight sm:text-4xl">Questions, answered</h2>
-          <div className="prose-editorial mt-10 [&_h3]:mt-10 [&_h3:first-child]:mt-0">
-            {faq.body}
-          </div>
+          <div className="prose-editorial mt-10 [&_h3]:mt-10 [&_h3:first-child]:mt-0">{faq.body}</div>
         </div>
 
         <p className="mx-auto mt-16 max-w-3xl border-t border-hairline pt-6 text-[13px] italic leading-relaxed text-muted-foreground">

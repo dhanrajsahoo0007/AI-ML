@@ -96,17 +96,25 @@ export function CloudDecisionTree({ topic }: { topic: string }) {
                 <div className="text-xs font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--dg-green)" }}>
                   Recommendation
                 </div>
-                <div className="mt-1.5 font-display text-2xl font-semibold leading-tight text-ink">{result.headline}</div>
+                <div className="mt-1.5 font-display text-2xl font-semibold leading-tight text-ink">
+                  {result.headline}
+                </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border-l-2 bg-paper-2/60 p-3" style={{ borderColor: "var(--dg-green)" }}>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--dg-green)" }}>
+                    <div
+                      className="text-[11px] font-semibold uppercase tracking-[0.08em]"
+                      style={{ color: "var(--dg-green)" }}
+                    >
                       Why
                     </div>
                     <div className="mt-1 text-sm text-ink-2">{result.why}</div>
                   </div>
                   <div className="rounded-lg border-l-2 bg-paper-2/60 p-3" style={{ borderColor: "var(--dg-orange)" }}>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--dg-orange)" }}>
+                    <div
+                      className="text-[11px] font-semibold uppercase tracking-[0.08em]"
+                      style={{ color: "var(--dg-orange)" }}
+                    >
                       Trade-off to say out loud
                     </div>
                     <div className="mt-1 text-sm text-ink-2">{result.tradeoff}</div>
@@ -114,7 +122,9 @@ export function CloudDecisionTree({ topic }: { topic: string }) {
                 </div>
 
                 <div className="mt-4 space-y-2">
-                  <div className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">On each cloud</div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    On each cloud
+                  </div>
                   {PROVIDER_ORDER.map((p) => (
                     <div
                       key={p}

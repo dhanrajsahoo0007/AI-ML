@@ -27,7 +27,8 @@ export function dsaSection(): SectionDef {
 function items(section: SectionDef) {
   const all = loadDsaItems(section);
   const invalid = all.filter((i) => i.issues.length > 0);
-  if (invalid.length > 0) throw new Error(`Invalid DSA frontmatter in ${invalid.map((i) => i.file).join(", ")} (run npm run content-check)`);
+  if (invalid.length > 0)
+    throw new Error(`Invalid DSA frontmatter in ${invalid.map((i) => i.file).join(", ")} (run npm run content-check)`);
   return all;
 }
 

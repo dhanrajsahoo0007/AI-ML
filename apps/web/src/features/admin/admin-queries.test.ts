@@ -31,7 +31,10 @@ describe.skipIf(!available)("admin queries (integration)", () => {
     const yearly = await subOf(ids.pro_yearly);
     const expired = await subOf(ids.pro_expired);
     // The expired one started long ago, so it is not "new" in the window.
-    await db.update(t.subscription).set({ createdAt: ago(200 * DAY) }).where(eq(t.subscription.id, expired.id));
+    await db
+      .update(t.subscription)
+      .set({ createdAt: ago(200 * DAY) })
+      .where(eq(t.subscription.id, expired.id));
 
     // A subscription whose renewal failed after on_hold: involuntary churn.
     const [lapsed] = await db
@@ -100,10 +103,31 @@ describe.skipIf(!available)("admin queries (integration)", () => {
     ]);
 
     await db.insert(t.webhookEvent).values([
-      { provider: "dodo", eventId: "evt_ok", type: "payment.succeeded", payload: {}, receivedAt: ago(10 * MIN), processedAt: ago(9 * MIN) },
+      {
+        provider: "dodo",
+        eventId: "evt_ok",
+        type: "payment.succeeded",
+        payload: {},
+        receivedAt: ago(10 * MIN),
+        processedAt: ago(9 * MIN),
+      },
       { provider: "dodo", eventId: "evt_backlog", type: "subscription.renewed", payload: {}, receivedAt: ago(5 * MIN) },
-      { provider: "dodo", eventId: "evt_fail", type: "refund.succeeded", payload: { secret: "never shown" }, receivedAt: ago(2 * MIN), error: "boom: unknown subscription" },
-      { provider: "resend", eventId: "evt_mail", type: "email.bounced", payload: {}, receivedAt: ago(1 * DAY), processedAt: ago(1 * DAY) },
+      {
+        provider: "dodo",
+        eventId: "evt_fail",
+        type: "refund.succeeded",
+        payload: { secret: "never shown" },
+        receivedAt: ago(2 * MIN),
+        error: "boom: unknown subscription",
+      },
+      {
+        provider: "resend",
+        eventId: "evt_mail",
+        type: "email.bounced",
+        payload: {},
+        receivedAt: ago(1 * DAY),
+        processedAt: ago(1 * DAY),
+      },
     ]);
   });
 
@@ -137,7 +161,9 @@ describe.skipIf(!available)("admin queries (integration)", () => {
         provider: "dodo",
         providerPaymentId: "pay_yearly",
         userId: ids.pro_yearly,
-        subscriptionId: (await tdb.db.select().from(t.subscription).where(eq(t.subscription.userId, ids.pro_yearly)))[0]!.id,
+        subscriptionId: (
+          await tdb.db.select().from(t.subscription).where(eq(t.subscription.userId, ids.pro_yearly))
+        )[0]!.id,
         status: "succeeded",
         currency: "INR",
         amountMinor: 299900,

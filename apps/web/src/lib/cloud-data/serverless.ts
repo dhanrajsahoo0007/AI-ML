@@ -89,10 +89,12 @@ export const services: CloudService[] = [
     name: "Amazon API Gateway",
     short: "API Gateway",
     group: "serverless",
-    tagline: "Managed front door for REST, HTTP and WebSocket APIs: auth, throttling and routing to Lambda or any backend.",
+    tagline:
+      "Managed front door for REST, HTTP and WebSocket APIs: auth, throttling and routing to Lambda or any backend.",
     youManage: "Routes, authorizers, throttling and usage plans, and stages.",
     scaling: "Fully managed; default account limit is about 10,000 requests per second per Region, adjustable.",
-    pricing: "Per million requests (HTTP APIs cost less than REST APIs); WebSocket APIs per message and connection-minute.",
+    pricing:
+      "Per million requests (HTTP APIs cost less than REST APIs); WebSocket APIs per message and connection-minute.",
     useWhen: [
       "Public APIs in front of Lambda or containers that need auth, throttling, API keys and usage plans.",
       "WebSocket APIs for chat or live updates at moderate scale, without running connection servers.",
@@ -136,15 +138,9 @@ export const services: CloudService[] = [
     youManage: "Function code, memory and CPU, concurrency and triggers (HTTP, Eventarc, Pub/Sub).",
     scaling: "Scales to zero and out with traffic; one instance can serve many requests at once.",
     pricing: "Cloud Run pricing: per vCPU-second and GiB-second plus requests, with a free tier.",
-    useWhen: [
-      "Glue code that reacts to Cloud Storage, Pub/Sub, Firestore or HTTP events.",
-    ],
-    avoidWhen: [
-      "Long-lived connections or very long jobs: use Cloud Run services or jobs.",
-    ],
-    gotchas: [
-      "Renamed from Cloud Functions in August 2024; functions now share Cloud Run's features and limits.",
-    ],
+    useWhen: ["Glue code that reacts to Cloud Storage, Pub/Sub, Firestore or HTTP events."],
+    avoidWhen: ["Long-lived connections or very long jobs: use Cloud Run services or jobs."],
+    gotchas: ["Renamed from Cloud Functions in August 2024; functions now share Cloud Run's features and limits."],
     docs: "https://cloud.google.com/functions",
     main: "functions",
   },
@@ -158,12 +154,8 @@ export const services: CloudService[] = [
     youManage: "Workflow definitions, retries and error handling.",
     scaling: "Fully managed; executions can wait for callbacks for a long time.",
     pricing: "Per step executed, with internal steps cheaper than external HTTP calls.",
-    useWhen: [
-      "Multi-step processes and sagas across Cloud Run, functions and Google APIs.",
-    ],
-    avoidWhen: [
-      "Very high-volume event processing per message: use Pub/Sub with Cloud Run.",
-    ],
+    useWhen: ["Multi-step processes and sagas across Cloud Run, functions and Google APIs."],
+    avoidWhen: ["Very high-volume event processing per message: use Pub/Sub with Cloud Run."],
     gotchas: [],
     docs: "https://cloud.google.com/workflows",
     main: "workflows",
@@ -178,12 +170,8 @@ export const services: CloudService[] = [
     youManage: "Triggers, filters and destinations (Standard), or buses and pipelines (Advanced).",
     scaling: "Fully managed; built on Pub/Sub.",
     pricing: "Per event for non-Google sources; Google sources mostly free.",
-    useWhen: [
-      "Reacting to changes in Google Cloud resources and routing domain events between services.",
-    ],
-    avoidWhen: [
-      "Ordered streams with replay: use Pub/Sub or Managed Kafka directly.",
-    ],
+    useWhen: ["Reacting to changes in Google Cloud resources and routing domain events between services."],
+    avoidWhen: ["Ordered streams with replay: use Pub/Sub or Managed Kafka directly."],
     gotchas: [],
     docs: "https://cloud.google.com/eventarc",
     main: "event-bus",
@@ -198,15 +186,9 @@ export const services: CloudService[] = [
     youManage: "API proxies, policies, products and environments.",
     scaling: "Managed runtime, sized by environment and tier.",
     pricing: "Pay-as-you-go per API call and environment, or subscription.",
-    useWhen: [
-      "Public or partner APIs that need keys, quotas, a developer portal and analytics.",
-    ],
-    avoidWhen: [
-      "A simple front door for a few Cloud Run services: API Gateway or the load balancer is enough.",
-    ],
-    gotchas: [
-      "Google Cloud API Gateway is the lighter, cheaper option for serverless backends.",
-    ],
+    useWhen: ["Public or partner APIs that need keys, quotas, a developer portal and analytics."],
+    avoidWhen: ["A simple front door for a few Cloud Run services: API Gateway or the load balancer is enough."],
+    gotchas: ["Google Cloud API Gateway is the lighter, cheaper option for serverless backends."],
     docs: "https://cloud.google.com/apigee",
     main: "api-front-door",
   },
@@ -216,7 +198,8 @@ export const services: CloudService[] = [
     name: "Azure Functions",
     short: "Functions",
     group: "serverless",
-    tagline: "Event-driven functions with triggers and bindings for Azure services, plus Durable Functions for workflows in code.",
+    tagline:
+      "Event-driven functions with triggers and bindings for Azure services, plus Durable Functions for workflows in code.",
     youManage: "Function code, hosting plan and triggers.",
     scaling: "Flex Consumption scales per instance with VNet support; Premium keeps instances warm.",
     pricing: "Per execution and GB-second on consumption plans; per instance on Premium and Dedicated.",
@@ -224,12 +207,8 @@ export const services: CloudService[] = [
       "Glue code reacting to Blob Storage, Service Bus, Event Grid, Cosmos DB change feed or HTTP.",
       "Long-running orchestrations written as code with Durable Functions.",
     ],
-    avoidWhen: [
-      "Long-lived connections or steady high load: use Container Apps or App Service.",
-    ],
-    gotchas: [
-      "Bindings read and write services declaratively, which cuts boilerplate but ties code to Azure.",
-    ],
+    avoidWhen: ["Long-lived connections or steady high load: use Container Apps or App Service."],
+    gotchas: ["Bindings read and write services declaratively, which cuts boilerplate but ties code to Azure."],
     docs: "https://azure.microsoft.com/en-us/products/functions",
     main: "functions",
   },
@@ -243,12 +222,8 @@ export const services: CloudService[] = [
     youManage: "Workflow definitions and connections.",
     scaling: "Consumption (serverless) or Standard (single-tenant) hosting.",
     pricing: "Per action and connector call (Consumption) or per hosting plan (Standard).",
-    useWhen: [
-      "Integration workflows and business processes across many systems.",
-    ],
-    avoidWhen: [
-      "High-volume, low-latency processing: use Functions or Container Apps.",
-    ],
+    useWhen: ["Integration workflows and business processes across many systems."],
+    avoidWhen: ["High-volume, low-latency processing: use Functions or Container Apps."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/logic-apps",
     main: "workflows",
@@ -263,12 +238,8 @@ export const services: CloudService[] = [
     youManage: "Topics, namespaces, subscriptions and filters.",
     scaling: "Fully managed.",
     pricing: "Per million operations.",
-    useWhen: [
-      "Reacting to Blob uploads and resource changes; routing domain events between services; IoT over MQTT.",
-    ],
-    avoidWhen: [
-      "Ordered, replayable streams: use Event Hubs.",
-    ],
+    useWhen: ["Reacting to Blob uploads and resource changes; routing domain events between services; IoT over MQTT."],
+    avoidWhen: ["Ordered, replayable streams: use Event Hubs."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/event-grid",
     main: "event-bus",
@@ -283,9 +254,7 @@ export const services: CloudService[] = [
     youManage: "APIs, products, policies and the tier.",
     scaling: "Scale units per tier; Consumption tier is serverless.",
     pricing: "Per tier unit per hour, or per call on Consumption.",
-    useWhen: [
-      "Public and partner APIs on Azure that need auth, rate limits and a developer portal.",
-    ],
+    useWhen: ["Public and partner APIs on Azure that need auth, rate limits and a developer portal."],
     avoidWhen: [],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/api-management",
@@ -301,15 +270,9 @@ export const services: CloudService[] = [
     youManage: "Hubs, event handlers and auth.",
     scaling: "Units of 1,000 concurrent connections; Premium scales further.",
     pricing: "Per unit per day plus messages beyond the included amount.",
-    useWhen: [
-      "Chat, live dashboards and collaboration without running WebSocket servers.",
-    ],
-    avoidWhen: [
-      "Very large always-on connection counts where your own servers are cheaper.",
-    ],
-    gotchas: [
-      "Azure SignalR Service does the same for apps built on ASP.NET SignalR.",
-    ],
+    useWhen: ["Chat, live dashboards and collaboration without running WebSocket servers."],
+    avoidWhen: ["Very large always-on connection counts where your own servers are cheaper."],
+    gotchas: ["Azure SignalR Service does the same for apps built on ASP.NET SignalR."],
     docs: "https://azure.microsoft.com/en-us/products/web-pubsub",
     main: "managed-websockets",
   },
@@ -322,8 +285,16 @@ export const capabilities: Capability[] = [
     title: "Functions as a service",
     summary: "Upload a function; the cloud runs one copy per event and bills per use.",
     aws: { services: ["aws-lambda"], fit: "direct" },
-    gcp: { services: ["gcp-cloud-run-functions"], fit: "direct", note: "Runs on Cloud Run, so one instance can serve many requests." },
-    azure: { services: ["azure-functions"], fit: "direct", note: "Flex Consumption plan adds VNet access and fast scale." },
+    gcp: {
+      services: ["gcp-cloud-run-functions"],
+      fit: "direct",
+      note: "Runs on Cloud Run, so one instance can serve many requests.",
+    },
+    azure: {
+      services: ["azure-functions"],
+      fit: "direct",
+      note: "Flex Consumption plan adds VNet access and fast scale.",
+    },
   },
   {
     id: "workflows",
@@ -367,7 +338,11 @@ export const capabilities: Capability[] = [
     title: "API gateway",
     summary: "Auth, throttling, keys and routing in front of your APIs.",
     aws: { services: ["aws-api-gateway"], fit: "direct" },
-    gcp: { services: ["API Gateway", "gcp-apigee"], fit: "direct", note: "Apigee for full API management and monetisation." },
+    gcp: {
+      services: ["API Gateway", "gcp-apigee"],
+      fit: "direct",
+      note: "Apigee for full API management and monetisation.",
+    },
     azure: { services: ["azure-apim"], fit: "direct" },
   },
   {
@@ -376,7 +351,11 @@ export const capabilities: Capability[] = [
     title: "Managed WebSocket connections",
     summary: "The cloud holds client connections; your code sends messages to them by id.",
     aws: { services: ["aws-api-gateway", "AppSync Events"], fit: "direct", note: "API Gateway WebSocket APIs." },
-    gcp: { services: ["gcp-cloud-run"], fit: "partial", note: "Cloud Run accepts WebSockets, but you hold the connections yourself." },
+    gcp: {
+      services: ["gcp-cloud-run"],
+      fit: "partial",
+      note: "Cloud Run accepts WebSockets, but you hold the connections yourself.",
+    },
     azure: { services: ["azure-web-pubsub", "Azure SignalR Service"], fit: "direct" },
   },
   {
@@ -386,6 +365,10 @@ export const capabilities: Capability[] = [
     summary: "A hosted GraphQL endpoint with resolvers and subscriptions.",
     aws: { services: ["aws-appsync"], fit: "direct" },
     gcp: { services: ["Firebase Data Connect", "Apigee GraphQL proxies"], fit: "partial" },
-    azure: { services: ["azure-apim"], fit: "partial", note: "Proxies or synthesises GraphQL; no managed subscriptions." },
+    azure: {
+      services: ["azure-apim"],
+      fit: "partial",
+      note: "Proxies or synthesises GraphQL; no managed subscriptions.",
+    },
   },
 ];

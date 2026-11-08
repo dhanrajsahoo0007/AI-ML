@@ -11,7 +11,8 @@ export const services: CloudService[] = [
     youManage:
       "Task definitions, services and scaling policies, plus the EC2 hosts if you choose EC2 capacity (none with Fargate or Managed Instances).",
     scaling: "Service auto scaling sets the task count; capacity providers add hosts (EC2) or AWS does (Fargate).",
-    pricing: "No charge for the ECS control plane. You pay for the Fargate tasks, EC2 instances or Managed Instances underneath.",
+    pricing:
+      "No charge for the ECS control plane. You pay for the Fargate tasks, EC2 instances or Managed Instances underneath.",
     useWhen: [
       "You want containers on AWS and do not need the Kubernetes API or its ecosystem.",
       "A small platform team: ECS has far fewer moving parts to upgrade than Kubernetes.",
@@ -36,7 +37,8 @@ export const services: CloudService[] = [
     tagline: "Managed Kubernetes: AWS runs the control plane, you run workloads with standard Kubernetes APIs.",
     youManage:
       "Kubernetes version upgrades, add-ons, nodes (unless Auto Mode or Fargate), and everything in the cluster: RBAC, policies, Helm releases.",
-    scaling: "Horizontal Pod Autoscaler for pods; Karpenter or Cluster Autoscaler for nodes. Auto Mode manages nodes for you.",
+    scaling:
+      "Horizontal Pod Autoscaler for pods; Karpenter or Cluster Autoscaler for nodes. Auto Mode manages nodes for you.",
     pricing:
       "$0.10 per cluster-hour in standard support, $0.60 in extended support (versions older than about 14 months). Auto Mode adds a fee on the instances it manages. Nodes are billed as EC2 or Fargate.",
     useWhen: [
@@ -97,7 +99,8 @@ export const services: CloudService[] = [
     avoidWhen: ["Any new project: new customers cannot sign up."],
     gotchas: ["AWS points new projects and migrations to ECS Express Mode."],
     docs: "https://aws.amazon.com/apprunner/",
-    status: "Closed to new customers since April 30, 2026. Existing customers keep using it; no new features are planned.",
+    status:
+      "Closed to new customers since April 30, 2026. Existing customers keep using it; no new features are planned.",
   },
   {
     id: "aws-ecr",
@@ -295,8 +298,16 @@ export const capabilities: Capability[] = [
     group: "containers",
     title: "Serverless containers",
     summary: "Run containers billed by the resources they request, with no hosts.",
-    aws: { services: ["aws-fargate"], fit: "direct", note: "A capacity type under ECS or EKS, not a standalone service." },
-    gcp: { services: ["gcp-cloud-run"], fit: "close", note: "Standalone service that also scales to zero on requests." },
+    aws: {
+      services: ["aws-fargate"],
+      fit: "direct",
+      note: "A capacity type under ECS or EKS, not a standalone service.",
+    },
+    gcp: {
+      services: ["gcp-cloud-run"],
+      fit: "close",
+      note: "Standalone service that also scales to zero on requests.",
+    },
     azure: { services: ["azure-container-apps"], fit: "close", note: "Consumption plan." },
   },
   {

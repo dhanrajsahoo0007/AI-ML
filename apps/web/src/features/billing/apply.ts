@@ -125,7 +125,9 @@ export async function applySubscriptionSnapshot(
   const [current] = await tx
     .select()
     .from(subscription)
-    .where(and(eq(subscription.provider, ctx.provider), eq(subscription.providerSubscriptionId, snap.providerSubscriptionId)))
+    .where(
+      and(eq(subscription.provider, ctx.provider), eq(subscription.providerSubscriptionId, snap.providerSubscriptionId))
+    )
     .limit(1);
   const userId = current?.userId ?? snap.userId;
   const target = `subscription:${ctx.provider}:${snap.providerSubscriptionId}`;
@@ -157,13 +159,20 @@ export async function applySubscriptionSnapshot(
     now: ctx.now,
   });
   if (!t.apply) {
-    await audit(tx, ctx.actor, "billing.event_ignored", target, { reason: t.reason, event: event.id, type: event.type });
+    await audit(tx, ctx.actor, "billing.event_ignored", target, {
+      reason: t.reason,
+      event: event.id,
+      type: event.type,
+    });
     return { applied: false, reason: t.reason };
   }
 
   if (t.status === "active" || t.status === "on_hold") {
     for (const other of others) {
-      await tx.update(subscription).set({ status: "cancelled", updatedAt: ctx.now }).where(eq(subscription.id, other.id));
+      await tx
+        .update(subscription)
+        .set({ status: "cancelled", updatedAt: ctx.now })
+        .where(eq(subscription.id, other.id));
       await audit(tx, ctx.actor, "billing.subscription_superseded", `subscription:${other.id}`, { by: target });
     }
   }
@@ -171,7 +180,12 @@ export async function applySubscriptionSnapshot(
   const values = rowValues(snap, t.status, t.plan);
   const [row] = await tx
     .insert(subscription)
-    .values({ ...values, userId: t.userId, provider: ctx.provider, providerSubscriptionId: snap.providerSubscriptionId })
+    .values({
+      ...values,
+      userId: t.userId,
+      provider: ctx.provider,
+      providerSubscriptionId: snap.providerSubscriptionId,
+    })
     .onConflictDoUpdate({
       target: [subscription.provider, subscription.providerSubscriptionId],
       set: { ...values, updatedAt: ctx.now },
@@ -233,7 +247,11 @@ async function revoke(tx: Exec, ctx: ApplyContext, userId: string, reason: strin
   await audit(tx, ctx.actor, "billing.access_revoked", `user:${userId}`, { reason, payment: target });
 }
 
-async function applyMoneyEvent(tx: Exec, ctx: ApplyContext, event: Extract<BillingEvent, { kind: "payment" | "refund" | "dispute" }>) {
+async function applyMoneyEvent(
+  tx: Exec,
+  ctx: ApplyContext,
+  event: Extract<BillingEvent, { kind: "payment" | "refund" | "dispute" }>
+) {
   const providerPaymentId =
     event.kind === "payment"
       ? event.payment.providerPaymentId
@@ -256,7 +274,12 @@ async function applyMoneyEvent(tx: Exec, ctx: ApplyContext, event: Extract<Billi
       const [sub] = await tx
         .select({ id: subscription.id, userId: subscription.userId })
         .from(subscription)
-        .where(and(eq(subscription.provider, ctx.provider), eq(subscription.providerSubscriptionId, p.providerSubscriptionId)))
+        .where(
+          and(
+            eq(subscription.provider, ctx.provider),
+            eq(subscription.providerSubscriptionId, p.providerSubscriptionId)
+          )
+        )
         .limit(1);
       subscriptionId = sub?.id ?? subscriptionId;
       userId = sub?.userId ?? userId;
@@ -289,7 +312,11 @@ async function applyMoneyEvent(tx: Exec, ctx: ApplyContext, event: Extract<Billi
 
   const target = `payment:${ctx.provider}:${providerPaymentId}`;
   const action =
-    event.kind === "payment" ? `billing.payment.${event.type}` : event.kind === "refund" ? "billing.refund" : `billing.dispute.${event.type}`;
+    event.kind === "payment"
+      ? `billing.payment.${event.type}`
+      : event.kind === "refund"
+        ? "billing.refund"
+        : `billing.dispute.${event.type}`;
   await audit(tx, ctx.actor, action, target, { event: event.id, from: existing?.status ?? null, to: status });
   const newlyFinal = revokesAccess(status) && !(existing && revokesAccess(existing.status as PaymentStatus));
   if (userId && (newlyFinal || (revokesAccess(status) && event.kind === "payment" && !existing?.userId))) {

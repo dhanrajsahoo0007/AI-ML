@@ -29,15 +29,7 @@ async function getMermaid(mode: Mode) {
   return mermaid;
 }
 
-export function Mermaid({
-  chart,
-  caption,
-  minWidth = 560,
-}: {
-  chart: string;
-  caption?: string;
-  minWidth?: number;
-}) {
+export function Mermaid({ chart, caption, minWidth = 560 }: { chart: string; caption?: string; minWidth?: number }) {
   const id = `m${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -49,10 +41,7 @@ export function Mermaid({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const io = new IntersectionObserver(
-      ([e]) => e.isIntersecting && setVisible(true),
-      { rootMargin: "400px" }
-    );
+    const io = new IntersectionObserver(([e]) => e.isIntersecting && setVisible(true), { rootMargin: "400px" });
     io.observe(el);
     return () => io.disconnect();
   }, []);
@@ -80,14 +69,9 @@ export function Mermaid({
           className="flex min-h-[200px] items-center justify-center rounded-xl border border-hairline bg-paper p-4 sm:p-6 [&_svg]:h-auto [&_svg]:max-w-full"
         >
           {svg ? (
-            <div
-              className="w-full [&>svg]:mx-auto"
-              dangerouslySetInnerHTML={{ __html: svg }}
-            />
+            <div className="w-full [&>svg]:mx-auto" dangerouslySetInnerHTML={{ __html: svg }} />
           ) : error ? (
-            <pre className="w-full overflow-auto font-mono text-xs text-muted-foreground">
-              {chart.trim()}
-            </pre>
+            <pre className="w-full overflow-auto font-mono text-xs text-muted-foreground">{chart.trim()}</pre>
           ) : (
             <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Rendering diagram…

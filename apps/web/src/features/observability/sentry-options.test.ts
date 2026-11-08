@@ -5,7 +5,12 @@ import { PUBLIC_OBSERVABILITY_ENV, pinPublicObservabilityEnv } from "./public-en
 
 describe("scrubEvent", () => {
   it("drops events from local hosts", () => {
-    for (const url of ["http://localhost:3001/x", "http://127.0.0.1:3100/", "http://app.localhost/", "http://web.test/"]) {
+    for (const url of [
+      "http://localhost:3001/x",
+      "http://127.0.0.1:3100/",
+      "http://app.localhost/",
+      "http://web.test/",
+    ]) {
       expect(scrubEvent({ request: { url } } as Event)).toBeNull();
     }
     expect(isLocalHost("originsai.example")).toBe(false);

@@ -89,9 +89,7 @@ describe("shouldBlockShortcut", () => {
   });
 
   it("blocks copy when the selection touches protected content", () => {
-    expect(
-      shouldBlockShortcut(key("c", { target: COPY_OK }), env({ selectionProtected: () => true }))
-    ).toBe(true);
+    expect(shouldBlockShortcut(key("c", { target: COPY_OK }), env({ selectionProtected: () => true }))).toBe(true);
   });
 });
 

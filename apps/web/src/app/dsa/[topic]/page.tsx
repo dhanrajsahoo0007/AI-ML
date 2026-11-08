@@ -36,7 +36,11 @@ export default async function TopicPage({ params }: { params: TopicParams }) {
       <ArticleLayout
         title={topic.fm.title}
         description={topic.fm.description}
-        docs={{ headings: doc.headings, updated: await getUpdatedDate(topic.file, topic.fm.updated), pagePath: topic.href }}
+        docs={{
+          headings: doc.headings,
+          updated: await getUpdatedDate(topic.file, topic.fm.updated),
+          pagePath: topic.href,
+        }}
       >
         {doc.body}
         {problems.length > 0 && (

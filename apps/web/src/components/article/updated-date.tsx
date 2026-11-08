@@ -17,8 +17,9 @@ function relative(iso: string, now: Date) {
 // "Updated today / 3 days ago / on Nov 2, 2026". Rendered in the reader's time zone, so it is computed
 // after mount; the server renders the absolute date to avoid a hydration mismatch.
 export function UpdatedDate({ iso }: { iso: string }) {
-  const [label, setLabel] = React.useState(() =>
-    `on ${new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}`,
+  const [label, setLabel] = React.useState(
+    () =>
+      `on ${new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}`
   );
   React.useEffect(() => setLabel(relative(iso, new Date())), [iso]);
   return (

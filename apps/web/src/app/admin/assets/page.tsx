@@ -30,13 +30,16 @@ export default async function AdminAssetsPage({ searchParams }: { searchParams: 
       viewer={viewer}
       lead={
         <>
-          From the build&apos;s asset manifest{manifest ? ` (${manifest.env})` : ""}. Reference assets by ID; add new ones
-          with <code>npm run asset:new -w web</code>.
+          From the build&apos;s asset manifest{manifest ? ` (${manifest.env})` : ""}. Reference assets by ID; add new
+          ones with <code>npm run asset:new -w web</code>.
         </>
       }
     >
       {!manifest ? (
-        <p className="rounded-xl border border-dashed border-hairline p-4 text-[14px] text-muted-foreground" data-testid="assets-missing">
+        <p
+          className="rounded-xl border border-dashed border-hairline p-4 text-[14px] text-muted-foreground"
+          data-testid="assets-missing"
+        >
           No asset manifest in this deployment (it is written by <code>npm run assets</code> before every build).
         </p>
       ) : (

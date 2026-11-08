@@ -49,7 +49,11 @@ const highlight = HighlightStyle.define([
   },
   { tag: [t.string, t.special(t.string), t.regexp], color: pair("#047857", "#6ee7b7") },
   { tag: [t.number, t.bool, t.null, t.atom], color: pair("#b45309", "#fcd34d") },
-  { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: pair("#6b7280", "#9ca3af"), fontStyle: "italic" },
+  {
+    tag: [t.comment, t.lineComment, t.blockComment, t.docComment],
+    color: pair("#6b7280", "#9ca3af"),
+    fontStyle: "italic",
+  },
   {
     tag: [t.function(t.variableName), t.function(t.propertyName), t.definition(t.function(t.variableName))],
     color: pair("#1d4ed8", "#93c5fd"),

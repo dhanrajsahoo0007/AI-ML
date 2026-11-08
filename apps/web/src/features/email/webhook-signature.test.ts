@@ -9,7 +9,11 @@ const KEY = Buffer.from("resend-webhook-unit-test-key-0123456789");
 const SECRET = `whsec_${KEY.toString("base64")}`;
 const ID = "msg_2pQnB3Zp1Xk9fV7yYw2qWJ0mC4d";
 const T = 1_800_000_000;
-const BODY = JSON.stringify({ type: "email.bounced", created_at: "2027-01-15T08:00:00.000Z", data: { to: ["a@example.com"] } });
+const BODY = JSON.stringify({
+  type: "email.bounced",
+  created_at: "2027-01-15T08:00:00.000Z",
+  data: { to: ["a@example.com"] },
+});
 
 const reference = (body = BODY, id = ID, t = T) =>
   `v1,${createHmac("sha256", KEY).update(`${id}.${t}.${body}`).digest("base64")}`;
@@ -57,13 +61,15 @@ describe("Resend webhook signatures", () => {
 
   it("rejects the wrong secret", async () => {
     const wrong = `whsec_${Buffer.from("another-key-another-key-0123456789").toString("base64")}`;
-    expect(await verifyWebhookSignature({ secret: wrong, headers: headers(reference()), body: BODY, now: T })).toEqual(
-      { ok: false, reason: "no-match" }
-    );
+    expect(await verifyWebhookSignature({ secret: wrong, headers: headers(reference()), body: BODY, now: T })).toEqual({
+      ok: false,
+      reason: "no-match",
+    });
   });
 
   it("enforces a 5-minute window both ways", async () => {
-    const at = (now: number) => verifyWebhookSignature({ secret: SECRET, headers: headers(reference()), body: BODY, now });
+    const at = (now: number) =>
+      verifyWebhookSignature({ secret: SECRET, headers: headers(reference()), body: BODY, now });
     expect((await at(T + 300)).ok).toBe(true);
     expect((await at(T - 300)).ok).toBe(true);
     expect(await at(T + 301)).toEqual({ ok: false, reason: "too-old" });

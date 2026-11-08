@@ -16,7 +16,15 @@ export const metadata: Metadata = { title: "Billing" };
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
 // The portal is an API redirect to the provider: a plain GET form, so the client router never prefetches it.
-function PortalButton({ children, className, testId }: { children: React.ReactNode; className: string; testId?: string }) {
+function PortalButton({
+  children,
+  className,
+  testId,
+}: {
+  children: React.ReactNode;
+  className: string;
+  testId?: string;
+}) {
   return (
     <form action="/api/billing/portal" method="get" className="inline">
       <button type="submit" className={className} data-testid={testId}>
@@ -26,7 +34,8 @@ function PortalButton({ children, className, testId }: { children: React.ReactNo
   );
 }
 
-const date = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+const date = (d: Date) =>
+  d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 
 const PAYMENT_LABELS: Record<string, string> = {
   succeeded: "Paid",
@@ -54,7 +63,11 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
       {success && <CheckoutReturn alreadyPro={pro} />}
 
       {sub?.status === "on_hold" && (
-        <div role="alert" data-testid="on-hold-banner" className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-[15px] text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+        <div
+          role="alert"
+          data-testid="on-hold-banner"
+          className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-[15px] text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+        >
           <p className="font-medium">Your last payment didn&apos;t go through.</p>
           <p className="mt-1">
             Pro stays on for a {GRACE_PERIOD_DAYS}-day grace period
@@ -109,7 +122,10 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
               Manage subscription
             </PortalButton>
           ) : (
-            <Link href="/pricing" className="inline-flex rounded-full bg-ink px-5 py-3 text-sm font-medium text-paper hover:bg-primary">
+            <Link
+              href="/pricing"
+              className="inline-flex rounded-full bg-ink px-5 py-3 text-sm font-medium text-paper hover:bg-primary"
+            >
               See Pro plans
             </Link>
           )}
@@ -128,9 +144,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Sear
           </p>
         )}
         <p className="mt-4 text-[13px] text-muted-foreground">
-          Payment method, invoices and cancellation are handled by our reseller, Dodo Payments. Cancelling stops
-          future renewals; you keep Pro until the end of the period you&apos;ve paid for. 7-day money-back guarantee
-          on your first payment (
+          Payment method, invoices and cancellation are handled by our reseller, Dodo Payments. Cancelling stops future
+          renewals; you keep Pro until the end of the period you&apos;ve paid for. 7-day money-back guarantee on your
+          first payment (
           <Link href="/legal/refunds" className="underline underline-offset-2">
             refund policy
           </Link>

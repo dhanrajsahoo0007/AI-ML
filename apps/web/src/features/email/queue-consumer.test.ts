@@ -38,7 +38,10 @@ const job = (patch: Partial<EmailJob> = {}): EmailJob =>
     kind: "newsletter.confirm",
     to: "ada@example.com",
     idempotencyKey: "newsletter.confirm:k1",
-    data: { confirmUrl: "https://site.example/n/confirm?token=a.b", unsubscribeUrl: "https://site.example/n/unsubscribe?token=c.d" },
+    data: {
+      confirmUrl: "https://site.example/n/confirm?token=a.b",
+      unsubscribeUrl: "https://site.example/n/unsubscribe?token=c.d",
+    },
     ...patch,
   }) as EmailJob;
 
@@ -106,24 +109,40 @@ describe("processEmailBatch", () => {
 
   it("retries a 429 no sooner than the provider's Retry-After", async () => {
     const m = new FakeMessage("m1", job(), 1);
-    await run(new FakeSender(() => new EmailSendError("Resend responded 429", { retryable: true, status: 429, retryAfterSeconds: 300 })), m);
+    await run(
+      new FakeSender(
+        () => new EmailSendError("Resend responded 429", { retryable: true, status: 429, retryAfterSeconds: 300 })
+      ),
+      m
+    );
     expect(m.outcome).toEqual({ kind: "retry", delaySeconds: 300 });
   });
 
   it("acks a permanent provider error (4xx) without retrying, logging a masked recipient", async () => {
     const m = new FakeMessage("m1", job());
     const ok = new FakeMessage("m2", job({ to: "bob@example.com" }));
-    const error = new EmailSendError("Resend responded 422 (validation_error) for ada@example.com", { retryable: false, status: 422 });
+    const error = new EmailSendError("Resend responded 422 (validation_error) for ada@example.com", {
+      retryable: false,
+      status: 422,
+    });
     const { lines } = await run(new FakeSender((n) => (n === 1 ? error : null)), m, ok);
     expect(m.outcome).toEqual({ kind: "ack" });
     expect(ok.outcome).toEqual({ kind: "ack" });
     const failed = lines.find((l) => l.msg === "email_send_failed")!;
-    expect(failed).toMatchObject({ level: "error", fields: { to: "a***@example.com", status: 422, kind: "newsletter.confirm" } });
+    expect(failed).toMatchObject({
+      level: "error",
+      fields: { to: "a***@example.com", status: 422, kind: "newsletter.confirm" },
+    });
     expect(JSON.stringify(lines)).not.toContain("ada@example.com");
   });
 
   it("acks and logs a message that is not a valid job, without its contents", async () => {
-    const bad = new FakeMessage("m1", { v: 1, kind: "newsletter.confirm", to: "ada@example.com", data: { confirmUrl: "x" } });
+    const bad = new FakeMessage("m1", {
+      v: 1,
+      kind: "newsletter.confirm",
+      to: "ada@example.com",
+      data: { confirmUrl: "x" },
+    });
     const junk = new FakeMessage("m2", "not a job");
     const sender = new FakeSender();
     const { lines } = await run(sender, bad, junk);
@@ -155,7 +174,10 @@ describe("handleEmailQueue (the Worker's queue() handler)", () => {
     expect(m.outcome).toEqual({ kind: "ack" });
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("https://api.resend.com/emails");
-    expect(calls[0].headers).toMatchObject({ Authorization: "Bearer re_test", "Idempotency-Key": "newsletter.confirm:k1" });
+    expect(calls[0].headers).toMatchObject({
+      Authorization: "Bearer re_test",
+      "Idempotency-Key": "newsletter.confirm:k1",
+    });
   });
 
   it("keeps the mail (retry) in production while RESEND_API_KEY is missing", async () => {
@@ -173,7 +195,11 @@ describe("queue-consumer.ts import graph", () => {
   const SRC = path.resolve(__dirname, "../..");
 
   function resolve(from: string, spec: string): string | null {
-    const base = spec.startsWith("@/") ? path.join(SRC, spec.slice(2)) : spec.startsWith(".") ? path.resolve(path.dirname(from), spec) : null;
+    const base = spec.startsWith("@/")
+      ? path.join(SRC, spec.slice(2))
+      : spec.startsWith(".")
+        ? path.resolve(path.dirname(from), spec)
+        : null;
     if (!base) return null;
     for (const candidate of [base, `${base}.ts`, `${base}.tsx`, path.join(base, "index.ts")]) {
       if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
@@ -189,7 +215,9 @@ describe("queue-consumer.ts import graph", () => {
       seen.add(file);
       const source = fs.readFileSync(file, "utf8");
       if (/^\s*import\s+["']server-only["']/m.test(source)) offenders.push(path.relative(SRC, file));
-      for (const [, type, spec] of source.matchAll(/^\s*(?:import|export)\s+(type\s+)?(?:[^"';]*?\sfrom\s+)?["']([^"']+)["']/gm)) {
+      for (const [, type, spec] of source.matchAll(
+        /^\s*(?:import|export)\s+(type\s+)?(?:[^"';]*?\sfrom\s+)?["']([^"']+)["']/gm
+      )) {
         if (type) continue;
         const next = resolve(file, spec);
         if (next) visit(next);

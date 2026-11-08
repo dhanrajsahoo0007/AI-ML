@@ -100,7 +100,11 @@ function resolvePage(href: string): LinkRef | null {
 }
 
 function slugify(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 60);
 }
 
 function loadTaxonomy(errors: string[]): Category[] {
@@ -166,7 +170,10 @@ function loadYamlQuestions(
   for (const file of files) {
     for (const r of readYaml<RawQuestion[]>(path.join(BANK_DIR, file)) ?? []) {
       const where = `${file} ${String(r.id ?? "?")}`;
-      if (typeof r.id !== "string" || !r.id) { errors.push(`${where}: missing id`); continue; }
+      if (typeof r.id !== "string" || !r.id) {
+        errors.push(`${where}: missing id`);
+        continue;
+      }
       if (typeof r.q !== "string" || !r.q.trim()) errors.push(`${where}: missing q`);
       if (typeof r.a !== "string" || !r.a.trim()) errors.push(`${where}: missing a`);
       if (!LEVELS.includes(r.level as Level)) errors.push(`${where}: bad level ${String(r.level)}`);
@@ -223,7 +230,10 @@ function loadArticleQuestions(
     const [category, subcategory] = target.split("/");
     if (!isSubsection(category, subcategory)) errors.push(`articles.yaml ${href}: unknown subsection ${target}`);
     const file = path.join(CONTENT, `${href}.mdx`);
-    if (!fs.existsSync(file)) { errors.push(`articles.yaml: page not found ${href}`); continue; }
+    if (!fs.existsSync(file)) {
+      errors.push(`articles.yaml: page not found ${href}`);
+      continue;
+    }
     const { data, content } = matter(fs.readFileSync(file, "utf8"));
     const related = { href, title: (data.title as string) ?? href };
     for (const m of content.matchAll(QUESTION_RE)) {
@@ -233,7 +243,12 @@ function loadArticleQuestions(
       const a = m[2]
         .trim()
         .split(/\n\s*\n/)
-        .map((p) => p.split("\n").map((l) => l.trim()).join(" "))
+        .map((p) =>
+          p
+            .split("\n")
+            .map((l) => l.trim())
+            .join(" ")
+        )
         .join("\n\n");
       out.push({
         id: `${href}#${slugify(q)}`,
@@ -284,7 +299,9 @@ export function validateLibrary(): string[] {
     load();
     return [];
   } catch (e) {
-    return String((e as Error).message).split("\n").slice(1);
+    return String((e as Error).message)
+      .split("\n")
+      .slice(1);
   }
 }
 
@@ -319,9 +336,7 @@ function load(): Library {
   // Library order: category, then subsection order from the taxonomy.
   const rank = new Map<string, number>();
   categories.forEach((c, i) => c.subsections.forEach((s, j) => rank.set(`${c.slug}/${s.slug}`, i * 100 + j)));
-  questions.sort(
-    (a, b) => rank.get(`${a.category}/${a.subcategory}`)! - rank.get(`${b.category}/${b.subcategory}`)!
-  );
+  questions.sort((a, b) => rank.get(`${a.category}/${a.subcategory}`)! - rank.get(`${b.category}/${b.subcategory}`)!);
   cache = { categories, companies, questions };
   return cache;
 }

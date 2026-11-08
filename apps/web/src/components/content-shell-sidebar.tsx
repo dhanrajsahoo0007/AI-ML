@@ -35,7 +35,7 @@ export function ContentShellSidebar({ navTree }: { navTree: NavSection[] }) {
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
     },
-    [width],
+    [width]
   );
 
   return (

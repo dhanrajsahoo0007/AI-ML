@@ -108,7 +108,12 @@ export async function processEmailBatch(batch: MessageBatch<unknown>, deps: Emai
       const failure = classify(e);
       if (failure.retryable) {
         const delaySeconds = retryDelaySeconds(message.attempts, failure.retryAfterSeconds);
-        log("warn", "email_send_retry", { ...fields, status: failure.status, delay_s: delaySeconds, error: errorText(e) });
+        log("warn", "email_send_retry", {
+          ...fields,
+          status: failure.status,
+          delay_s: delaySeconds,
+          error: errorText(e),
+        });
         message.retry({ delaySeconds });
       } else {
         log("error", "email_send_failed", { ...fields, status: failure.status, error: errorText(e) });
