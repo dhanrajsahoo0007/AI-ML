@@ -49,3 +49,26 @@ describe("newsletter-send runs only from main (M5)", () => {
     expect(wf.jobs.refuse?.environment).toBeUndefined();
   });
 });
+
+describe("deploy verifies with the whole CI suite", () => {
+  it("calls ci.yml read-only and without secrets, and deploys only after it", () => {
+    expect(Object.keys(load("ci.yml").on)).toContain("workflow_call");
+    const wf = load("deploy.yml") as unknown as {
+      jobs: Record<string, Job & { uses?: string; needs?: string | string[]; secrets?: unknown }>;
+    };
+    expect(wf.jobs.verify?.uses).toBe("./.github/workflows/ci.yml");
+    expect(wf.jobs.verify?.permissions).toEqual({ contents: "read" });
+    expect(wf.jobs.verify?.secrets).toBeUndefined();
+    expect([wf.jobs.deploy?.needs].flat()).toContain("verify");
+    // The fast gates are no longer repeated by hand.
+    expect(raw("deploy.yml")).not.toMatch(/npm run typecheck/);
+  });
+
+  it("installs npm 11.6.2 before every npm ci (Node 22's npm 10 rejects the lockfile)", () => {
+    for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".yml"))) {
+      for (const line of raw(file).split("\n").filter((l) => /\bnpm ci\b/.test(l) && !l.trim().startsWith("#"))) {
+        expect(line, file).toMatch(/npm install --global --ignore-scripts npm@11\.6\.2 && npm ci\b/);
+      }
+    }
+  });
+});
