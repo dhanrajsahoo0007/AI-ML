@@ -4,7 +4,9 @@
 //
 // - fetch: OpenNext's handler; Sentry starts per request only when the SENTRY_DSN secret is set
 //   (src/features/observability/sentry.worker.ts), otherwise requests go straight through.
-// - queue: see the marked spot below.
+// - queue: the transactional email consumer, handleEmailQueue (src/features/email/queue-consumer.ts), for the
+//   `queues.consumers` block in wrangler.jsonc. Until that block is uncommented no queue is bound, nothing is ever
+//   delivered here, and enqueueEmail() sends inline instead. Route by `batch.queue` if a second queue is added.
 // - OpenNext's Durable Object classes (DOQueueHandler, DOShardedTagCache, BucketCachePurge) are not re-exported:
 //   no binding uses them. Re-export them from ./.open-next/worker.js if one is ever added.
 //
@@ -12,12 +14,10 @@
 // make `npm run typecheck` take a minute and gigabytes of memory after every cf:build. The typed, tested logic is in
 // sentry.worker.ts; keep this file to wiring only.
 import openNext from "./.open-next/worker.js";
+import { handleEmailQueue } from "./src/features/email/queue-consumer.ts";
 import { withWorkerSentry } from "./src/features/observability/sentry.worker.ts";
 
 export default withWorkerSentry({
   fetch: openNext.fetch,
-
-  // ── Queue consumers ─────────────────────────────────────────────────────────────────────────────────────────
-  // TODO(email stream): add `queue: handleEmailQueue` here, imported from src/features/email/ (the email queue's
-  // consumer, with its `queues.consumers` block in wrangler.jsonc). withWorkerSentry wraps `queue` like `fetch`.
+  queue: handleEmailQueue,
 });
