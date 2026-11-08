@@ -79,7 +79,7 @@ describe("pricing variant (live × tier)", () => {
       expect(decidePricing({ pathname, ...live, country: "IN" }), pathname).toEqual({
         tier: null,
         rewrite: null,
-        headers: { "X-Robots-Tag": "noindex, noai, noimageai" },
+        headers: { "X-Robots-Tag": "noindex, nofollow, noai, noimageai" },
       });
     }
   });

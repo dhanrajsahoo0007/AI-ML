@@ -21,7 +21,7 @@ import { normalizePath } from "./sections-gate";
 /** Set by Cloudflare on every request through the zone (IP geolocation); a client can't override it there. */
 export const COUNTRY_HEADER = "cf-ipcountry";
 
-const NOINDEX = "noindex, noai, noimageai";
+const NOINDEX = "noindex, nofollow, noai, noimageai";
 const PRICING_PATH = "/pricing";
 const LIVE_PATH = "/pricing/live";
 
@@ -55,7 +55,7 @@ export function decidePricing(input: {
   country?: string | null;
 }): PricingDecision | null {
   const path = normalizePath(input.pathname);
-  // Keeps the AI-crawler opt-out that next.config.ts sends (middleware's X-Robots-Tag replaces it).
+  // The non-indexable value next.config.ts sends, AI-crawler opt-out included (middleware's header replaces it).
   if (VARIANT_PATHS.has(path)) return { tier: null, rewrite: null, headers: { "X-Robots-Tag": NOINDEX } };
   if (path !== PRICING_PATH) return null;
 
