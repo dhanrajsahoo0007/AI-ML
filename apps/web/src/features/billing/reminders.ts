@@ -1,15 +1,15 @@
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 import type { Db } from "@/server/db/client";
 import { auditLog, subscription, user } from "@/server/db/schema";
-import { business } from "@/config/business";
+import { enqueueEmail, type EmailQueueProducer } from "@/features/email/queue";
 import type { EmailSender } from "@/features/email/sender";
-import { renderEmail } from "@/features/email/render";
-import { RenewalReminderEmail } from "./emails/renewal-reminder";
 import { formatMoney } from "./plans";
 
 // The T-7 annual renewal reminder (plan §9.7) as a scheduling hook: `sendRenewalReminders(db, sender)` emails
 // every yearly subscription renewing 7 to 8 days from now, once per renewal date (audit_log remembers), so it can
-// run daily from a script or, later, the Worker's Cron Trigger.
+// run daily from a script or, later, the Worker's Cron Trigger. The email goes through enqueueEmail(): on the
+// Queue when `options.queue` is the EMAIL_QUEUE binding (a Cron Trigger would pass env.EMAIL_QUEUE), inline through
+// `sender` otherwise (the script). The idempotency key is the renewal itself, so a retry never sends two.
 
 const REMINDER_DAYS = 7;
 const DAY = 86_400_000;
@@ -18,7 +18,7 @@ const ACTION = "billing.renewal_reminder";
 export async function sendRenewalReminders(
   db: Db,
   sender: EmailSender,
-  options: { now?: Date; siteUrl: string }
+  options: { now?: Date; siteUrl: string; queue?: EmailQueueProducer | null }
 ): Promise<{ sent: number }> {
   const now = options.now ?? new Date();
   const from = new Date(now.getTime() + REMINDER_DAYS * DAY);
@@ -54,22 +54,20 @@ export async function sendRenewalReminders(
       .limit(1);
     if (already) continue;
     const renewsOn = sub.periodEnd!.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
-    const { html, text } = await renderEmail(
-      RenewalReminderEmail({
-        name: sub.name,
-        renewsOn,
-        price: formatMoney(sub.amountMinor, sub.currency),
-        manageUrl: `${options.siteUrl}/account/billing`,
-      })
+    await enqueueEmail(
+      {
+        kind: "billing.renewal-reminder",
+        to: sub.email,
+        data: {
+          name: sub.name,
+          renewsOn,
+          price: formatMoney(sub.amountMinor, sub.currency),
+          manageUrl: `${options.siteUrl}/account/billing`,
+        },
+        idempotencyKey: `billing.renewal-reminder:${sub.id}:${sub.periodEnd!.getTime()}`,
+      },
+      { queue: options.queue, sender }
     );
-    await sender.send({
-      to: sub.email,
-      from: `${business.BRAND} <${business.BILLING_EMAIL}>`,
-      subject: `Your ${business.BRAND} Pro plan renews on ${renewsOn}`,
-      html,
-      text,
-      template: "renewal-reminder",
-    });
     await db.insert(auditLog).values({ actor: "system:reminders", action: ACTION, target: `subscription:${sub.id}`, meta: { periodEnd } });
     sent++;
   }

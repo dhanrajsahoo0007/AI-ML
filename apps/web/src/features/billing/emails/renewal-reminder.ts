@@ -1,6 +1,8 @@
 import { Body, Container, Head, Heading, Hr, Html, Link, Preview, Text } from "@react-email/components";
 import { createElement as h } from "react";
 import { business, SITE_URL } from "../../../config/business";
+import { renderEmail } from "../../email/render";
+import type { EmailMessage } from "../../email/sender";
 import { s } from "../../email/templates/styles";
 
 // The annual renewal reminder (plan §9.7: US auto-renewal laws), sent 7 days before every yearly renewal.
@@ -13,7 +15,20 @@ export interface RenewalReminderProps {
   manageUrl: string;
 }
 
-export function RenewalReminderEmail({ name, renewsOn, price, manageUrl }: RenewalReminderProps) {
+/** The message for one reminder (built by the email queue consumer, or inline without a queue). */
+export async function renewalReminderEmail(to: string, props: RenewalReminderProps): Promise<EmailMessage> {
+  const { html, text } = await renderEmail(RenewalReminderEmail(props));
+  return {
+    to,
+    from: `${business.BRAND} <${business.BILLING_EMAIL}>`,
+    subject: `Your ${business.BRAND} Pro plan renews on ${props.renewsOn}`,
+    html,
+    text,
+    template: "renewal-reminder",
+  };
+}
+
+function RenewalReminderEmail({ name, renewsOn, price, manageUrl }: RenewalReminderProps) {
   return h(
     Html,
     { lang: "en" },

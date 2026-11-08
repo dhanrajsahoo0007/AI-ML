@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { EmailJob } from "../email/jobs";
 import type { EmailMessage, EmailSender } from "../email/sender";
 import { MemoryRateLimiter } from "./rate-limit";
 import {
@@ -140,6 +141,26 @@ describe("newsletter sign-up flow", () => {
       consentVersion: "1999-01-01",
     });
     expect(await confirmSubscription(d, token)).toEqual({ kind: "invalid" });
+  });
+});
+
+describe("with the email queue binding", () => {
+  it("queues the confirmation and the welcome as jobs instead of sending inline", async () => {
+    const { d, sender } = deps();
+    const jobs: EmailJob[] = [];
+    d.queue = { send: async (job) => void jobs.push(job) };
+    await subscribe(d, input("q@example.com"));
+    expect(sender.sent).toEqual([]);
+    expect(jobs).toMatchObject([{ v: 1, kind: "newsletter.confirm", to: "q@example.com" }]);
+    const confirm = jobs[0] as Extract<EmailJob, { kind: "newsletter.confirm" }>;
+    const token = /token=([A-Za-z0-9._-]+)/.exec(confirm.data.confirmUrl)![1];
+
+    expect(await confirmSubscription(d, token)).toEqual({ kind: "active" });
+    expect(sender.sent).toEqual([]);
+    expect(jobs[1]).toMatchObject({ kind: "newsletter.welcome", to: "q@example.com" });
+    // One welcome per activation: the key names the subscriber and the confirmation time.
+    expect(jobs[1].idempotencyKey).toMatch(/^newsletter\.welcome:[^:]+:\d+$/);
+    expect(jobs[0].idempotencyKey).toMatch(/^newsletter\.confirm:/);
   });
 });
 

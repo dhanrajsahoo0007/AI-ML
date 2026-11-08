@@ -39,6 +39,11 @@ interface CloudflareEnv {
   RL_EMAIL_LINK?: WorkersRateLimitBinding;
   RL_CSP?: WorkersRateLimitBinding;
   RL_VITALS?: WorkersRateLimitBinding;
+  /** Secret: Resend API key; the email queue consumer reads it from the Worker env (src/features/email/). */
+  RESEND_API_KEY?: string;
+  /** Queue producer for transactional email (src/features/email/queue.ts, wrangler.jsonc `queues`). Absent until
+   *  the TODO(account) queues block is uncommented; enqueueEmail() then sends inline. Optional on purpose. */
+  EMAIL_QUEUE?: Queue;
   // TODO(account): uncomment with the bindings in wrangler.jsonc.
   // MEDIA_PUBLIC: R2Bucket;
   // MEDIA_PRIVATE: R2Bucket;
@@ -49,4 +54,36 @@ interface CloudflareEnv {
 /** The Workers Rate Limiting binding's runtime API (`ratelimits` in wrangler.jsonc). */
 interface WorkersRateLimitBinding {
   limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
+// Cloudflare Queues and handler-context runtime types: the subset this app uses, copied from
+// @cloudflare/workers-types (not a dependency; cf-typegen runs with --include-runtime=false). Delete this block if
+// the runtime types are added, since these declarations merge with theirs.
+interface Queue<Body = unknown> {
+  send(message: Body, options?: QueueSendOptions): Promise<void>;
+}
+interface QueueSendOptions {
+  contentType?: "text" | "bytes" | "json" | "v8";
+  delaySeconds?: number;
+}
+interface QueueRetryOptions {
+  delaySeconds?: number;
+}
+interface Message<Body = unknown> {
+  readonly id: string;
+  readonly timestamp: Date;
+  readonly body: Body;
+  readonly attempts: number;
+  retry(options?: QueueRetryOptions): void;
+  ack(): void;
+}
+interface MessageBatch<Body = unknown> {
+  readonly queue: string;
+  readonly messages: readonly Message<Body>[];
+  retryAll(options?: QueueRetryOptions): void;
+  ackAll(): void;
+}
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+  passThroughOnException(): void;
 }

@@ -1,7 +1,8 @@
 import { log } from "@/server/log";
+import { enqueueEmail, type EmailQueueProducer } from "../email/queue";
 import type { EmailSender } from "../email/sender";
 import { CURRENT_CONSENT_VERSION, FIRST_CONSENT_VERSION, isConsentVersion } from "./consent";
-import { confirmationEmail, welcomeEmail, type SubscriberLinks } from "./emails";
+import type { SubscriberLinks } from "./emails";
 import { emailKey, type RateLimiter } from "./rate-limit";
 import { isSuppressed, type NewsletterStore, type Subscriber } from "./store";
 import type { CaptchaVerifier } from "./turnstile";
@@ -9,11 +10,14 @@ import { signToken, verifyToken } from "./token";
 
 // The sign-up flow (plan §15.2), independent of HTTP: the route handlers in app/api/newsletter parse the request
 // and call these. Every dependency is a port, so the same code runs on the in-memory dev implementations and on
-// Postgres + Resend (+ Queue later).
+// Postgres + Resend + the email queue.
 
 export interface NewsletterDeps {
   store: NewsletterStore;
+  /** Inline sender, used when there is no queue (features/email/queue.ts enqueueEmail()). */
   sender: EmailSender;
+  /** The EMAIL_QUEUE binding when the Worker has one; null or absent sends inline. */
+  queue?: EmailQueueProducer | null;
   limiter: RateLimiter;
   /** Turnstile (TURNSTILE_SECRET_KEY); null or absent means no check. */
   captcha?: CaptchaVerifier | null;
@@ -47,9 +51,24 @@ async function tokensFor(deps: NewsletterDeps, subscriberId: string, consentVers
   return deps.links({ confirm, unsubscribe });
 }
 
+/** The ports enqueueEmail() needs; the sender getter is read only for an inline send. */
+const mail = (deps: NewsletterDeps) => ({ queue: deps.queue, sender: () => deps.sender });
+
 async function sendWelcome(deps: NewsletterDeps, subscriber: Subscriber) {
   try {
-    await deps.sender.send(await welcomeEmail(subscriber.email, await tokensFor(deps, subscriber.id)));
+    const { archiveUrl, unsubscribeUrl, oneClickUrl } = await tokensFor(deps, subscriber.id);
+    await enqueueEmail(
+      {
+        kind: "newsletter.welcome",
+        to: subscriber.email,
+        data: { archiveUrl, unsubscribeUrl, oneClickUrl },
+        // One welcome per activation, even if two confirms race; a later re-subscribe gets a new confirmedAt.
+        idempotencyKey: subscriber.confirmedAt
+          ? `newsletter.welcome:${subscriber.id}:${subscriber.confirmedAt.getTime()}`
+          : undefined,
+      },
+      mail(deps)
+    );
   } catch (e) {
     // The subscription stands either way; a missing welcome email is not worth failing it for.
     // Through log.ts: provider errors can repeat the address, which redact() masks.
@@ -80,8 +99,11 @@ export async function subscribe(deps: NewsletterDeps, input: SubscribeInput): Pr
     country: input.country,
   });
   if (outcome === "send-confirmation") {
-    await deps.sender.send(
-      await confirmationEmail(subscriber.email, await tokensFor(deps, subscriber.id, input.consentVersion))
+    // A new confirmation each time (the store's cool-down limits how often), so a random idempotency key.
+    const { confirmUrl, unsubscribeUrl } = await tokensFor(deps, subscriber.id, input.consentVersion);
+    await enqueueEmail(
+      { kind: "newsletter.confirm", to: subscriber.email, data: { confirmUrl, unsubscribeUrl } },
+      mail(deps)
     );
   }
   return { kind: "accepted" };
