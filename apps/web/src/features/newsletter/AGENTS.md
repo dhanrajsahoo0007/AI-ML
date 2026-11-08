@@ -12,10 +12,13 @@ No index file; import the files directly.
 - `schema.ts`: issue frontmatter (`title`, `date`, `summary`, `access`, `status` draft/scheduled/sent, `sendAt`,
   `audience` all/pro); `SUMMARY_MAX` (200).
 - `service.ts`: `subscribe()`, confirm and unsubscribe flows over ports (`NewsletterDeps`).
-- `server.ts`: `newsletterDeps(href)`, `newsletterHref()` wire the ports for the API routes only.
+- `server.ts`: `newsletterDeps(href)`, `newsletterHref()` wire the ports for the API routes only; `emailQueue()`
+  (the `EMAIL_QUEUE` binding or null), `emailSender()`.
 - `store.ts` (port + `MemoryNewsletterStore`), `token.ts` (HMAC tokens), `rate-limit.ts`, `consent.ts`,
   `http.ts` (small JSON helpers), `unsubscribe-headers.ts` (RFC 8058).
 - `email-issue.ts` + `emails.ts`: issue, confirmation and welcome emails via `apps/web/src/features/email/`.
+  Confirmation and welcome are email jobs (`newsletter.confirm`, `newsletter.welcome`) sent with `enqueueEmail()`:
+  on the email queue when the Worker has the binding, inline otherwise (`apps/web/src/features/email/AGENTS.md`).
 - `send/send-issue.ts` + `send/plan.ts`: the send script run by `.github/workflows/newsletter-send.yml`.
 - `rss.ts`, `seo.ts`, `issue-body.tsx`, `links.ts`; islands `signup-form.client.tsx`, `token-action.client.tsx`.
 
@@ -46,11 +49,17 @@ carry a non-expiring `unsubscribe` token; mail providers POST `List-Unsubscribe=
   PNG with absolute URLs. A premium issue sent to everyone carries only its summary and a link.
 - Drafts and scheduled issues get a `noindex` review page outside production only.
 - A broadcast needs `status: scheduled`; marking an issue `sent` is a follow-up PR (the workflow can't push).
+- **Issues don't use the email queue.** They are Resend Broadcasts to a segment, `audience: pro` included (to
+  `RESEND_PRO_SEGMENT_ID`), so there are no per-recipient sends. If per-recipient issue mail is ever needed (e.g.
+  per-reader content), it would be a new email kind whose job carries the issue slug, not its HTML, fanned out in
+  batches with `idempotencyKey` `newsletter.issue:<slug>:<subscriber id>`; Resend's rate limit makes that a
+  queue job, never a request.
 
 ## Extend it
 
 Write an issue: `.claude/skills/write-newsletter-issue/SKILL.md`. New consent wording: add a version in
-`consent.ts`, never edit an old one. New email: build it in `emails.ts` from the shared templates.
+`consent.ts`, never edit an old one. New email: build it in `emails.ts` from the shared templates and register it
+as an email kind (`apps/web/src/features/email/AGENTS.md`, "Extend it").
 
 ## Tests
 
