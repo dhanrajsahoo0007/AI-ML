@@ -79,7 +79,13 @@ export default async function RootLayout({
         >
           Skip to content
         </a>
-        <SiteHeader navTree={headerNav} profileMenu={<ProfileMenu />} />
+        {/* Keys: an element handed to a client component as a prop arrives lazily and lands among the header's other
+            children, which React treats as an unkeyed list member (a dev-only warning); a key settles it. */}
+        <SiteHeader
+          navTree={headerNav}
+          profileMenu={<ProfileMenu key="profile-menu" />}
+          profileMenuMobile={<ProfileMenu key="profile-menu-mobile" />}
+        />
         <ContentProtection />
         {/* `next dev` only: the paid/unpaid view switch. APP_ENV is inlined at build, so deployed builds drop it. */}
         {process.env.APP_ENV === "local" && <LocalViewSwitch envDefault={process.env.LOCAL_VIEW_AS} />}

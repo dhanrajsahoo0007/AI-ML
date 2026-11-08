@@ -17,11 +17,20 @@ import type { HeaderNavSection } from "@/features/sections/public";
 // followed by the extra links (Pricing). Hovering or focusing a section opens a panel with that section's
 // subcategories (its first-level groups). The header is on every page, so it gets only that slim list
 // (HeaderNavSection); each article list lives in its own section's sidebar. The profile menu is passed in from
-// app/layout.tsx (it lives in features/account, which components/ can't import).
+// app/layout.tsx (it lives in features/account, which components/ can't import), once per slot: the desktop bar and
+// the mobile bar each render their own element (one element in two places trips React's key warning).
 
 const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
-export function SiteHeader({ navTree, profileMenu }: { navTree: HeaderNavSection[]; profileMenu: ReactNode }) {
+export function SiteHeader({
+  navTree,
+  profileMenu,
+  profileMenuMobile,
+}: {
+  navTree: HeaderNavSection[];
+  profileMenu: ReactNode;
+  profileMenuMobile: ReactNode;
+}) {
   const pathname = useCanonicalPathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -164,7 +173,7 @@ export function SiteHeader({ navTree, profileMenu }: { navTree: HeaderNavSection
         <div className="ml-auto flex items-center gap-1 lg:hidden">
           <SearchButton compact />
           <ThemeToggle />
-          {profileMenu}
+          {profileMenuMobile}
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger
               className="inline-flex size-10 items-center justify-center rounded-full text-ink transition-colors hover:bg-paper-2"
