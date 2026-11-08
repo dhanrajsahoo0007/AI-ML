@@ -153,6 +153,7 @@ only). Build outputs (src/generated/, .build-cache/, public/\_a/) are gitignored
 | SEO, headers, OG, JSON-LD                 | `apps/web/src/features/seo/`                                                                       |
 | Monitoring and analytics (off by default) | `apps/web/src/features/observability/`, `apps/web/src/features/analytics/`                         |
 | Business placeholders, crawler list       | `apps/web/src/config/business.ts`, `apps/web/src/config/crawlers.ts`                               |
+| Regional price tiers (country → A/B/C)    | `apps/web/src/config/pricing-tiers.ts` (pricing page, middleware, billing reporting)               |
 | UI components                             | `apps/web/src/components/` (mdx, article, diagrams, cloud, db, ui)                                 |
 
 ## Repo map
