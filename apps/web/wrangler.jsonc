@@ -64,10 +64,13 @@
   //   // Premium media, served only through the Worker after an entitlement check.
   //   { "binding": "MEDIA_PRIVATE", "bucket_name": "origins-ai-learn-media-private" },
   // ],
-  // TODO(account, Phase 4): Hyperdrive in front of Neon. Only /api/* handlers may use it.
-  // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id>", "localConnectionString": "postgres://app:app@localhost:5432/app" }],
-  // TODO(account): Analytics Engine dataset for paywall/checkout metrics (plan §10.5).
-  // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_<env>" }],
+  // TODO(account, Phase 4): Hyperdrive in front of Neon, one config per environment (`wrangler hyperdrive create`).
+  // Only /api/* handlers and the account pages use it (src/server/db/client.ts reads it per request; without it,
+  // DATABASE_URL). Locally the binding is optional: `localConnectionString` is the Docker Postgres.
+  // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id-local>", "localConnectionString": "postgres://origins:origins@127.0.0.1:54329/origins_dev" }],
+  // TODO(account): Analytics Engine dataset for paywall, checkout, webhook and web-vitals metrics (plan §10.5;
+  // src/server/edge/analytics.ts is a no-op without it). The dataset is created on first write.
+  // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_local" }],
 
   "env": {
     // One Worker (origins-ai-learn-preview) holds a version per PR, each with its own preview URL
@@ -91,7 +94,9 @@
         { "name": "RL_CSP", "namespace_id": "2012", "simple": { "limit": 30, "period": 60 } },
         { "name": "RL_VITALS", "namespace_id": "2013", "simple": { "limit": 60, "period": 60 } },
       ],
-      // TODO(account): r2_buckets / hyperdrive / analytics_engine_datasets as above (preview names).
+      // TODO(account): r2_buckets as above (preview names), and:
+      // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id-preview>" }],
+      // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_preview" }],
     },
     // Deployed from `development`. TODO(account): route `staging.<domain>` once the zone exists:
     // "routes": [{ "pattern": "staging.<domain>", "custom_domain": true }],
@@ -116,7 +121,9 @@
         { "name": "RL_CSP", "namespace_id": "3012", "simple": { "limit": 30, "period": 60 } },
         { "name": "RL_VITALS", "namespace_id": "3013", "simple": { "limit": 60, "period": 60 } },
       ],
-      // TODO(account): r2_buckets / hyperdrive / analytics_engine_datasets as above (staging names).
+      // TODO(account): r2_buckets as above (staging names), and:
+      // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id-staging>" }],
+      // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_staging" }],
     },
     // Deployed from `main` through the `production` GitHub environment. workers.dev stays on because
     // the deploy smoke tests use it (Bot Fight Mode on the custom domain blocks CI runners); middleware
@@ -143,7 +150,9 @@
         { "name": "RL_CSP", "namespace_id": "4012", "simple": { "limit": 30, "period": 60 } },
         { "name": "RL_VITALS", "namespace_id": "4013", "simple": { "limit": 60, "period": 60 } },
       ],
-      // TODO(account): r2_buckets / hyperdrive / analytics_engine_datasets as above (production names).
+      // TODO(account): r2_buckets as above (production names), and:
+      // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id-production>" }],
+      // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_production" }],
     },
   },
 }

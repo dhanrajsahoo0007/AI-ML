@@ -39,14 +39,31 @@ interface CloudflareEnv {
   RL_EMAIL_LINK?: WorkersRateLimitBinding;
   RL_CSP?: WorkersRateLimitBinding;
   RL_VITALS?: WorkersRateLimitBinding;
+  /** Secret: server-side Sentry on the Worker (src/features/observability/sentry.worker.ts); off when unset. */
+  SENTRY_DSN?: string;
+  SENTRY_RELEASE?: string;
+  /** Hyperdrive in front of Neon (src/server/db/client.ts); absent until the account exists (wrangler.jsonc TODO). */
+  HYPERDRIVE?: HyperdriveBinding;
+  /** Analytics Engine dataset (src/server/edge/analytics.ts); absent until the account exists (wrangler.jsonc TODO). */
+  ANALYTICS?: AnalyticsEngineBinding;
   // TODO(account): uncomment with the bindings in wrangler.jsonc.
   // MEDIA_PUBLIC: R2Bucket;
   // MEDIA_PRIVATE: R2Bucket;
-  // HYPERDRIVE: Hyperdrive;
-  // ANALYTICS: AnalyticsEngineDataset;
 }
 
 /** The Workers Rate Limiting binding's runtime API (`ratelimits` in wrangler.jsonc). */
 interface WorkersRateLimitBinding {
   limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
+/** The Hyperdrive binding's runtime API (`hyperdrive` in wrangler.jsonc): only the part we read. */
+interface HyperdriveBinding {
+  /** `postgresql://user:password@<id>.hyperdrive.local:5432/<db>`; Hyperdrive itself reaches Neon over TLS. */
+  readonly connectionString: string;
+}
+
+/** The Analytics Engine binding's runtime API (`analytics_engine_datasets` in wrangler.jsonc). */
+interface AnalyticsEngineBinding {
+  /** Non-blocking: queues the point and returns at once; the runtime sends it after the response. */
+  writeDataPoint(point?: { indexes?: string[]; blobs?: (string | null)[]; doubles?: number[] }): void;
 }
