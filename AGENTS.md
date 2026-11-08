@@ -145,6 +145,7 @@ only). Build outputs (src/generated/, .build-cache/, public/\_a/) are gitignored
 | Routing only (thin pages)                 | `apps/web/src/app/`                                                                                |
 | Section registry, kinds, nav              | `apps/web/src/features/sections/`, `apps/web/src/features/docs/`                                   |
 | Kind modules with own routes              | `apps/web/src/features/dsa/`, `apps/web/src/features/newsletter/`                                  |
+| Interview Practice page views and SEO     | `apps/web/src/features/interviews/`, `apps/web/src/lib/question-bank.ts`                           |
 | MDX compile, loaders, icons               | `apps/web/src/lib/mdx-doc.tsx`, `apps/web/src/lib/icons.ts`                                        |
 | Edge (middleware imports only this)       | `apps/web/src/server/edge/`                                                                        |
 | API wrapper, env, logs                    | `apps/web/src/server/http.ts`, `apps/web/src/server/env.ts`, `apps/web/src/server/log.ts`          |

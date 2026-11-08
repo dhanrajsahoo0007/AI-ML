@@ -6,7 +6,10 @@ pair serves every docs section: `apps/web/src/app/(content)/[section]/page.tsx` 
 
 ## Public API
 
-No index file; import the files directly.
+- `index.ts`: `SectionDocPage`, the article page view (server component; renders the paywall on previews). The
+  index re-exports JSX, so server-only tests import the files below by path instead.
+
+No other entry point yet; import these files directly:
 
 - `kind.ts`: `docsKind`, the `SectionKind<DocItem>` implementation (load, staticParams, nav, sitemap, search,
   access, questions, counts, validate).
@@ -16,7 +19,7 @@ No index file; import the files directly.
 - `hub-markup.ts`: `parseHubMarkup()` reads `<ModelCategory>`/`<ModelCard>` grids out of hub MDX.
 
 Rendering is in `apps/web/src/lib/mdx-doc.tsx` (compile, MDX component map, headings) and
-`apps/web/src/components/section-doc-page.tsx`; SEO in `apps/web/src/features/seo/docs.ts`.
+`apps/web/src/features/docs/section-doc-page.tsx`; SEO in `apps/web/src/features/seo/docs.ts`.
 
 ## Data flow
 

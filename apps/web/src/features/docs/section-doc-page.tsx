@@ -3,7 +3,7 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { ArticleLayout } from "@/components/article-layout";
 import { loadMdxFile } from "@/lib/mdx-doc";
 import { getUpdatedDate } from "@/lib/doc-meta";
-import { loadDocItems } from "@/features/docs/source";
+import { loadDocItems } from "./source";
 import { isPremiumDoc } from "@/features/paywall/access";
 import { Paywall } from "@/features/paywall/paywall";
 import { ProgressActions } from "@/features/progress/progress-actions.client";

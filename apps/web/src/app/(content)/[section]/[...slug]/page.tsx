@@ -1,4 +1,4 @@
-import { SectionDocPage } from "@/components/section-doc-page";
+import { SectionDocPage } from "@/features/docs";
 import { docSlugParams, docsSection, docVariant, type DocParams } from "@/features/docs/routes";
 import { docPageSeo } from "@/features/seo/docs";
 import { JsonLd } from "@/features/seo/json-ld-script";

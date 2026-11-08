@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { resolveSubsection, SubsectionView, subsectionSeo } from "@/components/interviews/subsection-view";
+import { resolveSubsection, SubsectionView, subsectionSeo } from "@/features/interviews";
 import { premiumAnswerCategories } from "@/features/paywall/access";
 import { PREVIEW_SEGMENT } from "@/features/paywall/constants";
 

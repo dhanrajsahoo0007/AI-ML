@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { CategoryView, categorySeo } from "@/components/interviews/category-view";
+import { CategoryView, categorySeo } from "@/features/interviews";
 import { isRouteBuilt } from "@/features/sections/route-helpers";
 import { getCategories, getCategory } from "@/lib/question-bank";
 
