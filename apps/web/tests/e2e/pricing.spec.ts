@@ -124,8 +124,13 @@ test.describe("regional pricing @core", () => {
   }) => {
     await page.goto("/pricing");
     await expectCanonicalPricing(page);
-    if (env === "production") {
-      await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "index, follow");
+    // /pricing is indexable whichever variant middleware serves there (preview builds are noindex site-wide).
+    for (const country of ["US", "IN"]) {
+      const res = await request.get("/pricing", { headers: { "cf-ipcountry": country } });
+      const html = await res.text();
+      expect(html, country).toMatch(/<link rel="canonical" href="https?:\/\/[^"]+\/pricing"\/>/);
+      expect(html, country).not.toMatch(/<meta name="robots" content="[^"]*noindex/);
+      if (env === "production") expect(res.headers()["x-robots-tag"] ?? "", country).not.toMatch(/noindex/);
     }
 
     for (const path of ["/pricing/b", "/pricing/c", "/pricing/live", "/pricing/live/b", "/pricing/live/c"]) {
