@@ -43,6 +43,7 @@ import {
   type RenderedFile,
 } from "./build-assets.lib";
 import { DiagramRenderer, PNG_BACKGROUND, excalidrawVersion, renderImage, svgToPng } from "./build-assets.render";
+import { stepCount, svgAtStep } from "../src/lib/svg-steps";
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.chdir(APP_DIR);
@@ -193,12 +194,20 @@ async function renderAsset(
       const svg = optimizeSvg(src.toString("utf8"), prefix);
       const files = [inline("light", svg)];
       const size = svgSize(svg);
+      const steps = a.type === "svg" ? stepCount(svg) : 0;
       if (a.type === "svg" && size) {
         const name = `${slug}.png`;
         const png = await svgToPng(svg, size.width, path.join(dir, name), PNG_BACKGROUND.light);
         files.push({ name, format: "png", theme: "light", bytes: png.bytes, width: png.width, height: png.height });
+        // Build-up figures (newsletter): one PNG per step, for email and the LinkedIn carousel. Only SVGs with
+        // data-step layers get them, so existing render caches stay valid without a PIPELINE_VERSION bump.
+        for (let step = 1; step <= steps; step++) {
+          const stepName = `${slug}-step-${step}.png`;
+          const out = await svgToPng(svgAtStep(svg, step), size.width, path.join(dir, stepName), PNG_BACKGROUND.light);
+          files.push({ name: stepName, format: "png", theme: "light", step, ...out });
+        }
       }
-      return { files, ...(size ?? {}) };
+      return { files, ...(size ?? {}), ...(steps ? { steps } : {}) };
     }
     case "mermaid": {
       const entry = mermaid.readDiagram(mermaid.diagramHash(src.toString("utf8")));

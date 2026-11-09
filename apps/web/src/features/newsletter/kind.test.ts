@@ -18,7 +18,9 @@ function fixture(name: string, year: string, frontmatter: string, body = "Hello.
   return readIssueFile(section, file, year);
 }
 
-const base = (extra = "") => `title: "T"\ndate: "2026-11-07"\nsummary: "S"\naccess: free\naudience: all\n${extra}`;
+const COVER = "cover: { motif: lattice, palette: sand, seed: 1 }";
+const base = (extra = "") =>
+  `title: "T"\nissue: 1\ndate: "2026-11-07"\nsummary: "S"\nformat: digest\n${COVER}\naccess: free\naudience: all\n${extra}`;
 const messages = async (issue: ReturnType<typeof fixture>) =>
   (await newsletterKind.validate(section, [issue])).map((e) => `${e.level}: ${e.message}`);
 
@@ -102,6 +104,66 @@ describe("newsletter kind", () => {
     const out = (await newsletterKind.validate(section, [a, b])).map((e) => e.message);
     expect(out).toContain("date 2026-11-07 is not in the 2025 folder");
     expect(out.some((m) => m.startsWith("slug same is also used by"))).toBe(true);
+  });
+
+  it("tags and series come from the catalog; related links must be pages", async () => {
+    const issue = fixture(
+      "catalog",
+      "2026",
+      base("status: draft\ntags: [agents, nope]\nseries: no-such-series\nrelated: [/system-design/no-such-page]")
+    );
+    const out = (await messages(issue)).join("\n");
+    expect(out).toMatch(/error: unknown tag "nope"/);
+    expect(out).not.toMatch(/unknown tag "agents"/);
+    expect(out).toMatch(/error: unknown series "no-such-series"/);
+    expect(out).toMatch(/error: related link \/system-design\/no-such-page is not a page/);
+  });
+
+  it("checks figures and callouts in the body", async () => {
+    const issue = fixture(
+      "figures",
+      "2026",
+      base("status: draft"),
+      "![x](asset:diagrams/svg/newsletter/no-such/figure)\n\n> [!DANGER]\n> Boom.\n\n> [!TIP]\n> Fine.\n"
+    );
+    const out = (await messages(issue)).join("\n");
+    expect(out).toMatch(/error: figure asset:diagrams\/svg\/newsletter\/no-such\/figure: no asset/);
+    expect(out).toMatch(/error: unknown callout \[!DANGER\]/);
+    expect(out).not.toMatch(/\[!TIP\]/);
+  });
+
+  it("issue numbers are unique and have no gaps", async () => {
+    const one = fixture("num-one", "2026", base("status: draft"));
+    const dup = fixture("num-dup", "2026", base("status: draft"));
+    const three = fixture("num-three", "2026", base("status: draft").replace("issue: 1", "issue: 3"));
+    const out = (await newsletterKind.validate(section, [one, dup, three])).map((e) => `${e.level}: ${e.message}`);
+    expect(out.some((m) => /^error: issue 1 is also used by/.test(m))).toBe(true);
+    expect(out).toContain("warning: issue 3 follows issue 1: numbers have no gaps");
+  });
+
+  it("a scheduled issue needs a number and a cover", async () => {
+    const bare = fixture(
+      "bare",
+      "2026",
+      `title: "T"\ndate: "2026-11-07"\nsummary: "S"\nstatus: scheduled\nsendAt: "2999-01-01T09:00:00Z"`
+    );
+    const out = (await messages(bare)).join("\n");
+    expect(out).toMatch(/frontmatter issue: required once scheduled/);
+    expect(out).toMatch(/frontmatter cover: required once scheduled/);
+  });
+
+  it("deep dives get shape warnings, never errors", async () => {
+    const issue = fixture(
+      "shape",
+      "2026",
+      base("status: draft").replace("format: digest", "format: deep-dive"),
+      "## Intro\n\nShort.\n"
+    );
+    const out = await messages(issue);
+    expect(out.filter((m) => m.startsWith("error"))).toEqual([]);
+    expect(out).toContain('warning: Deep dive issues have a "## Why this matters" section');
+    expect(out).toContain("warning: 0 figure(s); deep dive issues have at least 5");
+    expect(out).toContain("warning: 0 takeaway(s); deep dive issues have 3–5");
   });
 
   it("nav groups issues by year with draft status", () => {

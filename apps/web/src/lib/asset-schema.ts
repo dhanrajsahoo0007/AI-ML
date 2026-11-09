@@ -117,6 +117,8 @@ export interface AssetVariant {
   bytes: number;
   /** Public URL (/_a/<hash>/…) when this asset ships publicly in this environment. */
   url?: string;
+  /** Build-up step this rendition shows (an SVG with data-step layers gets a PNG per step). */
+  step?: number;
 }
 
 export interface AssetEntry {
@@ -144,6 +146,8 @@ export interface AssetEntry {
   height?: number;
   /** Tiny blurred WebP as a data: URL, shown while a raster image loads. */
   placeholder?: string;
+  /** Highest data-step layer of a build-up SVG (src/lib/svg-steps.ts). */
+  steps?: number;
   variants: AssetVariant[];
   /** Pages (paths) and code (`code:<file>`) that use this asset. */
   usedBy: string[];

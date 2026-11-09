@@ -12,8 +12,14 @@ JSX) and the client islands are imported by path, and so are `kind.ts` (from `ap
 plain Node) and `emails.ts` (from `apps/web/src/features/email/jobs.ts`, bundled into the Worker).
 
 - `kind.ts`: `newsletterKind` (`SectionKind<Issue>`). `source.ts`: `loadIssues()`, `readIssueFile()`.
-- `schema.ts`: issue frontmatter (`title`, `date`, `summary`, `access`, `status` draft/scheduled/sent, `sendAt`,
-  `audience` all/pro); `SUMMARY_MAX` (200).
+- `schema.ts`: issue frontmatter (`title`, `issue` number, `date`, `summary`, `format`, `series`, `tags`, `level`,
+  `readingTime`, `cover`, `takeaways`, `related`, `share.hook`, `access`, `status` draft/scheduled/sent, `sendAt`,
+  `audience` all/pro); `SUMMARY_MAX` (200); `FORMATS`, the per-format shape rules (deep-dive, digest).
+- `catalog.ts`: the closed tag and series lists in `content/newsletter/catalog.yaml`. `cover/catalog.ts`: cover
+  motif and palette names.
+- `links.ts` (links, images, `asset:` figure sources, callout markers), `figures.ts` (figure checks against the
+  asset source files; manifest lookup for rendering), `figure.tsx` (the web figure), `callouts.ts` (callout types
+  and the remark plugin), `body-stats.ts` (words, figures, headings, reading time).
 - `service.ts`: `subscribe()`, confirm and unsubscribe flows over ports (`NewsletterDeps`).
 - `server.ts`: `newsletterDeps(href)`, `newsletterHref()` wire the ports for the API routes only; `emailQueue()`
   (the `EMAIL_QUEUE` binding or null), `emailSender()`.
@@ -48,8 +54,19 @@ carry a non-expiring `unsubscribe` token; mail providers POST `List-Unsubscribe=
 - The memory store is for `APP_ENV=local` only; elsewhere a missing database is a 503 `not_configured`, because the
   cool-down has to survive isolates. Routes go through `newsletterRoute()` / `serverToServerRoute()` (`route()`
   behind the section gate; the second with `origin: false` for mail systems).
-- Issues are plain Markdown (no JSX components) so one file renders to the web and to email; email images must be
-  PNG with absolute URLs. A premium issue sent to everyone carries only its summary and a link.
+- Issues are plain Markdown (no JSX components) so one file renders to the web and to email. Rich content uses
+  Markdown-native syntax both renderers understand:
+  - **Figures:** `![alt](asset:<id>)`, or `![alt](asset:<id>#step=<n>)` for one step of a build-up SVG (layers
+    marked `data-step`, see `apps/web/src/lib/svg-steps.ts`). The web inlines the SVG as a numbered figure; email
+    gets the asset's PNG (a PNG per step, made by the asset build). The asset needs `alt` and `caption`, must be
+    free, and is counted as used by the issue page, so it ships wherever the page is built.
+  - **Callouts:** GitHub alerts `> [!NOTE]` (In plain English), `[!IMPORTANT]` (Key idea), `[!WARNING]` (Common
+    trap), `[!TIP]` (Try it); other types are errors.
+  - Any other image must be a PNG with an absolute URL. A premium issue sent to everyone carries only its summary
+    and a link.
+- Format rules (`FORMATS`: required sections, figure count, length, words between visuals, sentence length,
+  takeaways) are **warnings**, so a draft can be unfinished. Issue numbers are unique (error) and gapless
+  (warning); a scheduled or sent issue needs `issue` and `cover`.
 - Drafts and scheduled issues get a `noindex` review page outside production only.
 - A broadcast needs `status: scheduled`; marking an issue `sent` is a follow-up PR (the workflow can't push).
 - **Issues don't use the email queue.** They are Resend Broadcasts to a segment, `audience: pro` included (to
@@ -66,6 +83,6 @@ as an email kind (`apps/web/src/features/email/AGENTS.md`, "Extend it").
 
 ## Tests
 
-`kind.test.ts`, `service.test.ts`, `store.test.ts`, `token.test.ts`, `rss.test.ts`, `send-plan.test.ts`,
+`kind.test.ts`, `content-model.test.ts`, `service.test.ts`, `store.test.ts`, `token.test.ts`, `rss.test.ts`, `send-plan.test.ts`,
 `server.test.ts`, `unsubscribe-headers.test.ts`; E2E `apps/web/tests/e2e/newsletter.spec.ts` (subscribe → .eml →
 confirm → one-click unsubscribe).

@@ -5,8 +5,12 @@ import { SUBSCRIBE_KIND as NEWSLETTER_KIND } from "../sections/public";
 import { allSections } from "../sections/registry";
 import type { SectionDef } from "../sections";
 import { loadDocItems } from "../docs/source";
-import { findComponents, findImages, findLinks, internalPath, isPng } from "./links";
-import { issueFrontmatterSchema, SUMMARY_MAX } from "./schema";
+import { bodyStats } from "./body-stats";
+import { isCalloutType } from "./callouts";
+import { catalogProblems, loadCatalog } from "./catalog";
+import { figureProblems } from "./figures";
+import { ASSET_SCHEME, findCallouts, findComponents, findImages, findLinks, internalPath, isPng } from "./links";
+import { FORMATS, issueFrontmatterSchema, SUMMARY_MAX } from "./schema";
 import { isBuilt, isPublished, isValidSlug, loadIssues, type Issue } from "./source";
 
 // The newsletter kind (plan §15.2): issues in content/<section>/<yyyy>/<slug>.mdx, served by app/<section>/**.
@@ -108,6 +112,10 @@ export const newsletterKind: SectionKind<Issue> = {
     const now = Date.now();
     const paths = knownPaths(section, items);
     const slugs = new Map<string, Issue>();
+    const numbers = new Map<number, Issue>();
+    const catalog = loadCatalog(section.key);
+    const catalogFile = path.join("content", section.key, "catalog.yaml");
+    for (const message of catalogProblems(section.key)) errors.push({ file: catalogFile, message, level: "error" });
 
     for (const issue of items) {
       if (!isValidSlug(issue.slug)) push(issue, `file name "${issue.slug}" must be lowercase kebab-case`, 1);
@@ -169,8 +177,68 @@ export const newsletterKind: SectionKind<Issue> = {
         );
       }
       for (const img of findImages(issue.body)) {
-        if (!isPng(img.url)) push(issue, `image ${img.url} must be a PNG (email clients)`, fileLine(issue, img.line));
+        const line = fileLine(issue, img.line);
+        if (img.url.startsWith(ASSET_SCHEME)) for (const p of figureProblems(img.url)) push(issue, p, line);
+        else if (!isPng(img.url)) push(issue, `image ${img.url} must be a PNG (email clients)`, line);
       }
+      for (const c of findCallouts(issue.body)) {
+        if (!isCalloutType(c.type)) {
+          push(issue, `unknown callout [!${c.type}]: use NOTE, IMPORTANT, WARNING or TIP`, fileLine(issue, c.line));
+        }
+      }
+
+      // Number, catalog, related links.
+      if (fm.issue !== undefined) {
+        const other = numbers.get(fm.issue);
+        if (other) push(issue, `issue ${fm.issue} is also used by ${rel(other.file)}`, lineOf(issue.file, /^issue:/));
+        numbers.set(fm.issue, issue);
+      }
+      for (const tag of fm.tags) {
+        if (!(tag in catalog.tags))
+          push(issue, `unknown tag "${tag}": add it to ${catalogFile}`, lineOf(issue.file, /^tags:/));
+      }
+      if (fm.series && !(fm.series in catalog.series)) {
+        push(issue, `unknown series "${fm.series}": add it to ${catalogFile}`, lineOf(issue.file, /^series:/));
+      }
+      for (const href of fm.related) {
+        const state = paths.get(internalPath(href) ?? href);
+        if (state === undefined) push(issue, `related link ${href} is not a page`, lineOf(issue.file, /^related:/));
+      }
+
+      // The format's shape: warnings, so an unfinished draft still builds.
+      const rules = FORMATS[fm.format];
+      const stats = bodyStats(issue.body);
+      const warn = (message: string, line?: number) => push(issue, message, line ?? 1, "warning");
+      for (const heading of rules.requiredHeadings) {
+        if (!stats.headings.some((h) => h.toLowerCase().startsWith(heading.toLowerCase()))) {
+          warn(`${rules.label} issues have a "## ${heading}" section`);
+        }
+      }
+      if (stats.figures < rules.minFigures) {
+        warn(`${stats.figures} figure(s); ${rules.label.toLowerCase()} issues have at least ${rules.minFigures}`);
+      }
+      if (stats.words > rules.maxWords)
+        warn(`${stats.words} words; keep ${rules.label.toLowerCase()} issues under ${rules.maxWords}`);
+      if (stats.longestPlainRun.words > rules.maxWordsBetweenVisuals) {
+        warn(
+          `${stats.longestPlainRun.words} words in a row without a figure or callout (max ${rules.maxWordsBetweenVisuals})`,
+          fileLine(issue, stats.longestPlainRun.line)
+        );
+      }
+      if (stats.avgSentenceWords > rules.maxAvgSentenceWords) {
+        warn(
+          `sentences average ${stats.avgSentenceWords.toFixed(1)} words (aim for ${rules.maxAvgSentenceWords} or fewer)`
+        );
+      }
+      const [minT, maxT] = rules.takeaways;
+      if (fm.takeaways.length < minT || fm.takeaways.length > maxT) {
+        warn(
+          `${fm.takeaways.length} takeaway(s); ${rules.label.toLowerCase()} issues have ${minT}–${maxT}`,
+          lineOf(issue.file, /^takeaways:/)
+        );
+      }
+      if (fm.status === "draft" && !fm.cover)
+        warn("no cover yet: pick one in the cover gallery (/newsletter/covers)", 1);
       for (const link of findLinks(issue.body)) {
         const line = fileLine(issue, link.line);
         if (link.url.startsWith("http://")) {
@@ -186,6 +254,20 @@ export const newsletterKind: SectionKind<Issue> = {
         }
       }
     }
+
+    // Issue numbers run 0/1, 2, 3 … with no gaps, so "Issue #N" means the Nth issue.
+    const sorted = [...numbers.keys()].sort((a, b) => a - b);
+    sorted.forEach((n, i) => {
+      if (i > 0 && n !== sorted[i - 1] + 1) {
+        const issue = numbers.get(n)!;
+        push(
+          issue,
+          `issue ${n} follows issue ${sorted[i - 1]}: numbers have no gaps`,
+          lineOf(issue.file, /^issue:/),
+          "warning"
+        );
+      }
+    });
     return errors;
   },
 };
