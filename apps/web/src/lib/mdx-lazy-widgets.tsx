@@ -24,3 +24,39 @@ export const CloudDecisionTree = dynamic(() =>
 export const CloudEquivalenceMatrix = dynamic(() =>
   import("@/components/cloud/cloud-equivalence-matrix").then((m) => m.CloudEquivalenceMatrix)
 );
+
+// System-design teaching widgets. MDX uses the zod-validating wrappers in src/components/teach/widgets/index.tsx,
+// which render these islands.
+export const LatencyLadderIsland = dynamic(() =>
+  import("@/components/teach/widgets/latency-ladder.client").then((m) => m.LatencyLadder)
+);
+export const EstimateCalculatorIsland = dynamic(() =>
+  import("@/components/teach/widgets/estimate-calculator.client").then((m) => m.EstimateCalculator)
+);
+export const NinesCalculatorIsland = dynamic(() =>
+  import("@/components/teach/widgets/nines-calculator.client").then((m) => m.NinesCalculator)
+);
+export const ConsistentHashRingIsland = dynamic(() =>
+  import("@/components/teach/widgets/consistent-hash-ring.client").then((m) => m.ConsistentHashRing)
+);
+export const LoadBalancerSimIsland = dynamic(() =>
+  import("@/components/teach/widgets/load-balancer-sim.client").then((m) => m.LoadBalancerSim)
+);
+export const CacheSimIsland = dynamic(() =>
+  import("@/components/teach/widgets/cache-sim.client").then((m) => m.CacheSim)
+);
+export const RateLimiterSimIsland = dynamic(() =>
+  import("@/components/teach/widgets/rate-limiter-sim.client").then((m) => m.RateLimiterSim)
+);
+export const BloomFilterSimIsland = dynamic(() =>
+  import("@/components/teach/widgets/bloom-filter-sim.client").then((m) => m.BloomFilterSim)
+);
+export const ReplicationLagDemoIsland = dynamic(() =>
+  import("@/components/teach/widgets/replication-lag-demo.client").then((m) => m.ReplicationLagDemo)
+);
+export const IndexPlaygroundIsland = dynamic(() =>
+  import("@/components/teach/widgets/index-playground.client").then((m) => m.IndexPlayground)
+);
+export const QuorumPickerIsland = dynamic(() =>
+  import("@/components/teach/widgets/quorum-picker.client").then((m) => m.QuorumPicker)
+);

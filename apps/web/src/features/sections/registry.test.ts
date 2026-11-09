@@ -88,6 +88,16 @@ describe("parseRegistry", () => {
   it("rejects unknown fields", () => {
     assert.throws(() => parseRegistry(base.replace("order: 1", "order: 1, colour: red"), "t.yaml"), /colour/);
   });
+  it("lets at most one docs section own the glossary", () => {
+    const owner = base.replace("order: 1", "order: 1, glossary: true");
+    assert.equal(parseRegistry(owner, "t.yaml")[0].glossary, true);
+    const second = owner.replace(/\ba\b/g, "b").replace("title: A", "title: B");
+    assert.throws(() => parseRegistry(owner + second, "t.yaml"), /only one section can own the glossary/);
+    assert.throws(
+      () => parseRegistry(owner.replace("kind: docs", "kind: directory"), "t.yaml"),
+      /glossary belongs to a docs section/
+    );
+  });
 });
 
 describe("release states per environment", () => {

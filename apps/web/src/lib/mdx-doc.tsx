@@ -13,7 +13,8 @@ import { rehypeMermaidSvg } from "@/lib/rehype-mermaid-svg";
 import { remarkAssetRefs } from "@/lib/remark-asset-refs";
 import { remarkPremium, type PremiumSplit } from "@/features/paywall";
 import { ModelCategory, ModelGrid, ModelCard } from "@/components/mdx/model-grid";
-import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
+import { InterviewQuestion } from "@/components/mdx/interview-qa";
+import { ArticleInterviewQuestions } from "@/components/mdx/article-interview-qa";
 import { Pre, MermaidSvg } from "@/components/mdx/code-block";
 import { Img, Figure, Diagram as AssetDiagram, Mermaid, TechIcon, Download } from "@/components/mdx/assets";
 import { KatexStyles } from "@/components/article/katex-styles";
@@ -37,6 +38,36 @@ import { CloudServiceProfile } from "@/components/cloud/cloud-service-profile";
 import { ResponsibilityGrid } from "@/components/cloud/responsibility-grid";
 import { CloudMapping } from "@/components/cloud/cloud-mapping";
 import { CloudOnly } from "@/components/cloud/cloud-only";
+import {
+  KeyIdea,
+  Term,
+  Glossary,
+  Compare,
+  ProsCons,
+  Tabs,
+  Tab,
+  Quiz,
+  QuizItem,
+  DecisionTree,
+  RequirementsTable,
+  EstimateTable,
+  Numbers,
+  PatternUses,
+  LearningPath,
+} from "@/components/teach";
+import {
+  LatencyLadder,
+  EstimateCalculator,
+  NinesCalculator,
+  ConsistentHashRing,
+  LoadBalancerSim,
+  CacheSim,
+  RateLimiterSim,
+  BloomFilterSim,
+  ReplicationLagDemo,
+  IndexPlayground,
+  QuorumPicker,
+} from "@/components/teach/widgets";
 
 // Records whether the document has any math, so the KaTeX stylesheet is only loaded where it is needed.
 function remarkDetectMath(flags: { math: boolean }) {
@@ -107,7 +138,8 @@ export async function loadMdxFile(filePath: string, options: LoadMdxOptions = {}
       ModelCategory,
       ModelGrid,
       ModelCard,
-      InterviewQuestions,
+      // Resolves `companies={["Meta"]}` names to company tags before the shared list renders them.
+      InterviewQuestions: ArticleInterviewQuestions,
       InterviewQuestion,
       Figure,
       MermaidSvg,
@@ -136,6 +168,34 @@ export async function loadMdxFile(filePath: string, options: LoadMdxOptions = {}
       CloudEquivalenceMatrix,
       CloudMapping,
       CloudOnly,
+      // Shared teaching components (src/components/teach, plan §7).
+      KeyIdea,
+      Term,
+      Glossary,
+      Compare,
+      ProsCons,
+      Tabs,
+      Tab,
+      Quiz,
+      QuizItem,
+      DecisionTree,
+      RequirementsTable,
+      EstimateTable,
+      Numbers,
+      PatternUses,
+      LearningPath,
+      // Interactive teaching widgets (plan §5.2): server wrappers that validate props, then lazy islands.
+      LatencyLadder,
+      EstimateCalculator,
+      NinesCalculator,
+      ConsistentHashRing,
+      LoadBalancerSim,
+      CacheSim,
+      RateLimiterSim,
+      BloomFilterSim,
+      ReplicationLagDemo,
+      IndexPlayground,
+      QuorumPicker,
       pre: Pre,
     },
   });

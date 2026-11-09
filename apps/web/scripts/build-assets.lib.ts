@@ -656,10 +656,10 @@ export function animatedSpecsModule(ids: string[]) {
   return `${GENERATED}
 // Every AnimatedDiagram spec in apps/web/assets/diagrams/animated/, keyed by asset ID. Server-only by use:
 // the Diagram wrapper looks a spec up here and passes just that spec to the client component.
-import type { DiagramSpec } from "./types";
+import type { AnySpec } from "./types";
 ${imports}
 
-export const ANIMATED_SPECS: Record<string, DiagramSpec> = {
+export const ANIMATED_SPECS: Record<string, AnySpec> = {
 ${map}
 };
 `;

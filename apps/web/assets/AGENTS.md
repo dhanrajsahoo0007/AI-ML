@@ -11,7 +11,7 @@ brand/                                logo, favicon source, social avatar (alway
 images/<topic>/<slug>.{png,jpg,webp,avif,gif}   ≤ 1 MB → AVIF + WebP at 480/960/1600 + blur placeholder
 diagrams/mermaid/<topic>/<slug>.mmd   → light + dark SVG (same pipeline as ```mermaid fences) + PNG
 diagrams/excalidraw/<topic>/<slug>.excalidraw   → light + dark SVG + PNG
-diagrams/animated/<topic>/<slug>.ts   AnimatedDiagram specs (export default a DiagramSpec)
+diagrams/animated/<topic>/<slug>.ts   AnimatedDiagram specs (export default a DiagramSpec, SequenceSpec or LayoutSpec)
 diagrams/svg/<topic>/<slug>.svg       static SVG, ≤ 200 KB → optimised, inlined + PNG
 logos/companies/<slug>.svg            → src/lib/company-logos.ts (generated)
 logos/tech/<vendor>/<slug>.svg        → <TechIcon id="vendor/slug" />
@@ -57,6 +57,32 @@ created: 2026-11-07
   `apps/web/src/components/diagrams/animated-specs.ts`.
 - `npm run content-check -w web` validates the library: IDs exist, alt text, licences, size limits, duplicate files,
   no premium asset on a free page, generated files up to date; unused assets are warnings.
+
+## Animated diagram specs
+
+`diagrams/animated/<topic>/<slug>.ts` default-exports one of three kinds (types in
+`apps/web/src/components/diagrams/types.ts`); the same `<AnimatedDiagram>` tag renders all of them and dispatches on
+`kind` in `apps/web/src/components/diagrams/diagram.tsx`:
+
+| `kind`                     | Type           | Use for                                                     |
+| -------------------------- | -------------- | ----------------------------------------------------------- |
+| omitted / `"architecture"` | `DiagramSpec`  | zones, nodes, edges, build steps, `highlight`/`path` in MDX |
+| `"sequence"`               | `SequenceSpec` | lanes and messages over time (handshakes, 2PC, retries)     |
+| `"layout"`                 | `LayoutSpec`   | static shapes revealed by step (B-tree pages, hash rings)   |
+
+- `asset:new` scaffolds a `DiagramSpec`; for the other kinds change the type and add `kind`.
+- Every spec must pass `lintSpec` (`apps/web/src/components/diagrams/spec-lint.ts`): unique ids, contiguous steps,
+  edges and arrows that name existing nodes or shapes, boxes inside the canvas and not overlapping, labels that fit.
+  `apps/web/tests/unit/diagrams/specs.test.ts` lints every spec in the folder, so `npm test` fails on a broken one.
+  Fix the spec (widen the node, move it), not the lint rule.
+- Glyph names for `icon` are listed in `apps/web/src/components/diagrams/glyphs.tsx` (`GLYPH_NAMES`); anything else
+  falls back to a Lucide icon from `apps/web/src/lib/icons.ts`.
+- The three renderers load lazily from `apps/web/src/components/diagrams/lazy.client.tsx` (next/dynamic only splits
+  client components when called from a client module). Ids for SVG defs come from `useId` in the server wrapper
+  and are passed down as `idBase`: a `useId` inside a next/dynamic island does not match between SSR and
+  hydration. The teaching widgets and `Tabs` follow the same rule.
+- Author reference with full examples of every kind and `composeSpecs`:
+  `apps/web/content/system-design/COMPONENTS.md` §3.
 
 ## Rules and gotchas
 

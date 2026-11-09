@@ -1,4 +1,9 @@
-// Declarative spec for an animated architecture diagram. Coordinates are in viewBox units.
+// Declarative specs for the diagrams in assets/diagrams/animated. Coordinates are in viewBox units.
+//
+// Three kinds share one asset location and one <AnimatedDiagram> MDX tag (./diagram.tsx dispatches on `kind`):
+// - architecture (DiagramSpec, the default): zones, nodes and edges with packets and build steps
+// - sequence (SequenceSpec): lanes with lifelines and messages drawn top to bottom
+// - layout (LayoutSpec): static shapes (cells, boxes, arrows) with step reveal and highlight rings
 
 export type Tone = "blue" | "green" | "orange" | "red" | "violet" | "teal" | "neutral";
 
@@ -78,7 +83,10 @@ export interface DiagramStep {
   covers?: string;
 }
 
+/** An architecture diagram: the original and default kind. */
 export interface DiagramSpec {
+  /** Omitted means "architecture". */
+  kind?: "architecture";
   title: string;
   width: number;
   height: number;
@@ -87,4 +95,107 @@ export interface DiagramSpec {
   edges: DiagramEdge[];
   /** Build steps, in order; step n is steps[n - 1]. */
   steps?: DiagramStep[];
+}
+
+// ── Sequence diagrams ──────────────────────────────────────────────────────────────────────────────────────────
+
+export interface SequenceLane {
+  id: string;
+  label: string;
+  /** Glyph from ./glyphs, a key from DIAGRAM_ICONS, or any name from src/lib/icons.ts. */
+  icon?: string;
+  tone?: Tone;
+}
+
+/**
+ * How a message is drawn: "call" a solid arrow (default), "return" and "async" dashed arrows, "timeout" a solid
+ * arrow with a red bar across it (the call that never answered), "note" a box spanning the two lanes.
+ */
+export type MessageKind = "call" | "return" | "async" | "timeout" | "note";
+
+export interface SequenceMessage {
+  from: string;
+  to: string;
+  label?: string;
+  kind?: MessageKind;
+  /** Build step that introduces this message (default 1). */
+  step?: number;
+  /** Seconds of pause before this message's packet leaves, on top of the previous message finishing. */
+  delay?: number;
+  /** Seconds the packet takes to cross (default 1.2). */
+  duration?: number;
+  /** Row order; defaults to the message's index in the array. Rows are drawn top to bottom in ascending order. */
+  at?: number;
+}
+
+export interface SequenceNote {
+  /** Lane the note hangs next to. */
+  lane: string;
+  text: string;
+  /** Build step that introduces this note (default 1). */
+  step?: number;
+  /** Row order among messages; defaults to after every message. */
+  at?: number;
+}
+
+export interface SequenceSpec {
+  kind: "sequence";
+  title: string;
+  /** ViewBox width; defaults to room for every lane. Height follows from the number of rows. */
+  width?: number;
+  lanes: SequenceLane[];
+  messages: SequenceMessage[];
+  notes?: SequenceNote[];
+  steps?: DiagramStep[];
+}
+
+// ── Layout diagrams ────────────────────────────────────────────────────────────────────────────────────────────
+
+export type ShapeType = "box" | "cell" | "circle" | "text" | "arrow";
+
+export interface LayoutShape {
+  id: string;
+  type: ShapeType;
+  /**
+   * box, cell, text: top-left corner (text is centred inside its w × h box). circle: centre, w is the diameter.
+   * arrow without from/to: start point; w and h are the vector to the end point.
+   */
+  x: number;
+  y: number;
+  w?: number;
+  h?: number;
+  label?: string;
+  /** Second, smaller line under the label (box and cell). */
+  sub?: string;
+  tone?: Tone;
+  /** Build step that introduces this shape (default 1). */
+  step?: number;
+  /** Pulsing ring in the shape's tone, for the element the paragraph is about. */
+  highlight?: boolean;
+  /** Arrow endpoints by shape id; the line starts and ends at the shapes' borders. */
+  from?: string;
+  to?: string;
+  /** Intermediate points of an arrow, as [x, y] pairs. */
+  via?: [number, number][];
+  /** Arrow: dashed line, and a dot travelling along it. */
+  dashed?: boolean;
+  packet?: boolean;
+}
+
+export interface LayoutSpec {
+  kind: "layout";
+  title: string;
+  width: number;
+  height: number;
+  shapes: LayoutShape[];
+  /** Dotted groups behind the shapes, drawn like architecture zones. */
+  groups?: DiagramZone[];
+  steps?: DiagramStep[];
+}
+
+export type AnySpec = DiagramSpec | SequenceSpec | LayoutSpec;
+
+/** The kind of a spec, with the architecture default applied. */
+export function specKind(spec: AnySpec): "architecture" | "sequence" | "layout" {
+  return spec.kind ?? "architecture";
 }

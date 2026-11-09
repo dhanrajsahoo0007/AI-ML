@@ -29,12 +29,17 @@ Background: `apps/web/content/AGENTS.md` and `apps/web/src/features/docs/AGENTS.
    Hubs and outlines are free automatically.
 
 6. **Media by ID only.** Reuse or add assets (`.claude/skills/add-asset/SKILL.md`) and reference them with
-   `<Img id>`, `<Figure id>`, `<Mermaid ref>`. Inline ```` ```mermaid ```` fences are fine for one-off diagrams.
+   `<Img id>`, `<Figure id>`, `<Mermaid ref>`. Inline ```` ```mermaid ```` fences are fine for one-off diagrams in
+   the article body, but not inside an `<InterviewQuestion>` answer (step 7).
    - Bad: a Markdown image pointing at /images/x.png, or any file in `apps/web/public/`
 
 7. **Interview questions need mapping.** If the article has `<InterviewQuestion>` blocks and its section has
    `questions: true`, add `/<section>/<hub>/<slug>: <category>/<subsection>` to
    `apps/web/content/question-bank/articles.yaml` (slugs from `apps/web/content/question-bank/taxonomy.yaml`).
+   Answers are also compiled for the `/interviews` library, so inside `<InterviewQuestion>` use only
+   `AnimatedDiagram`, `Callout`, `Compare`, `KeyIdea`, `Tabs` and `Tab` (`ANSWER_COMPONENTS` in
+   `apps/web/src/lib/question-answer.ts`) and no mermaid fence; anything else fails content-check. Details in
+   `apps/web/content/AGENTS.md`.
 
 8. **Links resolve.** Internal links are site paths (`/system-design/databases/b-trees`), never full URLs to our own
    site.

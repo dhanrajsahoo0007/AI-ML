@@ -1,10 +1,14 @@
 # Excalidraw libraries (drafting only)
 
-Shape libraries used to sketch case-study diagrams in [Excalidraw](https://excalidraw.com) before they are turned into
-animated diagrams in `src/components/diagrams/`. Open Excalidraw, then **Library → Open** and pick a file from this folder.
+Shape libraries used to sketch case-study and pattern diagrams in [Excalidraw](https://excalidraw.com) before they are
+turned into animated diagram specs in `apps/web/assets/diagrams/animated/<group>/<name>.ts` (with a `<name>.meta.yaml`
+sidecar; the engine that renders them lives in `apps/web/src/components/diagrams/`). Open Excalidraw, then
+**Library → Open** and pick a file from this folder.
 
-These files are not loaded by the website. The site draws its own icons (`src/components/diagrams/glyphs.tsx`) in the
-same spirit: a cylinder for a database, stacked layers for a cache, a segmented tube for a log or queue.
+These files are not loaded by the website. The site draws its own icons (`apps/web/src/components/diagrams/glyphs.tsx`)
+in the same spirit: a cylinder for a database, stacked layers for a cache, a segmented tube for a log or queue. A sketch
+made here is a reference for layout only; the published diagram is always redrawn in the engine, never exported from
+Excalidraw.
 
 ## Sources and licence
 

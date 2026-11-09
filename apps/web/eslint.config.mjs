@@ -181,9 +181,16 @@ const eslintConfig = [
   // Known violations in existing files, reported as warnings until they're moved. Each block names its owner.
   {
     // TODO(T1 follow-up): these "lib" files are feature-level loaders (MDX component map, nav tree, question
-    // bank) that import components/, config/ and features/sections. Move them into features/content and
-    // features/interviews (plan §3 tree) and update AGENTS.md, which names their paths.
-    files: ["src/lib/mdx-doc.tsx", "src/lib/mdx-lazy-widgets.tsx", "src/lib/nav-tree.ts", "src/lib/question-bank.ts"],
+    // bank, glossary) that import components/, config/ and features/sections. Move them into features/content and
+    // features/interviews (plan §3 tree) and update AGENTS.md, which names their paths. The glossary reads the
+    // registry for its owning section (`glossary: true`) instead of hard-coding a section key.
+    files: [
+      "src/lib/mdx-doc.tsx",
+      "src/lib/mdx-lazy-widgets.tsx",
+      "src/lib/nav-tree.ts",
+      "src/lib/question-bank.ts",
+      "src/lib/glossary.ts",
+    ],
     rules: { "boundaries/dependencies": "warn" },
   },
   {

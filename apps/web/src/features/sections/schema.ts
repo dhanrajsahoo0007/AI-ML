@@ -57,6 +57,11 @@ export const sectionEntrySchema = z
     aggregates: z.array(slug).optional(),
     /** Who approves moving it to production. */
     owner: z.string().optional(),
+    /**
+     * Owns the shared glossary used by <Term>: content/<key>/glossary.yaml, page at <href>/glossary. At most one
+     * section, of kind docs.
+     */
+    glossary: z.boolean().optional(),
     /** Title and subtitle on the section index page. */
     hub: z
       .object({ title: z.string().min(1), subtitle: z.string().min(1) })
@@ -83,6 +88,19 @@ export const registrySchema = z.array(sectionEntrySchema).superRefine((sections,
       ctx.addIssue({ code: "custom", path: [i, "hub"], message: "docs sections need hub.title and hub.subtitle" });
     }
   });
+  const glossaries = sections.flatMap((s, i) => (s.glossary ? [i] : []));
+  if (glossaries.length > 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: [glossaries[1], "glossary"],
+      message: "only one section can own the glossary",
+    });
+  }
+  for (const i of glossaries) {
+    if (sections[i].kind !== "docs") {
+      ctx.addIssue({ code: "custom", path: [i, "glossary"], message: "the glossary belongs to a docs section" });
+    }
+  }
   sections.forEach((s, i) => {
     for (const a of s.aggregates ?? []) {
       if (!keys.has(a)) ctx.addIssue({ code: "custom", path: [i, "aggregates"], message: `unknown section ${a}` });

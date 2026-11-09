@@ -112,6 +112,11 @@ export function sectionOfKind(kind: SectionKindName): SectionDef {
   return matches[0];
 }
 
+/** The section that owns the glossary (`glossary: true` in sections.yaml), if any, in any release state. */
+export function glossarySection(): SectionDef | undefined {
+  return allSections().find((s) => s.glossary);
+}
+
 /** The section a site path belongs to, if any. */
 export function sectionForPath(href: string): SectionDef | undefined {
   const pathname = href.split(/[?#]/)[0];

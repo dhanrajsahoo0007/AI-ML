@@ -30,6 +30,23 @@ function files(dir: string): string[] {
   });
 }
 
+// Kind modules and route folders that belong to one section may also spell its URL or content path.
+const PATH_ALLOWED = [
+  ...ALLOWED,
+  "app/interviews/",
+  "features/interviews/",
+  "features/dsa/",
+  "features/newsletter/",
+  // Pre-existing hard-coded links (home and 404 CTAs, site config) from before this check covered paths. Move
+  // them to the registry, then delete them from this list; do not add to it.
+  "app/not-found.tsx",
+  "components/home/cta-banner.tsx",
+  "config/site.ts",
+];
+
+const isComment = (line: string) => /^\s*(\/\/|\*|\/\*)/.test(line);
+const isTest = (rel: string) => /\.test\.(ts|tsx)$/.test(rel);
+
 describe("section-key literals", () => {
   it("appear only in the registry and kind modules", () => {
     const keys = allSections().map((s) => s.key);
@@ -45,5 +62,25 @@ describe("section-key literals", () => {
         });
     }
     assert.deepEqual(hits, [], `section keys hard-coded in shared code:\n${hits.join("\n")}`);
+  });
+
+  it('do not appear as a URL or content path segment in shared code ("/key/...", content/key/)', () => {
+    const keys = allSections()
+      .map((s) => s.key.replace(/-/g, "\\-"))
+      .join("|");
+    // A string starting with /key (then /, #, ? or the closing quote), or a content/key/ file path.
+    const re = new RegExp(`["'\`]\\/(?:${keys})(?=[/#?"'\`])|(?<![\\w-])content\\/(?:${keys})\\/`, "g");
+    const hits: string[] = [];
+    for (const file of files(SRC)) {
+      const rel = path.relative(SRC, file).split(path.sep).join("/");
+      if (isTest(rel) || PATH_ALLOWED.some((a) => rel.startsWith(a))) continue;
+      fs.readFileSync(file, "utf8")
+        .split("\n")
+        .forEach((line, i) => {
+          if (isComment(line)) return;
+          for (const m of line.matchAll(re)) hits.push(`src/${rel}:${i + 1}: ${m[0]}`);
+        });
+    }
+    assert.deepEqual(hits, [], `section paths hard-coded in shared code (ask the registry):\n${hits.join("\n")}`);
   });
 });
