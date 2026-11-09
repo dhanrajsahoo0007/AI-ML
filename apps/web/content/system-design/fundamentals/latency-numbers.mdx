@@ -1,0 +1,217 @@
+---
+title: "Latency numbers that matter"
+description: "How long common operations take, from a CPU cache hit to a round trip across the planet, and what that means for a 100 ms request."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Every step a request takes has a typical cost, from a billionth of a second to a fifth of a second, so a few slow steps decide how fast a page feels.
+</KeyIdea>
+
+## The story
+
+You run a small online bookshop with its server in Virginia. A reader in Sydney writes in: "Every book page takes almost a second to open." You buy a faster CPU. Nothing changes. Then you measure: the CPU spends about 8 ms building the page, and the rest is waiting. The browser waits for three round trips across the Pacific before the first byte arrives, about 200 ms each, so 600 ms. The server waits on 40 database queries, one per review, sent one after another at about 5 ms each, so another 200 ms. The fix was never a faster CPU. It was knowing which steps are slow, and by how much.
+
+The numbers on this page are orders of magnitude, not exact figures. Learn roughly where each one sits, so you can spot the slow step before you build it.
+
+## How it works
+
+<Term id="latency">Latency</Term> is how long one operation takes, from start to finish. Three small units cover it:
+
+- a **nanosecond** (ns) is one billionth of a second,
+- a **microsecond** (µs) is 1,000 ns,
+- a **millisecond** (ms) is 1,000 µs, one thousandth of a second.
+
+The drawing below is a **log-scale ladder**: moving the same distance along the axis always multiplies the time by the same amount, so 1 ns, 1 µs, 1 ms and 1 s, each 1,000 times the one before, sit at equal gaps. On a normal ruler where 1 ns is 1 mm, the last row would be 200 km long.
+
+### Step 1: Inside one computer
+
+<AnimatedDiagram name="fundamentals/latency-ladder" step={1} caption="Inside one machine, memory costs nanoseconds to microseconds." />
+
+The CPU keeps the data it is using in tiny memories on the chip, called **caches**. The closest one, the **L1 cache**, answers in about 1 ns. The larger L2 cache takes about 4 ns. Data that is not on the chip comes from main memory (**RAM**) in about 100 ns. Reading a whole megabyte from RAM, in order, takes about 10 µs. For system design, all of this is close to free.
+
+<PremiumBreak />
+
+### Step 2: Storage
+
+<AnimatedDiagram name="fundamentals/latency-ladder" step={2} caption="Storage costs a hundred microseconds to ten milliseconds." />
+
+Data that does not fit in RAM lives on a drive. An **SSD** (a drive made of flash chips, with no moving parts) reads one 4 KB page from a random spot in about 100 µs, the time of 1,000 RAM reads. Reading 1 MB in order takes about 200 µs, 20 times the same read from RAM. A spinning **hard disk** must first move an arm to the right track, about 10 ms per random read. This gap is why databases keep their busiest data in RAM, and why a <Term id="cache" /> in memory pays off.
+
+### Step 3: The network
+
+<AnimatedDiagram name="fundamentals/latency-ladder" step={3} caption="Network round trips cost from half a millisecond to a fifth of a second." />
+
+A **round trip** is one message to another machine plus its reply. Inside one data center it takes about 0.5 ms, mostly spent in network cards, switches and the operating systems on both ends. Cloud providers group a few data centers, each called an **availability zone**, into a **region**. The buildings sit kilometres apart, so a round trip to another zone takes 1 to 2 ms.
+
+Across continents, distance takes over. Light in optical fibre covers about 200 km per millisecond. Virginia to Sydney is about 15,700 km, so even a straight cable needs 2 x 15,700 / 200 = 157 ms for the round trip. Real cables bend and routers add delay, so it is about 200 ms. No faster server fixes that; only moving the server, or a copy of the data, closer to the reader does.
+
+<Callout title="How slow, in human terms" tone="blue">
+
+Turn time into distance: let 1 ns be one 1-metre step across your kitchen. A RAM read (100 ns) is then a walk to the end of the street, 100 m. An SSD read (100 µs) is a 100 km drive to the next city. A hard disk seek (10 ms) is 10,000 km, a quarter of the way around the Earth. One round trip to Sydney (200 ms) is 200,000 km, about half the way to the Moon.
+
+</Callout>
+
+### Step 4: The 100 ms line
+
+<AnimatedDiagram name="fundamentals/latency-ladder" step={4} caption="Replies under about 100 ms feel instant. Only the trip to the far side of the planet crosses the line on its own." />
+
+People feel a reply within about 100 ms as instant. Up to about a second they notice the wait but keep their train of thought. So 100 ms is a good budget for anything a person clicks. Every bar that stops left of the red line fits inside that budget, most of them many times over. But a request is a chain of operations, and the costs add up.
+
+The most common chain is calls to a database or cache. One call costs a round trip plus the work on the other side. An **indexed query** finds its rows through a sorted <Term id="index" /> instead of reading the whole table. A **join** combines rows from two tables, so it does more work. Here is how many calls **in a row** fit into 100 ms:
+
+| Where the call goes | One call costs about | Calls in a row in 100 ms |
+|---|---|---|
+| Cache lookup, same data center | 0.5 ms | about 200 |
+| Simple indexed query, same zone | 2 ms | about 50 |
+| Query with a join, same zone | 5 ms | about 20 |
+| The same query, database in another zone | 6.5 ms (5 + 1.5) | about 15 |
+| Database across an ocean | 95 ms (90 + 5) | 1 |
+
+The arithmetic is division: 100 ms / 5 ms = 20 calls. In practice the trip to the reader and back uses part of the budget. A server left with 50 ms can afford about ten 5 ms queries in a row, and nothing else. Calls sent **in parallel** (all at once) cost about as much as the slowest one: four 5 ms queries in parallel take about 5 ms, not 20.
+
+### Step 5: What dominates a real request
+
+A reader in London opens a page served from Virginia, a round trip of about 80 ms.
+
+<AnimatedDiagram name="fundamentals/latency-budget" stepper caption="One request from London to Virginia: distance first, then database calls in a row. Use the numbers to replay each step." />
+
+1. **The first visit takes about 300 ms.** The browser finds the server's address with <Term id="dns" /> (20 ms). It opens a TCP connection, the reliable channel the page travels over (one round trip, 80 ms), and sets up encryption with <Term id="tls" /> (one more round trip, 80 ms). The request crosses the ocean (40 ms), the server works (40 ms) and the answer comes back (40 ms). About 260 of the 300 ms is distance.
+2. **Inside the server's 40 ms,** four queries in a row take 20 ms, a call to a pricing service takes 10 ms, and the code plus a cache read take the last 10 ms.
+3. **The next click reuses the open connection,** so it skips DNS, TCP and TLS and takes about 120 ms.
+
+That is the usual shape: long-distance round trips dominate, calls made one after another come next, and CPU time comes last. For the bookshop, loading all 40 reviews in one query turns 200 ms into about 6 ms. A <Term id="cdn" /> server near Sydney does the connection setup close to the readers and removes most of the 600 ms.
+
+## Try it
+
+Pick a reference row, then hover or tap another row to compare. The last column shows how many of each fit into 100 ms. The slowest row, 150 ms, is a long trip such as California to Europe.
+
+<LatencyLadder title="Compare any two rows" compareTo="memory" highlight="dc-rtt" windowMs={100} />
+
+<Quiz>
+  <QuizItem question="A page runs 12 database queries in a row, about 5 ms each. How much of a 100 ms budget is left?" hint="Multiply, then subtract.">
+    12 x 5 ms = 60 ms, so about 40 ms is left, and that must also cover the trip to the reader and back.
+  </QuizItem>
+  <QuizItem question="A cache answers in 0.5 ms. On a miss you also query the database, which takes 5 ms. If 90% of reads hit the cache, what is the average read time?" hint="Hits pay 0.5 ms. Misses pay 0.5 ms plus 5 ms.">
+    0.9 x 0.5 + 0.1 x 5.5 = 0.45 + 0.55 = about 1 ms, five times faster than always asking the database.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+Each fix removes one kind of wait and adds a cost elsewhere.
+
+<Compare
+  columns={["Fix", "What it removes", "Typical saving", "What it costs"]}
+  rows={[
+    ["Batch or join queries", "Many round trips", "40 x 5 ms = 200 ms down to about 6 ms", "Bigger queries and results"],
+    ["Run calls in parallel", "Waiting in sequence", "4 x 5 ms = 20 ms down to about 5 ms", "More load at once; you wait for the slowest"],
+    ["Cache in memory", "A database query", "5 ms down to 0.5 ms", "Stale data; RAM costs money"],
+    ["Reuse connections", "TCP and TLS handshakes", "160 ms per new connection, London to Virginia", "Open connections hold server memory"],
+    ["Serve from closer (CDN, second region)", "Ocean crossings", "200 ms down to about 20 ms for Sydney", "Copies of data to keep in sync"],
+  ]}
+  caption="Savings use the numbers on this page; measure your own system before you choose."
+/>
+
+## In the wild
+
+- **AWS** keeps the availability zones of a region within about 100 km of each other, so a round trip between zones stays in single-digit milliseconds.
+- **TLS 1.3** cut the encryption handshake from two round trips to one. **HTTP/3** runs on QUIC, a newer transport protocol that sets up the connection and the encryption together in a single round trip.
+- **CDNs** such as Cloudflare and Amazon CloudFront run servers in hundreds of cities, so handshakes and cached files travel a few hundred kilometres instead of an ocean.
+
+## Common pitfalls
+
+- **Queries in a loop.** One query for a list, then one per item: 40 items at 5 ms is 200 ms. Fetch them in one query.
+- **Watching the average.** It hides the slow requests. Track the <Term id="p99" />, the time that 99 of every 100 requests beat.
+- **Chatty calls across regions.** Ten calls in a row to a region across the country cost about 10 x 70 ms = 700 ms. Keep a request's calls inside one region.
+- **A new connection per request.** Each one repays the TCP and TLS round trips. Reuse connections from a pool.
+
+## How to say it in an interview
+
+"I keep a rough ladder in my head: memory about 100 nanoseconds, an SSD read about 100 microseconds, a round trip inside a data center half a millisecond, across zones one to two milliseconds, across an ocean 80 to 200 milliseconds. A user-facing request gets about 100 milliseconds. So I count the round trips it waits for one after another, and how far each travels. Distance dominates, so I end connections near users with a CDN or a nearby region and reuse them. Then I batch queries, run independent calls in parallel and cache hot reads. CPU time is rarely the bottleneck."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Put these in order from fastest to slowest: an SSD read, a RAM read, a round trip inside a data center, and a round trip across an ocean. Roughly how far apart are they?" level="Junior" category="Latency">
+    **Short answer.** RAM (about 100 ns), an SSD random read (about 100 µs), a data-center round trip (about 0.5 ms), then an ocean round trip (about 90 ms). The gaps are about 1,000x, 5x and 180x.
+
+    **Why.** RAM sits next to the CPU. An SSD waits on flash chips. A local round trip passes network cards, switches and two operating systems. An ocean crossing is bound by light in fibre at about 200 km per ms. Virginia to Frankfurt is about 6,600 km, so the round trip needs at least 2 x 6,600 / 200 = 66 ms, and about 90 ms on real cables.
+
+    <AnimatedDiagram name="fundamentals/latency-ladder" step={3} caption="Memory, storage and network rows on one log scale." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where does a hard disk seek sit? (About 10 ms.)
+    - Why can't better hardware shrink the ocean crossing?
+
+    **Watch out for.** "The network is fast now." Inside one data center that is nearly true; across an ocean the speed of light sets a floor.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A product page makes 40 database queries one after another and spends 250 ms on the server. What is wrong, and how would you fix it?" level="Junior" category="Performance">
+    **Short answer.** It pays 40 round trips in sequence at about 5 ms each, so 200 of the 250 ms is waiting. Fetch the data in one query, and cache what rarely changes.
+
+    **Why.** One query for the list, then one per item: 40 x 5 ms = 200 ms. One query with `WHERE id IN (...)` or a join costs one round trip plus a little more work, about 6 ms.
+
+    <AnimatedDiagram name="fundamentals/latency-budget" step={2} caption="The four highlighted queries, run one after another, take half of the 40 ms server budget." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if the calls go to different services? (Run them in parallel; you pay for the slowest.)
+    - How would you spot this in production? (Count queries per request in traces, the timing records of each request.)
+
+    **Watch out for.** Buying a bigger database. Each query is already fast; the number of round trips is the problem.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A request must finish in under 100 ms. How many database calls can it make?" level="Mid" category="Latency">
+    **Short answer.** About 20 queries in a row at 5 ms in the same zone, in theory. Once the user's own round trip takes its share, the server may have 50 ms, which is about 10.
+
+    **Why.** A call costs a round trip plus the work: 0.5 ms for a cache lookup, 5 ms for a query with a join, 1.5 ms more if the database is in another zone. Divide the budget by the cost: 50 / 5 = 10 queries, or 50 / 0.5 = 100 cache lookups. Independent calls run in parallel cost about one call.
+
+    **Follow-ups the interviewer may ask.**
+    - What if one call has a p99 of 50 ms?
+    - When would you return a partial page instead of waiting?
+
+    **Watch out for.** Planning with the average query time. The budget must hold for slow requests, so use each call's p99.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Users in Sydney say the app is slow. All servers run in Virginia. What dominates, and what would you change?" level="Mid" category="Networking">
+    **Short answer.** Distance: each round trip takes about 200 ms, and a first visit needs three of them before the first byte. Serve them from closer, starting with a CDN that does the handshakes near Sydney, and reuse connections.
+
+    **Why.** TCP, TLS and the request each need a round trip: 3 x 200 ms = 600 ms before any server work. Light in fibre sets a floor of about 157 ms per round trip, so server tuning cannot help. With a CDN server in Sydney, the handshakes take 10 to 20 ms. That server keeps an open connection to Virginia, so a page it must fetch costs one ocean round trip, not three. Cached pages never cross the ocean. Writes and personal data need a second region.
+
+    <AnimatedDiagram name="fundamentals/latency-ladder" step={4} caption="The Sydney round trip is the only row that crosses the 100 ms line on its own." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does a second region cost? (Keeping data in sync across 200 ms.)
+    - Would HTTP/3 help? (Yes, it saves one round trip on each new connection.)
+
+    **Watch out for.** Adding servers in Virginia. More servers raise throughput (how many requests you serve per second), not speed for a reader 15,700 km away.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A page calls ten services in parallel. Each answers in 10 ms at the median and 50 ms at p99. What latency do users see, and how would you improve it?" level="Senior" category="Reliability">
+    **Short answer.** The page waits for the slowest of the ten, so about 1 page in 10 waits 50 ms or more. The page's p90 is roughly each service's p99.
+
+    **Why.** All ten beat their p99 with probability $0.99^{10} \approx 0.904$, so about 9.6% of pages hit a slow reply; with 100 calls it is $1 - 0.99^{100} \approx 63\%$. To fix it: call fewer services on the path; send a second copy of a call that has not answered by its p95 and take the first reply (a hedged request, about 5% extra load); set timeouts and return a partial page; keep the services in one zone.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find which service drives the tail? (Tracing, per-call p99.)
+    - When is a hedged request unsafe? (When running the call twice does harm, such as charging a card twice.)
+
+    **Watch out for.** Adding medians or quoting one service's latency. Parallel calls cost the maximum, and the maximum of many sits near the tail.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [A request's journey](/system-design/fundamentals/anatomy-of-a-request)
+- [Back-of-the-envelope estimation](/system-design/fundamentals/estimation)
+- [Caching](/system-design/patterns/caching)
+- [CDN](/system-design/fundamentals/cdn)
+
+## Further reading
+
+- Jeff Dean, [Designs, Lessons and Advice from Building Large Distributed Systems](https://www.cs.cornell.edu/projects/ladis2009/talks/dean-keynote-ladis2009.pdf) (LADIS 2009 keynote): the talk that made the latency ladder well known.
+- Jeffrey Dean and Luiz André Barroso, [The Tail at Scale](https://research.google/pubs/the-tail-at-scale/) (Communications of the ACM, 2013): why fan-out makes slow replies common.
+- Jakob Nielsen, [Response Times: The 3 Important Limits](https://www.nngroup.com/articles/response-times-3-important-limits/) (Nielsen Norman Group): where the 0.1 s and 1 s limits come from.
+- AWS documentation, [Regions and Availability Zones](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-regions-availability-zones.html): how zones are placed and connected.

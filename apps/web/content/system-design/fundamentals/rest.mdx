@@ -1,9 +1,368 @@
 ---
 title: "REST"
-description: "Resources, HTTP verbs, status codes, idempotency, pagination and versioning."
-status: outline
+description: "How a REST API names things as resources, acts on them with HTTP methods, keeps each request self-contained, and what a good one looks like."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** resources, HTTP verbs, status codes, idempotency, pagination and versioning.
+<KeyIdea>
+  REST is a way to design a web API in which every thing the client cares about has its own URL, and the client reads or changes it with a few standard HTTP methods.
+</KeyIdea>
+
+## The story
+
+You build the booking app for a chain of 40 pet clinics, and its API: the set of URLs the app calls to read and change data. Version one grew fast. It has 60 endpoints, the URLs the app can call, all named after actions: `POST /getPet`, `POST /bookVaccination`, `POST /cancelBookingForPet`, `POST /getPetsForOwnerV2`. Every call is a POST. On the first Monday of vaccine week, 3,000 owners open the app between 9:00 and 9:05, and three things go wrong. A phone on a train times out on `/bookVaccination` and the app sends it again, so Bella the beagle gets two 9:30 slots and another dog gets none. The <Term id="cdn">CDN</Term> in front of your API never caches a POST, so all 3,000 requests for the same clinic list reach the database. And a grooming partner who wants to read pet records has to email you to ask which of the four "get pet" endpoints is the right one. This page rebuilds the API the REST way, and each problem goes away for a clear reason.
+
+## How it works
+
+REST stands for Representational State Transfer. Roy Fielding described it in 2000 as the style behind the web's own design, the one that let it grow to millions of servers. An API is RESTful when it follows those rules. Each step below adds one, using the clinic app.
+
+### Step 1: Name the things, not the actions
+
+<AnimatedDiagram name="fundamentals/rest" step={1} caption="Collections hold items, and every item has its own URL. The owner app reads Bella with GET /pets/42." />
+
+A **resource** is any thing a client can name: a pet, a clinic, a booking, even "the free slots at clinic 7 today". Each resource gets one URL, its address. Things of the same kind sit in a **collection**, such as `/pets`, and one item in it is `/pets/42`. The URL is a noun. The action goes in the HTTP method, the verb at the start of every HTTP request, such as GET or POST. So reading Bella is `GET /pets/42`, not `POST /getPet`.
+
+Sixty action names shrink to a short list of nouns. A developer who knows that `/clinics/7` exists can guess how to read it. Every tool on the path, from the browser to the CDN to the log viewer, knows that a GET only reads.
+
+<PremiumBreak />
+
+### Step 2: Send representations, and link them
+
+<AnimatedDiagram name="fundamentals/rest" step={2} caption="Bella's bookings are a sub-collection, each booking links to its clinic, and one booking is built from three tables." />
+
+The client never touches the resource itself. It gets a **representation**: a copy of the resource's current state in some format, usually JSON, a plain-text format of names and values. The `Content-Type` header (a name and value sent ahead of the body) names the format being sent. The client's `Accept` header says which format it wants back. The same booking could come back as JSON for the app and as a PDF for the printer at the front desk.
+
+A resource is not a database table. The booking `/appointments/981` is built from three tables: appointments, pets and clinics. Next year you can split or rename those tables, and as long as the JSON keeps its shape, no client notices. The URL and its representation are the promise. The tables stay private.
+
+Resources point to each other. A pet has a **sub-collection** of bookings at `/pets/42/appointments`, and each booking carries a link to its clinic. Keep nesting to one level: `/appointments/981` is easier to use than `/clinics/7/pets/42/appointments/981`, because the booking id alone finds it.
+
+**HATEOAS** (hypermedia as the engine of application state) pushes links further. Each response lists links for what the client may do next, the way a web page shows only the buttons you can press. A booking that can still be cancelled carries a `cancel` link, and a past booking does not. In theory a client then needs only the entry URL and follows links from there, so the server can move URLs freely. In practice few JSON APIs go that far: mobile apps are built against known URLs, and a client still has to understand what each link means. A common middle ground is `self` and `next` links in every response, and documentation for the rest.
+
+### Step 3: One small set of methods with fixed meanings
+
+<AnimatedDiagram name="fundamentals/rest" step={3} caption="The owner app books with POST to the collection, and the clinic desk updates one booking with PATCH. Same methods, any resource." />
+
+In the diagram, the owner app books with POST to Bella's bookings collection, and the clinic desk changes one booking with PATCH. Neither client needs a special endpoint. REST uses HTTP's methods as its whole vocabulary of actions. This is the **uniform interface**: every resource answers the same few methods, so a client that has learned one resource has learned them all. Two properties matter. A **safe** method changes nothing. An <Term id="idempotent">idempotent</Term> method leaves the server in the same state whether it runs once or five times, so a client may resend it after a timeout.
+
+<Compare
+  columns={["Method", "On the clinic API", "Safe", "Idempotent", "Success code"]}
+  rows={[
+    ["GET", "GET /pets/42 reads Bella", true, true, "200 OK"],
+    ["POST", "POST /pets/42/appointments books a slot", false, false, "201 Created"],
+    ["PUT", "PUT /pets/42 replaces Bella's whole record", false, true, "200 OK"],
+    ["PATCH", "PATCH /appointments/981 changes some fields", false, false, "200 OK"],
+    ["DELETE", "DELETE /appointments/981 cancels a booking", false, true, "204 No Content"],
+  ]}
+  caption="Five methods cover every resource. Full method and header details are on the HTTP page."
+/>
+
+The **status code** tells the client what happened in a form code can act on. A 2xx means it worked. A 4xx means the client must change something before trying again. A 5xx means the server failed, and a retry may work. A handful of codes carry most REST APIs: `201 Created` with a `Location` header naming the new URL, `400 Bad Request` for a malformed body, `404 Not Found`, `409 Conflict` when the request clashes with current state, `412 Precondition Failed` when the client's copy is out of date, and `429 Too Many Requests` when a client passes its <Term id="rate-limit">rate limit</Term>.
+
+Now the double booking from the story. POST is not idempotent, so a blind retry books twice. The fix is an `Idempotency-Key` header. The app makes one random id per booking attempt and sends that same id on every retry. The server stores each key with its first response for about 24 hours and replays that response for a repeat. [Idempotency](/system-design/patterns/idempotency) covers where to store the keys.
+
+<Tabs title="The clinic API on the wire">
+  <Tab label="Read a pet">
+
+```http
+GET /v1/pets/42 HTTP/1.1
+Host: api.pawbook.example
+Accept: application/json
+Authorization: Bearer eyJhbGciOiJFUzI1NiJ9...
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+ETag: "pet42-v7"
+Cache-Control: private, max-age=60
+
+{
+  "id": 42,
+  "name": "Bella",
+  "species": "dog",
+  "owner_id": 1150,
+  "links": {
+    "self": "/v1/pets/42",
+    "appointments": "/v1/pets/42/appointments"
+  }
+}
+```
+
+  </Tab>
+  <Tab label="Book a slot">
+
+```http
+POST /v1/pets/42/appointments HTTP/1.1
+Host: api.pawbook.example
+Content-Type: application/json
+Idempotency-Key: 7c1e9a52-3f0b-4d1e-9a4e-2b8f0c6d1a77
+
+{ "clinic_id": 7, "starts_at": "2026-11-16T09:30:00+01:00", "reason": "vaccination" }
+
+HTTP/1.1 201 Created
+Location: /v1/appointments/981
+Content-Type: application/json
+
+{
+  "id": 981,
+  "pet_id": 42,
+  "clinic_id": 7,
+  "starts_at": "2026-11-16T09:30:00+01:00",
+  "status": "booked",
+  "links": { "self": "/v1/appointments/981", "clinic": "/v1/clinics/7" }
+}
+```
+
+  </Tab>
+  <Tab label="Slot taken">
+
+```http
+POST /v1/pets/42/appointments HTTP/1.1
+Host: api.pawbook.example
+Content-Type: application/json
+Idempotency-Key: 0d4b7f13-8c2e-4a61-b5f9-6e3a1c9d2f80
+
+{ "clinic_id": 7, "starts_at": "2026-11-16T09:30:00+01:00", "reason": "vaccination" }
+
+HTTP/1.1 409 Conflict
+Content-Type: application/problem+json
+
+{
+  "type": "/errors/slot-taken",
+  "title": "Slot already booked",
+  "status": 409,
+  "detail": "Clinic 7 has no free slot at 09:30 on 16 November.",
+  "next_free": "2026-11-16T09:45:00+01:00"
+}
+```
+
+  </Tab>
+  <Tab label="Check in">
+
+```http
+PATCH /v1/appointments/981 HTTP/1.1
+Host: api.pawbook.example
+Content-Type: application/merge-patch+json
+If-Match: "appt981-v3"
+
+{ "status": "checked_in" }
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+ETag: "appt981-v4"
+
+{ "id": 981, "pet_id": 42, "clinic_id": 7, "status": "checked_in" }
+```
+
+  </Tab>
+</Tabs>
+
+### Step 4: Every request stands alone
+
+<AnimatedDiagram name="fundamentals/rest-stateless" stepper caption="Step 1: any server can answer, because each request carries its own token. Step 2: a CDN answers repeat reads of the clinic list." />
+
+**Stateless** means the server keeps no memory of a client between requests. Each request carries everything needed to answer it: the URL, a **token** (a signed string the app got at login that says who is calling), and any filters. The server still stores data. Bella's record lives in the database. What it must not keep is the conversation, such as "this client is on page 3 of the list".
+
+The payoff is that any server can answer any request. The <Term id="load-balancer">load balancer</Term> spreads Monday's 3,000 owners over servers A, B and C, about 1,000 each. If server B dies at 9:02, the next request from its owners goes to A or C and works. Adding server D needs no copying. The cost is a token on every request, a few hundred bytes to about 1 KB, and a check on every request.
+
+REST adds one more rule next to statelessness: each response says whether it may be cached. The clinic list is the same for every owner, so `GET /v1/clinics` returns `Cache-Control: public, max-age=300`, and the CDN keeps it for 5 minutes. With 20 CDN locations, each one asks the API about once per 5 minutes, and it holds back other requests for the same URL while that one fetch is in flight. That is about 20 requests reaching the API instead of 3,000: $3{,}000 / 20 = 150$ times fewer. Bella's record is private, so it says `private` and only her owner's phone keeps a copy.
+
+### Step 5: What a good REST API looks like
+
+Put the steps together and a good REST API has these habits:
+
+- **Plural nouns and ids in the path.** `/pets/42/appointments`, not `/getPetAppointments?petId=42`.
+- **Filters, sorting and paging in the query string.** `GET /v1/appointments?clinic_id=7&date=2026-11-16&limit=50`.
+- **Cursor pagination for long lists.** The chain has about 2 million past bookings. A partner syncing with `?offset=1990000` makes the database read and throw away 1,990,000 rows. A cursor instead holds the id of the last booking on the previous page, say 1990000, and turns into `WHERE id > 1990000 ORDER BY id LIMIT 50`, which the index answers in 3 or 4 page reads. [API design](/system-design/fundamentals/api-design) walks through it.
+- **Honest status codes and one error shape.** Every error uses the same JSON body, such as the standard "problem details" format in the Slot taken tab.
+- **Safe retries.** An `Idempotency-Key` on POST. PUT and DELETE are idempotent already.
+- **Lost-update protection.** Responses carry an `ETag` (a version tag), and updates send `If-Match`, so a stale edit gets a 412 instead of overwriting someone else's change.
+- **A new version only for breaking changes.** Adding a field breaks nobody, if clients ignore fields they do not know. Removing or renaming one does. Put the major version in the path (`/v1/`) or a header. Keep the old version alive while old app builds are still installed, often 12 months or more.
+- **A written contract.** An OpenAPI description, a machine-readable file that lists every URL, field and error, lets partners generate client code and lets tests check that the API still matches it.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Rewrite POST /cancelBookingForPet, which takes a pet id and a booking id, as a REST call." hint="Which resource is being changed, and does it need the pet id to find it?">
+    `DELETE /v1/appointments/981`. The booking id alone finds the booking, so the pet id is not needed. If the clinic must keep cancelled bookings visible, use `PATCH /v1/appointments/981` with `{"status": "cancelled"}` instead.
+  </QuizItem>
+  <QuizItem question="The app sends PUT /v1/pets/42 with a body that holds only Bella's name. What should happen to her species and owner?" hint="PUT replaces the whole representation.">
+    PUT means "make the resource equal to this body", so a strict server either clears the missing fields or rejects the request with 400. To change one field, use PATCH.
+  </QuizItem>
+  <QuizItem question="A CDN caches GET /v1/clinics for 300 seconds at each of its 20 locations. At most how many requests an hour reach the API for that URL?" hint="Each location refreshes on its own.">
+    Each location refetches at most every 300 seconds, so 12 times an hour. $12 \times 20 = 240$ requests an hour, however many owners open the app.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<ProsCons
+  pros={[
+    "Any HTTP client, browser or command line tool can call it, with no special library",
+    "Safe GETs are cached by browsers and CDNs with no extra code",
+    "Stateless servers scale out behind a load balancer and survive losing one",
+    "Clear URLs and methods make logs, metrics and access rules easy to write per resource",
+  ]}
+  cons={[
+    "A screen that needs five resources makes five calls, which hurts on a slow mobile network",
+    "Each resource returns a fixed shape, so clients often get more fields than they need",
+    "Actions that are not create, read, update or delete need some thought to model",
+    "JSON text is larger and slower to parse than a binary format",
+  ]}
+/>
+
+<Compare
+  columns={["", "REST", "GraphQL", "gRPC"]}
+  rows={[
+    ["Calls for a screen that needs 5 resources", "5, or 1 custom endpoint", "1", "1, if you define a method for that screen"],
+    ["HTTP caching by URL", true, false, false],
+    ["Callable from a browser with no extra layer", true, true, false],
+    ["Schema", "Optional (OpenAPI)", "Required", "Required (.proto)"],
+    ["Usual payload", "JSON text", "JSON text", "Binary Protocol Buffers"],
+  ]}
+  caption="REST is the default for public APIs. The other two win in narrower cases."
+/>
+
+[Choosing an API style](/system-design/fundamentals/choosing-an-api-style) weighs these against <Term id="rpc">RPC</Term> styles in more depth.
+
+## In the wild
+
+- **GitHub's REST API** names repositories, issues and pull requests as nested resources, and pages long lists with `Link` headers that hold the next URL.
+- **Stripe** uses resource URLs such as `/v1/customers`, accepts an `Idempotency-Key` on every POST, and pins each account to a dated API version, so new versions never break old integrations.
+- **Kubernetes** exposes every object (pods, services, deployments) as a resource under its API server, and uses a `resourceVersion` field to reject stale updates.
+- **Amazon S3** treats each object as a resource addressed by bucket and key: PUT uploads it, GET reads it, DELETE removes it.
+
+## Common pitfalls
+
+- **Verbs in URLs.** `/createAppointment` hides the method's meaning from every cache and retry library.
+- **200 OK with an error inside.** A body of `{"success": false}` with status 200 looks healthy to monitoring and to the load balancer.
+- **Mirroring tables.** One endpoint per table leaks your schema, so every database change becomes an API change.
+- **Deep nesting.** `/clinics/7/pets/42/appointments/981/notes` forces clients to know four ids to read one note.
+- **Offset paging on big lists.** Page 40,000 makes the database skip 2 million rows on every call.
+- **Breaking changes without a new version.** Renaming `starts_at` to `start_time` breaks every app build already on users' phones.
+
+## How to say it in an interview
+
+REST models an API as resources, each with its own URL, such as `/pets/42` and `/pets/42/appointments`. Clients act on them with HTTP methods that have fixed meanings: GET reads and is safe, PUT and DELETE are idempotent, POST creates. Status codes tell the client what happened. Requests are stateless: each one carries its own token and parameters, so any server behind the load balancer can answer it, and safe GETs can be cached by a CDN. In practice I use plural nouns, one level of nesting, cursor pagination, one error format, ETags against lost updates, an idempotency key on POST, and a new major version only for breaking changes. Its weak spot is chattiness: a screen that needs many resources pays one round trip per call, so for a mobile home screen I would add a screen-shaped endpoint or consider GraphQL.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What makes an API RESTful, and not only JSON over HTTP?" level="Junior" category="APIs">
+    **Short answer.** A RESTful API models its data as resources with their own URLs, uses HTTP methods and status codes with their standard meanings, and keeps every request self-contained. An API of `POST /doSomething` endpoints uses HTTP as a pipe and follows none of these rules.
+
+    **Why.** The rules pay off in tools you never write. A CDN caches `GET /v1/clinics` because GET is safe. Client libraries retry PUT and DELETE because they are idempotent. A load balancer can send any request to any server because none holds a session. With 60 action endpoints all on POST, none of that works, and 3,000 identical clinic-list calls all reach the database.
+
+    <AnimatedDiagram name="fundamentals/rest" highlight={["pets", "pet", "clinics", "clinic", "appts", "appt"]} caption="The API is a set of named resources. Clients act on all of them with the same few methods." />
+
+    **Follow-ups the interviewer may ask.**
+    - Is HATEOAS required before you can call an API RESTful?
+    - How would you name the endpoint that lists one clinic's bookings for one day?
+
+    **Watch out for.** "REST means JSON." The format is not the point. The same API could return XML or CSV and still be RESTful.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What does stateless mean in REST, and why does it make scaling easier?" level="Junior" category="Scalability">
+    **Short answer.** The server keeps no memory of a client between requests, so each request carries its URL, its credentials and its parameters. Any server behind the load balancer can then answer any request, and servers can be added or lost without logging anyone out.
+
+    **Why.** With sessions in server memory, each user must keep reaching the same server. If that server dies, its users lose their sessions, and a new server takes no load until new users arrive. With stateless requests, three servers each take about a third of 3,000 users, and losing one moves its 1,000 users to the other two on their next request. The cost is a token of a few hundred bytes on every request and a check of it each time.
+
+    <AnimatedDiagram name="fundamentals/rest-stateless" step={1} path="app>lb>api2>db" caption="The token travels with the request, so the load balancer may pick any server." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where does a shopping cart live if the servers are stateless?
+    - How do you revoke a self-contained token before it expires?
+
+    **Watch out for.** "Stateless means the service stores no data." The database holds plenty of state. What the server must not hold is the client's session between requests.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="PUT, PATCH or POST: which would you use to change an appointment's time, and why?" level="Mid" category="APIs">
+    **Short answer.** `PATCH /v1/appointments/981` with only the field that changes, or `PUT` with the whole booking if the client always holds a full, fresh copy. POST creates a new resource in a collection, so it is for booking, not for changing a booking.
+
+    **Why.** PUT means "make the resource equal to this body". Sending it twice gives the same result, so it is idempotent and safe to retry. But a PUT that carries only `starts_at` would wipe the reason and notes. PATCH sends a change. A merge patch such as `{"starts_at": "..."}` happens to be repeatable, but HTTP does not promise that for PATCH: a patch like "move it 15 minutes later" is not. Pair either one with `If-Match` so a stale copy cannot overwrite a newer one.
+
+    <Compare
+      columns={["", "PUT", "PATCH", "POST"]}
+      rows={[
+        ["Body", "Whole booking", "Changed fields only", "A new booking"],
+        ["Idempotent by definition", true, false, false],
+        ["Fits changing the time", "Yes, with a full copy", "Yes", "No"],
+      ]}
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - What should the server return if the new time is already taken?
+    - How do you make a PATCH safe to retry after a timeout?
+
+    **Watch out for.** Using POST for every change because "it works". Clients and proxies then cannot tell which calls are safe to retry.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you model an action that is not create, read, update or delete, such as checking a pet in or sending a reminder text?" level="Mid" category="API design">
+    **Short answer.** First look for a state change on an existing resource: checking in is `PATCH /v1/appointments/981` with `{"status": "checked_in"}`. If the action is an event with its own life, make it a resource you create: `POST /v1/appointments/981/reminders` creates a reminder and returns 202 Accepted while the text goes out in the background.
+
+    **Why.** Both keep the uniform interface. The state change gets ETags and conditional updates for free. The new resource gives the action an id and a history: the desk can `GET /v1/appointments/981/reminders` and see that two texts went out, at 08:00 and 09:10, and whether each was delivered. A `POST /sendReminder` endpoint gives neither, and such endpoints tend to multiply until you are back at 60 verbs.
+
+    <AnimatedDiagram name="fundamentals/rest" path="desk>appt" caption="The desk checks Bella in by changing the booking's status, not by calling a /checkIn endpoint." />
+
+    **Follow-ups the interviewer may ask.**
+    - Some style guides allow `POST /appointments/981:cancel`. When is a custom method like that acceptable?
+    - How do you stop the reminder from being sent twice if the POST is retried?
+
+    **Watch out for.** Forcing every action into DELETE or PUT to stay pure. Modelling a refund as `DELETE /payments/55` hides what happened. A refund is a new resource with its own amount and status.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Two receptionists edit the same appointment at the same time. How does a REST API stop one from silently overwriting the other?" level="Senior" category="Consistency">
+    **Short answer.** Optimistic concurrency with ETags. A GET returns `ETag: "appt981-v3"`, the update sends `If-Match: "appt981-v3"`, and if someone changed the booking in between, the server answers 412 Precondition Failed so the client reloads and tries again.
+
+    **Why.** Without it, the last write wins. Ana moves Bella to 10:00 at 09:01:10. Ben loaded the booking at 09:00 and changes the vet at 09:01:20 with a full PUT, which puts the time back to 09:30. Nobody sees an error. With ETags, the server makes the check part of the write, so no lock is held while a person types:
+
+    ```sql
+    UPDATE appointments
+    SET vet_id = 12, starts_at = '2026-11-16 09:30', version = 4
+    WHERE id = 981 AND version = 3;   -- 0 rows updated means someone got there first: return 412
+    ```
+
+    It costs one version column and one condition. Two people editing one booking in the same minute is rare, so the retry almost never runs. A server can also refuse updates that carry no `If-Match` at all, with 428 Precondition Required.
+
+    **Follow-ups the interviewer may ask.**
+    - Why not lock the row while the receptionist has the form open?
+    - How would you show the conflict to Ben so he does not lose his change?
+
+    **Watch out for.** Comparing timestamps from the clients' clocks to decide who wins. Clocks drift, and "last write wins" still throws one person's edit away.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A phone app's home screen needs data from five REST resources and takes about 2 seconds to load on a slow mobile network. What would you change?" level="Senior" category="Performance">
+    **Short answer.** First make independent calls run in parallel over one HTTP/2 connection. If that is still too slow, add one screen-shaped endpoint, a backend for frontend, that gathers the five resources inside the data center, or let clients ask for embedded resources and fewer fields.
+
+    **Why.** At a 300 ms mobile round trip plus about 100 ms of server time, each call costs about 400 ms, and five in a row cost 2 seconds. Some calls depend on others (pet ids come before their bookings), so the best parallel plan has two waves: about 800 ms. A `GET /v1/home` endpoint needs one mobile round trip. Inside the data center a round trip is about 0.5 ms, so the server can make its five calls in two waves for about 200 ms. The phone waits about 500 ms in all.
+
+    | Option | Mobile round trips | Cost |
+    | --- | --- | --- |
+    | Five calls in a row | 5, about 2 s | none |
+    | Parallel calls | 2 waves, about 800 ms | client code |
+    | `?include=appointments&fields=id,name` | 1 or 2 | a more complex API |
+    | Home endpoint (backend for frontend) | 1, about 500 ms | one more endpoint to own |
+
+    **Follow-ups the interviewer may ask.**
+    - Is `GET /v1/home` still REST? How would you cache it?
+    - At what point would you move this client to GraphQL instead?
+
+    **Watch out for.** Making every resource embed everything it links to. Responses grow from 2 KB to 200 KB, and every other client pays for the home screen.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [API design](/system-design/fundamentals/api-design)
+- [HTTP/1.1, HTTP/2 and HTTP/3](/system-design/fundamentals/http)
+- [GraphQL](/system-design/fundamentals/graphql)
+- [RPC and gRPC](/system-design/fundamentals/rpc)
+- [Choosing an API style](/system-design/fundamentals/choosing-an-api-style)
+- [API gateway](/system-design/fundamentals/api-gateway)
+- [Idempotency](/system-design/patterns/idempotency)
+- [Caching](/system-design/patterns/caching)
+
+## Further reading
+
+- [Roy Fielding, Representational State Transfer (dissertation, chapter 5)](https://www.ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm), where the REST constraints were first written down.
+- [RFC 9110: HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110), the meaning of every method, status code and conditional header.
+- [RFC 9457: Problem Details for HTTP APIs](https://www.rfc-editor.org/rfc/rfc9457), the standard JSON error format.
+- [Microsoft REST API Guidelines](https://github.com/microsoft/api-guidelines), a large company's rules for naming, paging and versioning.

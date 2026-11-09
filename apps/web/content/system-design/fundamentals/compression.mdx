@@ -1,0 +1,252 @@
+---
+title: "Compression and encoding"
+description: "How gzip, Brotli and zstd shrink text, where systems compress (CDN, queues, database pages), the CPU versus bandwidth trade, and how images and video differ."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Compression rewrites data in fewer bytes by spotting what repeats, so it costs a little computer time to save a lot of sending and storing.
+</KeyIdea>
+
+## The story
+
+You run TrailNotes, a hiking app. The trail list screen asks your server for every trail in a region and gets back 2.4 MB of JSON, the plain-text format most APIs send: 4,000 trails, each with the same field names, such as `"difficulty":"moderate"`. A hiker at a trailhead has one bar of 3G, about 1 Mbps (one megabit, a million bits, per second). That is 2.4 MB × 8 = 19.2 megabits, so the list takes about 19 seconds to load, and most hikers give up. Your cloud bill has a second problem. The endpoint serves 500,000 requests a day, so you send 2.4 MB × 500,000 = 1.2 TB a day out to the internet. At about \$0.09 per GB, that is roughly \$108 a day for one screen.
+
+One setting on the server fixes most of both. This page explains why it works, where else your system can shrink its bytes, and where shrinking does nothing.
+
+## How it works
+
+A **compressor** reads data and writes a shorter version. A **decompressor** turns it back. The pair is called a **codec**.
+
+Text compresses well because it repeats. The compressor keeps a window of the bytes it has just read, often 32 KB up to many MB. When it meets a run of bytes it has seen before, it writes a short note instead: "go back 312 bytes and copy 18". Then it gives the symbols it sees most often the shortest codes, the way Morse code gives the letter E a single dot. TrailNotes repeats `"difficulty":` 4,000 times, so nearly every copy after the first becomes a few bits.
+
+Codecs come in two kinds:
+
+- **Lossless**: you get back every byte exactly. gzip, Brotli, zstd, LZ4 and PNG are lossless. Text, code and database pages need this.
+- **Lossy**: you throw away detail people will not notice and keep a close copy. JPEG, WebP, AVIF and video codecs are lossy. They only work for pictures and sound.
+
+How much a codec saves is its **compression ratio**: original size divided by compressed size. Repetitive JSON often reaches 8x to 10x. Random bytes, or data that is already compressed, reach about 1x.
+
+### Step 1: The bytes along the path, uncompressed
+
+<AnimatedDiagram name="fundamentals/compression" step={1} caption="Nothing is compressed, so every hop carries 2.4 MB and the last hop over 3G takes about 19 seconds." />
+
+A response passes several machines on its way. The app builds the JSON. The **origin**, your own web server, sends it. A <Term id="cdn">CDN</Term> edge, a server near the user that keeps copies, may store it. Then the phone downloads it. Without compression each hop moves the full 2.4 MB. The hops inside the data centre are fast, so they barely notice. The user waits on the last hop, the slow mobile link.
+
+<PremiumBreak />
+
+### Step 2: Compress once, near the source
+
+<AnimatedDiagram name="fundamentals/compression" step={2} caption="The origin compresses the JSON once with Brotli, so the edge stores and sends about 260 KB, and the phone downloads it in about 2.1 seconds." />
+
+The browser and the server agree on a codec with two HTTP headers. The client lists what it can unpack in `Accept-Encoding`. The server picks one and names it in `Content-Encoding`.
+
+```http
+GET /v1/trails?region=alps HTTP/1.1
+Accept-Encoding: zstd, br, gzip
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Encoding: br
+Content-Length: 266240
+Vary: Accept-Encoding
+```
+
+`br` is Brotli. `Vary: Accept-Encoding` tells the CDN to keep a separate copy for each encoding, so a client that only knows gzip never gets a Brotli body it cannot read.
+
+Now count. Brotli at level 5 turns 2.4 MB into about 260 KB, roughly 9x, for about 40 ms of one CPU core. The CDN keeps the compressed copy, so later users cost no extra work. The phone downloads 260 KB × 8 = about 2.1 megabits in about 2.1 seconds and unpacks it in about 20 ms. Daily traffic drops from 1.2 TB to 260 KB × 500,000 = 130 GB, and the bill from about \$108 to about \$12 a day.
+
+### Step 3: Pick the codec and the level
+
+Every codec has **levels**. A higher level searches harder for repeats. The output is smaller and compressing costs more CPU, but unpacking stays about as fast. Here are rough figures for TrailNotes' 2.4 MB of JSON on one modern server core:
+
+<Compare
+  columns={["Codec and level", "Output", "Compress speed", "Unpack speed", "Best for"]}
+  rows={[
+    ["gzip 6", "About 300 KB (8x)", "About 50 MB/s", "About 400 MB/s", "Everything; every client supports it"],
+    ["Brotli 5", "About 260 KB (9x)", "About 60 MB/s", "About 400 MB/s", "Dynamic web responses"],
+    ["Brotli 11", "About 220 KB (11x)", "About 1 MB/s", "About 400 MB/s", "Static files compressed once at build time"],
+    ["zstd 3", "About 280 KB (8.5x)", "About 300 MB/s", "About 1,000 MB/s", "Services, queues, files, backups"],
+    ["LZ4", "About 550 KB (4.4x)", "About 600 MB/s", "About 3,000 MB/s", "Database pages, hot internal paths"],
+  ]}
+  caption="Rough figures for repetitive JSON on one core. Measure on your own data before you choose."
+/>
+
+**Static files get the slowest level.** Brotli 11 needs about 2.4 seconds of CPU for 2.4 MB. That is fine once, at build time, and the server then sends the stored `.br` file to every user. **Dynamic responses get a middle level**, such as Brotli 4 to 6 or gzip 6, which is fast enough to run on every request.
+
+**zstd** (Zstandard) gives gzip-like ratios at several times the speed, so it is the usual pick inside a system. Newer Chrome and Firefox accept it too, but not every client does, so web servers keep Brotli and gzip as fallbacks. **LZ4** and its cousin Snappy give up ratio for speed, cheap enough to run on every database page.
+
+Small messages are the weak spot. A 200-byte message has few repeats inside it, so servers are usually set to skip bodies under about 1 KB. For many small messages, compress a batch at once, or use a **dictionary**: sample messages both sides load in advance, so even the first copy of a field name is already known.
+
+### Step 4: Images and video shrink a different way
+
+<AnimatedDiagram name="fundamentals/compression" step={3} caption="A trail photo goes from 36 MB of raw pixels to a 3.5 MB JPEG and a 150 KB resized WebP. gzip on top saves under 1%." />
+
+A hiker uploads a photo from a 12-megapixel phone: 4,000 × 3,000 pixels, 3 bytes each, so 36 MB of raw colour values. The camera already saves it as a JPEG of about 3.5 MB. JPEG is lossy. It drops fine detail and colour changes the eye barely sees. Its last step then packs what is left tightly, much as gzip would. The bytes that come out look random, and random bytes do not repeat, so gzip on top finds nothing.
+
+Images shrink in two other ways.
+
+- **Send fewer pixels.** A phone screen shows the photo about 1,080 pixels wide. Resizing to 1,080 × 810 keeps 875,000 of the 12 million pixels, about 7%. Store the original once in <Term id="blob">blob</Term> storage, and make each size once, at upload.
+- **Use a newer format.** WebP and AVIF often match JPEG's quality in 25% to 50% fewer bytes. The resized WebP is about 150 KB. The server picks the format from the image types the browser lists in its `Accept` header.
+
+Video works the same way at a bigger scale. Raw 1080p video at 30 frames a second is 1,920 × 1,080 × 3 bytes × 30 = about 187 MB per second, or 1.5 Gbps. The H.264 codec streams the same picture at about 5 Mbps, about 300x smaller. A full **keyframe**, compressed much like a JPEG, comes every couple of seconds so a viewer can jump to any point. The frames between store only what changed since the one before: the hiker moved, the mountain did not. Newer codecs such as AV1 need roughly 30% to 50% fewer bits, but cost far more CPU to encode, so services encode each video once, in many sizes.
+
+### Step 5: Compression inside the system
+
+<AnimatedDiagram name="fundamentals/compression-where" stepper caption="Where TrailNotes compresses: Brotli toward users, zstd batches in the queue, and LZ4 pages and zstd column files at rest." />
+
+Users are not the only place where bytes cost money. Three more places matter.
+
+**Queues.** TrailNotes sends 40,000 hike events a second to an event queue. The app that sends them is the **producer**, the queue server is the **broker**, and the services that read them are **consumers**. One 400-byte event barely compresses. A batch of 500 similar events shares all its field names, so zstd shrinks it about 6x. The producer compresses each batch once. The broker stores it and copies it to its replicas still compressed, and consumers unpack it. One setting saves network, disk and <Term id="replication">replication</Term> traffic together.
+
+**Database pages.** A database reads and writes disk in **pages**, fixed blocks of often 8 or 16 KB. Many databases compress each page as they write it, usually with LZ4, Snappy or zstd. Rows in one page look alike, so 2x to 4x is common. LZ4 unpacks a 16 KB page in about 5 microseconds (16 KB ÷ 3,000 MB/s), while one random SSD read takes about 100. The CPU cost hides behind the disk, and more rows fit in each read and in memory, so scans often get faster, not slower.
+
+**Encodings for columns.** A codec knows nothing about your data. An **encoding** uses what you know about the values to write them more cheaply. Analytics stores keep each column together and apply encodings like these before any codec runs:
+
+- **Dictionary encoding**: the `region` column holds only 40 different names, so each row stores a 1-byte number instead of the text.
+- **Run-length encoding**: in a sorted `difficulty` column, 1,800 rows of "moderate" in a row become one pair: ("moderate", 1,800).
+- **Delta encoding**: event timestamps 1731120000, 1731120004, 1731120005 become 1731120000, +4, +1, so every value after the first fits in one byte.
+
+With zstd on top, the total often reaches 5x to 10x. That is why the event archive keeps column files, not JSON.
+
+Some encodings make data bigger on purpose. **Base64** writes bytes as plain text so binary can sit inside JSON. It uses 4 characters for every 3 bytes, so a 3 MB photo in a JSON field becomes 4 MB; send the photo as its own file instead. Choosing JSON or Protobuf for a record in the first place is [serialisation](/system-design/fundamentals/serialization), the step before compression.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="TrailNotes serves its JavaScript bundle to every visitor. Should it be compressed with Brotli 5 on each request, or Brotli 11?" hint="How many times does the file change?">
+    Brotli 11, once, at build time. The bundle changes only on deploy, so the slow level costs a few seconds once and every visitor gets the smaller file. On each request, Brotli 11 would burn about a second of CPU per MB.
+  </QuizItem>
+  <QuizItem question="A teammate turns on gzip for every response, photos included. What happens to the photos?" hint="What is left in a JPEG to find?">
+    They come out the same size, give or take 1%, and the server spends CPU for nothing. JPEG and WebP are already compressed, so their bytes look random. Compress text types (HTML, CSS, JavaScript, JSON, SVG) only.
+  </QuizItem>
+  <QuizItem question="Two services in the same rack exchange 2.4 MB responses over a 25 Gbps link. Does gzip 6 make a response arrive sooner?" hint="Compare the time to send with the time to compress.">
+    No. Sending 2.4 MB is 19.2 megabits, and 19.2 ÷ 25,000 megabits per second is under 1 ms. gzip 6 needs about 48 ms of CPU. Inside a fast network, compress only to save money or disk, and then with a fast codec such as LZ4 or zstd 1.
+  </QuizItem>
+</Quiz>
+
+The ladder below puts compressing 1 KB with Snappy, a fast codec like LZ4, next to sending 1 KB over a 1 Gbps link. Snappy takes about 2 µs and the link about 10 µs, so on that link a fast codec pays. On the 25 Gbps rack from the last question the link sends 1 KB in about 0.3 µs (8,192 bits ÷ 25 billion bits per second), faster than Snappy can compress it. Compare the rows, then pick others.
+
+<LatencyLadder title="Compressing 1 KB versus sending it" compareTo="net-1kb" highlight="snappy" />
+
+## Trade-offs
+
+Compression always trades CPU for bytes. Whether the trade pays depends on how slow or costly the link is. Here is the same 2.4 MB response with Brotli 5 (about 40 ms of CPU) on four links:
+
+<Compare
+  columns={["Link", "Speed", "Time to send 2.4 MB", "Time to send 260 KB", "Worth compressing?"]}
+  rows={[
+    ["Phone on weak 3G", "1 Mbps", "About 19 s", "About 2.1 s", "Yes, by far"],
+    ["Home broadband", "100 Mbps", "About 190 ms", "About 21 ms", "Yes, saves about 130 ms"],
+    ["Between regions", "1 Gbps, about $0.02/GB", "About 19 ms", "About 2 ms", "Yes, for the bill, though it adds about 20 ms"],
+    ["Same rack", "25 Gbps", "Under 1 ms", "Under 0.1 ms", "Only with LZ4 or zstd 1, and only to save disk or money"],
+  ]}
+  caption="The slower or pricier the link, the more compression pays."
+/>
+
+<ProsCons
+  pros={[
+    "8x to 10x fewer bytes for text, so faster pages on slow links",
+    "Smaller bills for internet and cross-region traffic",
+    "Less disk, and often faster reads, for database pages",
+  ]}
+  cons={[
+    "CPU on both ends: about 40 ms per 2.4 MB at Brotli 5",
+    "Nothing gained on images, video, zip files or encrypted data",
+    "Small single messages barely shrink without batching",
+  ]}
+/>
+
+## In the wild
+
+- **Brotli** came from Google. It ships with a built-in dictionary of common web words, which helps even small HTML files.
+- **Zstandard** came from Facebook. Its dictionary mode is aimed at the many-small-messages case.
+- **Apache Kafka** producers compress whole batches with gzip, Snappy, LZ4 or zstd. Brokers keep the batches compressed on disk.
+- **Apache Cassandra** compresses each chunk of its data files with LZ4 by default.
+
+## Common pitfalls
+
+- **Compressing compressed data.** JPEG, MP4, zip and encrypted bytes do not shrink. Restrict compression to text types.
+- **The top level on live requests.** Brotli 11 can take a second or more per MB. Keep it for files compressed once at build time.
+- **Forgetting `Vary: Accept-Encoding`.** A cache may hand a Brotli body to a client that cannot unpack it.
+- **Mixing secrets with reflected input.** If a response holds a secret token and also echoes text the attacker chose, compressed size changes leak the secret, even over <Term id="tls">TLS</Term>. This is the BREACH attack. Keep secrets out of those responses, or mask them on each request.
+- **No limit on unpacked size.** Deflate, the method inside gzip, can reach about 1,000:1, so a 10 MB upload can unpack to 10 GB. Stop reading once the output passes a cap.
+
+## How to say it in an interview
+
+"I'd compress anything text-like that crosses a slow or paid link. For web responses that means Brotli or gzip, negotiated with `Accept-Encoding`, plus `Vary: Accept-Encoding` so the CDN keeps the right copy. Static assets get Brotli 11 once at build time. Dynamic JSON gets a middle level: about 40 ms of CPU for 2.4 MB saves around 17 seconds on a 3G phone. Inside the system I'd use zstd on queue batches and LZ4 on database pages, where links are fast and CPU matters more. Images and video shrink through resizing and lossy codecs like WebP or H.264, not gzip. The trade is CPU against bytes, so I check the link: on a 25 Gbps rack, gzip makes things slower."
+
+<InterviewQuestions>
+  <InterviewQuestion question="Should a web server gzip every response it sends?" level="Junior" category="Performance">
+    **Short answer.** No, only text responses above about 1 KB, such as HTML, CSS, JavaScript, JSON and SVG. Images, video and zip files are already compressed, so gzip spends CPU and saves under 1%.
+
+    **Why.** Text repeats, so gzip or Brotli shrink it 8x to 10x. A 2.4 MB JSON list becomes about 260 KB with Brotli, which cuts a 19-second download on 1 Mbps to about 2 seconds. A JPEG has already had its repeats removed, and so has a WebP. The server picks a codec from the client's `Accept-Encoding`, names it in `Content-Encoding`, and sets `Vary: Accept-Encoding` so caches keep one copy per encoding.
+
+    <AnimatedDiagram name="fundamentals/compression" step={3} caption="The photo shrinks through a lossy format and resizing; gzip on top finds almost nothing." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why prefer Brotli 11 for static files but not for API responses?
+    - How would you make a 3.5 MB phone photo load fast in a feed?
+
+    **Watch out for.** Saying "compress everything". Compressing photos wastes CPU, and the top Brotli level on live requests can cost a second of CPU per MB.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your app publishes 40,000 events per second to a message queue, and broker disks and network are filling up. How would compression help, and where would you turn it on?" level="Mid" category="Performance">
+    **Short answer.** Turn on producer-side compression with zstd or LZ4, so each batch is compressed once before it leaves the app. The broker stores and replicates the compressed batch, and consumers unpack it.
+
+    **Why.** 40,000 events × 400 bytes = 16 MB/s, or about 1.4 TB a day per copy. With 3 replicas that is about 4.1 TB of disk a day. One 400-byte event barely shrinks, but a batch of 500 similar events shares its field names and compresses about 6x. That cuts disk to about 690 GB a day across all three copies, and the network shrinks the same way. zstd 3 runs at about 300 MB/s per core, so 16 MB/s needs a small fraction of one core.
+
+    <AnimatedDiagram name="fundamentals/compression-where" highlight={["app", "queue"]} caption="The producer in the app compresses each batch; the queue keeps it compressed all the way to the consumers." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to the ratio if you send each event on its own with no batching?
+    - Why compress at the producer and not at the broker?
+    - How do batch size and wait time trade against latency?
+
+    **Watch out for.** Compressing each message on its own. With few repeats inside one small message, you pay header and CPU costs for very little saving.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Services in one data centre exchange about 2 GB/s of JSON, and 300 MB/s of data replicates to a second region. Would you compress either flow, and with what?" level="Senior" category="Performance">
+    **Short answer.** Cross-region, yes: zstd at a low level costs about one core and saves about \$11,700 a month. Inside the data centre, mostly no, because a binary format like Protobuf saves more, and I would try LZ4 or zstd 1 only if the network is the real bottleneck.
+
+    **Why.** The two flows sit on very different links.
+
+    <Compare
+      columns={["", "Inside one data centre", "Cross-region"]}
+      rows={[
+        ["Traffic", "2 GB/s", "300 MB/s, about 26 TB a day"],
+        ["Link", "25 Gbps per host, no charge", "About $0.02 per GB"],
+        ["Cost of sending uncompressed", "No bill; under 1 ms per 2.4 MB", "26,000 GB × $0.02 = about $520 a day, about $15,600 a month"],
+        ["CPU for gzip 6 (50 MB/s)", "2,000 ÷ 50 = about 40 cores", "300 ÷ 50 = about 6 cores"],
+        ["CPU for zstd 1 to 3 (300 to 400 MB/s)", "About 5 to 7 cores", "About 1 core; at 4x it cuts 75% of the bill, about $11,700 a month"],
+      ]}
+    />
+
+    Inside the rack, sending is already faster than compressing, so compression adds latency and burns cores. Protobuf often cuts JSON size 2x to 3x with no codec at all. Across regions every GB is billed, and the link is shared and slower, so a core or two of zstd is cheap.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you check that compression is not raising p99 latency?
+    - Would you compress before or after encrypting the replication stream, and why?
+
+    **Watch out for.** Giving one answer for both flows. The right call depends on link speed and price, so show the arithmetic for each.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [CDN](/system-design/fundamentals/cdn)
+- [HTTP](/system-design/fundamentals/http)
+- [Serialisation: JSON, Protobuf, Avro](/system-design/fundamentals/serialization)
+- [Files, blocks and objects](/system-design/fundamentals/storage-types)
+- [Message queues](/system-design/patterns/message-queues)
+- [Analytical databases](/system-design/databases/analytical-databases)
+- [Design YouTube](/system-design/case-studies/youtube)
+
+## Further reading
+
+- IETF, [RFC 7932: Brotli Compressed Data Format](https://www.rfc-editor.org/rfc/rfc7932), the format and its built-in dictionary.
+- IETF, [RFC 8878: Zstandard Compression and the application/zstd Media Type](https://www.rfc-editor.org/rfc/rfc8878), how zstd frames and dictionaries work.
+- MDN Web Docs, [Content-Encoding](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Encoding), the header and the values browsers accept.
+- Apache Kafka, [Documentation](https://kafka.apache.org/documentation/), producer batching and the `compression.type` setting.

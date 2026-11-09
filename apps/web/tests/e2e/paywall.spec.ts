@@ -66,7 +66,7 @@ test.describe("paywall @core", () => {
     // Free pages are untouched: no paywall on a hub or an outline article.
     await page.goto("/system-design/databases");
     await expect(page.getByTestId("paywall")).toHaveCount(0);
-    await page.goto("/system-design/fundamentals/rpc");
+    await page.goto("/system-design/case-studies/dropbox");
     await expect(page.getByTestId("paywall")).toHaveCount(0);
   });
 

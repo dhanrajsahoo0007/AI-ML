@@ -1,0 +1,240 @@
+---
+title: "Capacity planning and bottlenecks"
+description: "Find the first bottleneck in CPU, memory, disk, network or connections, keep headroom for spikes and growth, and prove it with a load test."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Capacity planning means working out which part of your system runs out first as traffic grows, and fixing it before your users find it for you.
+</KeyIdea>
+
+## The story
+
+You run the website where students check their exam results. On a normal day it serves about 20 page views a second. This year 240,000 students will get results at 10:00 on one morning. Each student loads about 3 pages: log in, see results, refresh. That is 720,000 page views. Two thirds of them land in the first 10 minutes: 480,000 views in 600 seconds, or 800 a second. The first minute is about 2.5 times busier than that, so the peak is **about 2,000 page views a second**. Your site has one <Term id="load-balancer">load balancer</Term> (the box that spreads requests across servers), two app servers and one database. Will it hold? If not, which part gives up first? This page answers that question for this site, one wall at a time.
+
+## How it works
+
+Every request uses a little of several resources: CPU time, memory, disk, network bytes and a database connection. Each resource has a fixed capacity. A **bottleneck** is the resource that runs out first. It sets the <Term id="throughput" /> of the whole system, however much spare room the other parts have.
+
+### Step 1: List the resources and their ceilings
+
+<AnimatedDiagram name="fundamentals/capacity-planning" step={1} caption="Day one: two app servers, one database and a 1 Gbit/s link, facing a peak of about 2,000 page views a second." />
+
+For each resource, divide what you have by what one page view costs. The answer is that resource's **ceiling**: the page views per second it can serve when it is 100% busy. Here are the team's measurements for one results page.
+
+<Compare
+  columns={["Resource", "What we have", "Cost per page view", "Ceiling at 100%"]}
+  rows={[
+    ["App CPU", "2 servers x 8 cores", "10 ms of CPU", "1,600/s"],
+    ["App memory", "2 x 32 GB", "none extra: about 5 GB of workers, flat", "not traffic-bound"],
+    ["Network link", "1 Gbit/s = 125 MB/s", "60 KB", "about 2,080/s"],
+    ["DB connections", "2 pools of 40 (limit 100)", "held 8 ms", "10,000/s"],
+    ["DB CPU", "16 cores", "4 ms of CPU", "4,000/s"],
+    ["DB disk", "SSD, 64 GB of RAM", "almost no reads: the table is cached", "not on the read path"],
+  ]}
+  caption="Results-day ceilings for the day-one setup. The smallest number is the first bottleneck."
+/>
+
+The arithmetic is short. One core does 1,000 ms / 10 ms = 100 page views a second, so 16 cores do 1,600. The link moves 125,000 KB / 60 KB, about 2,080 pages a second. The results table is 240,000 rows of about 1 KB, so 240 MB. That fits in the database's 64 GB of RAM, so disk barely matters. The smallest ceiling is app CPU at 1,600, below the 2,000 peak. That is wall 1.
+
+<PremiumBreak />
+
+### Step 2: Wall 1, app CPU
+
+<AnimatedDiagram name="fundamentals/capacity-planning" step={2} caption="Two more app servers lift the CPU ceiling to 3,200 a second, but their connection pools push the database past its limit." />
+
+Each 8-core server tops out at 800 page views a second. Four servers give 3,200, so the 2,000 peak keeps them at about 62% busy. The team adds servers C and D behind the load balancer. Because the app servers keep no user data between requests, any of them can serve any student.
+
+Now the next wall appears at once. Each app server opens a **connection pool**: a fixed set of database connections it keeps open and reuses. Each pool opens all 40 connections when its server starts. Four pools of 40 make 160, and the database accepts at most 100. A and B already hold 80, so C gets 20 before the database answers "too many connections", and D gets none. Fixing one bottleneck often moves the load straight onto the next one.
+
+### Step 3: Wall 2, database connections
+
+<AnimatedDiagram name="fundamentals/capacity-planning" step={3} caption="A connection pooler takes 160 connections from the app tier and shares 40 real ones with the database." />
+
+How many connections does the database really need? Use a simple rule called Little's law: work in progress = arrival rate x time each item takes. Each page view runs one query. At 2,000 queries a second that each hold a connection for 8 ms, about 2,000 x 0.008 = 16 connections are busy at any moment. The pools asked for 160 because each server sized its pool for its own worst case.
+
+A **connection pooler** sits in front of the database. It accepts all 160 app-side connections and lends each query one of 40 real ones. With 40 connections at 125 queries a second each (1,000 / 8 ms), the ceiling is 5,000 a second. Lowering each server's pool to 20 would also work, until the team adds a fifth or sixth server.
+
+### Step 4: Wall 3, the network link
+
+<AnimatedDiagram name="fundamentals/capacity-planning" step={4} caption="Static files move to a CDN and the HTML is compressed, so each page view sends 5 KB through the load balancer instead of 60 KB." />
+
+With CPU and connections fixed, the link is next. At 2,000 pages a second x 60 KB, it must carry 120 MB a second. That is 96% of its 125 MB. Of those 60 KB, 40 KB are the same CSS, scripts and logo for every student. The team serves them from a <Term id="cdn" />, a network of servers near users that keeps copies of files. The 20 KB of HTML compresses with gzip (a standard way to shrink text before sending it) to about 5 KB. Now 2,000 x 5 KB = 10 MB a second crosses the link, about 8%.
+
+After all three fixes the ceilings are: app CPU 3,200, database CPU 4,000, pooler 5,000 and the link about 25,000. At the 2,000 peak, the busiest part is app CPU at 62%. The next wall would be app CPU again, and the team now knows where it is.
+
+### Headroom: why 70% and not 100%
+
+**Utilization** is the share of time a resource is busy. **Saturation** is work waiting in a queue for that resource. **Headroom** is the gap between your expected peak and the ceiling. Most teams plan to keep the busiest resource at or below about 70% at peak, for two reasons.
+
+The first reason is queueing. In a simple model of one queue, the average wait before service is the service time x u / (1 - u), where u is utilization. For a 10 ms request:
+
+| Utilization | Wait multiplier | Average wait |
+|---|---|---|
+| 50% | 1 | 10 ms |
+| 70% | 2.3 | 23 ms |
+| 80% | 4 | 40 ms |
+| 90% | 9 | 90 ms |
+| 95% | 19 | 190 ms |
+
+Real servers with many cores do better than one queue, but the curve has the same shape: it bends sharply after about 80%. Your <Term id="p99" /> latency goes first.
+
+The second reason is failure. With four app servers at 62%, losing one leaves three. They have 2,400 a second of ceiling for 2,000 of load, so 83% busy. To survive a lost server and stay near 70%, you need five servers: four survivors give 3,200, or 62%.
+
+### Growth: when to add capacity
+
+Traffic rarely stays flat. If the peak grows by a rate g each month, the number of months until utilization goes from today's u₀ to a limit u is:
+
+$$
+\text{months} = \frac{\ln(u / u_0)}{\ln(1 + g)}
+$$
+
+Say the exam board's everyday portal peaks at 50% of its ceiling and grows 5% a month. It reaches 70% in ln(1.4) / ln(1.05) = 0.336 / 0.049, about 7 months. It reaches 100% in ln(2) / ln(1.05), about 14 months. If the fix takes 3 months to build, start by month 4 at the latest. Lead time is the part people forget.
+
+### Load testing: proving the numbers
+
+The table in step 1 is an estimate. A **load test** checks it by sending scripted, realistic traffic at a copy of the system and raising the rate in stages. A good plan for results day:
+
+1. Build a copy of production: same server sizes, a full 240,000-row results table, the real pool settings.
+2. Script the real mix of pages: one login, one results page, one refresh per student.
+3. Ramp in stages of 500, 1,000, 1,500, 2,000 and 2,500 views a second, holding each for 10 minutes.
+4. At each stage, record p99 latency, errors, and the utilization of every resource in the table.
+5. Stop when p99 crosses your target or errors pass 0.1%. The last stage that stayed within target is your measured ceiling.
+
+Run the load generators on separate machines, and watch their CPU too. A busy load generator sends less traffic than you think, and the test looks better than reality.
+
+## Try it
+
+The calculator below turns daily users into an average and a peak rate. Set it to your system, then compare the peak with the ceilings you measured. The values below model an everyday app with 2 million daily users and 30 requests each. Its peak comes out near 2,100 requests a second, about the same as results day.
+
+<EstimateCalculator title="From daily users to peak load" dau={2000000} actionsPerUser={30} peakFactor={3} payloadBytes={2000} retentionDays={365} readWriteRatio={20} />
+
+<Quiz>
+  <QuizItem question="A page costs 25 ms of CPU. How many 16-core servers do you need for 3,000 pages a second at no more than 70% CPU?" hint="Work out pages per second per core first.">
+    One core does 1,000 / 25 = 40 pages a second, so one server does 640 at 100% and about 450 at 70%. 3,000 / 450 is about 6.7, so 7 servers. Add an eighth if you want to survive losing one.
+  </QuizItem>
+  <QuizItem question="Your database CPU is at 30%, but requests wait for a free database connection. Which resource is the bottleneck?">
+    The connection pool. The database has spare CPU, but work queues for connections. Check how long each query holds its connection, and add a pooler or resize the pools.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+Each fix raises one ceiling and has a cost. The numbers are from the results-day site.
+
+<Compare
+  columns={["Fix", "Ceiling it raises", "Gain here", "Cost or catch"]}
+  rows={[
+    ["Add app servers", "App CPU", "1,600 to 3,200/s", "More connections and more machines to run"],
+    ["Bigger server", "App CPU", "8 to 16 cores doubles it", "Stops at the largest machine; one box failing hurts more"],
+    ["Connection pooler", "DB connections", "160 app conns on 40 real", "One more hop; settings tied to one connection stop working"],
+    ["CDN and gzip", "Network", "60 KB to 5 KB a view", "CDN bill; old files cached after a deploy"],
+    ["Cache the results page", "App and DB CPU", "Most reads skip the DB", "A corrected mark shows late until the cache expires"],
+    ["Make each request cheaper", "Whatever it uses", "10 ms to 5 ms doubles it", "Engineering time; gains are hard to predict"],
+  ]}
+  caption="Raising a ceiling: what you get and what you pay."
+/>
+
+## In the wild
+
+- **PostgreSQL** ships with a default of 100 connections, and each one is a separate server process. That is why poolers such as PgBouncer are common in front of it.
+- **Cloud virtual machines** (AWS EC2, for example) list a network bandwidth figure per instance size. A small instance can hit its network limit long before its CPU limit.
+- **Google's SRE book** describes provisioning services for N+2: enough to serve peak load with one instance down for maintenance and another failed.
+
+## Common pitfalls
+
+- **Planning from the daily average.** The 720,000 results views average about 8 a second over 24 hours (720,000 / 86,400), but the peak minute is 2,000. Plan for the peak.
+- **Calling 90% busy "efficient".** At 90%, queueing makes the average wait about 9 times the service time.
+- **Fixing one wall without checking the next.** Two new app servers fixed CPU and broke the database connection limit.
+- **Load testing a toy copy.** A 100-row table fits in any cache, so the test never touches disk or the real query plan.
+- **Looking only at CPU.** Connection caps, open-file limits, thread pools and link speed run out too, and they fail with errors rather than slowness.
+
+## How to say it in an interview
+
+"I start from the peak, not the average. For this system I'd estimate the peak requests per second, then list what one request costs in each resource: CPU milliseconds, bytes on the wire, database connection time, memory and disk. Dividing capacity by cost gives each resource a ceiling, and the lowest ceiling is the first bottleneck. I size so that the busiest resource stays under about 70% at peak, because queueing makes latency climb fast above that, and I keep enough spare to lose one machine. After each fix I recompute, because fixing one wall usually exposes the next, for example more app servers running into the database's connection limit. Finally I'd prove the numbers with a staged load test against production-sized data, and track growth so new capacity lands before we cross 70%."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a bottleneck, and how do you find the first one in a system?" level="Junior" category="Capacity">
+    **Short answer.** A bottleneck is the resource that runs out first as load grows, so it caps the whole system. I find it by dividing each resource's capacity by what one request costs in it and picking the smallest result.
+
+    **Why.** On the exam-results site, 16 app cores at 10 ms per page give 1,600 pages a second, the 1 Gbit/s link at 60 KB per page gives about 2,080, and the database CPU at 4 ms per query gives 4,000. App CPU is lowest, so it breaks first at a 2,000 peak. After fixing it, the next lowest ceiling becomes the new bottleneck.
+
+    <AnimatedDiagram name="fundamentals/capacity-planning" highlight={["wall-cpu", "wall-conns", "wall-net"]} caption="The bottleneck moves: CPU first, then connections, then the network link." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you measure the cost per request in production?
+    - Which resources fail with errors instead of slowness?
+
+    **Watch out for.** Saying "the database" by habit. Do the division; here the database CPU had twice the room it needed, and app CPU broke first.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why do teams aim to keep servers at about 70% busy at peak instead of 100%?" level="Junior" category="Capacity">
+    **Short answer.** Because waiting time grows faster and faster as a resource nears 100% busy, and because you need spare room when a machine fails. 70% keeps latency steady and survives a loss.
+
+    **Why.** In a simple queue the average wait is the service time x u / (1 - u). For a 10 ms request that is 23 ms at 70%, 90 ms at 90% and 190 ms at 95%. With four servers at 62%, losing one puts the other three at 83%. Planning for about 70% leaves room for both.
+
+    **Follow-ups the interviewer may ask.**
+    - Would you use the same target for a batch job?
+    - How does autoscaling change the target?
+
+    **Watch out for.** Treating idle capacity as waste. The spare 30% is what keeps p99 latency flat during a spike.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You add two app servers to fix high CPU, and the new ones fail with 'too many connections' from the database. What happened, and how do you fix it?" level="Mid" category="Capacity">
+    **Short answer.** Each app server opens its own connection pool, so four pools of 40 asked for 160 connections against a database limit of 100. I'd put a connection pooler in front of the database, or shrink each pool, based on how many connections are really busy.
+
+    **Why.** Busy connections = query rate x time each query holds one. At 2,000 queries a second x 8 ms, only about 16 are busy at once. A pooler accepts all 160 app connections and shares 40 real ones, which still allows 40 x 125 = 5,000 queries a second.
+
+    <AnimatedDiagram name="fundamentals/capacity-planning" step={3} highlight={["app-a", "app-b", "app-c", "app-d", "pooler", "db"]} caption="Four app servers share 40 real database connections through the pooler." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why not raise the database's connection limit to 500?
+    - What breaks when a pooler shares connections per transaction?
+
+    **Watch out for.** Raising the database limit as the fix. Each connection costs memory and scheduling work on the database, so hundreds of mostly idle ones slow down the busy ones.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you load test a system before a known traffic spike, such as a ticket sale?" level="Mid" category="Capacity">
+    **Short answer.** Script the real mix of requests, run it against a production-sized copy, and raise the rate in stages while watching p99 latency, errors and every resource's utilization. The last stage that stays within target is the measured ceiling.
+
+    **Why.** Estimates miss things like lock contention and cold caches. For a 2,000-a-second peak I'd ramp 500, 1,000, 1,500, 2,000 and 2,500 a second, 10 minutes each, and stop at 0.1% errors or when p99 breaks the target. Testing past the peak shows how much headroom is real.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you keep the load generator from being the bottleneck?
+    - Would you test in production, and how safely?
+
+    **Watch out for.** Testing with a tiny dataset or one URL. Everything is cached, so the test reports a ceiling the real system never reaches.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Peak traffic grows 5% a month and you are at 50% of your ceiling. The database migration that raises the ceiling takes 4 months. When do you start?" level="Senior" category="Capacity">
+    **Short answer.** Now, or within a couple of months at most. Growth takes us to 70% in about 7 months, and the migration needs 4 of them plus time for slips.
+
+    **Why.** Months to reach u from u₀ at growth g is ln(u / u₀) / ln(1 + g). To 70%: ln(1.4) / ln(1.05), about 7 months. To 100%: ln(2) / ln(1.05), about 14 months. Starting at month 3 lands right at the 70% line with no slack, and migrations rarely finish on time. Meanwhile I'd buy time with cheaper fixes such as caching hot reads.
+
+    **Follow-ups the interviewer may ask.**
+    - What if growth is seasonal, with a December spike of 3x?
+    - Which short-term fixes buy the most months?
+
+    **Watch out for.** Planning to 100%. Latency suffers long before that, and a failure at 90% leaves nothing in reserve.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Back-of-the-envelope estimation](/system-design/fundamentals/estimation)
+- [Non-functional requirements](/system-design/fundamentals/non-functional-requirements)
+- [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+- [Latency numbers that matter](/system-design/fundamentals/latency-numbers)
+- [Caching](/system-design/patterns/caching)
+- [Back-pressure](/system-design/patterns/back-pressure)
+
+## Further reading
+
+- [Brendan Gregg, "The USE Method"](https://www.brendangregg.com/usemethod.html): a checklist for finding saturated resources on a real machine.
+- [Google SRE book, "Handling Overload"](https://sre.google/sre-book/handling-overload/): how Google plans capacity and sheds load when a service runs past it.
+- [PostgreSQL documentation, connection settings](https://www.postgresql.org/docs/current/runtime-config-connection.html): `max_connections` and what each connection costs.
+- [PgBouncer documentation](https://www.pgbouncer.org/): pooling modes and what each one gives up.

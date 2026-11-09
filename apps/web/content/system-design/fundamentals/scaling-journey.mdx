@@ -1,0 +1,258 @@
+---
+title: "Scaling from one server to millions of users"
+description: "How a web app grows from one box to millions of users, and why a load balancer, cache, replicas, CDN and queue each show up when they do."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Scaling means adding capacity one piece at a time, each piece placed where the current bottleneck is, so the system keeps up as users grow from hundreds to millions.
+</KeyIdea>
+
+## The story
+
+You built Potluck, a recipe site. It runs on one rented server with 8 CPU cores, and that machine runs both your code and your database. On a normal evening it serves 40 requests per second. Then a TV chef mentions Potluck on air, and 2,000 requests per second arrive. The server tops out near 300. Pages take 30 seconds, then the database runs out of connections and the site shows errors. This page follows Potluck from that night to 10 million daily users, one new part at a time.
+
+## How it works
+
+A **bottleneck** is the one resource that runs out first: CPU, memory, disk or network. There are two ways to add capacity:
+
+- **Scale up** (vertical scaling): move to a bigger machine. Nothing in the code changes.
+- **Scale out** (horizontal scaling): add more machines of the same size and split the work between them.
+
+Scaling up is the easy first move. But the biggest machines stop at a few hundred cores, and moving to a bigger one usually means minutes of downtime. Worse, one machine is a **single point of failure**: one part whose loss stops everything. Scaling out has no hard ceiling for the app servers, but the work must be split. Most steps below are about splitting it.
+
+Where does Potluck's 300 come from? Each page costs about 20 ms of CPU: 12 ms for the code and 8 ms for its database queries. 8 cores can do $8 \times 1000 / 20 = 400$ pages per second at 100% CPU. A server near 100% gets slow, so plan for 75%: 300 requests per second.
+
+### Step 1: One server does everything
+
+<AnimatedDiagram name="fundamentals/scaling-journey" step={1} caption="Step 1: users talk to one server that runs the code and the database." />
+
+The browser looks up Potluck's name in <Term id="dns">DNS</Term>, the internet's address book, and gets the server's address. Code and database share one CPU, one memory and one disk. For a new product that is the right design: cheap and easy to debug.
+
+<PremiumBreak />
+
+### Step 2: A load balancer, and the database on its own machine
+
+<AnimatedDiagram name="fundamentals/scaling-journey" step={2} caption="Step 2: users reach a load balancer; the app server talks to a database on a separate machine." />
+
+First, the database moves to its own machine. The queries used 8 of every 20 ms, so the app server now spends 12 ms per page: $8 \times 1000 / 12 \times 0.75 \approx 500$ requests per second, up from 300.
+
+Second, a <Term id="load-balancer">load balancer</Term> goes in front: a server whose only job is to pass each request on to an app server. DNS now points at it, so you can add or replace app servers later without users noticing. Every few seconds it sends each app server a small "are you alive?" request. This **health check** lets it stop sending traffic to any server that does not answer.
+
+### Step 3: Many identical, stateless app servers
+
+<AnimatedDiagram name="fundamentals/scaling-journey" step={3} caption="Step 3: identical app servers behind the load balancer. The middle server's arrows stand for every copy." />
+
+Now scale out. The TV spike needs $2000 / 500 = 4$ servers, plus one spare, so 5. The drawing shows three. This works only if the servers are **stateless**: a server keeps nothing about a user between requests, so any server can answer any request. The usual trap is the login **session**, the record that says "this cookie belongs to Ana". (A cookie is a small token the browser sends with every request.) If server A keeps it in memory and her next click lands on server B, B has never heard of her.
+
+<AnimatedDiagram name="fundamentals/scaling-journey-sessions" stepper caption="Keep the session in a shared store, and any server can answer the next click." />
+
+So move every piece of state out of the app servers. Sessions go to a shared store, or into a cookie the server signs so it can spot tampering. Uploaded files go to shared file storage, not a server's own disk.
+
+### Step 4: A cache for hot reads
+
+<AnimatedDiagram name="fundamentals/scaling-journey" step={4} caption="Step 4: the app server checks the cache first and goes to the database only on a miss." />
+
+Each page runs about 4 queries, so 2,000 pages per second means 8,000 queries per second. The database machine also has 8 cores, and each query costs it about 2 ms of CPU (the 8 ms from before, split over 4 queries). At 75% it handles $8 \times 1000 / 2 \times 0.75 = 3000$ queries per second. It is the new bottleneck.
+
+A <Term id="cache">cache</Term> keeps recent answers in memory. A cache read takes under 1 ms; a database query takes 5 to 10 ms. Recipes change rarely, so most reads can come from the cache. If 90% of them hit, the database sees $8000 \times 0.1 = 800$ queries per second. The top 100,000 recipes at 20 KB each fit in 2 GB. The price is staleness, so each entry gets a <Term id="ttl">TTL</Term>, a time after which it is thrown away and read again. The cache is also a common home for sessions. See [Caching](/system-design/patterns/caching).
+
+### Step 5: Read replicas take the remaining reads
+
+<AnimatedDiagram name="fundamentals/scaling-journey" step={5} caption="Step 5: writes go to the primary, which copies each change to the read replicas; cache misses read from a replica." />
+
+A year later Potluck has 10 million daily users making about 30 requests each: $10^7 \times 30 / 86400 \approx 3500$ requests per second on average. The evening peak is about 3 times that: 10,000. At 4 queries each, that is 40,000 queries per second. Even with a 90% cache hit rate, about 4,000 reach the database, more than one machine's 3,000.
+
+Only about 200 of those are writes. So one **primary** database takes all writes, and **read replicas**, copies that receive every change from the primary through <Term id="replication">replication</Term>, take the reads. Three replicas at about 1,300 reads per second each stay well under their 3,000. The catch is **replication lag**: a replica can be up to a second behind, so a user who posts a comment and reloads may get a <Term id="stale-read">stale read</Term>. See [Single-leader replication](/system-design/databases/single-leader-replication).
+
+### Step 6: A CDN serves static files near the user
+
+<AnimatedDiagram name="fundamentals/scaling-journey" step={6} caption="Step 6: browsers fetch images and scripts from a nearby CDN server; only misses reach your servers." />
+
+Each page also loads about 1 MB of photos, scripts and styles. These **static files** are the same for every user. Say 3,000 of the 10,000 requests per second are full page loads. (The rest are small data calls, such as search suggestions, that load no files.) That is 3 GB per second, about 24 Gbit/s. And Potluck's servers are in Virginia, so a reader in Sydney waits about 200 ms for every round trip.
+
+A <Term id="cdn">CDN</Term> (content delivery network) is a set of servers in many cities that keep copies of your static files. The browser gets each file from the nearest one, often 10 to 20 ms away. If the CDN already holds 95% of the files asked for, your servers send only 5% of 24 Gbit/s: about 1.2 Gbit/s. See [CDN](/system-design/fundamentals/cdn).
+
+### Step 7: A queue moves slow work off the request
+
+<AnimatedDiagram name="fundamentals/scaling-journey" step={7} caption="Step 7: the app server puts a job on a queue and replies at once; workers process jobs in the background." />
+
+A photo upload means making 4 sizes (about 2 s of CPU) and notifying the cook's followers (about 1 s). Inside the request, the user waits over 3 seconds and an app server is busy the whole time.
+
+A **queue** is a list of jobs waiting to be done. The app server adds a small job ("resize photo 812") in about 5 ms and replies at once. Separate **workers** take jobs off the queue and do the slow part. The queue also absorbs bursts. Say uploads jump from 5 to 50 per second for 10 minutes, and the workers finish 20 per second. The backlog grows by 30 jobs a second, to $30 \times 600 = 18000$ jobs. When uploads drop back to 5, it drains at 15 per second, in about $18000 / 15 = 1200$ s or 20 minutes. Pages stay fast the whole time. See [Message queues](/system-design/patterns/message-queues).
+
+<AnimatedDiagram name="fundamentals/scaling-journey" stepper caption="The whole journey: replay any step with the numbered buttons." />
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Your app servers sit at 20% CPU and the database at 95%, and pages are slow. Do you add app servers?" hint="Find the bottleneck first.">
+    No. The app servers are waiting on the database, and more of them would send it even more queries. First check the database's indexes (lookup structures that let it find rows without reading the whole table). Then add a cache, then read replicas.
+  </QuizItem>
+  <QuizItem question="Users get logged out at random after you add a second app server. What went wrong?" hint="Where does the session live?">
+    Sessions live in each server's memory, so a click that lands on the other server finds none. Move sessions to a shared store or a signed cookie.
+  </QuizItem>
+  <QuizItem question="Readers in Australia see slow pages, but your servers are healthy. What helps most?">
+    A CDN. The delay is distance: about 200 ms per round trip, cut to 10 to 20 ms by a nearby CDN server.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Scale up", "Scale out"]}
+  rows={[
+    ["Code changes", "None", "Servers must be stateless"],
+    ["Ceiling", "A few hundred cores", "No hard limit for app servers"],
+    ["Survives one machine failing", false, true],
+  ]}
+  caption="Scale up first; scale out when one machine is no longer enough or no longer safe."
+/>
+
+Every component is also one more thing to run and pay for, so add each one when a number says you need it:
+
+<Compare
+  columns={["Component", "Add it when", "What it costs you"]}
+  rows={[
+    ["Load balancer", "You need a second server or deploys without downtime", "A hop of about 1 ms; needs its own standby"],
+    ["More app servers", "App CPU stays above about 70% at peak", "State must move out of the servers"],
+    ["Cache", "The database answers the same reads again and again", "Stale data until the TTL expires"],
+    ["Read replicas", "Reads that miss the cache still overload the database", "Replication lag"],
+    ["CDN", "Static files dominate bandwidth, or users are far away", "Clearing old files after a release"],
+    ["Queue and workers", "A request does work the user need not wait for", "Jobs can fail or run twice"],
+  ]}
+/>
+
+## In the wild
+
+- **Instagram** described nearly this stack in its 2011 post "What Powers Instagram": load balancers, Django (Python) app servers, PostgreSQL with replicas, memcached and Redis caches, a task queue, and photos served through a CDN.
+- **Stack Overflow** is a known case of scaling up: a very large site served from a small fleet of powerful web and SQL Server machines.
+- **Wikipedia** serves most page views for logged-out readers from caching servers, and each of its database clusters has one primary and several replicas.
+
+## Common pitfalls
+
+- **Adding app servers when the database is the bottleneck.** They only send it more queries. Measure first.
+- **Hidden state on app servers**: sessions in memory, uploads on local disk. Each breaks the moment there is a second server.
+- **Building all seven steps on day one.** One server with backups is a fine design for the first thousands of users.
+- **One load balancer.** It becomes the new single point of failure unless it has a standby.
+
+## How to say it in an interview
+
+"I start with one server and scale up while that is cheap. When one machine is no longer enough or no longer safe, I put a load balancer in front of several stateless app servers, with sessions in a shared store. The database is usually next, so a cache takes the hot reads and read replicas most of the rest, with writes on the primary. A CDN serves static files near users, and a queue moves slow work like image resizing out of the request. I add each piece only when a number shows the bottleneck has moved there. If writes then outgrow one primary, I split the data across several databases: sharding."
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between vertical and horizontal scaling, and which would you do first?" level="Junior" category="Scalability" companies={["Amazon"]}>
+    **Short answer.** Vertical scaling moves to a bigger machine; horizontal scaling adds more machines and splits the work. I scale up first because it needs no code changes, and scale out when one machine hits its ceiling or its failure costs too much.
+
+    **Why.** Going from 8 to 32 cores gives about 4 times the capacity with no design work, but one machine has a ceiling and is a single point of failure. Four 8-core servers behind a load balancer give the same capacity and keep 75% of it when one dies.
+
+    **Follow-ups the interviewer may ask.**
+    - What must change in the code before you can scale out?
+    - Which part of a system is hardest to scale out?
+
+    **Watch out for.** Saying horizontal is always better. It moves the hard problems into shared state and the network.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What does it mean for an app server to be stateless, and why does it matter?" level="Junior" category="Scalability" companies={["Meta"]}>
+    **Short answer.** A stateless server keeps nothing about a user between requests, so any server can answer any request. Then the load balancer can send traffic anywhere, and servers can come and go.
+
+    **Why.** If server A keeps Ana's session in memory, every click that lands elsewhere logs her out: with 5 servers, about 4 clicks in 5. A shared session store, read in under 1 ms, fixes that.
+
+    <AnimatedDiagram name="fundamentals/scaling-journey" highlight={["lb", "app1", "app2", "app3", "cache"]} caption="Identical app servers behind the load balancer; shared state lives in the cache, not on any one server." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where else does state hide on a server?
+    - What changes with signed tokens instead of server-side sessions?
+
+    **Watch out for.** Answering "sticky sessions", which pin each user to one server. When it restarts, everyone on it is logged out.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your one database is at 90% CPU, and reads outnumber writes 50 to 1. What do you do, and in what order?" level="Mid" category="Scalability" companies={["Amazon"]}>
+    **Short answer.** First fix missing indexes (lookup structures that save reading whole tables) and slow queries, because that needs no new hardware. Then add a cache for hot reads, then read replicas for the reads the cache misses, with all writes on the primary.
+
+    **Why.** At 50 to 1, about 98% of the load is reads. A 90% cache hit rate removes about 88% of the database load ($0.98 \times 0.9$), and replicas split what is left. The primary keeps the 2% of writes.
+
+    <AnimatedDiagram name="fundamentals/scaling-journey" step={5} highlight={["app1", "cache", "db", "replicas"]} caption="Reads try the cache, then a replica; writes go to the primary, which copies changes to the replicas." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you stop the cache serving old data after a write?
+    - What if writes, not reads, overload the primary?
+
+    **Watch out for.** Jumping to sharding. Splitting the data is far more work and not needed while writes are 2% of the load.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You put a load balancer in front of your app servers. Haven't you created a new single point of failure?" level="Mid" category="Reliability">
+    **Short answer.** Yes, unless it is redundant. Run two load balancers that share one address, with the standby taking over in seconds, or use a managed cloud load balancer that is already spread over several machines.
+
+    **Why.** One load balancer can pass on tens of thousands of requests per second, so capacity is rarely the problem; failure is. A standby that takes over the address after a few missed checks turns a crash into seconds of errors. DNS alone fails over slowly, because clients cache answers for minutes.
+
+    <AnimatedDiagram name="fundamentals/scaling-journey" step={3} path="users>lb>app1" caption="Every request crosses the load balancer, so it needs a standby of its own." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does the load balancer know an app server is dead?
+    - What happens to requests in flight on a server that dies?
+
+    **Watch out for.** Saying "the load balancer never fails". Every box on the request path needs an answer to "what if this dies?"
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Uploading a photo takes 4 seconds because the server resizes it and notifies followers. How would you fix that?" level="Mid" category="Asynchronous processing" companies={["Meta"]}>
+    **Short answer.** Save the original, put a "process photo" job on a queue, and reply at once. Workers make the resized copies and send the notifications in the background.
+
+    **Why.** The request drops from 4 s to the save plus about 5 ms for the job, and app servers stop being tied up. In a burst, the backlog grows in the queue and drains later while pages stay fast.
+
+    <AnimatedDiagram name="fundamentals/scaling-journey" path="app1>queue>workers" caption="The app writes a job and replies; workers do the slow part later." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does the user see before the resized photo is ready?
+    - A worker crashes halfway through a job. What happens?
+
+    **Watch out for.** Forgetting that a job can run twice. Most queues deliver at least once, so a retry must not send followers two notifications.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Walk me through how a web app grows from 1,000 to 10 million daily users. What appears, in what order, and why?" level="Senior" category="Scalability" companies={["Amazon", "Microsoft"]}>
+    **Short answer.** One server, then a load balancer with the database on its own machine, stateless app servers, a cache, read replicas, a CDN and a queue. Each step answers a measured bottleneck.
+
+    **Why.** At 1,000 users, one 8-core box at about 300 requests per second is plenty. 10 million users at 30 requests a day peak near 10,000 requests per second: 20 app servers at 500 each, plus spares. At 4 queries per page, a 90% cache cuts 40,000 queries per second to 4,000, and replicas take the reads, leaving about 200 writes per second on the primary. Static files would be about 24 Gbit/s, so a CDN takes them. Slow work moves to a queue.
+
+    <AnimatedDiagram name="fundamentals/scaling-journey" stepper caption="The seven steps; each one answers a bottleneck the previous design hit." />
+
+    **Follow-ups the interviewer may ask.**
+    - What comes next when writes outgrow one primary?
+    - How do you find the bottleneck before users do?
+
+    **Watch out for.** Reciting components without numbers. Tie every step to the limit that triggered it and to what it costs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="After you add read replicas, a user's new comment vanishes when they reload, then shows up a moment later. Why, and how do you fix it?" level="Senior" category="Consistency">
+    **Short answer.** Replication lag: the write reached the primary, but the reload read from a replica that has not received it yet. Fix it with read-your-writes routing: for a few seconds after a user writes, send that user's reads to the primary.
+
+    **Why.** Replicas usually trail by tens of milliseconds to a second, so a reload 300 ms after posting can hit a replica 500 ms behind. Only recent writers need the primary: at 200 writes per second and a 5-second window, about 1,000 users.
+
+    <AnimatedDiagram name="fundamentals/scaling-journey" step={5} highlight={["db", "replicas"]} caption="The primary copies changes to the replicas a moment later; a read in that gap sees old data." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you know a replica has caught up with a given write?
+    - Can the cache cause the same symptom?
+
+    **Watch out for.** Sending all reads back to the primary. That undoes the reason you added replicas.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [What system design is](/system-design/fundamentals/what-is-system-design)
+- [Back-of-the-envelope estimation](/system-design/fundamentals/estimation)
+- [Availability, reliability and the nines](/system-design/fundamentals/availability)
+- [Load balancing](/system-design/patterns/load-balancing)
+- [Caching](/system-design/patterns/caching)
+- [Single-leader replication](/system-design/databases/single-leader-replication)
+- [Message queues](/system-design/patterns/message-queues)
+- [Sharding](/system-design/patterns/sharding)
+
+## Further reading
+
+- [The Twelve-Factor App: Processes](https://12factor.net/processes): why app processes should be stateless and share nothing.
+- [Google SRE book: Load Balancing in the Datacenter](https://sre.google/sre-book/load-balancing-datacenter/): how a large fleet spreads requests across servers.
+- [PostgreSQL documentation: Hot Standby](https://www.postgresql.org/docs/current/hot-standby.html): how read replicas answer queries while replaying the primary's changes.

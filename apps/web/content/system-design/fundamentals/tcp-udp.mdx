@@ -1,0 +1,258 @@
+---
+title: "IP, TCP and UDP"
+description: "How IP addresses and ports find a program, how TCP makes delivery reliable and ordered, and when UDP's send-and-forget is the better choice."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  IP carries small packets from one machine to another, TCP turns those packets into a complete, ordered stream of bytes, and UDP sends each packet once and lets the program decide what to do if it goes missing.
+</KeyIdea>
+
+## The story
+
+You run a small studio that makes a kart racing game for phones. The shop page sells new karts, and every byte of it must arrive, or the "Pay" button breaks. The race sends every kart's position 30 times a second, one update every 33 ms. Your first version sends race updates the same way as the shop page. On Friday night, players on busy hotel Wi-Fi complain: their kart freezes for a moment, then jumps ahead. Your server is fine. The Wi-Fi loses about 2% of packets, and the way you send them turns each loss into a freeze. This page explains why, and which tool fits each part of the game.
+
+## How it works
+
+Data does not travel as one long piece. It is cut into **packets** of at most about 1,500 bytes on most networks. About 1,460 of those bytes are your data, and the rest are addresses and other headers. So your 60 KB shop page becomes about 42 packets (60,000 / 1,460 is about 41.1, rounded up to 42). A **protocol** is a set of rules both ends agree on. Three protocols handle those packets:
+
+- **IP** (Internet Protocol) gets each packet to the right machine.
+- **TCP** (Transmission Control Protocol) makes sure every byte arrives, once, in order.
+- **UDP** (User Datagram Protocol) sends each packet once and promises nothing more.
+
+TCP and UDP both ride on top of IP. You pick one of them for each kind of traffic.
+
+### Step 1: An address finds the machine
+
+<AnimatedDiagram name="fundamentals/tcp-udp" step={1} caption="The laptop's request leaves from port 52114, passes the home router, and reaches the web server on port 443 at 203.0.113.7." />
+
+Every machine on a network has an **IP address**. An IPv4 address is 32 bits, written as four numbers from 0 to 255, such as `203.0.113.7`. That allows about 4.3 billion addresses, which is not enough for today's internet. IPv6 addresses are 128 bits, so they will not run out. Each packet carries the address it came from and the address it is going to. A **router** is a box that forwards packets between networks. Every router on the way reads the destination and passes the packet one hop closer.
+
+IP is **best effort**. A router with a full queue drops packets, and two packets can take different routes and arrive out of order. On a good wired link, loss is well under 0.1%. On crowded Wi-Fi or a moving phone, 1 to 2% is common. IP does not notice or fix any of this. That job belongs to the layer above.
+
+<PremiumBreak />
+
+### Step 2: A port finds the program
+
+<AnimatedDiagram name="fundamentals/tcp-udp" step={2} caption="One server machine, three programs, three ports. The router swaps private addresses for its single public one." />
+
+One machine runs many programs. Your server runs the web server, the game server and a database. A **port** is a 16-bit number, 0 to 65,535, that picks the program. Well-known services use fixed ports: 443 for HTTPS (encrypted web pages), 53 for <Term id="dns">DNS</Term>, 5432 for the PostgreSQL database. The game server listens on 7777, a number you chose.
+
+The client gets a temporary port from its operating system. On Linux the default range is 32768 to 60999, about 28,000 ports. Four numbers name one connection: the client's address and port, and the server's address and port. So thousands of players can all use port 443 at once, because each brings a different address or port.
+
+The home router does **NAT** (network address translation). The laptop and phone have private `192.168.1.x` addresses that mean nothing on the internet. The router swaps in its one public address, `198.51.100.24`, and remembers the swap so replies find their way back. The server never sees the laptop's own address.
+
+### Step 3: TCP opens a connection and numbers every byte
+
+<AnimatedDiagram name="fundamentals/tcp-udp-tcp-flow" step={2} caption="Three messages open the connection. Then every byte is numbered, and each ACK names the next byte the laptop expects." />
+
+Before any data moves, TCP runs a **three-way handshake**. The laptop sends SYN ("let's talk; I start counting here"). The server answers SYN-ACK ("fine, here is my starting number, and I got yours"). The laptop sends ACK, and the request rides along with it. That costs one **round-trip time** (RTT), the time for a packet to go there and an answer to come back. With a 40 ms round trip, the request cannot leave until 40 ms have passed. That is pure <Term id="latency">latency</Term>, before any work is done.
+
+Then TCP numbers every byte. The server sends bytes 0 to 999 in one **segment** (TCP's name for its packet). The laptop replies "ACK 1000": "I have everything before byte 1000; send 1000 next." The receiver also says how much buffer space it has free, its **receive window**, and the sender never has more unacknowledged bytes in flight than that. This **flow control** stops a fast server from drowning a slow phone.
+
+### Step 4: TCP resends what is lost and backs off when the network is full
+
+<AnimatedDiagram name="fundamentals/tcp-udp-tcp-flow" step={3} caption="Bytes 2000-2999 are lost. Bytes 3000-3999 arrive but wait in the buffer until the resend fills the gap." />
+
+When a segment is lost, the next one still arrives. The laptop keeps it but cannot hand it to the app, because TCP promises order. So it repeats "ACK 2000". After three repeated ACKs the server resends at once (**fast retransmit**), costing about one round trip. Otherwise it waits for its **retransmission timer**, which on Linux is never shorter than 200 ms. Meanwhile every byte behind the gap waits. This is **head-of-line blocking**, and it is the frozen kart: a 200 ms stall bunches six race updates together.
+
+TCP also protects the network. The sender keeps a **congestion window**, a limit on bytes in flight. A new connection starts at 10 segments (about 14.6 KB). The window doubles every round trip, and this is called **slow start**. When a loss signals a full network, the window shrinks. CUBIC, the set of congestion rules Linux uses by default, cuts it to about 70%. For a 1 MB image on a fresh connection, 40 ms RTT, 1,460-byte segments and no loss:
+
+| Round trip | Window | Sent this trip | Sent so far |
+|---|---|---|---|
+| 1 | 10 segments | 14.6 KB | 14.6 KB |
+| 2 | 20 | 29.2 KB | 43.8 KB |
+| 3 | 40 | 58.4 KB | 102.2 KB |
+| 4 | 80 | 116.8 KB | 219 KB |
+| 5 | 160 | 233.6 KB | 452.6 KB |
+| 6 | 320 | 467.2 KB | 919.8 KB |
+| 7 | 640 | last 80.2 KB | 1,000 KB |
+
+Seven round trips of data plus one for the handshake is 8 x 40 ms = 320 ms. The link itself, at 100 Mbit/s, could move 1 MB (8 megabits) in 80 ms. On a warm connection whose window has already grown, the image takes about one round trip plus those 80 ms, roughly 120 ms. That is why real systems keep connections open.
+
+### Step 5: UDP sends and forgets
+
+<AnimatedDiagram name="fundamentals/tcp-udp-udp-flow" stepper caption="Race state goes out every 33 ms with no handshake and no ACK. When #43 is lost, the phone draws #44 and moves on." />
+
+UDP adds very little to IP: a source port, a destination port, a length and a checksum (a small number that detects damaged data), 8 bytes in all. Each packet is a **datagram** that stands alone. There is no handshake, so the first datagram already carries data. There are no ACKs, no resends, no ordering and no congestion window. A datagram arrives whole or not at all.
+
+For the race, that is right. When state #43 is lost, #44 arrives 33 ms later with newer positions. Resending #43 would deliver old news late. The game adds only the rules it needs: a sequence number on each datagram so late arrivals are dropped, and a "last state I saw" from the phone so the server sends only what changed.
+
+DNS uses UDP for another reason. A lookup is one small question and one small answer, and a handshake would double its cost. If a packet is lost, the client asks again. If the answer is too big for one datagram, the client repeats the question over TCP.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Your game sends 30 updates a second over Wi-Fi that loses 2% of packets. How often does a player lose one?" hint="Multiply the rate by the loss.">
+    $30 \times 0.02 = 0.6$ lost packets a second, about one every 1.7 seconds. Over UDP each loss costs one 33 ms update. Over TCP each one stalls the whole stream for at least a round trip.
+  </QuizItem>
+  <QuizItem question="A 60 KB page is about 42 segments, and segment 10 is lost. What does the browser see?" hint="TCP hands bytes to the app only in order.">
+    Segments 11 onwards keep arriving, but the browser gets nothing past segment 9 until segment 10 is resent. Then everything is handed over at once.
+  </QuizItem>
+  <QuizItem question="A receiver allows 64 KB in flight and the round trip is 100 ms. What is the most this connection can carry on a 1 Gbit/s link?" hint="The sender can send one window per round trip.">
+    64 KB per 100 ms is 640 KB/s, about 5 Mbit/s. The window, not the link, is the limit, which is why receive windows can grow to megabytes.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "TCP", "UDP"]}
+  rows={[
+    ["Setup before the first data", "1 round trip (40 ms in the story)", "None"],
+    ["Header size", "20 bytes or more", "8 bytes"],
+    ["Lost data", "Resent automatically", "Gone unless the app resends it"],
+    ["Order", "Always in order", "Any order"],
+    ["Message boundaries kept", false, true],
+    ["Backs off when the network is full", true, false],
+    ["One loss delays later data", "Yes, by a round trip or more", "No"],
+    ["State on the server", "Buffers and timers per connection", "None per client"],
+  ]}
+  caption="TCP buys completeness and order with waiting. UDP buys freshness by giving them up."
+/>
+
+<Compare
+  columns={["Job", "Pick", "Why"]}
+  rows={[
+    ["Web pages, APIs, database queries", "TCP", "Every byte must arrive, in order"],
+    ["DNS lookups", "UDP, TCP for big answers", "A retry costs less than a handshake"],
+    ["Video and voice calls", "UDP", "Sound 200 ms late is worse than a short gap"],
+    ["Video on demand", "TCP or QUIC", "A 10 to 30 second buffer hides resends"],
+    ["Fast multiplayer games", "UDP plus game rules", "The newest state replaces the old one"],
+    ["HTTP/3", "QUIC over UDP", "Reliable per stream, so one loss stalls only its stream"],
+  ]}
+  caption="Which transport fits which job."
+/>
+
+The last row surprises people. **QUIC** rebuilds TCP's promises, plus <Term id="tls">TLS</Term> encryption, on top of UDP. It is reliable, but separately for each stream (one request and its response), so a lost packet for one image does not hold up the stylesheet.
+
+## In the wild
+
+- **Public DNS resolvers** such as `1.1.1.1` and `8.8.8.8` answer on UDP port 53 and switch to TCP when an answer does not fit in one datagram.
+- **WebRTC**, which browsers use for video calls, sends audio and video over UDP and lowers its own bitrate when it sees loss.
+- **HTTP/3** runs over QUIC on UDP port 443, and major browsers and <Term id="cdn">CDNs</Term> support it.
+- **PostgreSQL, MySQL and Redis** speak TCP on ports 5432, 3306 and 6379. A query result with a hole in it is useless.
+
+## Common pitfalls
+
+- **Treating TCP as a list of messages.** TCP is a stream of bytes. Two sends can arrive as one read. Put a length or a delimiter in your own format.
+- **A new connection for every request.** Each one pays the handshake and slow start again. At high rates it also uses up ports: the side that closes first holds the connection's four numbers for about 60 seconds on Linux, so 28,000 client ports allow only about 470 new connections a second to one server address and port. Reuse connections with keep-alive (leaving a connection open for the next request) or a connection pool.
+- **"UDP is faster, so use it everywhere."** If you need every byte, you end up rebuilding retries, ordering and congestion control, usually worse than TCP.
+- **Forgetting that NAT forgets.** Routers often drop an idle UDP mapping after 30 to 120 seconds. A quiet game client must send small keep-alives, or the server's next update goes nowhere.
+- **Big UDP datagrams.** A datagram too large for the path is split into fragments, and losing one fragment loses the whole datagram. Stay under about 1,200 bytes.
+
+## How to say it in an interview
+
+IP moves packets between machine addresses, ports pick the program, and the transport on top decides what happens when packets go missing. TCP opens a connection with a one-round-trip handshake, numbers every byte, resends losses and backs off when the network is full. The price is waiting: one lost segment holds up everything behind it for at least a round trip, and 200 ms or more if the timer fires. UDP has no setup and no resends, so it fits traffic where fresh beats complete: live voice and video, fast games, and one-packet exchanges like DNS. For pages, APIs and database queries I use TCP and keep connections open, so I pay the handshake and slow start once. If head-of-line blocking hurts, HTTP/3 over QUIC gives per-stream reliability on top of UDP.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between TCP and UDP, and when would you pick each?" level="Junior" category="Networking">
+    **Short answer.** TCP opens a connection and delivers a complete, ordered stream of bytes, resending anything lost. UDP sends independent datagrams with no setup and no promise of delivery or order, so I use it when fresh data matters more than complete data.
+
+    **Why.** TCP's guarantees cost time. The handshake adds one round trip, about 40 ms for a nearby user, and a lost segment stalls every later byte for at least another round trip. That is fine for a web page, where a missing byte breaks the result. A game sending 30 updates a second, or a voice call, would rather skip a lost packet than wait for it.
+
+    | | TCP | UDP |
+    | --- | --- | --- |
+    | Setup | 1 round trip | none |
+    | Lost data | resent | gone |
+    | Header | 20+ bytes | 8 bytes |
+
+    **Follow-ups the interviewer may ask.**
+    - Can you make UDP reliable? What would you add?
+    - What does TCP do when the network is congested?
+
+    **Watch out for.** "UDP is faster, so it is better." It only saves time when the app can live with loss. Otherwise you rebuild TCP by hand.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What does an IP address identify, and what does a port identify?" level="Junior" category="Networking">
+    **Short answer.** An IP address gets a packet to a machine (strictly, to one of its network interfaces). A port gets it to one program on that machine, and both addresses plus both ports together name one connection.
+
+    **Why.** One server at `203.0.113.7` can run a web server on 443, a game server on 7777 and a database on 5432. Ports are 16-bit, so there are 65,536 per address. The client uses a temporary port from its operating system, such as 52114. A home router doing NAT swaps the private client address for its public one, so the server sees the router, not the laptop.
+
+    <AnimatedDiagram name="fundamentals/tcp-udp" path="laptop>router>web" caption="The address finds the server machine; port 443 finds the web server on it." />
+
+    **Follow-ups the interviewer may ask.**
+    - How many connections can one client open to a single server port?
+    - What changes in the packet when it passes through NAT?
+
+    **Watch out for.** Thinking a server needs one port per client. Every client connects to port 443; the connections differ by the client's address and port.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why is a new TCP connection expensive, and how do real systems avoid paying for it on every request?" level="Mid" category="Performance">
+    **Short answer.** A new connection pays a handshake round trip, usually a TLS round trip too, and then starts with a small congestion window. Systems keep connections open and reuse them: HTTP keep-alive, database connection pools, and HTTP/2 or HTTP/3 to carry many requests over one connection.
+
+    **Why.** At a 40 ms round trip, TCP plus TLS 1.3 means the request leaves after 80 ms and the answer arrives after about 120 ms, against 40 ms on a warm connection. Slow start begins at about 14.6 KB per round trip, so a fresh 1 MB response needs about 7 round trips of data. At high rates, closed connections also hold their ports for about 60 seconds, which caps new connections to one destination at roughly 470 a second.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you size a connection pool between app servers and a database?
+    - What does HTTP/3 change about the setup cost?
+
+    **Watch out for.** "Make the calls async." That frees the thread but does not remove a single round trip.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why does DNS run over UDP, and what happens when a DNS packet is lost or the answer is too big?" level="Mid" category="Networking">
+    **Short answer.** A lookup is one small question and one small answer, so UDP finishes it in one round trip where TCP would need two. If a packet is lost, the client asks again after a timeout; if the answer does not fit, the server marks it truncated and the client repeats the question over TCP.
+
+    **Why.** A question is under 100 bytes and most answers are a few hundred, so each fits in one datagram. A resolver serves huge numbers of clients, and UDP lets it keep no state per client. The cost of a loss is the retry timeout: 5 seconds by default on many Linux machines, which is why a lost DNS packet looks like a page that hangs for 5 seconds.
+
+    **Follow-ups the interviewer may ask.**
+    - Why do DNS over TLS and DNS over HTTPS use TCP or QUIC instead?
+    - How would you shorten the stall a lost lookup causes in your own service?
+
+    **Watch out for.** "DNS uses UDP because it does not need reliability." It does need an answer. It gets reliability from a retry, which is cheaper than a connection for a single exchange.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You are designing the network layer for a fast multiplayer game. TCP or UDP, and how do you handle lost packets?" level="Senior" category="Real-time">
+    **Short answer.** UDP for live game state, with the game's own rules on top: send the newest state often, number datagrams so late ones are dropped, and send changes relative to the last state the client confirmed. Things that must arrive, like purchases and match results, go over a separate TCP connection.
+
+    **Why.** At 30 updates a second, one leaves every 33 ms. With 2% loss a player loses one about every 1.7 seconds ($30 \times 0.02 = 0.6$ per second). Over TCP each loss stalls the stream for at least a round trip, and 200 ms or more when the timer fires, so six updates arrive bunched and the kart freezes, then jumps. Over UDP a loss costs one 33 ms update, which smoothing between frames hides.
+
+    <AnimatedDiagram name="fundamentals/tcp-udp-udp-flow" step={3} caption="The phone reports the last state it saw; the server sends changes since then and never resends the lost one." />
+
+    **Follow-ups the interviewer may ask.**
+    - UDP has no congestion control. How do you keep the game from flooding a congested link?
+    - Some networks block UDP. What is your fallback?
+    - How do you keep NAT mappings alive for an idle player?
+
+    **Watch out for.** Making every message reliable and ordered on top of UDP, which rebuilds head-of-line blocking. Also "turn off Nagle's algorithm": that removes delay for small writes, not the stall after a loss.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="HTTP/3 runs over UDP. Why build a reliable web protocol on an unreliable transport instead of improving TCP?" level="Senior" category="Networking">
+    **Short answer.** HTTP/3 runs on QUIC, which rebuilds reliability, ordering, congestion control and TLS 1.3 on top of UDP, inside the application instead of the operating system. UDP is the base because it already crosses routers and firewalls, while any change to TCP must reach every operating system and network box, which takes years.
+
+    **Why.** HTTP/2 sends many streams over one TCP connection, so one lost packet stalls them all. QUIC tracks loss per stream. Setup is shorter too: TCP plus TLS 1.3 needs 2 round trips before the request leaves (80 ms at a 40 ms RTT), QUIC needs 1, and a returning client can send its request in the first packet. QUIC names a connection by an ID instead of the four numbers, so a phone moving from Wi-Fi to mobile data keeps it.
+
+    <Compare
+      columns={["", "HTTP/2 over TCP + TLS 1.3", "HTTP/3 over QUIC"]}
+      rows={[
+        ["Round trips before the request", "2", "1, or 0 when resuming"],
+        ["One lost packet stalls", "Every stream", "Only its own stream"],
+        ["Survives a network switch", false, true],
+      ]}
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens when a network blocks UDP port 443?
+    - Why should 0-RTT requests be limited to safe, repeatable ones?
+
+    **Watch out for.** "HTTP/3 is unreliable because it uses UDP." QUIC is as reliable as TCP; it moves those guarantees out of the kernel and makes them per stream.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Networking basics](/system-design/fundamentals/networking)
+- [A request's journey](/system-design/fundamentals/anatomy-of-a-request)
+- [DNS](/system-design/fundamentals/dns)
+- [HTTP/1.1, HTTP/2 and HTTP/3](/system-design/fundamentals/http)
+- [TLS and HTTPS](/system-design/fundamentals/tls)
+- [WebSockets](/system-design/fundamentals/websockets)
+
+## Further reading
+
+- [RFC 9293: Transmission Control Protocol](https://www.rfc-editor.org/rfc/rfc9293), the current TCP standard, with the handshake and connection states.
+- [RFC 768: User Datagram Protocol](https://www.rfc-editor.org/rfc/rfc768), the whole of UDP on three pages.
+- [RFC 9000: QUIC](https://www.rfc-editor.org/rfc/rfc9000), the transport under HTTP/3.
+- [Ilya Grigorik, High Performance Browser Networking](https://hpbn.co/), chapters on TCP, UDP and slow start from a web performance view.

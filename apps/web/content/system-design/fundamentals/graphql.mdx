@@ -1,9 +1,384 @@
 ---
 title: "GraphQL"
-description: "Schemas, queries and mutations, over- and under-fetching, and N+1 problems."
-status: outline
+description: "How one GraphQL query replaces several REST calls: schemas, queries, mutations, subscriptions, resolvers, the N+1 problem and DataLoader."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** schemas, queries and mutations, over- and under-fetching, and N+1 problems.
+<KeyIdea>
+  GraphQL lets an app ask a server for exactly the data one screen needs, in one request, by writing a query against a typed list of everything the server can return.
+</KeyIdea>
+
+## The story
+
+You build a podcast app. Its home screen shows the listener's name and avatar picture, then the 40 shows she follows, each with the title and length of its newest episode. Your backend offers three REST endpoints, URLs that each return one kind of thing as JSON (a plain-text format for data): `GET /me`, `GET /me/subscriptions` and `GET /episodes?shows=...`.
+
+She opens the app on a train, where each round trip (a request out and its answer back) from her phone takes about 200 milliseconds (ms). The third call needs the show ids from the second. The app sends the three calls one after another, so the screen waits about 3 x 200 = 600 ms. Even a careful app that sends the first two together still waits two round trips, about 400 ms. The calls also bring back about 4 + 60 + 80 = 144 KB: every field of the user, every show and every episode. The screen draws about 7 KB of it.
+
+These are two problems with names. **Over-fetching** means receiving fields you never use. **Under-fetching** means one call does not return enough, so you pay for another round trip. Next month the Android team wants one extra field and the web team wants a different one. Each wish means a new endpoint or a bigger response for everyone. Facebook hit the same wall with its mobile news feed in 2012 and built GraphQL to get past it.
+
+## How it works
+
+A GraphQL server exposes one URL, usually `/graphql`. The app sends a **query**: a piece of text that lists the fields it wants. The server checks the query against a **schema**, runs it, and returns JSON in the same shape as the query.
+
+### Step 1: One request instead of three
+
+Here is the whole home screen as one query:
+
+```graphql
+query HomeScreen {
+  me {
+    name
+    avatarUrl
+    subscriptions {
+      title
+      latestEpisode {
+        title
+        durationSec
+      }
+    }
+  }
+}
+```
+
+<AnimatedDiagram name="fundamentals/graphql-flow" step={1} stepper caption="Step 1 is today's three REST calls over the slow mobile link. Step 2 sends one GraphQL query instead." />
+
+In step 1, the phone crosses the slow mobile link three times. In step 2, it crosses once. The GraphQL server still makes three calls to the services, but it makes them inside the data center, where each hop costs 1 to 5 ms. Three hops plus parsing and checking the query add up to about 20 ms. The answer is 7 KB and arrives in about 200 + 20 = 220 ms. The work did not vanish. It moved to where round trips are cheap.
+
+<PremiumBreak />
+
+### Step 2: The schema is the menu
+
+The schema is a typed description of every object the server offers, its fields, and how the objects link. You write it in GraphQL's own schema language:
+
+```graphql
+type Query {
+  me: User
+  show(id: ID!): Show
+}
+
+type User {
+  id: ID!
+  name: String!
+  avatarUrl: String
+  subscriptions: [Show!]!
+}
+
+type Show {
+  id: ID!
+  title: String!
+  latestEpisode: Episode
+}
+
+type Episode {
+  id: ID!
+  title: String!
+  durationSec: Int!
+}
+```
+
+`Query` lists the fields a query may start from. A `!` means the field is never null, and `[Show!]!` is a list of shows. The server validates every query against this schema before it runs anything. Ask for `me { email }` and you get an error at once, because `User` has no `email` field.
+
+The schema is also a contract between teams. When the Android team needs a cover image, a backend developer adds `coverUrl: String` to `Show`. The Android query asks for it; the web query does not, and the web app's response stays the same size. A server can describe its own schema when asked (this is called introspection), so tools generate typed client code and editors autocomplete field names.
+
+### Step 3: Queries, mutations and subscriptions
+
+GraphQL has three kinds of operation, each with its own entry type in the schema.
+
+```graphql
+type Mutation {
+  followShow(showId: ID!): Show!
+}
+
+type Subscription {
+  newEpisode(showId: ID!): Episode!
+}
+```
+
+<Tabs title="Three kinds of operation">
+  <Tab label="Query">
+
+A query reads data, like an HTTP GET. The server may resolve sibling fields in parallel. The response mirrors the query:
+
+```json
+{
+  "data": {
+    "me": {
+      "name": "Asha",
+      "avatarUrl": "https://img.example.com/u/42.jpg",
+      "subscriptions": [
+        { "title": "Night Trains", "latestEpisode": { "title": "The Orient Line", "durationSec": 2710 } }
+      ]
+    }
+  }
+}
+```
+
+  </Tab>
+  <Tab label="Mutation">
+
+A mutation changes data. It returns the changed object, so the app can redraw without a second read:
+
+```graphql
+mutation {
+  followShow(showId: "9") {
+    id
+    title
+  }
+}
+```
+
+When one request holds several top-level mutation fields, the server runs them one after another, in order, so two writes in one request never race.
+
+  </Tab>
+  <Tab label="Subscription">
+
+A subscription is a stream. The app opens a <Term id="websocket">WebSocket</Term>, a connection that stays open so the server can send messages at any time. It sends `subscription { newEpisode(showId: "7") { title } }`, and the server pushes one message each time show 7 publishes. Each listener holds one connection open, so 200,000 listeners means 200,000 open connections for your servers to carry.
+
+  </Tab>
+</Tabs>
+
+One habit surprises newcomers. A GraphQL server usually answers `200 OK` even when part of the query failed. The JSON holds `data` and an `errors` list. If the episode service is down, the listener still sees her name and shows, with `latestEpisode: null` and an entry in `errors` that says why.
+
+### Step 4: Resolvers fill in each field
+
+<AnimatedDiagram name="fundamentals/graphql" step={1} caption="The query engine runs a resolver for each field. Query.me calls the user service, then User.subscriptions calls the show service." />
+
+A **resolver** is a function that returns the value of one field. The server runs them as a tree. `Query.me` runs first and returns user 42. Then the fields under it run, and each one receives its parent's value. `User.subscriptions` gets user 42 and asks the show service for her 40 shows. Plain fields like `name` need no code, because the default resolver reads the property off the parent object.
+
+```ts
+const resolvers = {
+  Query: {
+    me: (_parent, _args, ctx) => ctx.users.get(ctx.userId),
+  },
+  User: {
+    subscriptions: (user, _args, ctx) => ctx.shows.followedBy(user.id),
+  },
+  Show: {
+    latestEpisode: (show, _args, ctx) => ctx.episodes.latestFor(show.id),
+  },
+};
+```
+
+Notice that the GraphQL server owns no data. It is a thin layer that turns one query into calls to the services that do.
+
+### Step 5: The N+1 problem, and DataLoader
+
+<AnimatedDiagram name="fundamentals/graphql" step={2} caption="Show.latestEpisode runs once per show, so 40 shows mean 40 calls to the episode service." />
+
+`Show.latestEpisode` runs once for each show in the list. One call fetched the list of 40 shows, then 40 more calls fetch an episode each. That is the **N+1 problem**: one call for the list, plus N calls for its items. At an evening peak of 10,000 home screens a second, the episode service gets 10,000 x 40 = 400,000 requests a second instead of 10,000. The screen also waits for the slowest of 40 calls, so its <Term id="p99">p99</Term> latency grows. That is the time within which 99 of every 100 loads finish.
+
+<AnimatedDiagram name="fundamentals/graphql" step={3} caption="A DataLoader collects the 40 show ids and sends one batched call." />
+
+**DataLoader** is a small library that sits between resolvers and a service. Each resolver calls `loader.load(showId)` and gets back a promise, a placeholder for a value that arrives later. The loader waits until every resolver at this level has asked (in Node.js, the end of the current event-loop tick). Then it calls your batch function once, with all 40 ids. It also remembers each id for the rest of the request, so asking for show 7 twice costs one fetch. The home screen drops from 42 service calls to 3.
+
+```ts
+// Create one loader per request, in the request context.
+const latestEpisode = new DataLoader(async (showIds: readonly string[]) => {
+  const rows = await episodes.latestForMany(showIds); // one call: GET /episodes?shows=7,9,...
+  const byShow = new Map(rows.map((e) => [e.showId, e]));
+  return showIds.map((id) => byShow.get(id) ?? null); // same order as the ids
+});
+
+// The resolver stays one line.
+const latestEpisodeResolver = (show, _args, ctx) => ctx.latestEpisode.load(show.id);
+```
+
+Two rules keep it correct. The batch function must return results in the same order as the ids. And each request gets a fresh loader: a shared one would serve one user's data to another and never see updates.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="A query asks for 25 shows, each with its 10 newest episodes, each with its 20 newest comments. How many comments can one request return?" hint="Nesting multiplies.">
+    25 x 10 x 20 = 5,000 comments. Each level of nesting multiplies the work, which is why public GraphQL servers limit query depth and cost.
+  </QuizItem>
+  <QuizItem question="The episode service has no batch endpoint, only GET /shows/{id}/latest-episode. Does DataLoader still help?" hint="DataLoader has two jobs.">
+    Only a little. It still removes duplicate ids within one request, but 40 different shows still mean 40 calls. The real fix is a batch endpoint that takes many ids at once.
+  </QuizItem>
+  <QuizItem question="Your dashboard shows 0% HTTP errors, yet users report blank episode rows. What is going on?">
+    The GraphQL server returns 200 with an `errors` list when part of a query fails. Count entries in `errors` per field and per resolver, not HTTP status codes.
+  </QuizItem>
+  <QuizItem question="Why can't a CDN cache a GraphQL query the way it caches GET /shows/7?" hint="Look at the method and the URL.">
+    A <Term id="cdn">CDN</Term> is a network of cache servers close to users, and it caches GET requests by URL. Every GraphQL query is a POST to the same URL with a different body. Persisted queries fix this: the app sends a short hash of a known query in a GET URL, which a CDN can cache for public data such as a show page.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+For the podcast home screen, from the story's numbers:
+
+<Compare
+  columns={["", "Three REST calls", "One GraphQL query"]}
+  rows={[
+    ["Round trips over the mobile link", "3, about 600 ms", "1, about 220 ms"],
+    ["Bytes sent to the phone", "About 144 KB", "About 7 KB"],
+    ["One client needs a new field", "New endpoint, or a bigger response for all", "Add it to the schema; only that client asks"],
+    ["Caching at a CDN", "Works on GET URLs", "Needs persisted queries sent as GET"],
+    ["Server cost of one request", "Fixed by the endpoint", "Set by the query; needs limits"],
+    ["How failures show up", "HTTP status per call", "200 with an errors list"],
+    ["Typed contract built in", false, true],
+  ]}
+  caption="3 x 200 ms = 600 ms against 200 ms plus about 20 ms of calls inside the data center."
+/>
+
+GraphQL fits best when several clients (web, iOS, Android) read the same linked data in different shapes, and when round trips are expensive, as on phones. It fits poorly for traffic between your own services, where an <Term id="rpc">RPC</Term> framework is faster and simpler, and for public data that is served the same way to everyone, where plain cached GET URLs win.
+
+<DecisionTree
+  title="Should this API be GraphQL?"
+  tree={{
+    q: "Do several client apps need different shapes of the same data?",
+    yes: {
+      q: "Does one screen read linked objects, such as a user, her shows and their episodes?",
+      yes: {
+        q: "Can your team run query cost limits and persisted queries?",
+        yes: "GraphQL fits",
+        no: { answer: "Start with REST behind a gateway that shapes responses per client", href: "/system-design/fundamentals/api-gateway" },
+      },
+      no: { answer: "REST with a few well-shaped endpoints", href: "/system-design/fundamentals/rest" },
+    },
+    no: {
+      q: "Is this traffic between your own services?",
+      yes: { answer: "RPC, such as gRPC", href: "/system-design/fundamentals/rpc" },
+      no: { answer: "REST", href: "/system-design/fundamentals/rest" },
+    },
+  }}
+/>
+
+## In the wild
+
+- **Facebook** built GraphQL in 2012 for its iOS news feed and published the specification in 2015. The GraphQL Foundation now looks after it.
+- **GitHub** offers its public API as GraphQL. It limits each user by points per hour, computed from how much data a query can touch, not by request count.
+- **Shopify** runs its Admin and Storefront APIs on GraphQL. The Admin API charges each query a calculated cost against a bucket of points that refills every second.
+- **Netflix** runs a federated graph: each team owns part of the schema, and a gateway joins the parts into one graph for the apps.
+
+## Common pitfalls
+
+- **Shipping N+1 without noticing.** Any list whose items have their own resolvers can do it. Add DataLoader from day one and log service calls per request.
+- **No limits on a public endpoint.** Without depth limits, cost limits and timeouts, one nested query can ask for millions of objects.
+- **Treating 200 as success.** Partial failures hide in the `errors` list, so alert on it.
+- **One DataLoader for all requests.** It leaks data between users and serves stale values. Create one per request.
+- **Copying database tables into the schema.** Design types around what screens need, so the schema survives a change of database.
+
+## How to say it in an interview
+
+"GraphQL gives clients one endpoint and a typed schema, and each client asks for exactly the fields a screen needs. On a phone that turns three REST round trips of about 200 ms each into one, and cuts the payload from about 144 KB to about 7 KB, because the server fans out to services inside the data center where hops cost a few milliseconds. Each field has a resolver, so lists cause the N+1 problem: 40 shows mean 40 calls to the episode service. I fix that with a per-request DataLoader that batches the ids into one call. The costs are that HTTP caching needs persisted queries, errors arrive as 200 with an errors list, and a public endpoint needs depth and cost limits. I use it for client-facing reads across several apps, and RPC between services."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What problems does GraphQL solve compared with REST, and what does it cost you?" level="Junior" category="APIs">
+    **Short answer.** It removes over-fetching and under-fetching: the client asks for exactly the fields it needs, across linked objects, in one request. The costs are harder HTTP caching, query cost control on the server, and errors that arrive inside a 200 response.
+
+    **Why.** A podcast home screen built on three REST calls needs 3 round trips of about 200 ms on a phone, about 600 ms, and downloads 144 KB to draw 7 KB. One GraphQL query crosses the mobile link once, about 220 ms, and returns 7 KB. The server still makes three calls, but inside the data center, where each costs a few milliseconds.
+
+    <AnimatedDiagram name="fundamentals/graphql-flow" step={2} caption="One query over the mobile link; the fan-out to services happens inside the data center." />
+
+    **Follow-ups the interviewer may ask.**
+    - Could you get the same result with a REST endpoint built for this screen?
+    - How would you cache this response?
+
+    **Watch out for.** Saying GraphQL makes the backend faster. The services do the same work; the saving is in round trips and bytes on the slow link.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What are queries, mutations and subscriptions in GraphQL?" level="Junior" category="APIs">
+    **Short answer.** A query reads data, a mutation changes data and returns the changed object, and a subscription keeps a connection open so the server can push events. Each has its own root type in the schema: `Query`, `Mutation` and `Subscription`.
+
+    **Why.** Queries may resolve sibling fields in parallel because reads do not interfere. Top-level mutation fields run one after another, in order, so two writes in one request never race. Subscriptions usually run over a WebSocket, so each listener costs one open connection; 200,000 listeners means 200,000 connections to carry.
+
+    ```graphql
+    mutation { followShow(showId: "9") { id title } }
+    subscription { newEpisode(showId: "7") { title } }
+    ```
+
+    **Follow-ups the interviewer may ask.**
+    - Why return the changed object from a mutation?
+    - When would you use plain polling instead of a subscription?
+
+    **Watch out for.** Calling subscriptions "queries that re-run on a timer". The server pushes an event when something happens; the client does not poll.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is the N+1 problem in GraphQL, and how do you fix it?" level="Mid" category="APIs" companies={["Meta"]}>
+    **Short answer.** A list field returns N items, and a child field's resolver runs once per item, so one query makes 1 call for the list plus N calls for the children. Fix it with a per-request DataLoader that collects the N keys and makes one batched call.
+
+    **Why.** With 40 followed shows, `Show.latestEpisode` calls the episode service 40 times for one screen. At 10,000 screens a second that is 400,000 calls a second instead of 10,000, and the screen waits for the slowest of 40 calls. DataLoader waits until every resolver at that level has asked, then calls one batch function with all 40 ids: 42 service calls become 3.
+
+    <AnimatedDiagram name="fundamentals/graphql" highlight={["r_latest", "loader", "episodes"]} caption="Show.latestEpisode asks the DataLoader, which sends one batched call to the episode service." />
+
+    **Follow-ups the interviewer may ask.**
+    - What must the episode service offer for batching to work?
+    - Why must the loader be created per request?
+    - How would you spot N+1 in production?
+
+    **Watch out for.** Fixing it with a long-lived cache inside the resolver. That hides the call count until the cache goes cold, then the 40 calls come back at the worst moment, and it serves stale episodes after new ones publish.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Every GraphQL request is a POST to /graphql. How do you cache?" level="Mid" category="Caching">
+    **Short answer.** Cache at three layers: persisted queries sent as GET so a CDN can cache public data, DataLoader and service caches on the server, and a normalized cache in the client keyed by type and id.
+
+    **Why.** A CDN caches GET requests by URL, and it does not use a POST body as part of its cache key. With persisted queries, the app ships known queries at build time and sends only a hash plus variables in a GET URL, so a public show page viewed a million times a day is served mostly from the edge. Per-user screens, like the home screen, are not shared anyway. A client cache stores each object once, as `Show:7`, so when a mutation returns the updated show, every screen that shows it updates without a refetch.
+
+    | Layer | What it saves | Works for |
+    | --- | --- | --- |
+    | CDN with persisted queries | Whole responses | Public data |
+    | DataLoader per request | Duplicate service calls | Every request |
+    | Client normalized cache | Repeat reads on the device | One user's data |
+
+    **Follow-ups the interviewer may ask.**
+    - How do you set a cache lifetime when one response mixes fields with different freshness needs?
+    - What does a persisted-query allowlist also give you for security?
+
+    **Watch out for.** Saying GraphQL cannot be cached. It cannot use URL caching for free, which is a different claim.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you stop one client from sending a GraphQL query that takes your servers down?" level="Senior" category="Reliability">
+    **Short answer.** Measure a query's cost before running it and reject anything over a budget, limit depth, put a timeout on execution, and rate-limit by cost points rather than by request count. For your own apps, allow only persisted queries.
+
+    **Why.** Nesting multiplies:
+
+    ```graphql
+    { shows(first: 100) { episodes(first: 100) { comments(first: 100) { text } } } }
+    ```
+
+    That is 100 x 100 x 100 = 1,000,000 comments from one request of under 100 bytes. A cost analysis gives each object one point and multiplies by each list's `first` argument, so this query scores about a million points and is rejected against a budget of, say, 1,000 before any resolver runs. A per-client budget of points per hour then caps total load, which is how GitHub and Shopify meter their public APIs. Persisted queries go further: the server runs only queries your app shipped, so an attacker cannot send new ones.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you price a list field that has no `first` argument?
+    - Should introspection stay on in production?
+    - Where do you enforce the limit: gateway or GraphQL server?
+
+    **Watch out for.** Relying on a requests-per-second limit. One cheap and one huge query count the same, so a single client can stay under the limit and still exhaust the database.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You have 30 microservices. Would you put GraphQL in front of them, and who owns the schema?" level="Senior" category="Architecture">
+    **Short answer.** Yes, as one client-facing layer at the edge for reads across services, but not between services, where RPC is simpler and faster. With 30 teams I would use federation: each team owns its part of the schema, and a gateway composes the parts into one graph.
+
+    **Why.** The GraphQL layer turns one client request into calls to many services inside the data center, which is where its value lies. If one central team writes every resolver, every new field waits on that team, and with 30 services that queue grows fast. Federation moves each type to the team that owns its data: the episode team owns `Episode`, and adds `Show.latestEpisode` itself. The gateway plans each query across those parts. Each layer adds a hop of a few milliseconds, so trace every request through the gateway and the services.
+
+    <AnimatedDiagram name="fundamentals/graphql" path="phone>engine>r_me>users" caption="The GraphQL layer sits at the edge and calls services; it owns no data itself." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you stop a schema change in one part from breaking clients?
+    - What happens to a query when one service is down?
+
+    **Watch out for.** Making GraphQL the default for every service-to-service call, such as the episode service asking the show service for a title. Each hop then pays for parsing, validation and resolvers, and RPC does that job with less overhead. The gateway-to-team hop in federation is the one internal GraphQL call worth its cost.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [REST](/system-design/fundamentals/rest)
+- [RPC and gRPC](/system-design/fundamentals/rpc)
+- [API design basics](/system-design/fundamentals/api-design)
+- [Choosing an API style](/system-design/fundamentals/choosing-an-api-style)
+- [API gateways](/system-design/fundamentals/api-gateway)
+- [WebSockets](/system-design/fundamentals/websockets)
+- [Caching](/system-design/patterns/caching)
+- [Rate limiting](/system-design/patterns/rate-limiting)
+
+## Further reading
+
+- [GraphQL.org, Learn](https://graphql.org/learn/): the official introduction to schemas, queries, mutations, subscriptions and execution.
+- [The GraphQL specification](https://spec.graphql.org/): the exact rules for validation, execution order and error responses.
+- [DataLoader on GitHub](https://github.com/graphql/dataloader): the reference batching and per-request caching library, with a clear explanation of how it waits for one tick.
+- [GitHub Docs, rate limits and node limits for the GraphQL API](https://docs.github.com/en/graphql/overview/rate-limits-and-node-limits-for-the-graphql-api): a real point-based cost model for a public GraphQL API.

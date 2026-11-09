@@ -1,0 +1,232 @@
+---
+title: "TLS and HTTPS"
+description: "How TLS encrypts web traffic and proves who the server is: the one-round-trip handshake, certificates, what stays visible, edge termination and mTLS."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  TLS is the lock on a web connection: before any data moves, the browser and the server agree on a secret key and the server proves its name.
+</KeyIdea>
+
+## The story
+
+Maya sits in a café in Lisbon on the free Wi-Fi. Concert tickets go on sale at 10:00, and she buys two seats on tickets.example, whose servers run in Frankfurt. Every packet her laptop sends passes through the café's router, and anyone on that network can capture them with free software. Without protection, the person at the next table could read her card number or change the seat map she sees.
+
+With HTTPS, that person learns only that Maya talked to tickets.example, when, and roughly how many bytes moved. The protocol doing this is <Term id="tls">TLS</Term> (Transport Layer Security), and it makes three promises:
+
+1. **Privacy.** Nobody on the path can read the data.
+2. **Integrity.** Nobody on the path can change the data without being caught.
+3. **Identity.** The browser is talking to the real tickets.example, not an impostor.
+
+HTTPS is HTTP carried inside a TLS connection: same requests, safer pipe. On this page, one round trip (a message out and its reply back) between Lisbon and Frankfurt takes about 40 ms.
+
+## How it works
+
+The laptop first opens a TCP connection to the server. TCP is the reliable byte pipe that HTTP runs on, and opening it costs one round trip (see [TCP and UDP](/system-design/fundamentals/tcp-udp)). TLS then runs a **handshake**: a short exchange in which both sides agree on keys. This page describes TLS 1.3, the current version.
+
+### Step 1: The browser says hello
+
+<AnimatedDiagram name="fundamentals/tls" step={1} caption="Step 1: one message from the laptop. The café Wi-Fi can read it, and that is fine." />
+
+The browser sends a **ClientHello**. It lists the encryption methods it supports, names the site it wants, and carries a **key share**: a public number made for this one visit from a secret number the browser keeps.
+
+Here is the trick. Each side picks a random secret number and sends out a public number computed from it. Then each side combines its own secret with the other side's public number, and both get the same result, a **shared secret**. Someone who saw only the two public numbers cannot work it out. So the café Wi-Fi can read the hello, and it does not matter.
+
+<PremiumBreak />
+
+### Step 2: The server answers and proves who it is
+
+<AnimatedDiagram name="fundamentals/tls" step={2} caption="Step 2: the server's key share travels in the clear, everything after it encrypted. Braces mark encrypted messages." />
+
+The server replies with a **ServerHello** carrying its own key share. Both sides can now compute the shared secret, so the rest is encrypted:
+
+- **A certificate.** A small signed document that says "this public key belongs to tickets.example, valid until 3 May 2027". A public key and its private key are a matched pair: only the private key can sign, and anyone with the public key can check the signature. The server keeps the private key secret.
+- **A signature** over the whole handshake, made with that private key. An impostor can copy the public certificate but cannot produce this signature.
+- **Finished**, a checksum of everything said so far, computed with the new shared secret. If anyone changed one byte of the hellos, the two sides' checksums would not match.
+
+Why trust the certificate? Because a **certificate authority** (CA) signed it. A CA is an organization that checks you control a domain before it vouches for it. A **root** CA signs an **intermediate** CA, and the intermediate signs the site's certificate. Browsers and operating systems ship with around 150 trusted roots. The browser follows the signatures up to one of them, then checks the name and the dates.
+
+Certificates expire on purpose, because a stolen key is useful only until then. Public certificates may now last at most 200 days. The limit falls to 100 days in March 2027 and 47 days in March 2029, so renewal must be automatic.
+
+### Step 3: The request leaves after one round trip
+
+<AnimatedDiagram name="fundamentals/tls" step={3} stepper caption="The full handshake: one round trip of setup, then the request travels with the browser's Finished message." />
+
+The browser checks the chain and sends its own Finished message, with `GET /checkout` sent right alongside it. So TLS 1.3 costs **one round trip**. TLS 1.2 needed two. For Maya's first visit, ignoring server work:
+
+| Phase | TLS 1.3 | TLS 1.2 |
+|---|---|---|
+| TCP connection | 40 ms | 40 ms |
+| TLS handshake | 40 ms | 80 ms |
+| Request and response | 40 ms | 40 ms |
+| **First byte of the page** | **about 120 ms** | **about 160 ms** |
+
+What can the café Wi-Fi still see?
+
+<Compare
+  columns={["", "Visible on the café Wi-Fi", "Why"]}
+  rows={[
+    ["IP addresses", true, "Routers need them to deliver packets"],
+    ["Site name (tickets.example)", true, "Sent in the hello, unless the newer Encrypted Client Hello extension hides it"],
+    ["Path and query (/checkout?seat=14C)", false, "Inside the encrypted request"],
+    ["Headers, cookies, card number", false, "Inside the encrypted request"],
+    ["Size and timing of responses", true, "Encryption hides content, not length"],
+  ]}
+  caption="HTTPS hides what Maya says, not who she talks to."
+/>
+
+**Forward secrecy.** The secret numbers behind the key shares are thrown away when the connection ends, and the server's private key only signs. If someone records Maya's traffic today and steals that key next year, the recording stays unreadable.
+
+**Resumption.** When Maya returns an hour later, the browser shows a **session ticket**, a token the server handed it on the first visit, and both sides skip the certificate. With **0-RTT** (zero round trips) the request rides in the very first message. The catch: an attacker can capture that message and send it again, so servers accept 0-RTT only for requests that are safe to repeat.
+
+### Step 4: Where the lock comes off
+
+<AnimatedDiagram name="fundamentals/tls-termination" step={1} caption="The load balancer holds the certificate and decrypts. The checkout server behind it receives plain HTTP." />
+
+The machine that holds the private key and decrypts is said to **terminate** TLS. The usual choice is the <Term id="load-balancer">load balancer</Term>, the front door that spreads requests across app servers. The key lives in one place instead of on 40 app servers, the load balancer can read paths to route `/checkout`, and app servers skip the handshake work.
+
+That work is real at 10:00. If 300,000 fans arrive in the first minute, that is 300,000 / 60 = 5,000 new handshakes per second. With an RSA-2048 key (one common kind of certificate key), a CPU core does roughly 1,000 to 2,000 handshakes a second. So 5,000 / 2,000 = 2.5 to 5,000 / 1,000 = 5 cores do nothing else. An ECDSA key (a newer, smaller kind) makes the signing step several times cheaper. Encrypting the data afterwards is cheap: several gigabytes per second per core.
+
+<AnimatedDiagram name="fundamentals/tls-termination" step={2} caption="A CDN edge in Lisbon ends the handshake 5 ms from Maya and reuses an open encrypted connection to Frankfurt." />
+
+You can move the lock closer. A <Term id="cdn">CDN</Term> runs edge servers in hundreds of cities. The one in Lisbon is a 5 ms round trip from Maya. TCP and TLS now cost 5 + 5 = 10 ms instead of 80 ms. The edge forwards the request over a connection to Frankfurt it already holds open. First byte: 10 ms of handshakes, 5 ms to the edge and back, 40 ms from the edge to Frankfurt and back, so about 55 ms instead of 120 ms.
+
+### Step 5: Mutual TLS between services
+
+<AnimatedDiagram name="fundamentals/tls-termination" step={3} stepper caption="Inside the data center: the load balancer re-encrypts, and checkout and payments both show certificates from an internal CA." />
+
+In normal TLS only the server proves who it is; Maya logs in later with a password. **Mutual TLS** (mTLS) adds the other direction: the client also presents a certificate and signs the handshake. The payments service then accepts a call only if the caller's certificate says "checkout". These certificates come from an **internal CA** the company runs itself. They often last about 24 hours and renew automatically, so a leaked one is dead by tomorrow.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="On the café Wi-Fi, can the person at the next table see that Maya opened /checkout?" hint="Which part of the URL travels inside the HTTP request?">
+    No. The path is inside the encrypted request. They see the name tickets.example, the server's IP address and the response sizes.
+  </QuizItem>
+  <QuizItem question="A new HTTPS connection with TLS 1.3 crosses a 40 ms round trip. How long until the first byte, ignoring server time?" hint="Count round trips: TCP, TLS, then the request.">
+    About 120 ms: 40 for TCP, 40 for TLS, 40 for the request. With TLS 1.2 it is about 160 ms.
+  </QuizItem>
+  <QuizItem question="Why not allow 0-RTT for the 'buy tickets' request?" hint="What can an attacker do with a captured first message?">
+    A captured 0-RTT message can be replayed, and the server cannot tell the copy from the original. The seats could be bought twice.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+The main design choice is where TLS ends. Passthrough means the load balancer forwards the encrypted bytes without opening them. Handshake cost is TCP plus TLS 1.3, two round trips to wherever TLS ends.
+
+<Compare
+  columns={["Where TLS ends", "Handshakes for Maya", "Who sees plain text", "Main cost"]}
+  rows={[
+    ["App servers (passthrough)", "80 ms", "App servers only", "Every server holds the key; no routing on paths"],
+    ["Load balancer", "80 ms", "Load balancer and private network", "Traffic inside is readable"],
+    ["Load balancer, then re-encrypt", "80 ms", "Load balancer only", "A second, mostly reused, inner connection"],
+    ["CDN edge", "10 ms", "The CDN provider too", "A third party holds your key and sees user data"],
+  ]}
+  caption="Maya in Lisbon, servers in Frankfurt, edge in Lisbon."
+/>
+
+## In the wild
+
+- **Let's Encrypt** is a free CA that issues certificates through ACME, a protocol built for automatic renewal. Its 90-day certificates pushed many sites to automate.
+- **Cloudflare** terminates TLS at edges in hundreds of cities. Its Keyless SSL lets a bank keep its private key on its own servers while the edge runs the rest of the handshake.
+- **Istio**, a service mesh, runs a small proxy beside every service that handles mTLS for it, with 24-hour certificates by default.
+- **Certificate Transparency** logs are public lists of issued certificates. Chrome and Safari reject public certificates that are not logged, so a certificate issued for your domain by mistake can be spotted.
+
+## Common pitfalls
+
+- **Letting a certificate expire.** Microsoft Teams was down for about three hours in February 2020 for this reason. Automate renewal and alert well before expiry.
+- **Turning off verification to silence an error.** The client still encrypts, but to anyone, including an attacker in the middle.
+- **Leaving out the intermediate certificate.** Some desktop browsers fill the gap, so it looks fine in testing. Many phones, API clients and command-line tools then fail.
+- **Plain HTTP across shared networks.** "Internal" often means links you do not control. Re-encrypt card data and passwords.
+
+## How to say it in an interview
+
+"TLS gives a connection privacy, integrity and proof of the server's identity. In TLS 1.3 the client sends a key share in its hello. The server answers with its key share, then its certificate and a signature, already encrypted, so the request leaves after one round trip. The certificate chains to a root CA the client trusts. I would terminate TLS at the load balancer, or at a CDN edge for distant users, which cuts handshakes from 80 ms to about 10 ms. Inside, I would re-encrypt and use mTLS with short-lived certificates, and I would automate renewal, because expired certificates cause real outages."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does HTTPS protect, and what can someone on the same Wi-Fi still see?" level="Junior" category="Security">
+    **Short answer.** HTTPS encrypts the path, headers, cookies and body, detects tampering, and proves the server's identity. An observer still sees both IP addresses, the site name, and the size and timing of the traffic.
+
+    **Why.** Routers need IP addresses to deliver packets. The site name travels in the ClientHello before keys exist, unless Encrypted Client Hello is used. Encryption hides content, not length, so a 2 MB seat map and a 300-byte "sold out" reply look different on the wire.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you hide the site name as well?
+    - Does HTTPS protect you from a malicious server?
+
+    **Watch out for.** Saying HTTPS hides the whole URL. The path is hidden; the hostname usually is not.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Walk me through a TLS 1.3 handshake." level="Junior" category="Networking">
+    **Short answer.** The client sends a hello with a key share. The server replies with its key share in the clear, then sends its certificate, a signature and Finished, encrypted. The client checks them and sends its own Finished together with the first request.
+
+    **Why.** Combining your secret with the other side's public key share gives both sides the same secret, which an observer cannot compute. The signature proves the server holds the private key behind its certificate. On a 40 ms path the first byte arrives after about 120 ms: 40 for TCP, 40 for TLS, 40 for the request.
+
+    <AnimatedDiagram name="fundamentals/tls" step={2} caption="After ServerHello both sides share a secret, so the certificate already travels encrypted." />
+
+    **Follow-ups the interviewer may ask.**
+    - What changed from TLS 1.2, which took two round trips?
+    - How does 0-RTT work, and what is its risk?
+
+    **Watch out for.** Saying the client encrypts a secret with the server's public key. That was the old RSA key exchange; TLS 1.3 removed it because it has no forward secrecy.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does a browser know it is talking to the real site and not an impostor?" level="Mid" category="Security">
+    **Short answer.** The certificate binds the server's public key to its domain and is signed by a chain that ends at a root CA the browser already trusts. The server then signs the handshake with its private key, proving it owns that certificate.
+
+    **Why.** The certificate is public, so an impostor can copy it but cannot sign without the private key. The browser checks each signature up to one of about 150 trusted roots, plus the name and dates. Certificate Transparency logs make a certificate mis-issued for your domain visible.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens if a CA is compromised?
+    - Why are certificate lifetimes getting shorter?
+
+    **Watch out for.** Saying the padlock means the site is safe. It means you reached whoever controls that domain; phishing sites have valid certificates too.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where would you terminate TLS in a web system, and what do you give up?" level="Mid" category="Networking">
+    **Short answer.** At the load balancer by default, or at a CDN edge when users are far away, re-encrypting to app servers for sensitive data. You give up end-to-end encryption: whatever terminates TLS holds your key and sees plain text.
+
+    **Why.** One copy of the certificate is easier to manage, and the load balancer can route on paths. An edge 5 ms from the user cuts handshakes from 80 ms to 10 ms when the origin is 40 ms away, and it reuses warm connections for the long hop. Re-encrypting costs little over long-lived inner connections.
+
+    <AnimatedDiagram name="fundamentals/tls-termination" step={2} path="browser>edge>lb" caption="The handshake ends at the Lisbon edge; the long hop to Frankfurt reuses an open encrypted connection." />
+
+    **Follow-ups the interviewer may ask.**
+    - When would you pass TLS straight through to the app servers?
+    - How would you keep the private key away from the CDN?
+
+    **Watch out for.** Calling plain HTTP inside the data center safe because it is internal. Inside often spans links you do not control.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you secure traffic between 200 internal microservices?" level="Senior" category="Security">
+    **Short answer.** Mutual TLS everywhere, with certificates from an internal CA that name each service, and authorization rules based on that name. Run it in sidecar proxies (small proxies beside each service) so application code does not change, with certificates that live about a day.
+
+    **Why.** mTLS gives encryption plus proof of the caller, so payments can accept only checkout. 200 services with 10 replicas each is 2,000 certificates. Renewed once a day, that is 2,000 / 1,440 minutes, about 1.4 signings a minute; even renewing twice a day stays under 3 a minute, which a small CA handles easily. A leaked certificate dies within 24 hours, so revocation is rarely needed.
+
+    <AnimatedDiagram name="fundamentals/tls-termination" highlight={["app", "payments", "ca"]} caption="Checkout and payments both present certificates signed by the internal CA." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens if the internal CA is down for an hour?
+    - How do you roll this out while some services are not on the mesh yet?
+
+    **Watch out for.** Treating mTLS as authorization. It proves who is calling; you still need rules for what each caller may do.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [A request's journey](/system-design/fundamentals/anatomy-of-a-request)
+- [TCP and UDP](/system-design/fundamentals/tcp-udp)
+- [HTTP](/system-design/fundamentals/http)
+- [CDN](/system-design/fundamentals/cdn)
+- [Encryption and hashing](/system-design/fundamentals/encryption-and-hashing)
+- [API authentication](/system-design/fundamentals/api-auth)
+
+## Further reading
+
+- IETF, [RFC 8446: The Transport Layer Security Protocol Version 1.3](https://www.rfc-editor.org/rfc/rfc8446), the specification, with a readable overview in section 2.
+- Let's Encrypt, [How It Works](https://letsencrypt.org/how-it-works/), how a CA checks that you control a domain.
+- Cloudflare, [What is mutual TLS (mTLS)?](https://www.cloudflare.com/learning/access-management/what-is-mutual-tls/), a short explainer with service-to-service examples.

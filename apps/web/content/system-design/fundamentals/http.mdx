@@ -1,0 +1,323 @@
+---
+title: "HTTP/1.1, HTTP/2 and HTTP/3"
+description: "How a browser and a server talk with HTTP: requests, responses, status codes and caching headers, and how each version cuts the waiting."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  HTTP is the set of rules a browser and a server use to ask for something and answer it, and each new version keeps the same words but moves them faster.
+</KeyIdea>
+
+## The story
+
+You run a web-comics site. A chapter page is one HTML file plus 42 more: a stylesheet, a script and 40 panel images of about 10 KB each. The page also calls `/api/next-chapters` to suggest what to read next, and that call takes about 800 ms. Most readers are on phones. For them a round trip, the time a message takes to reach your server and the reply to come back, is about 80 ms. At home on Wi-Fi the chapter appears quickly. On a commuter train with a patchy signal, the panels arrive in bursts with long freezes in between. The code is the same in both places. What differs is how HTTP moves those 43 files, and each HTTP version fixed one part of that.
+
+## How it works
+
+HTTP (HyperText Transfer Protocol) is a request and response conversation. The **client**, usually a browser or an app, sends a **request**. The **server** sends back exactly one **response**. Here is the chapter page's first request and its response, written the way HTTP/1.1 sends them: as plain text.
+
+<Tabs title="One exchange">
+  <Tab label="Request">
+
+```http
+GET /chapters/12 HTTP/1.1
+Host: comics.example
+User-Agent: Mozilla/5.0 (Android 14)
+Accept: text/html
+Accept-Encoding: gzip, br
+Cookie: session=7f3a9c
+```
+
+  </Tab>
+  <Tab label="Response">
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Encoding: br
+Content-Length: 9800
+Cache-Control: no-cache
+ETag: "ch12-v3"
+
+<!doctype html> ... 9,800 bytes of compressed HTML (40 KB unpacked) ...
+```
+
+  </Tab>
+</Tabs>
+
+The first line of the request holds the **method** (`GET`, what to do), the **path** (`/chapters/12`, what to do it to) and the version. Then come **headers**: `Name: value` lines with extra details, such as which site you want (`Host`) or which compression you accept. A blank line ends the headers, and an optional **body** follows. The response starts with a **status code** (`200`, how it went), then its own headers, then the body.
+
+Most of these words have kept their meaning since HTTP/1.1 arrived in 1997. HTTP/2 and HTTP/3 changed only how the bytes travel. The steps follow the chapter page through all three.
+
+### Step 1: HTTP/1.1 sends one request at a time on a connection
+
+<AnimatedDiagram name="fundamentals/http" step={1} caption="On one HTTP/1.1 connection, the two images wait behind the slow next-chapters call." />
+
+HTTP/1.1 rides on TCP, which delivers bytes reliably and in order (see [TCP and UDP](/system-design/fundamentals/tcp-udp)). A new connection costs one round trip for TCP and one for <Term id="tls">TLS</Term>, the encryption layer: 160 ms on the phone before the first request leaves. HTTP/1.0 closed the connection after every response. HTTP/1.1 keeps it open by default, called **keep-alive**, so later requests skip that setup.
+
+But a connection carries one request at a time. The browser must receive the whole response before it sends the next request. This is **head-of-line blocking**: the item at the front of the line holds up everyone behind it. In the diagram, `p1.jpg` and `p2.jpg` wait 800 ms behind the slow call.
+
+Browsers soften this by opening up to six connections to each host. For the chapter page that means 42 files over 6 connections, or 7 requests in a row on each. Every request waits at least one round trip, so the page spends $7 \times 80 = 560$ ms just waiting, before any download time.
+
+<PremiumBreak />
+
+### Step 2: HTTP/2 multiplexes many streams on one connection
+
+<AnimatedDiagram name="fundamentals/http" step={2} caption="On HTTP/2 all three requests leave together, and the images come back before the slow reply." />
+
+HTTP/2 (2015) keeps the methods, status codes and headers but stops sending them as text. It cuts every message into small binary **frames**. Each frame carries a **stream id**, a number that says which request it belongs to. A **stream** is one request and its response. Frames from many streams take turns on one TCP connection, and the other side sorts them by id. Sharing one connection like this is called **multiplexing**.
+
+In the diagram, all three requests leave at once on streams 1, 3 and 5. The images come back while the recommendations service is still working. For the chapter page, all 42 requests go out together, so the wait drops from 560 ms to one round trip, about 80 ms.
+
+HTTP/2 also compresses headers. A phone sends about 600 bytes of headers per request, mostly the same cookie and `User-Agent` (the header that names the browser) every time. HTTP/2 remembers headers it has already sent and replaces repeats with a short number. Across 42 requests that removes most of the $42 \times 600 \approx 25$ KB of repeated upload.
+
+### Step 3: HTTP/3 moves to QUIC so one loss stalls one stream
+
+<AnimatedDiagram name="fundamentals/http-loss-flow" stepper caption="One lost packet: over TCP every stream waits; over QUIC only the stream that lost data waits." />
+
+HTTP/2 removed the line inside HTTP but not the one inside TCP. The network carries data in **packets**, small chunks of about 1,400 bytes each. TCP promises to hand them over in order. When one packet is lost, TCP holds back every later byte, from every stream, until the missing packet arrives again. On the train, about 2% of packets get lost. The 400 KB of panels fill about 290 packets of 1,400 bytes, so about 6 go missing. Each loss freezes all 40 images for at least one round trip: about 6 freezes of 80 ms or more.
+
+HTTP/3 (2022) runs on **QUIC**, a transport protocol built on top of UDP. UDP only sends packets, with no ordering or retries. QUIC adds reliability itself, but separately for each stream. A lost packet now delays only the streams whose data it carried. In the second half of the diagram, `p3.jpg` reaches the page at once and only `p2.jpg` waits.
+
+QUIC brings two more gains. Encryption is built in, so a new connection takes one round trip instead of two: 80 ms instead of 160. A returning visitor can even send the request in the first packet, called **0-RTT**. And QUIC names a connection by an id, not by the phone's IP address and port (the network address it has right now), so it survives the phone hopping from Wi-Fi to mobile data.
+
+### Step 4: The words every version shares
+
+The **method** says what the request wants. Two properties decide how safe it is to send again. A **safe** method changes nothing on the server. An <Term id="idempotent">idempotent</Term> method has the same effect whether it runs once or five times.
+
+<Compare
+  columns={["Method", "On the comics site", "Safe", "Idempotent", "Usual success code"]}
+  rows={[
+    ["GET", "GET /chapters/12 reads the chapter page", true, true, "200 OK"],
+    ["HEAD", "HEAD /assets/p1.8d1e.jpg checks the size without the image", true, true, "200 OK"],
+    ["POST", "POST /comments adds a new comment", false, false, "201 Created"],
+    ["PUT", "PUT /users/42/avatar replaces the profile picture", false, true, "200 or 204"],
+    ["PATCH", "PATCH /users/42 adds 10 reading coins to the balance", false, false, "200 OK"],
+    ["DELETE", "DELETE /comments/88 removes one comment", false, true, "204 No Content"],
+  ]}
+  caption="Idempotency matters because networks drop replies, and clients retry."
+/>
+
+The **status code** is a three-digit number whose first digit gives the kind of result.
+
+<Compare
+  columns={["Class", "Meaning", "Codes you will meet"]}
+  rows={[
+    ["2xx", "It worked", "200 OK, 201 Created, 204 No Content"],
+    ["3xx", "Look elsewhere or reuse your copy", "301 moved for good, 302 moved for now, 304 Not Modified"],
+    ["4xx", "The client must change something", "400 bad input, 401 not signed in, 403 not allowed, 404 not found, 429 too many requests"],
+    ["5xx", "The server failed", "500 error, 502 bad reply from the server behind, 503 overloaded, 504 the server behind timed out"],
+  ]}
+/>
+
+Resending a 4xx request unchanged fails again (a 429 can succeed after a wait). A 5xx may succeed on a retry, but retry only idempotent requests, with growing pauses. **Headers** carry everything else: what the body is (`Content-Type`), who is asking (`Authorization`, `Cookie`) and which site is meant (`Host`). A few control caching.
+
+### Step 5: Caching headers: the fastest request is the one never sent
+
+A <Term id="cache">cache</Term> keeps a copy of a response so the next reader skips the trip. The `Cache-Control` response header tells the browser, and any <Term id="cdn">CDN</Term> in between, whether it may keep a copy and for how long.
+
+<Tabs title="Two caching rules for the chapter page">
+  <Tab label="Images, CSS, JS">
+
+```http
+GET /assets/p1.8d1e.jpg HTTP/1.1
+
+HTTP/1.1 200 OK
+Cache-Control: public, max-age=31536000, immutable
+```
+
+The file name contains a fingerprint (`8d1e`), a short code computed from the file's bytes. A changed image gets a new name, so the old name can be cached for a year (31,536,000 seconds). When the reader opens chapter 12 again, its 42 files cost zero requests. On chapter 13 the stylesheet and script come from the cache too, so only the 40 new panels travel.
+
+  </Tab>
+  <Tab label="HTML">
+
+```http
+GET /chapters/12 HTTP/1.1
+If-None-Match: "ch12-v3"
+
+HTTP/1.1 304 Not Modified
+ETag: "ch12-v3"
+```
+
+`no-cache` means "keep a copy, but ask me before using it". The browser sends back the `ETag`, a version tag for the response. If nothing changed, the server answers `304` with no body: about 200 bytes instead of 9,800, for one 80 ms round trip.
+
+  </Tab>
+</Tabs>
+
+Personal pages get `Cache-Control: private`, so only the reader's own browser keeps them, or `no-store` for data that must never be written to disk. `max-age` is a time to live (<Term id="ttl">TTL</Term>) in seconds, and `s-maxage` sets a separate TTL for shared caches such as CDNs.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="The chapter page needs 42 files. Over HTTP/1.1 the browser opens 6 connections, and a round trip takes 80 ms. About how long goes on waiting for round trips? And over HTTP/2?" hint="How many requests run one after another on each connection?">
+    42 / 6 = 7 requests in a row on each connection, so about $7 \times 80 = 560$ ms. Over HTTP/2 all 42 go out together on one connection: about one round trip, 80 ms. Download time is the same in both cases.
+  </QuizItem>
+  <QuizItem question="A payment request (POST) times out. Should the client retry it automatically?" hint="Did the server charge the card or not? The client cannot tell.">
+    Not as it is. The server may have charged the card and only the reply got lost, and POST is not idempotent. Send an idempotency key with the request so the server can spot a repeat and return the first result. See [Idempotency](/system-design/patterns/idempotency).
+  </QuizItem>
+  <QuizItem question="On a network that loses 5% of packets, HTTP/2 can be slower than HTTP/1.1. Why?">
+    HTTP/2 puts everything on one TCP connection, so each loss freezes every stream. HTTP/1.1's six connections lose packets independently, so a loss freezes only one sixth of the work. HTTP/3 fixes this with per-stream recovery.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "HTTP/1.1", "HTTP/2", "HTTP/3"]}
+  rows={[
+    ["Runs on", "TCP", "TCP", "QUIC over UDP"],
+    ["Requests in flight per connection", "1", "Often 100 to 128", "Often 100 or more"],
+    ["Setup round trips before the first request (new HTTPS connection)", "2", "2", "1, or 0 on a repeat visit"],
+    ["A lost packet stalls", "Its connection", "Every stream on the connection", "Only the streams in that packet"],
+    ["Survives a switch from Wi-Fi to mobile data", false, false, true],
+    ["Messages are plain text (before encryption)", true, false, false],
+    ["Works on every network", true, true, "No: some block UDP, so clients fall back to HTTP/2"],
+  ]}
+  caption="Round trips assume TLS 1.3. HTTP/2 wins on a clean network; HTTP/3 wins when packets get lost or phones move."
+/>
+
+HTTP/3 costs more CPU per byte today, because QUIC runs inside the application instead of the operating system. Servers therefore offer it next to HTTP/2, not instead of it.
+
+## In the wild
+
+- **Chrome and Firefox** open at most six HTTP/1.1 connections per host name. That limit is why older sites spread images across `img1.` and `img2.` host names.
+- **gRPC**, a popular <Term id="rpc">RPC</Term> framework, is built on HTTP/2 and sends many calls as streams over one long-lived connection.
+- **Google, Meta and Cloudflare** serve HTTP/3 to browsers that support it. The browser learns about it from an `Alt-Svc` response header or a DNS record, and falls back to HTTP/2 when UDP is blocked.
+- **AWS Application Load Balancer and nginx** accept HTTP/2 from browsers and, by default, speak HTTP/1.x to the app servers behind them.
+
+## Common pitfalls
+
+- **Keeping HTTP/1.1 tricks on HTTP/2.** Spreading files over extra host names adds connections and handshakes and undoes multiplexing.
+- **A new connection per call between services.** That costs a TCP and a TLS handshake, two round trips, every time. Reuse connections from a pool.
+- **Reading `no-cache` as "do not cache".** It means "check before use". The header that forbids storing is `no-store`.
+- **Returning `200` with an error in the body.** Caches store it, monitoring counts it as success, and clients never retry. Use the real status code.
+- **Retrying POST on a timeout, or accepting POST in 0-RTT.** Both can run the action twice. An attacker can also replay 0-RTT data, so servers should accept only safe methods there.
+
+## How to say it in an interview
+
+"HTTP is a request and response protocol: a method, a path and headers go in; a status code, headers and a body come out. Since HTTP/1.1 only the transport has changed. HTTP/1.1 sends one request at a time per connection, so a slow response blocks the ones behind it, and browsers open six connections to cope. HTTP/2 splits messages into frames tagged with a stream id and multiplexes many requests on one connection, so a page with 40 images waits one round trip instead of seven. But it still runs on TCP, where one lost packet stalls every stream. HTTP/3 moves to QUIC over UDP, which recovers losses per stream, sets up in one round trip and survives network changes. For my design I would serve HTTP/2 and HTTP/3 at the edge, keep pooled HTTP/2 or HTTP/1.1 connections inside, and lean on `Cache-Control` and ETags so most requests never reach the origin."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does an HTTP request contain, and what does the response contain?" level="Junior" category="Networking">
+    **Short answer.** A request has a method, a path, headers and an optional body. A response has a status code, headers and an optional body, and the server sends exactly one response per request.
+
+    **Why.** In `GET /chapters/12`, the method says "read" and the path names the resource. Headers carry the details: `Host` picks the site, which lets one server address host many sites, and `Accept-Encoding` lists the compression the client understands. The status code comes first so the client can act before reading the body. A `304 Not Modified` has no body at all, which saves 9.8 KB on a page reload.
+
+    ```http
+    POST /comments HTTP/1.1
+    Host: comics.example
+    Content-Type: application/json
+
+    {"chapter": 12, "text": "Great twist"}
+    ```
+
+    **Follow-ups the interviewer may ask.**
+    - Why must every HTTP/1.1 request carry a `Host` header?
+    - What changes in this exchange under HTTP/2?
+
+    **Watch out for.** Saying HTTP/2 changed the methods or status codes. It changed only how the same fields are framed and sent.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Which HTTP methods are idempotent, and why does that matter?" level="Junior" category="APIs">
+    **Short answer.** GET, HEAD, PUT and DELETE are idempotent: running them twice leaves the server as running them once would. POST and PATCH are not, so a retry can repeat their effect.
+
+    **Why.** Networks drop replies. When a call times out, the client cannot tell whether the server acted. `PUT /users/42/email` sent three times still leaves one email address. `POST /payments` for 20 euros sent twice charges 40. That is why proxies and client libraries retry idempotent requests on their own and leave POST alone. To make a POST safe to retry, the client sends an `Idempotency-Key` header, and the server stores each key with its result for about a day. A repeat returns the stored result instead of charging again.
+
+    **Follow-ups the interviewer may ask.**
+    - A second DELETE returns 404. Is DELETE still idempotent?
+    - Where would you store idempotency keys, and for how long?
+
+    **Watch out for.** Mixing up safe and idempotent. DELETE is idempotent but not safe, because the first call changes the server.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is head-of-line blocking, and how does HTTP/2 deal with it?" level="Mid" category="Networking">
+    **Short answer.** Head-of-line blocking is when the first item in a queue holds up everything behind it. HTTP/1.1 carries one request at a time per connection, so a slow response blocks the next ones; HTTP/2 cuts messages into frames tagged with a stream id and interleaves many requests on one connection.
+
+    **Why.** Take a page with 42 files, six HTTP/1.1 connections and an 80 ms round trip. Each connection runs 7 requests in a row: $7 \times 80 = 560$ ms of waiting. One 800 ms API call takes a whole connection out of use while it runs. On HTTP/2 all 42 requests leave together, so the wait is about one round trip, 80 ms, and fast replies overtake the slow one.
+
+    <AnimatedDiagram name="fundamentals/http" stepper step={1} caption="Step 1: the images queue behind the slow call. Step 2: on HTTP/2 they overtake it." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why did HTTP/1.1 pipelining not fix this?
+    - Is head-of-line blocking gone entirely in HTTP/2?
+
+    **Watch out for.** Claiming HTTP/2 makes a single request faster. One request on a warm connection takes the same time; the gain comes from many requests sharing one connection.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you set caching headers for a web app's HTML, its JS and CSS files, and a user's account page?" level="Mid" category="Caching">
+    **Short answer.** Put a content fingerprint in static file names and cache them for a year as immutable. Let HTML be stored but revalidated with an ETag, and mark personal pages private or no-store.
+
+    **Why.** Fingerprinted files never change under one name, so a returning visitor loads 42 of them with zero requests. HTML changes on every deploy, so the browser asks "still `ch12-v3`?" and usually gets a `304` of about 200 bytes instead of 9.8 KB, for one round trip. An account page marked `public` could be stored by a CDN and shown to the next visitor.
+
+    | Resource | Cache-Control | Effect |
+    | --- | --- | --- |
+    | `app.4b7e.js` | `public, max-age=31536000, immutable` | No request for a year |
+    | `/chapters/12` | `no-cache` plus `ETag` | One small check per visit |
+    | `/account` | `private, no-store` | Never kept by a shared cache |
+
+    **Follow-ups the interviewer may ask.**
+    - How do you ship an urgent fix to a file that browsers cache for a year?
+    - When would you add `s-maxage` for the CDN?
+
+    **Watch out for.** Using `no-cache` to mean "never store". It means "check first"; `no-store` is the one that forbids keeping a copy.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your load balancer returns 502, 503 and 504 at different times. What does each tell you, and which should a client retry?" level="Mid" category="Reliability">
+    **Short answer.** A 502 means the load balancer got a broken reply or a closed connection from the app server. A 503 means no server can take the request now. A 504 means the app server did not answer in time. Retry only idempotent requests, with growing pauses, and honour `Retry-After`.
+
+    **Why.** Each points somewhere different. Many 502s often come from a timeout mismatch: the app closes idle connections after 5 seconds while the balancer keeps them for 60, so the balancer sometimes reuses a connection the app just closed. Set the app's keep-alive timeout above the balancer's. A 503 points to capacity or failing health checks. A 504 points to a slow dependency, such as the 800 ms recommendations call growing to 60 s. Never retry a POST after a 504, because the server may have finished the work.
+
+    **Follow-ups the interviewer may ask.**
+    - Three layers each try a call 3 times. How many calls can reach the bottom service?
+    - When would you return 429 instead of 503?
+
+    **Watch out for.** Treating every 5xx the same and retrying at once. Immediate retries multiply load on a service that is already failing; three layers of 3 attempts become 27 calls.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="HTTP/2 already multiplexes requests. Why was HTTP/3 needed?" level="Senior" category="Networking">
+    **Short answer.** HTTP/2 removed head-of-line blocking from HTTP but not from TCP, where one lost packet stalls every stream. HTTP/3 runs on QUIC, which recovers losses per stream, sets up in one round trip and keeps the connection when the phone changes networks.
+
+    **Why.** At 2% loss, 400 KB of images is about 290 packets, so about 6 are lost. Each loss freezes all 40 images for at least one 80 ms round trip. On lossy links HTTP/2's single connection can do worse than HTTP/1.1's six. Setup also shrinks: TCP plus TLS 1.3 takes 2 round trips (160 ms), QUIC takes 1 (80 ms), and 0 on a repeat visit. Fixing TCP itself was not practical: it lives in every operating system and in network boxes that inspect it. QUIC runs inside the application on top of UDP and encrypts its own headers, so it can change quickly.
+
+    <AnimatedDiagram name="fundamentals/http-loss-flow" stepper caption="Over TCP the loss holds back p3; over QUIC only p2 waits." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does QUIC cost compared with TCP?
+    - Which requests are safe to send as 0-RTT data?
+
+    **Watch out for.** Calling HTTP/3 "HTTP over unreliable UDP". QUIC is fully reliable; it only keeps the ordering per stream.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Which HTTP version would you use for service-to-service calls inside one data centre, and what can go wrong when you switch?" level="Senior" category="Load balancing">
+    **Short answer.** HTTP/2 over long-lived, pooled connections, which is what gRPC uses; HTTP/3 adds little inside a data centre. The catch is load balancing: a layer 4 (L4) load balancer picks a server once per TCP connection, not per request, so a few long-lived HTTP/2 connections can pin all traffic onto a few servers.
+
+    **Why.** Inside a data centre a round trip takes about 0.5 ms and packet loss is close to zero. QUIC's faster setup and per-stream recovery therefore save almost nothing, while costing extra CPU. HTTP/2 lets one connection carry about 100 requests at once, which cuts thousands of connections to tens. But if 10 callers each hold one connection to a service with 20 servers behind an L4 balancer, at most 10 servers get any traffic. Fix it with request-level balancing in a proxy, client-side balancing across all servers, or a maximum connection age of a few minutes so connections spread out again.
+
+    **Follow-ups the interviewer may ask.**
+    - How does a server drain its long-lived connections during a deploy?
+    - When is HTTP/1.1 with keep-alive still a fine choice?
+
+    **Watch out for.** Picking the newest version by default, or forgetting that the load balancer decides per connection.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Networking basics](/system-design/fundamentals/networking): the layers HTTP sits on
+- [IP, TCP and UDP](/system-design/fundamentals/tcp-udp): ordering and retries, which HTTP/2 inherits and QUIC rebuilds
+- [TLS and HTTPS](/system-design/fundamentals/tls): the encryption under every modern HTTP request
+- [CDNs and edge](/system-design/fundamentals/cdn): where caching headers pay off most
+- [REST](/system-design/fundamentals/rest): designing an API on top of HTTP methods and status codes
+- [WebSockets](/system-design/fundamentals/websockets): when one response per request is not enough
+- [Caching](/system-design/patterns/caching) and [Idempotency](/system-design/patterns/idempotency)
+
+## Further reading
+
+- [RFC 9110, HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110): the methods, status codes and headers that every version shares.
+- [MDN, HTTP caching](https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching): a practical guide to `Cache-Control`, ETags and revalidation.
+- [RFC 9113, HTTP/2](https://www.rfc-editor.org/rfc/rfc9113): frames, streams and header compression.
+- [RFC 9000, QUIC](https://www.rfc-editor.org/rfc/rfc9000): the transport under HTTP/3, including streams, loss recovery and connection ids.

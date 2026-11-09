@@ -17,7 +17,7 @@ interface PageCase {
 
 const PAGES: Record<string, PageCase> = {
   "free article (outline)": {
-    path: "/system-design/fundamentals/rpc",
+    path: "/system-design/case-studies/dropbox",
     types: ["Article", "BreadcrumbList"],
     ogType: "article",
   },

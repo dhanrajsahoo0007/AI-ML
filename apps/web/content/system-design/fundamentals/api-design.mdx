@@ -1,0 +1,333 @@
+---
+title: "API design basics"
+description: "How to design a web API's contract: resources and verbs, status codes and errors, pagination, idempotency keys, versions and rate-limit headers."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  An API is a written promise about which requests a server accepts and what it sends back, and good API design keeps that promise clear, safe to retry and stable as the service changes.
+</KeyIdea>
+
+## The story
+
+You run Crumbs, an app where people order cakes from about 1,200 local bakeries. Two programs call your server: your own phone app, and a delivery partner's script that copies every order into its system each night. In one month, four things go wrong. The partner's sync shows some orders twice and misses others. A customer on a train taps "Pay", the screen spins, the app tries again, and the card is charged twice. You rename the `total` field to `total_cents`, and every phone still on last month's app shows cakes for $0. Then the partner's script gets stuck in a loop at 300 requests a second and slows the app for everyone. None of these is a bug in your code. Each one is a gap in the API's contract, and this page closes them one at a time.
+
+## How it works
+
+An **API** (application programming interface) is the set of requests a program accepts from other programs. In a web API the client sends an HTTP method, a path, headers and sometimes a body, and the server answers with a status code, headers and a body. Designing the API means choosing each piece on purpose, before anyone depends on it.
+
+### Step 1: Resources and verbs
+
+<AnimatedDiagram name="fundamentals/api-design" step={1} caption="Both clients call the Orders API, which reads and writes the orders table." />
+
+A **resource** is a thing your API exposes, named by a noun in the path. `/v1/orders` is the collection of all orders. `/v1/orders/9001` is one order. The **method**, or verb, says what to do with it. Keep verbs out of paths: write `POST /v1/orders`, not `POST /v1/createOrder`.
+
+| Request | What it does at Crumbs | Safe | Idempotent |
+|---|---|---|---|
+| `GET /v1/orders/9001` | Read one order | Yes | Yes |
+| `POST /v1/orders` | Create a new order | No | No |
+| `PUT /v1/orders/9001` | Replace the whole order | No | Yes |
+| `PATCH /v1/orders/9001` | Change some fields, such as the pickup time | No | Not by default |
+| `DELETE /v1/orders/9001` | Cancel the order | No | Yes |
+
+A **safe** method changes nothing on the server. An <Term id="idempotent">idempotent</Term> method leaves the server in the same state whether you send it once or five times. These two columns decide what a client may retry on its own. A timed-out GET or PUT can be sent again. A timed-out POST cannot, because a second POST creates a second order. That is the double charge from the story.
+
+<PremiumBreak />
+
+### Step 2: Status codes and errors
+
+Every response starts with a three-digit **status code**. The first digit is the part clients act on: 2xx means it worked, 4xx means the client must change something before trying again, and 5xx means the server failed and a retry may help. Two 4xx codes are the exception: 409 and 429 say "wait, then try again".
+
+| Code | When Crumbs sends it |
+|---|---|
+| 200 OK | A read or an update worked |
+| 201 Created | A POST made a new order; the `Location` header holds its URL |
+| 204 No Content | A DELETE worked and there is nothing to return |
+| 400 Bad Request | The body is not valid JSON, or a field has the wrong type |
+| 401 Unauthorized | No token (the caller's proof of identity) was sent, or it has expired |
+| 403 Forbidden | The token is valid, but the order belongs to someone else |
+| 404 Not Found | No order has that id |
+| 409 Conflict | The cake was already picked up, so it cannot be cancelled |
+| 422 Unprocessable Content | Valid JSON that breaks a rule, such as a pickup time in the past |
+| 429 Too Many Requests | The caller is over its rate limit |
+| 500, 503 | A bug, or the server is overloaded for a moment |
+
+Give every error the same body shape, so a client writes its error handling once. A widely used standard is **problem details** (RFC 9457): a JSON body with a stable `type` a program can match on, a `title` a person can read, and any extra fields that help.
+
+<Tabs title="One rejected order">
+  <Tab label="Request">
+
+```http
+POST /v1/orders HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{"bakery_id": "bk_77", "cake": "lemon-drizzle", "pickup_at": "2026-11-08T09:00:00Z"}
+```
+
+  </Tab>
+  <Tab label="Response">
+
+```http
+HTTP/1.1 422 Unprocessable Content
+Content-Type: application/problem+json
+
+{
+  "type": "https://api.crumbs.example/errors/pickup-in-past",
+  "title": "Pickup time is in the past",
+  "status": 422,
+  "detail": "pickup_at is before the current time, 2026-11-09T14:02:11Z.",
+  "field": "pickup_at"
+}
+```
+
+  </Tab>
+</Tabs>
+
+Never send a stack trace (the list of functions that were running when the code failed) or a database message in an error. It helps attackers more than it helps clients.
+
+### Step 3: Paging through a long list
+
+Crumbs now holds 2 million orders. No client wants them in one response, so a list endpoint returns one **page** at a time. This is **pagination**, and there are two common ways to do it.
+
+**Offset pagination** says "skip this many rows, then give me 50": `GET /v1/orders?limit=50&offset=100000`. It is easy to build and lets a client jump to page 37. It has two costs. The database still walks past the 100,000 skipped rows, so deep pages get slower and slower. And the list moves while you page through it. Crumbs gets about 40,000 orders a day, which is about one every 2 seconds (86,400 s / 40,000). If 3 new orders arrive between page 1 and page 2, every row shifts down 3 places, and page 2 starts with the last 3 orders of page 1. When an order is removed, rows shift up and one is never seen. That is the partner's broken sync.
+
+**Cursor pagination** has the server return a `next_cursor`: a token that marks where the page ended. The client sends it back to say "give me the 50 rows after this point".
+
+<AnimatedDiagram name="fundamentals/api-design-pagination" stepper caption="The cursor records the last row's time and id. A new order sorts above it, so the next page does not shift." />
+
+Inside, the cursor holds the `created_at` and `id` of the last row on the page. With an <Term id="index">index</Term> on those two columns, the database jumps straight to that point, so page 2,000 costs about the same as page 1.
+
+```sql
+-- index: (created_at DESC, id DESC)
+SELECT id, bakery_id, total_cents, created_at
+FROM orders
+WHERE (created_at, id) < ('2026-11-09 08:14:03', 88412)  -- decoded from cursor c1
+ORDER BY created_at DESC, id DESC
+LIMIT 51;
+```
+
+Three details make it correct. Ask for 51 rows and return 50: the extra row only tells you that a next page exists. Include the `id` as a tie-breaker. Two orders can share a timestamp, and without the id a row on the page boundary can be skipped. Make the cursor **opaque**, meaning clients treat it as a sealed token. Encode the two values as base64 text (letters and digits that stand for raw bytes) and say in the docs that its contents may change. Clients then pass it back unchanged, and you stay free to change what is inside.
+
+### Step 4: Safe retries with idempotency keys
+
+<AnimatedDiagram name="fundamentals/api-design" step={2} caption="Before charging, the Orders API checks whether it has already seen this idempotency key." />
+
+Back to the customer on the train. The phone sent `POST /v1/orders`, which places the order and charges the card. The server did both and replied, but the reply was lost in a tunnel. After 10 seconds the app gave up and tried again. The server had no way to tell a retry from a second purchase.
+
+An **idempotency key** fixes this. The app makes a random id, such as a UUID (a 128-bit id that is almost certainly unique), once per tap of "Pay" and sends it in an `Idempotency-Key` header on the first attempt and every retry. The server keeps a small table: key, a hash of the request body, and the saved response. On a new key it does the work and stores the result. On a key it has seen, it returns the saved response and charges nothing. Keys expire after a <Term id="ttl">TTL</Term> (time to live), often 24 hours.
+
+Two edge cases need an answer. The same key with a different body is a client bug, so return 422. The same key while the first request is still running gets 409, and the client tries again shortly. The [idempotency pattern](/system-design/patterns/idempotency) page covers the storage side in depth.
+
+### Step 5: Versions and rate limits at the gateway
+
+<AnimatedDiagram name="fundamentals/api-design" step={3} caption="Every call now passes the gateway, which counts requests per key and routes v1 and v2 to the right handler." />
+
+An <Term id="api-gateway">API gateway</Term> is a front door that every request passes. It checks who is calling, counts their requests and sends each request to the right version of the service.
+
+**Versions.** A **breaking change** is one an existing client cannot survive: removing or renaming a field, changing its type, making an optional input required, or changing what a status code means. Adding an optional field or a new endpoint is not breaking, as long as clients ignore fields they do not know. Ship breaking changes under a new version, such as `/v2/orders`, and keep `/v1` running. Phones update slowly; a month after a release perhaps 30% still run the old app. So Crumbs keeps v1 for at least 6 months and announces its end date in a `Sunset` header. The safe rename was to add `total_cents` next to `total` in v1 and drop `total` only in v2.
+
+**Rate limits.** A <Term id="rate-limit">rate limit</Term> caps how many requests one caller may send in a time window. Crumbs gives each partner key 600 requests a minute. The looping script sent 300 a second, or 18,000 a minute, so the gateway turned away about 97% of its calls with 429 before they reached the database. Every response tells the client where it stands:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 18
+X-RateLimit-Limit: 600
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 18
+```
+
+`Retry-After` is part of HTTP itself. The `X-RateLimit-*` names are a common habit, not a standard (an IETF draft defines `RateLimit` and `RateLimit-Policy`), so document them, including whether the reset is seconds from now or a Unix time. A good client waits `Retry-After` seconds, then retries with growing gaps, as in [circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries).
+
+## Try it
+
+<Quiz>
+  <QuizItem question="A client calls DELETE /v1/orders/9001 twice. The first call returns 204, the second 404. Is DELETE still idempotent?" hint="Look at the server's state, not the response.">
+    Yes. After both calls the order is cancelled, the same state as after one call. Idempotency is about the effect on the server; the response may differ.
+  </QuizItem>
+  <QuizItem question="A partner pages newest first, 50 per page, with offsets. Two new orders arrive before it asks for page 2. What does it see?" hint="Every row moves down two places.">
+    The first 2 rows of page 2 are the last 2 rows of page 1, so it sees them twice. With a cursor, the new orders sort above the cursor and page 2 is unchanged.
+  </QuizItem>
+  <QuizItem question="Why does the cursor hold the order id as well as the timestamp?">
+    Two orders can share a timestamp. If page 1 ends between them, "rows older than this time" skips the second one. The id breaks the tie so every row has one exact place.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Offset (?offset=100000)", "Cursor (?cursor=c1)"]}
+  rows={[
+    ["Jump to page 37", true, false],
+    ["Cost of page 2,000 at 50 per page", "Walks past 100,000 rows", "One index seek, then 51 rows"],
+    ["New or deleted rows while paging", "Duplicates or missed rows", "No shift"],
+    ["Page numbers in the UI", "Natural", "Only next and previous"],
+    ["Sort order", "Any column", "Needs a unique, indexed sort key"],
+    ["Good fit", "Admin screens, lists under about 10,000 rows", "Feeds, sync jobs, large tables"],
+  ]}
+  caption="Offset is simple and lets people jump; cursors stay fast and stable on big, busy lists."
+/>
+
+<Compare
+  columns={["", "Version in the path", "Version in a header"]}
+  rows={[
+    ["Example", "GET /v2/orders", "GET /orders with Api-Version: 2026-11-01"],
+    ["Visible in logs and the browser bar", true, false],
+    ["One URL per resource across versions", false, true],
+    ["HTTP caches", "Work as they are", "Need Vary: Api-Version"],
+    ["Typical pace", "A big jump every year or two", "Small dated changes, a few a year"],
+  ]}
+  caption="Path versions are easy to see; header versions keep URLs stable and suit small, frequent changes."
+/>
+
+## In the wild
+
+- **Stripe** accepts an `Idempotency-Key` header on POST requests and may drop a key once it is 24 hours old. Its lists page with a cursor (`starting_after`, an object id) and a `has_more` flag, and each account is pinned to a dated API version.
+- **GitHub's REST API** returns page links in the `Link` header, sends `x-ratelimit-*` headers on every response (5,000 requests an hour for a signed-in user), and picks a dated version with the `X-GitHub-Api-Version` header.
+- **Slack's Web API** pages with a `cursor` parameter and returns the next one in `response_metadata.next_cursor`; an empty value means the end.
+
+## Common pitfalls
+
+- **A GET that changes data.** Link previewers and browser prefetch send GETs on their own, so they can cancel orders nobody meant to cancel.
+- **200 OK with an error in the body.** Clients, caches and monitoring all think the call worked. Use the status code.
+- **Offset pagination on a big, busy table.** Deep pages get slow, and sync jobs see duplicates and gaps.
+- **Retrying a POST without an idempotency key.** Every timeout becomes a possible double charge.
+- **Breaking changes without a new version**, or the opposite: a new version for every small addition, so you run five copies of the API.
+
+## How to say it in an interview
+
+"I design the API around resources, nouns like `/v1/orders`, with HTTP methods as the actions. GET, PUT and DELETE are idempotent, so clients may retry them. POST is not, so any POST that creates something or moves money takes an `Idempotency-Key`, and the server keeps the key and its response for about 24 hours. Errors use real status codes and one JSON shape: 4xx means fix the request, 429 means wait, 5xx means retry. Lists use cursor pagination, an opaque token holding the last row's sort key and id, so deep pages stay as fast as the first and inserts cause no duplicates. Breaking changes go into a new version while the old one keeps running. The gateway applies per-key rate limits and answers 429 with `Retry-After` and quota headers."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What do GET, POST, PUT, PATCH and DELETE mean, and which of them can a client safely retry?" level="Junior" category="APIs">
+    **Short answer.** GET reads, POST creates or triggers an action, PUT replaces a resource at a known URL, PATCH changes part of it, and DELETE removes it. GET, PUT and DELETE are idempotent, so a client may retry them; POST, and PATCH unless designed otherwise, need an idempotency key first.
+
+    **Why.** Idempotent means a second identical call leaves the server in the same state. `PUT /orders/9001` with a pickup time of 10:00, sent twice, still says 10:00. `POST /orders` sent twice makes two orders. A PATCH that says "set pickup to 10:00" is idempotent; a PATCH that says "add one cake" is not.
+
+    | Method | Safe | Idempotent |
+    | --- | --- | --- |
+    | GET | Yes | Yes |
+    | PUT, DELETE | No | Yes |
+    | POST | No | No |
+    | PATCH | No | Depends on the patch |
+
+    **Follow-ups the interviewer may ask.**
+    - If the second DELETE returns 404, is DELETE still idempotent?
+    - When would you create a resource with PUT instead of POST?
+
+    **Watch out for.** "Idempotent means the same response every time." It means the same effect on the server; the second DELETE may return 404.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Which status codes would you return for a new order, a malformed body, a missing token, another user's order and a client over its limit?" level="Junior" category="APIs">
+    **Short answer.** 201 Created with a `Location` header, 400 Bad Request, 401 Unauthorized, 403 Forbidden (or 404 if you want to hide that the order exists), and 429 Too Many Requests with `Retry-After`. The class matters most: 4xx tells the client to change the request (429 says wait first), and 5xx tells it a retry may work.
+
+    **Why.** Retry logic, caches and dashboards read the status code, not the body. If 2% of calls fail with 500, your on-call engineer is paged; if they fail with 400, the client has a bug. 401 means "who are you?"; 403 means "I know who you are, and no".
+
+    **Follow-ups the interviewer may ask.**
+    - When would you use 422 instead of 400?
+    - What should a client do with a 503?
+
+    **Watch out for.** Returning 200 with `{"error": ...}` in the body. Every tool between the client and the server will count it as a success.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you design the URLs for bakeries, their cakes and customer orders?" level="Junior" category="APIs">
+    **Short answer.** Plural nouns for collections and an id for one item: `/v1/bakeries`, `/v1/bakeries/{id}/cakes`, `/v1/orders` and `/v1/orders/{id}`. Nest one level when the child cannot exist without the parent, and use query filters otherwise, such as `/v1/orders?bakery_id=bk_77`.
+
+    **Why.** A cake belongs to one bakery, so nesting reads naturally. An order touches a customer, a bakery and a payment, so it gets its own top-level collection and filters. Deep paths like `/bakeries/1/cakes/2/orders/3` force the client to know three ids to read one order.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you model an action that is not create, read, update or delete, such as "cancel"?
+    - Should ids be sequential numbers or random strings?
+
+    **Watch out for.** Verbs in paths such as `/getOrders` or `/cancelOrder`. The method already says what happens.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A partner syncs 2 million orders through your list endpoint. Offset or cursor pagination, and why?" level="Mid" category="APIs">
+    **Short answer.** Cursor pagination. The cursor holds the last row's `created_at` and `id`, so each page is one index seek, and new orders cannot shift the next page.
+
+    **Why.** At 50 per page, the last page is about page 40,000, at offset 2 million. With offsets the database walks past every skipped row, so the sync gets slower page by page. New orders arrive about every 2 seconds, and each one shifts later pages by a row, which shows up as duplicates. A cursor query reads 51 rows wherever it starts; the 51st row only says that more exist.
+
+    <AnimatedDiagram name="fundamentals/api-design-pagination" step={2} caption="Order 9001 arrives mid-sync, but the page after c1 is unchanged." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why must the cursor include the id?
+    - The product team wants "page 7 of 120" in the admin screen. What do you do?
+
+    **Watch out for.** Building the cursor from the timestamp alone. Two orders in the same millisecond on a page boundary means one is skipped.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A phone times out on POST /v1/orders, which charges the card, and retries. How do you make sure the customer is charged once?" level="Mid" category="Reliability">
+    **Short answer.** The client makes an idempotency key once per purchase and sends it on every attempt. The server stores the key with a hash of the body and the response; a repeat key gets the saved response and no second charge.
+
+    **Why.** The timeout says nothing about whether the first request reached the server. Often it did, and only the reply was lost. One key with its saved reply takes under 1 KB. At 40,000 paid orders a day and a 24-hour TTL, the table holds about 40,000 rows, roughly 40 MB at most. Write the key and the order in one database transaction, and pass the same key on to the card processor, so a crash between the two steps cannot charge the card twice.
+
+    <AnimatedDiagram name="fundamentals/api-design" highlight={["api", "idem"]} caption="The Orders API checks the idempotency store before it does any work." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if two retries with the same key arrive at the same moment?
+    - What if the same key comes with a different amount?
+
+    **Watch out for.** Letting the server make the key. A retry then looks like a brand new request, which is the problem you set out to fix.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you version a public API, and what counts as a breaking change?" level="Mid" category="APIs">
+    **Short answer.** Breaking changes are removing or renaming fields, changing types, adding required inputs, or changing what a status code means. I ship those under a new version, path or header, and keep the old one running with a published end date.
+
+    **Why.** Old clients do not update on your schedule. If 30% of phones still run last month's app, removing a field breaks 30% of users at once. A new optional field needs no new version if clients ignore unknown fields. Each live version costs testing and support, so most teams run two or three and send a `Sunset` header on the oldest.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you know when it is safe to turn off v1?
+    - Path versions or header versions: which would you pick here?
+
+    **Watch out for.** Bumping the version for every change. Five live versions means five sets of bugs to fix.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design the rate-limit contract for a public API. What do clients see, and how should they behave?" level="Senior" category="APIs">
+    **Short answer.** Limit per API key at the gateway, and put the limit, the remaining quota and the reset time on every response. Over the limit, answer 429 with `Retry-After`; clients wait that long, then back off with jitter (a small random extra wait, so clients do not all retry at once).
+
+    **Why.** Rejecting at the gateway is cheap: a counter lookup under a millisecond instead of a database query. With 600 requests a minute per key, a script looping at 300 a second sends 18,000 a minute, so about 97% of its calls stop at the gateway. Headers on successful calls let good clients slow down before they hit the wall. Without them, every client finds the limit by failing.
+
+    <AnimatedDiagram name="fundamentals/api-design" path="partner>gateway>api" caption="The partner's calls pass the gateway, which counts them per key before any reach the Orders API." />
+
+    **Follow-ups the interviewer may ask.**
+    - Fixed window, sliding window or token bucket: which, and why?
+    - Do you fail open or closed if the counter store is down?
+
+    **Watch out for.** One global limit for everyone. A single noisy partner then uses up the quota that your own phone app needs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A partner must sync every order created or changed since its last run, without ever missing one. How would you design that endpoint?" level="Senior" category="APIs">
+    **Short answer.** A changes feed, `GET /v1/orders/changes?cursor=...`, ordered by a change position, with a cursor the partner saves after each page. It returns only changes older than a short safety window, or reads from a change log in commit order, so a slow transaction cannot slip in behind the cursor.
+
+    **Why.** 40,000 new orders a day, each created once and then changed about 3 times, is 160,000 change events (40,000 × 4). At 50 per page that is 3,200 calls, about 5.3 minutes at 600 calls a minute. The hard part is order: timestamps and sequence numbers are assigned when a write starts, not when it commits. A row stamped 08:00:01 can commit after the reader has passed 08:00:02 and be missed forever. Holding back the last 5 seconds, or reading the database's change log, closes that gap. The partner upserts by order id (inserts the order, or updates it if it already has it), so seeing an order twice is harmless.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you tell the partner about deleted orders?
+    - When would you push changes with webhooks instead?
+
+    **Watch out for.** Paging by `updated_at` with offsets. Updated rows jump to the end of the list, and every shift creates a gap or a duplicate.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [HTTP](/system-design/fundamentals/http)
+- [REST](/system-design/fundamentals/rest)
+- [GraphQL](/system-design/fundamentals/graphql)
+- [RPC and gRPC](/system-design/fundamentals/rpc)
+- [Choosing an API style](/system-design/fundamentals/choosing-an-api-style)
+- [API gateways](/system-design/fundamentals/api-gateway)
+- [Idempotency](/system-design/patterns/idempotency)
+- [Rate limiting](/system-design/patterns/rate-limiting)
+- [Design a rate limiter](/system-design/case-studies/rate-limiter)
+
+## Further reading
+
+- [RFC 9110: HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110), the standard meaning of methods, status codes and `Retry-After`.
+- [RFC 9457: Problem Details for HTTP APIs](https://www.rfc-editor.org/rfc/rfc9457), the error body format used above.
+- [Stripe API reference: idempotent requests](https://docs.stripe.com/api/idempotent_requests), a production idempotency-key contract.
+- [GitHub Docs: using pagination in the REST API](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api), cursor and `Link` header paging in practice.

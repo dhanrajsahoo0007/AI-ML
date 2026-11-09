@@ -1,0 +1,315 @@
+---
+title: "Authentication and authorization for APIs"
+description: "How an API knows who is calling and what they may do: session cookies, JWTs, API keys, OAuth 2 with PKCE, scopes, refresh and revocation."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Every API call must answer two questions before it runs: who is calling, and are they allowed to do this?
+</KeyIdea>
+
+## The story
+
+You run Larder, a recipe and grocery app with 2 million users. People save recipes on the website and on the phone app. A grocer's server pulls shopping lists every few minutes so it can deliver the food. Then a meal-planning app called PlanMyWeek asks to read your users' saved recipes.
+
+PlanMyWeek's first version asks each user for their Larder password and stores it. Six months later its database leaks, and 40,000 Larder passwords leak with it. Larder cannot tell PlanMyWeek's calls from the users' own. It cannot limit PlanMyWeek to reading recipes. It cannot cut PlanMyWeek off without making every one of those users change their password.
+
+This page builds the fix one caller at a time: a cookie for the website, a signed token for the phone, a key for the grocer, and a proper way to let PlanMyWeek in without ever seeing a password.
+
+## How it works
+
+Two words first. **Authentication** means proving who the caller is. **Authorization** means deciding what that caller may do. A **credential** is the thing the caller shows to prove it: a password, a cookie, a token or a key.
+
+### Step 1: One front door asks both questions
+
+<AnimatedDiagram name="fundamentals/api-auth" step={1} caption="Three kinds of caller bring three kinds of credential to one gateway, which forwards the user id and scopes to the services." />
+
+Every outside call reaches Larder through an <Term id="api-gateway">API gateway</Term>, a server that handles the checks every request shares. The gateway reads the credential, works out the user, and drops the call if the credential is missing or wrong. That answer is `401 Unauthorized`. The name is old and misleading: it really means "I do not know who you are". If the caller is known but not allowed, the answer is `403 Forbidden`.
+
+When the call passes, the gateway removes any identity headers the client sent and adds its own, such as `X-User-Id: 42`. The services trust only those. A **scope** is a named permission attached to a credential, such as `recipes:read`. The gateway does the coarse check: "does this caller hold `recipes:read` at all?" The recipes service does the fine check: "does recipe 77 belong to user 42?" Only the service knows that rule.
+
+<PremiumBreak />
+
+### Step 2: Session cookies for your own website
+
+<AnimatedDiagram name="fundamentals/api-auth" step={2} caption="A session id means nothing on its own, so the gateway looks it up in the session store." />
+
+When you log in on the website, Larder creates a **session**: a row that says "session `s9Qk...` belongs to user 42, logged in at 18:02". The browser gets only the random id, in a **cookie**, a small value the browser sends back on every request to that site. The gateway looks the id up in a fast in-memory store, which takes about 0.5 ms.
+
+The store is small. 2 million users with about 1.5 devices each is 3 million sessions. At about 200 bytes each, that is 3,000,000 × 200 B = 600 MB, which fits in memory on one machine with room to spare.
+
+Sessions are easy to take back: delete the row and the next request fails. Set three flags on the cookie. `HttpOnly` hides it from page scripts, so injected JavaScript cannot steal it. `Secure` sends it only over <Term id="tls">TLS</Term>. `SameSite=Lax` stops the browser from attaching it to a form post or a background request that another site starts. Without it, a page on `evil.example` could make your browser send `POST /lists/9/delete` with your cookie, an attack called **cross-site request forgery** (CSRF). Lax still sends the cookie when you follow a plain link, so `GET` routes must never change data.
+
+### Step 3: Signed tokens for the phone app
+
+<AnimatedDiagram name="fundamentals/api-auth" step={3} caption="A JWT carries its own claims. The gateway checks the signature locally with public keys it fetches from the auth server about once an hour." />
+
+When you log in on the phone, the app gets a **JWT** (JSON Web Token) instead. Step 5 shows that login. A JWT is a token that carries facts about the caller, called **claims**, plus a signature. It has three parts joined by dots: a header that names the signing algorithm and key, the claims, and the signature. Each part is Base64 text, a way to write bytes as letters and digits. Larder's **auth server**, the one service that logs people in, signs each token with a **private key** that only it holds. Anyone with the matching **public key** can check a signature but cannot make a new one. The gateway downloads the public keys from the auth server's key list (a **JWKS**, JSON Web Key Set) about once an hour. So no call to the auth server is needed per request.
+
+The app sends the token in the `Authorization` header. The word `Bearer` means "whoever holds this token may use it", which is why a copied token is as good as the real one.
+
+<Tabs title="One JWT at the gateway">
+  <Tab label="Request">
+
+```http
+GET /v1/recipes HTTP/1.1
+Host: api.larder.app
+Authorization: Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjYtMTEifQ.eyJpc3Mi...
+```
+
+  </Tab>
+  <Tab label="Decoded claims">
+
+```json
+{
+  "iss": "https://login.larder.app",
+  "aud": "api.larder.app",
+  "sub": "user_42",
+  "scope": "recipes:read lists:write",
+  "exp": 1794240900,
+  "jti": "t_8f2c1a"
+}
+```
+
+  </Tab>
+  <Tab label="Rejected">
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer error="invalid_token", error_description="expired"
+```
+
+  </Tab>
+</Tabs>
+
+Before it trusts a JWT, the gateway checks five things:
+
+1. The signature is valid, using the key named by `kid` (key id) in the token's header, and the algorithm is on an allowlist. A token that says `"alg": "none"` is rejected.
+2. `exp` (expiry) has not passed, with about 30 seconds of slack for clock drift.
+3. `iss` (issuer) is Larder's auth server.
+4. `aud` (audience) is this API, so a token minted for another service does not work here.
+5. `scope` covers the route being called.
+
+The token also carries `jti` (JWT id), a unique id for this one token. Step 5 uses it.
+
+A signature check costs about 0.1 ms of CPU. At Larder's peak of 20,000 calls a second, that is 20,000 × 0.1 ms = 2 seconds of CPU every second, or about 2 cores across the whole gateway fleet. The catch: a JWT is valid until it expires, and nobody can call it back. So Larder keeps access tokens short, at 15 minutes.
+
+### Step 4: API keys for the grocer's server
+
+<AnimatedDiagram name="fundamentals/api-auth" step={4} caption="An API key is hashed and looked up. Larder stores only the hash, so a leaked database does not leak working keys." />
+
+The grocer's server has no person at a keyboard. It gets an **API key**: a long random secret, such as `lk_live_` followed by 32 random bytes. Larder shows the key once, then stores only its SHA-256 hash, a fixed-size fingerprint that cannot be turned back into the key. On each call the gateway hashes the key it received and looks the hash up, with a 60-second <Term id="cache">cache</Term> in front.
+
+A fast hash is safe here, unlike for passwords. People pick guessable passwords, so password storage needs a deliberately slow hash. A 32-byte random key has $2^{256}$ possible values, so nobody can guess one. The `lk_live_` prefix lets code-scanning tools spot a key pushed to a public repository. Each key is tied to one partner, carries its own scopes and <Term id="rate-limit">rate limit</Term>, and is replaced every few months.
+
+### Step 5: Letting another app in with OAuth 2
+
+**OAuth 2** is a standard way for a user to give one app limited access to their data in another app, without sharing a password. PlanMyWeek is the **client**. Larder's login server, the auth server from step 3, plays the **authorization server**. The user approves a list of scopes, the named permissions from step 1, such as `recipes:read`.
+
+<AnimatedDiagram name="fundamentals/api-auth-oauth-flow" stepper caption="The authorization code flow with PKCE. The code travels through the browser; the tokens never do." />
+
+The **authorization code flow** goes like this. PlanMyWeek sends your browser to Larder. You log in on Larder's own page, so PlanMyWeek never sees your password. You approve `recipes:read`. Larder sends the browser back with a one-time **code** that lives about 60 seconds. PlanMyWeek's server trades that code for tokens in a direct call to Larder. Larder's own phone app logs in with the same flow, which is how it got its JWT in step 3.
+
+The code passes through the browser and the URL, so it can leak, for example to a malicious app on a phone that grabs the redirect. **PKCE** (Proof Key for Code Exchange) closes that hole. Before it starts, PlanMyWeek makes a random secret called the **verifier** and sends only its hash, the **challenge**. When it trades the code, it must show the verifier. Larder checks that SHA-256(verifier) matches the challenge. A thief with the code but not the verifier gets nothing.
+
+**Refresh.** PlanMyWeek receives two tokens. The **access token** is a 15-minute JWT that it sends to the API. The **refresh token** is a long-lived secret, valid for 30 days, that it sends only to the auth server to get a new access token. Larder **rotates** refresh tokens: each refresh returns a new one and kills the old one. If a killed one is ever used again, someone has copied it, so Larder ends the whole chain.
+
+Refreshing is cheap for the auth server. Say 300,000 users are active at peak. Each refreshes once per 15 minutes: 300,000 ÷ 900 s ≈ 330 refreshes a second, against 20,000 API calls a second at the gateway.
+
+<AnimatedDiagram name="fundamentals/api-auth" step={5} caption="The auth server pushes the ids of revoked tokens to a small denylist, which the gateway checks for every JWT." />
+
+**Revoke.** To cut an app off, Larder deletes its refresh token, so the next refresh fails. For the access token still in flight, it uses a **denylist** of revoked token ids (their `jti` claims). Each entry only needs to live until that token's `exp`, at most 15 minutes. Larder revokes about 3,000 tokens a day for stolen phones, bans and password changes. A day has 96 periods of 15 minutes, so about 3,000 ÷ 96 ≈ 31 entries are live at once. At about 50 bytes per entry (the `jti` and its `exp`), that is under 2 KB, so the list fits in every gateway's memory.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="A user logs out of the phone app. Their 15-minute access token was issued 4 minutes ago. Without a denylist, how long can a copy of it still work?" hint="A JWT is checked locally against its own exp claim.">
+    About 11 minutes, until `exp`. Deleting the refresh token stops new access tokens, but the gateway still accepts the current one. Add its `jti` to the denylist to stop it now.
+  </QuizItem>
+  <QuizItem question="An attacker gets a copy of Larder's API-key table. Why can they not call the API as the grocer?" hint="What exactly is stored?">
+    The table holds only SHA-256 hashes. The gateway needs the original key, and a 32-byte random key cannot be found from its hash or guessed.
+  </QuizItem>
+  <QuizItem question="An attacker steals an authorization code from a redirect URL. Why can they not trade it for tokens?" hint="What else does the token request carry?">
+    With PKCE, the token request must include the verifier, and only PlanMyWeek has it. The code is also single use and expires in about 60 seconds.
+  </QuizItem>
+</Quiz>
+
+<DecisionTree
+  title="Which credential for this caller?"
+  tree={{
+    q: "Is the caller a person using your own website?",
+    yes: "A session cookie with HttpOnly, Secure and SameSite set",
+    no: {
+      q: "Is a person using an app, yours or someone else's?",
+      yes: {
+        q: "Is it someone else's app reading the user's data?",
+        yes: "OAuth 2 code flow with PKCE and scopes the user approves",
+        no: "Your own login page with code flow and PKCE, then short JWTs and a refresh token",
+      },
+      no: "An API key, stored as a hash, with its own scopes and rate limit",
+    },
+  }}
+/>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Session cookie", "JWT access token", "API key"]}
+  rows={[
+    ["Typical caller", "Your website", "Your apps, apps acting for a user", "Partner servers"],
+    ["Check at the gateway", "Store lookup, about 0.5 ms", "Signature check, about 0.1 ms CPU", "Hash lookup, cached 60 s"],
+    ["Bytes sent per call", "About 40", "About 400", "About 50"],
+    ["Typical lifetime", "Days, renewed while active", "15 minutes", "Months, until rotated"],
+    ["Revoke at once", "Yes, delete the row", "Only with a denylist", "Within 60 s, after the cache"],
+    ["Main risk", "CSRF if SameSite is off", "Cannot be taken back before exp", "Leaks into code or logs"],
+  ]}
+  caption="Larder numbers. Lookups assume an in-memory store in the same data centre."
+/>
+
+The real choice is between state and speed. A session or a hashed key needs a store lookup on every call, but you can end it instantly. A JWT needs no lookup, but it lives until `exp`. Short access tokens, refresh tokens and a small denylist give you most of both.
+
+## In the wild
+
+- **Google APIs** use OAuth 2 with fine-grained scopes, and show users a consent screen listing each one.
+- **GitHub** puts a prefix such as `ghp_` on its tokens so secret scanners can find leaked ones in public code.
+- **Stripe** separates `sk_live_` and `sk_test_` keys and offers restricted keys that can call only some endpoints.
+- **Envoy** has a JWT filter that fetches a JWKS and checks tokens at the proxy before any service sees the call.
+
+## Common pitfalls
+
+- **Putting secrets in a JWT.** The payload is only encoded as text (Base64), not encrypted. Anyone with the token can read it.
+- **Skipping `aud` and `iss` checks.** A valid token for another service then works on yours.
+- **Hour-long or day-long access tokens.** A stolen token works for that whole time.
+- **Storing tokens in browser `localStorage`.** Any injected script can read it. Use an HttpOnly cookie for web apps.
+- **Authorizing only at the gateway.** A valid scope does not mean user 42 may read user 99's recipe. The service must check ownership.
+- **Logging full `Authorization` headers.** Logs are read by many people and kept for months.
+
+## How to say it in an interview
+
+"I split it into authentication, who is calling, and authorization, what they may do. The gateway authenticates every call. For the website I use a session cookie with HttpOnly, Secure and SameSite set, backed by an in-memory store; 3 million sessions is about 600 MB. For apps I use OAuth 2 authorization code with PKCE. That gives a 15-minute JWT access token, which the gateway checks locally with cached public keys in about 0.1 ms, plus a rotating refresh token. Third-party apps get only the scopes the user approves. Partner servers get API keys that I store as hashes. The gateway checks scopes, and each service checks ownership. To revoke, I delete the refresh token and put the access token's id on a denylist, which stays tiny because tokens live only 15 minutes."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between authentication and authorization? When do you return 401 and when 403?" level="Junior" category="Security">
+    **Short answer.** Authentication proves who the caller is; authorization decides what that caller may do. Return 401 when you cannot tell who is calling, and 403 when you know who it is but they are not allowed.
+
+    **Why.** A call with no token, or an expired one, fails authentication: 401, and the client should log in again or refresh. A call from user 42 with a valid token and only `recipes:read` that tries `DELETE /lists/9` fails authorization: 403, and logging in again will not help. Getting this right tells the client what to do next.
+
+    <AnimatedDiagram name="fundamentals/api-auth" step={1} highlight={["gateway"]} caption="The gateway answers both questions before any service sees the call." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which checks belong at the gateway and which in the service?
+    - Should a 403 reveal that the resource exists?
+
+    **Watch out for.** Treating the two words as the same. A system that only authenticates lets any logged-in user read anyone's data.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="For your own website, would you use a session cookie or a JWT?" level="Junior" category="Security">
+    **Short answer.** A session cookie, marked HttpOnly, Secure and SameSite. It is small, scripts cannot read it, and you can end it at once by deleting the session row.
+
+    **Why.** The lookup costs about 0.5 ms in an in-memory store, and 3 million sessions at 200 bytes is about 600 MB, so scale is not a problem. A JWT kept in `localStorage` can be stolen by any injected script, and it cannot be revoked before `exp` without extra machinery. JWTs earn their place when many services or other companies must check the caller without calling a central store.
+
+    <AnimatedDiagram name="fundamentals/api-auth" path="web>gateway>sessions" caption="The website's cookie carries only a session id; the gateway looks it up." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does SameSite protect against?
+    - How would you log a user out of every device?
+
+    **Watch out for.** Saying JWTs are "more secure". They are signed, not secret, and harder to revoke.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How can the gateway validate a JWT without calling the auth server on every request?" level="Mid" category="Security">
+    **Short answer.** The auth server signs tokens with a private key and publishes the public keys as a JWKS. The gateway caches those keys and checks each token's signature, `exp`, `iss`, `aud` and scope locally.
+
+    **Why.** A signature check is about 0.1 ms of CPU. At 20,000 calls a second that is about 2 cores across the fleet, with no network hop. Calling the auth server instead would add about 1 ms per call and make it a single point of failure for every request. The gateway refreshes keys about once an hour, and fetches again at once if a token names an unknown `kid`.
+
+    <AnimatedDiagram name="fundamentals/api-auth" highlight={["gateway", "authsrv", "mobile"]} caption="Public keys flow from the auth server to the gateway; tokens are checked locally." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why must the gateway keep an allowlist of algorithms?
+    - How much clock drift would you allow on `exp`?
+
+    **Watch out for.** Decoding the token and reading its claims without checking the signature. Anyone can write a JSON payload that says `"sub": "admin"`.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="In OAuth 2, why does the login server return a code instead of the access token, and what does PKCE add?" level="Mid" category="Security">
+    **Short answer.** The redirect travels through the browser and the URL, where it can leak, so it carries only a short-lived, single-use code. The app then trades the code for tokens over a direct server call, and PKCE makes it prove it is the same app that started the flow.
+
+    **Why.** URLs end up in browser history, logs and, on phones, in other apps that claim the same redirect address. A code that lives about 60 seconds and works once limits the damage. PKCE closes the rest: the app sends SHA-256 of a random verifier at the start and the verifier itself at the token step. A thief with only the code cannot pass that check.
+
+    <AnimatedDiagram name="fundamentals/api-auth-oauth-flow" step={3} caption="The token request carries the code and the verifier; the login server checks the hash." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why is PKCE now recommended even for apps with a server-side secret?
+    - What does the `state` parameter protect against?
+
+    **Watch out for.** Recommending the old implicit flow, which put the access token straight into the redirect URL. Current guidance retires it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you issue, store and check API keys for 300 partner servers?" level="Mid" category="Security">
+    **Short answer.** Generate a long random key with a recognisable prefix, show it once, and store only its SHA-256 hash with the partner's scopes and rate limit. The gateway hashes each incoming key, looks it up through a short cache, and rejects unknown or revoked hashes.
+
+    **Why.** A 32-byte random key cannot be guessed, so a fast hash is enough, unlike passwords. A leaked key table then contains no working keys. With a 60-second cache, each gateway reads each of the 300 keys at most once a minute: 300 ÷ 60 = 5 store reads a second per gateway. A revoked key stops working within a minute. Letting each partner hold two active keys allows rotation with no downtime.
+
+    <AnimatedDiagram name="fundamentals/api-auth" path="partner>gateway>apikeys" caption="The grocer's key is hashed and matched against stored hashes." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you rotate a key without breaking the partner?
+    - When would you use OAuth client credentials instead?
+
+    **Watch out for.** Storing keys in plain text "so support can look them up". One database leak then hands out every partner's access.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A user reports their phone stolen. Access tokens are JWTs valid for 15 minutes. How do you cut the phone off right now?" level="Senior" category="Security">
+    **Short answer.** Revoke the phone's refresh token so no new access tokens are issued, and push the current access token's `jti` to a denylist that every gateway checks. The denylist entry expires when the token would have.
+
+    **Why.** Without the denylist the thief has up to 15 minutes. Entries live at most 15 minutes, so at about 3,000 revocations a day only about 3,000 ÷ 96 ≈ 31 are live at once. Even a hundredfold spike is about 3,100 entries × 50 bytes ≈ 155 KB, small enough to hold in every gateway's memory and update by push within a second or two. With refresh-token rotation, a copied refresh token is also caught the moment either copy is reused.
+
+    <AnimatedDiagram name="fundamentals/api-auth" step={5} highlight={["gateway", "denylist", "authsrv"]} caption="The auth server pushes revoked token ids; the gateway rejects them until they expire." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if the denylist push fails to reach one gateway?
+    - Would you shorten tokens to 1 minute instead? What does that cost the auth server?
+
+    **Watch out for.** Calling the auth server on every request to ask "is this token still valid?". That brings back the central lookup JWTs were meant to remove, at 20,000 calls a second.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You suspect the private key that signs your JWTs has leaked. What do you do, and how should the system be built so this is survivable?" level="Senior" category="Security">
+    **Short answer.** Generate a new key, publish it in the JWKS, start signing with it, and remove the old key so every token it signed fails. Build for this ahead of time: every token names its key with `kid`, and gateways refetch the JWKS when they see a `kid` they do not know.
+
+    **Why.** Anyone with the old key can mint a token for any user with any scope, so the old key must go now, not at its planned retirement. Removing it rejects every token it signed. Refresh tokens are random values checked against the database, not JWTs, so they still work and each client recovers with one refresh. Plan for the herd: 300,000 active users make 20,000 calls a second, so each calls about every 15 seconds. Nearly all of them hit a 401 within 15 seconds, which is up to 300,000 ÷ 15 = 20,000 refreshes a second, 60 times the normal 330. Clients should retry with random jitter, and the auth server should queue or rate-limit refreshes so the spike spreads over 3 to 5 minutes: 300,000 ÷ 300 s to 300,000 ÷ 180 s, about 1,000 to 1,700 a second. Keep the private key in a hardware security module (a sealed device that signs on request and never hands out the key) or a managed key service, so it is far harder to copy in the first place.
+
+    | Planned rotation | Emergency rotation |
+    | --- | --- |
+    | Publish new key, wait an hour for caches | Publish new key and sign with it at once |
+    | Keep old key until its tokens expire | Remove old key immediately |
+    | No user notices | Users with old tokens refresh once |
+
+    **Follow-ups the interviewer may ask.**
+    - Why should refresh tokens not be JWTs signed with the same key?
+    - How do you find out which tokens the attacker minted?
+
+    **Watch out for.** A single key with no `kid`. Then rotating means every gateway and every token must switch at the same instant, which never goes cleanly.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [API gateways and backends for frontends](/system-design/fundamentals/api-gateway)
+- [TLS and HTTPS](/system-design/fundamentals/tls)
+- [HTTP](/system-design/fundamentals/http)
+- [API design](/system-design/fundamentals/api-design)
+- [Security](/system-design/fundamentals/security)
+- [Encryption and hashing](/system-design/fundamentals/encryption-and-hashing)
+- [Common attacks](/system-design/fundamentals/common-attacks)
+- [Rate limiting](/system-design/patterns/rate-limiting)
+
+## Further reading
+
+- [IETF RFC 6749, The OAuth 2.0 Authorization Framework](https://www.rfc-editor.org/rfc/rfc6749): the base standard for roles, grants and tokens.
+- [IETF RFC 7636, Proof Key for Code Exchange](https://www.rfc-editor.org/rfc/rfc7636): the PKCE extension and why public clients need it.
+- [IETF RFC 8725, JSON Web Token Best Current Practices](https://www.rfc-editor.org/rfc/rfc8725): the checks a verifier must make, including algorithm allowlists.
+- [OWASP Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html): cookie flags, session lifetimes and logout done right.

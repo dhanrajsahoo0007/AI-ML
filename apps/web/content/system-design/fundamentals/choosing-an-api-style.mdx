@@ -1,0 +1,229 @@
+---
+title: "Choosing an API style"
+description: "How to pick REST, GraphQL, gRPC, WebSockets or webhooks for each conversation in a system, based on who calls and who starts."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Pick an API style for each conversation in your system, not one for the whole system, by asking who is calling, who speaks first and how often messages flow.
+</KeyIdea>
+
+## The story
+
+You build Spokes, a bike-share app for one city with 3,000 docks and 40,000 bikes. The first version uses REST for everything, and it creaks in three places. The rider app's home screen needs four calls before it can draw. During a ride, the app asks "anything new?" every 2 seconds. At the evening peak about 24,000 rides start in one hour and each lasts about 25 minutes, so about $24{,}000 \times 25 \div 60 = 10{,}000$ rides are under way at once. That is $10{,}000 \div 2 = 5{,}000$ requests a second, and almost every answer is "no". Billing asks the card processor "has this charge gone through?" until the answer is yes. All three come from one mistake: one style for every kind of conversation.
+
+## How it works
+
+An **API** (application programming interface) is the agreed way two programs talk. An **API style** is the shape of that conversation. Three questions sort almost every case:
+
+1. **Who is calling?** An outside developer, your own app, or another of your own services.
+2. **Who speaks first?** The client asks and the server answers, or the server has news nobody asked for.
+3. **How often?** One question and one answer, or a steady stream of messages in both directions.
+
+Spokes has five kinds of conversation. Each step below adds one, with the style that fits it.
+
+### Step 1: Partners read public data with REST
+
+<AnimatedDiagram name="fundamentals/choosing-an-api-style" step={1} caption="A partner app asks the API gateway for the dock list with a plain GET." />
+
+The city's planning office and a transit app want the dock list. They are outside developers, so they need something they can try with `curl`, a command-line tool that sends one web request. **REST** fits: each thing (a dock, a bike) has a URL, and HTTP verbs such as `GET` (read) and `POST` (create or change) act on it. An <Term id="api-gateway">API gateway</Term> at the front checks each partner's key and sends the request on. Because `GET /docks` is a plain URL, a <Term id="cdn">CDN</Term> can keep the answer for 30 seconds. Most of the partners' 300 requests a second never reach Spokes at all.
+
+<PremiumBreak />
+
+### Step 2: Your own app's screens use GraphQL
+
+<AnimatedDiagram name="fundamentals/choosing-an-api-style" step={2} caption="The rider app sends one query for the home screen; the GraphQL server fetches from the services it needs." />
+
+The home screen needs the rider's name, their pass, the nearest docks with free bikes and their last ride. With REST that is four calls. The pass and the last ride need the rider's id from the first call, so the phone waits for two round trips in a row. `GET /docks?near=...` also returns 30 full dock objects of about 2 KB each, 60 KB in all, when the screen shows three fields per dock, about 3 KB.
+
+**GraphQL** lets the app send one query that names the exact fields it wants. A GraphQL server checks the query against a **schema** (a typed list of every object and field it offers), fetches from the services behind it, and returns about 4 KB in one round trip. The cost lands on the server: it must cap how expensive a query can be, and responses no longer cache by URL. See [GraphQL](/system-design/fundamentals/graphql).
+
+### Step 3: Services call each other with gRPC
+
+<AnimatedDiagram name="fundamentals/choosing-an-api-style" step={3} caption="Behind the entry points, every call between Spokes services is gRPC." />
+
+Behind the entry points, both sides of every call are code you own. **gRPC** is a framework for <Term id="rpc">remote procedure calls</Term>: one service calls a function on another as if it were local. A shared contract file (a `.proto` file) generates the code on both sides, so a renamed field breaks the build, not production. Every call carries a **deadline**, the time after which the caller stops waiting. Browsers cannot call plain gRPC, so it stays behind the entry points. See [RPC and gRPC](/system-design/fundamentals/rpc).
+
+These calls add up. Each home screen query turns into about 3 calls inside Spokes. Each live ride also reports its position every 5 seconds, which is $10{,}000 \div 5 = 2{,}000$ reports a second at peak, and each report turns into 2 calls: save the position, then price the fare. With about 200 home screens a second at peak, services make about $200 \times 3 + 2{,}000 \times 2 = 4{,}600$ calls a second to each other, and every one of them benefits from the contract and the deadline.
+
+### Step 4: Live updates during a ride use a WebSocket
+
+<AnimatedDiagram name="fundamentals/choosing-an-api-style" step={4} caption="The phone keeps one connection open to the live gateway; messages flow both ways on it." />
+
+During a ride, the conversation runs both ways. The phone sends its position every 5 seconds. The server sends the fare as it grows, and warnings such as "the dock at Elm Street is full". A <Term id="websocket">WebSocket</Term> is a connection that starts as an HTTP request, then stays open so either side can send a message at any time.
+
+Run the numbers. Polling every 2 seconds cost 5,000 full HTTP requests a second. With WebSockets, Spokes holds 10,000 open connections. The phones send 2,000 small position messages a second, and the server sends one when something changes, about one per ride every 10 seconds, or $10{,}000 \div 10 = 1{,}000$ a second. The price is state: the live gateway must know which connection belongs to which ride, and the app must reconnect when the network drops. If only the server talked, **Server-Sent Events** (a one-way stream over plain HTTP) would be simpler. [Choosing a real-time method](/system-design/fundamentals/choosing-realtime) compares them.
+
+### Step 5: Another company tells you about events with a webhook
+
+<AnimatedDiagram name="fundamentals/choosing-an-api-style" step={5} caption="The card processor calls Spokes when a charge settles; Spokes starts charges with a normal REST call." />
+
+The card processor is another company's server, and it will not hold a connection open for each of its customers. A **webhook** reverses the usual direction: you give the processor a URL, and it sends an HTTP `POST` to that URL when something happens, such as a charge going through.
+
+<AnimatedDiagram name="fundamentals/choosing-an-api-style-flow" stepper caption="Polling asks three times and wastes two; the webhook arrives once, as soon as the bank approves." />
+
+Spokes runs about 150,000 rides a day. If billing checked each charge three times, that is 450,000 calls, and two thirds of them come back "pending". A webhook sends 150,000 deliveries, each on time. In return, the receiver checks each request's signature so nobody can fake a payment, answers `200` within a second or two, and does the real work later from a queue. The processor resends anything it is not sure arrived, so the handler must be <Term id="idempotent">idempotent</Term>: running it twice has the same effect as running it once.
+
+## Try it
+
+<DecisionTree
+  title="Which API style for this conversation?"
+  tree={{
+    q: "Does the server need to send news that nobody asked for?",
+    yes: {
+      q: "Is the one being told another company's server, with a public URL?",
+      yes: { answer: "Webhooks: POST each event to their URL, signed, with retries", href: "/system-design/fundamentals/webhooks" },
+      no: {
+        q: "Does the client also send a steady stream of messages back?",
+        yes: { answer: "WebSocket: one open connection, messages both ways", href: "/system-design/fundamentals/websockets" },
+        no: { answer: "Server-Sent Events: a one-way stream over plain HTTP", href: "/system-design/fundamentals/server-sent-events" },
+      },
+    },
+    no: {
+      q: "Are both sides services your own company runs?",
+      yes: { answer: "gRPC: a shared contract, binary messages, deadlines", href: "/system-design/fundamentals/rpc" },
+      no: {
+        q: "Is the caller your own app, with screens that combine many kinds of data?",
+        yes: { answer: "GraphQL: one query per screen, exactly the fields it shows", href: "/system-design/fundamentals/graphql" },
+        no: { answer: "REST: resources at URLs, easy to try and to cache", href: "/system-design/fundamentals/rest" },
+      },
+    },
+  }}
+/>
+
+## Trade-offs
+
+<Compare
+  columns={["", "REST", "GraphQL", "gRPC", "WebSocket", "Webhooks"]}
+  rows={[
+    ["Who sends first", "Client", "Client", "Client", "Either side", "The side with news"],
+    ["Connection", "Request per call", "Request per query", "Long-lived HTTP/2", "One open connection", "Request per event"],
+    ["Contract", "Optional (OpenAPI)", "Required schema", "Required .proto file", "None built in", "Event docs"],
+    ["Browser can use it directly", true, true, false, true, false],
+    ["Caches by URL at a CDN", true, "Only for saved queries sent as GET", false, false, false],
+    ["Spokes use", "Partner dock list", "Rider app screens", "Ride to pricing", "Live ride", "Charge settled"],
+    ["Spokes peak load", "About 300 req/s", "About 200 queries/s", "About 4,600 calls/s", "10,000 open sockets", "About 2 events/s"],
+    ["Main cost", "Many round trips, extra fields", "Query cost limits, weaker caching", "No browsers, per-call balancing", "Stateful servers, reconnects", "Retries, repeats, signatures"],
+  ]}
+  caption="One system, five styles. The 2 events/s for webhooks is 150,000 charges spread over 86,400 seconds."
+/>
+
+Each extra style needs its own tools, monitoring and security review. A small team can start with REST and add a style only when a number shows the need, as each step above did.
+
+## In the wild
+
+- **GitHub** offers a REST API and a GraphQL API side by side, and sends webhooks when something happens in a repository, such as a push or a new pull request.
+- **Stripe** takes payment requests over REST and reports results such as a succeeded payment through signed webhooks that it retries when they fail.
+- **Slack** delivers events to apps through webhooks, and offers Socket Mode, a WebSocket connection, for apps that cannot expose a public URL.
+
+## Common pitfalls
+
+- **One style for everything.** REST for live updates means wasteful polling. WebSockets for plain reads gives up caching and adds state for nothing.
+- **GraphQL for partners by default.** Outside developers can write very expensive queries. Without cost limits, one partner's query can load every dock and every ride.
+- **gRPC to the browser.** Browsers cannot read gRPC's trailing status headers. Put REST or GraphQL at the edge, or use gRPC-Web through a proxy.
+- **Doing the work inside the webhook request.** If the handler takes 30 seconds, the sender times out and resends, and now the work runs twice.
+- **Trusting a webhook without checking it.** Anyone can post to a public URL. Verify the signature and the timestamp on every delivery.
+
+## How to say it in an interview
+
+I pick an API style per conversation, using three questions: who calls, who speaks first and how often. For outside developers I use REST, because it is easy to try and caches at a CDN. For our own app's screens I consider GraphQL, so one round trip returns exactly the fields shown. Between our own services I use gRPC, for the shared contract and deadlines. When the server has news, I push it: a WebSocket when messages flow both ways, Server-Sent Events when only the server talks, and webhooks when the receiver is another company's server. I add a style only when a number justifies it, such as 5,000 polls a second that mostly return nothing.
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a webhook, and why would you use one instead of polling?" level="Junior" category="APIs">
+    **Short answer.** A webhook is an HTTP `POST` that another system sends to a URL you gave it when an event happens. It replaces "keep asking until the answer changes" with "be told once, when it changes".
+
+    **Why.** Billing at Spokes waits a few seconds for each charge. Checking every 2 seconds costs about 3 calls per charge, so 150,000 charges a day means 450,000 calls, and 300,000 of them say "pending". A webhook sends 150,000 requests, each the moment the bank approves.
+
+    <AnimatedDiagram name="fundamentals/choosing-an-api-style-flow" step={2} caption="The processor tells billing as soon as the bank approves." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens if your server is down when the webhook is sent?
+    - How do you know the request really came from the processor?
+
+    **Watch out for.** Thinking webhooks remove all polling. Senders retry for a limited time, so a careful receiver also runs a slow hourly check for missed events.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="WebSockets can carry any message. Why not use them for every API call?" level="Junior" category="Real-time">
+    **Short answer.** A WebSocket keeps a connection and its state open on a server, which pays off only when messages flow often or the server must speak first. For a plain read, a REST request is cheaper to run, easier to debug and can be cached.
+
+    **Why.** A partner reading the dock list 300 times a second is served mostly from a CDN that keeps `GET /docks` for 30 seconds. Over WebSockets, every read would reach Spokes, and a deploy would drop every partner's connection at once.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you balance load across servers that hold open connections?
+    - What does a client do when its WebSocket drops?
+
+    **Watch out for.** "WebSockets are faster." Once a connection is open, a REST call over a reused connection costs one round trip too. The real gain is server push, not speed.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your mobile home screen makes four REST calls. Would you switch it to GraphQL?" level="Mid" category="APIs">
+    **Short answer.** Probably, for that screen, because one GraphQL query replaces two rounds of calls and returns only the fields shown. I would keep REST for partners and put cost limits on the GraphQL server.
+
+    **Why.** Two of the calls need the rider's id from the first one, so the phone waits for two round trips in a row, about 200 ms on a 100 ms network, before any server work. The dock call returns about 60 KB when the screen uses about 3 KB. One query costs one round trip and about 4 KB.
+
+    <AnimatedDiagram name="fundamentals/choosing-an-api-style" step={2} path="phone>graphql>rides" caption="One query from the app; the GraphQL server calls the ride service for the last ride." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you stop one query from loading every ride in the city?
+    - How do you cache when every query is a POST to one URL?
+
+    **Watch out for.** Treating a backend-for-frontend endpoint, one REST endpoint built for this screen, as wrong. With one app and a stable screen it is a fine, simpler answer.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Riders want to see their fare and dock warnings live during a ride. Polling, Server-Sent Events or WebSockets?" level="Mid" category="Real-time">
+    **Short answer.** WebSockets, because the phone also sends its position every 5 seconds, so messages flow both ways. If only the server sent updates, Server-Sent Events would do the job with less work.
+
+    **Why.** Polling every 2 seconds with 10,000 rides is 5,000 requests a second, and most return nothing new. With WebSockets the server holds 10,000 connections, receives 2,000 position messages a second and sends about 1,000 updates when something changes.
+
+    <Compare
+      columns={["", "Polling every 2 s", "Server-Sent Events", "WebSocket"]}
+      rows={[
+        ["Requests or messages per second", "5,000", "About 1,000 down", "About 1,000 down, 2,000 up"],
+        ["Phone can send on the same channel", false, false, true],
+        ["Delay before the rider sees news", "Up to 2 s", "Under 1 s", "Under 1 s"],
+      ]}
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - How does the ride service find the live gateway holding a rider's connection?
+    - What happens to updates sent while the phone is in a tunnel?
+
+    **Watch out for.** Forgetting reconnects. Phones lose signal often, so the app needs a resume point, such as the last event id it saw.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design how Spokes receives payment webhooks so that no charge is lost or applied twice." level="Senior" category="Reliability">
+    **Short answer.** The receiver checks the signature, writes the event to a queue and answers `200` at once. A worker then applies each event by its event id, so a repeat changes nothing. An hourly reconciliation against the processor's REST API catches anything that never arrived.
+
+    **Why.** The processor retries any delivery that does not get a `2xx` quickly, so you get each event at least once, not exactly once. Events can arrive out of order, such as a refund before its charge, so the worker reads the charge's current state before acting. At about 2 events a second, one worker keeps up, and the queue absorbs bursts after an outage.
+
+    <AnimatedDiagram name="fundamentals/choosing-an-api-style" highlight={["processor", "hooks", "billing"]} caption="The receiver only verifies and queues; billing does the work." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you rotate the shared signing secret without dropping events?
+    - How do you stop an attacker from replaying an old, validly signed request?
+
+    **Watch out for.** Charging or crediting inside the request handler. A slow database makes the sender time out and retry, and the same payment is applied twice.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [API design basics](/system-design/fundamentals/api-design)
+- [REST](/system-design/fundamentals/rest)
+- [GraphQL](/system-design/fundamentals/graphql)
+- [RPC and gRPC](/system-design/fundamentals/rpc)
+- [WebSockets](/system-design/fundamentals/websockets)
+- [Webhooks](/system-design/fundamentals/webhooks)
+- [Choosing a real-time method](/system-design/fundamentals/choosing-realtime)
+- [API gateways and backends for frontends](/system-design/fundamentals/api-gateway)
+- [Idempotency](/system-design/patterns/idempotency)
+
+## Further reading
+
+- [Roy Fielding, "Architectural Styles and the Design of Network-based Software Architectures", chapter 5](https://www.ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm), the dissertation that defined REST.
+- [GraphQL: Learn](https://graphql.org/learn/), the official introduction to schemas, queries and resolvers.
+- [RFC 6455: The WebSocket Protocol](https://www.rfc-editor.org/rfc/rfc6455), how the HTTP upgrade and message frames work.
+- [Stripe: Receive events in your webhook endpoint](https://docs.stripe.com/webhooks), a real guide to signatures, retries and quick replies.

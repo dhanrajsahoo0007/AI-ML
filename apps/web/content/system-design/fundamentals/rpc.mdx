@@ -1,9 +1,279 @@
 ---
-title: "RPC (Remote Procedure Call)"
-description: "gRPC and Protocol Buffers, streaming, and when RPC beats REST."
-status: outline
+title: "RPC and gRPC"
+description: "How a remote procedure call makes a network request look like a function call, and how gRPC adds Protobuf, HTTP/2 streams and deadlines."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** gRPC and Protocol Buffers, streaming, and when RPC beats REST.
+<KeyIdea>
+  A remote procedure call lets code on one machine call a function on another machine as if it were a local function, with generated code doing the networking in between.
+</KeyIdea>
+
+## The story
+
+You run an online bookshop. When a shopper presses "Buy", the checkout service makes three calls to other services: inventory holds the copies, pricing totals the basket, and payments charges the card. Each call is JSON over HTTP, and each team writes its own code to build and read that JSON. One Friday the pricing team renames the field `price_cents` to `priceCents`. Checkout still looks for `price_cents`, finds nothing, and treats the missing value as zero. It is a quiet evening, about 2 orders a second, so in the 40 minutes before anyone notices, about $2 \times 60 \times 40 = 4{,}800$ orders go through with a price of zero. A week later, during a launch-day sale, inventory gets stuck on a database lock. Checkout sets no time limit of its own, so each call waits until its HTTP library gives up, 30 seconds later. At 2,000 checkouts a second, $2{,}000 \times 30 = 60{,}000$ requests pile up, and the whole shop stops answering. Neither failure was about the network. Both came from calls with no shared contract and no deadline. This page shows how RPC, and gRPC in particular, fixes both.
+
+## How it works
+
+An <Term id="rpc">RPC</Term> (remote procedure call) hides the network behind a function call. You write `inventory.ReserveStock(sku, 2)`, and code generated for you turns that into bytes, sends them, waits for the answer and hands you an object back. **gRPC** is one of the most widely used RPC frameworks today. It was open-sourced by Google in 2015 and has three parts: **Protobuf** (Protocol Buffers, Google's format for describing and encoding messages) for the contract and the bytes, **HTTP/2** to carry the calls, and **deadlines** to bound how long any call may take.
+
+### Step 1: A contract, and a stub generated from it
+
+Both teams first agree on a contract written in an **IDL** (interface definition language), a small language that describes functions and messages without saying how either side implements them. gRPC uses Protobuf's IDL, kept in a `.proto` file:
+
+```text
+// inventory.proto, kept in one repository both teams build from
+syntax = "proto3";
+package inventory.v1;
+
+service Inventory {
+  rpc ReserveStock(ReserveRequest) returns (ReserveReply);
+}
+
+message ReserveRequest {
+  string sku      = 1;   // the number is the field's identity on the wire
+  int32  quantity = 2;
+  int64  order_id = 3;
+}
+
+message ReserveReply {
+  bool  reserved  = 1;
+  int32 remaining = 2;
+}
+```
+
+A code generator, `protoc`, reads this file and writes two pieces of code in each team's language. The **client stub** is a class with one method per `rpc` line. The **server stub** receives calls and passes them to the function the inventory team writes. If pricing renames a field in the contract, checkout's code no longer compiles until someone updates it. The free books from the story become a build error on a Tuesday afternoon.
+
+<AnimatedDiagram name="fundamentals/rpc" step={1} caption="Checkout calls a generated method. Nothing in its code mentions URLs, JSON or sockets." />
+
+<PremiumBreak />
+
+### Step 2: The call becomes a few bytes
+
+The stub must **serialise** the request: turn the in-memory object into bytes that can cross the network. JSON writes every field name as text, every time. Protobuf writes a short **tag** instead (one byte for field numbers 1 to 15), which holds the field number from the `.proto` file and a hint about the value's shape (a **wire type**). Small whole numbers go out as **varints**, which use one byte for values under 128 and add a byte for each further 7 bits.
+
+<AnimatedDiagram name="fundamentals/rpc-layout" stepper caption="The same request, sku BK-1042, quantity 2, order 98765: 47 bytes as JSON, 15 as Protobuf, drawn to the same scale." />
+
+Here the JSON is 47 bytes and the Protobuf is 15, about a third. The number 98765 needs 5 bytes as JSON text and 3 as a varint. The bigger saving is the names: 32 of JSON's 47 bytes are field names and the quotes, colons, commas and braces around them. Protobuf is also faster to decode, because the reader never scans text for quotes or turns digits into numbers. The price is that you cannot read the bytes by eye. You need the `.proto` file to make sense of `0A 07 42 4B`.
+
+Be fair about the size. Checkout makes 3 calls per order, so 2,000 orders a second is 6,000 calls, and $6{,}000 \times 47$ bytes is only about 280 KB/s. For small messages, the contract and the lower CPU cost matter more than the bytes. For a 2 MB list of order lines, the size saving matters too.
+
+### Step 3: One call, one HTTP/2 stream
+
+<AnimatedDiagram name="fundamentals/rpc" step={2} caption="The request goes out as a HEADERS frame and a DATA frame on a new stream. The reply comes back on the same stream, ending with grpc-status 0." />
+
+gRPC sends calls over **HTTP/2**, the version of [HTTP](/system-design/fundamentals/http) that sends binary frames instead of lines of text. One TCP connection (a reliable, ordered byte pipe between two machines) carries many **streams** at once. A stream is one request and its response, and each one has a number. Every message travels in small **frames** marked with their stream number, so frames from 100 calls can interleave on one connection without waiting for each other.
+
+One gRPC call is one stream:
+
+1. A **HEADERS** frame names the method as a path, `/inventory.v1.Inventory/ReserveStock`, and carries the deadline as `grpc-timeout: 300m` (300 milliseconds).
+2. A **DATA** frame carries a 5-byte prefix (a compressed flag and the length) and then the 15 Protobuf bytes.
+3. The reply comes back as DATA, then a final HEADERS frame called the **trailers**, holding `grpc-status`. Zero means OK. Other codes include `NOT_FOUND`, `UNAVAILABLE` and `DEADLINE_EXCEEDED`.
+
+HTTP/2 also compresses headers with a shared table, so the second call to the same method sends the path as a short index instead of the full text. The connection stays open, so checkout pays the TCP and <Term id="tls">TLS</Term> setup once, not once per call.
+
+Because a stream can carry many messages in each direction, gRPC offers four shapes of call:
+
+<Tabs title="Four shapes of gRPC call">
+  <Tab label="Unary">
+    One request, one reply. `ReserveStock` is unary. Most calls in most systems are this shape.
+  </Tab>
+  <Tab label="Server streaming">
+    One request, many replies. A warehouse screen calls `WatchStock("BK-1042")` and the server sends a message each time the count changes, on one stream that stays open for hours.
+  </Tab>
+  <Tab label="Client streaming">
+    Many requests, one reply. A scanner at the loading dock sends 5,000 barcodes as they are read, and the server answers once with a summary when the client closes its side.
+  </Tab>
+  <Tab label="Bidirectional">
+    Both sides send whenever they like on one stream. A picking robot reports its position while the server sends it the next shelf, with neither side waiting for the other.
+  </Tab>
+</Tabs>
+
+### Step 4: Every call gets a deadline
+
+<AnimatedDiagram name="fundamentals/rpc" step={3} caption="Inventory is stuck. After 300 ms checkout gets DEADLINE_EXCEEDED, and the client cancels the stream so the server stops working." />
+
+A **deadline** is the latest moment the caller will wait for an answer. A timeout is the same idea written as a duration. gRPC sends the remaining time with the call, so the server knows it too. When the deadline passes, the client stub stops waiting and returns `DEADLINE_EXCEEDED`, and it sends `RST_STREAM` to cancel the stream. The server's handler sees its **context** (the object gRPC hands each handler, carrying the deadline and a cancel signal) marked as cancelled, and can stop.
+
+Run the story's numbers again. With a 300 ms deadline, at most about $2{,}000 \times 0.3 = 600$ inventory calls are waiting at any moment, not 60,000. Checkout fails a few orders fast and stays up for everyone else.
+
+Deadlines should **propagate**. Say the gateway gives a checkout request 800 ms in all. Checkout spends 100 ms, so it calls inventory with the 700 ms that remain. If inventory calls a warehouse service, it passes on what is left after its own work. No service downstream keeps working on an answer that nobody upstream is still waiting for. In Go and Java, passing the incoming context to the outgoing call does this for you.
+
+### Step 5: Where RPC fits
+
+<AnimatedDiagram name="fundamentals/rpc-internal" stepper caption="Public clients keep REST and JSON. Behind the gateway, services call each other with gRPC." />
+
+RPC works best between services you own. Both sides build from the same `.proto` files, deploy on your schedule and can use HTTP/2. Public clients are different. Browsers cannot read HTTP/2 trailers through the fetch API, so plain gRPC does not work from a web page. Partners want an API they can try with `curl` and read without a code generator. A <Term id="cdn">CDN</Term> (a network of caches close to users) can cache REST GET responses, but not gRPC calls. A REST API can still have a contract: an **OpenAPI** file is a machine-readable list of its URLs and fields, though nothing forces the code to match it. So the usual shape is REST (resources at URLs, read and changed with HTTP verbs) with JSON at the <Term id="api-gateway">API gateway</Term> and gRPC behind it. The gateway translates each public request into a gRPC call. Where a browser must speak gRPC, **gRPC-Web** wraps the call so a proxy can turn it into real gRPC.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="A Protobuf message has an int32 field set to 300. How many bytes does the value take as a varint?" hint="A varint carries 7 bits of the number in each byte.">
+    Two. 300 needs 9 bits, which is more than 7 and no more than 14. The tag adds one more byte, so the field costs 3 bytes. As JSON text, `"count":300` is 11 bytes.
+  </QuizItem>
+  <QuizItem question="Checkout gets a request with 800 ms left and spends 150 ms before calling pricing. What deadline should the pricing call carry?" hint="Pass on what is left, not a fresh number.">
+    About 650 ms, or less if checkout needs time after pricing answers. Giving pricing a fresh 800 ms would let it work on after the shopper's request has already failed.
+  </QuizItem>
+  <QuizItem question="A web page needs live stock counts. Can it call the WatchStock server-streaming method directly?" hint="Think about what the browser's fetch API exposes.">
+    Not with plain gRPC, because browsers do not expose HTTP/2 trailers to page code. Use gRPC-Web through a proxy, or have the gateway turn the stream into Server-Sent Events or a WebSocket.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "REST with JSON", "gRPC with Protobuf"]}
+  rows={[
+    ["Contract", "Optional (an OpenAPI file, if kept up to date)", "Required: the .proto file"],
+    ["Bytes for the bookshop request", "47", "15"],
+    ["Readable with curl and your eyes", true, false],
+    ["Works from a browser as is", true, false],
+    ["Streaming in both directions on one call", false, true],
+    ["Deadline sent to the server", "Only if you add a header yourself", "Built in"],
+    ["HTTP caching by CDNs and browsers", "GET responses cache well", "Not cacheable"],
+    ["Load balancing", "Any HTTP load balancer, per request", "Needs a balancer that spreads calls, not connections"],
+  ]}
+  caption="REST wins at the public edge. gRPC wins between services you own."
+/>
+
+<DecisionTree
+  title="RPC or REST for this API?"
+  tree={{
+    q: "Will browsers or outside developers call it directly?",
+    yes: { answer: "REST with JSON at the edge; use gRPC behind the gateway if you like", href: "/system-design/fundamentals/rest" },
+    no: {
+      q: "Do both sides build from one repository of contracts?",
+      yes: { answer: "gRPC with Protobuf and deadlines", href: "/system-design/fundamentals/choosing-an-api-style" },
+      no: "REST with an OpenAPI contract, until the teams can share .proto files",
+    },
+  }}
+/>
+
+## In the wild
+
+- **Google** built gRPC from Stubby, its internal RPC system, which by Google's account handles on the order of ten billion calls a second.
+- **Kubernetes** uses gRPC where its parts meet: the kubelet talks to container runtimes through the gRPC-based Container Runtime Interface, and etcd, its data store, serves a gRPC API.
+- **Envoy**, a popular service proxy, receives its routing configuration over long-lived gRPC streams from a control plane, the service that holds the routing rules.
+
+## Common pitfalls
+
+- **No deadline.** gRPC's default is to wait forever. One slow service then holds threads and memory all the way up the call chain, exactly as in the story.
+- **Load balancing per connection.** HTTP/2 keeps one connection open for hours. A <Term id="load-balancer">load balancer</Term> that picks a server once per TCP connection (layer 4) sends every call from one client to one server. Balance per call at layer 7, with a proxy that reads each HTTP/2 stream, or let the client pick from the list of servers.
+- **Reusing a field number.** The number is the field's identity on the wire. If you delete field 3 and later give 3 to a new field, old clients will read the new data as the old field. Mark deleted numbers `reserved`.
+- **Treating zero as "not sent".** In proto3, a number field that was never set reads as 0. If 0 is a real price, mark the field `optional` so the reader can tell the two apart.
+- **Forgetting the network is there.** A call that looks local can still time out after the server did the work. Retry only methods that are <Term id="idempotent">idempotent</Term>, or send an idempotency key so a retry cannot reserve the stock twice.
+
+## How to say it in an interview
+
+RPC lets one service call another's function as if it were local. Both sides share a contract in an IDL, and generated stubs turn calls into bytes and back. For internal service calls I would use gRPC. The `.proto` file is the contract, so a breaking change shows up as a build error, not as bad data in production. Protobuf drops field names from the wire, so a typical message is about a third the size of the JSON and faster to decode. HTTP/2 carries many calls on one connection, and the framework supports streaming in both directions. I would give every call a deadline and pass the remaining time downstream, so a stuck service fails fast instead of piling up requests. For browsers and outside developers I keep REST and JSON at the gateway, and I balance gRPC traffic per call, not per connection.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is an RPC, and what does a stub do?" level="Junior" category="APIs">
+    **Short answer.** An RPC (remote procedure call) lets code call a function that runs on another machine using normal function-call syntax. The stub is generated code that sits in place of the real function: it serialises the arguments, sends them, waits for the reply and turns it back into an object.
+
+    **Why.** Without stubs, every team writes its own code to build URLs, encode JSON, check status codes and parse replies, and each copy has its own bugs. With a contract file, a generator writes the client stub and the server stub in each language. The caller writes `inventory.ReserveStock(req)`, and the server team writes only the function body.
+
+    **Follow-ups the interviewer may ask.**
+    - What can go wrong with a remote call that cannot go wrong with a local one?
+    - How do the stubs on both sides stay in sync?
+
+    **Watch out for.** Saying the call is "just like a local call". It looks like one, but it can be slow, fail halfway or succeed on the server while the reply is lost. That is why every call needs a deadline and retries need idempotency.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why is a Protobuf message smaller than the same data in JSON?" level="Junior" category="Serialization">
+    **Short answer.** JSON repeats every field name as text in every message, and writes numbers as digits. Protobuf replaces each name with a one-byte tag holding the field number, and writes numbers as compact varints.
+
+    **Why.** For `{"sku":"BK-1042","quantity":2,"order_id":98765}`, JSON takes 47 bytes, and 32 of them are names, quotes and punctuation. Protobuf takes 15: three tag bytes, one length byte, seven bytes of the string, one byte for 2 and three for 98765.
+
+    | Part | JSON | Protobuf |
+    | --- | --- | --- |
+    | Field names | 32 bytes with punctuation | 3 tag bytes |
+    | `98765` | 5 bytes of digits | 3-byte varint |
+    | Total | 47 bytes | 15 bytes |
+
+    **Follow-ups the interviewer may ask.**
+    - What does the reader need in order to decode Protobuf bytes?
+    - Would compressing the JSON close the gap?
+
+    **Watch out for.** Claiming size is the main reason to adopt gRPC. For small messages the absolute saving is tiny. The contract, the faster decoding and the deadlines usually matter more.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When would you choose gRPC over REST, and when would you not?" level="Mid" category="APIs">
+    **Short answer.** I use gRPC between services my company owns, where both sides share the contract files and want streaming, deadlines and lower CPU per call. I keep REST with JSON for anything a browser or an outside developer calls, and translate at the gateway.
+
+    **Why.** In the bookshop, one checkout makes three internal calls, so at 2,000 checkouts a second the services handle 6,000 calls a second between them. A shared `.proto` file turns a renamed field into a build error, and deadlines keep a stuck service from piling up requests. At the edge, browsers cannot read gRPC's trailers, CDNs can cache REST GET responses, and partners expect to try an endpoint with `curl`.
+
+    <AnimatedDiagram name="fundamentals/rpc-internal" step={2} highlight={["gateway", "checkout", "inventory", "pricing", "payments"]} caption="REST stops at the gateway; everything behind it speaks gRPC." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does the gateway turn a REST request into a gRPC call?
+    - What would make you pick GraphQL for the public side instead?
+
+    **Watch out for.** "gRPC is faster, so use it everywhere." The public edge loses caching, browser support and easy debugging, and the speed gain there is small next to the network round trip.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is a deadline in gRPC, and why should it be passed from service to service?" level="Mid" category="Reliability">
+    **Short answer.** A deadline is the moment after which the caller stops waiting. gRPC sends it with the call, so the server knows it too. Each service passes on the time that remains, so no service downstream works on an answer nobody is waiting for.
+
+    **Why.** By Little's law, requests in flight equal the arrival rate times the time each one waits. At 2,000 calls a second, a 30 second hang means $2{,}000 \times 30 = 60{,}000$ calls in flight. A 300 ms deadline caps it at about 600. If checkout has 800 ms and spends 100, it should give inventory about 700 ms, not a fresh second.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you pick the deadline for each call?
+    - Should a client retry after `DEADLINE_EXCEEDED`?
+
+    **Watch out for.** Giving each hop its own fixed timeout. With 1 s per hop across four hops, if each service calls the next just before its own second runs out, the bottom service can still be working almost 3 s after the shopper's request has failed: $4 \times 1 - 1 = 3$.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You run 10 gRPC servers behind a layer 4 load balancer, but one server takes almost all the traffic. What is happening, and how do you fix it?" level="Senior" category="Load balancing">
+    **Short answer.** gRPC keeps one long-lived HTTP/2 connection per client and sends every call on it. A layer 4 balancer chooses a server once per TCP connection, so each client sticks to one server. Balance per call instead, with a layer 7 proxy or with client-side balancing.
+
+    **Why.** Picture a rolling restart, where servers restart a few at a time. While the other servers restart, every client reconnects to the one that is up, and it keeps those connections for hours after the rest come back. With only 3 checkout instances, at most 3 of the 10 servers would get traffic even on a good day. A layer 7 proxy such as Envoy reads each HTTP/2 stream and spreads calls across all 10. Client-side balancing gets the server list from service discovery (a registry of the servers that are up) and spreads calls itself, with no proxy hop.
+
+    <Compare
+      columns={["", "Layer 4 balancer", "Layer 7 proxy", "Client-side"]}
+      rows={[
+        ["Unit it balances", "TCP connection", "Each call", "Each call"],
+        ["Extra network hop", true, true, false],
+        ["Client needs a smarter library", false, false, true],
+      ]}
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - How does a new server get traffic when clients hold old connections?
+    - What does setting a maximum connection age on the server change?
+
+    **Watch out for.** Fixing it by opening a new connection per call. That brings back the TCP and TLS setup cost on every call and throws away what HTTP/2 gives you.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you change a Protobuf contract without breaking clients that are already running?" level="Senior" category="Data modeling">
+    **Short answer.** Add new fields with new numbers and never change or reuse an existing number or type. Old readers skip fields they do not know, and new readers see a default value for fields old writers leave out. Retire a field by marking its number `reserved`, and check every change against the last release in CI.
+
+    **Why.** On the wire a field is only its number and wire type, so renaming a field is safe for the bytes. Changing a type or reusing a number is not: if field 3 was `order_id` and becomes a `string` coupon code, old clients misread it. During a rolling deploy, old and new versions run side by side for minutes or hours, so every change must work in both directions. A tool such as `buf breaking` compares the new `.proto` files with the last release and fails the build on an unsafe change.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you tell "price is 0" from "price was not sent" in proto3?
+    - When would you create `inventory.v2` instead of changing `v1`?
+
+    **Watch out for.** "Protobuf handles versioning for you." It only makes compatible changes possible. Renumbering, retyping or reusing a field still breaks running clients without any error at build time.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [REST](/system-design/fundamentals/rest)
+- [GraphQL](/system-design/fundamentals/graphql)
+- [Choosing an API style](/system-design/fundamentals/choosing-an-api-style)
+- [HTTP/1.1, HTTP/2 and HTTP/3](/system-design/fundamentals/http)
+- [Serialization formats](/system-design/fundamentals/serialization)
+- [API gateways](/system-design/fundamentals/api-gateway)
+- [Load balancing](/system-design/patterns/load-balancing)
+- [Circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries)
+- [Idempotency](/system-design/patterns/idempotency)
+
+## Further reading
+
+- [gRPC documentation: core concepts](https://grpc.io/docs/what-is-grpc/core-concepts/), the four call shapes, deadlines and cancellation from the project itself.
+- [Protocol Buffers: encoding](https://protobuf.dev/programming-guides/encoding/), how tags, wire types and varints are laid out byte by byte.
+- [gRPC over HTTP/2](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md), the exact headers, frames and trailers of a call.
+- [Andrew Birrell and Bruce Nelson, "Implementing Remote Procedure Calls" (ACM Transactions on Computer Systems, 1984)](https://doi.org/10.1145/2080.357392), the paper that defined stubs and the RPC model.

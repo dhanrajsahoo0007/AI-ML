@@ -1,11 +1,236 @@
 ---
-title: "Networking"
-description: "DNS, TCP and UDP, HTTP versions, load balancers, CDNs and proxies."
-status: outline
+title: "Networking basics"
+description: "How data crosses a network: packets, the four layers, IP addresses, ports, and why latency and bandwidth are different problems."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** dNS, TCP and UDP, HTTP versions, load balancers, CDNs and proxies.
+<KeyIdea>
+  A network moves data by cutting it into small packets, labelling each one with where it is going, and passing it from machine to machine until it arrives.
+</KeyIdea>
 
-**Video series:** [System design networking playlist (YouTube)](https://www.youtube.com/watch?v=tWuUZUyfSAs&list=PL3Hc8S1SG2AQHwI1SmwGoWOhbAE3Kf3bN)
+## The story
+
+You run a recipe site from one server in Frankfurt. Meera, in Chennai, clicks "Lemon rice" on her laptop. About half a second later the page starts to appear. In that time her click became a 400-byte message. The message gained three more sets of labels and crossed about 15 machines and 10,000 km of undersea cable. You open the same page in Frankfurt and it loads more than ten times faster. Same server, same code. The difference lives in the trip, and this page is the map of it.
+
+## How it works
+
+A **packet** is a small chunk of data, at most about 1,500 bytes, with labels on the front that say where it goes. Networks move packets, not files. A **protocol** is an agreed set of rules for one kind of conversation. A **header** is the block of labels a protocol puts in front of the data.
+
+The work is split into **layers**, and each layer solves one problem. On the way out, each layer adds its header and hands the bundle down. The layer below treats it as a sealed parcel. On the way in, each layer removes its header and hands the rest up. Engineers number the layers from an older seven-layer model (OSI), which is why you hear "an L4 load balancer". The internet uses four of those layers and keeps their OSI numbers:
+
+<Compare
+  columns={["Layer", "The question it answers", "Common protocols", "Label it adds"]}
+  rows={[
+    ["L7 Application", "What does the message mean?", "HTTP, DNS, gRPC", "The message itself"],
+    ["L4 Transport", "Which program gets it, and did every byte arrive?", "TCP, UDP", "Ports"],
+    ["L3 Network", "Which computer, anywhere on earth?", "IP", "IP addresses"],
+    ["L2 Link", "Which device on this one cable or radio link?", "Ethernet, Wi-Fi", "Hardware (MAC) addresses"],
+  ]}
+  caption="Sending walks down the table and wraps. Receiving walks up and unwraps."
+/>
+
+### Step 1: The message (L7, application)
+
+<AnimatedDiagram name="fundamentals/networking" step={1} caption="The browser writes an HTTP request of about 400 bytes. Nothing is wrapped yet." />
+
+The browser writes an HTTP request: a few lines of text that name the page (`GET /lemon-rice`) and add details such as cookies. It comes to about 400 bytes. HTTP knows nothing about cables or routes. It trusts the layers below to deliver its bytes, in order, to the right program. On a real site, <Term id="tls">TLS</Term> encrypts these bytes first, so the machines along the way cannot read them. TLS adds about 20 bytes of its own; the drawing leaves them out to keep the sums simple.
+
+<PremiumBreak />
+
+### Step 2: Ports (L4, transport)
+
+<AnimatedDiagram name="fundamentals/networking" step={2} caption="TCP adds a 20-byte header: source and destination ports, plus numbers that keep bytes in order." />
+
+One computer runs many programs that use the network. A **port** is a number from 0 to 65,535 that picks out one program. Servers listen on well-known ports: 443 for HTTPS, 53 for DNS, 5432 for PostgreSQL. Meera's laptop picks a temporary port for its side, say 52814, so the reply comes back to the right connection in the browser.
+
+TCP adds a 20-byte header with both ports and a sequence number. The receiver uses sequence numbers to put packets back in order. It also tells the sender which bytes arrived, so the sender can resend any that went missing. UDP adds only 8 bytes and makes no such promises. [IP, TCP and UDP](/system-design/fundamentals/tcp-udp) covers when each one wins.
+
+### Step 3: Addresses (L3, network)
+
+<AnimatedDiagram name="fundamentals/networking" step={3} caption="IP adds a 20-byte header: where the packet came from and where it must end up." />
+
+An **IP address** names one computer's connection to the network. IPv4 addresses are 32 bits, written as four numbers such as 198.51.100.20. That allows about 4.3 billion ($2^{32}$), fewer than the devices online, so homes share. Meera's laptop has a private address, 192.168.1.23, and her home router swaps it for the home's one public address on the way out. It also swaps the port when two devices at home pick the same one. This swap is NAT (network address translation). IPv6 uses 128-bit addresses, so it needs no sharing.
+
+The IP header also carries a hop limit (IPv4 calls it TTL, time to live), often 64. Every router lowers it by one and drops the packet at zero, so a packet caught in a loop cannot circle forever. Routers on the internet read this header and nothing deeper. A home router is the exception: NAT makes it read ports too. Each one picks only the next hop; no machine plans the whole route.
+
+Meera typed a name, not an address. Before any of this, her laptop asked a <Term id="dns">DNS</Term> resolver to turn the name into 198.51.100.20.
+
+### Step 4: One hop at a time (L2, link)
+
+<AnimatedDiagram name="fundamentals/networking" step={4} caption="The link layer adds a 14-byte header and a 4-byte check for the next hop only: 458 bytes in all." />
+
+The link layer moves the packet across one hop. Its bundle is called a **frame**: the IP packet with a link header in front and a check at the end. One hop is laptop to home router over Wi-Fi; the next is router to the internet provider over fibre. The link header holds **MAC addresses**, the hardware ids built into network cards, for this hop only. The 4-byte check lets the next device spot damaged bits. The drawing shows Ethernet; Wi-Fi's header is a little longer. Every router removes the link header, reads the IP header, and adds a fresh link header for the next hop. So MAC addresses change at every hop, while IP addresses stay the same end to end. The one exception is NAT, which rewrites the source address once, at the edge of the home.
+
+One Ethernet frame carries at most 1,500 bytes of IP packet. That limit is the **MTU** (maximum transmission unit). Take away 40 bytes of IP and TCP headers, and one packet holds 1,460 bytes of your data. The 60 KB recipe page needs $60{,}000 / 1{,}460 \approx 41.1$, so 42 packets.
+
+### Step 5: The trip, and what makes it slow
+
+<AnimatedDiagram name="fundamentals/networking-path" caption="Meera's packet crosses about 15 machines and reaches Frankfurt in about 70 ms. Each box says how deep that device looks." />
+
+Two numbers describe the trip. <Term id="latency">Latency</Term> is how long one packet takes to arrive; engineers usually quote the **round-trip time** (RTT), there and back. Light in fibre needs about 5 ms to cover 1,000 km. The cables from Chennai to Frankfurt run about 10,000 km, so the floor is 50 ms one way. Detours and router queues push it to about 70 ms, or 140 ms for a round trip.
+
+**Bandwidth** is how many bits per second a link can carry, and <Term id="throughput">throughput</Term> is how many you actually get. Picture a motorway: latency is the drive time, bandwidth is the number of lanes. More lanes move more cars per hour but do not shorten any one trip. For one request and reply:
+
+$t \approx \text{RTT} + \frac{\text{size}}{\text{bandwidth}}$
+
+A 2 KB reply over 100 Mbit/s takes 0.16 ms to send plus a 140 ms round trip, so latency is 99.9% of the wait. A 1 GB file takes $8{,}000 \text{ Mbit} / 100 = 80$ seconds, and the round trip hardly matters. Small, chatty traffic is latency-bound; big transfers are bandwidth-bound.
+
+Now Meera's wait makes sense. Before the first byte arrives, she needs three round trips: TCP setup, the TLS handshake, then the request. That is $3 \times 140 = 420$ ms plus 20 ms on the server. The rest of the page takes about two more round trips, because TCP sends only about 14 KB at first and then doubles each round trip: 14 KB with the request's round trip, then 29 KB, then the last 17 KB. So Meera waits $5 \times 140 + 20 = 720$ ms. In Frankfurt each round trip is about 5 ms, so the same five cost 25 ms and the page arrives in about 45 ms, sixteen times sooner. No bandwidth closes that gap; shorter distance and fewer round trips do. A <Term id="cdn">CDN</Term> shortens the distance by answering from a server near the reader.
+
+### Where the other networking pages fit
+
+| When you need to know... | Layer | Read |
+|---|---|---|
+| How a name becomes an address | L7, before the trip | [DNS](/system-design/fundamentals/dns) |
+| Reliable, ordered delivery or speed with some loss | L4 | [IP, TCP and UDP](/system-design/fundamentals/tcp-udp) |
+| What a request contains, and how HTTP/2 and HTTP/3 save round trips | L7 | [HTTP](/system-design/fundamentals/http) |
+| How bytes stay secret and the server proves who it is | Between L4 and L7 | [TLS and HTTPS](/system-design/fundamentals/tls) |
+| What sits in the middle and forwards traffic | L4 or L7 | [Proxies](/system-design/fundamentals/proxies) |
+| How to move content closer to readers | All | [CDNs and edge](/system-design/fundamentals/cdn) |
+| How to spread requests over many servers | L4 or L7 | [Load balancing basics](/system-design/fundamentals/load-balancing-basics) |
+
+## Try it
+
+Compare the "round trip across a continent" row (150 ms, close to Meera's 140 ms) with a round trip inside one data center (0.5 ms). That is $150 / 0.5 = 300$ times. Every call that crosses a continent costs as much waiting as 300 calls between machines in the same building.
+
+<LatencyLadder title="Where a network round trip sits" compareTo="dc-rtt" highlight="cross-continent" windowMs={1000} />
+
+<Quiz>
+  <QuizItem question="Your API returns 3 KB of JSON. How many packets does it need?" hint="Each packet carries at most 1,460 bytes of data.">
+    Three: $3{,}000 / 1{,}460 \approx 2.05$, so two full packets and a small third one.
+  </QuizItem>
+  <QuizItem question="Meera upgrades from 50 to 100 Mbit/s. How much faster does the recipe page load?" hint="Work out the send time of 60 KB at each speed.">
+    Barely. 60 KB is 480,000 bits: 9.6 ms at 50 Mbit/s, 4.8 ms at 100. She saves about 5 ms of about 720 ms. The round trips are the cost.
+  </QuizItem>
+  <QuizItem question="Your app makes 8 database calls one after another to a database 30 ms away (round trip). What is the least time this takes?">
+    $8 \times 30 = 240$ ms of waiting before the database does any work. Batch the calls, run them in parallel, or move the app next to the database.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["Change", "2 KB API call, 140 ms RTT", "1 GB download at 100 Mbit/s"]}
+  rows={[
+    ["Double the bandwidth", "Saves 0.08 ms: no real change", "80 s becomes 40 s"],
+    ["Serve from a nearby edge (RTT 20 ms)", "Saves 120 ms per round trip", "Small gain: only setup"],
+    ["Reuse open connections", "Saves 2 round trips (280 ms)", "No change after setup"],
+    ["Compress the reply 5x", "Little: it already fits in 2 packets", "About 16 s for text"],
+  ]}
+  caption="Find out which kind of slow you have before spending money. Most API traffic is latency-bound."
+/>
+
+Layering has its own costs. The headers add 58 bytes to every frame: about 13% of the 458-byte request ($58 / 458$), but under 4% of a full 1,518-byte frame ($58 / 1{,}518$). And problems hide between layers, so a slow page can be DNS, TCP, TLS or the app. In return each layer can change alone: HTTP/3 swapped TCP for UDP without changing what a web page is.
+
+## In the wild
+
+- **Linux** hands out temporary client ports from 32768 to 60999 by default, about 28,000 per destination address and port.
+- **AWS** allows 9,001-byte "jumbo" frames inside one VPC (a private network you rent in AWS), six times the usual 1,500. Traffic to the internet drops back to 1,500.
+- **HTTP/3** runs over QUIC, a transport on UDP port 443, used by the major browsers and CDNs.
+
+## Common pitfalls
+
+- **Buying bandwidth for a latency problem.** Ten calls one after another, each with a 70 ms round trip, wait 700 ms at any link speed.
+- **Splitting the app and its database across regions.** Every query pays a long round trip.
+- **A new connection per request.** Each one costs TCP and TLS round trips, and the side that closes it first holds its temporary port for about 60 seconds (Linux's TIME_WAIT). With 28,000 ports, one proxy gets about $28{,}000 / 60 \approx 470$ new connections a second to one backend. Use a connection pool.
+- **Treating an IP address as a person.** Behind NAT, a whole office can share one address, and a per-IP limit blocks all of them.
+
+## How to say it in an interview
+
+A network moves data as packets of up to about 1,500 bytes, each wrapped in layers. L7 is the message, such as an HTTP request. L4, TCP or UDP, adds ports so the right program gets it, and TCP adds ordering and retries. L3, IP, adds addresses so routers can forward it hop by hop, and L2 crosses one link at a time. When I place a component, I say which layer it reads: a router reads L3, an L4 load balancer reads ports, an L7 proxy reads the request. For speed I separate latency from bandwidth. Latency comes from distance, about 1 ms of round trip per 100 km of fibre, times the number of round trips. Bandwidth matters only for big transfers. So for a slow API I count round trips first and cut them with nearby edges, reused connections and fewer sequential calls.
+
+<InterviewQuestions>
+  <InterviewQuestion question="Walk me through what each network layer adds when a browser sends a request." level="Junior" category="Networking">
+    **Short answer.** The browser writes the HTTP request (L7), TCP adds ports and sequence numbers (L4), IP adds source and destination addresses (L3), and the link layer adds hardware addresses and a check for the next hop (L2). The receiver removes them in reverse order.
+
+    **Why.** Ports pick the program, IP addresses pick the computer, MAC addresses pick the next device on the wire. A 400-byte request grows by 20 + 20 + 18 bytes to a 458-byte frame. Routers rewrite only the link layer, so MAC addresses change at every hop while IP addresses stay, except where a NAT router rewrites the source address.
+
+    <AnimatedDiagram name="fundamentals/networking" step={4} caption="The 400-byte request after all four layers have wrapped it: 458 bytes on the wire." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where does TLS fit in this picture?
+    - Which header does a home router change, and why?
+
+    **Watch out for.** Reciting the seven OSI layer names without saying what each header is for.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is the difference between latency and bandwidth? Which matters more for an API?" level="Junior" category="Performance">
+    **Short answer.** Latency is how long one packet takes to arrive; bandwidth is how many bits per second the link carries. Most API calls are small, so latency dominates.
+
+    **Why.** A request takes about RTT + size / bandwidth. For a 2 KB reply at 100 Mbit/s with a 140 ms round trip, sending takes 0.16 ms and waiting takes 140 ms. Doubling bandwidth saves 0.08 ms; a server close enough to cut the round trip from 140 ms to 20 ms saves 120 ms per round trip. A 1 GB file at 100 Mbit/s takes 80 s, where bandwidth is what counts.
+
+    **Follow-ups the interviewer may ask.**
+    - What sets the lower bound on latency between two cities?
+    - When would a video service care more about bandwidth?
+
+    **Watch out for.** Saying "a faster connection" fixes a slow API. More bandwidth does nothing for a 2 KB reply.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why does a server need both an IP address and a port? How can one server on port 443 hold 100,000 connections?" level="Mid" category="Networking">
+    **Short answer.** The IP address picks the computer and the port picks the program. A connection is identified by four values, client IP, client port, server IP and server port, so 100,000 clients can share port 443 as long as their client pairs differ.
+
+    **Why.** The server side of every connection is the same address and port 443. The client side differs: each client has its own IP, and each connection from one client uses a different temporary port. The real limits are memory per connection (a few KB to tens of KB) and file handles. Ports run out on the other side: a proxy calling one backend has only about 28,000 temporary ports.
+
+    **Follow-ups the interviewer may ask.**
+    - What changes when many clients sit behind one NAT address?
+    - How does a connection pool help a proxy that talks to one database?
+
+    **Watch out for.** Claiming a server tops out at 65,535 connections. That limit applies to one client address talking to one server address and port.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What does it mean that a load balancer works at L4 or at L7?" level="Mid" category="Networking">
+    **Short answer.** An L4 load balancer reads only addresses and ports and forwards whole connections without looking inside. An L7 load balancer reads the HTTP request, so it can route by path, header or cookie, at more cost per request.
+
+    **Why.** Internet routers read only L3. The balancer in front of the servers can stop at L4, picking a server per connection, which is cheap and works for any protocol. Or it can unwrap to L7, which means ending TLS to read the request. Then it can send `/api` and `/images` to different pools and retry a failed request elsewhere, for the CPU cost of decryption and about a millisecond.
+
+    <AnimatedDiagram name="fundamentals/networking-path" highlight={["lb", "server"]} caption="The load balancer sits in front of the web server and reads either the ports (L4) or the full request (L7)." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why put an L4 balancer in front of a set of L7 proxies?
+    - How does each kind keep a WebSocket on one server?
+
+    **Watch out for.** Saying L7 is always better. For raw TCP or very high packet rates, L4 is the right tool.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Users in India say your API is slow. It runs in Frankfurt and the server's p99 is 20 ms. How do you find and fix the problem?" level="Senior" category="Performance">
+    **Short answer.** The time goes into round trips, not the server. I would count round trips on the path, about 140 ms each from India, and cut their number and length with an edge near the users and reused connections.
+
+    **Why.** A new HTTPS connection costs one round trip for TCP, one for TLS 1.3 and one for the request. TCP also starts slow, sending about 14 KB and doubling each round trip, so a 60 KB reply needs about 3 round trips of data. That is 5 round trips: $5 \times 140 = 700$ ms plus 20 ms on the server. An edge in Mumbai (20 ms round trip) ends TCP and TLS and keeps a warm connection to Frankfurt. Then the user pays $5 \times 20 = 100$ ms, plus one 120 ms round trip from the edge to Frankfurt and 20 ms of server time: about 240 ms.
+
+    <AnimatedDiagram name="fundamentals/networking-path" path="laptop>router>isp>core>lb>server" caption="Most of the one-way time sits on the 60 ms leg between the user's provider and the internet core." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which responses can the edge cache outright?
+    - When would you run a second copy of the API and its data in India?
+
+    **Watch out for.** Tuning or adding servers. The server is 20 ms of a 720 ms request, so measure DNS, connect, TLS and first byte from the user's side first.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+<LearningPath
+  title="The networking group, in order"
+  steps={[
+    { title: "Networking basics", href: "/system-design/fundamentals/networking", minutes: 12 },
+    { title: "IP, TCP and UDP", href: "/system-design/fundamentals/tcp-udp", minutes: 15 },
+    { title: "DNS", href: "/system-design/fundamentals/dns", minutes: 12 },
+    { title: "HTTP/1.1, HTTP/2 and HTTP/3", href: "/system-design/fundamentals/http", minutes: 18 },
+    { title: "TLS and HTTPS", href: "/system-design/fundamentals/tls", minutes: 12 },
+    { title: "Proxies, reverse proxies and gateways", href: "/system-design/fundamentals/proxies", minutes: 12 },
+    { title: "CDNs and edge", href: "/system-design/fundamentals/cdn", minutes: 15 },
+    { title: "Load balancing basics", href: "/system-design/fundamentals/load-balancing-basics", minutes: 10 },
+  ]}
+/>
+
+- [A request's journey](/system-design/fundamentals/anatomy-of-a-request): the same trip on one timeline, with the cache and database.
+- [Latency numbers that matter](/system-design/fundamentals/latency-numbers): a round trip next to memory and disk.
+
+## Further reading
+
+- [RFC 1122, Requirements for Internet Hosts: Communication Layers](https://www.rfc-editor.org/rfc/rfc1122): defines the internet's link, IP, transport and application layers.
+- [RFC 791, Internet Protocol](https://www.rfc-editor.org/rfc/rfc791): the IPv4 header, addresses and the hop limit.
+- [RFC 9293, Transmission Control Protocol](https://www.rfc-editor.org/rfc/rfc9293): ports, sequence numbers and connection setup.
+- [Ilya Grigorik, High Performance Browser Networking](https://hpbn.co/): latency, bandwidth, TCP and TLS from the browser's side.

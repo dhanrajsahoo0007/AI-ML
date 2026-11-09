@@ -1,0 +1,287 @@
+---
+title: "The system design interview framework"
+description: "A 45-minute script for design interviews: clarify, requirements, estimates, API, data, high level, deep dive and wrap-up, and what gets scored."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  A system design interview is a 45-minute conversation in which you turn a vague prompt into a working design in eight phases, so the interviewer can watch you decide, not only draw.
+</KeyIdea>
+
+## The story
+
+Priya gets the prompt "Design a chat app." At minute two she draws a queue, then a cache, then three databases. At minute 25 the interviewer asks how many messages a second the system must carry. She has no idea. At minute 40 the interviewer asks about group chats, and the board is full. Priya knew every box she drew. She still failed, because the interviewer never saw her decide anything: which features mattered, how big the system was, or why each box was there.
+
+Two months later she gets the same prompt and follows a script. She asks questions for three minutes, writes five features and four targets, and works out the message rate. Only then does she draw. At minute 30 she has a simple design that works. The next 11 minutes go to the one hard part the interviewer cares about, and the last four to the design's limits. This page is that script.
+
+## How it works
+
+The interview has eight phases. Each phase leaves something on the **whiteboard** (the shared drawing space, a real board or an online doc), and each one feeds the next. The requirements decide what you estimate. The estimate decides how big the design must be. The design decides where the deep dive goes.
+
+<Compare
+  columns={["Phase", "Minutes", "What you leave on the board"]}
+  rows={[
+    ["1. Clarify", "0-3", "Who uses it, on which devices, roughly how many"],
+    ["2. Requirements", "3-8", "About 5 features (F1-F5) and 3-4 targets (N1-N4)"],
+    ["3. Estimate", "8-12", "Peak requests per second, storage per year, one conclusion"],
+    ["4. API", "12-16", "3-5 endpoints or events"],
+    ["5. Data model", "16-20", "The main tables, their keys, the kind of database"],
+    ["6. High-level design", "20-30", "Boxes and arrows, and one request traced end to end"],
+    ["7. Deep dive", "30-41", "One hard part: two options, a choice, the cost"],
+    ["8. Wrap-up", "41-45", "Bottlenecks, failures, what you would build next"],
+  ]}
+  caption="The 45-minute script. The minutes are a budget, not a law: when the interviewer steers, follow them."
+/>
+
+In a 60-minute slot, introductions and your own questions take the rest. The timeline below plays the script with the chat app prompt, in three lanes: the interviewer, you (the candidate) and the whiteboard. Orange banners mark the phases.
+
+### Step 1: Clarify and pin the requirements (minutes 0-8)
+
+<AnimatedDiagram name="fundamentals/interview-framework" step={1} caption="Minutes 0 to 8: ask the questions that change the design, then write down what you will build." />
+
+In the timeline, the interviewer gives the prompt, you ask your questions, and the requirements go on the board. The prompt is vague on purpose. Ask three or four questions whose answers change the design: one-to-one chats or groups too? Phones or browsers? How many users? Then write two numbered lists. A **functional requirement** is something the system does, such as "send a message to a group". A **non-functional requirement** is how well it must do it, such as "the message arrives within 200 ms" or "99.99% <Term id="availability">availability</Term>". Numbering them (F1, N1) lets you point back later: "this box is here because of N3." When the interviewer drops voice calls, cross them out. A smaller scope is a gift.
+
+<PremiumBreak />
+
+### Step 2: Estimate the scale (minutes 8-12)
+
+<AnimatedDiagram name="fundamentals/interview-framework" step={2} caption="Minutes 8 to 12: round numbers, one line of arithmetic each, and a conclusion the interviewer agrees with." />
+
+In the timeline, you write one line of arithmetic on the board and ask the interviewer to agree with the peak. An estimate is arithmetic on round numbers, done out loud. 100 million daily users send about 40 messages each, so 100M x 40 = 4 billion messages a day. A day has 86,400 seconds. Round it to 100,000 to work in your head: 4B / 100K = 40K messages a second, or about 46K with the exact figure. Traffic peaks at about three times the average, so plan for about 140K messages a second. That rate is the system's peak <Term id="qps">QPS</Term>. At 200 bytes a message, storage grows by 4B x 200 B = 800 GB a day, about 290 TB a year before copies.
+
+Then say what the numbers mean. One database server handles on the order of 10K simple writes a second, so 140K needs at least 14 machines, and more to leave spare capacity. The messages must be split across machines, which is called <Term id="sharding">sharding</Term>. That conclusion is what the interviewer is listening for. Spend four minutes here, not ten.
+
+### Step 3: API and data model (minutes 12-20)
+
+<AnimatedDiagram name="fundamentals/interview-framework" step={3} caption="Minutes 12 to 20: the calls the apps make, then the table that stores the messages." />
+
+In the timeline, the API and then the main table go on the board, and the interviewer asks why you chose that database. The API is the list of calls the apps make. Three or four lines are enough:
+
+```http
+POST /v1/chats/{chatId}/messages              body: { clientMsgId, text }  -> 201 { messageId }
+GET  /v1/chats/{chatId}/messages?before={cursor}&limit=50
+WS   /v1/stream                               server pushes message.new and receipt.update
+```
+
+The `cursor` is the id of the oldest message the phone already has, so the call returns the 50 messages before it. `clientMsgId` lets the server spot a resend after a dropped connection, so the call is <Term id="idempotent">idempotent</Term>: sending it twice stores one message. The `WS` line is a <Term id="websocket">WebSocket</Term>, a connection that stays open so the server can push messages to the phone.
+
+The data model is the main table and its key. Chats are read one conversation at a time, newest first, so the key starts with the chat id:
+
+```sql
+-- partition key: chat_id (one chat lives on one machine)
+-- clustering key: message_id, time-ordered, newest first
+CREATE TABLE messages (
+  chat_id    bigint,
+  message_id bigint,
+  sender_id  bigint,
+  body       text,
+  PRIMARY KEY (chat_id, message_id)
+);
+```
+
+When the interviewer asks "why that database?", answer from the numbers: 140K writes a second, read by chat in time order, no joins. A **wide-column store** fits that shape. It is a database that uses a **partition key** (here `chat_id`) to decide which machine holds a row, and a **clustering key** (here `message_id`) to keep the rows on that machine sorted.
+
+### Step 4: High-level design (minutes 20-30)
+
+<AnimatedDiagram name="fundamentals/interview-framework" step={4} caption="Minutes 20 to 30: draw the boxes, then walk one message through them." />
+
+In the timeline, you draw the boxes and then talk one message through them. Now draw. Start at the user's phone and add a box only when a requirement needs it. By minute 30 the board might look like the first build steps of the Messenger case study:
+
+<AnimatedDiagram name="messenger/architecture" step={3} caption="A board at minute 30: a load balancer, chat servers holding open connections, a message store, a registry of who is connected where, and push for offline phones." />
+
+A <Term id="load-balancer">load balancer</Term> spreads connections across chat servers. A chat server keeps each phone's WebSocket open and writes every message to the store. The session registry records which chat server holds each user, so the sender's server knows where to forward. The push service wakes offline phones. Then trace one message from sender to recipient out loud, box by box. The trace proves the design works before anyone asks.
+
+### Step 5: Deep dive and wrap-up (minutes 30-45)
+
+<AnimatedDiagram name="fundamentals/interview-framework" step={5} caption="Minutes 30 to 45: one hard part in depth, then the risks and the next steps." />
+
+In the timeline, the interviewer names a hard case, you weigh two options on the board, and you close with risks. The interviewer picks the hard part, or asks you to. Here they ask about a group with 500 members. One message to that group becomes 500 deliveries. This is called <Term id="fan-out">fan-out</Term>. Suppose 5% of the 140K messages a second at peak go to groups with about 100 members on average. That is 7K x 100 = 700K deliveries a second, five times the raw message rate. Give two options, put a number on each, pick one and say what you give up. For example: push to every online member now, which costs about 700K deliveries a second but keeps delivery fast. Or write each message once to the group's log and let members fetch it when they open the chat, which costs one write a message but makes every chat open a read.
+
+Keep four minutes for the wrap-up. Name the first **bottleneck**, the part that runs out of capacity first (here the session registry, read on every message). Name one failure and its fix: when a chat server dies, its 100K phones reconnect, so they retry after random delays. Name what you would build next, such as a second **region** (a full copy of the system in another part of the world). When the interviewer asks "Any questions for me?", ask a real one.
+
+### What the interviewer is scoring
+
+Interviewers fill in a written scorecard after the round. The labels differ by company, but most look for these five signals:
+
+<Compare
+  columns={["Signal", "What earns it", "Where they see it"]}
+  rows={[
+    ["Scoping", "Questions that change the design; a clear cut of what is out", "Phases 1-2"],
+    ["Numbers", "Round figures, the right order of magnitude, a stated conclusion", "Phase 3"],
+    ["Design", "Every box tied to a requirement; one request traced end to end", "Phases 4-6"],
+    ["Depth and trade-offs", "Two options with numbers, a choice, the cost of the choice", "Phase 7"],
+    ["Communication", "Thinking aloud, checking in, taking hints, managing the clock", "All phases"],
+  ]}
+  caption="Five signals. A correct final drawing earns only part of the Design row."
+/>
+
+The bar rises with the level. A junior candidate should reach a working high-level design, with some help. A mid-level candidate should get there alone and go deep on one part. A senior candidate drives the whole hour: they pick the deep dive, raise failures before being asked, and say which requirement each trade-off protects.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="It is minute 22 and you are still discussing the API. What do you do?" hint="Look at the budget table.">
+    Say it out loud: "I'll freeze the API at these three calls and move to the design." Then draw. A finished design with a short API scores far better than a perfect API and no design.
+  </QuizItem>
+  <QuizItem question="Your estimate comes out at 3K writes a second. What should you conclude?" hint="Compare it with what one database server handles.">
+    One database server, plus a copy for safety, handles that load. Say so, and say you will not shard yet. Avoiding complexity the numbers do not need is a strong signal.
+  </QuizItem>
+  <QuizItem question="The interviewer says, 'Assume the API is obvious.' What changes?">
+    Write one line for the API and move on. Give the four saved minutes to the deep dive, where the interviewer wants to see you.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<ProsCons
+  pros={[
+    "No signal is missed: every row of the scorecard gets its minutes",
+    "The interviewer always knows where you are and what comes next",
+    "Each phase hands the next one its inputs, so the design has reasons",
+  ]}
+  cons={[
+    "Followed rigidly, it ignores an interviewer who wants to jump ahead",
+    "Some prompts need fewer minutes in one phase and more in another",
+    "It can sound rehearsed if you announce phases instead of thinking",
+  ]}
+/>
+
+The second con matters most, so move minutes to where the prompt is hard. A product prompt (a chat app, food delivery) spends them on the high-level design. An infrastructure prompt (a rate limiter, a key-value store) spends them on the deep dive. An object-design prompt (a parking garage, a vending machine) spends them on the data model and API, and the estimate takes one minute.
+
+Worked designs: [rate limiter](/system-design/case-studies/rate-limiter), [key-value store](/system-design/case-studies/key-value-store), [parking garage](/system-design/case-studies/parking-garage) and [vending machine](/system-design/case-studies/vending-machine).
+
+## In the wild
+
+- **The Messenger case study** follows the script section by section: [requirements](/system-design/case-studies/facebook-messenger#1-functional-requirements), [estimates](/system-design/case-studies/facebook-messenger#3-back-of-the-envelope-estimates), [API](/system-design/case-studies/facebook-messenger#4-api-design), [schema](/system-design/case-studies/facebook-messenger#5-database-schema) and the [step-by-step build](/system-design/case-studies/facebook-messenger#6-building-the-architecture-one-requirement-at-a-time). It assumes 500M daily users, so the same arithmetic gives about 230K messages a second on average and about 700K at peak.
+- **The Uber Eats case study** shows the "say what the numbers mean" habit. Its [estimates](/system-design/case-studies/uber-eats#3-back-of-the-envelope-estimates) put orders at about 600 a second at peak and courier positions at about 250K a second, which is why the two live in different stores. Its [build steps](/system-design/case-studies/uber-eats#6-building-the-architecture-one-requirement-at-a-time) add one box per requirement, as phase 6 asks.
+- **Google's SRE teams** practise the same habit on real systems: they estimate first, then check every part of the design against the numbers. The workbook chapter under Further reading walks through one such exercise.
+
+## Common pitfalls
+
+- **Drawing in minute two.** Boxes without requirements cannot be judged, so the interviewer has nothing to score.
+- **Estimating without a conclusion.** "46K a second" is half the answer. "So the messages need sharding" is the other half.
+- **Naming products instead of reasons.** "I'll use Kafka" says nothing. "A log that keeps every message on disk, so a crashed chat server loses none" says why.
+- **Going deep everywhere.** Ten minutes on the API leaves no time for the deep dive, which carries the most weight.
+- **Not checking in.** A silent five minutes hides your thinking. Say what you are weighing and ask if the direction is useful.
+- **Ignoring hints.** "What happens with large groups?" is not small talk. It is the interviewer choosing your deep dive.
+
+## How to say it in an interview
+
+Say this in the first minute: "Before I draw anything, I'd like to ask a few questions and write down what we're building. Then a quick estimate, so we know the scale. I'll sketch the API and the main table, draw the high-level design and walk one request through it. Then I'd like to go deep on the part you find most interesting, and keep a few minutes at the end for bottlenecks and failures. Does that plan work for you?" It takes 20 seconds. It shows you manage the clock, and it invites the interviewer to steer early instead of late.
+
+<InterviewQuestions>
+  <InterviewQuestion question="You are asked to design a chat app. What questions do you ask before drawing anything?" level="Junior" category="Interview framework">
+    **Short answer.** I ask the three or four questions whose answers change the design: one-to-one or groups, which devices, how many users, how long messages are kept. Then I write the answers down as numbered features and targets.
+
+    **Why.** Each answer moves a box. Groups bring fan-out: a 500-member group turns one message into 500 deliveries. Phones mean push notifications for offline users. 100 million daily users at 40 messages each is about 46K messages a second, which decides whether one database is enough.
+
+    **Follow-ups the interviewer may ask.**
+    - Which feature would you cut first if we had only 30 minutes?
+    - What do you do if I answer "you decide"?
+
+    **Watch out for.** Asking ten questions without writing anything down. The answers must become a list you then design against.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why do interviewers want a back-of-the-envelope estimate, and how precise should it be?" level="Junior" category="Estimation">
+    **Short answer.** The estimate tells you how big the design must be: one server or fifty. It needs only the right order of magnitude (the right power of ten), worked out loud with round numbers.
+
+    **Why.** 4 billion messages a day over about 100,000 seconds is 40K a second (46K with the exact 86,400), and about 140K at a 3x peak. Whether the truth is 120K or 160K changes nothing: both are far beyond the roughly 10K writes a second one database server handles, so the data must be split. Getting 1.4K or 14M would change the design, and that is the mistake the estimate catches.
+
+    **Follow-ups the interviewer may ask.**
+    - What peak factor would you use for food delivery at dinner time?
+    - How much storage does a year of messages need?
+
+    **Watch out for.** Ten minutes of exact arithmetic, or numbers with no statement of what they mean for the design.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How much of the API and data model should you write in a 45-minute design interview?" level="Junior" category="Interview framework">
+    **Short answer.** Three to five API calls with their key parameters, and the one or two main tables with their keys. About eight minutes for both.
+
+    **Why.** The interviewer wants to see what the apps call and how the data is found. For chat: send, fetch history with a cursor, and a WebSocket for pushes, plus a messages table keyed by chat id, then a time-ordered message id. That key turns "show the newest 50 messages" into one sorted read on one machine. Field lists and error codes cost time and earn little.
+
+    **Follow-ups the interviewer may ask.**
+    - Why put a client-generated id on the send call?
+    - Why is the chat id the first part of the key?
+
+    **Watch out for.** Designing every endpoint the app could ever need. Ten endpoints at minute 20 usually means no deep dive.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Walk me through how a message gets from one user to another in your design." level="Mid" category="High-level design">
+    **Short answer.** The sender's phone sends the message over its open connection, through the load balancer, to its chat server. That server stores it, looks up which chat server holds the recipient, and forwards it there, or hands it to the push service if the recipient is offline.
+
+    **Why.** Tracing one request proves the boxes work together, and each hop has a reason. Storing before acknowledging means a "sent" message is never lost. The session registry turns "where is this user?" into one in-memory read instead of asking every chat server. Push covers phones with no open connection.
+
+    <AnimatedDiagram name="messenger/architecture" step={3} path="sender>lb>chat>session" caption="One message's route: through the load balancer to a chat server, which asks the session registry where the recipient is connected." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens if the recipient's chat server dies mid-delivery?
+    - Do you acknowledge the sender before or after the store write?
+
+    **Watch out for.** Listing the boxes one by one without following a message. A list does not show that they connect.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="It is minute 30. How do you choose what to deep dive on?" level="Mid" category="Interview framework">
+    **Short answer.** I take the interviewer's hint if there is one. Otherwise I pick the part where the numbers are largest or the requirement is strictest, and say why.
+
+    **Why.** For chat, group fan-out multiplies the load: if 5% of 140K messages a second go to groups of about 100, that is 700K deliveries a second, five times the raw rate. That is where the design can break, so depth there earns the most. A deep dive on a part under no pressure, such as the login page, shows little.
+
+    **Follow-ups the interviewer may ask.**
+    - What would you deep dive on for a food delivery app?
+    - What if I disagree with your choice?
+
+    **Watch out for.** Asking "what should I go deep on?" with no proposal. Offer a choice and a reason, then let the interviewer redirect.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The interviewer challenges your database choice halfway through. How do you respond?" level="Mid" category="Communication">
+    **Short answer.** I restate the requirement behind the choice and check whether the challenge changes it. Then I either defend the choice with numbers or change it and say what else moves.
+
+    **Why.** A challenge is usually a probe, not a verdict. "I picked a wide-column store because we write 140K messages a second and read one chat at a time, in order, with no joins." If the interviewer adds a fact, such as search across all chats, the answer may be to keep the store and add a search index fed from it. Changing your mind for a stated reason scores well; changing it because you were pushed does not.
+
+    **Follow-ups the interviewer may ask.**
+    - Would a relational database work here? Up to what load?
+    - What would make you switch stores a year from now?
+
+    **Watch out for.** Defending the choice by naming a company that uses it. That is not a reason tied to your requirements.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What separates a senior candidate's answer from a mid-level one in the same design interview?" level="Senior" category="Interview framework">
+    **Short answer.** The senior candidate drives: they set the agenda, choose the deep dive, and raise failures and costs before being asked. The drawings may look alike; the reasoning around them differs.
+
+    **Why.** A mid-level answer reaches a working design and goes deep when prompted. A senior answer ties each trade-off to a requirement: "pushing to every member costs 700K deliveries a second, but it keeps delivery under 200 ms, which N1 needs." It says what happens when a chat server with 100K connections dies, and what it would not build yet. The interviewer spends the hour reacting instead of pulling.
+
+    **Follow-ups the interviewer may ask.**
+    - What would you change if the budget were cut in half?
+    - Which part would you build first, and how would you know it works?
+
+    **Watch out for.** Equating seniority with more boxes. A bigger diagram with no stated trade-offs reads as less senior, not more.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You have four minutes left. How do you wrap up?" level="Senior" category="Interview framework">
+    **Short answer.** In about three minutes I name the first bottleneck, one failure and how the design survives it, and what I would build next. Then I hand the time back for questions.
+
+    **Why.** Seeing your design's limits is a senior signal on its own. For chat: the session registry is read on every message, so it is the first hot spot; I would replicate it and cache lookups on each chat server. When a chat server dies, its 100K phones reconnect; random retry delays spread that over a minute instead of one second. Next I would add a second region. Three sentences, each with a number.
+
+    **Follow-ups the interviewer may ask.**
+    - Which failure worries you most, and why?
+    - How would you monitor this system in its first week?
+
+    **Watch out for.** Using the last minutes to add three more boxes. A box you have no time to justify invites questions you cannot answer.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [What system design is](/system-design/fundamentals/what-is-system-design): the four questions behind every design.
+- [Functional requirements](/system-design/fundamentals/functional-requirements) and [non-functional requirements](/system-design/fundamentals/non-functional-requirements): phases 1 and 2 in detail.
+- [Back-of-the-envelope estimation](/system-design/fundamentals/estimation): phase 3, with more worked numbers.
+- [API design](/system-design/fundamentals/api-design) and [choosing a database](/system-design/databases/choosing-a-database): phases 4 and 5.
+- [Fan-out](/system-design/patterns/fan-out): the deep dive used on this page.
+- [Design Facebook Messenger](/system-design/case-studies/facebook-messenger) and [Design Uber Eats](/system-design/case-studies/uber-eats): the script applied in full.
+
+## Further reading
+
+- [Google SRE Workbook, "Non-Abstract Large System Design"](https://sre.google/workbook/non-abstract-design/): designing against estimates, phase by phase.
+- [Jeff Dean, "Designs, Lessons and Advice from Building Large Distributed Systems" (LADIS 2009 keynote)](https://www.cs.cornell.edu/projects/ladis2009/talks/dean-keynote-ladis2009.pdf): back-of-the-envelope numbers and how to use them.
+- Martin Kleppmann, *Designing Data-Intensive Applications* (O'Reilly): the trade-offs behind most deep dives.

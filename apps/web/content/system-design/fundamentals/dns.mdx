@@ -1,0 +1,254 @@
+---
+title: "DNS"
+description: "How a name like recipes.example.com becomes a server address: recursive lookups, caches, TTLs, record types and DNS-based load balancing."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  DNS turns a name people can remember, like recipes.example.com, into the number a computer needs to reach a server, and it keeps recent answers close by so most lookups finish in milliseconds.
+</KeyIdea>
+
+## The story
+
+You run a recipe site at `recipes.example.com`. Your only server sits in Frankfurt at `203.0.113.10`. A reader in Sydney types your site's name into her browser. Her laptop cannot connect to a name. Computers reach each other by number, called an IP address. Something has to turn the name into the number before the page can start loading. That something is the <Term id="dns">Domain Name System (DNS)</Term>.
+
+Months later, two things happen. You add servers in Singapore, because a round trip from Sydney to Frankfurt takes about 280 ms, and you want each reader sent to the closer copy. You also move Frankfurt to a new machine with a new address. For most of the next day, some readers keep landing on the old, switched-off machine. Both are DNS problems, and this page solves both.
+
+## How it works
+
+DNS names form a tree, read from right to left. `com` is near the top, `example.com` sits under it, and `recipes.example.com` under that. No server knows every name. Each level only knows who runs the level below, the way a postal system sorts by country, then city, then street.
+
+Four kinds of servers take part:
+
+- **Resolver.** Does the legwork for you and remembers answers. Usually run by your internet provider, or a public service such as 1.1.1.1.
+- **Root servers.** The top of the tree. They know who runs each ending, such as `.com`.
+- **Top-level domain (TLD) servers.** They know which name servers run each domain under their ending.
+- **Authoritative name servers.** Run by you or your DNS provider. They hold the real answers for your domain.
+
+### Step 1: Ask the resolver
+
+<AnimatedDiagram name="fundamentals/dns-lookup" step={1} caption="The laptop checks its own memory, then asks its resolver. The resolver has never seen this name." />
+
+The browser and the operating system each keep a small <Term id="cache">cache</Term> of recent answers, and a hit there costs well under a millisecond. On a miss, the laptop sends one question to its resolver, usually over UDP, a way to send a single packet without first setting up a connection. Question and answer each fit in one small packet. The resolver is about 10 ms away. It checks its own cache. Your site is new, so it misses too.
+
+<PremiumBreak />
+
+### Step 2: Walk down the tree on a miss
+
+<AnimatedDiagram name="fundamentals/dns-lookup" step={2} caption="Two referrals, then the answer: root, then .com, then the site's own name server." />
+
+The root server does not know the address. It replies with a referral: "ask the `.com` servers". The `.com` server refers on: "`example.com` is run by `ns1.example.com`". Your authoritative server answers: `203.0.113.10`, keep it for 300 seconds. The laptop asked one question and got one final answer, because the resolver made every hop for it. That is what "recursive lookup" means.
+
+Add up the cost: about 10 ms to the resolver, 15 ms to a nearby root copy, 20 ms to `.com`, and 40 ms to your DNS provider's name server. A cold lookup costs about 10 + 15 + 20 + 40 = 85 ms. The root step is rare in practice. Resolvers keep the `.com` referral for two days, so the walk usually starts at `.com`.
+
+### Step 3: Cache the answer for its TTL
+
+<AnimatedDiagram name="fundamentals/dns-lookup" step={3} caption="The resolver keeps the answer for 300 seconds, so the next lookup stops at the resolver." />
+
+Every answer carries a <Term id="ttl">time to live (TTL)</Term>: how many seconds anyone may reuse it. Two minutes later a neighbour on the same provider asks for your site. The resolver answers from memory in about 10 ms instead of 85.
+
+You set the TTL, and it controls two things at once:
+
+- **How long a change takes to reach everyone.** Say you had raised the TTL to 86,400 seconds, one day, to cut query load. On move day, every resolver that looked you up in the previous 24 hours kept the old address until its copy expired. That was the day of readers hitting a dead machine.
+- **How much traffic your name servers get.** Say your readers sit behind 5,000 resolvers. With a 300-second TTL each asks at most once per 5 minutes: 5,000 / 300 ≈ 17 queries per second. A 30-second TTL makes it about 170.
+
+Resolvers cache "no such name" answers too. Look up `new.example.com` before you create it, and the miss is remembered for minutes.
+
+### Step 4: Records hold different kinds of answers
+
+Your domain's names and answers form a zone. Each entry is a record, and its type says what kind of answer it holds.
+
+<Compare
+  columns={["Type", "Holds", "Example in the story"]}
+  rows={[
+    ["A", "An IPv4 address (the classic four-number form)", "recipes.example.com → 203.0.113.10"],
+    ["AAAA", "An IPv6 address (the newer, longer form)", "recipes.example.com → 2001:db8::10"],
+    ["CNAME", "Another name to look up instead", "img.example.com → recipes.cdn-provider.net"],
+    ["MX", "Mail servers, with a priority", "example.com → 10 mail.example.com"],
+    ["NS", "The name servers that run the zone", "example.com → ns1.example.com"],
+    ["TXT", "Free text, often proof you own the domain", "example.com → site-verification=abc123"],
+  ]}
+  caption="The six record types you meet most. Each record carries its own TTL."
+/>
+
+A CNAME is an alias, the usual way to point a name at a service you do not run, such as a <Term id="cdn">CDN</Term>. Following it can cost one more round trip on a cold cache. The bare domain, `example.com`, cannot be a CNAME, because it must also hold the zone's NS records. Many providers offer an ALIAS-style record that resolves the target on their side and returns plain A records.
+
+### Step 5: DNS as a load balancer
+
+Your authoritative server does not have to give everyone the same answer. That makes DNS a coarse <Term id="load-balancer">load balancer</Term>, and it is how the recipe site sends Sydney to Singapore.
+
+<AnimatedDiagram name="fundamentals/dns-geodns" stepper caption="One name, different answers: GeoDNS picks a region per asker, and health checks take a dead region out of the answers." />
+
+1. **Answer by location.** GeoDNS is a name server that picks its answer by where the question comes from. Sydney gets Singapore's address, which cuts each round trip from about 280 ms to about 90 ms. Paris gets Frankfurt's.
+2. **Watch each region.** A health checker probes every region every 10 seconds and tells GeoDNS which are up.
+3. **Fail over.** Singapore stops answering. After three failed probes, about 30 seconds, GeoDNS stops handing out its address. Sydney readers move to Frankfurt when their cached answer expires. With a 60-second TTL, the worst case is about 30 + 60 = 90 seconds. That is DNS <Term id="failover">failover</Term>.
+
+Simpler forms exist. Round robin returns several A records so clients spread across them, with no health checks. Weighted answers send, say, 95% of lookups to current servers and 5% to a new release.
+
+DNS balancing has limits. Your name server sees the resolver, not the reader, so a Sydney reader using a resolver in California can land in the wrong region. Some large resolvers pass on part of the reader's address to fix this (EDNS Client Subnet). DNS also cannot see server load, and every change waits on caches. So real systems use two layers: DNS picks the region, and a load balancer inside it picks the server per request. See [Load balancing](/system-design/patterns/load-balancing).
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Your A record has a TTL of 3,600 seconds. You change the address at 10:00. When can you switch off the old server?" hint="Think about a resolver that cached the old answer at 9:59.">
+    Not before about 11:00, since a resolver that cached it at 9:59 may serve the old address for a full hour. Some clients keep answers longer, so wait until the old server's traffic is near zero.
+  </QuizItem>
+  <QuizItem question="Why do resolvers almost never talk to the root servers?" hint="Look at the TTL on the .com referral.">
+    The `.com` referral has a two-day TTL, and a busy resolver looks up some `.com` name every second. Its copy almost never expires, so the walk starts at `.com`.
+  </QuizItem>
+  <QuizItem question="Can example.com itself be a CNAME pointing to your CDN?">
+    No. The bare domain must hold NS records, and a name with a CNAME may hold nothing else. Use an ALIAS-style record, or point `www.example.com` at the CDN and redirect the bare domain.
+  </QuizItem>
+  <QuizItem question="GeoDNS sends a reader in Sydney to your Virginia region. What is the likely cause?">
+    Her resolver is not in Australia. GeoDNS sees the resolver's address, so a public resolver reaching you from the US makes her look American.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+Picking a TTL trades speed of change against load. With the story's 5,000 resolvers:
+
+<Compare
+  columns={["", "Short TTL (60 s)", "Long TTL (1 day)"]}
+  rows={[
+    ["A change reaches everyone in", "About 1 minute", "Up to 24 hours"],
+    ["Queries to your name servers", "About 83 per second", "Under 0.1 per second"],
+    ["Readers who wait for a cold lookup", "Often, about 50 to 85 ms instead of 10", "Rarely"],
+    ["Answers survive a name server outage for", "About 1 minute", "Up to a day"],
+    ["Good for failover", true, false],
+  ]}
+  caption="5,000 / 60 s ≈ 83 queries per second; 5,000 / 86,400 s ≈ 0.06. A cold lookup costs 10 + 40 = 50 ms with the example.com referral cached, 85 ms with nothing cached."
+/>
+
+A common middle ground: 300 seconds for records that might move, an hour or more for MX and NS.
+
+Using DNS as the load balancer:
+
+<ProsCons
+  pros={[
+    "Steers readers to a region before their first request",
+    "No extra machine in the request path",
+    "Works for any protocol, not only HTTP",
+  ]}
+  cons={[
+    "Changes wait for caches: a minute or more",
+    "Sees the resolver's location, not the reader's",
+    "Picks a region, not a server, and cannot see load",
+  ]}
+/>
+
+## In the wild
+
+- **The root zone** is served under 13 names, `a.root-servers.net` to `m.root-servers.net`, run by 12 organisations from well over a thousand machines worldwide.
+- **Amazon Route 53** offers geolocation, latency-based, weighted and failover routing, with health checks probing from several locations.
+- **Public resolvers** such as Cloudflare's 1.1.1.1 and Google's 8.8.8.8 announce one address from many sites, so each query reaches a nearby copy.
+- **The 2016 Dyn outage**: a flood of traffic from hacked home devices overwhelmed one DNS provider, and many large sites that relied only on it could not be found for hours.
+
+## Common pitfalls
+
+- **Lowering the TTL on move day.** Resolvers still hold the old TTL. Lower it at least one old TTL ahead, move, then raise it again.
+- **Apps that look up a name once.** Some runtimes, and pools of long-lived connections, keep an address for the life of the process, so DNS failover misses them.
+- **Expecting instant failover.** Detection plus TTL plus clients that ignore the TTL: plan for minutes.
+- **One DNS provider.** If it fails, cached answers last only until their TTLs run out.
+
+## How to say it in an interview
+
+"DNS maps a name to an address. The client asks a recursive resolver. On a miss, the resolver walks the tree, root, then TLD, then the domain's authoritative server, which returns a record with a TTL. Every layer caches it, so a warm lookup costs about 10 ms instead of about 85. The TTL is my trade-off: 60 seconds makes changes and failover fast but multiplies queries; a day cuts load but makes every change slow. Across regions I use GeoDNS with health checks to pick the region and a load balancer inside each region to pick the server, and I expect DNS failover to take a minute or two."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="A user types shop.example.com into a browser for the first time. Walk me through the DNS part." level="Junior" category="Networking">
+    **Short answer.** The browser and operating system check their caches, then ask a recursive resolver. On a miss, the resolver asks a root server, then the `.com` servers, then the domain's authoritative server, and returns the address with its TTL.
+
+    **Why.** Root and TLD servers only give referrals. The authoritative server holds the A or AAAA record. A cold lookup is about four round trips, roughly 85 ms. Resolvers keep the `.com` referral for two days, so the root step is usually skipped, and a warm lookup costs only the 5 to 20 ms hop to the resolver.
+
+    **Follow-ups the interviewer may ask.**
+    - Which transport does DNS use, and when does it switch to TCP?
+    - Which of the caches does the site owner control?
+
+    **Watch out for.** Saying the browser asks the root server. The browser only talks to its resolver. Skipping caching is the other gap, because caching is why DNS is fast.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is a DNS TTL, and how would you choose one?" level="Junior" category="Networking">
+    **Short answer.** The TTL is how many seconds caches may reuse an answer. Choose it by weighing how fast the record must change against how many queries your name servers can take.
+
+    **Why.** With readers behind 5,000 resolvers:
+
+    | TTL | Change reaches everyone in | Queries per second |
+    | --- | --- | --- |
+    | 60 s | about 1 minute | about 83 |
+    | 300 s | about 5 minutes | about 17 |
+    | 86,400 s | up to a day | under 0.1 |
+
+    Records that fail over need short TTLs. Records that never move, such as MX or NS, can sit at hours.
+
+    **Follow-ups the interviewer may ask.**
+    - Why is a 1-second TTL a bad idea?
+    - Do all clients honour the TTL?
+
+    **Watch out for.** Treating the TTL as an exact expiry. It is an upper bound for well-behaved caches; some keep answers longer.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You need to move your site to servers with a new IP address and no downtime. How do you handle DNS?" level="Mid" category="Networking">
+    **Short answer.** Lower the TTL well before the move, run old and new servers side by side, switch the record, and retire the old servers once their traffic is near zero. Then raise the TTL again.
+
+    **Why.** With a one-day TTL, resolvers may hold the old address for 24 hours after any change. Lower it to 60 seconds at least a day ahead, and on move day the switch spreads in about a minute. Keep the old servers serving or forwarding a while longer, because some clients cache past the TTL.
+
+    **Follow-ups the interviewer may ask.**
+    - What if the old servers hold sessions or uploads?
+    - How would you move only 5% of traffic first?
+
+    **Watch out for.** Lowering the TTL on move day. The old one-day value is already cached everywhere.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you use DNS to send users to the nearest of several regions, and what are the limits?" level="Mid" category="Networking">
+    **Short answer.** Serve the name from a GeoDNS or latency-based DNS service that answers each lookup with the closest healthy region. Inside each region a load balancer picks the server.
+
+    **Why.** Sending a Sydney reader to Singapore instead of Frankfurt cuts each round trip from about 280 ms to about 90 ms, and DNS makes that choice once per cached answer, at no cost per request.
+
+    <AnimatedDiagram name="fundamentals/dns-geodns" step={1} path="geodns>sydney>sg" caption="The Sydney reader's lookup returns Singapore's address, so every later request goes to Singapore." />
+
+    The limits come from what DNS sees: the resolver's address, not the reader's (EDNS Client Subnet helps), no per-server load, and changes that wait on caches.
+
+    **Follow-ups the interviewer may ask.**
+    - When do geolocation and latency-based routing pick different regions?
+    - What happens to a user's data if a later lookup sends her elsewhere?
+
+    **Watch out for.** Claiming DNS spreads load evenly across servers. It splits readers by resolver, and one large resolver sends a big block of readers to the same answer.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="One of your regions goes down. How fast does DNS failover move traffic, and how would you make it faster?" level="Senior" category="Reliability">
+    **Short answer.** Failover takes detection time plus the TTL, plus a tail of clients that cache longer: about 90 seconds with 10-second probes, three failures and a 60-second TTL. For faster failover, move it below DNS with anycast or a global load balancer.
+
+    **Why.** Three failed probes take about 30 seconds, then resolvers serve the old answer for up to 60 more. Clients with long-lived connections or process-level caches stay until they reconnect. Cutting the TTL to 5 seconds raises name server load twelve-fold and still leaves that tail. Anycast announces one address from every region; when a region withdraws its route, the network moves packets elsewhere within seconds, with no cache involved.
+
+    <AnimatedDiagram name="fundamentals/dns-geodns" highlight={["health", "geodns", "sg"]} path="sydney>fra" caption="Health checks mark Singapore down, GeoDNS stops returning it, and readers move to Frankfurt as cached answers expire." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you stop a flaky health check from bouncing traffic between regions?
+    - Can the surviving region absorb the failed region's traffic?
+    - What if the DNS provider itself is down?
+
+    **Watch out for.** Promising failover in seconds with DNS alone. The TTL and client caching set a floor the name server cannot remove.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Networking basics](/system-design/fundamentals/networking)
+- [Anatomy of a request](/system-design/fundamentals/anatomy-of-a-request)
+- [TCP and UDP](/system-design/fundamentals/tcp-udp)
+- [CDN](/system-design/fundamentals/cdn)
+- [Load balancing](/system-design/patterns/load-balancing)
+- [Caching](/system-design/patterns/caching)
+- [Availability](/system-design/fundamentals/availability)
+
+## Further reading
+
+- [RFC 1034, Domain Names: Concepts and Facilities](https://www.rfc-editor.org/rfc/rfc1034): the original design of the name tree, resolvers and caching.
+- [Amazon Route 53 Developer Guide, choosing a routing policy](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html): geolocation, latency, weighted and failover routing in a real product.
+- [Cloudflare Learning Center, What is DNS?](https://www.cloudflare.com/learning/dns/what-is-dns/): a short illustrated walk through resolvers and record types.
+- [root-servers.org](https://root-servers.org/): who runs the 13 root server names and where their copies are.
