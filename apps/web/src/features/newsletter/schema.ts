@@ -56,7 +56,8 @@ export const FORMATS: Record<IssueFormat, FormatRules> = {
       "Go deeper",
     ],
     minFigures: 5,
-    maxWords: 2200,
+    // A complete explainer: long enough to cover the topic end to end, short enough to finish in one sitting.
+    maxWords: 4000,
     maxWordsBetweenVisuals: 350,
     takeaways: [3, 5],
     maxAvgSentenceWords: 22,

@@ -91,6 +91,13 @@ describe("email templates", () => {
     expect(text).toContain("Just a quote.");
   });
 
+  it("issue tables and code blocks can't widen the email", async () => {
+    const body = "| A | B |\n| --- | --- |\n| one | two |\n\n```text\n" + "x".repeat(200) + "\n```\n";
+    const { html } = await renderIssueEmail(issue({ body }), { unsubscribeUrl: "https://site.example/u" });
+    expect(html).toMatch(/<table[^>]*style="[^"]*table-layout:fixed[^"]*width:100%/);
+    expect(html).toMatch(/<pre[^>]*style="[^"]*white-space:pre-wrap/);
+  });
+
   it("issue images must be PNG", async () => {
     await expect(
       renderIssueEmail(issue({ body: "![d](/a/diagram.svg)\n" }), { unsubscribeUrl: "https://site.example/u" })

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { ImageResponse } from "next/og";
 import { SITE_NAME } from "../../seo/public";
 import type { Issue } from "../source";
@@ -16,6 +18,28 @@ export type PngVariant = (typeof PNG_VARIANTS)[number];
 type CardIssue = Pick<Issue, "title" | "number" | "hook" | "readingTime"> & {
   cover: NonNullable<Issue["cover"]>;
 };
+
+// Inter (the site font) at three weights, read from @fontsource/inter at build time: the cards render once during
+// the build, so nothing is fetched at request time. A bold headline stands out in a LinkedIn feed.
+// The package is hoisted to the repo root in the workspace; look in the app first, then upwards.
+function fontFile(weight: number) {
+  const rel = path.join("@fontsource", "inter", "files", `inter-latin-${weight}-normal.woff`);
+  for (const dir of [process.cwd(), path.join(process.cwd(), "..", "..")]) {
+    const file = path.join(dir, "node_modules", rel);
+    if (fs.existsSync(file)) return fs.readFileSync(file);
+  }
+  throw new Error(`font ${rel} not found; run npm install`);
+}
+let fonts: { name: string; data: Buffer; weight: 500 | 700 | 800; style: "normal" }[] | null = null;
+function interFonts() {
+  fonts ??= ([500, 700, 800] as const).map((weight) => ({
+    name: "Inter",
+    data: fontFile(weight),
+    weight,
+    style: "normal",
+  }));
+  return fonts;
+}
 
 const dataUrl = (svg: string) => `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 
@@ -36,13 +60,14 @@ export function coverPng(issue: CardIssue, variant: PngVariant): ImageResponse {
     return new ImageResponse(<img src={dataUrl(background)} width={width} height={height} alt="" />, {
       width,
       height,
+      fonts: interFonts(),
     });
   }
 
   const og = variant === "og";
-  const titleSize = og ? (issue.title.length > 42 ? 58 : 68) : issue.title.length > 42 ? 76 : 88;
+  const titleSize = og ? (issue.title.length > 42 ? 62 : 74) : issue.title.length > 42 ? 82 : 96;
   return new ImageResponse(
-    <div style={{ width: "100%", height: "100%", display: "flex", position: "relative" }}>
+    <div style={{ width: "100%", height: "100%", display: "flex", position: "relative", fontFamily: "Inter" }}>
       {/* eslint-disable-next-line @next/next/no-img-element -- next/og draws <img>, not next/image */}
       <img src={dataUrl(background)} width={width} height={height} alt="" style={{ position: "absolute" }} />
       <div
@@ -61,7 +86,7 @@ export function coverPng(issue: CardIssue, variant: PngVariant): ImageResponse {
         {og && <div style={{ ...sub, fontSize: 24, fontWeight: 700, letterSpacing: 3 }}>{kicker(issue)}</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: og ? 18 : 28 }}>
           {!og && <div style={{ ...sub, fontSize: 30, fontWeight: 700, letterSpacing: 3 }}>{kicker(issue)}</div>}
-          <div style={{ ...text, fontSize: titleSize, fontWeight: 700, lineHeight: 1.06, letterSpacing: -1.5 }}>
+          <div style={{ ...text, fontSize: titleSize, fontWeight: 800, lineHeight: 1.02, letterSpacing: -2.5 }}>
             {issue.title}
           </div>
           {variant === "portrait" && (
@@ -75,6 +100,6 @@ export function coverPng(issue: CardIssue, variant: PngVariant): ImageResponse {
         </div>
       </div>
     </div>,
-    { width, height }
+    { width, height, fonts: interFonts() }
   );
 }

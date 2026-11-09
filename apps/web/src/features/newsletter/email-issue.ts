@@ -39,6 +39,11 @@ const emailComponents = {
     return h("blockquote", { style: s.quote }, children);
   },
   hr: () => h(Hr, { style: s.hr }),
+  pre: ({ children }: ComponentProps<"pre">) => h("pre", { style: s.pre }, children),
+  table: ({ children }: ComponentProps<"table">) =>
+    h("table", { style: s.table, role: "presentation", cellPadding: 0, cellSpacing: 0 }, children),
+  th: ({ children }: ComponentProps<"th">) => h("th", { style: s.th }, children),
+  td: ({ children }: ComponentProps<"td">) => h("td", { style: s.td }, children),
   img: ({ src, alt }: ComponentProps<"img">) => {
     const url = typeof src === "string" ? src : "";
     if (url.startsWith(ASSET_SCHEME)) return figureImg(url);

@@ -20,26 +20,33 @@ Reference figures: Issue #1, `apps/web/design/newsletter-figures/harness-enginee
    with `#steps`: readers step through it on the web, email shows it complete, and the LinkedIn carousel gets one
    slide per step. Earlier steps fade, later ones hide, and `stepOnly(n, …)` holds the caption that explains
    step n. Use 3–5 steps.
-6. **Colour means something, and always the same thing:**
+6. **Cards, not boxes.** Concepts are white cards with a soft shadow and a coloured icon tile (`card`, `tile`),
+   groups are tinted panels (`panel`), short tags are pills (`pill`), and the model is the glowing core (`core`).
+   The dotted backdrop and soft colour glows (`glows`) give every figure depth. Plain outlined boxes look like a
+   whiteboard sketch; avoid them.
+7. **One colour per idea, the same in every figure:**
 
-   | Role     | Means                                         |
-   | -------- | --------------------------------------------- |
-   | `accent` | the thing this figure is about (from the cover) |
-   | `ink`    | structure: boxes, labels                       |
-   | `muted`  | arrows, secondary text                         |
-   | `ok`     | checked, verified, success                     |
-   | `risk`   | failure, danger, a trap                        |
+   | Hue      | Means                                                |
+   | -------- | ---------------------------------------------------- |
+   | `accent` | the issue's own colour (from the cover): the subject |
+   | `blue`   | context, information                                 |
+   | `amber`  | tools, actions, people                               |
+   | `teal`   | sandboxes, safe execution                            |
+   | `violet` | memory                                               |
+   | `pink`   | observability, traces                                |
+   | `ok`     | checked, verified, success                           |
+   | `risk`   | failure, danger, a trap                              |
 
-7. **One icon vocabulary.** Use the kit's `ICONS`: context, tools, sandbox, memory, verify, guardrails, observe,
-   human, model, act and loop. Add a new icon to the kit instead of drawing it inline in one figure.
-8. **Captions say what to notice, not what is drawn.** `alt` describes the picture for screen readers. `caption`
+8. **One icon vocabulary.** Use the kit's `ICONS` (context, tools, sandbox, memory, verify, guardrails, observe,
+   human, spark, test, code, rules, git, globe, warning and more). Add a new icon to the kit instead of drawing it inline in one figure.
+9. **Captions say what to notice, not what is drawn.** `alt` describes the picture for screen readers. `caption`
    is the one sentence to remember. `slide` is the line under the figure on the LinkedIn carousel.
 
 ## Making a figure
 
 1. Add or edit the issue's module in `apps/web/design/newsletter-figures/<issue>.ts`. Compose figures from
-   `apps/web/design/newsletter-figures/kit.ts`: `figure`, `box`, `core`, `arrow`, `badge`, `icon`, `text`, `step`
-   and `stepOnly`. Give the issue an `Accent` taken from its cover palette. Register the module in
+   `apps/web/design/newsletter-figures/kit.ts`: `figure`, `card`, `tile`, `panel`, `pill`, `core`, `arrow`,
+   `badge`, `text`, `step`, `stepOnly` and `captionBand`. Give the issue an `Accent` taken from its cover palette. Register the module in
    `apps/web/design/newsletter-figures/build.ts`.
 2. Run `npm run figures:newsletter -w web -- <issue>`. It writes
    `apps/web/assets/diagrams/svg/newsletter/<issue>/<figure>.svg` and its sidecar. Commit both, and never edit
