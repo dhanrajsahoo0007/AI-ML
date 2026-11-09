@@ -3,6 +3,7 @@ import Link from "next/link";
 import { compileMDX } from "next-mdx-remote/rsc";
 import type { ComponentProps, ReactElement } from "react";
 import remarkGfm from "remark-gfm";
+import { rehypeHeadingIds, type DocHeading } from "@/lib/doc-headings";
 import { Callout } from "@/components/db/callouts";
 import { CALLOUT_ATTR, CALLOUTS, isCalloutType, remarkCallouts } from "./callouts";
 import { IssueFigure } from "./figure";
@@ -55,11 +56,18 @@ function components() {
   };
 }
 
-export async function issueBody(issue: Pick<Issue, "body">): Promise<ReactElement> {
+/** The issue body for its web page, and its h2/h3 outline for "On this page". */
+export async function issueBody(
+  issue: Pick<Issue, "body">
+): Promise<{ content: ReactElement; headings: DocHeading[] }> {
+  const headings: DocHeading[] = [];
   const { content } = await compileMDX({
     source: issue.body,
     components: components(),
-    options: { parseFrontmatter: false, mdxOptions: { remarkPlugins: [remarkGfm, remarkCallouts] } },
+    options: {
+      parseFrontmatter: false,
+      mdxOptions: { remarkPlugins: [remarkGfm, remarkCallouts], rehypePlugins: [[rehypeHeadingIds, { headings }]] },
+    },
   });
-  return content;
+  return { content, headings };
 }

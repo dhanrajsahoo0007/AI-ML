@@ -98,7 +98,23 @@ export async function renderIssueEmail(issue: Issue, opts: RenderIssueOptions): 
           "."
         )
       );
+  const kicker = [issue.number !== undefined && `Issue #${issue.number}`, `${issue.readingTime} min read`]
+    .filter(Boolean)
+    .join(" · ");
   return renderEmail(
-    h(IssueEmail, { title: issue.title, summary: issue.summary, webUrl, unsubscribeUrl: opts.unsubscribeUrl }, body)
+    h(
+      IssueEmail,
+      {
+        title: issue.title,
+        summary: issue.summary,
+        webUrl,
+        unsubscribeUrl: opts.unsubscribeUrl,
+        // The cover PNG route (app/newsletter/[slug]/share/[file]); built for every issue with a cover.
+        coverUrl: issue.cover ? absoluteUrl(`${issue.href}/share/email.png`) : undefined,
+        kicker,
+        takeaways: emailCarriesBody(issue) ? issue.takeaways : [],
+      },
+      body
+    )
   );
 }
