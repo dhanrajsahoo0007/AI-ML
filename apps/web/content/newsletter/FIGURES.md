@@ -16,8 +16,9 @@ Reference figures: Issue #1, `apps/web/design/newsletter-figures/harness-enginee
    this), and a box label is at most two or three words.
 4. **Square or portrait.** Use 1080×1080 to 1080×1350, so a figure fits a phone screen, a 600 px email and a 4:5
    LinkedIn slide without resizing. Never use wide 16:9.
-5. **Build up hard ideas.** Put each new part on its own `step(n, …)` layer and show the figure in the issue with
-   `#step=1` … `#step=n`. Earlier steps fade, later ones hide, and `stepOnly(n, …)` holds the caption that explains
+5. **Build up hard ideas.** Put each new part on its own `step(n, …)` layer and put the figure in the issue once,
+   with `#steps`: readers step through it on the web, email shows it complete, and the LinkedIn carousel gets one
+   slide per step. Earlier steps fade, later ones hide, and `stepOnly(n, …)` holds the caption that explains
    step n. Use 3–5 steps.
 6. **Colour means something, and always the same thing:**
 
@@ -44,7 +45,7 @@ Reference figures: Issue #1, `apps/web/design/newsletter-figures/harness-enginee
    `apps/web/assets/diagrams/svg/newsletter/<issue>/<figure>.svg` and its sidecar. Commit both, and never edit
    them by hand: `tests/unit/newsletter-figures.test.ts` fails when the files and the code disagree.
 3. Use the figure in the issue: `![What it shows](asset:diagrams/svg/newsletter/<issue>/<figure>)`, or
-   `…#step=2` for one step of a build-up figure.
+   `…#steps` for a build-up figure (or `…#step=2` for a single step).
 4. Run `npm run assets -w web`. Then check the page in light and dark mode, and check the PNG (the email and
    carousel image) in `.build-cache/assets/<hash>/`.
 

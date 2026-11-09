@@ -36,6 +36,7 @@ function components() {
       const fig = resolveFigure(url);
       if (!(fig.step && fig.asset.id === lastStepped)) figure += 1;
       lastStepped = fig.step ? fig.asset.id : null;
+      if (fig.allSteps) lastStepped = null;
       return <IssueFigure fig={fig} number={figure} />;
     },
     // A figure is an image alone in a paragraph; <figure> can't sit inside <p>.

@@ -62,10 +62,12 @@ carry a non-expiring `unsubscribe` token; mail providers POST `List-Unsubscribe=
   behind the section gate; the second with `origin: false` for mail systems).
 - Issues are plain Markdown (no JSX components) so one file renders to the web and to email. Rich content uses
   Markdown-native syntax both renderers understand:
-  - **Figures:** `![alt](asset:<id>)`, or `![alt](asset:<id>#step=<n>)` for one step of a build-up SVG (layers
-    marked `data-step`, see `apps/web/src/lib/svg-steps.ts`). The web inlines the SVG as a numbered figure; email
-    gets the asset's PNG (a PNG per step, made by the asset build). The asset needs `alt` and `caption`, must be
-    free, and is counted as used by the issue page, so it ships wherever the page is built.
+  - **Figures:** `![alt](asset:<id>)`. A build-up SVG (layers marked `data-step`, see
+    `apps/web/src/lib/svg-steps.ts`) goes in as `#steps`: one figure the reader steps through on the web
+    (`step-figure.client.tsx`) and the complete figure in email; `#step=<n>` shows a single step. The web inlines
+    the SVG as a numbered figure, with a "View full size" PNG link on phones; email gets the asset's PNG (a PNG
+    per step, made by the asset build). The asset needs `alt` and `caption`, must be free, and is counted as used
+    by the issue page, so it ships wherever the page is built.
   - **Callouts:** GitHub alerts `> [!NOTE]` (In plain English), `[!IMPORTANT]` (Key idea), `[!WARNING]` (Common
     trap), `[!TIP]` (Try it); other types are errors.
   - Any other image must be a PNG with an absolute URL. A premium issue sent to everyone carries only its summary

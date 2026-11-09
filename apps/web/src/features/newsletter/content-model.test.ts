@@ -39,6 +39,7 @@ describe("asset: figure sources", () => {
   it("parses ids and steps; rejects malformed ones", () => {
     expect(parseAssetSrc("asset:diagrams/svg/nl/loop#step=2")).toEqual({ id: "diagrams/svg/nl/loop", step: 2 });
     expect(parseAssetSrc("asset:diagrams/svg/nl/hero")).toEqual({ id: "diagrams/svg/nl/hero" });
+    expect(parseAssetSrc("asset:diagrams/svg/nl/loop#steps")).toEqual({ id: "diagrams/svg/nl/loop", allSteps: true });
     expect(parseAssetSrc("asset:Bad Id")).toBeNull();
     expect(parseAssetSrc("asset:x#step=0")).toBeNull();
     expect(parseAssetSrc("https://x/y.png")).toBeNull();
@@ -55,9 +56,11 @@ describe("asset: figure sources", () => {
     expect(figureProblems("asset:diagrams/svg/nl/missing", tmp).join()).toMatch(/no asset diagrams\/svg\/nl\/missing/);
     expect(figureProblems("asset:diagrams/svg/nl/bare", tmp).join("\n")).toMatch(/needs alt[\s\S]*needs a caption/);
     expect(figureProblems("asset:diagrams/svg/nl/locked", tmp).join()).toMatch(/premium/);
-    expect(figureProblems("asset:diagrams/svg/nl/loop", tmp).join()).toMatch(/build-up figure; pick a step/);
+    expect(figureProblems("asset:diagrams/svg/nl/loop", tmp).join()).toMatch(/build-up figure; use #steps/);
     expect(figureProblems("asset:diagrams/svg/nl/loop#step=3", tmp).join()).toMatch(/step 3 is not one of 1, 2/);
     expect(figureProblems("asset:diagrams/svg/nl/hero#step=1", tmp).join()).toMatch(/no data-step layers/);
+    expect(figureProblems("asset:diagrams/svg/nl/loop#steps", tmp)).toEqual([]);
+    expect(figureProblems("asset:diagrams/svg/nl/hero#steps", tmp).join()).toMatch(/no data-step layers/);
     expect(figureProblems("asset:BAD", tmp).join()).toMatch(/malformed/);
   });
 

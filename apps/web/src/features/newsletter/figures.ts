@@ -76,7 +76,7 @@ export function figureSource(id: string, assetsDir = defaultAssetsDir()): Figure
 /** What is wrong with an `asset:` figure source, or [] when it is fine. */
 export function figureProblems(src: string, assetsDir = defaultAssetsDir()): string[] {
   const ref = parseAssetSrc(src);
-  if (!ref) return [`figure ${src} is malformed: use asset:<id> or asset:<id>#step=<n>`];
+  if (!ref) return [`figure ${src} is malformed: use asset:<id>, asset:<id>#step=<n> or asset:<id>#steps`];
   const a = figureSource(ref.id, assetsDir);
   if (!a) return [`figure ${src}: no asset ${ref.id}; scaffold it with npm run asset:new -w web -- ${ref.id}`];
   const out: string[] = [];
@@ -84,12 +84,16 @@ export function figureProblems(src: string, assetsDir = defaultAssetsDir()): str
   if (a.access === "premium") out.push(`figure ${src}: premium assets can't go in an issue (it is emailed)`);
   if (!a.alt) out.push(`figure ${src}: the asset's sidecar needs alt (what the figure shows)`);
   if (!a.caption) out.push(`figure ${src}: the asset's sidecar needs a caption (the one thing to notice)`);
-  if (ref.step !== undefined) {
+  if (ref.allSteps) {
+    if (a.steps.length === 0) out.push(`figure ${src}: ${ref.id} has no data-step layers`);
+  } else if (ref.step !== undefined) {
     if (a.steps.length === 0) out.push(`figure ${src}: ${ref.id} has no data-step layers`);
     else if (!a.steps.includes(ref.step))
       out.push(`figure ${src}: step ${ref.step} is not one of ${a.steps.join(", ")}`);
   } else if (a.steps.length > 0) {
-    out.push(`figure ${src}: ${ref.id} is a build-up figure; pick a step with #step=1…${Math.max(...a.steps)}`);
+    out.push(
+      `figure ${src}: ${ref.id} is a build-up figure; use #steps, or one step with #step=1…${Math.max(...a.steps)}`
+    );
   }
   return out;
 }
@@ -131,7 +135,9 @@ export function resolveFigure(src: string): ResolvedFigure {
 }
 
 /** The PNG of a figure (of its step, for a build-up figure), light theme: what email clients show. */
-export function figurePng(fig: Pick<ResolvedFigure, "asset" | "step">): AssetVariant | undefined {
+export function figurePng(fig: Pick<ResolvedFigure, "asset" | "step" | "allSteps">): AssetVariant | undefined {
+  // `#steps` in email: the plain PNG, which for a build-up figure is its last (complete) step.
+  if (fig.allSteps) return figurePng({ asset: fig.asset });
   const pngs = fig.asset.variants.filter((v) => v.format === "png" && (v.theme ?? "light") === "light");
   return pngs.find((v) => v.step === fig.step) ?? (fig.step === undefined ? undefined : pngs.find((v) => !v.step));
 }

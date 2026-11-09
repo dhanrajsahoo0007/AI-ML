@@ -1,0 +1,198 @@
+---
+title: "The harness is the product"
+issue: 1
+date: "2026-11-17"
+summary: "Why the code around an AI model, not the model itself, decides whether an agent is reliable, and the seven parts every good harness has."
+format: deep-dive
+series: agent-engineering
+tags: [agents, harness, reliability]
+level: intro
+cover: { motif: harness-ring, palette: dusk, seed: 7 }
+takeaways:
+  - "An agent is a model plus a harness: everything around the model that decides what it sees, what it can do and what counts as done."
+  - "Every turn runs a loop of gather, propose, check, act and observe. The model does only one of those steps."
+  - "Reliability comes from checks that run cheapest first: formats, then tests, then a reviewer model, then a person."
+  - "A second harness, the eval harness, turns real runs into tests, so you can change the agent without breaking it."
+related:
+  - /ai-system-design/genai-system-design/harness-engineering
+  - /ai-system-design/genai-system-design/agentic-ai-evaluation
+  - /ai-system-design/genai-system-design/tool-use-and-mcp
+  - /ai-system-design/genai-system-design/guardrails-and-safety
+share:
+  hook: "Same model. Two products. One is reliable, the other falls apart. The difference isn't the model. It's the harness."
+access: free
+status: draft
+audience: all
+---
+
+## Why this matters
+
+Give the same AI model to two teams. One ships an agent that fixes real bugs every day. The other ships a demo
+that falls apart the first time a customer touches it.
+
+The model didn't change. What changed is everything around it: what it was shown, what it was allowed to do, and
+how its work was checked. That surrounding code has a name now. It's called the **harness**, and designing it is
+**harness engineering**.
+
+This issue explains what a harness is, how it works turn by turn, and where most teams get it wrong.
+
+## The idea in plain English
+
+Think of a brilliant new hire on their first day. They're smart, but smart isn't enough. They need a desk, logins
+to the right systems, a checklist, someone to review their work, and a record of what they did.
+
+The model is the new hire. The harness is everything else.
+
+![Agent = model + harness](asset:diagrams/svg/newsletter/harness-engineering/model-plus-harness)
+
+> [!NOTE]
+> A harness is everything in an agent except the model. Birgitta Böckeler sums it up as "Agent = Model +
+> Harness" in her article on Martin Fowler's site.
+
+Each part answers one question:
+
+- **Context:** what does the model see right now?
+- **Tools:** what is it allowed to do?
+- **Sandbox:** where do its actions run, so mistakes stay contained?
+- **Memory:** what carries over from one step, or one session, to the next?
+- **Verification:** how do we know the work is right?
+- **Guardrails:** what must it never do?
+- **Observability:** what did it actually do, step by step?
+
+A strong model with a weak harness flails. An average model with a strong harness can be dependable.
+
+## How it works: the loop
+
+An agent doesn't answer once. It works in a loop, and every turn of the loop passes through the harness. Step
+through the figure:
+
+![The agent loop, step by step](asset:diagrams/svg/newsletter/harness-engineering/agent-loop#steps)
+
+1. **Gather.** The harness decides which instructions, files and earlier results the model sees on this turn.
+2. **Propose.** The model suggests the next action, such as "edit this file" or "call the search tool". Nothing has
+   happened yet. It's only a suggestion.
+3. **Check.** The harness tests the proposal. Is the tool call well formed? Is the action allowed? Is it safe?
+4. **Act.** Only then does the action run, inside a sandbox where a mistake can't hurt real systems.
+5. **Observe.** The output, the error or the failing test becomes context for the next turn. The loop repeats until
+   the task is done or a limit is hit.
+
+> [!IMPORTANT]
+> Count the steps. The model does one of the five. The other four are harness code that your team writes, tests and
+> owns.
+
+## How it works: what the model sees
+
+The model only knows what's in its context window. That window is large, but it is fixed, and it fills up fast.
+
+![What fills the context window](asset:diagrams/svg/newsletter/harness-engineering/context-budget)
+
+So the harness acts like an editor. Anthropic calls this **context engineering**: finding the smallest set of
+high-signal information that gets the job done.
+
+In practice, three habits matter most:
+
+- **Load just in time.** Give the model a way to search and open files, instead of pasting the whole codebase in up
+  front.
+- **Compact the history.** Old tool results pile up quickly. Summarise them before they crowd out what matters.
+- **Write things down.** For long tasks, keep a progress file and commit often. A fresh session can then pick up
+  where the last one stopped.
+
+That last habit comes from Anthropic's write-up on long-running agents. A first session sets up the project, a
+feature list and a progress log. Every later session reads them, makes one piece of progress and leaves clean notes
+behind.
+
+## How it works: checking the work
+
+A model will sometimes be confidently wrong. The harness's job is to catch that before it matters, and to catch it
+as cheaply as possible.
+
+![Checking the work, one check at a time](asset:diagrams/svg/newsletter/harness-engineering/verification-ladder#steps)
+
+The first two checks are **certain**. A schema check or a failing test gives the same answer every time, costs
+almost nothing and runs in seconds.
+
+The last two checks are **judgment**. A reviewer model can spot that the code works but solves the wrong problem.
+A person signs off on anything risky or irreversible. Both cost more, so they go last.
+
+> [!NOTE]
+> Böckeler splits these controls into **guides**, which steer the agent before it acts, such as instructions and
+> examples, and **sensors**, which check its output afterwards, such as tests and reviewers. A good harness has
+> both.
+
+When a check fails, the error goes back to the model as context. That feedback loop is where most of an agent's
+reliability comes from.
+
+## How it works: the second harness
+
+How do you know a change to your harness made things better, not worse? You need a second harness that tests the
+first one.
+
+![Two harnesses, one system](asset:diagrams/svg/newsletter/harness-engineering/two-harnesses)
+
+The **agent harness** runs the agent. The **eval harness** runs a fixed set of tasks through it and scores the
+results. Real runs, especially the failures, become new test cases. A change ships only if the scores hold.
+
+OpenAI's Codex team described taking this idea far. Their engineers stopped writing code by hand and spent their
+time on the environment instead: documentation the agent can read, tests and linters that enforce architecture
+rules, and feedback loops that let the agent check its own work.
+
+## A worked example
+
+Here's one small task, traced from start to finish. A coding agent is asked to fix a failing test.
+
+![A coding agent fixes a bug](asset:diagrams/svg/newsletter/harness-engineering/coding-agent-trace)
+
+Look at who did what. The model made two decisions: the first fix, and the better second fix. The harness did
+everything else. It picked the files, enforced the rules, ran the tests, caught the missed edge case and handed the
+result to a person.
+
+That's the pattern in every reliable agent. The model is the creative step. The harness is the system.
+
+## What goes wrong
+
+> [!WARNING]
+> **Dumping everything into context.** More context isn't better context. Long, noisy prompts bury the
+> instructions that matter. Fetch what the task needs, when it needs it.
+
+> [!WARNING]
+> **Vague tools.** A tool called `do_stuff` with a one-line description will be misused. Name tools clearly, keep
+> them few, and return errors the model can act on.
+
+> [!WARNING]
+> **No verification step.** If nothing checks the work, the agent marks its own homework. Anthropic found agents
+> declaring features done before testing them end to end.
+
+> [!WARNING]
+> **No traces.** When an agent fails and you can't replay what it saw and did, you can't fix it. Log every turn
+> from day one.
+
+## The bigger picture
+
+Models will keep getting better, and you'll swap them every few months. Your harness stays. It holds your
+team's knowledge: your rules, your tools, your tests and your definition of done.
+
+That's why the best teams treat the harness as product code. They version it, review it and test it with an eval
+harness. When the agent repeats a mistake, they don't just retry it. They add a guide or a sensor so the mistake
+can't happen again.
+
+The skill is shifting from "prompt the model well" to "build the system around the model well".
+
+## Try it yourself
+
+> [!TIP]
+> Pick an AI tool you use every week, such as a coding assistant or a chatbot at work. For each of the seven parts
+> in Figure 1, write one line on how that tool handles it. Which part is weakest? That's probably where its
+> failures come from.
+
+## Go deeper
+
+- [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering) on this site: the full
+  reference, with architecture and trade-offs.
+- [Harness engineering for coding agent users](https://martinfowler.com/articles/harness-engineering.html), Birgitta
+  Böckeler: guides and sensors, and the inner and outer harness.
+- [Effective harnesses for long-running agents](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents),
+  Anthropic: how to keep agents on track across many sessions.
+- [Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents),
+  Anthropic: deciding what goes into the context window.
+- [Harness engineering: leveraging Codex in an agent-first world](https://openai.com/index/harness-engineering/),
+  OpenAI, with [InfoQ's summary](https://www.infoq.com/news/2026/02/openai-harness-engineering-codex/).

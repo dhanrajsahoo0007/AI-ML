@@ -223,7 +223,7 @@ export interface AssetRef {
 const REF_RE = new RegExp(`<(${Object.keys(ASSET_REF_COMPONENTS).join("|")})\\b([^>]*?)\\/?>`, "g");
 
 /** Markdown figures in newsletter issues: ![alt](asset:<id>) or ![alt](asset:<id>#step=<n>). */
-const MD_ASSET_RE = /!\[[^\]]*\]\(asset:([a-z0-9][a-z0-9/-]*[a-z0-9])(?:#step=\d+)?\)/g;
+const MD_ASSET_RE = /!\[[^\]]*\]\(asset:([a-z0-9][a-z0-9/-]*[a-z0-9])(?:#step=\d+|#steps)?\)/g;
 
 /** Asset references in one MDX source. `<Figure caption>` without an id is not a reference. */
 export function findRefs(text: string): { component: AssetRefComponent; id: string; index: number }[] {

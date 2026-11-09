@@ -44,7 +44,7 @@ export function internalPath(url: string): string | null {
   return pathname || "/";
 }
 
-// ── Figures: ![alt](asset:<id>) and ![alt](asset:<id>#step=<n>) ─────────────────────────────────
+// ── Figures: ![alt](asset:<id>), ![alt](asset:<id>#step=<n>) and ![alt](asset:<id>#steps) ──────────
 
 export const ASSET_SCHEME = "asset:";
 
@@ -53,13 +53,16 @@ export interface AssetSrc {
   id: string;
   /** Build-up step (1-based) of a figure whose SVG has data-step layers. */
   step?: number;
+  /** `#steps`: every step of a build-up figure, stepped through on the web (the last step in email). */
+  allSteps?: boolean;
 }
 
 /** Parses an `asset:` image source; null for any other URL, or a malformed one. */
 export function parseAssetSrc(src: string): AssetSrc | null {
   if (!src.startsWith(ASSET_SCHEME)) return null;
-  const m = /^asset:([a-z0-9][a-z0-9/-]*[a-z0-9])(?:#step=([1-9]\d*))?$/.exec(src);
+  const m = /^asset:([a-z0-9][a-z0-9/-]*[a-z0-9])(?:#step=([1-9]\d*)|#(steps))?$/.exec(src);
   if (!m) return null;
+  if (m[3]) return { id: m[1], allSteps: true };
   return m[2] ? { id: m[1], step: Number(m[2]) } : { id: m[1] };
 }
 

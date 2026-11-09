@@ -25,9 +25,10 @@ Model: `apps/web/content/newsletter/2026/system-design-digest-0.mdx`.
    paths (made absolute for email).
    - Figures: add the asset with `npm run asset:new -w web -- diagrams/svg/newsletter/<slug>/<figure>` (sidecar
      needs `alt` and `caption`), then `![What it shows](asset:diagrams/svg/newsletter/<slug>/<figure>)`. A build-up
-     figure marks its layers `<g data-step="1">` … and is shown one step at a time with `#step=<n>`.
+     figure (its layers carry `data-step`) goes in once as `#steps`: a step-through figure on the web, the complete
+     figure in email. `#step=<n>` shows a single step.
    - Callouts: `> [!NOTE]`, `> [!IMPORTANT]`, `> [!WARNING]`, `> [!TIP]` on the first line of a quote.
-   - Good: `![The agent loop](asset:diagrams/svg/newsletter/harness-engineering/agent-loop#step=2)`
+   - Good: `![The agent loop](asset:diagrams/svg/newsletter/harness-engineering/agent-loop#steps)`
    - Bad: `<Figure id="…" />`, an SVG URL, or a `> [!DANGER]` callout
 
 5. **Summaries, never bodies, in feeds.** Don't change RSS or search to include the body, even for free issues.
