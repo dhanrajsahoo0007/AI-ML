@@ -17,7 +17,11 @@ Model: `apps/web/content/newsletter/2026/system-design-digest-0.mdx`.
    `status` (`draft` → `scheduled` → `sent`), `access` (`free` default), `audience` (`all` or `pro`). `scheduled`
    needs `sendAt` with a time zone, e.g. `2026-11-14T09:00:00Z`, plus `issue` and `cover`.
 
-3. **Plain Markdown only.** No JSX components: the same file renders to the web page and the email. Links are site
+3. **Cover:** open `/newsletter/covers` on the dev server, step the seed until a cover fits the topic, and paste
+   its `cover:` line. Check the link preview at `/newsletter/<slug>/opengraph-image` and the LinkedIn image at
+   `/newsletter/<slug>/share/portrait.png`.
+
+4. **Plain Markdown only.** No JSX components: the same file renders to the web page and the email. Links are site
    paths (made absolute for email).
    - Figures: add the asset with `npm run asset:new -w web -- diagrams/svg/newsletter/<slug>/<figure>` (sidecar
      needs `alt` and `caption`), then `![What it shows](asset:diagrams/svg/newsletter/<slug>/<figure>)`. A build-up
@@ -26,16 +30,16 @@ Model: `apps/web/content/newsletter/2026/system-design-digest-0.mdx`.
    - Good: `![The agent loop](asset:diagrams/svg/newsletter/harness-engineering/agent-loop#step=2)`
    - Bad: `<Figure id="…" />`, an SVG URL, or a `> [!DANGER]` callout
 
-4. **Summaries, never bodies, in feeds.** Don't change RSS or search to include the body, even for free issues.
+5. **Summaries, never bodies, in feeds.** Don't change RSS or search to include the body, even for free issues.
 
-5. **Premium issues** (`access: premium`) sent to `audience: all` carry only the summary and a link; full text goes
+6. **Premium issues** (`access: premium`) sent to `audience: all` carry only the summary and a link; full text goes
    by email only to `audience: pro`.
 
-6. **Sending is the owner's step.** `.github/workflows/newsletter-send.yml` runs
+7. **Sending is the owner's step.** `.github/workflows/newsletter-send.yml` runs
    `src/features/newsletter/send/send-issue.ts`: `--dry-run` writes an .eml under `apps/web/.build/mail` (safe for
    agents), `--mode test` sends to the founder, `--mode broadcast` needs `status: scheduled` and the owner's
    Resend keys. After a broadcast, a follow-up PR sets `status: sent`.
    - Bad: an agent running a broadcast, or setting `status: sent` before it went out
 
-7. **Verify:** `npm run content-check -w web` (errors block; format warnings show what a deep dive still lacks); `npm run dev` → `/newsletter/<slug>` (drafts show a `noindex` review
+8. **Verify:** `npm run content-check -w web` (errors block; format warnings show what a deep dive still lacks); `npm run dev` → `/newsletter/<slug>` (drafts show a `noindex` review
    page outside production); a `--dry-run` render to check the email.

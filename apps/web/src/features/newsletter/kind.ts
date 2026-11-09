@@ -117,8 +117,14 @@ export const newsletterKind: SectionKind<Issue> = {
     const catalogFile = path.join("content", section.key, "catalog.yaml");
     for (const message of catalogProblems(section.key)) errors.push({ file: catalogFile, message, level: "error" });
 
+    // Fixed routes next to the issues (covers, confirm, unsubscribe, rss.xml) can't be issue slugs.
+    const routeDir = path.join(process.cwd(), "src", "app", section.key);
+    const reserved = new Set(
+      fs.existsSync(routeDir) ? fs.readdirSync(routeDir).filter((n) => !n.startsWith("[") && !n.includes(".tsx")) : []
+    );
     for (const issue of items) {
       if (!isValidSlug(issue.slug)) push(issue, `file name "${issue.slug}" must be lowercase kebab-case`, 1);
+      if (reserved.has(issue.slug)) push(issue, `"${issue.slug}" is a fixed route of the section; rename the file`, 1);
       const first = slugs.get(issue.slug);
       if (first) push(issue, `slug ${issue.slug} is also used by ${rel(first.file)}; slugs are unique across years`, 1);
       slugs.set(issue.slug, issue);

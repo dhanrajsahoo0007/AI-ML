@@ -9,5 +9,6 @@ export function generateMetadata() {
 
 export default function NewsletterLayout({ children }: { children: React.ReactNode }) {
   routeSection(NEWSLETTER_KIND);
-  return <div className="mx-auto w-full max-w-3xl px-4 pt-8 pb-20 sm:px-8">{children}</div>;
+  // Each page sets its own reading width: issues and utility pages are narrow, the archive and gallery wide.
+  return <div className="mx-auto w-full max-w-6xl px-4 pt-8 pb-20 sm:px-8">{children}</div>;
 }

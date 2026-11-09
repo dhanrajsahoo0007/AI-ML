@@ -33,7 +33,7 @@ export default function NewsletterArchivePage() {
   const section = routeSection(NEWSLETTER_KIND);
   const issues = loadIssues(section).filter((i) => isBuilt(i));
   return (
-    <>
+    <div className="mx-auto max-w-3xl">
       <JsonLd data={archiveSeo(section).jsonLd} />
       <Breadcrumb items={[{ label: "Home", href: "/" }, { label: section.label }]} />
       <PageHeader className="mt-10 mb-10" title={ARCHIVE_TITLE} lead={ARCHIVE_DESCRIPTION} />
@@ -72,6 +72,6 @@ export default function NewsletterArchivePage() {
           </ol>
         )}
       </section>
-    </>
+    </div>
   );
 }

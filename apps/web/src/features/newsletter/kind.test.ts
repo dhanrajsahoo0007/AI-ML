@@ -98,6 +98,11 @@ describe("newsletter kind", () => {
     ]);
   });
 
+  it("issue slugs can't shadow the section's fixed routes", async () => {
+    const out = await messages(fixture("covers", "2026", base("status: draft")));
+    expect(out).toContain('error: "covers" is a fixed route of the section; rename the file');
+  });
+
   it("checks the year folder and duplicate slugs", async () => {
     const a = fixture("same", "2025", base("status: draft"));
     const b = fixture("same", "2026", base("status: draft"));

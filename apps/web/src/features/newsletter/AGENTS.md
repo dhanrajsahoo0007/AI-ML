@@ -15,8 +15,14 @@ plain Node) and `emails.ts` (from `apps/web/src/features/email/jobs.ts`, bundled
 - `schema.ts`: issue frontmatter (`title`, `issue` number, `date`, `summary`, `format`, `series`, `tags`, `level`,
   `readingTime`, `cover`, `takeaways`, `related`, `share.hook`, `access`, `status` draft/scheduled/sent, `sendAt`,
   `audience` all/pro); `SUMMARY_MAX` (200); `FORMATS`, the per-format shape rules (deep-dive, digest).
-- `catalog.ts`: the closed tag and series lists in `content/newsletter/catalog.yaml`. `cover/catalog.ts`: cover
-  motif and palette names.
+- `catalog.ts`: the closed tag and series lists in `content/newsletter/catalog.yaml`.
+- `cover/`: generative covers. `cover/catalog.ts` (motif and palette names the frontmatter may use),
+  `cover/rng.ts` (seeded), `cover/palettes.ts`, `cover/motifs.ts`, `cover/render.ts` (`renderCover(spec,
+variant)` → SVG string, pure, runs in Node and the browser), `cover/social-card.tsx` (`coverPng()`: og, email,
+  portrait and square PNGs through next/og), `cover/cover-gallery.client.tsx` (the gallery island). Routes:
+  `apps/web/src/app/newsletter/[slug]/opengraph-image.tsx`,
+  `apps/web/src/app/newsletter/[slug]/share/[file]/route.ts` (`email.png`, `portrait.png`, `square.png`) and
+  `apps/web/src/app/newsletter/covers/page.tsx` (the gallery; not built in production, noindex).
 - `links.ts` (links, images, `asset:` figure sources, callout markers), `figures.ts` (figure checks against the
   asset source files; manifest lookup for rendering), `figure.tsx` (the web figure), `callouts.ts` (callout types
   and the remark plugin), `body-stats.ts` (words, figures, headings, reading time).
@@ -64,6 +70,9 @@ carry a non-expiring `unsubscribe` token; mail providers POST `List-Unsubscribe=
     trap), `[!TIP]` (Try it); other types are errors.
   - Any other image must be a PNG with an absolute URL. A premium issue sent to everyone carries only its summary
     and a link.
+- A new motif or palette is a name in `cover/catalog.ts` plus its drawing; `cover/cover.test.ts` checks every name is
+  drawn, ids are prefixed, and title text keeps WCAG contrast on every palette. Same seed, same cover: never use
+  `Math.random` in a motif. Issue slugs can't be a fixed route name of the section (`covers`, `confirm`, …).
 - Format rules (`FORMATS`: required sections, figure count, length, words between visuals, sentence length,
   takeaways) are **warnings**, so a draft can be unfinished. Issue numbers are unique (error) and gapless
   (warning); a scheduled or sent issue needs `issue` and `cover`.
@@ -83,6 +92,6 @@ as an email kind (`apps/web/src/features/email/AGENTS.md`, "Extend it").
 
 ## Tests
 
-`kind.test.ts`, `content-model.test.ts`, `service.test.ts`, `store.test.ts`, `token.test.ts`, `rss.test.ts`, `send-plan.test.ts`,
+`kind.test.ts`, `content-model.test.ts`, `cover/cover.test.ts`, `service.test.ts`, `store.test.ts`, `token.test.ts`, `rss.test.ts`, `send-plan.test.ts`,
 `server.test.ts`, `unsubscribe-headers.test.ts`; E2E `apps/web/tests/e2e/newsletter.spec.ts` (subscribe → .eml →
 confirm → one-click unsubscribe).

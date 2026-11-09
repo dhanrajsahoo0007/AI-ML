@@ -47,7 +47,7 @@ export default async function NewsletterIssuePage({ params }: { params: Params }
   const { section, issue } = findIssue((await params).slug);
   const premium = newsletterKind.access(section, issue) === "premium";
   return (
-    <article>
+    <article className="mx-auto max-w-3xl">
       <JsonLd data={issueSeo(section, issue).jsonLd} />
       <Breadcrumb
         items={[{ label: "Home", href: "/" }, { label: section.label, href: section.href }, { label: issue.title }]}
