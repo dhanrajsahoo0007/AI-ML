@@ -51,6 +51,12 @@ describe("AnimatedDiagram highlight and path", () => {
     expect(dimmed(html, "node")).toEqual(["client", "lb", "db"]);
   });
 
+  it("keeps the figure inside the article column (no negative margins over the sidebar and outline)", () => {
+    const html = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: arch }));
+    const figure = html.match(/<figure[^>]*class="([^"]*)"/)?.[1] ?? "";
+    expect(figure).not.toMatch(/(^|\s)([a-z0-9]+:)?-m[xlr]?-/);
+  });
+
   it("starts paused and draws packets with the class that reduced motion hides", () => {
     const html = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: arch }));
     expect(html).toContain('data-running="false"');

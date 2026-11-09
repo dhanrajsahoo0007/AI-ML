@@ -120,7 +120,7 @@ export function DiagramFigure({
   added = [],
   width,
   height,
-  minWidth = 680,
+  minWidth = 560,
   toolbar,
   children,
 }: {
@@ -143,7 +143,9 @@ export function DiagramFigure({
   const label = caption ?? title;
 
   return (
-    <figure ref={figRef} className="my-10 xl:-mx-24 2xl:-mx-40">
+    // Stays inside the article column: the docs layout has a sidebar on the left and the page outline on the right,
+    // so negative margins would draw the figure over them.
+    <figure ref={figRef} className="my-10">
       {toolbar}
       {(current !== undefined || stepper) && (
         <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
