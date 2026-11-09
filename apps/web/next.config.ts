@@ -91,8 +91,9 @@ function nextConfig(phase: string): NextConfig {
       // Registry and switch sources, inlined so request-time code never reads content/*.yaml (no fs on Workers).
       SECTIONS_YAML: fs.readFileSync(path.join(__dirname, "content", "sections.yaml"), "utf8"),
       FEATURES_YAML: fs.readFileSync(path.join(__dirname, "content", "features.yaml"), "utf8"),
-      // Written by `prebuild` (scripts/gen-runtime-data.ts); "" in `next dev`, where the layout reads content directly.
-      HEADER_NAV: readGenerated("header-nav.json"),
+      // Written by `prebuild` (scripts/gen-runtime-data.ts); "" in `next dev`, where the layout reads content directly
+      // (a header-nav.json left by an earlier production build would show production's sections in dev).
+      HEADER_NAV: phase === PHASE_DEVELOPMENT_SERVER ? "" : readGenerated("header-nav.json"),
       SEARCH_INDEX: readGenerated("search-index.json"),
       // The paywall switch (content/features.yaml) this build was made with: "on" | "off" (plan §9).
       PAYWALL: features.paywall ? "on" : "off",
