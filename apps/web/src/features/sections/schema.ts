@@ -29,6 +29,12 @@ const slug = z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "must be lowercase keb
 
 export const releaseSchema = z.object({ local: state, preview: state, staging: state, production: state }).strict();
 
+/** A docs hub's own release: `on` or `off` per environment (no `hidden`; the section's state applies on top). */
+const hubState = z.enum(["on", "off"]);
+export const hubReleaseSchema = z
+  .object({ local: hubState, preview: hubState, staging: hubState, production: hubState })
+  .strict();
+
 export const sectionEntrySchema = z
   .object({
     key: slug,
@@ -62,6 +68,12 @@ export const sectionEntrySchema = z
       .object({ title: z.string().min(1), subtitle: z.string().min(1) })
       .strict()
       .optional(),
+    /**
+     * Docs only: hubs (top-level slugs) with their own release, e.g. a parked hub inside a live section. A hub
+     * that is `off` in an environment is not built, listed, linked or indexed there; hubs not named follow the
+     * section.
+     */
+    hubRelease: z.record(slug, hubReleaseSchema).optional(),
     /** Old URLs that now live in this section; `fallback` is used while the section is not `on`. */
     redirects: z
       .array(z.object({ from: z.string(), to: z.string(), fallback: z.string().optional() }).strict())
@@ -82,6 +94,9 @@ export const registrySchema = z.array(sectionEntrySchema).superRefine((sections,
     if (s.kind === "docs" && !s.hub) {
       ctx.addIssue({ code: "custom", path: [i, "hub"], message: "docs sections need hub.title and hub.subtitle" });
     }
+    if (s.hubRelease && s.kind !== "docs") {
+      ctx.addIssue({ code: "custom", path: [i, "hubRelease"], message: "hubRelease is for docs sections only" });
+    }
   });
   sections.forEach((s, i) => {
     for (const a of s.aggregates ?? []) {
@@ -92,8 +107,11 @@ export const registrySchema = z.array(sectionEntrySchema).superRefine((sections,
 
 export type SectionEntry = z.infer<typeof sectionEntrySchema>;
 
-/** A registry entry with its release state resolved for the current environment. */
-export type SectionDef = SectionEntry & { state: ReleaseState };
+/**
+ * A registry entry with its release state resolved for the current environment. `offHubs` lists the hubs
+ * (from `hubRelease`) that are `off` in this environment.
+ */
+export type SectionDef = SectionEntry & { state: ReleaseState; offHubs?: string[] };
 
 // content/features.yaml: non-section switches in the same per-environment format.
 const switchState = z.enum(["on", "off"]);

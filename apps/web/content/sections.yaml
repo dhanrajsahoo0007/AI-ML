@@ -12,7 +12,9 @@
 #
 # icon: a key from src/lib/icons.ts. navGroup: learn | practice | more (header mega-menu groups).
 # hub: title and subtitle on the section's index page (docs kind).
-# redirects: old URLs that move into this section; `fallback` is used while the section is not on.
+# redirects: old URLs that move into this section; `fallback` is used while the section is not on (or while
+#   `to` is in a hub that is off).
+# hubRelease (docs only): hubs with their own on/off per environment, e.g. a parked hub inside a live section.
 
 - key: ai-system-design
   kind: docs
@@ -29,6 +31,16 @@
   hub:
     title: GenAI & LLM Systems
     subtitle: Interview deep-dives on transformers, LLMs, RAG, knowledge graphs, agents and production AI systems, with architecture diagrams and practice questions.
+  # ML System Design (formerly its own /ml-system-design section) is parked: built only in local until the owner
+  # releases it. Change a value here in its own PR, like a section's release.production.
+  hubRelease:
+    ml-system-design: { local: on, preview: off, staging: off, production: off }
+  redirects:
+    - { from: /ml-system-design, to: /ai-system-design, fallback: /ai-system-design }
+    - { from: /ml-system-design/components, to: /ai-system-design/ml-system-design, fallback: /ai-system-design }
+    - { from: "/ml-system-design/components/:path*", to: "/ai-system-design/ml-system-design/:path*", fallback: /ai-system-design }
+    - { from: /system-design/ml-system-design, to: /ai-system-design/ml-system-design, fallback: /ai-system-design }
+    - { from: "/system-design/ml-system-design/:path*", to: "/ai-system-design/ml-system-design/:path*", fallback: /ai-system-design }
 
 - key: system-design
   kind: docs
@@ -110,20 +122,3 @@
   access: { default: free }
   owner: dhanraj
 
-- key: ml-system-design
-  kind: docs
-  label: ML System Design
-  href: /ml-system-design
-  icon: server
-  navGroup: learn
-  order: 9
-  release: { local: on, preview: off, staging: off, production: off }
-  access: { default: premium, alwaysFree: [hubs, outlines] }
-  questions: true
-  owner: dhanraj
-  hub:
-    title: ML System Design
-    subtitle: Architecture notes focused on reliability, data movement, and the interfaces between research and production.
-  redirects:
-    - { from: /system-design/ml-system-design, to: /ml-system-design/components, fallback: /ai-system-design }
-    - { from: "/system-design/ml-system-design/:path*", to: "/ml-system-design/components/:path*", fallback: /ai-system-design }

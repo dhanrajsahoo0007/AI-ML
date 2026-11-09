@@ -43,18 +43,16 @@ All content lives in `apps/web/content` as MDX and YAML:
 
 | Folder              | Site section                                                                                                                                                                        |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ai-system-design/` | AI System Design deep-dives (`/ai-system-design`)                                                                                                                                   |
+| `ai-system-design/` | GenAI & LLM Systems (`/ai-system-design`): GenAI deep-dives, plus the ML System Design hub (parked: local only, `hubRelease` in `sections.yaml`)                                    |
 | `system-design/`    | System Design fundamentals and case studies (`/system-design`)                                                                                                                      |
 | `cloud/`            | Cloud Architecture: AWS, Google Cloud and Azure guides (`/cloud`), dev only for now (see feature flags)                                                                             |
 | `question-bank/`    | Interview question library: `taxonomy.yaml` (categories and subsections), one YAML file per category, `articles.yaml` (files practice questions inside articles under a subsection) |
 | `companies/`        | Company records used for tags and `/companies`                                                                                                                                      |
-| `ml-system-design/` | ML System Design, parked (see feature flags)                                                                                                                                        |
 
 ### Feature flags
 
 `apps/web/src/config/features.ts` parks content for later iterations without deleting it:
 
-- `mlSystemDesign` shows the `/ml-system-design` section and the practice questions from its articles.
 - `mlInterviews` shows the interview categories marked `flag: mlInterviews` in `taxonomy.yaml` (ML Fundamentals, Deep Learning, Statistics & Data Science).
 - `cloud` shows the `/cloud` section. It is on under `npm run dev` and off in production builds until the pilot pages are approved.
 

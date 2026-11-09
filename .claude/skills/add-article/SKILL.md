@@ -1,6 +1,6 @@
 ---
 name: add-article
-description: Use when adding or outlining an article or hub in a docs section (GenAI & LLM Systems, Classic System Design, Cloud, ML System Design) under apps/web/content.
+description: Use when adding or outlining an article or hub in a docs section (GenAI & LLM Systems, Classic System Design, Cloud) under apps/web/content.
 ---
 
 # Add an article to a docs section

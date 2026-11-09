@@ -51,14 +51,27 @@ function walk(dir: string, base = ""): string[] {
 
 const cache = new Map<string, DocItem[]>();
 
-/** Every page of a docs section: hubs first (by `order`, then name), then their articles. */
-export function loadDocItems(section: Pick<SectionDef, "key" | "href">): DocItem[] {
-  const hit = cache.get(section.key);
+type DocsSection = Pick<SectionDef, "key" | "href" | "offHubs">;
+
+const inHub = (hubs: readonly string[]) => (slug: string) => hubs.includes(slug.split("/")[0]);
+
+/**
+ * Every page of a docs section: hubs first (by `order`, then name), then their articles. Pages of hubs that are
+ * `off` in this environment (`hubRelease` in sections.yaml) are left out, so they are not built or listed;
+ * `includeOffHubs` keeps them, for the checks that must still see every file (content-check, the asset library).
+ */
+export function loadDocItems(section: DocsSection, { includeOffHubs = false } = {}): DocItem[] {
+  const offHubs = includeOffHubs ? [] : (section.offHubs ?? []);
+  const cacheKey = `${section.key}|${offHubs.join(",")}`;
+  const hit = cache.get(cacheKey);
   if (hit) return hit;
   const dir = sectionDir(section);
+  const isOff = inHub(offHubs);
   // Test-only fixture pages (the leak canary) join the section in every environment but production.
   const sources = [
-    ...walk(dir).map((slug) => ({ slug, file: path.join(dir, `${slug}.mdx`) })),
+    ...walk(dir)
+      .filter((slug) => !isOff(slug))
+      .map((slug) => ({ slug, file: path.join(dir, `${slug}.mdx`) })),
     ...fixtureDocsFor(section.key, resolveAppEnv()),
   ];
   const items = sources.map(({ slug, file }): DocItem => {
@@ -95,7 +108,7 @@ export function loadDocItems(section: Pick<SectionDef, "key" | "href">): DocItem
     .map((item, i) => ({ item, i }))
     .sort((a, b) => rank(a.item) - rank(b.item) || Number(b.item.isHub) - Number(a.item.isHub) || a.i - b.i)
     .map(({ item }) => item);
-  cache.set(section.key, sorted);
+  cache.set(cacheKey, sorted);
   return sorted;
 }
 
@@ -109,8 +122,11 @@ export function articlesOf(items: DocItem[], hub?: string) {
 
 export const NAV_INDEX_FILE = "_index.yaml";
 
-/** The section's nav index; an empty one when the file is missing (content-check reports that). */
-export function loadNavIndex(section: Pick<SectionDef, "key">): NavIndex {
+/**
+ * The section's nav index without hubs that are `off` in this environment; an empty one when the file is missing
+ * (content-check reports that).
+ */
+export function loadNavIndex(section: Pick<SectionDef, "key" | "offHubs">): NavIndex {
   const file = path.join(sectionDir(section), NAV_INDEX_FILE);
   if (!fs.existsSync(file)) return { hubs: [] };
   const result = navIndexSchema.safeParse(yaml.load(fs.readFileSync(file, "utf8")));
@@ -118,5 +134,6 @@ export function loadNavIndex(section: Pick<SectionDef, "key">): NavIndex {
     const lines = result.error.issues.map((i) => `  ${file} [${i.path.join(".")}]: ${i.message}`);
     throw new Error(`Invalid nav index:\n${lines.join("\n")}`);
   }
-  return result.data;
+  const offHubs = section.offHubs ?? [];
+  return { hubs: result.data.hubs.filter((h) => !offHubs.includes(h.slug)) };
 }

@@ -20,7 +20,8 @@ tables and prose tidy by hand.
 | `newsletter/<yyyy>/<slug>.mdx`             | Newsletter issues                                                          |
 | `pages/`                                   | Legal, contact, security and pricing FAQ, with `{{KEY}}` placeholders      |
 
-Docs sections today: `ai-system-design/`, `system-design/`, `cloud/`, `ml-system-design/` (parked).
+Docs sections today: `ai-system-design/` (hubs `genai-system-design` and `ml-system-design`, the latter parked
+with `hubRelease`: on in local only), `system-design/`, `cloud/`.
 
 ## Docs frontmatter
 

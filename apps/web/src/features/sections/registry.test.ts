@@ -4,6 +4,7 @@ import { describe, it } from "./test-runner";
 import {
   allSections,
   hiddenRoutes,
+  isInOffHub,
   isPathVisible,
   parseRegistry,
   REGISTRY_FILE,
@@ -52,7 +53,13 @@ describe("content/sections.yaml", () => {
     assert.deepEqual(states.cloud, { local: "on", preview: "on", staging: "on", production: "hidden" });
     assert.deepEqual(states.dsa, { local: "on", preview: "on", staging: "on", production: "off" });
     assert.deepEqual(states.newsletter, { local: "on", preview: "on", staging: "on", production: "off" });
-    assert.deepEqual(states["ml-system-design"], { local: "on", preview: "off", staging: "off", production: "off" });
+    assert.equal(states["ml-system-design"], undefined, "ML System Design is a hub of ai-system-design now");
+  });
+  it("parks the ML System Design hub of AI & ML System Design outside local", () => {
+    const ai = entries.find((s) => s.key === "ai-system-design");
+    assert.deepEqual(ai?.hubRelease, {
+      "ml-system-design": { local: "on", preview: "off", staging: "off", production: "off" },
+    });
   });
   it("gives each section one label", () => {
     assert.equal(entries.find((s) => s.key === "cloud")?.label, "Cloud");
@@ -85,6 +92,24 @@ describe("parseRegistry", () => {
   it("requires href to be /<key>", () => {
     assert.throws(() => parseRegistry(base.replace("href: /a", "href: /b"), "t.yaml"), /href must be \/a/);
   });
+  it("accepts hubRelease on docs sections only, with on/off states", () => {
+    const withHub = base.replace(
+      "order: 1,",
+      "order: 1, hubRelease: { h: { local: on, preview: off, staging: off, production: off } },"
+    );
+    assert.equal(parseRegistry(withHub, "t.yaml")[0].hubRelease?.h.preview, "off");
+    assert.throws(() => parseRegistry(withHub.replace("preview: off", "preview: hidden"), "t.yaml"), /hubRelease/);
+    assert.throws(() => parseRegistry(withHub.replace("kind: docs", "kind: problems"), "t.yaml"), /docs sections only/);
+  });
+  it("resolves the hubs that are off in each environment", () => {
+    const withHub = base.replace(
+      "order: 1,",
+      "order: 1, hubRelease: { h: { local: on, preview: off, staging: off, production: off } },"
+    );
+    const parsed = parseRegistry(withHub, "t.yaml");
+    assert.equal(resolveSections(parsed, "local")[0].offHubs, undefined);
+    assert.deepEqual(resolveSections(parsed, "production")[0].offHubs, ["h"]);
+  });
   it("rejects unknown fields", () => {
     assert.throws(() => parseRegistry(base.replace("order: 1", "order: 1, colour: red"), "t.yaml"), /colour/);
   });
@@ -104,17 +129,26 @@ describe("release states per environment", () => {
       assert.deepEqual(hiddenRoutes(), {
         env: "production",
         hidden: ["/cloud"],
-        off: ["/dsa", "/newsletter", "/ml-system-design"],
+        off: ["/dsa", "/newsletter", "/ai-system-design/ml-system-design"],
       });
       assert.equal(isPathVisible("/cloud/aws/compute"), false);
       assert.equal(isPathVisible("/cloudy"), true);
       assert.equal(isPathVisible("/system-design/databases"), true);
     });
   });
-  it("keeps ML System Design off outside local", () => {
+  it("keeps the ML System Design hub off outside local, and the rest of the section on", () => {
     for (const env of ["preview", "staging", "production"] as const) {
-      withEnv(env, () => assert.equal(sectionState("ml-system-design"), "off"));
+      withEnv(env, () => {
+        assert.equal(isInOffHub("/ai-system-design/ml-system-design/drift-detection"), true);
+        assert.equal(isPathVisible("/ai-system-design/ml-system-design"), false);
+        assert.equal(isPathVisible("/ai-system-design/ml-system-designer"), true);
+        assert.equal(isPathVisible("/ai-system-design/genai-system-design/rag-fundamentals"), true);
+      });
     }
+    withEnv("local", () => {
+      assert.equal(isPathVisible("/ai-system-design/ml-system-design/drift-detection"), true);
+      assert.deepEqual(hiddenRoutes().off, []);
+    });
   });
   it("throws for an unknown section key", () => {
     assert.throws(() => sectionState("nope"), /Unknown section/);
