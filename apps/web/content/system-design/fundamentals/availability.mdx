@@ -1,0 +1,228 @@
+---
+title: "Availability, reliability and the nines"
+description: "What 99.9% and 99.99% mean in minutes, how SLIs, SLOs and SLAs fit together, and how spare servers and failover buy extra nines."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Availability is the share of time a system answers its users correctly, and each extra "nine" after the decimal point cuts the downtime you are allowed by ten.
+</KeyIdea>
+
+## The story
+
+You run the ticket site for a small football club. It is one server in a rented rack. Tickets for the derby go on sale on Saturday at 9 am. At 9:04 the server's disk dies. You drive in, swap the disk and restore last night's backup. The site is back at 12:10, three hours later. By then fans have bought from resellers, and the club chairman asks you two questions: "How often will this happen?" and "What do I have to pay so it doesn't?" This page gives you the words and the arithmetic to answer both.
+
+## How it works
+
+Start with two words that sound alike. **Reliability** is how rarely a system breaks. **<Term id="availability">Availability</Term>** is the share of time it is up and answering correctly. A system can break often and still have high availability if each break is fixed in seconds.
+
+Two numbers connect them. **MTBF** (mean time between failures) is how long the system runs, on average, before something breaks. **MTTR** (mean time to repair) is how long it takes, on average, to get it working again. Availability is:
+
+$A = \frac{MTBF}{MTBF + MTTR}$
+
+Say the ticket server fails once every 1,000 hours and takes 1 hour to fix. That is $1000 / 1001$, about 99.9%. Keep the same hardware but cut the repair to 6 minutes (0.1 hours), and you get $1000 / 1000.1$, about 99.99%. Faster repair buys a nine without buying better hardware. Hold on to that idea; the rest of the page builds on it.
+
+People quote availability as "nines": 99.9% is "three nines", 99.99% is "four nines". The table turns each one into minutes, using a 365-day year (525,600 minutes) and a 30-day month (43,200 minutes).
+
+<Compare
+  columns={["Availability", "Name", "Downtime per year", "Downtime per month", "Downtime per day"]}
+  rows={[
+    ["99%", "two nines", "about 3.7 days (87.6 h)", "about 7.2 h", "about 14 min"],
+    ["99.9%", "three nines", "about 8.8 h (526 min)", "about 43 min", "about 86 s"],
+    ["99.95%", "three and a half", "about 4.4 h (263 min)", "about 22 min", "about 43 s"],
+    ["99.99%", "four nines", "about 53 min", "about 4.3 min", "about 8.6 s"],
+    ["99.999%", "five nines", "about 5.3 min", "about 26 s", "under 1 s"],
+  ]}
+  caption="Downtime = (1 - availability) x period. For 99.99% a year: 0.0001 x 525,600 min = about 53 minutes."
+/>
+
+The ticket site's three-hour outage was 180 minutes. Against a monthly 99.9% target (43 minutes) it blew the budget four times over in one morning. Against four nines (4.3 minutes a month) no human can even drive to the rack in time. That is the real difference between 99.9 and 99.99: the first allows a person to fix things; the second needs the system to fix itself.
+
+### Step 1: Add a spare that waits (active-passive)
+
+<AnimatedDiagram name="fundamentals/availability" step={1} caption="Active-passive: the load balancer sends all traffic to server A and only health-checks server B. A copies its state to B so B can take over." />
+
+A **single point of failure** is any one part whose death takes the whole system down. The ticket server was one. The fix is **redundancy**: run a second copy so one failure does not stop service. Here a <Term id="load-balancer">load balancer</Term> sits in front of two identical servers. Server A does all the work. Server B is the **standby**: it runs, receives copies of A's in-memory state (such as who is logged in), and waits. The load balancer sends a health check, a small "are you alive?" request, to both every few seconds. When A stops answering, the load balancer moves traffic to B. That switch is called <Term id="failover">failover</Term>.
+
+<PremiumBreak />
+
+### Step 2: Let both serve (active-active)
+
+<AnimatedDiagram name="fundamentals/availability" step={2} caption="Active-active: the load balancer splits traffic across both servers, and both read and write the same replicated database." />
+
+Now both servers take half the traffic. When one dies, the load balancer stops sending it requests and the other carries everything. There is no promotion step and no cold standby to warm up, so the outage is only the time to notice the failure. With health checks every 5 seconds and three misses before a server is marked down, that is about 15 seconds. In the active-passive pair you also wait while B takes over its new role. A database standby can take a minute or two to do that.
+
+Active-active has a price. If one of two servers must carry 100% of the load alone, each must normally run at 50% or less. With three servers, each can run at about 66%, because two survivors share the extra third. Spare capacity you never use on a good day is what you pay for staying up on a bad one.
+
+### Step 3: Do the math, series and parallel
+
+Real systems chain parts together, and the arithmetic depends on how they are wired.
+
+**In series** (every part must work): multiply. A request to the ticket site passes through the load balancer (99.99%), the app server (99.9%) and the database (99.9%). The chain is up only when all three are up:
+
+$0.9999 \times 0.999 \times 0.999 \approx 0.9979$
+
+That is about 99.79%, or roughly 18 hours of downtime a year. Each part was three nines or better, yet the chain is worse than any of them. Every dependency you add in series costs you availability.
+
+**In parallel** (any one copy is enough): multiply the chances of failure instead. Two app servers at 99.9% each are both down only when both fail at once:
+
+$1 - (1 - 0.999)^2 = 1 - 0.000001 = 0.999999$
+
+On paper that is six nines. In practice you never see it, because the formula assumes the two failures are independent. Two servers in the same rack share a power supply. Two servers that got the same bad deploy fail together. So spread copies across racks, data centres or cloud availability zones (separate buildings with their own power and network), and roll out changes one copy at a time.
+
+### Step 4: Measure it and promise it (SLI, SLO, SLA)
+
+You cannot manage availability you do not measure. Three terms keep the measuring, the goal and the promise apart:
+
+- A <Term id="sli">service level indicator (SLI)</Term> is the measurement. For the ticket site: the share of checkout requests that returned without a server error in under 2 seconds.
+- A <Term id="slo">service level objective (SLO)</Term> is the target your team sets for that measurement. For example: 99.9% of checkout requests are good, measured over a rolling 30 days.
+- A <Term id="sla">service level agreement (SLA)</Term> is the promise in a contract, with a penalty. For example: if monthly availability falls under 99.5%, the club gets 10% of its hosting fee back.
+
+The SLA is set looser than the SLO on purpose. Your team should notice and react long before a customer is owed money.
+
+The gap between 100% and the SLO is the **error budget**. If the ticket site serves 3 million checkout requests a month at a 99.9% SLO, it may fail 3,000 of them. While budget remains, the team ships new features. When a bad week burns it, the team pauses risky changes and works on reliability. The budget turns "how reliable is reliable enough?" into a number both sides can agree on.
+
+## Try it
+
+Pick two levels of nines and compare how much downtime each allows per day, week, month and year, and what kind of setup usually reaches it.
+
+<NinesCalculator />
+
+<Quiz>
+  <QuizItem question="A page needs an auth service (99.9%) and a profile service (99.9%) in series. What is the best availability the page can have?" hint="Multiply the two.">
+    $0.999 \times 0.999 \approx 0.998$, so about 99.8%. That allows about 17.5 hours of downtime a year, twice as much as either service alone.
+  </QuizItem>
+  <QuizItem question="You run three cheap servers in parallel, each only 99% available, and any one is enough. What do you get, assuming independent failures?" hint="All three must be down at once.">
+    $1 - 0.01^3 = 0.999999$, about six nines on paper. Cheap parts in parallel can beat one expensive part, as long as their failures really are independent.
+  </QuizItem>
+  <QuizItem question="Your server fails once every 2,000 hours and takes 2 hours to fix. Which single change buys more availability: halving the failure rate or cutting repair to 12 minutes?" hint="Use A = MTBF / (MTBF + MTTR).">
+    Today: $2000 / 2002 \approx 99.90\%$. Halving failures: $4000 / 4002 \approx 99.95\%$. Cutting repair to 0.2 hours: $2000 / 2000.2 \approx 99.99\%$. Faster repair wins by a wide margin.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["Setup", "Typical outage when a server dies", "Spare capacity you pay for", "Hard part"]}
+  rows={[
+    ["One server", "Hours: someone must fix or replace it", "None", "Every failure is an outage"],
+    ["Active-passive", "Seconds to minutes: detect, then promote the standby", "100%: the standby idles", "Keeping the standby's state fresh; testing failover"],
+    ["Active-active (2 copies)", "About the detection time, often 10 to 30 s", "Half of each server: each runs at 50% or less", "Shared state must live outside the servers"],
+    ["Active-active (3 copies)", "About the detection time", "A third of each server: each runs at about 66% or less", "More copies to deploy and watch"],
+  ]}
+  caption="Active-active works best for stateless servers. Databases more often run active-passive, because two copies accepting writes at once can conflict."
+/>
+
+## In the wild
+
+- **Amazon S3** says its Standard storage class is designed for 99.99% availability, while its SLA only promises 99.9% a month before credits. That is the SLO-tighter-than-SLA gap in a real contract.
+- **Amazon RDS Multi-AZ** keeps a standby database in a second availability zone and fails over to it automatically. AWS documents that failover usually completes in 60 to 120 seconds, a classic active-passive pair.
+- **Google's Site Reliability Engineering** practice made error budgets well known: when a service has spent its budget, launches wait until reliability work brings it back.
+
+## Common pitfalls
+
+- **Quoting a nine without a period.** 99.9% a year allows one 8.8-hour outage; 99.9% a month allows no outage longer than 43 minutes. Always say over what window.
+- **Forgetting the hidden chain.** DNS, an auth service, a payment provider and the database are all in series with your service. Your availability cannot beat their product.
+- **A standby nobody has tested.** A failover that has never run in production is a guess. Practise it on a schedule.
+- **Treating parallel math as real.** Two copies in one rack or on one bad build fail together. Independence has to be designed in.
+- **Active-active without headroom.** If both servers run at 80%, losing one sends 160% of a server's load to the survivor, and it falls over too.
+
+## How to say it in an interview
+
+Availability is the share of time the system answers correctly, and I always turn it into minutes. 99.9% is about 43 minutes a month, which a person can fix. 99.99% is about 4 minutes a month, which means the system has to recover on its own. Parts in series multiply, so three dependencies at 99.9% give about 99.7% at best. Parts in parallel multiply their failure chances, so redundancy is how I buy nines back, as long as the copies fail independently. For stateless servers I use active-active behind a load balancer with headroom for losing one. For the primary database I use an active-passive pair with automated failover. I would set an SLO a little tighter than any SLA, measure it with a request-based SLI, and use the error budget to decide when to slow down releases.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does 99.99% availability mean in practice?" level="Junior" category="Reliability" companies={["Amazon"]}>
+    **Short answer.** The system may be down or failing for about 0.01% of the time, which is about 53 minutes a year or about 4.3 minutes in a 30-day month. That is too little time for a person to log in and fix a fault, so recovery must be automatic.
+
+    **Why.** Downtime is (1 - availability) x the period. A year has 525,600 minutes, and 0.0001 x 525,600 is about 53. A 30-day month has 43,200 minutes, and 0.0001 x 43,200 is about 4.3. Compare 99.9%: about 43 minutes a month, enough for an on-call engineer to get paged, find the fault and roll back.
+
+    **Follow-ups the interviewer may ask.**
+    - Is that measured per month or per year, and why does it matter?
+    - Would you count time-based uptime or the share of successful requests?
+
+    **Watch out for.** Answering "it is almost never down" without a number. The interviewer wants the minutes and what they force in the design.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is the difference between an SLI, an SLO and an SLA?" level="Junior" category="Reliability" companies={["Microsoft"]}>
+    **Short answer.** The SLI is what you measure, the SLO is the target your team sets for that measurement, and the SLA is the contractual promise to a customer with a penalty if you miss it. The SLA should be looser than the SLO.
+
+    **Why.** Take a checkout API. SLI: the share of checkout requests that succeed in under 2 seconds. SLO: 99.9% over a rolling 30 days. SLA: under 99.5% in a calendar month refunds 10% of the fee. With 3 million requests a month, the SLO allows 3,000 bad ones (the error budget) while the SLA only bites after 15,000. The gap gives the team time to react before it costs money.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens when the error budget runs out?
+    - Which SLIs would you pick for a read-heavy feed versus a payment API?
+
+    **Watch out for.** Using the three words as synonyms, or setting the internal SLO equal to the SLA, which leaves no warning margin.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A request must pass through a load balancer, an app server and a database, each 99.9% available. What availability can you promise, and how would you raise it?" level="Mid" category="Reliability">
+    **Short answer.** About 99.7%, because parts in series multiply: $0.999^3 \approx 0.997$. To raise it, add redundancy to each part so no single copy is in the request path alone.
+
+    **Why.** 99.7% leaves about 0.3% of 8,760 hours, roughly 26 hours of downtime a year, worse than any single part. Put two app servers in parallel and their combined availability is $1 - 0.001^2$, about 99.9999% on paper. Do the same for the load balancer (a pair) and the database (a primary and a standby with automated failover). The chain is then limited by the slowest failover, not by any single machine.
+
+    **Follow-ups the interviewer may ask.**
+    - Which of the three would you make redundant first, and why?
+    - What other dependencies sit in series that you have not drawn, such as DNS or an auth service?
+
+    **Watch out for.** Saying "99.9%, the same as each part". Series availability is always lower than the weakest link.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="For the web tier and for the database, would you choose active-passive or active-active?" level="Mid" category="Reliability" companies={["Meta"]}>
+    **Short answer.** Active-active for stateless web servers, because any copy can serve any request and losing one costs only the detection time. Active-passive for a single-writer database, because two copies accepting writes at once can conflict.
+
+    **Why.** A stateless server keeps no user data between requests, so the load balancer can split traffic freely and drop a dead server in about 15 seconds (5-second checks, three misses). The cost is headroom: with two servers each must stay under 50% load. A database primary holds the latest writes. Running a standby that receives replicated writes and takes over on failure keeps one writer at a time; managed services typically fail over in one to two minutes.
+
+    <AnimatedDiagram name="fundamentals/availability" highlight={["lb", "appA", "appB"]} caption="Active-active web tier: the load balancer splits traffic across both servers and drops a dead one after a few failed health checks." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where do sessions live if the web servers are stateless?
+    - When would you accept active-active writes on a database, and what do you do about conflicts?
+
+    **Watch out for.** Choosing active-active everywhere because it sounds better. For a database it brings write conflicts that the application must resolve.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Two servers at 99.9% each give 99.9999% on paper. Why do real systems rarely see that?" level="Senior" category="Reliability" companies={["Amazon"]}>
+    **Short answer.** The parallel formula assumes the two copies fail independently and that failover is instant and free. Neither is true by default: copies share racks, power, deploys and configuration, and every failover itself takes time.
+
+    **Why.** If a bad deploy reaches both servers within a minute, they fail together and redundancy buys nothing. If health checks take 15 seconds to mark a server down, each failure still costs 15 seconds of errors for its share of traffic; at one failure a day that alone is about 1.5 hours a year. And if both servers ran at 70% load, the survivor receives 140% and falls over, turning one failure into two. Real availability is set by correlated failures, detection time and headroom.
+
+    <AnimatedDiagram name="fundamentals/availability" path="users>lb>appB>db" caption="After A fails, every request takes this path. B must have the headroom to carry all of it." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you make the two copies' failures more independent?
+    - How would you shorten detection without causing false failovers?
+
+    **Watch out for.** Claiming six nines because the math says so. Interviewers want to hear about correlated failures and capacity, not only the formula.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The product team asks for five nines. How do you respond?" level="Senior" category="Reliability" companies={["Microsoft"]}>
+    **Short answer.** I would translate it into about 5 minutes of downtime a year and ask which user actions truly need that. Usually only one or two paths do, and the rest can sit at three or four nines at a fraction of the cost.
+
+    **Why.** Five nines leaves about 26 seconds a month. No human can respond in that time, so every failure must be detected and handled automatically, across multiple regions, with deploys that roll back on their own. Each extra nine roughly means another layer of redundancy and testing. A user's mobile connection often drops more than 0.01% of requests on its own, so they may never notice the extra nine. I would propose per-feature SLOs, for example checkout at 99.99% and the order history page at 99.9%, each with an error budget.
+
+    **Follow-ups the interviewer may ask.**
+    - Which design changes take you from 99.9% to 99.99%?
+    - How would you measure availability so it matches what users feel?
+
+    **Watch out for.** Saying "yes" and drawing more boxes. The senior answer questions the requirement, prices it, and narrows it to where it matters.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [What system design is](/system-design/fundamentals/what-is-system-design): the four questions, with "what breaks" as the fourth.
+- [Non-functional requirements](/system-design/fundamentals/non-functional-requirements): availability next to latency, durability, consistency and cost.
+- [Load balancing](/system-design/patterns/load-balancing): health checks and how a dead server leaves the pool.
+- [Single-leader replication](/system-design/databases/single-leader-replication): the database standby and its failover.
+- [Synchronous vs asynchronous replication](/system-design/databases/sync-vs-async-replication): what a failover may lose.
+- [Circuit breaker, retries and timeouts](/system-design/patterns/circuit-breaker-and-retries): keeping one failing dependency from taking the chain down.
+
+## Further reading
+
+- [Google, Site Reliability Engineering, "Service Level Objectives"](https://sre.google/sre-book/service-level-objectives/): how Google defines SLIs and SLOs and chooses targets.
+- [Google, The Site Reliability Workbook, "Implementing SLOs"](https://sre.google/workbook/implementing-slos/): worked steps for picking SLIs and running an error budget.
+- [AWS Well-Architected Framework, Reliability Pillar](https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html): availability math, redundancy across zones and failover practice.
+- [Amazon S3 Service Level Agreement](https://aws.amazon.com/s3/sla/): a real SLA with credit tiers to compare with the design targets.

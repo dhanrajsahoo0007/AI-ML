@@ -67,8 +67,8 @@ Seeded ids (42): `latency`, `throughput`, `qps`, `availability`, `consistency`, 
 `consensus`, `hash-ring`, `bloom-filter`, `blob`, `ttl`, `sla`, `slo`, `sli`, `failover`, `hot-key`, `stale-read`,
 `read-your-writes`, `p99`, `rpc`, `websocket`, `dns`, `tls`, `api-gateway`.
 
-> The `/system-design/glossary` page itself does not exist yet, so Term links currently lead to a 404. Adding it is
-> one MDX page containing `<Glossary />` plus its nav entries; the owner decides where it sits in the nav.
+The glossary page is `content/system-design/glossary.mdx`, a hub with no articles (so no `_index.yaml` entry and no
+categories) that renders `<Glossary />`; it shows as its own card on the section index and its own sidebar group.
 
 #### glossary.yaml entry format
 
@@ -93,7 +93,7 @@ Quote any value that contains `: ` or starts with a quote.
 
 ### Glossary
 
-Renders the whole glossary, sorted by term, one anchor per id (`#latency`). No props. Meant for the future
+Renders the whole glossary, sorted by term, one anchor per id (`#latency`). No props. Used by the
 `/system-design/glossary` page.
 
 ```mdx

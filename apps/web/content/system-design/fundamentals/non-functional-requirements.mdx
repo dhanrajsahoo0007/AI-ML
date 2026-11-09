@@ -1,9 +1,253 @@
 ---
 title: "Non-Functional Requirements"
-description: "Scale, latency, availability, consistency, durability and cost targets, and how they shape a design."
-status: outline
+description: "Turn fast, reliable and cheap into latency, throughput, availability, consistency, durability and cost targets, and see how each one shapes a design."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** scale, latency, availability, consistency, durability and cost targets, and how they shape a design.
+<KeyIdea>
+  A non-functional requirement says how well the system must do its job, as a number you can measure, and those numbers decide which boxes end up in the diagram.
+</KeyIdea>
+
+## The story
+
+You build a notes app for your class. It does two things: save a note, and show me my notes. Two hundred classmates use it, and it runs on one small server for a few dollars a month. Then your friend's company wants the same app for its 50,000 employees. Then a startup wants it for 50 million people around the world. The two features never change. What changes is how fast it must answer, how often it may be down, how many copies of a note must exist before the app says "saved", and what each user may cost. Those answers are the non-functional requirements, and every one of them adds or removes a box in the design.
+
+## How it works
+
+A functional requirement says *what* the system does: "save a note". A non-functional requirement (NFR) says *how well*: "a save returns in under 300 ms, 99 times out of 100". If you cannot write an NFR as a number with a unit, it is not a requirement yet. It is a wish.
+
+### The six properties
+
+Six properties cover almost every system you will be asked to design.
+
+| Property | The question it answers |
+|---|---|
+| <Term id="latency">Latency</Term> | How long may one request take, and for which users? |
+| <Term id="throughput">Throughput</Term> | How much work per second, on an average day and at the peak? |
+| <Term id="availability">Availability</Term> | How many minutes a month may it be down? |
+| <Term id="consistency">Consistency</Term> | After a write, who sees it, and how soon? |
+| Durability | Once we say "saved", under what failures may the data still vanish? |
+| Cost | What may the system cost, per month or per user? |
+
+Two words need definitions. <Term id="p99">p99</Term> is the 99th percentile: sort every request of the day by how long it took, and p99 is the time that 99 of every 100 requests beat. We use it instead of the average because the average hides the slow requests, and the slow ones are what users complain about. **Durability** is the promise that data you confirmed as saved is still there later, through crashes, dead disks and bigger disasters. It is not availability: a system can be down for an hour and lose nothing, or be up all day and quietly lose last night's writes.
+
+### Turning words into numbers
+
+People who ask for a system speak in adjectives. Your first job is to trade each adjective for a number. Ask about the worst case they can accept, not the best case they hope for.
+
+<Compare
+  columns={["They say", "You ask", "You write down"]}
+  rows={[
+    ["It must be fast", "How long may the slowest 1 in 100 requests take?", "p99 < 300 ms"],
+    ["It must handle a lot of users", "How many are active a day, and how many actions does each take?", "5M daily users x 5 saves = 25M writes/day, about 290/s"],
+    ["It must always be up", "How many minutes a month may it be down?", "99.9% = about 43 min/month"],
+    ["It must never lose data", "How many copies before we say saved? How much may a disaster erase?", "2 copies before ack; lose at most 1 minute"],
+    ["Everyone must see the same thing", "After I save, who must see it and how soon?", "Writer at once; others within 2 s"],
+    ["It must be cheap", "What is the budget per user per month?", "< $0.01 per monthly active user"],
+  ]}
+  caption="If nobody will pick a number, pick one yourself, say it out loud, and let them correct it."
+/>
+
+The three steps below draw the same two features under three sets of targets.
+
+### Step 1: Target A, a class project
+
+<AnimatedDiagram name="fundamentals/non-functional-requirements" step={1} caption="Target A: one app process and one database. The browser talks straight to the app." />
+
+Two hundred classmates each save about 20 notes a day: 4,000 writes a day, or about 0.05 a second. Even if they all open the app in the same minute, the server sees a few dozen requests a second. Loose targets are still targets:
+
+<RequirementsTable
+  kind="non-functional"
+  rows={[
+    { id: "N1", property: "Latency", target: "p99 under 1 s", why: "Nobody is paying." },
+    { id: "N2", property: "Throughput", target: "about 50 requests/s at peak", why: "200 users, all at once in the worst case." },
+    { id: "N3", property: "Availability", target: "99% a month", why: "About 7 hours down a month (720 h x 1%) is fine." },
+    { id: "N4", property: "Consistency", target: "I see my note right after saving", why: "One database, so this comes free." },
+    { id: "N5", property: "Durability", target: "Lose at most one day of notes", why: "A nightly backup is enough." },
+    { id: "N6", property: "Cost", target: "Under $10 a month", why: "Paid out of pocket." },
+  ]}
+/>
+
+One process, one database and a nightly copy elsewhere meet every row. A <Term id="load-balancer">load balancer</Term> or a second database here would cost money and buy nothing the targets ask for.
+
+<PremiumBreak />
+
+### Step 2: Target B, a company tool
+
+<AnimatedDiagram name="fundamentals/non-functional-requirements" step={2} caption="Target B: a load balancer in front of a stateless app tier, a cache for hot reads, and a synchronous replica so one dead disk cannot lose a confirmed note." />
+
+The company's 50,000 employees each save about 10 notes a day and read 20 for every save: 500,000 writes and 10 million reads a day. Flat over 24 hours that is about 6 writes and 116 reads a second. Office work is bunched and bursty, so plan for 6 times that: about 35 writes/s and 700 reads/s at peak. Still small. The other four properties are what changed.
+
+- **Availability 99.9%**, about 43 minutes a month (720 h x 0.1%). A patch reboot takes minutes and a dead disk takes hours, so one machine cannot promise this. The app runs as two or more identical stateless processes behind a load balancer that stops sending traffic to a dead one within seconds.
+- **Durability: no confirmed note is ever lost.** The database copies every write to a second machine and waits for that copy before it answers "saved". This is <Term id="replication">replication</Term>, and the waiting kind is called synchronous. In one region it adds about 1 to 2 ms per write.
+- **Latency p99 under 300 ms.** The slowest reads are the ones that go to disk. A <Term id="cache">cache</Term> keeps recently opened notes in memory, so most reads take under a millisecond.
+- **Consistency: I see my note at once; a colleague may be a second behind.** After a save the app updates the database and deletes the cached copy. The company agreed to that second of staleness in writing.
+
+Cost moved too: about $2,000 a month, roughly $0.04 per employee. Each of the three new boxes traces to one line of the requirements. That is the test of a good NFR: it buys a box, or it does not exist.
+
+### Step 3: Target C, a consumer app
+
+<AnimatedDiagram name="fundamentals/non-functional-requirements" step={3} caption="Target C: a CDN for static files, an asynchronous replica in a second region for a region-wide failure, and an object store with three copies for photo attachments." />
+
+Fifty million people sign up, and about 5 million use the app each day. Each saves 5 notes and reads 20 for every save:
+
+<EstimateTable
+  rows={[
+    { quantity: "Writes per day", assumption: "5M daily users x 5 saves", result: "25M/day, about 290 writes/s on average" },
+    { quantity: "Reads per day", assumption: "20 reads per write", result: "500M/day, about 5,800 reads/s on average" },
+    { quantity: "Peak traffic", assumption: "3x the average", result: "about 900 writes/s and 17,000 reads/s" },
+    { quantity: "Note storage", assumption: "2 KB per note", result: "50 GB/day, about 18 TB/year, 55 TB with 3 copies" },
+    { quantity: "Attachments", assumption: "1 note in 20 carries a 500 KB photo", result: "625 GB/day, about 230 TB/year" },
+  ]}
+  note="Round numbers chosen to size the system. 25M / 86,400 s = 289; 500M / 86,400 s = 5,787."
+/>
+
+<Numbers
+  items={[
+    { value: "17K/s", label: "Peak reads", hint: "3x the daily average" },
+    { value: "4.3 min", label: "Downtime a month", hint: "99.99% of 30 days" },
+    { value: "230 TB", label: "Attachments a year", hint: "before copies" },
+  ]}
+/>
+
+17,000 reads a second is still within reach of a few app servers and one well-cached database. The new boxes come from other targets:
+
+- **Latency p99 under 150 ms worldwide.** Light in fibre covers about 200,000 km a second, so a round trip from Sydney to the US east coast (16,000 km) takes about 160 ms before any work. One region cannot meet this. A <Term id="cdn">CDN</Term> copies images, scripts and styles to servers near each user; app servers in more regions come next.
+- **Availability 99.99%**, about 4.3 minutes a month. Now you plan for a whole region going dark, so the database also ships its writes to a second region. Waiting 60 to 100 ms for that copy on every write would eat the latency budget, so it is asynchronous. If region A dies, region B takes over with a <Term id="failover">failover</Term>, and the last second of writes may be lost. Write that down as a **recovery point objective** (RPO, how much recent data a disaster may erase) under 1 minute and a **recovery time objective** (RTO, how long until you serve again) under 15 minutes.
+- **Durability for attachments.** Photos go to an object store that keeps copies in three data centres and is designed for eleven nines a year. With 450 million photos after a year, that is about one lost photo every 200 years.
+- **Consistency across devices.** "<Term id="read-your-writes">Read your writes</Term> on the saving device; other devices within 5 seconds" is testable and far cheaper than "all devices always agree".
+- **Cost under $0.01 per monthly active user**, about $200,000 a month for 20 million users. Cost adds no box; it decides where data lives: photos in object storage at about $0.02 per GB a month, and only recent notes in memory.
+
+Same two features, three drawings. Every box answers a number.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="A dashboard shows average latency of 80 ms, and users still say the app feels slow. What number would you ask for?" hint="The average hides the tail.">
+    The p99. An 80 ms average fits a world where 1 request in 100 takes 3 seconds, and a page that makes 20 requests hits one of those about 18% of the time (1 - 0.99^20).
+  </QuizItem>
+  <QuizItem question="Your team promises 99.99% availability. A deploy goes wrong and the site is down for 20 minutes. How much of this month's budget is left?" hint="Work out 0.01% of a 30-day month.">
+    None. 99.99% of a 30-day month allows about 4.3 minutes (30 x 24 x 60 x 0.0001). One 20-minute outage spends almost five months of budget.
+  </QuizItem>
+  <QuizItem question="A product manager says notes must 'never be lost'. Which two numbers do you ask for?">
+    How many copies must exist before the app says "saved" (and where: same machine, same region or another region), and how much recent data a disaster may erase (the RPO). "Never" is not a target. "Two copies in one region before ack, RPO under 1 minute across regions" is a target with a price.
+  </QuizItem>
+</Quiz>
+
+Compare two availability targets. The [availability page](/system-design/fundamentals/availability) works through what each extra nine costs.
+
+<NinesCalculator a={99.9} b={99.99} />
+
+## Trade-offs
+
+Every target pulls against another. The job is to find the set the business can pay for and write it down.
+
+<Compare
+  columns={["Tightening this", "Pulls against", "What it costs in the drawing"]}
+  rows={[
+    ["Latency (p99 150 ms worldwide)", "Consistency, cost", "CDN, app servers in several regions, reads from local copies that may be a second stale"],
+    ["Availability (99.9% to 99.99%)", "Cost, simplicity", "Every single box becomes two; a second region; automatic failover and tests that prove it works"],
+    ["Durability (ack after 2 copies)", "Latency", "About 1 to 2 ms per write in one region, 60 to 100 ms across regions, so cross-region copies go async"],
+    ["Consistency (everyone sees the latest)", "Latency, availability", "Reads go to the primary or wait for a quorum; during a network split some requests must be refused"],
+    ["Cost (under $0.01 per user)", "Everything above", "Fewer copies, more caching, cheaper storage tiers, fewer regions"],
+  ]}
+  caption="There is no free direction. Picking which number to relax is the design."
+/>
+
+## In the wild
+
+- **Amazon S3** states its durability (eleven nines a year) and its availability (99.99% design target) as separate numbers, a clear sign they are different promises.
+- **Google's SRE teams** treat availability as an error budget: a 99.9% target gives a service about 43 minutes of failure a month to spend on risky deploys, and when it is gone, launches pause.
+- **Google Cloud Spanner** prices the extra nine openly: its SLA promises 99.99% for a single-region instance and 99.999% for a multi-region one, so the fifth nine costs a second region.
+
+## Common pitfalls
+
+- **Writing adjectives.** "Fast", "scalable" and "highly available" need a number, a unit and a way to measure it.
+- **Quoting the average.** Report p99. A fine average with a terrible tail is the normal shape of a slow system.
+- **Confusing durability with availability.** Backups help durability and do nothing for uptime. Replicas can serve both, but only if failover is automatic and tested.
+- **Asking for 99.999% out of habit.** Five nines is 26 seconds a month. Almost no product needs it, and it costs a second region and no single point of failure anywhere.
+- **Designing for the big target first.** Target A does not need Target C's architecture. Write the target, then draw the smallest system that meets it.
+
+## How to say it in an interview
+
+Before I draw anything I turn the brief into six numbers: latency as a p99, throughput at the peak, availability as minutes down a month, consistency as who sees a write and how soon, durability as copies before we acknowledge, and cost per user. For a notes app for 50,000 employees that is p99 under 300 ms, about 700 reads and 35 writes a second at peak, 99.9% (about 43 minutes a month), read-your-writes for the author, two synchronous copies in one region, and about $2,000 a month. Those numbers buy a load balancer with two app servers, a cache and a synchronous replica, and tell me I do not need a second region yet.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a functional and a non-functional requirement? Give one of each for a notes app." level="Junior" category="Requirements">
+    **Short answer.** A functional requirement says what the system does; a non-functional requirement says how well, as a measurable number. "Save a note" is functional; "a save returns in under 300 ms at p99" is non-functional.
+
+    **Why.** Functional requirements are tested with "does it work". Non-functional ones are tested by measuring over time: latency percentiles, minutes down, lost records, dollars. The same feature can carry very different targets, and the targets decide the boxes. A class tool and a 50-million-user app both "save a note", but one runs on one machine and the other spans two regions.
+
+    **Follow-ups the interviewer may ask.**
+    - Which one would you ask about first for this system, and why?
+    - How would you check after launch that it is being met?
+
+    **Watch out for.** Listing "scalability, reliability, performance". Those are categories, not requirements. Give a number with a unit.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why do we state latency targets as p99 rather than as an average?" level="Junior" category="Latency">
+    **Short answer.** The average hides the slow requests, and those are the ones users notice. p99 says how slow the worst 1 in 100 requests may be.
+
+    **Why.** Take 99 requests at 50 ms and one at 3,000 ms. The average is about 80 ms. But a page that fires 20 requests has an 18% chance (1 - 0.99^20) of including the slow one, so nearly one page load in five feels broken. Slow requests have their own causes (a cache miss, a disk read, a retry), and measuring p99 makes you find them.
+
+    **Follow-ups the interviewer may ask.**
+    - Do you measure at the server or at the client, and why does it matter?
+    - Name one change that lowers p99 without moving the average much.
+
+    **Watch out for.** Saying "p99 is 99% of requests". It is a time that 99% of requests beat, not a share.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A stakeholder says the service must be 'highly available'. How do you turn that into a target, and what does each extra nine cost?" level="Mid" category="Availability" companies={["Amazon"]}>
+    **Short answer.** I ask how many minutes a month it may be down and write that as a percentage: 99.9% is about 43 minutes, 99.99% about 4.3 minutes, 99.999% about 26 seconds. Each extra nine removes another single point of failure and costs roughly ten times more effort.
+
+    **Why.** At 99.9%, two app servers behind a load balancer and a database with a replica are enough, because a reboot or a dead disk costs minutes and is rare. At 99.99% one bad 20-minute deploy spends five months of budget, so you need automatic failover, gradual rollouts and a plan for losing a region. At 99.999% no human can be in the loop.
+
+    <AnimatedDiagram name="fundamentals/non-functional-requirements" highlight={["lb", "replica", "region2"]} caption="The availability boxes: a load balancer so one dead app process is invisible, a synchronous replica so one dead disk is invisible, and a second region so one dead region is survivable." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does the business lose per minute down, and does that justify the target?
+    - Do you measure availability in minutes, failed requests or affected users?
+
+    **Watch out for.** Promising five nines because it sounds good, or mixing up availability and durability: a backup helps the second and does nothing for the first.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Should the primary database wait for its replica before telling the user a note is saved? Reason it through with numbers." level="Senior" category="Durability">
+    **Short answer.** Yes for a replica in the same region: about 1 to 2 ms buys a guarantee that no confirmed write dies with one machine. No for a replica in another region: 60 to 100 ms per write is too much, so that copy goes asynchronous with a stated recovery point objective.
+
+    **Why.** Against a 300 ms budget, 2 ms is free. Across regions every write pays up to 100 ms, and at 900 writes a second about 90 writes are in flight at once instead of about 2, each holding a connection. So the second region gets each change a moment after the primary answers. If region A dies first, those writes are gone, and the requirement says so: RPO under 1 minute. Systems that need RPO zero across regions, such as payments, pay the latency openly.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to writes if the synchronous replica is down? (Block, or fall back to async and alert; decide in advance.)
+    - How would you prove the RPO is really under 1 minute?
+
+    **Watch out for.** Treating "replicated" as one thing; synchronous and asynchronous copies make opposite trade-offs. And a nightly backup is not a replica: it can lose up to 24 hours.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A note saved on my phone appears on my laptop three seconds later. Is that a bug? How should the consistency requirement be written?" level="Senior" category="Consistency" companies={["Meta"]}>
+    **Short answer.** Only if the requirement says all devices must agree at once, and almost no product should. The honest requirement is: the saving device sees the note immediately (read your writes); other devices see it within 5 seconds (eventual consistency).
+
+    **Why.** Reads come from caches and replicas so p99 stays low at 17,000 reads a second, and those copies trail the primary by up to a few seconds. Making every device see the latest note would send every read to the primary or through a quorum, costing latency, throughput and availability during a network split. Users mainly need their own save not to vanish, which the app can guarantee by reading from the primary right after a write. Three seconds inside a five-second bound is the system working as specified.
+
+    **Follow-ups the interviewer may ask.**
+    - Which operations do need strong consistency? (Sharing permissions, account deletion.)
+    - How would you measure replica lag and alert before the bound is broken?
+
+    **Watch out for.** Answering "strong consistency everywhere" or "eventual is fine". Name which operation gets which guarantee, with a time bound and its cost.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Functional requirements](/system-design/fundamentals/functional-requirements): the "what" half of the requirements conversation.
+- [Availability, reliability and the nines](/system-design/fundamentals/availability): the downtime arithmetic in depth.
+- [Consistency models and CAP](/system-design/patterns/consistency-models): what "who sees a write and when" can mean.
+- [Synchronous vs asynchronous replication](/system-design/databases/sync-vs-async-replication): the durability versus latency trade in detail.
+- [Caching](/system-design/patterns/caching): the box most latency targets add first.
+
+## Further reading
+
+- [Google, Site Reliability Engineering: Service Level Objectives](https://sre.google/sre-book/service-level-objectives/): how to pick targets and run an error budget.
+- [Jeffrey Dean and Luiz André Barroso, The Tail at Scale (CACM, 2013)](https://research.google/pubs/the-tail-at-scale/): why p99 matters and how large systems tame it.
+- [AWS, Data protection in Amazon S3](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DataDurability.html): an object store that states durability and availability as separate numbers.

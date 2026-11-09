@@ -8,9 +8,12 @@ import s2 from "../../../assets/diagrams/animated/databases/inverted-index";
 import s3 from "../../../assets/diagrams/animated/databases/lsm-write-path";
 import s4 from "../../../assets/diagrams/animated/databases/polyglot-ecommerce";
 import s5 from "../../../assets/diagrams/animated/databases/read-scaling";
-import s6 from "../../../assets/diagrams/animated/messenger/architecture";
-import s7 from "../../../assets/diagrams/animated/messenger/aws";
-import s8 from "../../../assets/diagrams/animated/uber-eats/architecture";
+import s6 from "../../../assets/diagrams/animated/fundamentals/availability";
+import s7 from "../../../assets/diagrams/animated/fundamentals/non-functional-requirements";
+import s8 from "../../../assets/diagrams/animated/fundamentals/one-server-to-many";
+import s9 from "../../../assets/diagrams/animated/messenger/architecture";
+import s10 from "../../../assets/diagrams/animated/messenger/aws";
+import s11 from "../../../assets/diagrams/animated/uber-eats/architecture";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/databases/btree-lookup": s0,
@@ -19,7 +22,10 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/databases/lsm-write-path": s3,
   "diagrams/animated/databases/polyglot-ecommerce": s4,
   "diagrams/animated/databases/read-scaling": s5,
-  "diagrams/animated/messenger/architecture": s6,
-  "diagrams/animated/messenger/aws": s7,
-  "diagrams/animated/uber-eats/architecture": s8,
+  "diagrams/animated/fundamentals/availability": s6,
+  "diagrams/animated/fundamentals/non-functional-requirements": s7,
+  "diagrams/animated/fundamentals/one-server-to-many": s8,
+  "diagrams/animated/messenger/architecture": s9,
+  "diagrams/animated/messenger/aws": s10,
+  "diagrams/animated/uber-eats/architecture": s11,
 };
