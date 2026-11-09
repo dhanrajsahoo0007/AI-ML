@@ -1,6 +1,6 @@
 # features/docs: the `docs` section kind
 
-MDX hubs and articles for GenAI & LLM Systems, Classic System Design, Cloud and ML System Design. One shared route
+MDX hubs and articles for GenAI & LLM Systems (GenAI and ML System Design hubs), Classic System Design and Cloud. One shared route
 pair serves every docs section: `apps/web/src/app/(content)/[section]/page.tsx` and
 `apps/web/src/app/(content)/[section]/[...slug]/page.tsx`.
 
@@ -46,6 +46,10 @@ validated with `frontmatterSchema` (`apps/web/src/features/sections/schema.ts`) 
   `apps/web/src/lib/rehype-mermaid-svg.ts`; in `next dev` an un-rendered fence falls back to client rendering. Run
   `npm run mermaid -w web` to see production output.
 - This folder and `apps/web/src/features/sections/` are the only shared places allowed to name section keys.
+- A hub can be parked inside a live section with `hubRelease` in `apps/web/content/sections.yaml` (on/off per
+  environment). `loadDocItems()` and `loadNavIndex()` drop `off` hubs, so they are not built, listed, searched or
+  in the sitemap; the hidden-routes manifest lists their prefixes as `off` (404). Pass `{ includeOffHubs: true }`
+  only from checks that must see every file (content-check, the asset library).
 
 ## Extend it
 

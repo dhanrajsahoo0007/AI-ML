@@ -78,6 +78,15 @@ function checkRegistry(sections: SectionDef[]) {
           s.state === "off" ? "warning" : "error",
           line
         );
+      for (const hub of Object.keys(s.hubRelease ?? {})) {
+        if (!fs.existsSync(path.join(contentDir, `${hub}.mdx`)))
+          report(
+            regFile,
+            `section ${s.key}: hubRelease names ${hub}, which has no content/${s.key}/${hub}.mdx`,
+            "error",
+            line
+          );
+      }
       if (fs.existsSync(routeDir))
         report(
           path.relative(ROOT, routeDir),
@@ -166,7 +175,16 @@ async function main() {
     for (const p of await kind.validate(section, items)) problems.push(p);
     routes.pages.set(section.href, section.state);
     for (const entry of kind.sitemap(section, items)) routes.pages.set(entry.url, section.state);
-    if (section.kind === "docs") docsItems.push({ section, items: items as never });
+    if (section.kind === "docs") {
+      docsItems.push({ section, items: items as never });
+      // Pages of hubs that are `off` here are not built, but links to them are not broken.
+      if (section.offHubs?.length) {
+        const { loadDocItems } = await import("../src/features/docs/source");
+        for (const item of loadDocItems(section, { includeOffHubs: true })) {
+          if (section.offHubs.includes(item.hub)) routes.pages.set(item.href, "off");
+        }
+      }
+    }
     if (section.kind === "directory") {
       routes.directoryHref = section.href;
       for (const c of items as { slug: string }[]) routes.companies.add(c.slug);

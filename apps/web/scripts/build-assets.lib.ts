@@ -262,7 +262,7 @@ const SITE_PAGE_ROUTES: Record<string, string> = { "pricing-faq": "/pricing" };
 
 /**
  * MDX file → page, from the section registry (docs sections, through their kind for `access`) and
- * content/pages. Pages of `off` sections are included with visible: false.
+ * content/pages. Pages of `off` sections and `off` hubs are included with visible: false.
  */
 export async function contentPages(contentDir: string): Promise<Map<string, PageInfo>> {
   const { allSections } = await import("../src/features/sections/registry");
@@ -272,9 +272,11 @@ export async function contentPages(contentDir: string): Promise<Map<string, Page
   for (const section of allSections()) {
     if (section.kind !== "docs") continue;
     const kind = kindOf(section);
-    for (const item of loadDocItems(section)) {
+    const offHubs = section.offHubs ?? [];
+    for (const item of loadDocItems(section, { includeOffHubs: true })) {
       const access = kind.access?.(section, item) ?? "free";
-      pages.set(item.file, { href: item.href, visible: section.state === "on", access });
+      const visible = section.state === "on" && !offHubs.includes(item.hub);
+      pages.set(item.file, { href: item.href, visible, access });
     }
   }
   const pagesDir = path.join(contentDir, "pages");

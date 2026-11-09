@@ -6,7 +6,7 @@ import path from "node:path";
 import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from "next/constants";
 import { features } from "./src/config/features";
 import { premiumRoutes } from "./src/features/paywall/access";
-import { allSections, hiddenRoutes, publicNavLinks, resolveAppEnv } from "./src/features/sections/registry";
+import { allSections, hiddenRoutes, isInOffHub, publicNavLinks, resolveAppEnv } from "./src/features/sections/registry";
 import { securityHeaders } from "./src/features/seo/security-headers";
 
 // Old topic-bank URLs, now category and subsection pages of the question library. Banks whose
@@ -36,13 +36,15 @@ const OLD_BANKS: Record<string, string> = {
   "transformers-and-attention": "/interviews/llm-foundations/attention",
 };
 
-// Redirects declared by sections in content/sections.yaml: to `to` while the section is on, else to
-// `fallback` (temporary, so turning the section on later is not blocked by cached permanent redirects).
+// Redirects declared by sections in content/sections.yaml: to `to` while the section is on (and `to` is not in a
+// hub that is off here), else to `fallback` (temporary, so turning the section or hub on later is not blocked by
+// cached permanent redirects).
 function sectionRedirects() {
   return allSections().flatMap((s) =>
     (s.redirects ?? []).flatMap((r) => {
-      const destination = s.state === "on" ? r.to : r.fallback;
-      return destination ? [{ source: r.from, destination, permanent: s.state === "on" }] : [];
+      const live = s.state === "on" && !isInOffHub(r.to);
+      const destination = live ? r.to : r.fallback;
+      return destination ? [{ source: r.from, destination, permanent: live }] : [];
     })
   );
 }
