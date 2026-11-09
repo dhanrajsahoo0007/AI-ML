@@ -197,7 +197,9 @@ async function renderAsset(
       const steps = a.type === "svg" ? stepCount(svg) : 0;
       if (a.type === "svg" && size) {
         const name = `${slug}.png`;
-        const png = await svgToPng(svg, size.width, path.join(dir, name), PNG_BACKGROUND.light);
+        // A build-up figure's plain PNG is its last step (step-only captions would overlap otherwise).
+        const full = steps ? svgAtStep(svg, steps) : svg;
+        const png = await svgToPng(full, size.width, path.join(dir, name), PNG_BACKGROUND.light);
         files.push({ name, format: "png", theme: "light", bytes: png.bytes, width: png.width, height: png.height });
         // Build-up figures (newsletter): one PNG per step, for email and the LinkedIn carousel. Only SVGs with
         // data-step layers get them, so existing render caches stay valid without a PIPELINE_VERSION bump.

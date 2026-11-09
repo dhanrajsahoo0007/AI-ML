@@ -55,6 +55,8 @@ export const sidecarSchema = z
     /** Required for anything rendered as an image (ALT_REQUIRED). Describe what the picture shows. */
     alt: z.string().min(1).optional(),
     caption: z.string().min(1).optional(),
+    /** One line for a social carousel slide that shows this figure (newsletter LinkedIn kit). */
+    slide: z.string().min(1).max(220).optional(),
     tags: z.array(z.string().regex(kebab, "tags are kebab-case")).default([]),
     /** premium assets are never written to public output (plan §5.6 step 6). */
     access: z.enum(["free", "premium"]).default("free"),

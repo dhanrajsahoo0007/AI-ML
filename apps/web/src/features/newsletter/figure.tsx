@@ -9,7 +9,7 @@ import type { ResolvedFigure } from "./figures";
 // with the theme); a build-up figure shows one step and says which. Email gets the PNG instead (email-issue.ts).
 
 const frame =
-  "overflow-hidden rounded-2xl border border-hairline bg-paper p-3 sm:p-5 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:w-full [&_svg]:max-w-[680px]";
+  "nl-figure overflow-hidden rounded-2xl border border-hairline bg-paper p-3 sm:p-5 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:w-full [&_svg]:max-w-[680px]";
 
 function Svg({ fig }: { fig: ResolvedFigure }) {
   const at = (svg: string) => (fig.step ? svgAtStep(svg, fig.step) : svg);

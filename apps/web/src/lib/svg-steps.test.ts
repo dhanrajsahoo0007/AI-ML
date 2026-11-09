@@ -18,6 +18,15 @@ describe("svg build-up steps", () => {
     expect(at2).toContain('<path data-step="3" d="M0 0" display="none"/>');
   });
 
+  it("step-only content shows at its own step and nowhere else", () => {
+    const svg = `<svg><text data-step-only="1">one</text><text data-step-only="2">two</text><g data-step="2"/></svg>`;
+    expect(stepsUsed(svg)).toEqual([1, 2]);
+    const at1 = svgAtStep(svg, 1);
+    expect(at1).toContain('<text data-step-only="1">one</text>');
+    expect(at1).toContain('<text data-step-only="2" display="none">two</text>');
+    expect(svgAtStep(svg, 2)).toContain('<text data-step-only="1" display="none">one</text>');
+  });
+
   it("the last step shows everything", () => {
     expect(svgAtStep(SVG, 3)).not.toContain('display="none"');
   });
