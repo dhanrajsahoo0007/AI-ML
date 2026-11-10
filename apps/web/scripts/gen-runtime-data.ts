@@ -8,14 +8,17 @@ import path from "node:path";
 //   description, section, URL) of every page in sections that are `on`. Titles only: never article bodies, and
 //   nothing from `hidden` or `off` sections (plan §5.1.1, §11.10). The header search loads the public copy on demand;
 //   next.config.ts inlines the generated copy as SEARCH_INDEX for server pages that need titles (account progress).
-// Also runs in `predev` with --dev: then only the search index is written (APP_ENV defaults to local), so header
+// - public/nav-items.json: each header-menu group's article list (titles and links only, `on` sections only). The
+//   header loads it the first time a menu opens, so the per-page header payload stays the slim HeaderNavSection list.
+// Also runs in `predev` with --dev: then only the search index and nav items are written (APP_ENV defaults to local), so header
 // search works in `next dev`, while the header menu keeps reading content live.
 const devMode = process.argv.includes("--dev");
 if (devMode) process.env.APP_ENV ||= "local";
 (process.env as Record<string, string | undefined>).NODE_ENV ??= "production";
-const { getHeaderNav } = await import("../src/lib/nav-tree");
+const { getHeaderNav, getNavTree } = await import("../src/lib/nav-tree");
 const { visibleSections } = await import("../src/features/sections/registry");
 const { loadSection } = await import("../src/features/sections/kinds");
+const { headerNavItems } = await import("../src/features/sections/public");
 
 const nav = await getHeaderNav();
 
@@ -48,4 +51,6 @@ if (!devMode) fs.writeFileSync(path.join(generated, "header-nav.json"), `${JSON.
 const index = `${JSON.stringify(entries)}\n`;
 fs.writeFileSync(path.join(generated, "search-index.json"), index);
 fs.writeFileSync(path.join(process.cwd(), "public", "search-index.json"), index);
+const navItems = headerNavItems(await getNavTree());
+fs.writeFileSync(path.join(process.cwd(), "public", "nav-items.json"), `${JSON.stringify(navItems)}\n`);
 console.log(`runtime data: header nav ${nav.length} sections, search index ${entries.length} pages`);

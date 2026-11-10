@@ -78,7 +78,7 @@ export function ContentShellSidebar({ navTree }: { navTree: NavSection[] }) {
           aria-label="Resize sidebar"
           className="group sticky top-16 z-10 -ml-px hidden h-[calc(100vh-4rem)] w-1.5 shrink-0 cursor-col-resize items-center justify-center md:flex"
         >
-          <div className="h-full w-px bg-transparent transition-colors group-hover:bg-primary group-active:bg-primary" />
+          <div className="h-full w-px bg-transparent transition-colors group-hover:bg-tint group-active:bg-tint" />
         </div>
       )}
 
@@ -92,7 +92,12 @@ export function ContentShellSidebar({ navTree }: { navTree: NavSection[] }) {
             <Menu className="size-4" />
             Contents
           </SheetTrigger>
-          <SheetContent side="left" className="w-[300px] bg-paper-2 p-0 sm:max-w-[340px]">
+          {/* The drawer renders outside the shell (a portal), so it carries the section's tint itself. */}
+          <SheetContent
+            side="left"
+            data-tone={navTree.length === 1 ? navTree[0].tone : undefined}
+            className="w-[300px] bg-paper-2 p-0 sm:max-w-[340px]"
+          >
             <SheetHeader className="border-b border-hairline px-4 py-3">
               <SheetTitle className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                 Contents

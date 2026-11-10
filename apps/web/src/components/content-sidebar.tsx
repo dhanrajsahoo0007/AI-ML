@@ -3,9 +3,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
+import { isCompleted, useCompletedPages } from "@/lib/completed.client";
 import type { NavSection, NavGroup, NavCategory } from "@/lib/nav-tree";
 
 interface ContentSidebarProps {
@@ -71,7 +72,7 @@ function SidebarSection({
         )}
       >
         {SectionIcon && (
-          <SectionIcon className={cn("size-4 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
+          <SectionIcon className={cn("size-4 shrink-0", isActive ? "text-tint" : "text-muted-foreground")} />
         )}
         <span className="flex-1">{section.label}</span>
         {!pinnedOpen && (
@@ -167,7 +168,7 @@ function SidebarGroup({ group, pathname, onNavigate }: { group: NavGroup; pathna
         )}
       >
         {GroupIcon && (
-          <GroupIcon className={cn("size-4 shrink-0", isGroupActive ? "text-primary" : "text-muted-foreground")} />
+          <GroupIcon className={cn("size-4 shrink-0", isGroupActive ? "text-tint" : "text-muted-foreground")} />
         )}
         <span className="flex-1 truncate text-sm font-semibold">{group.title}</span>
         <ChevronDown
@@ -209,6 +210,9 @@ function SidebarCategory({
 }) {
   const hasActive = category.items.some((i) => pathname === i.href);
   const [open, setOpen] = React.useState(hasActive);
+  const done = useCompletedPages();
+  const read = category.items.filter((i) => isCompleted(done, i.href)).length;
+  const CategoryIcon = category.icon ? getIconComponent(category.icon) : null;
 
   React.useEffect(() => {
     if (hasActive && !open) setOpen(true);
@@ -226,14 +230,28 @@ function SidebarCategory({
         <ChevronRight
           className={cn("size-3 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-90")}
         />
+        {CategoryIcon && (
+          <CategoryIcon
+            aria-hidden
+            className={cn("size-3.5 shrink-0", hasActive ? "text-tint" : "text-muted-foreground/80")}
+          />
+        )}
         <span
           className={cn(
-            "text-xs font-semibold uppercase tracking-[0.08em]",
-            hasActive ? "text-primary" : "text-muted-foreground hover:text-ink"
+            "flex-1 text-xs font-semibold uppercase tracking-[0.08em]",
+            hasActive ? "text-ink" : "text-muted-foreground hover:text-ink"
           )}
         >
           {category.title}
         </span>
+        {read > 0 && (
+          <span
+            className="shrink-0 text-[11px] tabular-nums text-muted-foreground"
+            aria-label={`${read} of ${category.items.length} read`}
+          >
+            {read}/{category.items.length}
+          </span>
+        )}
       </button>
 
       {open && (
@@ -268,6 +286,7 @@ function NavLink({
   onNavigate?: () => void;
   size?: "group" | "item";
 }) {
+  const done = isCompleted(useCompletedPages(), href);
   return (
     <Link
       href={href}
@@ -277,12 +296,18 @@ function NavLink({
         "-ml-px flex items-center gap-2.5 border-l-2 transition-colors",
         size === "group" ? "px-2 py-2 text-sm" : "px-3 py-1.5 text-sm",
         active
-          ? "border-primary bg-accent-soft/60 font-medium text-ink"
+          ? "border-tint bg-tint-soft/70 font-medium text-ink"
           : "border-transparent text-muted-foreground hover:border-ink/30 hover:text-ink"
       )}
     >
-      {Icon && <Icon className={cn("size-4 shrink-0", active ? "text-primary" : "text-muted-foreground")} />}
+      {Icon && <Icon className={cn("size-4 shrink-0", active ? "text-tint" : "text-muted-foreground")} />}
       <span className="truncate">{label}</span>
+      {done && (
+        <>
+          <Check aria-hidden className="ml-auto size-3.5 shrink-0 text-success" />
+          <span className="sr-only">(read)</span>
+        </>
+      )}
     </Link>
   );
 }
