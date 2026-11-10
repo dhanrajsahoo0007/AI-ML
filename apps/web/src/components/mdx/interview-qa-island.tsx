@@ -8,7 +8,9 @@ export type Level = "Junior" | "Mid" | "Senior";
 export interface InterviewQuestionProps {
   question: string;
   category?: string;
-  /** The area the question's category belongs to (LLM, GenAI, System Design); adds an "Area" filter to the list. */
+  /** Icon key of `category`, when it is an interview topic (the companies page). */
+  categoryIcon?: string;
+  /** The area the question's topic belongs to (LLM, GenAI, System Design); a list with several gets an Area filter. */
   area?: string;
   level?: Level;
   companies?: CompanyTag[];
@@ -101,6 +103,10 @@ export function QaController({ company }: { company?: string }) {
         const label = btn.querySelector("[data-qa-tag-count]");
         if (label) label.textContent = String(n);
         btn.hidden = n === 0;
+      }
+      // Topics are listed area by area; a row with no topic left (another area is chosen) goes with them.
+      for (const row of all<HTMLElement>("[data-qa-tag-row]")) {
+        row.hidden = !Array.from(row.querySelectorAll<HTMLElement>("[data-qa-filter]")).some((b) => !b.hidden);
       }
       for (const btn of all<HTMLButtonElement>("[data-qa-filter]")) {
         const group = btn.dataset.qaFilter as FilterGroup;

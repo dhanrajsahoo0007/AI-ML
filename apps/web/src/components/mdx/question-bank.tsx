@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
 import { AnswerBody } from "@/components/mdx/question-answer";
-import { getCompanies, type LibraryQuestion } from "@/lib/question-bank";
+import { getCompanies, type LibraryQuestion, getCategories } from "@/lib/question-bank";
 
 const SOURCE_URL = "https://github.com/pallavi-shekhar/ai-engineering-interview-questions-company-wise";
 
@@ -46,15 +46,19 @@ export function questionItems(
   questions: LibraryQuestion[],
   tagOf?: (q: LibraryQuestion) => string,
   locked?: (q: LibraryQuestion) => boolean,
-  areaOf?: (q: LibraryQuestion) => string | undefined
+  /** Icon of the tag, when `tagOf` names the question's topic. */
+  iconOf?: (q: LibraryQuestion) => string | undefined
 ) {
+  // Every question carries its area (LLM, GenAI, System Design), shown on the question and used by the Area filter.
+  const areas = new Map(getCategories().map((c) => [c.slug, c.group]));
   const companies = new Map(getCompanies().map((c) => [c.slug, { slug: c.slug, name: c.name }]));
   return questions.map((q) => (
     <InterviewQuestion
       key={q.id}
       question={q.q}
       category={tagOf?.(q)}
-      area={areaOf?.(q)}
+      categoryIcon={iconOf?.(q)}
+      area={areas.get(q.category)}
       level={q.level}
       companies={q.companies.map((slug) => companies.get(slug)!)}
       related={q.related}

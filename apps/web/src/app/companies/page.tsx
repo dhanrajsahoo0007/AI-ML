@@ -43,7 +43,7 @@ export default async function CompaniesPage() {
   const categoryTitles = new Map(categories.map((c) => [c.slug, c.title]));
   // Each question's area (LLM, GenAI, System Design): the "Area" filter on a company's questions. Questions are
   // listed area by area, in the order of the topics, so a company's list reads LLM first, then GenAI, and so on.
-  const areaOf = new Map(categories.map((c) => [c.slug, c.group]));
+  const topicIcons = new Map(categories.map((c) => [c.slug, c.icon]));
   const topicRank = new Map(categories.map((c, i) => [c.slug, i]));
   const ordered = tagged
     .map((q, i) => ({ q, i }))
@@ -69,7 +69,7 @@ export default async function CompaniesPage() {
             ordered,
             (q) => categoryTitles.get(q.category)!,
             (q) => premiumAnswers.has(q.category),
-            (q) => areaOf.get(q.category)
+            (q) => topicIcons.get(q.category)
           )}
         </CompanyExplorer>
       </Suspense>
