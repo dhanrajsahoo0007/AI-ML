@@ -8,8 +8,6 @@ export type Level = "Junior" | "Mid" | "Senior";
 export interface InterviewQuestionProps {
   question: string;
   category?: string;
-  /** Icon key of `category`, when it is an interview topic (the companies page). */
-  categoryIcon?: string;
   /** The area the question's topic belongs to (LLM, GenAI, System Design); a list with several gets an Area filter. */
   area?: string;
   level?: Level;

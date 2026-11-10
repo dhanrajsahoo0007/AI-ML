@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
+import { getIconComponent } from "@/lib/icons";
+import { INTERVIEW_AREAS } from "@/lib/interview-areas";
+import { InterviewQuestions, InterviewQuestion, type QuestionIcons } from "@/components/mdx/interview-qa";
 import { AnswerBody } from "@/components/mdx/question-answer";
 import { getCompanies, type LibraryQuestion, getCategories } from "@/lib/question-bank";
 
@@ -42,12 +44,22 @@ function LockedAnswer() {
 // Library questions as <InterviewQuestion> elements; `tagOf` labels each one for the topic chips. Answers are
 // MDX compiled by AnswerBody (components/mdx/question-answer.tsx). An answer for which `locked` is true is
 // replaced by the Pro placeholder and is never compiled, so its text and diagrams are not in the page.
+/** The icons a question list shows, rendered here on the server: one per area and one per topic title. */
+export function questionIcons(): QuestionIcons {
+  const icons: QuestionIcons = {};
+  const add = (key: string, name: string) => {
+    const Component = getIconComponent(name);
+    if (Component) icons[key] = <Component aria-hidden />;
+  };
+  for (const area of INTERVIEW_AREAS) add(`area:${area.name}`, area.icon);
+  for (const c of getCategories()) add(`topic:${c.title}`, c.icon);
+  return icons;
+}
+
 export function questionItems(
   questions: LibraryQuestion[],
   tagOf?: (q: LibraryQuestion) => string,
-  locked?: (q: LibraryQuestion) => boolean,
-  /** Icon of the tag, when `tagOf` names the question's topic. */
-  iconOf?: (q: LibraryQuestion) => string | undefined
+  locked?: (q: LibraryQuestion) => boolean
 ) {
   // Every question carries its area (LLM, GenAI, System Design), shown on the question and used by the Area filter.
   const areas = new Map(getCategories().map((c) => [c.slug, c.group]));
@@ -57,7 +69,6 @@ export function questionItems(
       key={q.id}
       question={q.q}
       category={tagOf?.(q)}
-      categoryIcon={iconOf?.(q)}
       area={areas.get(q.category)}
       level={q.level}
       companies={q.companies.map((slug) => companies.get(slug)!)}
@@ -84,7 +95,7 @@ export function QuestionList({
   if (questions.length === 0) return null;
   const credited = questions.some((q) => q.source === "outcome-school");
   return (
-    <InterviewQuestions title={title} footer={credited ? <SourceCredit /> : undefined}>
+    <InterviewQuestions title={title} footer={credited ? <SourceCredit /> : undefined} icons={questionIcons()}>
       {questionItems(questions, tagOf, locked)}
     </InterviewQuestions>
   );

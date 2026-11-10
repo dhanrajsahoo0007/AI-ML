@@ -3,7 +3,6 @@ import Link from "next/link";
 import { ArrowUpRight, ListCollapse, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CompanyChip, type CompanyTag } from "@/components/company-logo";
-import { getIconComponent } from "@/lib/icons";
 import { interviewArea } from "@/lib/interview-areas";
 import {
   InterviewQuestion,
@@ -43,9 +42,16 @@ const LEVEL_DOT: Record<Level, string> = {
   Senior: "var(--dg-red)",
 };
 
-function Icon({ name, className }: { name?: string; className?: string }) {
-  const Component = name ? getIconComponent(name) : undefined;
-  return Component ? <Component aria-hidden className={className} /> : null;
+/**
+ * Icons for the list, rendered by the server: `area:<name>` for an area, `topic:<title>` for a topic
+ * (questionIcons() in question-bank.tsx). They arrive as elements so this file, which also runs in the browser on
+ * the companies page, does not pull the icon set into that page's bundle.
+ */
+export type QuestionIcons = Record<string, React.ReactNode>;
+
+function Icon({ icons, id, className }: { icons?: QuestionIcons; id: string; className?: string }) {
+  const icon = icons?.[id];
+  return icon ? <span className={cn("inline-flex shrink-0 [&>svg]:size-full", className)}>{icon}</span> : null;
 }
 
 function LevelDot({ level }: { level: Level }) {
@@ -53,11 +59,11 @@ function LevelDot({ level }: { level: Level }) {
 }
 
 /** The question's area as a tinted pill with the area's icon. */
-function AreaBadge({ area }: { area: string }) {
+function AreaBadge({ area, icons }: { area: string; icons?: QuestionIcons }) {
   const meta = interviewArea(area);
   return (
     <span data-tone={meta?.tone} className={cn(badgeClass, "bg-tint-soft")}>
-      <Icon name={meta?.icon} className="size-3 text-tint" />
+      <Icon icons={icons} id={`area:${area}`} className="size-3 text-tint" />
       {area}
     </span>
   );
@@ -68,6 +74,8 @@ interface InterviewQuestionsProps {
   footer?: React.ReactNode;
   /** Company slug chosen outside the list (the companies page); replaces the company chips. */
   company?: string;
+  /** Icons of the areas and topics in the list (questionIcons()). */
+  icons?: QuestionIcons;
   children: React.ReactNode;
 }
 
@@ -80,8 +88,9 @@ function QuestionItem({
   companies,
   related,
   refs,
+  icons,
   children,
-}: InterviewQuestionProps & { index: number }) {
+}: InterviewQuestionProps & { index: number; icons?: QuestionIcons }) {
   return (
     <details
       data-qa-item
@@ -99,7 +108,7 @@ function QuestionItem({
           </span>
           {(area || category || level) && (
             <span className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-              {area && <AreaBadge area={area} />}
+              {area && <AreaBadge area={area} icons={icons} />}
               {level && (
                 <span className={cn(badgeClass, "border border-hairline")}>
                   <LevelDot level={level} />
@@ -197,7 +206,7 @@ function FilterChip({
   );
 }
 
-export function InterviewQuestions({ title, footer, company, children }: InterviewQuestionsProps) {
+export function InterviewQuestions({ title, footer, company, icons, children }: InterviewQuestionsProps) {
   const questions = React.Children.toArray(children).filter(
     (child): child is React.ReactElement<InterviewQuestionProps> => React.isValidElement(child)
   );
@@ -216,12 +225,12 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
     (a, b) => b.count - a.count || a.company.name.localeCompare(b.company.name)
   );
 
-  // Topic chips, each with its icon and the area it belongs to.
-  const tagMap = new Map<string, { name: string; count: number; icon?: string; area?: string }>();
+  // Topic chips, each with the area it belongs to.
+  const tagMap = new Map<string, { name: string; count: number; area?: string }>();
   for (const q of questions) {
     const cat = q.props.category;
     if (!cat) continue;
-    const tag = tagMap.get(cat) ?? { name: cat, count: 0, icon: q.props.categoryIcon, area: q.props.area };
+    const tag = tagMap.get(cat) ?? { name: cat, count: 0, area: q.props.area };
     tag.count += 1;
     tagMap.set(cat, tag);
   }
@@ -316,7 +325,7 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
             </FilterChip>
             {areas.map(({ name, count }) => (
               <FilterChip key={name} group="area" value={name} tone={interviewArea(name)?.tone}>
-                <Icon name={interviewArea(name)?.icon} className="size-3.5 text-tint" />
+                <Icon icons={icons} id={`area:${name}`} className="size-3.5 text-tint" />
                 {name}
                 <span data-qa-tag-count className="opacity-60">
                   {count}
@@ -357,15 +366,15 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
                       data-tone={interviewArea(areaName)?.tone}
                       className="inline-flex w-full items-center gap-1 text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase sm:w-32 sm:shrink-0"
                     >
-                      <Icon name={interviewArea(areaName)?.icon} className="size-3 text-tint" />
+                      <Icon icons={icons} id={`area:${areaName}`} className="size-3 text-tint" />
                       {areaName}
                     </span>
                   )}
                   {tags
                     .filter((t) => areaName === undefined || t.area === areaName)
-                    .map(({ name, count, icon }) => (
+                    .map(({ name, count }) => (
                       <FilterChip key={name} group="tag" value={name}>
-                        <Icon name={icon} className="size-3.5 text-muted-foreground" />
+                        <Icon icons={icons} id={`topic:${name}`} className="size-3.5 text-muted-foreground" />
                         {name}
                         <span data-qa-tag-count className="opacity-60">
                           {count}
@@ -381,7 +390,7 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
 
       <div className="flex flex-col">
         {questions.map((q, i) => (
-          <QuestionItem key={i} index={i + 1} {...q.props} />
+          <QuestionItem key={i} index={i + 1} icons={icons} {...q.props} />
         ))}
         <p data-qa-empty hidden className={cn("py-10 text-center text-sm text-muted-foreground")}>
           No questions match. Try a different search or filter.
