@@ -31,7 +31,8 @@ const chipClass =
 // Company chips draw their own pill; this restyles it when pressed.
 const companyChipClass =
   "rounded-full [&[aria-pressed=true]>span]:border-ink [&[aria-pressed=true]>span]:bg-ink [&[aria-pressed=true]>span]:text-paper";
-const labelClass = "w-14 shrink-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+// Wide enough for the longest label, "Company", so the chips of every row start on the same line.
+const labelClass = "w-[4.75rem] shrink-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
 const badgeClass =
   "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-2";
 
