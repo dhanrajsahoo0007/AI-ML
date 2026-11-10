@@ -4,6 +4,7 @@ import yaml from "js-yaml";
 import { describe, expect, it } from "vitest";
 import { figures as evals } from "../../design/newsletter-figures/evals-for-llm-apps";
 import { figures as tuning } from "../../design/newsletter-figures/is-fine-tuning-dead";
+import { figures as jepa } from "../../design/newsletter-figures/jepa-explained";
 import { figures as harness } from "../../design/newsletter-figures/harness-engineering";
 import { figures as loop } from "../../design/newsletter-figures/loop-engineering";
 import { wrap } from "../../design/newsletter-figures/kit";
@@ -18,6 +19,7 @@ const ISSUES = {
   "loop-engineering": loop,
   "evals-for-llm-apps": evals,
   "is-fine-tuning-dead": tuning,
+  "jepa-explained": jepa,
 };
 const DIR = path.join(process.cwd(), "assets", "diagrams", "svg", "newsletter");
 

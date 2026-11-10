@@ -1,0 +1,297 @@
+---
+title: "The AI that doesn't predict the next word"
+issue: 5
+date: "2026-12-15"
+summary: "How JEPA works, and why Yann LeCun is betting it beats LLMs. A visual guide to models that predict meaning instead of words or pixels."
+format: deep-dive
+series: inside-the-model
+tags: [llm-internals, world-models]
+level: intro
+cover: { motif: constellation, palette: lagoon, seed: 5 }
+takeaways:
+  - "An LLM predicts what is written next. A JEPA predicts what happens next, as an abstract summary."
+  - "Predicting meaning, not pixels or words, lets the model skip detail nobody could predict, like every leaf on a tree."
+  - "JEPA is a way of training, not a chatbot. Today it's used mostly for images, video and robot planning."
+  - "Whether it replaces LLMs is an open bet, not a settled fact. Both sides have real evidence."
+related:
+  - /ai-system-design/genai-system-design/transformer-architecture
+  - /ai-system-design/genai-system-design/self-attention-explained
+  - /ai-system-design/genai-system-design/encoder-decoder-families
+  - /ai-system-design/genai-system-design/multimodal-and-voice-ai
+  - /ai-system-design/genai-system-design/scaling-laws-and-training
+share:
+  hook: "Every chatbot you use works by guessing the next word. One of AI's founders thinks that's a dead end."
+access: free
+status: draft
+audience: all
+---
+
+## Why this matters
+
+A toddler knocks a cup off a table and watches it fall. After a few tries they stop being surprised. Nobody
+explained gravity to them, and they can't read yet. They learned how the world behaves by watching it.
+
+A large language model (LLM) learns the other way round. It reads a huge library of text and learns to guess the
+next word. Everything it knows about cups and tables, it picked up from sentences about them.
+
+Yann LeCun thinks that second route has a ceiling. He is one of the researchers who made modern AI possible, and
+he spent years as Meta's chief AI scientist. In 2022 he proposed a different design called JEPA. In 2026 he
+co-founded a company, AMI Labs, to chase the same idea. It raised $1.03 billion before it had a product.
+
+You'll hear the word JEPA more often from here on. This issue explains what it is and how it learns. It also
+separates what has been shown from what is still a bet.
+
+## The idea in plain English
+
+Pause a film halfway through a penalty kick and ask a friend what happens next. They'll say "the ball goes in
+the net" or "the keeper saves it". They won't paint the next frame, blade of grass by blade of grass. They
+predict the gist and skip the rest.
+
+That is the whole idea. JEPA stands for Joint Embedding Predictive Architecture. In plain words: turn each thing
+you see into a short summary, then predict one summary from another.
+
+![An LLM predicts the exact next word, a JEPA predicts a summary of what comes next](asset:diagrams/svg/newsletter/jepa-explained/word-vs-world)
+
+An LLM has to commit to one exact next word. A JEPA commits only to a summary. That summary is a list of numbers
+called an **embedding**. Inputs that mean similar things get similar numbers.
+
+> [!NOTE]
+> **In plain English:** an LLM fills in the blank with the exact missing word. A JEPA fills in the blank with
+> "something like this", and is graded on whether the meaning is right.
+
+## How it works: how an LLM learns
+
+Start with what you already use. An LLM's training is one small game, played billions of times.
+
+![An LLM learns in four steps: read, guess the next word, check, adjust](asset:diagrams/svg/newsletter/jepa-explained/llm-training)
+
+The model reads some text, guesses the next word and checks itself against the real one. Then its **weights**,
+the numbers inside the model, are nudged so the right word becomes a little likelier. Strictly, it works on
+word-pieces called tokens, but "word" is close enough here.
+
+Two things make this work so well. The answer key is free, because the next word is already there in the text.
+And language has a fixed list of pieces, so the model can give every possible next piece a probability.
+
+The second point is where pictures cause trouble. A video frame has no fixed list of possible answers. There are
+endless ways the next frame could look, and nearly all of them differ in details that don't matter.
+
+## How it works: how a JEPA learns
+
+A JEPA plays a similar hide-and-guess game, but it changes what counts as the answer. The first working version,
+I-JEPA, plays it with images.
+
+![A JEPA hides part of a picture and predicts the summary of the hidden part](asset:diagrams/svg/newsletter/jepa-explained/jepa-training#steps)
+
+Here are the four steps again, a little slower.
+
+1. **Hide.** The picture is cut into small squares called patches. The model is shown one block of them. Several
+   other blocks are held back as targets.
+2. **Encode.** An **encoder** turns the visible patches into embeddings: a summary of what it can see.
+3. **Predict.** A smaller network, the **predictor**, takes that summary and the positions of the hidden blocks.
+   It guesses the summary of each one.
+4. **Compare.** A second encoder, the **target encoder**, looks at the whole picture and produces the real
+   summaries. Training shrinks the gap between the guess and the real thing.
+
+Notice what never happens. The model is never asked to draw the hidden patches. Its score depends only on the
+distance between two summaries.
+
+> [!IMPORTANT]
+> **Key idea:** in a JEPA, both the guess and the answer are summaries. The model is free to leave out anything
+> it can't predict, because nobody asks it for the pixels.
+
+Nobody labels the pictures, either. As with an LLM, the answer key comes free from the data. The I-JEPA team
+trained a large image model this way in under 72 hours on 16 GPUs. They report that it took over ten times less
+computing than a well-known method that rebuilds pixels.
+
+## How it works: why predict meaning
+
+Imagine a clip of a ball rolling under a tree on a windy day. Now predict the next second.
+
+![Predicting pixels means every leaf and shadow, predicting meaning keeps only the ball](asset:diagrams/svg/newsletter/jepa-explained/ball-and-leaves)
+
+A model that must produce pixels has to decide where every leaf ends up. That can't be done, because the wind is
+random. So it spends most of its effort on detail that has nothing to do with the ball.
+
+A model that predicts a summary can drop the leaves. Where the ball goes is predictable, so that stays. The
+exact flutter of leaf 4,012 isn't, so it goes.
+
+The I-JEPA paper tested this directly. The authors swapped the target from summaries back to pixels and kept
+everything else the same. The model got clearly worse at recognising what was in images.
+
+> [!NOTE]
+> **In plain English:** a weather forecaster says "rain tomorrow afternoon". They don't predict where each drop
+> lands. Leaving that out is what makes the forecast possible.
+
+## How it works: the collapse problem
+
+There's a catch, and it's the hardest part of making a JEPA work. The model writes its own answer key. So it can
+cheat.
+
+![Healthy embeddings spread out, collapsed embeddings all sit on one point](asset:diagrams/svg/newsletter/jepa-explained/collapse)
+
+The cheat is simple. Give every input the same summary. A cat, a truck and a blank wall all become the same list
+of numbers. The predictor is now right every time, and the model has learned nothing. Researchers call this
+**collapse**.
+
+An LLM can't cheat this way. Its answer key is the real next word, which the model doesn't control.
+
+There are two main fixes so far.
+
+- **A slow target.** In I-JEPA and V-JEPA the target encoder isn't trained directly. It is a slow-moving average
+  of the main encoder. The answer key always lags behind the learner, which makes the cheat hard to reach.
+- **A spread-out rule.** LeJEPA, from November 2025, adds one term to the training goal. It pushes the summaries
+  to stay spread out in every direction. The authors say this removes the slow target and several other tricks,
+  and that the core fits in about 50 lines of code.
+
+> [!WARNING]
+> **Reading "low training error" as "learned something".** A collapsed model has a perfect score. Fix: test the
+> summaries on a real task, such as sorting images into classes, before trusting the number.
+
+## How it works: the family
+
+JEPA isn't one model. It's a recipe, and each paper applies it to a harder kind of data.
+
+![The JEPA family from the 2022 proposal to AMI Labs in 2026](asset:diagrams/svg/newsletter/jepa-explained/family-timeline)
+
+- **2022, the proposal.** LeCun's position paper, "A Path Towards Autonomous Machine Intelligence", describes
+  JEPA as the centre of a larger design for machines that can plan.
+- **2023, I-JEPA.** The first working version, for still images.
+- **2024, V-JEPA.** The same game on video, trained on 2 million clips. It used no text and no labels.
+- **2025, V-JEPA 2.** Trained on over 1 million hours of internet video, then taught to plan robot moves.
+- **2025, LeJEPA.** A simpler and more stable way to train the whole family.
+- **2026, AMI Labs.** LeCun's new company. Its site doesn't use the name JEPA, but it describes the same recipe:
+  learn abstract summaries of sensor data and predict in that space.
+
+## A worked example
+
+V-JEPA 2 is the clearest picture of what the idea is for. Here is how it gets a robot arm to pick up a cup and
+put it somewhere else.
+
+First the model watched over 1 million hours of ordinary internet video. That taught it to summarise scenes.
+Then the team added a second predictor and trained it on under 62 hours of robot video. This one learned a new
+question: "if the arm moves like this, what will the summary look like next?"
+
+After that the robot got no task training at all. It was handed one thing: a photo of the goal.
+
+![A robot imagines three moves and picks the one whose result is nearest the goal](asset:diagrams/svg/newsletter/jepa-explained/plan-in-latent)
+
+Each step runs like this.
+
+1. Turn the camera view into a summary. Do the same for the goal photo.
+2. Make up a batch of candidate moves. The real system tries 800 at a time and refines them ten times.
+3. For each move, ask the predictor what summary would follow.
+4. Pick the move whose imagined summary sits closest to the goal's.
+5. Do only the first bit of that move. Look again and start over.
+
+No picture is ever generated. All the imagining happens in summaries, which is why it's fast: about 16 seconds
+of thinking per move. The paper reports about 4 minutes for a rival approach that generates video.
+
+The team tested it on arms in two labs the model had never seen. It moved a cup to the right place in 80% of
+trials, and a box in 65%. Reaching a point worked every time. Grasping was the weak spot: 65% for the cup and
+25% for the box.
+
+> [!NOTE]
+> **In plain English:** you plan a route across a room by thinking "past the chair, round the table". You don't
+> picture every floorboard. The robot plans the same way.
+
+The paper lists its own limits. The planner is sensitive to where the camera sits. Errors pile up on long tasks.
+Goals have to be photos, so you can't yet tell it what to do in words.
+
+## How it works: side by side
+
+Put the two next to each other and the difference in purpose is plain.
+
+![LLM and JEPA compared on what they learn from, predict, output, do well and where they're used](asset:diagrams/svg/newsletter/jepa-explained/llm-vs-jepa)
+
+The row to remember is "Gives you". An LLM's output is text, which a person can read straight away. A JEPA's
+output is a summary in numbers. It's only useful when something else reads it, such as a planner or a
+classifier.
+
+That is why there's no JEPA chatbot to try. A JEPA is closer to a sense of sight than to a voice.
+
+## What goes wrong
+
+> [!WARNING]
+> **Calling JEPA "a better ChatGPT".** It doesn't write text and there's nothing to chat with. Fix: describe it
+> as a way of training models to understand and predict, mostly from images and video.
+
+> [!WARNING]
+> **Stating "LLMs have no world model" as fact.** That's one side of a live argument, and there's evidence
+> against it. Fix: say what has been measured, and call the rest an open question.
+
+> [!WARNING]
+> **Treating a research bet as a product.** The robot results are real but early: two labs, short tasks, 80% at
+> best. Fix: follow the papers, and don't plan a roadmap around something you can't buy yet.
+
+## The bigger picture
+
+The disagreement is about what intelligence needs.
+
+**LeCun's side.** Text is a thin slice of what people know. Most of what a child learns comes through eyes and
+hands, long before words. A system that only predicts text will always lack that grounding, however large it
+gets. AMI Labs puts it in one line on its site: "real intelligence does not start in language. It starts in the
+world." On this view you first need a model of how the world behaves. Language comes on top.
+
+**The other side.** LLMs may be building world models already, without being asked to. In one 2022 study,
+researchers trained a small GPT-style model only to predict legal moves in the board game Othello. Inside it
+they found a working picture of the board. A 2023 study found that Llama-2 models hold a map-like sense of where
+places are and when events happened. The authors called their results suggestive, not conclusive.
+
+And the scoreboard favours LLMs today. They're in products used by hundreds of millions of people. JEPA's best
+robot results come from two labs. Meta built new tests of physical reasoning alongside V-JEPA 2, and says people
+score 85% to 95% on them. Top models, V-JEPA 2 included, fall well short.
+
+> [!IMPORTANT]
+> **Key idea:** nobody disputes that JEPA works on images and video. The open question is whether predicting
+> text alone can ever build the same understanding of the world.
+
+**Where it may end up.** The two ideas don't exclude each other. A JEPA could be the part that watches and
+predicts, and a language model the part that talks and reasons in words. V-JEPA 2's own authors list language
+goals as future work, which points the same way.
+
+Hype is a risk too. AMI's chief executive has predicted that within months every company will call itself a
+world-model company to raise money. So judge the claims by the checks in this issue. What does the model
+predict? In what space? What stops it collapsing? What was measured?
+
+## Try it yourself
+
+> [!TIP]
+> Film five seconds of anything: a kettle, a street, a pet. Stop at second three and write one sentence about
+> what happens next. Then count what you left out: colours, textures, the background. Your sentence is roughly
+> what a JEPA predicts. Everything you left out is what a pixel model would have to get right.
+
+## Words to know
+
+| Term             | Plain meaning                                                                 |
+| ---------------- | ----------------------------------------------------------------------------- |
+| LLM              | A model trained to predict the next word in text                              |
+| JEPA             | A way of training that predicts the summary of a hidden part, not its details |
+| Embedding        | A summary of an input, stored as a list of numbers                            |
+| Encoder          | The part that turns an input into an embedding                                |
+| Predictor        | The part that guesses the embedding of something it hasn't seen               |
+| Target encoder   | A second encoder that supplies the real embedding to compare against          |
+| Patch            | One small square of an image                                                  |
+| Collapse         | The failure where every input gets the same embedding                         |
+| World model      | A model that predicts what happens next, given what you do                    |
+| Generative model | A model that produces the content itself: words, pixels or sound              |
+
+## Go deeper
+
+- [Encoder and decoder families](/ai-system-design/genai-system-design/encoder-decoder-families) on this site:
+  where encoders sit in the wider family of model designs.
+- [A Path Towards Autonomous Machine Intelligence](https://openreview.net/forum?id=BZ5a1r-kVsf), Yann LeCun,
+  2022: the position paper that proposed JEPA.
+- [Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture](https://arxiv.org/abs/2301.08243),
+  Assran and others, 2023: the I-JEPA paper, with the pixels-against-summaries test.
+- [Revisiting Feature Prediction for Learning Visual Representations from Video](https://arxiv.org/abs/2404.08471),
+  Bardes and others, 2024: V-JEPA.
+- [V-JEPA 2](https://arxiv.org/abs/2506.09985), Assran and others, 2025: the video model and the robot planning
+  results used in the worked example.
+- [LeJEPA](https://arxiv.org/abs/2511.08544), Balestriero and LeCun, 2025: the spread-out rule that prevents
+  collapse.
+- [Emergent World Representations](https://arxiv.org/abs/2210.13382), Li and others, 2022: the Othello study on
+  the other side of the debate.
+- [Language Models Represent Space and Time](https://arxiv.org/abs/2310.02207), Gurnee and Tegmark, 2023: maps
+  and timelines found inside Llama-2.
+- [Yann LeCun's AMI Labs raises $1.03 billion](https://techcrunch.com/2026/03/09/yann-lecuns-ami-labs-raises-1-03-billion-to-build-world-models/),
+  TechCrunch, 2026: the funding round and the company's plans.
