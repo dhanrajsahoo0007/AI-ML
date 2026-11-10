@@ -6,6 +6,9 @@ import { getCategories, getQuestions, validateLibrary, type Category } from "../
 // the app/interviews routes.
 
 const categoryHref = (section: { href: string }, c: Category) => `${section.href}/${c.slug}`;
+// The menu and the sitemap list a subsection only once it has a question (its page exists either way).
+const filled = (c: Category) =>
+  c.subsections.filter((s) => getQuestions({ category: c.slug, subcategory: s.slug }).length > 0);
 
 export const questionBankKind: SectionKind<Category> = {
   kind: "question-bank",
@@ -31,7 +34,7 @@ export const questionBankKind: SectionKind<Category> = {
         href: categoryHref(section, c),
         icon: c.icon,
         heading: c.group,
-        items: c.subsections.map((s) => ({
+        items: filled(c).map((s) => ({
           slug: s.slug,
           title: s.title,
           href: `${categoryHref(section, c)}/${s.slug}`,
@@ -45,7 +48,7 @@ export const questionBankKind: SectionKind<Category> = {
       { url: section.href },
       ...items.flatMap((c) => [
         { url: categoryHref(section, c) },
-        ...c.subsections.map((s) => ({ url: `${categoryHref(section, c)}/${s.slug}` })),
+        ...filled(c).map((s) => ({ url: `${categoryHref(section, c)}/${s.slug}` })),
       ]),
     ];
   },

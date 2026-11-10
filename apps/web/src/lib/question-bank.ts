@@ -1,5 +1,5 @@
 import "server-only";
-import { INTERVIEW_AREAS } from "./interview-areas";
+import { INTERVIEW_AREAS, INTERVIEW_TRACKS, type InterviewTrack } from "./interview-areas";
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
@@ -14,6 +14,8 @@ import { checkAnswerMdx, extractInterviewQuestions } from "@/lib/question-answer
 // - content/question-bank/<category>.yaml (entries with `source: outcome-school` are adapted from
 //   Outcome School's "AI Engineering Interview Questions Company Wise", Apache 2.0; answers are ours);
 // - practice questions inside articles, filed by content/question-bank/articles.yaml.
+// A YAML question can list `topics` (site pages it belongs to; it is shown on each of them) and `followUps` (the
+// questions an interviewer asks next). A follow-up is a question of its own with `parent` set.
 // Answers from both places are MDX with a restricted component set (lib/question-answer.ts); the library pages
 // compile them with components/mdx/question-answer.tsx.
 
@@ -43,8 +45,14 @@ export interface LibraryQuestion {
   /** Company slugs. */
   companies: string[];
   related?: LinkRef;
+  /** Site pages the question is tagged to, main topic first. The question is listed on each of them. */
+  topics: LinkRef[];
   refs: QuestionRef[];
   source: QuestionSource;
+  /** Set on a follow-up: the question it follows. */
+  parent?: { id: string; q: string };
+  /** The follow-ups of this question, in the order an interviewer asks them. They are also in the library on their own. */
+  followUps: LibraryQuestion[];
 }
 
 export interface Subsection {
@@ -57,6 +65,8 @@ export interface Category {
   slug: string;
   title: string;
   group: string;
+  /** AI and ML, or classic system design (INTERVIEW_TRACKS). */
+  track: InterviewTrack;
   icon: string;
   description: string;
   study: LinkRef[];
@@ -85,6 +95,8 @@ export const COMPANY_GROUPS = [
   "AI Infrastructure",
   "AI-Native Products",
   "Forward-Deployed & Enterprise",
+  // The companies known for the classic system design loop (Google, Netflix, Uber, Stripe and others).
+  "Product & Platform Companies",
 ];
 
 const LEVELS: Level[] = ["Junior", "Mid", "Senior"];
@@ -135,6 +147,9 @@ function loadTaxonomy(errors: string[]): Category[] {
     if (seen.has(c.slug)) errors.push(`taxonomy: duplicate category ${c.slug}`);
     seen.add(c.slug);
     if (!CATEGORY_GROUPS.includes(c.group)) errors.push(`taxonomy ${c.slug}: unknown group ${c.group}`);
+    if (!INTERVIEW_TRACKS.some((t) => t.slug === c.track)) {
+      errors.push(`taxonomy ${c.slug}: track must be one of ${INTERVIEW_TRACKS.map((t) => t.slug).join(", ")}`);
+    }
     if (c.flag !== undefined && !(c.flag in features)) errors.push(`taxonomy ${c.slug}: unknown flag ${c.flag}`);
     if (c.access !== undefined && c.access !== "free" && c.access !== "premium") {
       errors.push(`taxonomy ${c.slug}: access must be free or premium`);
@@ -169,7 +184,7 @@ function loadCompanies(errors: string[]): Company[] {
   return raw;
 }
 
-interface RawQuestion {
+export interface RawQuestion {
   id?: unknown;
   q?: unknown;
   a?: unknown;
@@ -180,58 +195,132 @@ interface RawQuestion {
   related?: unknown;
   refs?: unknown;
   source?: unknown;
+  topics?: unknown;
+  followUps?: unknown;
 }
 
+// The fields a follow-up may have (anything else, a nested `followUps` included, is an error).
+const FOLLOW_UP_KEYS = new Set(Object.keys({ q: 0, a: 0, level: 0, companies: 0, topics: 0, refs: 0 }));
+
 function loadYamlQuestions(
-  isSubsection: (cat: string, sub: string) => boolean,
+  categories: Map<string, Pick<Category, "track" | "subsections">>,
+  companySlugByName: Map<string, string>,
+  errors: string[]
+): LibraryQuestion[] {
+  const files = fs.readdirSync(BANK_DIR).filter((f) => f.endsWith(".yaml") && !DATA_FILES.has(f));
+  return files.flatMap((file) =>
+    parseYamlQuestions(
+      file,
+      readYaml<RawQuestion[]>(path.join(BANK_DIR, file)) ?? [],
+      categories,
+      companySlugByName,
+      errors
+    )
+  );
+}
+
+/** The questions of one parsed library file, follow-ups included; problems are added to `errors`. */
+export function parseYamlQuestions(
+  file: string,
+  entries: RawQuestion[],
+  categories: Map<string, Pick<Category, "track" | "subsections">>,
   companySlugByName: Map<string, string>,
   errors: string[]
 ): LibraryQuestion[] {
   const out: LibraryQuestion[] = [];
-  const files = fs.readdirSync(BANK_DIR).filter((f) => f.endsWith(".yaml") && !DATA_FILES.has(f));
-  for (const file of files) {
-    for (const r of readYaml<RawQuestion[]>(path.join(BANK_DIR, file)) ?? []) {
-      const where = `${file} ${String(r.id ?? "?")}`;
-      if (typeof r.id !== "string" || !r.id) {
-        errors.push(`${where}: missing id`);
-        continue;
+
+  // The fields a question and a follow-up share.
+  const common = (r: RawQuestion, where: string) => {
+    if (typeof r.q !== "string" || !r.q.trim()) errors.push(`${where}: missing q`);
+    if (typeof r.a !== "string" || !r.a.trim()) errors.push(`${where}: missing a`);
+    else for (const problem of checkAnswerMdx(r.a)) errors.push(`${where}: ${problem}`);
+    if (!LEVELS.includes(r.level as Level)) errors.push(`${where}: bad level ${String(r.level)}`);
+    const companies: string[] = [];
+    for (const name of Array.isArray(r.companies) ? (r.companies as string[]) : []) {
+      const slug = companySlugByName.get(name);
+      if (slug) companies.push(slug);
+      else errors.push(`${where}: unknown company ${name}`);
+    }
+    const topics: LinkRef[] = [];
+    if (r.topics !== undefined && !Array.isArray(r.topics)) errors.push(`${where}: topics must be a list of pages`);
+    for (const href of Array.isArray(r.topics) ? (r.topics as unknown[]) : []) {
+      const page = typeof href === "string" ? resolvePage(href) : null;
+      if (!page) errors.push(`${where}: topic page not found ${String(href)}`);
+      else if (topics.some((t) => t.href === page.href)) errors.push(`${where}: duplicate topic ${page.href}`);
+      else topics.push(page);
+    }
+    const refs = Array.isArray(r.refs) ? (r.refs as QuestionRef[]) : [];
+    for (const ref of refs) if (!ref?.title || !/^https:\/\//.test(ref?.url ?? "")) errors.push(`${where}: bad ref`);
+    return {
+      q: String(r.q).trim(),
+      a: String(r.a).trim(),
+      level: r.level as Level,
+      companies,
+      topics,
+      refs,
+    };
+  };
+
+  for (const r of entries) {
+    const where = `${file} ${String(r.id ?? "?")}`;
+    if (typeof r.id !== "string" || !r.id) {
+      errors.push(`${where}: missing id`);
+      continue;
+    }
+    const category = String(r.category);
+    const subcategory = String(r.subcategory);
+    if (`${category}.yaml` !== file) errors.push(`${where}: category ${category} does not match file`);
+    if (!categories.get(category)?.subsections.some((s) => s.slug === subcategory)) {
+      errors.push(`${where}: unknown subsection ${category}/${subcategory}`);
+    }
+    const fields = common(r, where);
+    let related: LinkRef | undefined;
+    if (r.related !== undefined) {
+      const page = typeof r.related === "string" ? resolvePage(r.related) : null;
+      if (!page) errors.push(`${where}: related page not found ${String(r.related)}`);
+      else related = page;
+    }
+    if (r.source !== undefined && r.source !== "outcome-school") errors.push(`${where}: unknown source`);
+    // A system design question is always shown on a topic page, so it must name one.
+    if (categories.get(category)?.track === "design" && fields.topics.length === 0) {
+      errors.push(`${where}: a system design question needs at least one topic`);
+    }
+    const question: LibraryQuestion = {
+      id: r.id,
+      ...fields,
+      file: `question-bank/${file}`,
+      category,
+      subcategory,
+      // The main topic is the deep-dive link unless the entry names another page.
+      related: related ?? fields.topics[0],
+      source: r.source === "outcome-school" ? "outcome-school" : "original",
+      followUps: [],
+    };
+    out.push(question);
+
+    if (r.followUps !== undefined && !Array.isArray(r.followUps)) errors.push(`${where}: followUps must be a list`);
+    for (const raw of Array.isArray(r.followUps) ? (r.followUps as Record<string, unknown>[]) : []) {
+      const slug = slugify(String(raw?.q ?? ""));
+      const id = `${r.id}--${slug}`;
+      const at = `${file} ${id}`;
+      // One level only: a follow-up is a short probe, not a new thread.
+      for (const key of Object.keys(raw ?? {})) {
+        if (!FOLLOW_UP_KEYS.has(key)) errors.push(`${at}: a follow-up cannot have ${key}`);
       }
-      if (typeof r.q !== "string" || !r.q.trim()) errors.push(`${where}: missing q`);
-      if (typeof r.a !== "string" || !r.a.trim()) errors.push(`${where}: missing a`);
-      else for (const problem of checkAnswerMdx(r.a)) errors.push(`${where}: ${problem}`);
-      if (!LEVELS.includes(r.level as Level)) errors.push(`${where}: bad level ${String(r.level)}`);
-      const category = String(r.category);
-      const subcategory = String(r.subcategory);
-      if (`${category}.yaml` !== file) errors.push(`${where}: category ${category} does not match file`);
-      if (!isSubsection(category, subcategory)) errors.push(`${where}: unknown subsection ${category}/${subcategory}`);
-      const companies: string[] = [];
-      for (const name of Array.isArray(r.companies) ? (r.companies as string[]) : []) {
-        const slug = companySlugByName.get(name);
-        if (slug) companies.push(slug);
-        else errors.push(`${where}: unknown company ${name}`);
-      }
-      let related: LinkRef | undefined;
-      if (r.related !== undefined) {
-        const page = typeof r.related === "string" ? resolvePage(r.related) : null;
-        if (!page) errors.push(`${where}: related page not found ${String(r.related)}`);
-        else related = page;
-      }
-      const refs = Array.isArray(r.refs) ? (r.refs as QuestionRef[]) : [];
-      for (const ref of refs) if (!ref?.title || !/^https:\/\//.test(ref?.url ?? "")) errors.push(`${where}: bad ref`);
-      if (r.source !== undefined && r.source !== "outcome-school") errors.push(`${where}: unknown source`);
-      out.push({
-        id: r.id,
-        q: String(r.q).trim(),
-        a: String(r.a).trim(),
-        file: `question-bank/${file}`,
-        level: r.level as Level,
+      const own = common(raw ?? {}, at);
+      const followUp: LibraryQuestion = {
+        id,
+        ...own,
+        file: question.file,
         category,
         subcategory,
-        companies,
-        related,
-        refs,
-        source: r.source === "outcome-school" ? "outcome-school" : "original",
-      });
+        related: own.topics[0] ?? question.related,
+        source: "original",
+        parent: { id: question.id, q: question.q },
+        followUps: [],
+      };
+      question.followUps.push(followUp);
+      out.push(followUp);
     }
   }
   return out;
@@ -275,8 +364,10 @@ function loadArticleQuestions(
         subcategory,
         companies,
         related,
+        topics: [],
         refs: [],
         source: "article",
+        followUps: [],
       });
     }
   }
@@ -339,7 +430,7 @@ function load(): Library {
   const companySlugByName = new Map(companies.map((c) => [c.name, c.slug]));
 
   const questions = [
-    ...loadYamlQuestions(isSubsection, companySlugByName, errors),
+    ...loadYamlQuestions(new Map(categories.map((c) => [c.slug, c])), companySlugByName, errors),
     ...loadArticleQuestions(isSubsection, companySlugByName, errors),
   ];
   const ids = new Set<string>();
@@ -381,12 +472,25 @@ export function getCategory(slug: string) {
   return getCategories().find((c) => c.slug === slug);
 }
 
+// What a reader may see of a question: links to pages of sections that are not `on` are dropped.
+function visibleQuestion(q: LibraryQuestion): LibraryQuestion {
+  const topics = q.topics.filter((t) => isPathVisible(t.href));
+  const related = visibleLink(q.related);
+  if (related === q.related && topics.length === q.topics.length && q.followUps.length === 0) return q;
+  return { ...q, related, topics, followUps: q.followUps.map(visibleQuestion) };
+}
+
+/**
+ * The visible questions, in library order. Follow-ups are included as questions of their own (`parent` set),
+ * straight after the question they follow, so counts and the company filter see them.
+ */
 export function getQuestions({
   category,
   subcategory,
   company,
-}: { category?: string; subcategory?: string; company?: string } = {}) {
-  const visible = new Set(getCategories().map((c) => c.slug));
+  track,
+}: { category?: string; subcategory?: string; company?: string; track?: InterviewTrack } = {}) {
+  const visible = new Map(getCategories().map((c) => [c.slug, c]));
   return load()
     .questions.filter(
       (q) =>
@@ -394,9 +498,20 @@ export function getQuestions({
         !(q.source === "article" && !visibleLink(q.related)) &&
         (!category || q.category === category) &&
         (!subcategory || q.subcategory === subcategory) &&
+        (!track || visible.get(q.category)!.track === track) &&
         (!company || q.companies.includes(company))
     )
-    .map((q) => (q.related && !visibleLink(q.related) ? { ...q, related: undefined } : q));
+    .map(visibleQuestion);
+}
+
+/**
+ * The library questions tagged to a page (`topics`), for the "Asked in interviews" list on that page. A follow-up
+ * tagged to the page is returned on its own unless its parent is tagged too (the parent then carries it).
+ */
+export function getQuestionsForTopic(href: string) {
+  const tagged = getQuestions().filter((q) => q.topics.some((t) => t.href === href));
+  const ids = new Set(tagged.map((q) => q.id));
+  return tagged.filter((q) => !q.parent || !ids.has(q.parent.id));
 }
 
 export function getCompanies() {

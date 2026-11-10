@@ -3,7 +3,7 @@ import { getIconComponent } from "@/lib/icons";
 import { INTERVIEW_AREAS } from "@/lib/interview-areas";
 import { InterviewQuestions, InterviewQuestion, type QuestionIcons } from "@/components/mdx/interview-qa";
 import { AnswerBody } from "@/components/mdx/question-answer";
-import { getCompanies, type LibraryQuestion, getCategories } from "@/lib/question-bank";
+import { getCompanies, getQuestionsForTopic, type LibraryQuestion, getCategories } from "@/lib/question-bank";
 
 const SOURCE_URL = "https://github.com/pallavi-shekhar/ai-engineering-interview-questions-company-wise";
 
@@ -64,20 +64,36 @@ export function questionItems(
   // Every question carries its area (LLM, GenAI, System Design), shown on the question and used by the Area filter.
   const areas = new Map(getCategories().map((c) => [c.slug, c.group]));
   const companies = new Map(getCompanies().map((c) => [c.slug, { slug: c.slug, name: c.name }]));
-  return questions.map((q) => (
-    <InterviewQuestion
-      key={q.id}
-      question={q.q}
-      category={tagOf?.(q)}
-      area={areas.get(q.category)}
-      level={q.level}
-      companies={q.companies.map((slug) => companies.get(slug)!)}
-      related={q.related}
-      refs={q.refs}
-    >
-      {locked?.(q) ? <LockedAnswer /> : <AnswerBody question={q} />}
-    </InterviewQuestion>
-  ));
+  const tags = (q: LibraryQuestion) => q.companies.map((slug) => companies.get(slug)!);
+  const answer = (q: LibraryQuestion) => (locked?.(q) ? <LockedAnswer /> : <AnswerBody question={q} />);
+  // A follow-up is drawn nested under its question, so it is left out of the top level when that question is in
+  // the list. Listed without it (a topic page it is tagged to), it stands alone and names its question.
+  const ids = new Set(questions.map((q) => q.id));
+  return questions
+    .filter((q) => !q.parent || !ids.has(q.parent.id))
+    .map((q) => (
+      <InterviewQuestion
+        key={q.id}
+        question={q.q}
+        category={tagOf?.(q)}
+        area={areas.get(q.category)}
+        level={q.level}
+        companies={tags(q)}
+        related={q.related}
+        topics={q.topics}
+        refs={q.refs}
+        followUpTo={q.parent?.q}
+        followUps={q.followUps.map((f) => ({
+          question: f.q,
+          level: f.level,
+          companies: tags(f),
+          topics: f.topics,
+          answer: answer(f),
+        }))}
+      >
+        {answer(q)}
+      </InterviewQuestion>
+    ));
 }
 
 // A filterable list of library questions.
@@ -98,5 +114,23 @@ export function QuestionList({
     <InterviewQuestions title={title} footer={credited ? <SourceCredit /> : undefined} icons={questionIcons()}>
       {questionItems(questions, tagOf, locked)}
     </InterviewQuestions>
+  );
+}
+
+// "Asked in interviews" at the end of a topic page: the library questions tagged to that page (`topics` in the
+// question YAML). The page's own questions, written in its MDX, are listed by the article itself above this.
+export function TopicQuestions({ href, locked }: { href: string; locked?: (q: LibraryQuestion) => boolean }) {
+  const questions = getQuestionsForTopic(href);
+  if (questions.length === 0) return null;
+  const titles = new Map(getCategories().map((c) => [c.slug, c.title]));
+  return (
+    <div data-topic-questions>
+      <QuestionList
+        questions={questions}
+        title="Asked in interviews"
+        tagOf={(q) => titles.get(q.category) ?? q.category}
+        locked={locked}
+      />
+    </div>
   );
 }

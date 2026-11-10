@@ -5,6 +5,15 @@ import type { CompanyTag } from "@/components/company-logo";
 
 export type Level = "Junior" | "Mid" | "Senior";
 
+/** A follow-up an interviewer asks after the question, shown nested under it. */
+export interface FollowUpItem {
+  question: string;
+  level?: Level;
+  companies?: CompanyTag[];
+  topics?: { href: string; title: string }[];
+  answer: React.ReactNode;
+}
+
 export interface InterviewQuestionProps {
   question: string;
   category?: string;
@@ -13,7 +22,12 @@ export interface InterviewQuestionProps {
   level?: Level;
   companies?: CompanyTag[];
   related?: { href: string; title: string };
+  /** The topic pages the question is tagged to; when given they replace the single deep-dive link. */
+  topics?: { href: string; title: string }[];
   refs?: { title: string; url: string }[];
+  /** Set on a follow-up listed without its parent question: the parent's text. */
+  followUpTo?: string;
+  followUps?: FollowUpItem[];
   children: React.ReactNode;
 }
 
@@ -44,7 +58,12 @@ export function QaController({ company }: { company?: string }) {
       area: el.dataset.area ?? "",
       level: el.dataset.level ?? "",
       companies: (el.dataset.companies ?? "").split(" ").filter(Boolean),
+      // A question counts for itself and for the follow-ups nested under it.
+      weight: Number(el.dataset.qaWeight) || 1,
     }));
+    const total = meta.reduce((n, m) => n + m.weight, 0);
+    const weigh = (pick: (m: (typeof meta)[number], i: number) => boolean) =>
+      meta.reduce((n, m, i) => (pick(m, i) ? n + m.weight : n), 0);
     const one = <T extends Element>(sel: string) => root.querySelector<T>(sel);
     const all = <T extends Element>(sel: string) => Array.from(root.querySelectorAll<T>(sel));
     const search = one<HTMLInputElement>("[data-qa-search]");
@@ -74,13 +93,13 @@ export function QaController({ company }: { company?: string }) {
           byCompany(i) &&
           terms.every((t) => text![i].includes(t));
         el.hidden = !match;
-        if (match) shown++;
+        if (match) shown += m.weight;
       });
 
       const count = one("[data-qa-count]");
       if (count) count.textContent = String(shown);
       const of = one<HTMLElement>("[data-qa-of]");
-      if (of) of.hidden = shown === items.length;
+      if (of) of.hidden = shown === total;
       const empty = one<HTMLElement>("[data-qa-empty]");
       if (empty) empty.hidden = shown > 0;
 
@@ -89,7 +108,7 @@ export function QaController({ company }: { company?: string }) {
       for (const btn of all<HTMLButtonElement>('[data-qa-filter="area"]')) {
         const value = btn.dataset.value ?? "";
         if (!value) continue;
-        const n = meta.filter((m, i) => m.area === value && byCompany(i)).length;
+        const n = weigh((m, i) => m.area === value && byCompany(i));
         const label = btn.querySelector("[data-qa-tag-count]");
         if (label) label.textContent = String(n);
         btn.hidden = n === 0;
@@ -97,7 +116,7 @@ export function QaController({ company }: { company?: string }) {
       for (const btn of all<HTMLButtonElement>('[data-qa-filter="tag"]')) {
         const value = btn.dataset.value ?? "";
         if (!value) continue;
-        const n = meta.filter((m, i) => m.cat === value && byCompany(i) && (!f.area || m.area === f.area)).length;
+        const n = weigh((m, i) => m.cat === value && byCompany(i) && (!f.area || m.area === f.area));
         const label = btn.querySelector("[data-qa-tag-count]");
         if (label) label.textContent = String(n);
         btn.hidden = n === 0;

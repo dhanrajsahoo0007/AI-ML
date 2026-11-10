@@ -59,12 +59,12 @@ export default async function CompaniesPage() {
         <PageHeader
           className="mt-10 mb-12 border-b border-hairline pb-12"
           title="Interview questions by company"
-          lead="Pick a company to see the questions it is publicly reported to ask, split into LLM, GenAI and System Design, along with the reported roles and interview loop. Every question also carries its company tags in the topic pages."
+          lead="Pick a company to see the questions it is publicly reported to ask, split by area, from LLM and GenAI to System Design, along with the reported roles and interview loop. Every question also carries its company tags in the topic pages."
         />
       </FadeIn>
       <Suspense>
         <CompanyExplorer
-          groups={COMPANY_GROUPS}
+          groups={COMPANY_GROUPS.filter((g) => companies.some((c) => c.group === g))}
           companies={companies}
           footer={<SourceCredit />}
           icons={questionIcons()}

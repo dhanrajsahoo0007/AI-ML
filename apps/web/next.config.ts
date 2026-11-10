@@ -8,6 +8,7 @@ import { features } from "./src/config/features";
 import { premiumRoutes } from "./src/features/paywall/access";
 import { allSections, hiddenRoutes, isInOffHub, publicNavLinks, resolveAppEnv } from "./src/features/sections/registry";
 import { securityHeaders } from "./src/features/seo/security-headers";
+import { interviewRedirects } from "./src/features/interviews/redirects";
 
 // Old topic-bank URLs, now category and subsection pages of the question library. Banks whose
 // category is switched off (content/features.yaml) go to the interviews index instead.
@@ -136,6 +137,7 @@ function nextConfig(phase: string): NextConfig {
           destination,
           permanent: true,
         })),
+        ...interviewRedirects(),
         { source: "/companies/:slug", destination: "/companies?company=:slug", permanent: true },
         // Learning Paths was removed.
         { source: "/learning-paths/:path*", destination: "/ai-system-design", permanent: true },

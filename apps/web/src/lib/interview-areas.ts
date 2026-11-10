@@ -20,3 +20,24 @@ export const INTERVIEW_AREAS: readonly InterviewArea[] = [
 export function interviewArea(name: string | undefined): InterviewArea | undefined {
   return INTERVIEW_AREAS.find((a) => a.name === name);
 }
+
+// The two tracks of Interview Practice. Every category is in one (`track` in content/question-bank/taxonomy.yaml):
+// AI and ML questions, or classic system design questions. The /interviews index lists the tracks separately.
+export type InterviewTrack = "ai" | "design";
+
+export const INTERVIEW_TRACKS: readonly { slug: InterviewTrack; title: string; noun: string; description: string }[] = [
+  {
+    slug: "ai",
+    title: "AI & ML interviews",
+    noun: "AI and ML",
+    description:
+      "LLMs, RAG, agents, evaluation, AI system design and machine learning, tagged with the companies reported to ask them.",
+  },
+  {
+    slug: "design",
+    title: "System design interviews",
+    noun: "system design",
+    description:
+      "Design questions with the follow-ups interviewers ask next, and the fundamentals, databases and patterns behind them. Every question links to its topic page.",
+  },
+];

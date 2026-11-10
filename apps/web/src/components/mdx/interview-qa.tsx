@@ -1,12 +1,13 @@
 import React from "react";
 import Link from "next/link";
-import { ArrowUpRight, ListCollapse, Plus, Search } from "lucide-react";
+import { ArrowUpRight, CornerDownRight, ListCollapse, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CompanyChip, type CompanyTag } from "@/components/company-logo";
 import { interviewArea } from "@/lib/interview-areas";
 import {
   InterviewQuestion,
   QaController,
+  type FollowUpItem,
   type InterviewQuestionProps,
   type Level,
 } from "@/components/mdx/interview-qa-island";
@@ -70,6 +71,85 @@ function AreaBadge({ area, icons }: { area: string; icons?: QuestionIcons }) {
   );
 }
 
+type PageLink = { href: string; title: string };
+
+/** "Topics: Caching · Redis" under an answer: the pages a question is tagged to. */
+function TopicLinks({ label, links }: { label: string; links: PageLink[] }) {
+  return (
+    <p>
+      <span className="text-muted-foreground">{label}: </span>
+      {links.map((t, i) => (
+        <span key={t.href}>
+          {i > 0 && " · "}
+          <Link href={t.href} className="text-primary underline underline-offset-2">
+            {t.title}
+          </Link>
+        </span>
+      ))}
+    </p>
+  );
+}
+
+/** A question's own companies and those of its follow-ups, each once. */
+function allCompanies(own: CompanyTag[] = [], followUps: FollowUpItem[] = []) {
+  const bySlug = new Map<string, CompanyTag>();
+  for (const c of [...own, ...followUps.flatMap((f) => f.companies ?? [])]) bySlug.set(c.slug, c);
+  return Array.from(bySlug.values());
+}
+
+const weightOf = (followUps: FollowUpItem[] = []) => 1 + followUps.length;
+
+// The follow-ups of a design question, nested under its answer. They are plain <details> without data-qa-item,
+// so the filters treat a question and its follow-ups as one row and "Expand all" leaves them closed.
+function FollowUps({ items }: { items: FollowUpItem[] }) {
+  return (
+    <div data-qa-followups className="mt-5 rounded-lg border border-hairline bg-paper">
+      <p className="flex items-center gap-2 border-b border-hairline px-4 py-2.5 text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        <CornerDownRight aria-hidden className="size-3.5 text-primary" />
+        Interviewers then ask
+        <span className="font-mono font-normal tracking-normal">{items.length}</span>
+      </p>
+      {items.map((f, i) => (
+        <details key={i} data-qa-followup className="group/f border-b border-hairline last:border-b-0">
+          <summary className="flex cursor-pointer list-none items-start gap-3 px-4 py-3 text-left [&::-webkit-details-marker]:hidden">
+            <span className="w-5 shrink-0 pt-0.5 font-mono text-xs text-primary">{i + 1}</span>
+            <span className="block min-w-0 flex-1">
+              <span className="block text-[15px] leading-snug font-medium text-ink">{f.question}</span>
+              {(f.level || (f.companies && f.companies.length > 0)) && (
+                <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  {f.level && (
+                    <span className={cn(badgeClass, "border border-hairline")}>
+                      <LevelDot level={f.level} />
+                      {f.level}
+                    </span>
+                  )}
+                  {f.companies?.slice(0, TAGS_SHOWN).map((c) => (
+                    <CompanyChip key={c.slug} company={c} />
+                  ))}
+                </span>
+              )}
+            </span>
+            <span
+              aria-hidden
+              className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-hairline text-ink transition-transform duration-200 group-open/f:rotate-45"
+            >
+              <Plus className="size-3" />
+            </span>
+          </summary>
+          <div className="px-4 pb-4 pl-12">
+            <div className="text-[15px] leading-relaxed text-ink-2 [&>*+*]:mt-3">{f.answer}</div>
+            {f.topics && f.topics.length > 0 && (
+              <div className="mt-3 border-t border-hairline pt-2.5 text-[13px]">
+                <TopicLinks label={f.topics.length > 1 ? "Topics" : "Topic"} links={f.topics} />
+              </div>
+            )}
+          </div>
+        </details>
+      ))}
+    </div>
+  );
+}
+
 interface InterviewQuestionsProps {
   title?: string;
   footer?: React.ReactNode;
@@ -88,22 +168,35 @@ function QuestionItem({
   level,
   companies,
   related,
+  topics,
   refs,
+  followUpTo,
+  followUps,
   icons,
   children,
 }: InterviewQuestionProps & { index: number; icons?: QuestionIcons }) {
+  const hasTopics = topics !== undefined && topics.length > 0;
   return (
     <details
       data-qa-item
       data-cat={category ?? ""}
       data-area={area ?? ""}
       data-level={level ?? ""}
-      data-companies={(companies ?? []).map((c) => c.slug).join(" ")}
+      data-companies={allCompanies(companies, followUps)
+        .map((c) => c.slug)
+        .join(" ")}
+      data-qa-weight={weightOf(followUps)}
       className="group border-b border-hairline transition-colors duration-200 open:bg-paper-2/50"
     >
       <summary className="group/q flex w-full cursor-pointer list-none items-start gap-4 px-1 py-5 text-left sm:gap-6 sm:px-3 [&::-webkit-details-marker]:hidden">
         <span className="w-6 shrink-0 pt-1.5 font-mono text-xs text-primary">{String(index).padStart(2, "0")}</span>
         <span className="block min-w-0 flex-1">
+          {followUpTo && (
+            <span data-qa-followup-to className="mb-1 flex items-start gap-1.5 text-[12.5px] text-muted-foreground">
+              <CornerDownRight aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+              <span>Follow-up to: {followUpTo}</span>
+            </span>
+          )}
           <span className="block font-display text-lg leading-snug text-ink transition-colors group-hover/q:text-primary">
             {question}
           </span>
@@ -119,6 +212,12 @@ function QuestionItem({
               {category && (
                 <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   {category}
+                </span>
+              )}
+              {followUps && followUps.length > 0 && (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <CornerDownRight aria-hidden className="size-3" />
+                  {followUps.length} follow-up{followUps.length > 1 ? "s" : ""}
                 </span>
               )}
             </span>
@@ -145,9 +244,10 @@ function QuestionItem({
 
       <div className="pr-4 pb-6 pl-11 sm:pr-14 sm:pl-[3.75rem]">
         <div className="text-[15px] leading-relaxed text-ink-2 [&>*+*]:mt-3">{children}</div>
-        {(related || (refs && refs.length > 0)) && (
+        {(related || hasTopics || (refs && refs.length > 0)) && (
           <div className="mt-4 space-y-1.5 border-t border-hairline pt-3 text-[13px]">
-            {related && (
+            {hasTopics && <TopicLinks label={topics.length > 1 ? "Topics" : "Topic"} links={topics} />}
+            {!hasTopics && related && (
               <p>
                 <span className="text-muted-foreground">Deep-dive: </span>
                 <Link href={related.href} className="text-primary underline underline-offset-2">
@@ -176,6 +276,7 @@ function QuestionItem({
             )}
           </div>
         )}
+        {followUps && followUps.length > 0 && <FollowUps items={followUps} />}
       </div>
     </details>
   );
@@ -214,10 +315,13 @@ export function InterviewQuestions({ title, footer, company, icons, children }: 
 
   const levels = LEVELS.filter((l) => questions.some((q) => q.props.level === l));
 
-  // Companies by how many questions they tag, most first.
+  // A question counts for itself and for each follow-up nested under it.
+  const total = questions.reduce((n, q) => n + weightOf(q.props.followUps), 0);
+
+  // Companies by how many questions (and follow-ups) they tag, most first.
   const seen = new Map<string, { company: CompanyTag; count: number }>();
   for (const q of questions)
-    for (const c of q.props.companies ?? []) {
+    for (const c of [...(q.props.companies ?? []), ...(q.props.followUps ?? []).flatMap((f) => f.companies ?? [])]) {
       const entry = seen.get(c.slug) ?? { company: c, count: 0 };
       entry.count += 1;
       seen.set(c.slug, entry);
@@ -232,7 +336,7 @@ export function InterviewQuestions({ title, footer, company, icons, children }: 
     const cat = q.props.category;
     if (!cat) continue;
     const tag = tagMap.get(cat) ?? { name: cat, count: 0, area: q.props.area };
-    tag.count += 1;
+    tag.count += weightOf(q.props.followUps);
     tagMap.set(cat, tag);
   }
   const tags = Array.from(tagMap.values());
@@ -241,7 +345,7 @@ export function InterviewQuestions({ title, footer, company, icons, children }: 
   const areaCounts = new Map<string, number>();
   for (const q of questions) {
     const a = q.props.area;
-    if (a) areaCounts.set(a, (areaCounts.get(a) ?? 0) + 1);
+    if (a) areaCounts.set(a, (areaCounts.get(a) ?? 0) + weightOf(q.props.followUps));
   }
   const areas = Array.from(areaCounts.entries()).map(([name, count]) => ({ name, count }));
 
@@ -254,10 +358,10 @@ export function InterviewQuestions({ title, footer, company, icons, children }: 
             {title ?? "Interview questions"}
           </p>
           <p className="mt-1 font-display text-2xl text-ink">
-            <span data-qa-count>{questions.length}</span>
+            <span data-qa-count>{total}</span>
             <span data-qa-of hidden className="text-muted-foreground">
               {" "}
-              / {questions.length}
+              / {total}
             </span>{" "}
             <span className="text-muted-foreground">questions</span>
           </p>
