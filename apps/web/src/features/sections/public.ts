@@ -94,7 +94,8 @@ export function headerNavSection(nav: FullNavSection): HeaderNavSection {
 export interface HeaderNavBlock {
   /** Category title; absent for a group's uncategorised items. */
   title?: string;
-  items: { title: string; href: string }[];
+  /** `slug` is set for directory sections only: the company whose logo the menu shows. */
+  items: { title: string; href: string; slug?: string }[];
 }
 
 /** Every `on` section's article lists for the header menu: section key → group slug → blocks. */
@@ -102,19 +103,24 @@ export type HeaderNavItems = Record<string, Record<string, HeaderNavBlock[]>>;
 
 /** Builds public/nav-items.json: titles and links only, loaded by the header when a menu first opens. */
 export function headerNavItems(navs: FullNavSection[]): HeaderNavItems {
-  type Item = { title: string; href: string };
-  const pick = (items: unknown[]) => (items as Item[]).map(({ title, href }) => ({ title, href }));
+  type Item = { title: string; href: string; slug: string };
   return Object.fromEntries(
-    navs.map((nav) => [
-      nav.key,
-      Object.fromEntries(
-        nav.groups.map((g) => {
-          const blocks: HeaderNavBlock[] = [];
-          if (g.items?.length) blocks.push({ items: pick(g.items) });
-          for (const c of g.categories ?? []) if (c.items.length) blocks.push({ title: c.title, items: pick(c.items) });
-          return [g.slug, blocks];
-        })
-      ),
-    ])
+    navs.map((nav) => {
+      const withSlug = nav.kind === "directory";
+      const pick = (items: unknown[]) =>
+        (items as Item[]).map(({ title, href, slug }) => ({ title, href, ...(withSlug ? { slug } : {}) }));
+      return [
+        nav.key,
+        Object.fromEntries(
+          nav.groups.map((g) => {
+            const blocks: HeaderNavBlock[] = [];
+            if (g.items?.length) blocks.push({ items: pick(g.items) });
+            for (const c of g.categories ?? [])
+              if (c.items.length) blocks.push({ title: c.title, items: pick(c.items) });
+            return [g.slug, blocks];
+          })
+        ),
+      ];
+    })
   );
 }

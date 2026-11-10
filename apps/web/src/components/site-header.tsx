@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
 import { ArrowRight, ChevronDown, ChevronRight, Menu } from "lucide-react";
@@ -20,6 +21,12 @@ import type { HeaderNavItems, HeaderNavSection } from "@/features/sections/publi
 // the first time a panel opens. The profile menu is passed in from
 // app/layout.tsx (it lives in features/account, which components/ can't import), once per slot: the desktop bar and
 // the mobile bar each render their own element (one element in two places trips React's key warning).
+
+// Company logos (about 33 kB of SVG paths) load only when the Companies panel opens.
+const CompanyMenuItems = dynamic(() => import("@/components/company-menu-items").then((m) => m.CompanyMenuItems), {
+  ssr: false,
+  loading: () => <div aria-hidden className="h-40 animate-pulse rounded-xl bg-paper-2" />,
+});
 
 const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
@@ -151,7 +158,12 @@ export function SiteHeader({
 
           {openSection && (
             <div className="fixed left-1/2 top-16 z-50 w-[60rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-hairline bg-paper shadow-[0_24px_48px_-24px_rgba(17,17,17,0.45)]">
-              <SectionPanel key={openSection.key} section={openSection} pathname={pathname} />
+              <SectionPanel
+                key={openSection.key}
+                section={openSection}
+                pathname={pathname}
+                onNavigate={() => setOpenKey(null)}
+              />
             </div>
           )}
         </div>
@@ -309,7 +321,16 @@ function useNavItems() {
 }
 
 // Two panes: the section's groups stacked on the left, the hovered (or focused) group's articles on the right.
-function SectionPanel({ section, pathname }: { section: HeaderNavSection; pathname: string }) {
+function SectionPanel({
+  section,
+  pathname,
+  onNavigate,
+}: {
+  section: HeaderNavSection;
+  pathname: string;
+  /** Closes the menu: a company link only changes the query string, which the header does not see as navigation. */
+  onNavigate: () => void;
+}) {
   const items = useNavItems();
   // Opens on the group that holds the current page (known once the article lists have loaded), else the first one.
   // A group's own href can be a hub page shared with other groups, so the article lists decide.
@@ -415,6 +436,8 @@ function SectionPanel({ section, pathname }: { section: HeaderNavSection; pathna
                       <li key={i} className="mb-2.5 h-4 w-4/5 animate-pulse rounded bg-paper-2" />
                     ))}
                   </ul>
+                ) : blocks.length > 0 && section.kind === "directory" ? (
+                  <CompanyMenuItems items={blocks.flatMap((b) => b.items)} onNavigate={onNavigate} />
                 ) : blocks.length > 0 ? (
                   <div className="columns-2 gap-8">
                     {blocks.map((block, i) => (
