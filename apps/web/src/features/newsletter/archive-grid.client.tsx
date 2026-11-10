@@ -3,8 +3,8 @@
 import { useState, type ReactNode } from "react";
 import { Chip } from "@/components/ui/editorial";
 
-// The archive's tag filter (plan §3): every card is rendered on the server; this island only hides the ones that
-// don't match. Without JavaScript all issues show.
+// The archive's tag filter and list (plan §3): the filter sits on top, then one large card per issue. Every card is
+// rendered on the server; this island only hides the ones that don't match. Without JavaScript all issues show.
 
 export interface ArchiveItem {
   slug: string;
@@ -29,11 +29,14 @@ export function ArchiveGrid({ items, tags }: { items: ArchiveItem[]; tags: { key
           ))}
         </div>
       )}
-      <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      <ul className="grid gap-8">
         {shown.map((i) => (
           <li key={i.slug}>{i.card}</li>
         ))}
       </ul>
+      <p aria-live="polite" className="sr-only">
+        {shown.length === 1 ? "1 issue shown" : `${shown.length} issues shown`}
+      </p>
     </div>
   );
 }

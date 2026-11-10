@@ -18,8 +18,8 @@ import { SignupBox } from "@/features/newsletter/public";
 import { routeSection } from "@/features/sections";
 import { JsonLd } from "@/features/seo";
 
-// The newsletter archive (plan §3): masthead and sign-up, the newest issue as a large card, then every issue as a
-// cover card, filterable by topic.
+// The newsletter archive (plan §3): masthead and sign-up, then the topic filter and every issue as a large cover
+// card, newest first.
 
 export const dynamic = "force-static";
 
@@ -31,7 +31,6 @@ export default function NewsletterArchivePage() {
   const section = routeSection(NEWSLETTER_KIND);
   const issues = loadIssues(section).filter((i) => isBuilt(i));
   const sent = issues.filter(isPublished);
-  const [featured, ...rest] = issues;
   const premium = (i: (typeof issues)[number]) => newsletterKind.access(section, i) === "premium";
   const tags = new Map<string, string>();
   for (const i of issues) for (const t of issueLabels(section.key, i).tags) tags.set(t.key, t.label);
@@ -63,30 +62,20 @@ export default function NewsletterArchivePage() {
         <SignupBox source="archive" title="Get the next issue by email" />
       </header>
 
-      {featured ? (
-        <>
-          <section aria-labelledby="latest" className="mt-16">
-            <h2 id="latest" className="sr-only">
-              Latest issue
-            </h2>
-            <IssueCard issue={featured} sectionKey={section.key} featured isNew premium={premium(featured)} />
-          </section>
-          {rest.length > 0 && (
-            <section aria-labelledby="archive" className="mt-16">
-              <h2 id="archive" className="mb-6 font-display text-2xl tracking-tight text-ink">
-                Past issues
-              </h2>
-              <ArchiveGrid
-                tags={[...tags].map(([key, label]) => ({ key, label }))}
-                items={rest.map((i) => ({
-                  slug: i.slug,
-                  tags: i.tags,
-                  card: <IssueCard issue={i} sectionKey={section.key} premium={premium(i)} />,
-                }))}
-              />
-            </section>
-          )}
-        </>
+      {issues.length > 0 ? (
+        <section aria-labelledby="archive" className="mt-16">
+          <h2 id="archive" className="sr-only">
+            All issues
+          </h2>
+          <ArchiveGrid
+            tags={[...tags].map(([key, label]) => ({ key, label }))}
+            items={issues.map((i, n) => ({
+              slug: i.slug,
+              tags: i.tags,
+              card: <IssueCard issue={i} sectionKey={section.key} featured isNew={n === 0} premium={premium(i)} />,
+            }))}
+          />
+        </section>
       ) : (
         <p className="mt-16 text-[15px] text-muted-foreground">The first issue is on its way.</p>
       )}

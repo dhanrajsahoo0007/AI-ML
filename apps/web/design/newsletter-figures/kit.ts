@@ -152,6 +152,11 @@ export const ICONS = {
   git: `<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M18 11.5c0 3-4 3-9.5 5"/>`,
   chart: `<path d="M4 20V4M4 20h16"/><path d="M8 16l4-5 3 3 5-7"/>`,
   gate: `<path d="M4 21V5h16v16"/><path d="M4 9h16M9 9v12M15 9v12"/>`,
+  clock: `<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>`,
+  bolt: `<path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/>`,
+  target: `<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>`,
+  stop: `<path d="M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3z"/><path d="M8.5 12h7"/>`,
+  coin: `<circle cx="12" cy="12" r="9"/><path d="M12 6.5v11M14.6 9.6c-.4-.8-1.4-1.300-2.600-1.300-1.400 0-2.400.7-2.400 1.800 0 2.500 5 1.200 5 3.800 0 1.100-1.100 1.900-2.600 1.900-1.300 0-2.300-.5-2.700-1.400"/>`,
 } as const;
 export type IconName = keyof typeof ICONS;
 

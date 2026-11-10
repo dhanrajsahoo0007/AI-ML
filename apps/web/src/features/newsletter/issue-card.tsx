@@ -5,7 +5,7 @@ import { formatIssueDate, issueLabels } from "./meta";
 import { isPublished, type Issue } from "./source";
 
 // One issue in the archive grid and on the home page: cover, series, number, title, summary and reading time.
-// `featured` is the large card for the newest issue.
+// `featured` is the large side-by-side card the archive uses for every issue.
 
 export function IssueCard({
   issue,

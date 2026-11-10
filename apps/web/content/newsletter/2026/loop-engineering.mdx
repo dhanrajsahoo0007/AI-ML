@@ -1,0 +1,286 @@
+---
+title: "Stop prompting. Start looping."
+issue: 2
+date: "2026-11-24"
+summary: "A visual guide to loop engineering: designing the system that prompts an AI agent for you, checks its work, and knows when to stop."
+format: deep-dive
+series: agent-engineering
+tags: [agents, harness, loops]
+level: intro
+cover: { motif: feedback-loop, palette: coral, seed: 4 }
+takeaways:
+  - "Prompt engineering improves one turn. Loop engineering designs the system that runs many turns without you."
+  - "Every loop has four parts: a goal, a way to act, a check and a stop."
+  - "The check is the hard part. “The agent says it's done” is a claim, not a proof."
+  - "Always cap a loop: a limit on turns, a limit on spend, and a human gate for anything risky."
+related:
+  - /ai-system-design/genai-system-design/harness-engineering
+  - /ai-system-design/genai-system-design/agent-architectures
+  - /ai-system-design/genai-system-design/agentic-ai-evaluation
+  - /ai-system-design/genai-system-design/multi-agent-systems
+share:
+  hook: "You're still typing “keep going” to your AI agent. The best engineers stopped months ago. They design the loop that does it for them."
+access: free
+status: draft
+audience: all
+---
+
+## Why this matters
+
+You give a coding agent a task. It works for two minutes and stops. You read the result, type "keep going", and
+wait. It stops again. You type "now run the tests". Then "fix that one too".
+
+Forty prompts later the job is done. But look at what you did. You weren't engineering. You were a very expensive
+`while` loop, checking the work and pressing go.
+
+In June 2026 this got a name. Addy Osmani called it **loop engineering**: "replacing yourself as the person who
+prompts the agent. You design the system that does it instead." A research paper followed in August, and Anthropic
+published a getting-started guide.
+
+This issue explains the idea from the ground up. You'll learn the four parts of a loop, the four kinds of loop,
+why the check matters most, and how to keep a loop from running away with your money.
+
+## The idea in plain English
+
+Think of a thermostat. You don't stand by the heater turning it on and off. You set a target, say 21 °C. The
+thermostat measures the room, switches the heater, measures again, and stops when the room is warm.
+
+You did one thing: you set the goal. The loop did the rest.
+
+Loop engineering is the same move for AI agents. You stop being the person who prompts each turn. You build
+the thing that prompts, measures and stops.
+
+It's the newest of four layers, and each one wraps the last.
+
+![Four layers of one craft: prompt, context, harness, loop](asset:diagrams/svg/newsletter/loop-engineering/four-layers)
+
+- **Prompt engineering** is about the words of one request.
+- **Context engineering** is about everything the model sees on a turn: files, history, tool results.
+- **Harness engineering** is about what the agent can do and how its work is checked. It was the subject of
+  [Issue #1](/newsletter/harness-engineering).
+- **Loop engineering** is about when the agent runs again, and when it stops.
+
+> [!NOTE]
+> A loop is a small program that keeps asking an agent to work until a test says the job is done, or a limit says
+> stop. Loop engineering is designing that program well.
+
+## How it works: the four parts
+
+Every loop, simple or fancy, has the same four parts.
+
+![The anatomy of a loop: goal, act, check, stop](asset:diagrams/svg/newsletter/loop-engineering/loop-anatomy#steps)
+
+**1. A goal.** The goal says what "done" looks like, in a form a program can test. "Make the code better" is a
+wish. "All 212 tests pass and the linter is clean" is a goal.
+
+**2. Act.** The agent takes a turn. It reads files, edits code and runs commands. Everything it can touch is set
+by its harness, not by the loop.
+
+**3. Check.** Something tests the result against the goal. If the goal isn't met, the loop sends the agent round
+again, usually with the failure attached: "three tests still fail, here is the output".
+
+**4. Stop.** The loop ends. Ideally that's because the check passed. Sometimes it's because a limit was hit.
+Both are fine. What isn't fine is a loop with no way out.
+
+The oldest and simplest loop fits on one line. Geoffrey Huntley published it in 2025 and named it Ralph:
+
+```bash
+while :; do cat PROMPT.md | claude-code ; done
+```
+
+It feeds the same prompt to a coding agent, over and over. Each round starts with a fresh context. The plan and
+the progress live in files, so the next round can pick up where the last one ended. Tests and type checkers push
+back on bad work.
+
+Look closely and you'll find three of the four parts. The goal is in `PROMPT.md`. The act is the agent. The check
+is the test suite. The stop is missing: `while :` runs forever. Huntley is open that it needs supervision and
+burns tokens. Modern loops add the fourth part.
+
+> [!IMPORTANT]
+> The loop doesn't make the agent smarter. It makes the agent **persistent**, and it replaces your judgment with a
+> test. So the loop is exactly as good as that test.
+
+## How it works: four kinds of loop
+
+Loops differ in how much you hand over. Anthropic's guide sorts them into four kinds, by the job you give away.
+
+![Four kinds of loop, from hands-on to hands-off](asset:diagrams/svg/newsletter/loop-engineering/loop-types)
+
+**Turn-based.** You still prompt every turn, but the agent checks its own work before it answers. For example,
+it runs the tests after each edit. You've handed over the routine checking.
+
+**Goal-based.** You state a goal and a limit, such as "all tests pass, at most 20 turns". The agent keeps going
+until one of them is true. You've handed over the decision to stop.
+
+**Time-based.** The loop starts by the clock: every morning, or every ten minutes. "Each day at 9, check for
+failed builds and open a fix." You've handed over the decision to start.
+
+**Proactive.** An event starts the loop: a new bug report, a failed deploy, a review comment. No person is present
+at all. You've handed over the prompt itself.
+
+Each step down gives you more of your time back. It also takes away a moment where a person would have noticed a
+problem. So move down one rung at a time, and only when the rung above is boring.
+
+> [!TIP]
+> Not sure where to start? Pick a task where **you** are the bottleneck: the agent is fast, and it mostly waits for
+> you to say "continue". That's the task to turn into a goal-based loop first.
+
+## How it works: the check
+
+Here is the uncomfortable fact behind every loop. Agents are bad judges of their own work.
+
+Anthropic's engineers saw this while building long-running harnesses. Agents, they wrote, "reliably skew positive
+when grading their own work". Ask an agent if it's finished and it will usually say yes. Osmani makes the same
+point: a loop's "done" is "a claim and not a proof".
+
+So the check must rest on evidence the agent didn't write. Some evidence is stronger than other evidence.
+
+![Five checks, from weakest to strongest evidence](asset:diagrams/svg/newsletter/loop-engineering/check-strength)
+
+- **The agent says "done".** This is no check at all. A loop that stops here stops whenever the agent feels like it.
+- **It compiles and lints.** Cheap and certain, but shallow. Code can compile and still be wrong.
+- **The tests pass.** This is the workhorse. It's certain, repeatable and hard to argue with.
+- **A second model reviews.** Some goals can't be tested by code, like "is this summary accurate?". Give the work
+  to a different agent with a fresh context and a sceptical brief. It didn't write the work, so it isn't attached
+  to it.
+- **A person signs off.** Keep this for what can't be undone: deploys, payments, emails to customers.
+
+Good loops stack these. They run the cheap, certain checks every round, and save the costly ones for the end.
+
+> [!IMPORTANT]
+> Write the check before you write the prompt. If you can't say how a program would know the job is done, the
+> task isn't ready for a loop yet.
+
+## How it works: knowing when to stop
+
+A loop with one exit is a trap. If the goal can't be reached, it never ends. A good loop has five ways out.
+
+![A loop with five exits: one for success, four for safety](asset:diagrams/svg/newsletter/loop-engineering/stop-conditions)
+
+**Goal met.** The check passes. This is the exit you want.
+
+**Turn cap.** "Stop after 25 rounds." It's the simplest safety net, and the one to add first.
+
+**Budget cap.** "Stop at $15." Turns vary a lot in cost, so cap the money as well as the count.
+
+**No progress.** If the same test fails three times with the same error, more rounds won't help. Stop and flag it.
+
+**Needs a human.** Some steps should always pause: deleting data, merging to the main branch, anything that spends
+money. The loop stops and waits for a person.
+
+This is where practice lags behind advice. The August 2026 study scanned 36,645 code repositories and confirmed
+217 with loops. Stop conditions, budgets and verifier agents written into those loops were almost absent. Each
+turned up in at most two repositories. Yet about three in four published loop designs do name their end states.
+People know they should add exits. Most haven't yet.
+
+> [!WARNING]
+> **A loop without a cap is an open tab.** The same study quotes one report of about 8 million tokens used in 48
+> hours by a loop nobody was watching. Set the turn cap and the budget cap before the first run, not after the
+> first bill.
+
+## A worked example
+
+Here is one loop, traced through a night. The numbers are made up to show the shape, but the pattern is typical.
+
+A team's test suite has 30 failing tests after a big library upgrade. An engineer sets up a goal-based loop
+before going home.
+
+- **Goal:** all tests pass.
+- **Check:** the test suite, run after every round.
+- **Caps:** 25 rounds, $15, and "skip any test that fails three times with the same error".
+- **Human gate:** the loop may commit to a branch. It may not merge.
+
+![An overnight loop clears 29 of 30 failing tests](asset:diagrams/svg/newsletter/loop-engineering/overnight-trace)
+
+**Rounds 1 to 4.** The agent reads the failures and spots a pattern. One shared date helper changed its
+behaviour in the upgrade. Fixing it clears 18 tests at once.
+
+**Rounds 5 to 9.** The rest are separate problems. The agent takes one per round. After each fix the suite
+runs again, and the loop feeds the new result back in.
+
+**Rounds 10 to 12.** One test fails three times with the same error. It depends on an outside service the agent
+can't reach. The no-progress rule fires. The loop writes a note about it and moves on.
+
+**Rounds 13 to 18.** Six more fixes, each one proven by the suite.
+
+**Stop.** There is nothing left that the loop is allowed to try, so it ends. The result is 29 tests fixed and one
+flagged for a person, in 18 rounds and $9.40. In the morning the engineer reads one summary and one diff.
+
+Notice what the engineer did not do. They didn't type a single prompt after the first. Notice also what they did
+do: they chose the goal, the check and four limits. That was the engineering.
+
+## What goes wrong
+
+> [!WARNING]
+> **The loop never ends.** The goal is out of reach, or it's too vague to test, so the agent circles all night.
+> The study calls these infinite fix loops. Fix: a turn cap, a budget cap and a no-progress rule, every time.
+
+> [!WARNING]
+> **The agent games the check.** Told to "make the tests pass", an agent may delete the failing test or weaken
+> what it asserts. The goal is met, and the code is worse. Fix: protect the test files, and have a second agent
+> review the diff. Watch for "verifier theater" too: a reviewer that approves everything is not a check.
+
+> [!WARNING]
+> **The context fills with old attempts.** After fifteen rounds the window is crowded with failed tries, and
+> the agent starts repeating them. Fix: start each round with a fresh context. Keep the plan and the progress
+> in files, as Ralph does.
+
+> [!WARNING]
+> **You stop understanding your own code.** The loop ships changes faster than you read them. Osmani calls
+> this comprehension debt, and warns of "cognitive surrender": accepting the output because checking is tiring.
+> Fix: keep loops small enough to review, and read the diff, not only the summary.
+
+## The bigger picture
+
+Loop engineering changes where an engineer's time goes.
+
+![You design the loop once; the loop runs it every round](asset:diagrams/svg/newsletter/loop-engineering/who-does-what)
+
+You write less of the code and fewer of the prompts. You write more goals, checks and limits. Those are old
+skills under a new name. A clear goal is a good specification. A strong check is a good test. A sensible cap is
+ordinary operational care. Teams that already test well will find loops easy. Teams that don't will find that
+loops produce wrong code faster.
+
+Two cautions are worth keeping in mind. First, the field is very young. The term is months old, and the study
+found loops in under 1% of the repositories it scanned. Second, the big success stories come from the companies
+involved, and nobody outside has checked them. Treat loops as a promising tool, not a settled practice.
+
+Loops also depend on the layers beneath them. A loop around a weak harness repeats a weak agent. That's why
+[harness engineering](/ai-system-design/genai-system-design/harness-engineering) comes first, and why
+[evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation) matters more as people step away.
+
+## Try it yourself
+
+> [!TIP]
+> Take one task you gave an agent this week where you typed "continue" more than three times. Write down four
+> lines: the goal a program could test, the check that tests it, a turn cap, and one step that needs your
+> sign-off. Then run it as a goal-based loop on a small slice first: five failing tests, not five hundred.
+
+## Words to know
+
+| Term               | Plain meaning                                                   |
+| ------------------ | --------------------------------------------------------------- |
+| Loop               | A program that keeps asking an agent to work until told to stop |
+| Goal               | What "done" looks like, in a form a program can test            |
+| Check              | The test that decides whether the goal is met                   |
+| Stop condition     | A rule that ends the loop: success, or a limit                  |
+| Turn cap           | The most rounds a loop may run                                  |
+| Budget cap         | The most money or tokens a loop may spend                       |
+| Human gate         | A step where the loop pauses for a person's approval            |
+| Verifier           | A second agent that reviews the first agent's work              |
+| Ralph              | The simplest loop: one prompt, fed to an agent again and again  |
+| Comprehension debt | Code your loop shipped that you no longer understand            |
+
+## Go deeper
+
+- [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering) on this site: the layer a
+  loop sits on.
+- [Loop Engineering](https://addyosmani.com/blog/loop-engineering/), Addy Osmani: the post that named the
+  practice, with its building blocks and its risks.
+- [Loop engineering: Getting started with loops](https://claude.com/blog/getting-started-with-loops), Anthropic:
+  the four kinds of loop and how to pilot one.
+- [Loop Engineering: Building Blocks, Adoption, and Impact](https://arxiv.org/html/2608.21884v1), Lulla and
+  colleagues: the first study of how loops are used in real repositories.
+- [Ralph](https://ghuntley.com/ralph/), Geoffrey Huntley: the one-line loop that started it.
+- [Harness design for long-running application development](https://www.anthropic.com/engineering/harness-design-long-running-apps),
+  Anthropic: why agents need a separate, sceptical evaluator.
