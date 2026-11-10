@@ -58,7 +58,14 @@ describe("newsletter RSS", () => {
       const line = issue.body.split("\n").find((l) => l.trim().length > 60 && !l.startsWith("#"));
       expect(line).toBeDefined();
       expect(feed).not.toContain(line!.trim().slice(0, 50));
-      expect(feed).toContain(issue.title.replace(/&/g, "&amp;"));
+      // Titles are XML-escaped in the feed (an apostrophe becomes &apos;), so escape the same way here.
+      const escaped = issue.title
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/'/g, "&apos;")
+        .replace(/"/g, "&quot;");
+      expect(feed).toContain(escaped);
     }
   });
 });
