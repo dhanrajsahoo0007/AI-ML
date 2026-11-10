@@ -342,12 +342,13 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
         )}
 
         {tags.length > 1 && (
-          <div className="flex items-start gap-2">
+          <div className="flex flex-wrap items-start gap-2 sm:flex-nowrap">
             <span className={cn(labelClass, "pt-1.5")}>Topic</span>
             <FilterChip group="tag" value="">
               All
             </FilterChip>
-            <div className="min-w-0 flex-1 space-y-2">
+            {/* On a phone the rows take the full width, under the label and the All chip. */}
+            <div className="min-w-0 basis-full space-y-2 sm:flex-1 sm:basis-0">
               {/* Topics area by area, so a long list (a company can be asked about a dozen) reads as a few short rows. */}
               {(areas.length > 1 ? areas.map((a) => a.name) : [undefined]).map((areaName) => (
                 <div key={areaName ?? "all"} data-qa-tag-row className="flex flex-wrap items-center gap-2">
