@@ -8,6 +8,8 @@ export type Level = "Junior" | "Mid" | "Senior";
 export interface InterviewQuestionProps {
   question: string;
   category?: string;
+  /** The area the question's category belongs to (LLM, GenAI, System Design); adds an "Area" filter to the list. */
+  area?: string;
   level?: Level;
   companies?: CompanyTag[];
   related?: { href: string; title: string };
@@ -23,7 +25,8 @@ export function InterviewQuestion(props: InterviewQuestionProps) {
   return null;
 }
 
-type Filters = { tag: string; level: string; company: string; query: string; allCompanies: boolean };
+type Filters = { tag: string; area: string; level: string; company: string; query: string; allCompanies: boolean };
+type FilterGroup = "tag" | "area" | "level" | "company";
 
 // Search, filters and "Expand all" for the server-rendered list in interview-qa.tsx. It works on the
 // markup through data attributes instead of re-rendering it, so the answers never ship as JS props.
@@ -38,6 +41,7 @@ export function QaController({ company }: { company?: string }) {
     const items = Array.from(root.querySelectorAll<HTMLDetailsElement>("details[data-qa-item]"));
     const meta = items.map((el) => ({
       cat: el.dataset.cat ?? "",
+      area: el.dataset.area ?? "",
       level: el.dataset.level ?? "",
       companies: (el.dataset.companies ?? "").split(" ").filter(Boolean),
     }));
@@ -45,7 +49,7 @@ export function QaController({ company }: { company?: string }) {
     const all = <T extends Element>(sel: string) => Array.from(root.querySelectorAll<T>(sel));
     const search = one<HTMLInputElement>("[data-qa-search]");
     let text: string[] | null = null;
-    const f: Filters = { tag: "", level: "", company: "", query: search?.value ?? "", allCompanies: false };
+    const f: Filters = { tag: "", area: "", level: "", company: "", query: search?.value ?? "", allCompanies: false };
 
     const syncExpand = () => {
       const visible = items.filter((el) => !el.hidden);
@@ -65,6 +69,7 @@ export function QaController({ company }: { company?: string }) {
         const m = meta[i];
         const match =
           (!f.tag || m.cat === f.tag) &&
+          (!f.area || m.area === f.area) &&
           (!f.level || m.level === f.level) &&
           byCompany(i) &&
           terms.every((t) => text![i].includes(t));
@@ -79,17 +84,26 @@ export function QaController({ company }: { company?: string }) {
       const empty = one<HTMLElement>("[data-qa-empty]");
       if (empty) empty.hidden = shown > 0;
 
-      // Topic counts follow the company filter, so they match what a click on the chip shows.
+      // Area counts follow the company filter, and topic counts follow the company and the area, so each count
+      // matches what a click on the chip shows.
+      for (const btn of all<HTMLButtonElement>('[data-qa-filter="area"]')) {
+        const value = btn.dataset.value ?? "";
+        if (!value) continue;
+        const n = meta.filter((m, i) => m.area === value && byCompany(i)).length;
+        const label = btn.querySelector("[data-qa-tag-count]");
+        if (label) label.textContent = String(n);
+        btn.hidden = n === 0;
+      }
       for (const btn of all<HTMLButtonElement>('[data-qa-filter="tag"]')) {
         const value = btn.dataset.value ?? "";
         if (!value) continue;
-        const n = meta.filter((m, i) => m.cat === value && byCompany(i)).length;
+        const n = meta.filter((m, i) => m.cat === value && byCompany(i) && (!f.area || m.area === f.area)).length;
         const label = btn.querySelector("[data-qa-tag-count]");
         if (label) label.textContent = String(n);
         btn.hidden = n === 0;
       }
       for (const btn of all<HTMLButtonElement>("[data-qa-filter]")) {
-        const group = btn.dataset.qaFilter as "tag" | "level" | "company";
+        const group = btn.dataset.qaFilter as FilterGroup;
         btn.setAttribute("aria-pressed", String((btn.dataset.value ?? "") === f[group]));
       }
       for (const btn of all<HTMLButtonElement>("[data-qa-extra]")) {
@@ -104,9 +118,11 @@ export function QaController({ company }: { company?: string }) {
       const target = e.target as Element;
       const filter = target.closest<HTMLButtonElement>("[data-qa-filter]");
       if (filter && root.contains(filter)) {
-        const group = filter.dataset.qaFilter as "tag" | "level" | "company";
+        const group = filter.dataset.qaFilter as FilterGroup;
         const value = filter.dataset.value ?? "";
         f[group] = f[group] === value ? "" : value;
+        // A topic belongs to one area: changing the area clears a topic that is no longer in view.
+        if (group === "area") f.tag = "";
         return update();
       }
       if (target.closest("[data-qa-more]")) {

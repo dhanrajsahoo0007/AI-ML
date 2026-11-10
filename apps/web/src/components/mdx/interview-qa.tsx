@@ -44,6 +44,7 @@ function QuestionItem({
   index,
   question,
   category,
+  area,
   level,
   companies,
   related,
@@ -54,6 +55,7 @@ function QuestionItem({
     <details
       data-qa-item
       data-cat={category ?? ""}
+      data-area={area ?? ""}
       data-level={level ?? ""}
       data-companies={(companies ?? []).map((c) => c.slug).join(" ")}
       className="group border-b border-hairline transition-colors duration-200 open:bg-paper-2/50"
@@ -162,6 +164,14 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
   }
   const tags = Array.from(tagCounts.entries()).map(([name, count]) => ({ name, count }));
 
+  // Areas (LLM, GenAI, System Design), in the order the questions arrive, which is area order.
+  const areaCounts = new Map<string, number>();
+  for (const q of questions) {
+    const a = q.props.area;
+    if (a) areaCounts.set(a, (areaCounts.get(a) ?? 0) + 1);
+  }
+  const areas = Array.from(areaCounts.entries()).map(([name, count]) => ({ name, count }));
+
   return (
     <section className="mt-10" data-qa>
       <QaController company={company} />
@@ -231,6 +241,23 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
               Show all {companyOptions.length}
             </button>
           )}
+        </div>
+      )}
+
+      {areas.length > 1 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className={labelClass}>Area</span>
+          <FilterChip group="area" value="">
+            Any
+          </FilterChip>
+          {areas.map(({ name, count }) => (
+            <FilterChip key={name} group="area" value={name}>
+              {name}
+              <span data-qa-tag-count className="ml-1.5 opacity-60">
+                {count}
+              </span>
+            </FilterChip>
+          ))}
         </div>
       )}
 

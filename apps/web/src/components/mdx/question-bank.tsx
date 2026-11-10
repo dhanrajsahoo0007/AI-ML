@@ -45,7 +45,8 @@ function LockedAnswer() {
 export function questionItems(
   questions: LibraryQuestion[],
   tagOf?: (q: LibraryQuestion) => string,
-  locked?: (q: LibraryQuestion) => boolean
+  locked?: (q: LibraryQuestion) => boolean,
+  areaOf?: (q: LibraryQuestion) => string | undefined
 ) {
   const companies = new Map(getCompanies().map((c) => [c.slug, { slug: c.slug, name: c.name }]));
   return questions.map((q) => (
@@ -53,6 +54,7 @@ export function questionItems(
       key={q.id}
       question={q.q}
       category={tagOf?.(q)}
+      area={areaOf?.(q)}
       level={q.level}
       companies={q.companies.map((slug) => companies.get(slug)!)}
       related={q.related}

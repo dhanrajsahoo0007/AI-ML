@@ -74,12 +74,9 @@ export interface Company {
   loop: string;
 }
 
-export const CATEGORY_GROUPS = [
-  "Generative AI & LLMs",
-  "System Design & Production",
-  "Machine Learning & Data Science",
-  "Career & Applied",
-];
+// The areas an interview category belongs to, in display order: how models work (LLM), what is built on them
+// (GenAI) and how the systems around them are designed (System Design).
+export const CATEGORY_GROUPS = ["LLM", "GenAI", "System Design", "Machine Learning & Data Science", "Career & Applied"];
 
 export const COMPANY_GROUPS = [
   "Frontier AI Labs",
@@ -369,10 +366,14 @@ function visibleLink(link?: LinkRef) {
   return link && isPathVisible(link.href) ? link : undefined;
 }
 
+/** The visible categories, area by area (CATEGORY_GROUPS order), each area in taxonomy order. */
 export function getCategories() {
+  const rank = (c: Category) => CATEGORY_GROUPS.indexOf(c.group);
   return load()
     .categories.filter(isCategoryVisible)
-    .map((c) => ({ ...c, study: c.study.filter((s) => isPathVisible(s.href)) }));
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => rank(a.c) - rank(b.c) || a.i - b.i)
+    .map(({ c }) => ({ ...c, study: c.study.filter((s) => isPathVisible(s.href)) }));
 }
 
 export function getCategory(slug: string) {
