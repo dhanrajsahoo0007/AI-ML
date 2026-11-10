@@ -16,6 +16,8 @@ const config: KnipConfig = {
         "eslint-config-next",
         // Peer of @tailwindcss/postcss; Next.js ships its own copy.
         "postcss",
+        // Its font files are read by path (cover/social-card.tsx, kit/build-kit.ts), not imported.
+        "@fontsource/inter",
       ],
     },
   },
