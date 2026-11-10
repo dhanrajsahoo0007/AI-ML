@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { ResolvingMetadata } from "next";
 import { ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
 import { OnThisPage, OnThisPageMobile } from "@/components/article/on-this-page";
 import { Breadcrumb } from "@/components/breadcrumb";
@@ -12,7 +11,7 @@ import { issueBody } from "@/features/newsletter/issue-body";
 import { formatIssueDate, issueLabels, LEVEL_LABEL, neighbours, relatedArticles } from "@/features/newsletter/meta";
 import { SignupBox } from "@/features/newsletter/public";
 import { isRouteBuilt, routeSection, sectionOfKind } from "@/features/sections";
-import { absoluteUrl, PAYWALL_CONTAINER_CLASS, withParentImages } from "@/features/seo/public";
+import { absoluteUrl, PAYWALL_CONTAINER_CLASS } from "@/features/seo/public";
 import { JsonLd } from "@/features/seo";
 
 // The web version of one issue (plan §3): cover, the "In 30 seconds" takeaways, the body with an outline rail,
@@ -37,9 +36,10 @@ function findIssue(slug: string) {
   return { section, issue, issues };
 }
 
-export async function generateMetadata({ params }: { params: Params }, parent: ResolvingMetadata) {
+// The metadata names the issue's own share image, so the parent's (the site card) is not carried down.
+export async function generateMetadata({ params }: { params: Params }) {
   const { section, issue } = findIssue((await params).slug);
-  return withParentImages(issueSeo(section, issue).metadata, parent);
+  return issueSeo(section, issue).metadata;
 }
 
 export default async function NewsletterIssuePage({ params }: { params: Params }) {
