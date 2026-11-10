@@ -3,6 +3,7 @@ import { Workflow } from "@/components/home/workflow";
 import { Features } from "@/components/home/features";
 import { Stats } from "@/components/home/stats";
 import { CtaBanner } from "@/components/home/cta-banner";
+import { LatestIssue } from "@/features/newsletter/latest-issue";
 import { visibleSections, loadSection } from "@/features/sections";
 import type { SectionKindName } from "@/features/sections";
 import { homeSeo, JsonLd } from "@/features/seo";
@@ -25,6 +26,7 @@ export default async function HomePage() {
       <Workflow />
       <Features />
       <Stats questions={written("question-bank")} articles={written("docs")} companies={written("directory")} />
+      <LatestIssue />
       <CtaBanner />
     </>
   );

@@ -14,6 +14,7 @@ export {
   ARCHIVE_TITLE,
   archiveSeo,
   issueSeo,
+  seriesSeo,
   NEWSLETTER_NAME,
   NEWSLETTER_PROMISE,
   utilityPageMetadata,

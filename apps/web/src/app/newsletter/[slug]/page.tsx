@@ -6,6 +6,7 @@ import { OnThisPage, OnThisPageMobile } from "@/components/article/on-this-page"
 import { Breadcrumb } from "@/components/breadcrumb";
 import { TopicCard } from "@/components/topic-card";
 import { isBuilt, isPublished, issueSeo, loadIssues, NEWSLETTER_KIND, newsletterKind } from "@/features/newsletter";
+import { seriesHref } from "@/features/newsletter/catalog";
 import { CoverPlaceholder, IssueCover } from "@/features/newsletter/cover/issue-cover";
 import { issueBody } from "@/features/newsletter/issue-body";
 import { formatIssueDate, issueLabels, LEVEL_LABEL, neighbours, relatedArticles } from "@/features/newsletter/meta";
@@ -49,7 +50,7 @@ export default async function NewsletterIssuePage({ params }: { params: Params }
   const related = relatedArticles(issue.related);
   const { newer, older } = neighbours(issues, issue.slug);
   const url = absoluteUrl(issue.href);
-  const kicker = [issue.number !== undefined && `Issue #${issue.number}`, series].filter(Boolean).join(" · ");
+  const number = issue.number !== undefined ? `Issue #${issue.number}` : undefined;
 
   return (
     <article>
@@ -81,7 +82,17 @@ export default async function NewsletterIssuePage({ params }: { params: Params }
       <div className="mx-auto mt-10 grid max-w-[1080px] gap-12 xl:grid-cols-[minmax(0,1fr)_220px]">
         <div className="min-w-0 max-w-[72ch]">
           <header>
-            {kicker && <p className="text-xs font-semibold tracking-[0.1em] text-primary uppercase">{kicker}</p>}
+            {(number || series) && (
+              <p className="text-xs font-semibold tracking-[0.1em] text-primary uppercase">
+                {number}
+                {number && series && " · "}
+                {series && issue.series && (
+                  <Link href={seriesHref(section.href, issue.series)} className="hover:underline">
+                    {series}
+                  </Link>
+                )}
+              </p>
+            )}
             <h1 className="mt-3 font-display text-4xl leading-[1.08] tracking-tight text-ink sm:text-5xl">
               {issue.title}
             </h1>

@@ -23,6 +23,12 @@ variant)` → SVG string, pure, runs in Node and the browser), `cover/social-car
   `apps/web/src/app/newsletter/[slug]/opengraph-image.tsx`,
   `apps/web/src/app/newsletter/[slug]/share/[file]/route.ts` (`email.png`, `portrait.png`, `square.png`) and
   `apps/web/src/app/newsletter/covers/page.tsx` (the gallery; not built in production, noindex).
+- Series: `catalog.ts` (`seriesHref()`), `meta.ts` (`seriesIssues()`, reading order), `seo.ts` (`seriesSeo()`, noindex
+  until the series has a sent issue) and the route `apps/web/src/app/newsletter/series/[series]/page.tsx`; the
+  sitemap lists a series once it has a sent issue.
+- `latest-issue.tsx`: the home page's "Latest issue" strip, shown only while the section is `on`.
+- The issue template `apps/web/content/newsletter/_TEMPLATE.md` (never loaded; `tests/unit/newsletter-template.test.ts`
+  keeps it valid).
 - `links.ts` (links, images, `asset:` figure sources, callout markers), `figures.ts` (figure checks against the
   asset source files; manifest lookup for rendering), `figure.tsx` (the web figure), `callouts.ts` (callout types
   and the remark plugin), `body-stats.ts` (words, figures, headings, reading time).

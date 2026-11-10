@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { sectionOfKind } from "../sections/registry";
 import { NEWSLETTER_KIND, newsletterKind } from "./kind";
+import { seriesIssues } from "./meta";
 import { isBuilt, loadIssues, readIssueFile } from "./source";
 
 const section = sectionOfKind(NEWSLETTER_KIND);
@@ -40,6 +41,34 @@ describe("newsletter kind", () => {
     expect(docs).toEqual([{ href: sent.href, title: "T", description: "S", section: section.key }]);
     expect(JSON.stringify(docs)).not.toContain("Body text");
     expect(newsletterKind.counts([sent, draft])).toEqual({ written: 1, outline: 1 });
+  });
+
+  it("lists a series page in the sitemap once the series has a sent issue", () => {
+    const sent = fixture("series-sent", "2026", base("status: sent\nseries: agent-engineering"));
+    const draft = fixture("series-draft", "2026", base("status: draft\nseries: system-design-digest"));
+    expect(newsletterKind.sitemap(section, [sent, draft]).map((e) => e.url)).toEqual([
+      section.href,
+      sent.href,
+      `${section.href}/series/agent-engineering`,
+    ]);
+  });
+
+  it("orders a series by issue number, then date, and leaves out other series", () => {
+    const at = (number: number | undefined, date: string, series = "s") => ({
+      ...sentLike,
+      number,
+      date,
+      series,
+      slug: date,
+    });
+    const sentLike = fixture("series-shape", "2026", base("status: sent"));
+    const issues = [
+      at(3, "2026-03-01"),
+      at(undefined, "2026-01-01"),
+      at(1, "2026-05-01"),
+      at(2, "2026-02-01", "other"),
+    ];
+    expect(seriesIssues(issues, "s").map((i) => i.number)).toEqual([1, 3, undefined]);
   });
 
   it("drafts get a review page outside production only", () => {

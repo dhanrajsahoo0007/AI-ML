@@ -44,3 +44,6 @@ export function catalogProblems(sectionKey: string): string[] {
 }
 
 export const tagLabel = (catalog: NewsletterCatalog, tag: string) => catalog.tags[tag] ?? tag;
+
+/** A series page: /newsletter/series/<key>. */
+export const seriesHref = (sectionHref: string, key: string) => `${sectionHref}/series/${key}`;

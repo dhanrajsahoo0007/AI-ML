@@ -6,9 +6,12 @@ description: Use when writing, scheduling or sending a newsletter issue (apps/we
 # Write a newsletter issue
 
 Background: `apps/web/src/features/newsletter/AGENTS.md`; schema in `apps/web/src/features/newsletter/schema.ts`.
-Model: `apps/web/content/newsletter/2026/system-design-digest-0.mdx`.
+Start from the template `apps/web/content/newsletter/_TEMPLATE.md` (a deep dive). Reference issue:
+`apps/web/content/newsletter/2026/harness-engineering.mdx`; a digest: `apps/web/content/newsletter/2026/system-design-digest-0.mdx`.
 
-1. **File:** `apps/web/content/newsletter/<yyyy>/<slug>.mdx`, kebab-case slug; the year folder is the issue year.
+1. **File:** copy the template to `apps/web/content/newsletter/<yyyy>/<slug>.mdx`, kebab-case slug; the year folder
+   is the issue year. A new tag or series goes into `apps/web/content/newsletter/catalog.yaml` first; a series gets
+   its page at `/newsletter/series/<key>` as soon as it has an issue.
 
 2. **Frontmatter:** `title`, `issue` (the next number; no gaps), `date` (quoted `"YYYY-MM-DD"`), `summary`
    (≤ 200 chars; it is what RSS, search and the email preview show), `format` (`deep-dive` or `digest`), `tags` and
@@ -17,8 +20,9 @@ Model: `apps/web/content/newsletter/2026/system-design-digest-0.mdx`.
    `status` (`draft` → `scheduled` → `sent`), `access` (`free` default), `audience` (`all` or `pro`). `scheduled`
    needs `sendAt` with a time zone, e.g. `2026-11-14T09:00:00Z`, plus `issue` and `cover`.
 
-3. **Cover:** open `/newsletter/covers` on the dev server, step the seed until a cover fits the topic, and paste
-   its `cover:` line. Check the link preview at `/newsletter/<slug>/opengraph-image` and the LinkedIn image at
+3. **Cover:** open `/newsletter/covers` on the dev server, pick the motif that suits the topic (harness-ring,
+   feedback-loop, lattice, layers, constellation, waves, prism, streams, grid-bloom, orbit-pair), step the seed until
+   a cover fits, and paste its `cover:` line. Check the link preview at `/newsletter/<slug>/opengraph-image` and the LinkedIn image at
    `/newsletter/<slug>/share/portrait.png`.
 
 4. **Plain Markdown only.** No JSX components: the same file renders to the web page and the email. Links are site

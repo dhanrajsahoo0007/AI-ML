@@ -7,7 +7,7 @@ import type { SectionDef } from "../sections";
 import { loadDocItems } from "../docs/source";
 import { bodyStats } from "./body-stats";
 import { isCalloutType } from "./callouts";
-import { catalogProblems, loadCatalog } from "./catalog";
+import { catalogProblems, loadCatalog, seriesHref } from "./catalog";
 import { figureProblems } from "./figures";
 import { ASSET_SCHEME, findCallouts, findComponents, findImages, findLinks, internalPath, isPng } from "./links";
 import { FORMATS, issueFrontmatterSchema, SUMMARY_MAX } from "./schema";
@@ -85,7 +85,14 @@ export const newsletterKind: SectionKind<Issue> = {
   },
 
   sitemap(section, items) {
-    return [{ url: section.href }, ...items.filter(isPublished).map((i) => ({ url: i.href, lastModified: i.date }))];
+    const sent = items.filter(isPublished);
+    // A series page is listed once it holds a sent issue (it stays noindex until then).
+    const series = [...new Set(sent.flatMap((i) => (i.series ? [i.series] : [])))];
+    return [
+      { url: section.href },
+      ...sent.map((i) => ({ url: i.href, lastModified: i.date })),
+      ...series.map((key) => ({ url: seriesHref(section.href, key) })),
+    ];
   },
 
   search(section, items) {

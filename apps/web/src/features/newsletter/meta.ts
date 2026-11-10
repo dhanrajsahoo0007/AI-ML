@@ -43,3 +43,10 @@ export function neighbours(issues: Issue[], slug: string) {
   const i = built.findIndex((x) => x.slug === slug);
   return { newer: i > 0 ? built[i - 1] : undefined, older: i >= 0 ? built[i + 1] : undefined };
 }
+
+/** The built issues of a series, in reading order: by issue number, then date. */
+export function seriesIssues(issues: Issue[], key: string): Issue[] {
+  return issues
+    .filter((i) => i.series === key && isBuilt(i))
+    .sort((a, b) => (a.number ?? Infinity) - (b.number ?? Infinity) || a.date.localeCompare(b.date));
+}
