@@ -87,8 +87,11 @@ function SidebarSection({
 
       {open && (
         <div className="mt-2">
-          {section.groups.map((group) => {
+          {section.groups.map((group, groupIndex) => {
             const isSoleGroup = section.groups.length === 1;
+            // An area label (Interview Practice: LLM, GenAI, System Design) above the first group that carries it.
+            const heading =
+              group.heading && group.heading !== section.groups[groupIndex - 1]?.heading ? group.heading : undefined;
             const hasChildren =
               (group.categories && group.categories.length > 0) || (group.items && group.items.length > 0);
 
@@ -111,7 +114,16 @@ function SidebarSection({
               );
             }
 
-            return <SidebarGroup key={group.slug} group={group} pathname={pathname} onNavigate={onNavigate} />;
+            return (
+              <React.Fragment key={group.slug}>
+                {heading && (
+                  <p className="mt-4 mb-1 border-t border-hairline px-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground first:mt-0 first:border-t-0 first:pt-1">
+                    {heading}
+                  </p>
+                )}
+                <SidebarGroup group={group} pathname={pathname} onNavigate={onNavigate} />
+              </React.Fragment>
+            );
           })}
         </div>
       )}

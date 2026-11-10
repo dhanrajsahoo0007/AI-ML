@@ -48,6 +48,8 @@ interface HeaderNavGroup {
   title: string;
   href: string;
   icon?: string;
+  /** A label shared by a run of groups (an interview area), shown once above them. */
+  heading?: string;
   /** Pages (or companies) in the group, shown as a hint. */
   count: number;
 }
@@ -68,6 +70,7 @@ interface FullNavSection extends Omit<HeaderNavSection, "groups"> {
     title: string;
     href: string;
     icon?: string;
+    heading?: string;
     items?: unknown[];
     categories?: { title: string; icon?: string; items: unknown[] }[];
   }[];
@@ -91,6 +94,7 @@ export function headerNavSection(nav: FullNavSection): HeaderNavSection {
       title: g.title,
       href: g.href,
       ...(g.icon ? { icon: g.icon } : {}),
+      ...(g.heading ? { heading: g.heading } : {}),
       count: (g.items?.length ?? 0) + (g.categories ?? []).reduce((n, c) => n + c.items.length, 0),
     })),
   };

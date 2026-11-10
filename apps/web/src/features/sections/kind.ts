@@ -35,6 +35,8 @@ export interface NavGroup {
   href: string;
   icon?: string;
   tone?: SectionTone;
+  /** A label shared by a run of groups (an interview area such as "LLM"); shown once, above the first of them. */
+  heading?: string;
   categories?: NavCategory[];
   items?: NavItem[];
 }

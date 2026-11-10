@@ -39,7 +39,16 @@ export default async function CompaniesPage() {
     ...c,
     count: refs.filter((r) => r.company === c.slug).length,
   }));
-  const categoryTitles = new Map(getCategories().map((c) => [c.slug, c.title]));
+  const categories = getCategories();
+  const categoryTitles = new Map(categories.map((c) => [c.slug, c.title]));
+  // Each question's area (LLM, GenAI, System Design): the "Area" filter on a company's questions. Questions are
+  // listed area by area, in the order of the topics, so a company's list reads LLM first, then GenAI, and so on.
+  const areaOf = new Map(categories.map((c) => [c.slug, c.group]));
+  const topicRank = new Map(categories.map((c, i) => [c.slug, i]));
+  const ordered = tagged
+    .map((q, i) => ({ q, i }))
+    .sort((a, b) => (topicRank.get(a.q.category) ?? 0) - (topicRank.get(b.q.category) ?? 0) || a.i - b.i)
+    .map(({ q }) => q);
   // Answers of premium-answer categories stay on their (gated) category pages, never on this public one.
   const premiumAnswers = new Set(premiumAnswerCategories().map((c) => c.slug));
 
@@ -51,15 +60,16 @@ export default async function CompaniesPage() {
         <PageHeader
           className="mt-10 mb-12 border-b border-hairline pb-12"
           title="Interview questions by company"
-          lead="Pick a company to see the questions it is publicly reported to ask, across every topic, along with the reported roles and interview loop. Every question also carries its company tags in the topic pages."
+          lead="Pick a company to see the questions it is publicly reported to ask, split into LLM, GenAI and System Design, along with the reported roles and interview loop. Every question also carries its company tags in the topic pages."
         />
       </FadeIn>
       <Suspense>
         <CompanyExplorer groups={COMPANY_GROUPS} companies={companies} footer={<SourceCredit />}>
           {questionItems(
-            tagged,
+            ordered,
             (q) => categoryTitles.get(q.category)!,
-            (q) => premiumAnswers.has(q.category)
+            (q) => premiumAnswers.has(q.category),
+            (q) => areaOf.get(q.category)
           )}
         </CompanyExplorer>
       </Suspense>
