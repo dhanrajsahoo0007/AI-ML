@@ -16,7 +16,7 @@ export const GET = route({
     return new Response(JSON.stringify(data, null, 2), {
       headers: {
         "content-type": "application/json; charset=utf-8",
-        "content-disposition": `attachment; filename="origins-ai-learn-export-${day}.json"`,
+        "content-disposition": `attachment; filename="tokenstoscale-export-${day}.json"`,
       },
     });
   },

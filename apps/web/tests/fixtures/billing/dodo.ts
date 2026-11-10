@@ -43,7 +43,7 @@ export function dodoSubscription(f: SubscriptionFixture) {
     quantity: 1,
     customer: {
       customer_id: f.customerId ?? `cus_${f.subscriptionId}`,
-      email: "buyer@users.origins.test",
+      email: "buyer@users.tokenstoscale.test",
       name: "Test Buyer",
     },
     metadata: f.userId ? { user_id: f.userId } : {},
@@ -70,7 +70,7 @@ export function dodoPayment(f: {
     payload_type: "Payment",
     payment_id: f.paymentId,
     subscription_id: f.subscriptionId ?? null,
-    customer: { customer_id: "cus_x", email: "buyer@users.origins.test", name: "Test Buyer" },
+    customer: { customer_id: "cus_x", email: "buyer@users.tokenstoscale.test", name: "Test Buyer" },
     metadata: f.userId ? { user_id: f.userId } : {},
     total_amount: f.amount ?? 900,
     tax: f.tax ?? 0,

@@ -9,7 +9,7 @@
 //   public static assets (plan §9.2): the spike (2026-11-07) showed the static-assets cache files under
 //   .open-next/assets/cdn-cgi/_next_cache/ are served to anyone by `wrangler dev` (a request with `$`
 //   escaped as `%24` returned the full page). R2 is private: only the Worker reads it, after middleware has
-//   checked the `oa_ent` cookie. `opennextjs-cloudflare preview` fills a local R2 bucket (no account needed);
+//   checked the `tts_ent` cookie. `opennextjs-cloudflare preview` fills a local R2 bucket (no account needed);
 //   deployed environments need the NEXT_INC_CACHE_R2_BUCKET bucket (wrangler.jsonc TODOs) and
 //   `opennextjs-cloudflare populateCache remote` on deploy.
 // - paywall off (production today): the read-only Workers Static Assets cache under `cdn-cgi/_next_cache/`,

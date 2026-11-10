@@ -103,7 +103,7 @@ export const subscription = pgTable(
 );
 
 // Derived from `subscription` by the billing code in the same transaction (plan §9.2). `version` is the `v`
-// claim of the `oa_ent` cookie (plan §11.3): bumped on cancel, refund or dispute so older cookies stop being
+// claim of the `tts_ent` cookie (plan §11.3): bumped on cancel, refund or dispute so older cookies stop being
 // re-issued.
 export const entitlement = pgTable(
   "entitlement",

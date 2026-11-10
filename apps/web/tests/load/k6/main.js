@@ -1,6 +1,6 @@
 // k6 load and concurrency tests (plan §12.6). Run through the runner, not directly:
 //   npm run load:local -w web            laptop rates against `npm run preview -w web` (Workers runtime)
-// The runner (tests/load/run.ts) builds the URL list from the build manifest, signs the `oa_ent` cookie with the
+// The runner (tests/load/run.ts) builds the URL list from the build manifest, signs the `tts_ent` cookie with the
 // edge helper and refuses any host that isn't local. See tests/load/README.md.
 //
 // Env (set by the runner):
@@ -8,7 +8,7 @@
 //   PROFILE        "local" (laptop rates, default) or "staging" (the §12.6 rates)
 //   SCENARIOS      comma list; default: every scenario of the profile
 //   URLS_FILE      JSON { free: string[], premium: string[], premiumIsReal: boolean }
-//   ENT_COOKIE     signed `oa_ent` value for the entitled-premium scenario (tier=pro)
+//   ENT_COOKIE     signed `tts_ent` value for the entitled-premium scenario (tier=pro)
 //   LOAD_SCALE     local profile only: multiply every rate (default 1)
 import http from "k6/http";
 import { check } from "k6";
@@ -158,7 +158,7 @@ export const options = {
   scenarios,
   thresholds,
   summaryTrendStats: ["avg", "min", "med", "p(90)", "p(95)", "p(99)", "max"],
-  userAgent: "origins-load-test/1.0 (k6; local)",
+  userAgent: "tts-load-test/1.0 (k6; local)",
 };
 
 // ── Metrics ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -196,7 +196,7 @@ export function free_pages() {
 }
 
 export function premium_pages() {
-  const res = getPage(pick(URLS.premium), { cookies: { oa_ent: ENT_COOKIE } });
+  const res = getPage(pick(URLS.premium), { cookies: { tts_ent: ENT_COOKIE } });
   check(res, {
     "entitled page 200 + html": isHtmlPage,
     // Entitled HTML must never be stored by a shared cache (plan §9.2). Only meaningful once real premium pages

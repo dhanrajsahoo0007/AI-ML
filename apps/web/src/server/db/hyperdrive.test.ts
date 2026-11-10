@@ -15,7 +15,7 @@ vi.mock("@opennextjs/cloudflare", () => ({
 const { createDb, hyperdriveConnectionString } = await import("./client");
 const { databaseUrl } = await import("./config");
 
-const LOCAL = "postgres://origins:origins@127.0.0.1:54329/origins_dev";
+const LOCAL = "postgres://tts:tts@127.0.0.1:54329/tts_dev";
 // The shape Hyperdrive hands the Worker: a per-config host under hyperdrive.local, no sslmode (Hyperdrive itself
 // reaches Neon over TLS).
 const HYPERDRIVE = "postgresql://app_rw:x@0123abcd.hyperdrive.local:5432/neondb";

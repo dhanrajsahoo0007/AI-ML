@@ -202,7 +202,7 @@ describe("dodoProvider API client (stubbed fetch, never the real API)", () => {
     const p = dodoProvider({ ...config, fetch });
     const res = await p.createCheckout({
       userId: USER,
-      email: "a@users.origins.test",
+      email: "a@users.tokenstoscale.test",
       name: "A",
       plan: "pro_yearly",
       country: "DE",
@@ -216,7 +216,7 @@ describe("dodoProvider API client (stubbed fetch, never the real API)", () => {
     const body = JSON.parse(String(init!.body));
     expect(body).toMatchObject({
       product_cart: [{ product_id: TEST_PRODUCTS.DODO_PRODUCT_PRO_YEARLY, quantity: 1 }],
-      customer: { email: "a@users.origins.test", name: "A" },
+      customer: { email: "a@users.tokenstoscale.test", name: "A" },
       billing_address: { country: "DE" },
       metadata: { user_id: USER, plan: "pro_yearly", locale: "de-DE" },
       return_url: "https://example.test/account/billing?status=success",

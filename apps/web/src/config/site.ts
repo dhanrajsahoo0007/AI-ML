@@ -1,4 +1,5 @@
 import { publicNav, type PublicNavLink } from "@/features/sections/public";
+import { business } from "./business";
 
 // Section links come from the registry (content/sections.yaml), resolved at build for the current
 // environment: only `on` sections, and only those with pages (not "coming soon" kinds).
@@ -10,15 +11,15 @@ const extraNav: { href: string; label: string; navGroup: PublicNavLink["navGroup
 ];
 
 export const siteConfig = {
-  name: "Origins AI Learn",
+  name: business.BRAND,
   tagline: "AI system design",
   description:
-    "Origins AI Learn is a one-stop place to prepare for AI and system design interviews: deep-dives on LLMs, RAG, agents and production AI systems, classic system design case studies, and interview questions tagged with the companies that ask them.",
+    "TokensToScale is a one-stop place to prepare for AI and system design interviews: deep-dives on LLMs, RAG, agents and production AI systems, classic system design case studies, and interview questions tagged with the companies that ask them.",
   nav,
   extraNav,
   hero: {
     badge: "One place for AI and system design interview prep",
-    headline: ["Master AI.", "From Scratch."],
+    headline: ["From tokens", "to scale."],
     description:
       "Deep-dives on **transformers**, **LLMs**, **RAG**, **agents** and **production AI systems**, plus **system design** case studies and interview questions reported at top AI companies, so you can explain how ideas land in real systems.",
     primaryCta: { label: "Explore GenAI & LLM Systems", href: "/ai-system-design" },

@@ -14,7 +14,7 @@ export function maintenanceResponse(): Response {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Down for maintenance · Origins AI Learn</title>
+<title>Down for maintenance · TokensToScale</title>
 <style>
   :root { color-scheme: light dark; --bg: #fafafa; --fg: #18181b; --muted: #52525b; }
   @media (prefers-color-scheme: dark) { :root { --bg: #09090b; --fg: #fafafa; --muted: #a1a1aa; } }

@@ -1,10 +1,10 @@
-// Python side of the Python runner (py.worker.ts): defines __oa_run_case(code, entry, mode, case_json),
+// Python side of the Python runner (py.worker.ts): defines __tts_run_case(code, entry, mode, case_json),
 // which runs one public case in a fresh namespace with stdout captured and returns a JSON string
 // {"ok": true, "actual": …, "logs": "…"} or {"ok": false, "error": "…", "logs": "…"}.
 export const PY_HARNESS = String.raw`
 import contextlib, io, json, traceback
 
-def __oa_error(e):
+def __tts_error(e):
     line = None
     for frame in traceback.extract_tb(e.__traceback__):
         if frame.filename == "solution.py":
@@ -14,7 +14,7 @@ def __oa_error(e):
     text = f"{type(e).__name__}: {e}"
     return f"{text} (line {line})" if line else text
 
-def __oa_run_case(code, entry, mode, case_json):
+def __tts_run_case(code, entry, mode, case_json):
     case = json.loads(case_json)
     out = io.StringIO()
     try:
@@ -38,5 +38,5 @@ def __oa_run_case(code, entry, mode, case_json):
                 actual = target(*case["args"])
         return json.dumps({"ok": True, "actual": actual, "logs": out.getvalue()}, default=repr)
     except BaseException as e:
-        return json.dumps({"ok": False, "error": __oa_error(e), "logs": out.getvalue()})
+        return json.dumps({"ok": False, "error": __tts_error(e), "logs": out.getvalue()})
 `;

@@ -399,9 +399,9 @@ describe.skipIf(!available)("billing (integration)", () => {
     const tokenOf = (res: Response) =>
       res.headers
         .getSetCookie()
-        .find((c) => c.startsWith("oa_ent="))!
+        .find((c) => c.startsWith("tts_ent="))!
         .split(";")[0]
-        .slice(7);
+        .slice("tts_ent=".length);
 
     it("issues tier=pro to a Pro user, and drops to free once access is revoked", async () => {
       const cookie = await testLoginAs("pro_monthly");
@@ -410,7 +410,7 @@ describe.skipIf(!available)("billing (integration)", () => {
       expect(await res.json()).toMatchObject({ tier: "pro", hold: false, stale: false });
       const claims = await verifyEntitlement(tokenOf(res), keyring());
       expect(claims).toMatchObject({ sub: env.ids.pro_monthly, tier: "pro", role: "user" });
-      expect(res.headers.getSetCookie().find((c) => c.startsWith("oa_ent="))).toMatch(/HttpOnly/);
+      expect(res.headers.getSetCookie().find((c) => c.startsWith("tts_ent="))).toMatch(/HttpOnly/);
 
       // Revoke (as a lost dispute would): version bump + free.
       await db
@@ -427,7 +427,7 @@ describe.skipIf(!available)("billing (integration)", () => {
     it("refuses a cookie copied from another user, and a newer version than the database", async () => {
       const pro = await testLoginAs("pro_yearly");
       const proRes = await call(refreshPOST, "/api/entitlements/refresh", { method: "POST", cookie: pro });
-      const stolen = `oa_ent=${tokenOf(proRes)}`;
+      const stolen = `tts_ent=${tokenOf(proRes)}`;
       const free = await testLoginAs("free");
       const res = await call(refreshPOST, "/api/entitlements/refresh", {
         method: "POST",
@@ -435,7 +435,7 @@ describe.skipIf(!available)("billing (integration)", () => {
       });
       expect(res.status).toBe(409);
       expect(((await res.json()) as { error: { code: string } }).error.code).toBe("user_mismatch");
-      expect(res.headers.getSetCookie().some((c) => c.startsWith("oa_ent=;") && /Max-Age=0/.test(c))).toBe(true);
+      expect(res.headers.getSetCookie().some((c) => c.startsWith("tts_ent=;") && /Max-Age=0/.test(c))).toBe(true);
 
       await db.update(entitlement).set({ version: 0 }).where(eq(entitlement.userId, env.ids.pro_yearly));
       const rollback = await call(refreshPOST, "/api/entitlements/refresh", {
@@ -601,7 +601,7 @@ describe.skipIf(!available)("billing (integration)", () => {
     const sent: { to: string; subject: string; text: string }[] = [];
     const sender = { send: async (m: { to: string; subject: string; text: string }) => (sent.push(m), { id: "x" }) };
     expect(await sendRenewalReminders(db, sender, { siteUrl: "https://example.test" })).toEqual({ sent: 1 });
-    expect(sent[0].to).toBe("free@users.origins.test");
+    expect(sent[0].to).toBe("free@users.tokenstoscale.test");
     expect(sent[0].text).toMatch(/€90\.00/);
     expect(sent[0].text).toMatch(/example\.test\/account\/billing/);
     expect(await sendRenewalReminders(db, sender, { siteUrl: "https://example.test" })).toEqual({ sent: 0 });

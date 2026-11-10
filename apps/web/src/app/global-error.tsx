@@ -15,7 +15,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
       <body style={{ font: "16px/1.6 system-ui, sans-serif", colorScheme: "light dark", textAlign: "center" }}>
         <main role="alert" style={{ maxWidth: "36rem", margin: "20vh auto", padding: "0 1rem" }}>
           <h1>Something went wrong</h1>
-          <p>Origins AI Learn didn&apos;t load properly. Please try again in a moment.</p>
+          <p>TokensToScale didn&apos;t load properly. Please try again in a moment.</p>
           <p>
             <button type="button" onClick={reset}>
               Try again

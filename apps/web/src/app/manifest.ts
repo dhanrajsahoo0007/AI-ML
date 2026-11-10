@@ -5,7 +5,7 @@ import { siteConfig } from "@/config/site";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: siteConfig.name,
-    short_name: "Origins AI",
+    short_name: "TokensToScale",
     description: siteConfig.description,
     start_url: "/",
     scope: "/",

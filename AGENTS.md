@@ -11,7 +11,7 @@ Step-by-step skills are in `.claude/skills/` (`add-article`, `add-section`, `rel
 
 ## Product
 
-**Origins AI Learn** teaches GenAI & LLM systems, classic system design and cloud architecture, with interview
+**TokensToScale** teaches GenAI & LLM systems, classic system design and cloud architecture, with interview
 practice on top. Goal: the fastest, clearest place to learn how real systems are built, and to pass the interview.
 
 **Audiences:** all ages (free content needs no account; under-18 accounts need a parent's or guardian's permission,
@@ -98,7 +98,7 @@ Open: domain and brand, prices, which articles are free, seller entity, Neon reg
   and the production profile.
 - **Kill switch**: the `SECTIONS_KILL` Worker secret (e.g. `dsa,cloud`); middleware answers 503 for those sections
   at once, no rebuild.
-- **`oa_ent`**: the signed entitlement cookie (HS256 JWT, 15 minutes, `{sub, tier, role, v}`, key chosen by the
+- **`tts_ent`**: the signed entitlement cookie (HS256 JWT, 15 minutes, `{sub, tier, role, v}`, key chosen by the
   `kid` header). Middleware verifies it without a database (`apps/web/src/server/edge/entitlement.ts`).
 - **Entitlement**: what a user may read (`tier` free/pro); the source of truth is the `entitlement` table, written
   only from verified billing events.
@@ -116,7 +116,7 @@ Open: domain and brand, prices, which articles are free, seller entity, Neon reg
 ```
 Browser ─► Cloudflare edge ─► static assets (/_next/static, fonts, /_a/* optimised media)
                           └─► Worker (OpenNext): src/middleware.ts (SECTIONS_KILL → 503, off → 404,
-                                 hidden → 404 unless oa_ent role=admin, x-app-version; NO database)
+                                 hidden → 404 unless tts_ent role=admin, x-app-version; NO database)
                                  ├─ free / entitled page ─► prerendered HTML (no database)
                                  ├─ premium, not entitled ─► rewrite to the public preview   (Planned, stream L)
                                  └─ /api/* (auth, account, progress, newsletter, test, vitals, health) ─► Postgres
@@ -178,21 +178,21 @@ apps/web/
 Run from the repo root (Node 22, see `.nvmrc`; npm only, `npm ci` with the committed lockfile). App scripts take
 `-w web`.
 
-| Command                                                      | What it does                                                          |
-| ------------------------------------------------------------ | --------------------------------------------------------------------- |
-| `npm run dev`                                                | Dev server on http://localhost:3001                                   |
-| `npm run build`                                              | Production build (no env vars needed; `APP_ENV` picks section states) |
-| `npm run typecheck` · `npm run lint`                         | `tsc --noEmit` · ESLint                                               |
-| `npm run format` / `npm run format:check`                    | Prettier write / check                                                |
-| `npm test`                                                   | Vitest unit + integration (DB tests skip without Docker)              |
-| `npm run content-check -w web`                               | Validates registry, frontmatter, nav index, questions, assets, links  |
-| `npm run e2e:chromium -w web`                                | Playwright on Chromium (what CI runs); needs a build first            |
-| `npm run size -w web`                                        | First-load JS budgets per route type                                  |
-| `npm run db:up -w web` · `npm run db:migrate -w web`         | Local Postgres (Docker) · apply migrations (local/preview only)       |
-| `npm run db:generate -w web` · `npm run db:seed:test -w web` | New migration from the schema diff · seed test users (local only)     |
-| `npm run asset:new -w web` · `npm run asset:find -w web`     | Scaffold an asset with its sidecar · search the library               |
-| `npm run preview -w web`                                     | Cloudflare Workers build + local preview (no account needed)          |
-| `npm run knip` · `npm run check:agents-md`                   | Unused code/deps · checks every agent doc                             |
+| Command                                                            | What it does                                                             |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `npm run dev`                                                      | Dev server on http://localhost:3001                                      |
+| `npm run build`                                                    | Production build (no env vars needed; `APP_ENV` picks section states)    |
+| `npm run typecheck` · `npm run lint`                               | `tsc --noEmit` · ESLint                                                  |
+| `npm run format` / `npm run format:check`                          | Prettier write / check                                                   |
+| `npm test`                                                         | Vitest unit + integration (DB tests skip without Docker)                 |
+| `npm run content-check -w web`                                     | Validates registry, frontmatter, nav index, questions, assets, links     |
+| `npm run e2e:chromium -w web`                                      | Playwright on Chromium (what CI runs); needs a build first               |
+| `npm run size -w web`                                              | First-load JS budgets per route type                                     |
+| `npm run db:up -w web` · `npm run db:migrate -w web`               | Local Postgres (Docker) · apply migrations (local/preview only)          |
+| `npm run db:generate -w web` · `npm run db:seed:test -w web`       | New migration from the schema diff · seed test users (local only)        |
+| `npm run asset:new -w web` · `npm run asset:find -w web`           | Scaffold an asset with its sidecar · search the library                  |
+| `npm run preview -w web`                                           | Cloudflare Workers build + local preview (no account needed)             |
+| `npm run knip` · `npm run check:agents-md` · `npm run check:brand` | Unused code/deps · checks every agent doc · blocks the former brand name |
 
 Before you finish, follow `.claude/skills/review-before-merge/SKILL.md`.
 
@@ -230,11 +230,11 @@ runs it.
   keys); 503 immediately (pages through middleware; the newsletter API checks it too). Undo with `npx wrangler secret delete SECTIONS_KILL --env production`. Follow up with a PR
   setting the section's `release.production` to `off` (`.claude/skills/release-section/SKILL.md`).
 - **Neon outage:** content pages, middleware and the paywall gate keep working (no database). Sign-in, account,
-  progress and newsletter APIs return 5xx; Pro readers keep access until their `oa_ent` expires (≤ 15 min) and
+  progress and newsletter APIs return 5xx; Pro readers keep access until their `tts_ent` expires (≤ 15 min) and
   then see previews until the refresh endpoint can read the database again. Watch Neon status; no action in code.
 - **Restore from backup:** Neon point-in-time restore into a new branch, verify with the smoke suite against it,
   then point Hyperdrive at it (owner, in the Neon and Cloudflare consoles). Never restore over production in place.
-- **Secret rotation (`oa_ent`):** values are `<kid>:<base64url 32+ bytes>`. Put the current value into
+- **Secret rotation (`tts_ent`):** values are `<kid>:<base64url 32+ bytes>`. Put the current value into
   `ENTITLEMENT_SECRET_PREVIOUS`, a new kid and key into `ENTITLEMENT_SECRET`, wait ≥ 17 minutes (15 min lifetime +
   2 min skew), then delete `ENTITLEMENT_SECRET_PREVIOUS`. Nobody is signed out. Rotating `BETTER_AUTH_SECRET` signs
   everyone out. `NEWSLETTER_TOKEN_SECRET` has no previous-key slot: rotating it breaks every unsubscribe link already
@@ -287,7 +287,7 @@ and the section registry need code-owner review (`.github/CODEOWNERS`).
   previews, `/account/billing`, `/checkout` consent step, `paywall` switch in `features.yaml`, their `AGENTS.md`.
 - Runbooks that need billing: **webhook backlog** (provider retries; find unprocessed or failed `webhook_event` rows,
   fix the cause, replay from the provider dashboard, let reconciliation correct drift) and **Dodo outage** (existing
-  Pro access is unaffected because `oa_ent` refresh reads our database; checkout shows "try again later"; `on_hold`
+  Pro access is unaffected because `tts_ent` refresh reads our database; checkout shows "try again later"; `on_hold`
   subscriptions keep a 7-day grace; switch `BILLING_PRIMARY` to the standby once one exists).
 - `/admin` dashboards; nightly `pg_dump` backup workflow and restore drill; DSA stage C judge; newsletter Turnstile,
   Postgres store, bounce webhooks; `eslint-plugin-boundaries`; R2 + regional cache; creating

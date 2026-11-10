@@ -26,7 +26,7 @@ const onCloudflare = () => cloudflareBindings() !== null;
 
 export function createAuth(db: Db, config: AuthConfig = authConfig(), options: { rateLimit?: boolean } = {}) {
   return betterAuth({
-    appName: "Origins AI Learn",
+    appName: "TokensToScale",
     baseURL: config.baseURL,
     basePath: "/api/auth",
     secret: config.secret,

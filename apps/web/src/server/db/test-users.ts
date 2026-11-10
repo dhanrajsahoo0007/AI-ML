@@ -4,7 +4,7 @@
 export const TEST_USER_KEYS = ["free", "pro_monthly", "pro_yearly", "pro_expired", "on_hold", "admin"] as const;
 export type TestUserKey = (typeof TEST_USER_KEYS)[number];
 
-export const testUserEmail = (key: TestUserKey) => `${key.replace(/_/g, "-")}@users.origins.test`;
+export const testUserEmail = (key: TestUserKey) => `${key.replace(/_/g, "-")}@users.tokenstoscale.test`;
 
 const DAY = 86_400_000;
 

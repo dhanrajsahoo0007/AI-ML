@@ -78,7 +78,7 @@ export interface Visitor {
 export const NON_ENTITLED_VISITORS: Visitor[] = [
   { name: "anonymous", headers: {} },
   // A well-formed but unsigned entitlement cookie (plan §11.3): must be treated as no entitlement.
-  { name: "forged cookie", headers: { cookie: "oa_ent=eyJ0aWVyIjoicHJvIiwiZXhwIjo0MTAyNDQ0ODAwfQ.forged-signature" } },
+  { name: "forged cookie", headers: { cookie: "tts_ent=eyJ0aWVyIjoicHJvIiwiZXhwIjo0MTAyNDQ0ODAwfQ.forged-signature" } },
 ];
 
 export interface Surface {

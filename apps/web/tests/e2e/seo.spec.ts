@@ -98,7 +98,7 @@ test.describe("SEO metadata @core", () => {
       expect(canonical.protocol).toBe("https:");
       expect(canonical.pathname).toBe(c.path);
       expect(h.ogUrl).toBe(h.canonical);
-      expect(h.ogTitle).toContain("Origins AI Learn");
+      expect(h.ogTitle).toContain("TokensToScale");
       expect(h.ogDescription).toBe(h.description);
       expect(h.ogType).toBe(c.ogType);
       expect(h.ogImage).toMatch(/^https:\/\/.+opengraph-image/);
@@ -146,7 +146,7 @@ test.describe("SEO metadata @core", () => {
   test("the web manifest is served", async ({ request }) => {
     const response = await request.get("/manifest.webmanifest");
     expect(response.status()).toBe(200);
-    expect((await response.json()).name).toBe("Origins AI Learn");
+    expect((await response.json()).name).toBe("TokensToScale");
   });
 });
 

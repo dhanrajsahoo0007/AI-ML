@@ -15,8 +15,8 @@ describe.skipIf(!available)("PostgresNewsletterStore (integration)", () => {
     // The contract's user IDs must exist for the user_id foreign key.
     await tdb.db.execute(sql`
       insert into "user" (id, name, email, email_verified) values
-        ('0190f0f0-0000-7000-8000-000000000001', 'Contract One', 'one@users.origins.test', true),
-        ('0190f0f0-0000-7000-8000-000000000002', 'Contract Two', 'two@users.origins.test', true)`);
+        ('0190f0f0-0000-7000-8000-000000000001', 'Contract One', 'one@users.tokenstoscale.test', true),
+        ('0190f0f0-0000-7000-8000-000000000002', 'Contract Two', 'two@users.tokenstoscale.test', true)`);
   });
   afterAll(async () => {
     await tdb?.drop();

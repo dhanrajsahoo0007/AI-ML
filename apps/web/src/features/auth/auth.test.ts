@@ -79,7 +79,7 @@ describe.skipIf(!available)("auth (integration)", () => {
 
     it("sign-out (and sign out everywhere) also clears the entitlement cookies (plan §11.3)", async () => {
       const cleared = (res: Response) =>
-        ["oa_ent", "oa_ent_hint"].every((name) =>
+        ["tts_ent", "tts_ent_hint"].every((name) =>
           res.headers.getSetCookie().some((c) => c.startsWith(`${name}=;`) && /Max-Age=0/i.test(c))
         );
       const { POST } = await import("@/app/api/auth/[...all]/route");
@@ -133,7 +133,7 @@ describe.skipIf(!available)("auth (integration)", () => {
     const res = await call(consent, "/api/account/consent", { method: "POST", body: { ageConfirmed: true } });
     expect(res.status).toBe(200);
     const ageCookie = cookieHeader(res);
-    expect(ageCookie).toMatch(/^oa_age_ok=/);
+    expect(ageCookie).toMatch(/^tts_age_ok=/);
     expect(res.headers.getSetCookie()[0]).toMatch(/Path=\/api\/auth/);
 
     const { POST } = await import("@/app/api/test/login/route");
@@ -176,7 +176,7 @@ describe.skipIf(!available)("auth (integration)", () => {
     });
 
     it("redirects to Google with openid email profile, PKCE and state", async () => {
-      const res = await signIn("oa_age_ok=" + CONSENT_VERSIONS.age_confirmation);
+      const res = await signIn("tts_age_ok=" + CONSENT_VERSIONS.age_confirmation);
       expect(res.status).toBe(200);
       const { url } = (await res.json()) as { url: string };
       const google = new URL(url);
@@ -189,7 +189,7 @@ describe.skipIf(!available)("auth (integration)", () => {
     });
 
     it("refuses a callbackURL on another origin", async () => {
-      const res = await signIn("oa_age_ok=" + CONSENT_VERSIONS.age_confirmation, "https://evil.example/steal");
+      const res = await signIn("tts_age_ok=" + CONSENT_VERSIONS.age_confirmation, "https://evil.example/steal");
       expect(res.status).toBe(403);
     });
   });

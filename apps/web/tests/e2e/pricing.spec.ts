@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { paywallBuilt, premiumManifest } from "../fixtures/paywall";
 
 // @core regional pricing (plan §9.5): middleware serves /pricing's prerendered variant for the visitor's price tier,
-// from the `oa_region` cookie (the region switcher) first, then `cf-ipcountry` (set by Cloudflare; spoofed here, which
+// from the `tts_region` cookie (the region switcher) first, then `cf-ipcountry` (set by Cloudflare; spoofed here, which
 // works only against `next start`, since Cloudflare overwrites the header). /pricing stays the canonical URL.
 //
 // Local and preview builds show sample prices ($9 / $90 base) until config/business.ts has real ones; staging and
@@ -83,7 +83,7 @@ test.describe("regional pricing @core", () => {
       await page.getByRole("button", { name: "Update prices" }).click();
       await expect(proCard(page)).toHaveAttribute("data-price-tier", "C");
       expect(new URL(page.url()).pathname).toBe("/pricing");
-      expect((await context.cookies()).find((k) => k.name === "oa_region")?.value).toBe("IN");
+      expect((await context.cookies()).find((k) => k.name === "tts_region")?.value).toBe("IN");
       await expect(page.getByLabel("Show prices for")).toHaveValue("IN");
       if (samplePrices) await expect(page.locator("#plan-pro")).toContainText("$4/month");
 
@@ -94,7 +94,7 @@ test.describe("regional pricing @core", () => {
       await page.getByLabel("Show prices for").selectOption({ label: "Your location" });
       await page.getByRole("button", { name: "Update prices" }).click();
       await expect(proCard(page)).toHaveAttribute("data-price-tier", "A");
-      expect((await context.cookies()).find((k) => k.name === "oa_region")).toBeUndefined();
+      expect((await context.cookies()).find((k) => k.name === "tts_region")).toBeUndefined();
     });
 
     test("is a labelled form control that works from the keyboard", async ({ page }) => {
@@ -111,7 +111,7 @@ test.describe("regional pricing @core", () => {
 
   test("a malformed region cookie falls back to the IP country", async ({ browser, baseURL }) => {
     const context = await browser.newContext({ extraHTTPHeaders: { "cf-ipcountry": "IN" } });
-    await context.addCookies([{ name: "oa_region", value: "not-a-country", url: baseURL! }]);
+    await context.addCookies([{ name: "tts_region", value: "not-a-country", url: baseURL! }]);
     const page = await context.newPage();
     await page.goto("/pricing");
     await expect(proCard(page)).toHaveAttribute("data-price-tier", "C");

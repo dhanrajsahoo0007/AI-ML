@@ -3,7 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import { parseKey, signEntitlement } from "../../src/server/edge/entitlement";
 
-// Paywall e2e helpers (plan §12.2, §12.4): the build's premium manifest, `oa_ent` cookies signed with the server
+// Paywall e2e helpers (plan §12.2, §12.4): the build's premium manifest, `tts_ent` cookies signed with the server
 // under test's ENTITLEMENT_SECRET (inherited from the shell that starts the Playwright web server), and a local
 // stand-in for the Dodo API so checkout can run without any real endpoint.
 
@@ -31,7 +31,7 @@ export const paywallBuilt = () => premiumManifest().paywall;
 /** Whether this run can sign cookies the server accepts. */
 export const canSign = () => Boolean(parseKey(process.env.ENTITLEMENT_SECRET));
 
-/** An `oa_ent` cookie signed with the server's key: `Cookie` header value. */
+/** An `tts_ent` cookie signed with the server's key: `Cookie` header value. */
 export async function signedEntitlement(
   claims: { tier: "free" | "pro"; role?: "user" | "admin"; sub?: string; v?: number; exp?: number },
   now = new Date()
@@ -49,7 +49,7 @@ export async function signedEntitlement(
     key,
     now
   );
-  return `oa_ent=${token}`;
+  return `tts_ent=${token}`;
 }
 
 /** A correctly signed cookie that expired 10 minutes ago (beyond the 2-minute skew). */
@@ -62,7 +62,7 @@ export async function expiredEntitlement(): Promise<string> {
 export async function foreignKidEntitlement(): Promise<string> {
   const secret = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
   const token = await signEntitlement({ sub: "x", tier: "pro", role: "user", v: 1 }, parseKey(`zz:${secret}`)!);
-  return `oa_ent=${token}`;
+  return `tts_ent=${token}`;
 }
 
 /** A minimal Dodo API stand-in: records requests, answers checkout and portal sessions. */

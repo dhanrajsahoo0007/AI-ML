@@ -53,6 +53,8 @@ jobs:
       - run: npm run lint
       - name: AGENTS.md references real paths and scripts
         run: npm run check:agents-md
+      - name: No former brand names
+        run: npm run check:brand
 
   format:
     runs-on: ubuntu-latest
@@ -77,15 +79,15 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_USER: origins
-          POSTGRES_PASSWORD: origins
-          POSTGRES_DB: origins_dev
+          POSTGRES_USER: tts
+          POSTGRES_PASSWORD: tts
+          POSTGRES_DB: tts_dev
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U origins -d origins_dev" --health-interval 2s --health-timeout 3s --health-retries 30
+          --health-cmd "pg_isready -U tts -d tts_dev" --health-interval 2s --health-timeout 3s --health-retries 30
     env:
-      TEST_DATABASE_URL: postgres://origins:origins@127.0.0.1:5432/postgres
+      TEST_DATABASE_URL: postgres://tts:tts@127.0.0.1:5432/postgres
       REQUIRE_DB: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -255,16 +257,16 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_USER: origins
-          POSTGRES_PASSWORD: origins
-          POSTGRES_DB: origins_e2e
+          POSTGRES_USER: tts
+          POSTGRES_PASSWORD: tts
+          POSTGRES_DB: tts_e2e
         ports: ["54329:5432"]
         options: >-
-          --health-cmd "pg_isready -U origins" --health-interval 2s --health-timeout 3s --health-retries 30
+          --health-cmd "pg_isready -U tts" --health-interval 2s --health-timeout 3s --health-retries 30
     env:
       EXPECT_APP_ENV: preview
       SHARD: ${{ matrix.shard }}
-      DATABASE_URL: postgres://origins:origins@127.0.0.1:54329/origins_e2e
+      DATABASE_URL: postgres://tts:tts@127.0.0.1:54329/tts_e2e
       E2E_DB: "1"
       ENABLE_TEST_LOGIN: "1"
       BETTER_AUTH_URL: http://127.0.0.1:3100
@@ -327,17 +329,17 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_USER: origins
-          POSTGRES_PASSWORD: origins
-          POSTGRES_DB: origins_e2e
+          POSTGRES_USER: tts
+          POSTGRES_PASSWORD: tts
+          POSTGRES_DB: tts_e2e
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U origins -d origins_e2e" --health-interval 2s --health-timeout 3s --health-retries 30
+          --health-cmd "pg_isready -U tts -d tts_e2e" --health-interval 2s --health-timeout 3s --health-retries 30
     env:
       EXPECT_APP_ENV: preview
       APP_ENV: preview
-      DATABASE_URL: postgres://origins:origins@127.0.0.1:5432/origins_e2e
+      DATABASE_URL: postgres://tts:tts@127.0.0.1:5432/tts_e2e
       E2E_DB: "1"
       ENABLE_TEST_LOGIN: "1"
       E2E_PORT: "3100"

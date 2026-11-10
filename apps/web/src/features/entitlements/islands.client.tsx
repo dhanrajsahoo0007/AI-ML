@@ -5,11 +5,11 @@ import { useEffect, useState } from "react";
 import { REFRESH_EARLY_SEC, REFRESH_PATH, hintFromCookies, refreshDue, type EntitlementHint } from "./hint";
 
 // Tiny client islands for the entitlement cookie (plan §9.2). Signed-out visitors have no hint cookie, so they
-// never call the API. Nothing here decides access: middleware does, from the HttpOnly `oa_ent` cookie.
+// never call the API. Nothing here decides access: middleware does, from the HttpOnly `tts_ent` cookie.
 
 const nowSec = () => Math.floor(Date.now() / 1000);
 
-/** Re-issues `oa_ent` from the server. Resolves to the new tier, or null when signed out or on error. */
+/** Re-issues `tts_ent` from the server. Resolves to the new tier, or null when signed out or on error. */
 export async function refreshEntitlement(): Promise<"free" | "pro" | null> {
   try {
     const res = await fetch(REFRESH_PATH, { method: "POST", credentials: "same-origin" });
@@ -21,7 +21,7 @@ export async function refreshEntitlement(): Promise<"free" | "pro" | null> {
   }
 }
 
-const RELOAD_KEY = "oa_paywall_reload";
+const RELOAD_KEY = "tts_paywall_reload";
 
 /**
  * On a paywalled preview: a signed-in reader whose cookie expired gets it re-issued, and if they have Pro the
@@ -46,7 +46,7 @@ export function PaywallUnlock() {
 }
 
 /**
- * Keeps a signed-in reader's `oa_ent` fresh while they read (refresh shortly before it expires) and shows the
+ * Keeps a signed-in reader's `tts_ent` fresh while they read (refresh shortly before it expires) and shows the
  * payment-on-hold banner during the grace period.
  */
 export function EntitlementKeeper() {

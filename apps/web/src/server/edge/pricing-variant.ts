@@ -6,7 +6,7 @@ import { normalizePath } from "./sections-gate";
 //
 // Two switches compose, giving six prerendered pages:
 //   checkout   launching soon (default) | live (paywall on and DODO_API_KEY set, paywall-gate.ts pricingRewrite)
-//   tier       A (base) | B | C, from the `oa_region` cookie (region switcher) first, then the visitor's country
+//   tier       A (base) | B | C, from the `tts_region` cookie (region switcher) first, then the visitor's country
 //              (`cf-ipcountry`, set by Cloudflare from request.cf.country), default A
 //
 //                 tier A          tier B             tier C

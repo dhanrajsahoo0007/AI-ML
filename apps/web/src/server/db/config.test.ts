@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assertDatabaseAllowed, assertLocalDatabase, databaseHost, readAppEnv } from "./config";
 import { uuidv7 } from "./uuid";
 
-const LOCAL = "postgres://origins:origins@127.0.0.1:54329/origins_dev";
+const LOCAL = "postgres://tts:tts@127.0.0.1:54329/tts_dev";
 const NEON = "postgresql://app_rw:x@ep-cool-name-123456.us-east-1.aws.neon.tech/neondb?sslmode=require";
 const HYPERDRIVE = "postgresql://app_rw:x@0123abcd.hyperdrive.local:5432/neondb";
 

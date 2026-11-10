@@ -9,7 +9,7 @@ describe("load test target guard", () => {
 
   it.each([
     "https://example.com",
-    "https://origins-ai-learn.workers.dev",
+    "https://tokenstoscale.workers.dev",
     "http://10.0.0.5:8787",
     "https://staging.example.com",
   ])("refuses %s without LOAD_ALLOW_HOST", (base) => {

@@ -1,7 +1,7 @@
 import { ENTITLEMENT_COOKIE } from "@/server/edge/entitlement";
 import { HINT_COOKIE, formatHint, type EntitlementHint } from "./hint";
 
-// Set-Cookie values for `oa_ent` (plan §11.3: HttpOnly; Secure; SameSite=Lax; Path=/; 15 minutes) and its
+// Set-Cookie values for `tts_ent` (plan §11.3: HttpOnly; Secure; SameSite=Lax; Path=/; 15 minutes) and its
 // readable hint (see ./hint.ts), which lives as long as a session so the islands know to refresh.
 
 const HINT_MAX_AGE_SEC = 30 * 24 * 60 * 60;

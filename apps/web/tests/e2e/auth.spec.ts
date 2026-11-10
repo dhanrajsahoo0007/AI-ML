@@ -66,7 +66,7 @@ test.describe("test-login provider is absent from production @core", () => {
         if (entry.isDirectory()) walk(p);
         else if (
           /\.(js|json|html)$/.test(entry.name) &&
-          /test\/login|x-test-login-key|dev\/login|oa_local_view/.test(fs.readFileSync(p, "utf8"))
+          /test\/login|x-test-login-key|dev\/login|tts_local_view/.test(fs.readFileSync(p, "utf8"))
         ) {
           offenders.push(path.relative(webRoot, p));
         }
@@ -111,7 +111,7 @@ test.describe("sign-in with the database @core", () => {
     await expect(page).toHaveURL(new RegExp(`${href}$`));
     expect(await profileName(page)).toBe(TEST_USERS.free.name);
     await page.goto("/account");
-    await expect(page.getByTestId("account-email")).toHaveText("free@users.origins.test");
+    await expect(page.getByTestId("account-email")).toHaveText("free@users.tokenstoscale.test");
 
     await profileButton(page).click();
     await page.getByRole("menuitem", { name: "Sign out" }).filter({ visible: true }).click();
@@ -215,7 +215,7 @@ test.describe("sign-in with the database @core", () => {
     await page.evaluate(
       ([k, j]) =>
         localStorage.setItem(
-          "oa_progress_v1",
+          "tts_progress_v1",
           JSON.stringify({ completed: { [k]: new Date().toISOString(), [j]: new Date().toISOString() } })
         ),
       [merged, junk]
@@ -226,7 +226,7 @@ test.describe("sign-in with the database @core", () => {
     const completed = page.getByTestId("account-completed");
     await expect(completed.locator(`a[href="${keyHref}"]`)).toHaveText(keyTitle);
     await expect(completed.locator(`a[href="${mergedHref}"]`)).toHaveText(mergedTitle);
-    expect(await page.evaluate(() => localStorage.getItem("oa_progress_v1"))).toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem("tts_progress_v1"))).toBeNull();
 
     // And the first browser sees what the second one merged.
     const list = await (await first.request.get("/api/progress")).json();

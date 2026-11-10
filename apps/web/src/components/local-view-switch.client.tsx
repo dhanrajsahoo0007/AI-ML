@@ -7,10 +7,10 @@ import { useEffect, useState } from "react";
 //   Real   → follows who is signed in (signed out or a free user sees the paywall; Pro sees everything)
 //   Paid   → every premium page opens in full, as for a paying user
 //   Unpaid → every premium page shows the preview and the paywall, as for a non-paying visitor
-// It sets the `oa_local_view` cookie, which src/middleware.ts honours only in local builds. The startup default
+// It sets the `tts_local_view` cookie, which src/middleware.ts honours only in local builds. The startup default
 // is LOCAL_VIEW_AS in .env.local (read when `npm run dev` starts).
 
-const LOCAL_VIEW_COOKIE = "oa_local_view";
+const LOCAL_VIEW_COOKIE = "tts_local_view";
 const OPTIONS = [
   { value: "real", label: "Real" },
   { value: "paid", label: "Paid" },

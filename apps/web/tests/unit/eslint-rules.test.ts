@@ -15,7 +15,7 @@ const tester = new RuleTester({
   languageOptions: { parser: tsParser, ecmaVersion: "latest", sourceType: "module" },
 });
 
-// ── origins/api-route-wrapper ─────────────────────────────────────────────────────────────────────────────────
+// ── tts/api-route-wrapper ─────────────────────────────────────────────────────────────────────────────────
 
 describe("apiRouteOf", () => {
   it("maps route files to their URL and ignores everything else", ({ expect }) => {
@@ -31,7 +31,7 @@ describe("apiRouteOf", () => {
 const ROUTE_FILE = "/repo/apps/web/src/app/api/things/route.ts";
 const IMPORT_ROUTE = `import { route } from "@/features/auth";\n`;
 
-tester.run("origins/api-route-wrapper", apiRouteWrapper, {
+tester.run("tts/api-route-wrapper", apiRouteWrapper, {
   valid: [
     { filename: ROUTE_FILE, code: `${IMPORT_ROUTE}export const POST = route({ handler: () => ({ ok: true }) });` },
     {
@@ -154,7 +154,7 @@ export const POST = process.env.APP_ENV === "production" ? notFoundRoute : route
   ],
 });
 
-// ── origins/no-server-only-in-client ──────────────────────────────────────────────────────────────────────────
+// ── tts/no-server-only-in-client ──────────────────────────────────────────────────────────────────────────
 
 // A throwaway src/ tree: the rule reads the files it imports to see whether they're server-only.
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "no-server-only-in-client-"));
@@ -176,7 +176,7 @@ const clientFile = path.join(root, "src/components/widget.tsx");
 const islandFile = path.join(root, "src/features/progress/badge.client.tsx");
 const serverFile = path.join(root, "src/components/server-widget.tsx");
 
-tester.run("origins/no-server-only-in-client", noServerOnlyInClient, {
+tester.run("tts/no-server-only-in-client", noServerOnlyInClient, {
   valid: [
     { filename: clientFile, options, code: `"use client";\nimport { format } from "@/lib/format";` },
     {

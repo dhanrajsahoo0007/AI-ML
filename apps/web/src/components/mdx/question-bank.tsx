@@ -21,8 +21,8 @@ export function SourceCredit() {
       >
         Outcome School
       </a>{" "}
-      (Apache 2.0), compiled from publicly reported interviews. Answers are written by Origins AI Learn. Company names
-      and logos are trademarks of their owners and imply no affiliation.
+      (Apache 2.0), compiled from publicly reported interviews. Answers are written by TokensToScale. Company names and
+      logos are trademarks of their owners and imply no affiliation.
     </p>
   );
 }

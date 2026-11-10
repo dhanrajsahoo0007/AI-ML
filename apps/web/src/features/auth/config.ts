@@ -8,7 +8,7 @@ import { readAppEnv, type AppEnv } from "@/server/db/config";
 //   BETTER_AUTH_SECRET    ≥ 32 chars; signs session cookies. Required in preview, staging, production.
 //   BETTER_AUTH_URL       Public origin, e.g. https://example.com. Required in preview, staging, production.
 //   TRUSTED_ORIGINS       Extra allowed origins, comma separated; `*` matches one host label
-//                         (e.g. https://*-origins.example.workers.dev for previews).
+//                         (e.g. https://*-tokenstoscale.example.workers.dev for previews).
 //   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET   Google sign-in; when either is missing Google is disabled.
 //   ENABLE_TEST_LOGIN=1 + TEST_LOGIN_KEY      Test-login provider (plan §12.3); never in production.
 

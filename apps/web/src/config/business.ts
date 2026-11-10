@@ -11,7 +11,7 @@ const todo = (label: string) => `[TODO: ${label}]`;
 const DOMAIN = "todo-domain.example";
 
 export const business = {
-  BRAND: "Origins AI Learn",
+  BRAND: "TokensToScale",
   DOMAIN,
   SELLER_LEGAL_NAME: todo("seller legal name"),
   SELLER_ADDRESS: todo("seller business address"),

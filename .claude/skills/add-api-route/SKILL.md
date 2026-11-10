@@ -49,7 +49,7 @@ Background: `apps/web/src/server/http.ts` (the wrapper) and `apps/web/src/featur
    with `createTestDatabase()` (`apps/web/src/server/db/testing.ts`).
 
 9. **Nothing premium leaks:** never return premium content to a non-entitled caller; entitlement comes from the
-   database (or a verified `oa_ent`), never from a request parameter or checkout redirect.
+   database (or a verified `tts_ent`), never from a request parameter or checkout redirect.
 
 10. **Tests:** a unit/integration test for the feature function and the route's auth and validation, plus an E2E
     case if a page uses it. A bug fix includes the test that would have caught it.

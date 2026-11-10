@@ -1,6 +1,6 @@
-# Origins AI Learn
+# TokensToScale
 
-**Origins AI Learn** is a one-stop place to prepare for **AI system design**, **system design** and **cloud architecture** interviews: deep-dives on transformers, LLMs, RAG, agents and production AI systems, classic system design fundamentals and case studies, AWS / Google Cloud / Azure guides, and an interview question library tagged with the companies that ask each question.
+**TokensToScale** is a one-stop place to prepare for **AI system design**, **system design** and **cloud architecture** interviews: deep-dives on transformers, LLMs, RAG, agents and production AI systems, classic system design fundamentals and case studies, AWS / Google Cloud / Azure guides, and an interview question library tagged with the companies that ask each question.
 
 Stack: **Next.js 15 (App Router)**, MDX content compiled at build time. Pages never touch a database, and the build needs no environment variables. Planned: Cloudflare Workers (OpenNext) hosting, Neon Postgres for sign-in and billing only.
 

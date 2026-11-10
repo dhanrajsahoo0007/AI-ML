@@ -11,7 +11,7 @@ import { migrateDatabase } from "./migrate";
 // server isn't reachable the DB tests are skipped, unless REQUIRE_DB=1 (set it in CI with a Postgres service),
 // in which case they fail.
 
-const TEST_SERVER_URL = process.env.TEST_DATABASE_URL ?? "postgres://origins:origins@127.0.0.1:54329/postgres";
+const TEST_SERVER_URL = process.env.TEST_DATABASE_URL ?? "postgres://tts:tts@127.0.0.1:54329/postgres";
 
 function withDatabase(url: string, name: string): string {
   const u = new URL(url);
@@ -49,7 +49,7 @@ export interface TestDatabase extends DbHandle {
 }
 
 export async function createTestDatabase(): Promise<TestDatabase> {
-  const name = `oa_test_${uuidv7().replace(/-/g, "").slice(-16)}`;
+  const name = `tts_test_${uuidv7().replace(/-/g, "").slice(-16)}`;
   await admin((c) => c.query(`create database "${name}"`));
   const url = withDatabase(TEST_SERVER_URL, name);
   await migrateDatabase(url);

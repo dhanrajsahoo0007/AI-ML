@@ -27,7 +27,7 @@ const welcome: EmailJob = {
 const reminder: EmailJob = {
   v: 1,
   kind: "billing.renewal-reminder",
-  to: "free@users.origins.test",
+  to: "free@users.tokenstoscale.test",
   idempotencyKey: "billing.renewal-reminder:sub_9:1763164800000",
   data: {
     name: "Ada",

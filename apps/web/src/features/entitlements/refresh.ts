@@ -25,7 +25,7 @@ export function decideRefresh(input: {
   role: "user" | "admin";
   /** The `current_entitlement` row (tier already downgraded once `valid_until` passed), or null: never had one. */
   entitlement: StoredEntitlement | null;
-  /** The verified `oa_ent` the browser sent, if any. */
+  /** The verified `tts_ent` the browser sent, if any. */
   presented: EntitlementClaims | null;
   now: Date;
 }): RefreshDecision {

@@ -12,7 +12,7 @@ const MIN = 60_000;
 
 function session(role: "user" | "admin", ageMinutes: number): RequestSessionInfo {
   return {
-    user: { id: "u1", name: "A", email: "a@users.origins.test", image: null, role },
+    user: { id: "u1", name: "A", email: "a@users.tokenstoscale.test", image: null, role },
     session: { id: "s1", userId: "u1", createdAt: new Date(NOW - ageMinutes * MIN), expiresAt: new Date(NOW + 1e9) },
   };
 }

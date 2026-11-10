@@ -80,7 +80,7 @@ describe("decideRefresh", () => {
   });
 });
 
-describe("oa_ent sign / verify", () => {
+describe("tts_ent sign / verify", () => {
   const current = `k2:${secret()}`;
   const previous = `k1:${secret()}`;
   const claims = { sub: "u1", tier: "pro", role: "user", v: 1 } as const;
@@ -118,15 +118,15 @@ describe("oa_ent sign / verify", () => {
 });
 
 describe("cookies and hint", () => {
-  it("sets oa_ent HttpOnly + Secure + SameSite=Lax for its lifetime, and a readable hint", () => {
+  it("sets tts_ent HttpOnly + Secure + SameSite=Lax for its lifetime, and a readable hint", () => {
     const [ent, hint] = entitlementCookies({
       token: "t.o.k",
       hint: { exp: nowSec + 900, tier: "pro", hold: true },
       nowSec,
       secure: true,
     });
-    expect(ent).toBe("oa_ent=t.o.k; Path=/; Max-Age=900; SameSite=Lax; HttpOnly; Secure");
-    expect(hint).toContain("oa_ent_hint=");
+    expect(ent).toBe("tts_ent=t.o.k; Path=/; Max-Age=900; SameSite=Lax; HttpOnly; Secure");
+    expect(hint).toContain("tts_ent_hint=");
     expect(hint).not.toContain("HttpOnly");
     const value = decodeURIComponent(hint.split(";")[0].split("=")[1]);
     expect(parseHint(value)).toEqual({ exp: nowSec + 900, tier: "pro", hold: true });
@@ -134,14 +134,14 @@ describe("cookies and hint", () => {
 
   it("clears both", () => {
     expect(clearEntitlementCookies(false)).toEqual([
-      "oa_ent=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly",
-      "oa_ent_hint=; Path=/; Max-Age=0; SameSite=Lax",
+      "tts_ent=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly",
+      "tts_ent_hint=; Path=/; Max-Age=0; SameSite=Lax",
     ]);
   });
 
   it("parses the hint from document.cookie and knows when a refresh is due", () => {
     const hint = { exp: nowSec + 600, tier: "free" as const, hold: false };
-    const cookies = `a=1; oa_ent_hint=${encodeURIComponent(formatHint(hint))}; b=2`;
+    const cookies = `a=1; tts_ent_hint=${encodeURIComponent(formatHint(hint))}; b=2`;
     expect(hintFromCookies(cookies)).toEqual(hint);
     expect(hintFromCookies("a=1")).toBeNull();
     expect(parseHint("1.pro.2")).toBeNull();

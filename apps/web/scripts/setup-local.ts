@@ -26,11 +26,11 @@ const origin = `http://localhost:${PORT}`;
 
 const values: [string, string, string?][] = [
   ["APP_ENV", "local", "Sections and switches use their `local` state (content/sections.yaml, content/features.yaml)"],
-  ["DATABASE_URL", "postgres://origins:origins@127.0.0.1:54329/origins_dev", "Local Docker Postgres (npm run db:up)"],
+  ["DATABASE_URL", "postgres://tts:tts@127.0.0.1:54329/tts_dev", "Local Docker Postgres (npm run db:up)"],
   ["BETTER_AUTH_URL", origin],
   ["TRUSTED_ORIGINS", origin],
   ["BETTER_AUTH_SECRET", b64url(32)],
-  ["ENTITLEMENT_SECRET", `k1:${b64url(32)}`, "Signs the oa_ent paywall cookie: <kid>:<base64url 256-bit key>"],
+  ["ENTITLEMENT_SECRET", `k1:${b64url(32)}`, "Signs the tts_ent paywall cookie: <kid>:<base64url 256-bit key>"],
   ["NEWSLETTER_TOKEN_SECRET", b64url(32)],
   ["ENABLE_TEST_LOGIN", "1", "Local test accounts on /sign-in (never in production builds)"],
   ["TEST_LOGIN_KEY", b64url(24)],

@@ -8,7 +8,7 @@ import { clearEntitlementCookies, entitlementCookies } from "./cookies";
 import { decideRefresh, type StoredEntitlement } from "./refresh";
 
 // The database side of `POST /api/entitlements/refresh` (plan §9.2): one read of the `current_entitlement` view
-// (plus the live subscription's status for the on-hold banner), then a freshly signed `oa_ent`.
+// (plus the live subscription's status for the on-hold banner), then a freshly signed `tts_ent`.
 
 function readCookie(request: Request, name: string): string | undefined {
   const header = request.headers.get("cookie") ?? "";

@@ -13,7 +13,7 @@ export const MIGRATIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.met
 
 export async function migrateDatabase(connectionString: string): Promise<void> {
   assertDatabaseAllowed(connectionString, readAppEnv());
-  const pool = new Pool({ connectionString, max: 1, application_name: "origins-migrate" });
+  const pool = new Pool({ connectionString, max: 1, application_name: "tts-migrate" });
   try {
     await migrate(drizzle(pool), { migrationsFolder: MIGRATIONS_DIR });
   } finally {
@@ -24,7 +24,7 @@ export async function migrateDatabase(connectionString: string): Promise<void> {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const url = process.env.DATABASE_URL_DIRECT ?? process.env.DATABASE_URL;
   if (!url) {
-    console.error("db:migrate: set DATABASE_URL (local: postgres://origins:origins@127.0.0.1:54329/origins_dev)");
+    console.error("db:migrate: set DATABASE_URL (local: postgres://tts:tts@127.0.0.1:54329/tts_dev)");
     process.exit(1);
   }
   migrateDatabase(url).then(

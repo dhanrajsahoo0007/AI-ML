@@ -54,7 +54,7 @@ export function SignInForm({ googleEnabled, next }: { googleEnabled: boolean; ne
         />
         <div>
           <label htmlFor={`${id}-age`} className="text-[15px] font-medium text-ink">
-            I&apos;m 18 or older, or my parent or guardian has given permission for me to use Origins AI Learn.
+            I&apos;m 18 or older, or my parent or guardian has given permission for me to use TokensToScale.
           </label>
           <p id={`${id}-age-note`} className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
             Under 13? Ask a parent or guardian to create the account and supervise how it&apos;s used.

@@ -7,7 +7,7 @@
 // What it does:
 // 1. Refuses any target that isn't localhost (staging needs LOAD_ALLOW_HOST=<exact host>, set by the owner).
 // 2. Builds the URL list from the build manifest (.next/prerender-manifest.json): every prerendered 200 page.
-// 3. Signs a pro `oa_ent` cookie with the edge helper (src/server/edge/entitlement.ts) and a throwaway key.
+// 3. Signs a pro `tts_ent` cookie with the edge helper (src/server/edge/entitlement.ts) and a throwaway key.
 // 4. If nothing is listening on the base URL, starts `opennextjs-cloudflare preview` with that key as
 //    ENTITLEMENT_SECRET (needs `npm run cf:build` first) and stops it afterwards.
 // 5. Runs k6: the local binary if installed, else the official grafana/k6 Docker image.

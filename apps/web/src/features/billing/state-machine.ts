@@ -10,7 +10,7 @@ import type { BillingEvent, Plan, SubscriptionSnapshot, SubscriptionStatus } fro
 // - any refund or a lost dispute ends access (see revokesAccess)
 // - entitlement: active → Pro until the period end (plus a day for the renewal webhook unless it ends);
 //   on_hold → Pro for a 7-day grace period from when the hold began; cancelled → Pro until the paid period ends;
-//   expired / failed → free. Cancel, refund and dispute-lost bump the entitlement version (`oa_ent` `v`)
+//   expired / failed → free. Cancel, refund and dispute-lost bump the entitlement version (`tts_ent` `v`)
 
 export const GRACE_PERIOD_DAYS = 7;
 export const RENEWAL_LEEWAY_MS = 24 * 60 * 60 * 1000;

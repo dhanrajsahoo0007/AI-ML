@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Sign in",
-  description: "Sign in to Origins AI Learn with your Google account.",
+  description: "Sign in to TokensToScale with your Google account.",
   robots: { index: false, follow: false },
 };
 

@@ -197,4 +197,4 @@ export function tierFromSlug(slug: string): Exclude<PriceTier, "A"> | null {
  * The region override cookie set by the pricing page's switcher: an ISO country code, read by middleware before
  * the visitor's IP country. Not a secret and not trusted for anything but the displayed estimate.
  */
-export const REGION_COOKIE = "oa_region";
+export const REGION_COOKIE = "tts_region";

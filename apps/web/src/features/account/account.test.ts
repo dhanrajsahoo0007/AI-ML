@@ -49,10 +49,10 @@ describe.skipIf(!available)("account data (integration)", () => {
 
     const res = await call(exportRoute, "/api/account/export", { cookie: mine });
     expect(res.status).toBe(200);
-    expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="origins-ai-learn-export-/);
+    expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename="tokenstoscale-export-/);
     const text = await res.text();
     const data = JSON.parse(text);
-    expect(data.profile.email).toBe("pro-monthly@users.origins.test");
+    expect(data.profile.email).toBe("pro-monthly@users.tokenstoscale.test");
     expect(data.progress.map((p: { contentKey: string }) => p.contentKey)).toEqual(["system-design/caching/cdn"]);
     expect(data.billing.subscriptions).toHaveLength(1);
     expect(data.consents[0].kind).toBe("age_confirmation");
