@@ -117,6 +117,21 @@ export function SiteHeader({
                 />
               </>
             );
+            // A section without subcategories (the newsletter) is a plain link, like Pricing: no arrow, no panel.
+            if (section.groups.length === 0 && !section.comingSoon) {
+              return (
+                <Link
+                  key={section.key}
+                  href={section.href}
+                  onMouseEnter={() => setOpenKey(null)}
+                  aria-current={isUnder(pathname, section.href) ? "page" : undefined}
+                  title={section.label}
+                  className={itemClass(isUnder(pathname, section.href))}
+                >
+                  {label}
+                </Link>
+              );
+            }
             // A link to the section that also opens its subcategory panel on hover and keyboard focus.
             return section.comingSoon ? (
               <span

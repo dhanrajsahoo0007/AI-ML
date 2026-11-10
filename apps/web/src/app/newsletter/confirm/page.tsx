@@ -19,7 +19,7 @@ export function generateMetadata() {
 export default function NewsletterConfirmPage() {
   const section = routeSection(NEWSLETTER_KIND);
   return (
-    <div data-copy-ok="page">
+    <div data-copy-ok="page" className="mx-auto max-w-3xl">
       <PageHeader
         className="mb-8"
         title="Confirm your subscription"

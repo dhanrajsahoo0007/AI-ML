@@ -9,7 +9,16 @@ export { NEWSLETTER_KIND, newsletterKind } from "./kind";
 export { clientIp } from "./rate-limit";
 export { processResendEvent, RESEND_PROVIDER, resendEventSchema } from "./resend-webhook";
 export { buildRss } from "./rss";
-export { ARCHIVE_DESCRIPTION, ARCHIVE_TITLE, archiveSeo, issueSeo, utilityPageMetadata } from "./seo";
+export {
+  ARCHIVE_DESCRIPTION,
+  ARCHIVE_TITLE,
+  archiveSeo,
+  issueSeo,
+  seriesSeo,
+  NEWSLETTER_NAME,
+  NEWSLETTER_PROMISE,
+  utilityPageMetadata,
+} from "./seo";
 export {
   hasDatabase,
   newsletterDeps,

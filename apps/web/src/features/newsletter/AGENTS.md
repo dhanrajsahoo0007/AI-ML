@@ -12,8 +12,26 @@ JSX) and the client islands are imported by path, and so are `kind.ts` (from `ap
 plain Node) and `emails.ts` (from `apps/web/src/features/email/jobs.ts`, bundled into the Worker).
 
 - `kind.ts`: `newsletterKind` (`SectionKind<Issue>`). `source.ts`: `loadIssues()`, `readIssueFile()`.
-- `schema.ts`: issue frontmatter (`title`, `date`, `summary`, `access`, `status` draft/scheduled/sent, `sendAt`,
-  `audience` all/pro); `SUMMARY_MAX` (200).
+- `schema.ts`: issue frontmatter (`title`, `issue` number, `date`, `summary`, `format`, `series`, `tags`, `level`,
+  `readingTime`, `cover`, `takeaways`, `related`, `share.hook`, `access`, `status` draft/scheduled/sent, `sendAt`,
+  `audience` all/pro); `SUMMARY_MAX` (200); `FORMATS`, the per-format shape rules (deep-dive, digest).
+- `catalog.ts`: the closed tag and series lists in `content/newsletter/catalog.yaml`.
+- `cover/`: generative covers. `cover/catalog.ts` (motif and palette names the frontmatter may use),
+  `cover/rng.ts` (seeded), `cover/palettes.ts`, `cover/motifs.ts`, `cover/render.ts` (`renderCover(spec,
+variant)` → SVG string, pure, runs in Node and the browser), `cover/social-card.tsx` (`coverPng()`: og, email,
+  portrait and square PNGs through next/og), `cover/cover-gallery.client.tsx` (the gallery island). Routes:
+  `apps/web/src/app/newsletter/[slug]/opengraph-image.tsx`,
+  `apps/web/src/app/newsletter/[slug]/share/[file]/route.ts` (`email.png`, `portrait.png`, `square.png`) and
+  `apps/web/src/app/newsletter/covers/page.tsx` (the gallery; not built in production, noindex).
+- Series: `catalog.ts` (`seriesHref()`), `meta.ts` (`seriesIssues()`, reading order), `seo.ts` (`seriesSeo()`, noindex
+  until the series has a sent issue) and the route `apps/web/src/app/newsletter/series/[series]/page.tsx`; the
+  sitemap lists a series once it has a sent issue.
+- `latest-issue.tsx`: the home page's "Latest issue" strip, shown only while the section is `on`.
+- The issue template `apps/web/content/newsletter/_TEMPLATE.md` (never loaded; `tests/unit/newsletter-template.test.ts`
+  keeps it valid).
+- `links.ts` (links, images, `asset:` figure sources, callout markers), `figures.ts` (figure checks against the
+  asset source files; manifest lookup for rendering), `figure.tsx` (the web figure), `callouts.ts` (callout types
+  and the remark plugin), `body-stats.ts` (words, figures, headings, reading time).
 - `service.ts`: `subscribe()`, confirm and unsubscribe flows over ports (`NewsletterDeps`).
 - `server.ts`: `newsletterDeps(href)`, `newsletterHref()` wire the ports for the API routes only; `emailQueue()`
   (the `EMAIL_QUEUE` binding or null), `emailSender()`.
@@ -23,6 +41,11 @@ plain Node) and `emails.ts` (from `apps/web/src/features/email/jobs.ts`, bundled
   Confirmation and welcome are email jobs (`newsletter.confirm`, `newsletter.welcome`) sent with `enqueueEmail()`:
   on the email queue when the Worker has the binding, inline otherwise (`apps/web/src/features/email/AGENTS.md`).
 - `send/send-issue.ts` + `send/plan.ts`: the send script run by `.github/workflows/newsletter-send.yml`.
+- `kit/slides.ts` (pure: the carousel's slides, their HTML, the UTM-tagged URL and the suggested post) and
+  `kit/build-kit.ts` (`npm run newsletter:kit -w web -- <slug>`: renders the LinkedIn kit with Playwright into
+  `apps/web/.build/newsletter-kit/<slug>/`, owner-only output, never deployed). Figure slides use each figure's
+  sidecar `slide:` line.
+- `brand.ts`: `NEWSLETTER_NAME` and `NEWSLETTER_PROMISE` (plain Node; re-exported by `seo.ts`).
 - `rss.ts`, `seo.ts`, `issue-body.tsx`, `links.ts`; islands `signup-form.client.tsx`, `token-action.client.tsx`.
 
 ## Data flow
@@ -48,8 +71,24 @@ carry a non-expiring `unsubscribe` token; mail providers POST `List-Unsubscribe=
 - The memory store is for `APP_ENV=local` only; elsewhere a missing database is a 503 `not_configured`, because the
   cool-down has to survive isolates. Routes go through `newsletterRoute()` / `serverToServerRoute()` (`route()`
   behind the section gate; the second with `origin: false` for mail systems).
-- Issues are plain Markdown (no JSX components) so one file renders to the web and to email; email images must be
-  PNG with absolute URLs. A premium issue sent to everyone carries only its summary and a link.
+- Issues are plain Markdown (no JSX components) so one file renders to the web and to email. Rich content uses
+  Markdown-native syntax both renderers understand:
+  - **Figures:** `![alt](asset:<id>)`. A build-up SVG (layers marked `data-step`, see
+    `apps/web/src/lib/svg-steps.ts`) goes in as `#steps`: one figure the reader steps through on the web
+    (`step-figure.client.tsx`) and the complete figure in email; `#step=<n>` shows a single step. The web inlines
+    the SVG as a numbered figure, with a "View full size" PNG link on phones; email gets the asset's PNG (a PNG
+    per step, made by the asset build). The asset needs `alt` and `caption`, must be free, and is counted as used
+    by the issue page, so it ships wherever the page is built.
+  - **Callouts:** GitHub alerts `> [!NOTE]` (In plain English), `[!IMPORTANT]` (Key idea), `[!WARNING]` (Common
+    trap), `[!TIP]` (Try it); other types are errors.
+  - Any other image must be a PNG with an absolute URL. A premium issue sent to everyone carries only its summary
+    and a link.
+- A new motif or palette is a name in `cover/catalog.ts` plus its drawing; `cover/cover.test.ts` checks every name is
+  drawn, ids are prefixed, and title text keeps WCAG contrast on every palette. Same seed, same cover: never use
+  `Math.random` in a motif. Issue slugs can't be a fixed route name of the section (`covers`, `confirm`, …).
+- Format rules (`FORMATS`: required sections, figure count, length, words between visuals, sentence length,
+  takeaways) are **warnings**, so a draft can be unfinished. Issue numbers are unique (error) and gapless
+  (warning); a scheduled or sent issue needs `issue` and `cover`.
 - Drafts and scheduled issues get a `noindex` review page outside production only.
 - A broadcast needs `status: scheduled`; marking an issue `sent` is a follow-up PR (the workflow can't push).
 - **Issues don't use the email queue.** They are Resend Broadcasts to a segment, `audience: pro` included (to
@@ -66,6 +105,6 @@ as an email kind (`apps/web/src/features/email/AGENTS.md`, "Extend it").
 
 ## Tests
 
-`kind.test.ts`, `service.test.ts`, `store.test.ts`, `token.test.ts`, `rss.test.ts`, `send-plan.test.ts`,
+`kind.test.ts`, `content-model.test.ts`, `cover/cover.test.ts`, `service.test.ts`, `store.test.ts`, `token.test.ts`, `rss.test.ts`, `send-plan.test.ts`,
 `server.test.ts`, `unsubscribe-headers.test.ts`; E2E `apps/web/tests/e2e/newsletter.spec.ts` (subscribe → .eml →
 confirm → one-click unsubscribe).

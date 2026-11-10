@@ -222,9 +222,13 @@ export interface AssetRef {
 
 const REF_RE = new RegExp(`<(${Object.keys(ASSET_REF_COMPONENTS).join("|")})\\b([^>]*?)\\/?>`, "g");
 
+/** Markdown figures in newsletter issues: ![alt](asset:<id>) or ![alt](asset:<id>#step=<n>). */
+const MD_ASSET_RE = /!\[[^\]]*\]\(asset:([a-z0-9][a-z0-9/-]*[a-z0-9])(?:#step=\d+|#steps)?\)/g;
+
 /** Asset references in one MDX source. `<Figure caption>` without an id is not a reference. */
 export function findRefs(text: string): { component: AssetRefComponent; id: string; index: number }[] {
   const out: { component: AssetRefComponent; id: string; index: number }[] = [];
+  for (const m of text.matchAll(MD_ASSET_RE)) out.push({ component: "Figure", id: m[1], index: m.index! });
   for (const m of text.matchAll(REF_RE)) {
     const component = m[1] as AssetRefComponent;
     for (const attr of ASSET_REF_COMPONENTS[component]) {
@@ -261,8 +265,8 @@ export function scanUsage(contentDir: string, pages: Map<string, PageInfo>, appD
 const SITE_PAGE_ROUTES: Record<string, string> = { "pricing-faq": "/pricing" };
 
 /**
- * MDX file → page, from the section registry (docs sections, through their kind for `access`) and
- * content/pages. Pages of `off` sections and `off` hubs are included with visible: false.
+ * MDX file → page, from the section registry (docs sections and newsletter issues, through their kind for
+ * `access`) and content/pages. Pages of `off` sections and `off` hubs are included with visible: false.
  */
 export async function contentPages(contentDir: string): Promise<Map<string, PageInfo>> {
   const { allSections } = await import("../src/features/sections/registry");
@@ -277,6 +281,17 @@ export async function contentPages(contentDir: string): Promise<Map<string, Page
       const access = kind.access?.(section, item) ?? "free";
       const visible = section.state === "on" && !offHubs.includes(item.hub);
       pages.set(item.file, { href: item.href, visible, access });
+    }
+  }
+  // Newsletter issues: a review page outside production for drafts, so their figures ship where the page is built.
+  const { loadIssues, isBuilt } = await import("../src/features/newsletter/source");
+  const { SUBSCRIBE_KIND } = await import("../src/features/sections/public");
+  for (const section of allSections()) {
+    if (section.kind !== SUBSCRIBE_KIND) continue;
+    const kind = kindOf(section);
+    for (const issue of loadIssues(section)) {
+      const access = kind.access?.(section, issue as never) ?? "free";
+      pages.set(issue.file, { href: issue.href, visible: section.state === "on" && isBuilt(issue), access });
     }
   }
   const pagesDir = path.join(contentDir, "pages");
@@ -465,6 +480,7 @@ export interface Rendered {
   width?: number;
   height?: number;
   placeholder?: string;
+  steps?: number;
 }
 
 /** Files that become URLs when published. Inline SVGs are drawn into the page and never get a URL. */
@@ -521,6 +537,7 @@ export function publishAssets(opts: {
       ...meta,
       ...(r.width && r.height ? { width: r.width, height: r.height } : {}),
       ...(r.placeholder ? { placeholder: r.placeholder } : {}),
+      ...(r.steps ? { steps: r.steps } : {}),
       variants,
       usedBy: usedBy.get(a.id) ?? [],
       public: pub,
