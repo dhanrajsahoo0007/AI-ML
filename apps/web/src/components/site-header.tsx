@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCanonicalPathname } from "@/lib/use-canonical-pathname";
-import { ArrowRight, ChevronDown, ChevronRight, Menu } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronRight, Gem, Menu } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
@@ -15,7 +15,8 @@ import { GROUPS_ONLY_KINDS, SUBSCRIBE_KIND } from "@/features/sections/public";
 import type { HeaderNavItems, HeaderNavSection } from "@/features/sections/public";
 
 // Header: every visible section from content/sections.yaml is its own item in the top bar (in registry order),
-// followed by the extra links (Pricing). Hovering or focusing a section opens a two-pane panel: that section's
+// with its icon; the extra links (Pricing) are a button on the right, next to search and the profile. Hovering or
+// focusing a section opens a two-pane panel: that section's
 // first-level groups stacked on the left, and the hovered group's articles on the right. The header is on every page,
 // so its props are only the slim group list (HeaderNavSection); the article lists come from /nav-items.json, fetched
 // the first time a panel opens. The profile menu is passed in from
@@ -78,7 +79,7 @@ export function SiteHeader({
 
   const itemClass = (active: boolean) =>
     cn(
-      "relative inline-flex items-center gap-1 whitespace-nowrap py-1 text-[13px] transition-colors xl:text-sm",
+      "relative inline-flex items-center gap-1.5 whitespace-nowrap py-1 text-[13px] transition-colors xl:text-sm",
       active
         ? "text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-ink"
         : "text-muted-foreground hover:text-ink"
@@ -94,24 +95,38 @@ export function SiteHeader({
       <nav aria-label="Main" className="flex h-16 w-full items-center gap-4 px-4 sm:px-6 xl:gap-6">
         <Link href="/" className="flex shrink-0 items-baseline gap-3">
           <span className="font-display text-xl whitespace-nowrap sm:text-2xl">{siteConfig.name}</span>
-          <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground 2xl:inline">
+          <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground min-[1800px]:inline">
             {siteConfig.tagline}
           </span>
         </Link>
 
-        <div className="relative hidden min-w-0 flex-1 items-center justify-center gap-3 self-stretch lg:flex xl:gap-5 2xl:gap-6">
+        <div className="relative hidden min-w-0 flex-1 items-center justify-center gap-2.5 self-stretch lg:flex xl:gap-5 2xl:gap-6">
           {navTree.map((section) => {
             const label = section.shortLabel ?? section.label;
             const active = isUnder(pathname, section.href) || openKey === section.key;
             // The underline of the current section takes that section's tint (data-tone on the link).
             const className = cn(itemClass(active), "after:bg-tint", section.comingSoon && "text-muted-foreground/70");
+            // The section's icon, in its tint when the section is current or its menu is open. Seven sections with
+            // icons need about 770px, so icons wait for a 1400px window and the arrows for 1900px; the tagline and Subscribe wait for 1800px; below 1400px the
+            // bar is labels only.
+            const SectionIcon = getIconComponent(section.icon);
+            const icon = SectionIcon && (
+              <SectionIcon
+                aria-hidden
+                className={cn(
+                  "hidden size-3.5 shrink-0 transition-colors min-[1400px]:block",
+                  active ? "text-tint" : "text-muted-foreground/80"
+                )}
+              />
+            );
             const content = (
               <>
+                {icon}
                 {label}
                 <ChevronDown
                   aria-hidden
                   className={cn(
-                    "hidden size-3 transition-transform duration-200 xl:block",
+                    "hidden size-3 transition-transform duration-200 min-[1900px]:block",
                     openKey === section.key && "rotate-180"
                   )}
                 />
@@ -126,8 +141,10 @@ export function SiteHeader({
                   onMouseEnter={() => setOpenKey(null)}
                   aria-current={isUnder(pathname, section.href) ? "page" : undefined}
                   title={section.label}
-                  className={itemClass(isUnder(pathname, section.href))}
+                  data-tone={section.tone}
+                  className={cn(itemClass(isUnder(pathname, section.href)), "after:bg-tint")}
                 >
+                  {icon}
                   {label}
                 </Link>
               );
@@ -162,17 +179,6 @@ export function SiteHeader({
               </Link>
             );
           })}
-          {extras.map((e) => (
-            <Link
-              key={e.href}
-              href={e.href}
-              aria-current={isUnder(pathname, e.href) ? "page" : undefined}
-              onMouseEnter={() => setOpenKey(null)}
-              className={itemClass(isUnder(pathname, e.href))}
-            >
-              {e.label}
-            </Link>
-          ))}
 
           {openSection && (
             <div
@@ -189,13 +195,28 @@ export function SiteHeader({
           )}
         </div>
 
-        <div className="ml-auto hidden shrink-0 items-center gap-3 lg:flex" onMouseEnter={() => setOpenKey(null)}>
+        <div
+          className="ml-auto hidden shrink-0 items-center gap-2 lg:flex xl:gap-3"
+          onMouseEnter={() => setOpenKey(null)}
+        >
           <SearchButton />
           <ThemeToggle />
+          {/* Pricing is an action, not a section: it sits with search and the profile, as the bar's one filled button. */}
+          {extras.map((e) => (
+            <Link
+              key={e.href}
+              href={e.href}
+              aria-current={isUnder(pathname, e.href) ? "page" : undefined}
+              className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-[13px] font-medium whitespace-nowrap text-paper transition-colors hover:bg-primary xl:px-4 xl:py-2 xl:text-sm"
+            >
+              <Gem aria-hidden className="hidden size-3.5 xl:block" />
+              {e.label}
+            </Link>
+          ))}
           {subscribe && (
             <Link
               href={subscribe.href}
-              className="hidden rounded-full border border-hairline px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-ink 2xl:inline-flex"
+              className="hidden rounded-full border border-hairline px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-ink min-[1800px]:inline-flex"
             >
               Subscribe
             </Link>
