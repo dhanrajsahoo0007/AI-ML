@@ -10,6 +10,11 @@ sign-in.
 - `setProgress(db, userId, key, kind, on)`, `listProgress(db, userId)`, `mergeProgress(db, userId, items)`.
 - Client island by path: `merge-local-progress.client.tsx` (runs on `/sign-in/complete`); `local.ts` holds the
   browser-side `localStorage` helpers (`oa_progress_v1`).
+- Progress marks outside the article: `completed-provider.client.tsx` (mounted by the docs section layout) reads this
+  browser's completed keys with `use-completed.client.ts` and fills the context in
+  `apps/web/src/lib/completed.client.ts`. The sidebar (`apps/web/src/components/content-sidebar.tsx`) shows a tick and a
+  per-category count from it, and section cards show "N read" (`apps/web/src/components/read-count.tsx`). components/
+  cannot import a feature, which is why the context lives in lib/. `local.ts` fires `PROGRESS_EVENT` on every change.
 
 ## Data flow
 
@@ -36,7 +41,8 @@ Signed out: the browser writes `localStorage` only. Signed in: `GET/POST/DELETE 
 ## Extend it
 
 A new progress kind: add it to `progressKindSchema` and the DB enum/check (additive migration), then the store and
-tests. Planned (after stream L): DSA solved status and article progress UI.
+tests. Planned (after stream L): DSA solved status; filling this browser's store from the account after sign-in on a new
+device (today the marks show only what this browser recorded); the provider in the other section layouts.
 
 ## Tests
 

@@ -174,12 +174,13 @@ export function hiddenRoutes(): HiddenRoutesManifest {
 
 /** Client-safe nav links for `on` sections; next.config.ts inlines them (see ./public.ts). */
 export function publicNavLinks() {
-  return visibleSections().map(({ key, kind, label, href, icon, navGroup }) => ({
+  return visibleSections().map(({ key, kind, label, href, icon, tone, navGroup }) => ({
     key,
     kind,
     label,
     href,
     icon,
+    ...(tone ? { tone } : {}),
     navGroup,
     ...(KINDS_WITH_ROUTES.includes(kind) ? {} : { comingSoon: true }),
   }));

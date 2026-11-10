@@ -11,10 +11,16 @@
 # Moving a section to production: change only release.production, in its own PR (plan §5.1.1).
 #
 # icon: a key from src/lib/icons.ts. navGroup: learn | practice | more (header mega-menu groups).
+# tone: the section's tint, one of blue | green | orange | red | violet | teal | neutral (the diagram tones in
+#   src/app/globals.css). It colours small elements only (icons, icon tiles, active markers, hover); without it the
+#   section keeps the navy accent. A group in `groups` may set its own.
 # hub: title and subtitle on the section's index page (docs kind).
 # redirects: old URLs that move into this section; `fallback` is used while the section is not on (or while
 #   `to` is in a hub that is off).
 # hubRelease (docs only): hubs with their own on/off per environment, e.g. a parked hub inside a live section.
+# groups (docs only): the section's reading order. Each group names hub categories (titles from the section's
+#   _index.yaml) and may draw from more than one hub. It sets the cards on the section index page, the sidebar and
+#   the header menu; reorder the list to reorder all three. Categories of a hub that is off are left out.
 # glossary: this section owns the <Term> glossary (content/<key>/glossary.yaml, page <href>/glossary); at most one.
 
 - key: ai-system-design
@@ -23,6 +29,7 @@
   shortLabel: GenAI & LLMs
   href: /ai-system-design
   icon: sparkles
+  tone: violet
   navGroup: learn
   order: 1
   release: { local: on, preview: on, staging: on, production: on }
@@ -36,12 +43,63 @@
   # releases it. Change a value here in its own PR, like a section's release.production.
   hubRelease:
     ml-system-design: { local: on, preview: off, staging: off, production: off }
+  groups:
+    - name: Core Principles
+      icon: book-open
+      description: The building blocks of a production AI system, layer by layer, from data ingestion and serving to memory, evaluation, safety and operations.
+      categories:
+        - Data & Ingestion Layer
+        - Model Serving & Inference
+        - Prompt & Orchestration Layer
+        - Memory & State Management
+        - Monitoring & Observability
+        - Evaluation & Testing
+        - MLOps / LLMOps Pipelines
+        - Safety, Security & Governance
+        - Deployment & Scaling
+        - Feedback & Improvement Loop
+    - name: LLM Foundations
+      icon: cpu
+      description: How transformers and LLMs work inside, and how prompting, harnesses and fine-tuning get reliable behaviour out of them.
+      categories:
+        - Transformers & LLM Internals
+        - Prompting & Model Adaptation
+    - name: RAG & Knowledge
+      icon: database
+      description: Grounding a model in your own data with retrieval, vector databases and knowledge graphs, including two worked case studies.
+      categories:
+        - Retrieval & Knowledge
+    - name: Agentic Systems
+      icon: bot
+      description: Designing, running and measuring agents that plan, call tools, keep memory and work together.
+      categories:
+        - Agentic Systems
+    - name: Production & Applied AI
+      icon: layers
+      description: Serving, securing, observing and paying for LLM applications at scale, plus multimodal, voice and forward-deployed work.
+      categories:
+        - Production LLM Systems
+        - Multimodal & Applied AI
+    - name: AI System Design
+      icon: presentation
+      description: End-to-end designs that bring it all together, covering the classic AI system design interview questions.
+      categories:
+        - AI System Design Case Studies
+        - System Design Interview
   redirects:
     - { from: /ml-system-design, to: /ai-system-design, fallback: /ai-system-design }
     - { from: /ml-system-design/components, to: /ai-system-design/ml-system-design, fallback: /ai-system-design }
-    - { from: "/ml-system-design/components/:path*", to: "/ai-system-design/ml-system-design/:path*", fallback: /ai-system-design }
+    - {
+        from: "/ml-system-design/components/:path*",
+        to: "/ai-system-design/ml-system-design/:path*",
+        fallback: /ai-system-design,
+      }
     - { from: /system-design/ml-system-design, to: /ai-system-design/ml-system-design, fallback: /ai-system-design }
-    - { from: "/system-design/ml-system-design/:path*", to: "/ai-system-design/ml-system-design/:path*", fallback: /ai-system-design }
+    - {
+        from: "/system-design/ml-system-design/:path*",
+        to: "/ai-system-design/ml-system-design/:path*",
+        fallback: /ai-system-design,
+      }
 
 - key: system-design
   kind: docs
@@ -49,6 +107,7 @@
   shortLabel: System Design
   href: /system-design
   icon: layers
+  tone: blue
   navGroup: learn
   order: 2
   release: { local: on, preview: on, staging: on, production: on }
@@ -65,6 +124,7 @@
   label: Cloud
   href: /cloud
   icon: cloud
+  tone: teal
   navGroup: learn
   order: 3
   release: { local: on, preview: on, staging: on, production: hidden }
@@ -81,6 +141,7 @@
   shortLabel: Interviews
   href: /interviews
   icon: brain
+  tone: orange
   navGroup: practice
   order: 4
   release: { local: on, preview: on, staging: on, production: on }
@@ -94,6 +155,7 @@
   shortLabel: Companies
   href: /companies
   icon: users
+  tone: green
   navGroup: practice
   order: 5
   release: { local: on, preview: on, staging: on, production: on }
@@ -106,6 +168,7 @@
   label: DSA
   href: /dsa
   icon: code2
+  tone: red
   navGroup: practice
   order: 6
   release: { local: on, preview: on, staging: on, production: off }
@@ -118,6 +181,7 @@
   label: Newsletter
   href: /newsletter
   icon: file-text
+  tone: neutral
   navGroup: more
   order: 7
   release: { local: on, preview: on, staging: on, production: off }
