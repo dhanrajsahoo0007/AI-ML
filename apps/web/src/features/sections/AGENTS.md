@@ -57,6 +57,10 @@ redirects, and to write the hidden-routes manifest that `apps/web/src/middleware
 - Reorder or regroup a docs section: edit its `groups` list in `apps/web/content/sections.yaml` (group name, icon,
   description, hub category titles). `apps/web/src/features/docs/groups.ts` resolves it for the section index, the
   sidebar and the header menu; `next dev` must be restarted to pick up the change.
+- Tint a section: set `tone` on its entry in `apps/web/content/sections.yaml` (one of `SECTION_TONES` in `schema.ts`;
+  a group may set its own). The section layout's shell gets `data-tone`, and `apps/web/src/app/globals.css` maps it to
+  `--tint` / `--tint-soft` (utilities `text-tint`, `bg-tint-soft`, `border-tint`). Use the tint on icons, markers and
+  hover only, never on text: several tones are below 4.5:1 on paper.
 - New registry field: add it to `sectionEntrySchema` (strict, so unknown fields fail), document it in the YAML
   header comment.
 

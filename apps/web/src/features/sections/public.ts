@@ -1,4 +1,4 @@
-import type { NavGroupName, SectionKindName } from "./schema";
+import type { NavGroupName, SectionKindName, SectionTone } from "./schema";
 
 // Client-safe view of the registry: the `on` sections' header links. next.config.ts resolves the
 // registry at build and inlines the result as process.env.SECTION_NAV, so client components (header,
@@ -13,6 +13,8 @@ export interface PublicNavLink {
   shortLabel?: string;
   href: string;
   icon: string;
+  /** The section's tint (sections.yaml `tone`); absent means the default navy accent. */
+  tone?: SectionTone;
   navGroup: NavGroupName;
   /** No pages yet: shown without a link. */
   comingSoon?: boolean;
@@ -67,7 +69,7 @@ interface FullNavSection extends Omit<HeaderNavSection, "groups"> {
 
 /** Strips a section's nav down to what the header shows. */
 export function headerNavSection(nav: FullNavSection): HeaderNavSection {
-  const { key, kind, label, shortLabel, href, icon, navGroup, comingSoon } = nav;
+  const { key, kind, label, shortLabel, href, icon, tone, navGroup, comingSoon } = nav;
   return {
     key,
     kind,
@@ -75,6 +77,7 @@ export function headerNavSection(nav: FullNavSection): HeaderNavSection {
     ...(shortLabel ? { shortLabel } : {}),
     href,
     icon,
+    ...(tone ? { tone } : {}),
     navGroup,
     ...(comingSoon ? { comingSoon } : {}),
     groups: nav.groups.map((g) => ({

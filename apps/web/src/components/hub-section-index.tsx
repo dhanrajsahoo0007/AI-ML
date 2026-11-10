@@ -21,6 +21,8 @@ export function HubSectionIndex({ section, items }: { section: SectionDef; items
             title={g.name}
             description={g.description ?? hub.subtitle}
             childCount={g.count}
+            tone={g.tone}
+            hrefs={g.categories.flatMap((c) => c.items.map((item) => item.href))}
             categories={g.categories.map((c) => c.title)}
           />
         ))}

@@ -9,6 +9,17 @@ export const MAX_MERGE_ITEMS = 500;
 
 const LOCAL_PROGRESS_KEY = "oa_progress_v1";
 
+/** Fired on `window` after this page changes the stored progress, so progress marks elsewhere on it can update. */
+export const PROGRESS_EVENT = "oa-progress";
+
+function announce() {
+  try {
+    window.dispatchEvent(new Event(PROGRESS_EVENT));
+  } catch {
+    // No window (never the case in the browser): nothing to tell.
+  }
+}
+
 interface LocalProgress {
   completed?: Record<string, string>;
   bookmarks?: Record<string, string>;
@@ -35,6 +46,11 @@ export function readLocalProgress(): MergeItem[] {
   }));
 }
 
+/** Every content key this browser has marked complete. */
+export function completedKeys(): string[] {
+  return Object.keys(read().completed ?? {});
+}
+
 /** Whether this browser has `contentKey` marked complete / bookmarked. */
 export function localProgressState(contentKey: string): { complete: boolean; bookmark: boolean } {
   const { completed = {}, bookmarks = {} } = read();
@@ -50,6 +66,7 @@ export function setLocalProgress(contentKey: string, kind: "complete" | "bookmar
   else delete entries[contentKey];
   try {
     window.localStorage.setItem(LOCAL_PROGRESS_KEY, JSON.stringify({ ...data, [field]: entries }));
+    announce();
   } catch {
     // Storage blocked (private mode): the account copy, if signed in, still has it.
   }
@@ -58,6 +75,7 @@ export function setLocalProgress(contentKey: string, kind: "complete" | "bookmar
 export function clearLocalProgress(): void {
   try {
     window.localStorage.removeItem(LOCAL_PROGRESS_KEY);
+    announce();
   } catch {
     // Storage blocked: nothing to clear.
   }

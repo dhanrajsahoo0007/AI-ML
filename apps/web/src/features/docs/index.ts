@@ -16,4 +16,4 @@ export {
   type SectionParams,
 } from "./routes";
 export { articlesOf, hubsOf, loadDocItems, type DocItem } from "./source";
-export { categoryAnchor, sectionGroups, type DocGroup } from "./groups";
+export { sectionGroups } from "./groups";

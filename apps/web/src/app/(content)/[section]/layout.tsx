@@ -1,5 +1,6 @@
 import { ContentShell } from "@/components/content-shell";
 import { EntitlementKeeper } from "@/features/entitlements/islands.client";
+import { CompletedProvider } from "@/features/progress/completed-provider.client";
 import { SpeculationRules } from "@/components/speculation-rules";
 import { getSectionNav } from "@/lib/nav-tree";
 import { docsSection, docsSectionParams, sectionRobots, type SectionParams } from "@/features/docs";
@@ -31,7 +32,10 @@ export default async function DocsSectionLayout({
     <>
       {/* Keeps a signed-in reader's entitlement cookie fresh; shows the payment-on-hold banner (plan §9.2, §9.3). */}
       <EntitlementKeeper />
-      <ContentShell navTree={[nav]}>{children}</ContentShell>
+      {/* Read ticks in the sidebar and "N read" on the section cards, from this browser's saved progress. */}
+      <CompletedProvider>
+        <ContentShell navTree={[nav]}>{children}</ContentShell>
+      </CompletedProvider>
       <SpeculationRules sectionHref={section.href} />
     </>
   );

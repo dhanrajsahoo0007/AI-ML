@@ -1,5 +1,5 @@
 import type { NavCategory } from "../sections/kind";
-import type { SectionDef } from "../sections/schema";
+import type { SectionDef, SectionTone } from "../sections/schema";
 import { slugify } from "../../lib/doc-headings";
 import { hubsOf, loadNavIndex, type DocItem } from "./source";
 
@@ -8,11 +8,12 @@ import { hubsOf, loadNavIndex, type DocItem } from "./source";
 // index, in the sidebar and in the header menu is set in one place and no page has to move. Categories of hubs
 // that are `off` in this environment are left out, and a group with none left is dropped.
 
-export interface DocGroup {
+interface DocGroup {
   slug: string;
   name: string;
   icon?: string;
   description?: string;
+  tone?: SectionTone;
   /** The hub page of the group's first category, at that category's heading. */
   href: string;
   categories: NavCategory[];
@@ -21,7 +22,7 @@ export interface DocGroup {
 }
 
 /** The id of a category's heading on its hub page (<ModelCategory> sets the same id). */
-export function categoryAnchor(title: string) {
+function categoryAnchor(title: string) {
   return slugify(title);
 }
 
@@ -39,6 +40,7 @@ export function hubCategories(section: SectionDef, hub?: string): (NavCategory &
         .map((c) => ({
           hub: h.slug,
           title: c.title,
+          ...(c.icon ? { icon: c.icon } : {}),
           items: c.cards.map((card) => ({ slug: lastSegment(card.href), title: card.title, href: card.href })),
         }))
     );
@@ -60,8 +62,9 @@ export function sectionGroups(section: SectionDef, items: DocItem[]): DocGroup[]
       name: g.name,
       icon: g.icon,
       description: g.description,
+      tone: g.tone,
       href: `${hubHref.get(matched[0].hub)}#${categoryAnchor(matched[0].title)}`,
-      categories: matched.map(({ title, items: cards }) => ({ title, items: cards })),
+      categories: matched.map(({ title, icon, items: cards }) => ({ title, ...(icon ? { icon } : {}), items: cards })),
       count: matched.reduce((n, c) => n + c.items.length, 0),
     });
   }

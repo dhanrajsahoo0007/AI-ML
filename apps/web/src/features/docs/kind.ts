@@ -21,7 +21,11 @@ function escape(s: string) {
 }
 
 function hubCategories(section: SectionDef, hub: string): NavCategory[] {
-  return allHubCategories(section, hub).map(({ title, items }) => ({ title, items }));
+  return allHubCategories(section, hub).map(({ title, icon, items }) => ({
+    title,
+    ...(icon ? { icon } : {}),
+    items,
+  }));
 }
 
 function hubGroups(hub: DocItem) {
@@ -48,7 +52,14 @@ export const docsKind: SectionKind<DocItem> = {
     const groups: NavGroup[] = [];
     const own = sectionGroups(section, items);
     for (const g of own) {
-      groups.push({ slug: g.slug, title: g.name, href: g.href, icon: g.icon, categories: g.categories });
+      groups.push({
+        slug: g.slug,
+        title: g.name,
+        href: g.href,
+        icon: g.icon,
+        ...(g.tone ? { tone: g.tone } : {}),
+        categories: g.categories,
+      });
     }
     const grouped = new Set(own.flatMap((g) => g.categories.map((c) => c.title)));
     for (const hub of hubsOf(items)) {

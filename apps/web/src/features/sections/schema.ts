@@ -24,6 +24,13 @@ export const KINDS_WITH_ROUTES: readonly SectionKindName[] = [
 export const NAV_GROUPS = ["learn", "practice", "more"] as const;
 export type NavGroupName = (typeof NAV_GROUPS)[number];
 
+/**
+ * Tints a section (or one of its groups) may take: the diagram tones of globals.css (`--dg-<tone>`), so the site
+ * has one palette. The tint colours small elements only (icons, markers, hover), never text or backgrounds.
+ */
+export const SECTION_TONES = ["blue", "green", "orange", "red", "violet", "teal", "neutral"] as const;
+export type SectionTone = (typeof SECTION_TONES)[number];
+
 const state = z.enum(RELEASE_STATES);
 const slug = z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "must be lowercase kebab-case");
 
@@ -44,6 +51,8 @@ export const sectionEntrySchema = z
     shortLabel: z.string().min(1).max(16).optional(),
     href: z.string().regex(/^\/[a-z0-9-]+$/, "must be a top-level path such as /cloud"),
     icon: z.string().min(1),
+    /** The section's tint (see SECTION_TONES); without one it keeps the site's navy accent. */
+    tone: z.enum(SECTION_TONES).optional(),
     navGroup: z.enum(NAV_GROUPS),
     order: z.number().int(),
     release: releaseSchema,
@@ -91,6 +100,8 @@ export const sectionEntrySchema = z
             name: z.string().min(1),
             icon: z.string().optional(),
             description: z.string().min(1).optional(),
+            /** Overrides the section's tint for this group. */
+            tone: z.enum(SECTION_TONES).optional(),
             categories: z.array(z.string().min(1)).min(1),
           })
           .strict()

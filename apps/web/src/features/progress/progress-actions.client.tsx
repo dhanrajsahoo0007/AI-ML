@@ -47,11 +47,15 @@ export function ProgressActions({ contentKey }: { contentKey: string }) {
         className={cn(
           button,
           state?.complete
-            ? "border-primary bg-primary/10 text-primary"
+            ? "border-success/60 bg-success/10 text-ink"
             : "border-hairline text-ink-2 hover:border-ink hover:text-ink"
         )}
       >
-        {state?.complete ? <CheckCircle2 aria-hidden className="size-4" /> : <Circle aria-hidden className="size-4" />}
+        {state?.complete ? (
+          <CheckCircle2 aria-hidden className="size-4 text-success" />
+        ) : (
+          <Circle aria-hidden className="size-4" />
+        )}
         {state?.complete ? "Completed" : "Mark complete"}
       </button>
       <button

@@ -10,8 +10,10 @@ interface ContentShellProps {
 // Section layout: sidebar on the left, page on the right. The page is rendered once and laid out with
 // responsive CSS; only the sidebar (collapse, resize and the mobile drawer) is a client island.
 export function ContentShell({ navTree, children }: ContentShellProps) {
+  // A shell that shows one section takes that section's tint (globals.css, [data-tone]).
+  const tone = navTree.length === 1 ? navTree[0].tone : undefined;
   return (
-    <div data-content-shell className="flex w-full items-start">
+    <div data-content-shell data-tone={tone} className="flex w-full items-start">
       <ContentShellSidebar navTree={navTree} />
       <div className="relative flex min-w-0 flex-1 flex-col">
         <div className="flex-1">{children}</div>

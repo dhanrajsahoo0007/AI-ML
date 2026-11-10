@@ -1,4 +1,10 @@
-import { KINDS_WITH_ROUTES, type NavGroupName, type SectionDef, type SectionKindName } from "./schema";
+import {
+  KINDS_WITH_ROUTES,
+  type NavGroupName,
+  type SectionDef,
+  type SectionKindName,
+  type SectionTone,
+} from "./schema";
 
 // The section-kind contract (plan §5.1). Every kind (docs, question-bank, directory, and later
 // problems and newsletter) is implemented once as an object of this shape, and shared code only loops
@@ -18,6 +24,8 @@ export interface NavItem {
 
 export interface NavCategory {
   title: string;
+  /** Icon key (src/lib/icons.ts) shown before the heading in the sidebar. */
+  icon?: string;
   items: NavItem[];
 }
 
@@ -26,6 +34,7 @@ export interface NavGroup {
   title: string;
   href: string;
   icon?: string;
+  tone?: SectionTone;
   categories?: NavCategory[];
   items?: NavItem[];
 }
@@ -38,6 +47,7 @@ export interface NavSection {
   shortLabel?: string;
   href: string;
   icon: string;
+  tone?: SectionTone;
   navGroup: NavGroupName;
   groups: NavGroup[];
   /** The section's kind has no pages yet: shown in the nav without a link. */
@@ -98,7 +108,7 @@ export interface SectionKind<Item> {
 
 /** Builds a NavSection from a registry entry and its groups. */
 export function navSection(section: SectionDef, groups: NavGroup[]): NavSection {
-  const { key, kind, label, shortLabel, href, icon, navGroup } = section;
+  const { key, kind, label, shortLabel, href, icon, navGroup, tone } = section;
   const comingSoon = !KINDS_WITH_ROUTES.includes(kind);
   return {
     key,
@@ -107,6 +117,7 @@ export function navSection(section: SectionDef, groups: NavGroup[]): NavSection 
     ...(shortLabel ? { shortLabel } : {}),
     href,
     icon,
+    ...(tone ? { tone } : {}),
     navGroup,
     groups,
     ...(comingSoon ? { comingSoon } : {}),
