@@ -84,8 +84,12 @@ async function main() {
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)) fail(`usage: npm run newsletter:kit -w web -- <issue-slug>`);
 
   const section = sectionOfKind(NEWSLETTER_KIND);
-  const issue = loadIssues(section).find((i) => i.slug === slug) ?? fail(`no issue ${slug} in content/${section.key}/`);
-  const errors = (await newsletterKind.validate(section, [issue])).filter((p) => p.level === "error");
+  const issues = loadIssues(section);
+  const issue = issues.find((i) => i.slug === slug) ?? fail(`no issue ${slug} in content/${section.key}/`);
+  // Validate against every issue, so a link to another issue resolves; report only this issue's errors.
+  const errors = (await newsletterKind.validate(section, issues)).filter(
+    (p) => p.level === "error" && path.resolve(p.file) === path.resolve(issue.file)
+  );
   if (errors.length > 0)
     fail(`issue ${slug} is invalid:\n${errors.map((p) => `${p.file}:${p.line}: ${p.message}`).join("\n")}`);
   if (!issue.cover) fail(`issue ${slug} has no cover; add cover: { motif, palette, seed }`);

@@ -24,6 +24,7 @@ export interface FigureDef {
 
 const ISSUES: Record<string, () => Promise<{ figures: FigureDef[] }>> = {
   "harness-engineering": () => import("./harness-engineering"),
+  "loop-engineering": () => import("./loop-engineering"),
 };
 
 const OUT = path.join(process.cwd(), "assets", "diagrams", "svg", "newsletter");
