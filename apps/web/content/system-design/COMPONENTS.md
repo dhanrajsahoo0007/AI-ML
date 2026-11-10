@@ -954,9 +954,12 @@ Answers are **MDX** in both places they come from, and the same text renders on 
   answer.
 - Counts: concept page 4–8, pattern page 6–8, case study 8–10, spread across the three levels.
 - The article must be listed in `content/question-bank/articles.yaml` (`/path/to/page: <category>/<subsection>`).
-  The system-design subsections are under `distributed-systems-patterns/`: `fundamentals`, `networking`, `apis`,
-  `realtime-communication`, `security`, `database-foundations` and `replication`, next to the existing ones (see
-  `question-bank/taxonomy.yaml`; case studies map to `distributed-systems-patterns/case-studies`).
+  System design pages file into four categories (see `question-bank/taxonomy.yaml`):
+  `system-design-fundamentals/` (`fundamentals`, `networking`, `apis`, `realtime-communication`, `security`),
+  `system-design-databases/` (`database-foundations`, `database-selection`, `storage-engines`, `replication`,
+  `partitioning`), `system-design-patterns/` (`scaling-traffic`, `data-consistency`, `messaging-async`,
+  `reliability-resilience`, `specialised-structures`) and, for case studies, `system-design-questions/` (by product
+  kind, for example `messaging-realtime`).
 
 ### 5.2 In a library YAML file (`content/question-bank/<category>.yaml`)
 
@@ -964,8 +967,9 @@ Answers are **MDX** in both places they come from, and the same text renders on 
 - id: deliver-message-online-user
   q: How does Messenger deliver a message to an online user?
   level: Mid
-  category: distributed-systems-patterns
-  subcategory: realtime-communication
+  category: system-design-questions
+  subcategory: messaging-realtime
+  topics: [/system-design/case-studies/facebook-messenger, /system-design/fundamentals/websockets]
   companies: [Meta]
   a: |-
     **Short answer.** The sender's chat server forwards the message to the server holding the recipient's WebSocket.
@@ -976,7 +980,22 @@ Answers are **MDX** in both places they come from, and the same text renders on 
     | WebSocket | ms | low per message |
 
     <AnimatedDiagram name="messenger/architecture" highlight={["chat"]} />
+  followUps:
+    - q: What changes when the recipient is offline?
+      level: Senior
+      topics: [/system-design/patterns/message-queues]
+      a: |-
+        The message is stored first, then a push notification is sent through a queue.
 ```
+
+- `topics` is a list of site paths. Every path must be a real page; the first one is the main topic. The question is
+  shown on each of those pages under **Asked in interviews** (added by the page layout, nothing to write in the MDX).
+  A question in a system design category needs at least one topic.
+- `followUps` are the questions an interviewer asks next. Each has `q`, `a` and `level`, and may have `companies`,
+  `topics` and `refs`. A follow-up cannot have follow-ups of its own. It takes its category and subsection from its
+  question, gets the id `<question id>--<slug of its text>`, counts as a question in every total, and is drawn nested
+  under its question as **Interviewers then ask**. On a topic page it is tagged to, without its question, it shows
+  **Follow-up to: ...**.
 
 Use a block scalar (`|-`) for anything longer than one line. In `taxonomy.yaml`, quote any description or title that
 contains a comma (an unquoted comma ends the value in a YAML flow mapping; content-check now rejects it).

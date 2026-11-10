@@ -4,7 +4,8 @@ import { ArticleLayout } from "@/components/article-layout";
 import { loadMdxFile } from "@/lib/mdx-doc";
 import { getUpdatedDate } from "@/lib/doc-meta";
 import { loadDocItems } from "./source";
-import { isPremiumDoc } from "@/features/paywall";
+import { TopicQuestions } from "@/components/mdx/question-bank";
+import { isPremiumDoc, premiumAnswerCategories } from "@/features/paywall";
 import { Paywall } from "@/features/paywall/public";
 import { ProgressActions } from "@/features/progress/progress-actions.client";
 import { getSection } from "@/features/sections";
@@ -59,6 +60,11 @@ export async function SectionDocPage({
       }
     : undefined;
 
+  // Library questions tagged to this page. The public preview of a premium page ends at the paywall, so it lists
+  // none. On a free page the answers of premium-answer categories stay locked, as on the companies page; a
+  // premium page is served only with Pro, so there they are open.
+  const premiumAnswers = new Set(premium ? [] : premiumAnswerCategories().map((c) => c.slug));
+
   return (
     <div data-access={premium ? (preview ? "preview" : "full") : "free"}>
       <div className={`mx-auto px-4 pt-6 md:px-8 ${docsLayout ? "max-w-6xl" : "max-w-4xl"}`}>
@@ -71,6 +77,7 @@ export async function SectionDocPage({
         after={preview ? <Paywall path={item.href} /> : <ProgressActions contentKey={item.href.slice(1)} />}
       >
         {doc.body}
+        {!preview && <TopicQuestions href={item.href} locked={(q) => premiumAnswers.has(q.category)} />}
       </ArticleLayout>
     </div>
   );

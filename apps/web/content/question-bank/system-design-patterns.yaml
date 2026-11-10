@@ -1,0 +1,1773 @@
+# System design pattern questions that are not written inside an article. All answers are written by TokensToScale.
+- id: what-is-a-cache-and-where-to-place-it
+  q: What is a cache, and where would you place one in a system?
+  level: Junior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/fundamentals/cdn]
+  a: |-
+    **Short answer.** A cache is a small, fast copy of data that is slow or costly to get. Put it as close to the reader as you can, in front of whatever is slowest.
+
+    **Why.** Reading from memory takes well under a millisecond. A database query that hits disk or joins tables takes tens of milliseconds. Most systems read the same few things again and again, so a copy of the popular answers removes most of the slow work.
+
+    There are four usual places, from the user inwards:
+
+    | Place | What it holds | Example |
+    | --- | --- | --- |
+    | Browser or app | Files and responses for one user | Images, scripts |
+    | CDN | Public content, near the user | Product photos, video segments |
+    | Shared cache next to the service | Query results, sessions, computed objects | Redis or Memcached |
+    | Inside the database | Recently used pages | Buffer pool |
+
+    Start with the one that removes the most work. Static files go to the CDN. Repeated database reads go to a shared cache.
+
+    **Watch out for.** Adding a cache before you know what is slow. A cache adds a second copy of the data that can be out of date, so it should pay for that with a real saving.
+  followUps:
+    - q: What data should you not cache?
+      level: Junior
+      a: |-
+        **Short answer.** Data that changes on almost every read, data that is rarely read twice, and data where a stale value causes real harm.
+
+        **Why.** A cache helps only when the same answer is asked for again before it changes. Three cases fail that test:
+
+        - Values that change constantly, such as a live counter. The copy is out of date as soon as it is written.
+        - Values read once, such as a one-time report. You pay to store it and nobody reads it again.
+        - Values that must be exact at the moment of use, such as an account balance when money is about to move, or the number of seats left at the point of sale. Read these from the source of truth.
+
+        Personal data needs care too. A response for one user stored under a key that does not include the user id will be shown to someone else.
+
+        **Watch out for.** Treating "must be correct" as "never cache". A balance shown on a home screen can be a few seconds old. The same balance used to approve a payment cannot.
+- id: what-happens-if-the-cache-goes-down
+  q: What happens to your system if the cache goes down?
+  level: Senior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/patterns/circuit-breaker-and-retries]
+  a: |-
+    **Short answer.** Every read falls through to the database at once. If the database was sized for the 10% of reads that normally miss, it now gets ten times its usual load and can fail as well.
+
+    **Why.** A cache with a 90% hit rate hides nine reads out of ten from the database. Teams then size the database for what it sees, and the cache quietly becomes something the system cannot run without.
+
+    Plan for it in three layers:
+
+    1. **Make loss partial.** Run the cache as several nodes with replicas, with keys spread by consistent hashing. One dead node then loses a slice of the keys, not all of them.
+    2. **Protect the database.** Limit how many requests may go to the database at the same time. Reject or queue the rest and serve a fallback, such as slightly old data from a local in-process cache, or a simpler page.
+    3. **Come back slowly.** A restarted cache is empty. Let traffic back in steps, or warm the popular keys first, so the refill does not look like a second outage.
+
+    **Watch out for.** A short timeout that is missing. If the cache is slow and not dead, every request waits on it. Set a timeout of a few milliseconds and treat a timeout as a miss.
+  followUps:
+    - q: How do you warm a cold cache after a restart or a deploy?
+      level: Senior
+      a: |-
+        **Short answer.** Fill the most popular keys before the cache takes full traffic, and let real traffic back in gradually.
+
+        **Why.** An empty cache has a hit rate of zero, so for the first minutes the database carries every read. Three methods are common:
+
+        - **Replay.** Keep a list of the top keys, taken from recent access logs, and load them with a script before the node joins.
+        - **Copy.** Start the new node as a replica of a warm one, or restore from a snapshot on disk. Redis can do both.
+        - **Ramp.** Send 1% of traffic to the new node, then 5%, then 25%, watching database load at each step.
+
+        For deploys, avoid the problem. Replace cache nodes one at a time, so only a small share of keys is cold at any moment.
+
+        **Watch out for.** Changing the key format or the serialised shape of values in a release. Every existing entry becomes useless at the same moment, which is a full cold start that nobody planned.
+- id: cache-eviction-policy-choice
+  q: Which cache eviction policy would you choose, and why?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching]
+  a: |-
+    **Short answer.** Start with LRU (least recently used). Move to LFU (least frequently used) when a small set of items stays popular for a long time and bursts of one-off reads keep pushing them out.
+
+    **Why.** Memory is limited, so when the cache is full something must leave. The policy is a guess about what will not be needed again.
+
+    | Policy | Removes | Good when | Weak when |
+    | --- | --- | --- | --- |
+    | LRU | The item unused for the longest time | Recent use predicts the next use | A large scan touches many cold items and pushes out hot ones |
+    | LFU | The item used least often | Popularity is stable | An item that was hot last week stays too long |
+    | FIFO | The oldest item | You need the simplest thing | Popular old items are thrown away |
+    | TTL only | Items past their expiry | Freshness matters more than memory | Memory fills before anything expires |
+
+    In practice you combine a size-based policy with a TTL. Redis offers `allkeys-lru` and `allkeys-lfu`, and both are approximate: Redis samples a few keys and removes the best candidate, which is close to exact LRU for much less memory.
+
+    **Watch out for.** Picking a policy without measuring. The hit rate on your own traffic is the test, and the difference between LRU and LFU is often a few percent.
+  followUps:
+    - q: How would you build an LRU cache with O(1) get and put?
+      level: Mid
+      a: |-
+        **Short answer.** Combine a hash map with a doubly linked list. The map finds an entry in one step, and the list keeps entries in order of last use.
+
+        **Why.** Each need is covered by one structure. The hash map goes from key to the list node, so a lookup is O(1). The list has the most recently used entry at the head and the least recently used at the tail.
+
+        - `get(key)`: find the node in the map, unlink it and move it to the head. Return the value.
+        - `put(key, value)`: if the key exists, update it and move it to the head. If not, add a new node at the head. If the cache is now over its size, remove the tail node and delete its key from the map.
+
+        The list must be doubly linked. Removing a node from the middle needs its previous neighbour, and a singly linked list would have to walk from the head to find it.
+
+        For several threads, one lock around both structures is correct and simple. Under heavy load it becomes the bottleneck, so real caches split the keys into segments with a lock each, or record reads in a buffer and reorder the list later.
+
+        **Watch out for.** Forgetting to delete the key from the map when the tail is removed. The map then grows without limit.
+- id: handling-a-hot-key-in-a-cache
+  q: One key gets far more traffic than any other. How do you handle a hot key?
+  level: Senior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/patterns/sharding]
+  a: |-
+    **Short answer.** Spread the reads for that key over more than one place: a small in-process cache on each app server, several copies of the key across cache nodes, or both.
+
+    **Why.** Sharding spreads keys over nodes, but one key always lives on one node. If a celebrity profile gets 200,000 reads a second, the node that holds it is overloaded while the rest sit idle. Adding nodes does not help, because the key does not split.
+
+    What works:
+
+    - **Local cache in front.** Each app server keeps the hot value in its own memory for one or two seconds. 500 app servers then make about 500 requests a second to the shared cache, not 200,000.
+    - **Key copies.** Store the value under `key#1` to `key#10` on different nodes and have readers pick one at random. Writes must update all ten.
+    - **Read replicas.** Let replicas of the hot node serve reads.
+
+    You also have to find hot keys. Sample requests on the client or use the cache's own tooling, and alert when one key passes a share of total traffic.
+
+    **Watch out for.** The moment a hot key expires. Thousands of readers miss together and all rebuild the value. Refresh hot keys in the background before they expire.
+- id: choosing-a-cache-ttl
+  q: How do you choose a TTL for cached data?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching]
+  a: |-
+    **Short answer.** Ask how old the data may be before a user is harmed or confused, and use the longest TTL that stays inside that limit.
+
+    **Why.** A TTL (time to live) trades freshness against load. A longer TTL means more hits and less work for the database, and also means a change takes longer to show.
+
+    Work from the data:
+
+    | Data | Acceptable age | Typical TTL |
+    | --- | --- | --- |
+    | Static files with a version in the name | Forever | 1 year |
+    | Product description | Minutes | 5 to 15 minutes |
+    | Price or stock shown in a list | Seconds | 10 to 60 seconds |
+    | Session | Until idle | 30 minutes, renewed on use |
+
+    Even a very short TTL helps a busy key. If a key is read 5,000 times a second, a 1 second TTL removes 4,999 of every 5,000 database reads.
+
+    Two habits make TTLs safer. Add a small random amount, for example plus or minus 10%, so keys written together do not expire together. And when the application knows the data changed, delete the key at once and keep the TTL only as a safety net.
+
+    **Watch out for.** Using one TTL for everything. A single global value is either too stale for prices or too short for content that never changes.
+- id: write-behind-caching-risk
+  q: What is write-behind (write-back) caching, and when is it worth the risk?
+  level: Senior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/patterns/message-queues]
+  a: |-
+    **Short answer.** The application writes to the cache and returns straight away. The cache saves the change to the database later, in batches. It is worth it only when writes are very frequent and losing the last few seconds of them is acceptable.
+
+    **Why.** Batching turns many small database writes into a few large ones. A counter updated 1,000 times a second becomes one database write a second. Writes also stay fast when the database is slow for a moment.
+
+    The price is durability. The newest data exists only in cache memory until it is flushed. If the cache node dies first, those writes are gone, and the user was already told they succeeded.
+
+    Good fits: view counts, "last seen" times, likes on a busy post, game scores between checkpoints. Poor fits: orders, payments, anything a user would notice was missing.
+
+    To reduce the risk, replicate the cache, flush often, and keep the pending writes in a durable log or queue instead of memory alone. At that point the design is close to "write to a log, apply to the database later", which is often the clearer way to describe it.
+
+    **Watch out for.** Flush order. If two updates to one row are flushed out of order, the older value wins. Keep updates to the same key in order, or flush only the latest value per key.
+- id: delete-or-update-cache-on-write
+  q: When the database changes, should you update the cached value or delete it?
+  level: Senior
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics: [/system-design/patterns/caching, /system-design/patterns/consistency-models]
+  a: |-
+    **Short answer.** Delete it. The next reader loads the fresh value from the database and puts it back.
+
+    **Why.** Updating looks more efficient but allows a race. Two writers, A then B, change the same row. The database ends with B's value. If their cache updates arrive in the other order, the cache ends with A's value and stays wrong until the TTL runs out. Deleting has no such order problem: two deletes in either order leave the key empty.
+
+    Deleting also avoids wasted work. If a value is written ten times between reads, updating builds the cached object ten times and nine of them are never read.
+
+    A smaller race remains with delete. A reader misses, reads the old row, then a writer updates the row and deletes the key, and then the reader stores its old value. It is rare, because the write would have to fit inside the short gap between a read and a cache set. The usual guards are a TTL on every key as a backstop, and for stricter cases a second delete a moment later or a version check when setting.
+
+    **Watch out for.** Deleting the key before writing to the database. A read in between reloads the old value into the cache, and nothing removes it afterwards. Write to the database first, then delete.
+- id: cache-penetration-missing-keys
+  q: Requests keep arriving for keys that do not exist, so every one misses the cache and hits the database. How do you stop it?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/patterns/bloom-filter]
+  a: |-
+    **Short answer.** Cache the "not found" answer for a short time, and for large key spaces put a Bloom filter in front that rejects ids that were never created.
+
+    **Why.** A normal cache stores only what exists. A request for user id 999999999 misses the cache, queries the database, finds nothing and stores nothing, so the next request repeats the whole trip. A bug in a client or an attacker sending random ids can turn this into the heaviest load on the database. This is often called cache penetration.
+
+    Two fixes, usually used together:
+
+    - **Negative caching.** Store a marker such as "none" under the key with a short TTL, 30 to 60 seconds. Repeated requests for the same missing id now stop at the cache. Keep the TTL short so a record created later shows up quickly.
+    - **Bloom filter.** Keep a compact set of all valid ids in memory. It can say "definitely not present" with no database call. At about 10 bits per id, 100 million ids need roughly 120 MB, with a false positive rate near 1%.
+
+    Check the input first as well. An id in the wrong format should be rejected before any lookup.
+
+    **Watch out for.** Negative caching alone against random ids. Each id is different, so the cache fills with markers and pushes out useful entries. That is the case the Bloom filter is for.
+- id: cache-avalanche-mass-expiry
+  q: What is a cache avalanche, and how is it different from a cache stampede?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching]
+  a: |-
+    **Short answer.** An avalanche is many keys becoming unavailable at the same time, so a large share of all reads reach the database together. A stampede is many requests rebuilding one key at the same time.
+
+    **Why.** The causes are different, so the fixes are different.
+
+    An avalanche usually starts in one of two ways. A batch job loads a million keys at 02:00 with a 1 hour TTL, and at 03:00 they all expire in the same second. Or a cache node fails and every key on it is gone.
+
+    | | Stampede | Avalanche |
+    | --- | --- | --- |
+    | Scope | One popular key | Many keys |
+    | Trigger | That key expires | Shared expiry time or node loss |
+    | Fix | One rebuilder per key, refresh early | Spread expiry times, replicas, limit database load |
+
+    For expiry, add a random amount to each TTL, for example 60 minutes plus or minus 6, so the expiries spread over 12 minutes. For node loss, use replicas and consistent hashing so one failure removes only a slice of keys. In both cases, cap the number of concurrent database queries so the database slows down instead of falling over.
+
+    **Watch out for.** Treating the two as one problem. A lock per key stops a stampede and does nothing for a million different keys expiring together.
+- id: local-cache-vs-shared-cache
+  q: When would you use an in-process cache on each server and when a shared cache such as Redis?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching]
+  a: |-
+    **Short answer.** Use an in-process cache for small, very hot data that may be slightly different on each server. Use a shared cache when all servers must see the same value or the data is too large to copy onto every server.
+
+    **Why.** The two differ in speed, consistency and size.
+
+    | | In-process | Shared (Redis, Memcached) |
+    | --- | --- | --- |
+    | Read cost | About 100 nanoseconds, no network | About 0.5 to 1 ms, one network round trip |
+    | Same on all servers | No, each has its own copy | Yes |
+    | Survives a deploy | No | Yes |
+    | Size | Limited by the app's memory | Many nodes, hundreds of GB |
+
+    With 200 app servers, an in-process cache means 200 separate copies. A value is loaded 200 times, and deleting it on one server leaves 199 stale copies. That is acceptable for feature flags or a country list, and not for a shopping cart.
+
+    Many systems use both. A small in-process layer with a TTL of a second or two sits in front of the shared cache and takes the hottest keys.
+
+    **Watch out for.** Invalidating an in-process cache. There is no single place to delete from, so either keep its TTL very short or broadcast invalidation messages to every server.
+- id: redis-vs-memcached
+  q: "Redis or Memcached: how do you choose?"
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/databases/key-value-stores]
+  a: |-
+    **Short answer.** Choose Redis unless all you need is a plain key-to-value cache on many cores and you want the simplest thing to run. Redis does more, and the extra features are usually what the design ends up needing.
+
+    **Why.**
+
+    | | Redis | Memcached |
+    | --- | --- | --- |
+    | Values | Strings, hashes, lists, sets, sorted sets, streams | Strings only |
+    | Persistence | Optional snapshots and an append-only log | None |
+    | Replication and failover | Built in | Not built in, done by the client or a proxy |
+    | Threads | Commands run on one thread | Many threads |
+    | Extras | Atomic scripts, pub/sub, per-key expiry, counters | Per-key expiry, counters |
+
+    The data types matter in an interview. A leaderboard is a sorted set. A rate limiter is an atomic counter with expiry, or a script. A session is a hash. With Memcached each of these means reading a blob, changing it in the application and writing it back.
+
+    Memcached's strengths are a small memory overhead per key and good use of many cores for simple gets and sets on large values.
+
+    **Watch out for.** Calling Redis a database because it can save to disk. With default settings it can lose the last second or so of writes on a crash, so do not make it the only copy of data you cannot rebuild.
+- id: scaling-a-cache-beyond-one-node
+  q: One cache node is no longer enough. How do you scale the cache?
+  level: Senior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics:
+    [/system-design/patterns/caching, /system-design/patterns/consistent-hashing, /system-design/patterns/sharding]
+  a: |-
+    **Short answer.** Split the keys over several nodes with consistent hashing, and give each node a replica so that losing one machine does not empty part of the cache.
+
+    **Why.** A single node runs out of memory first, then out of throughput. Both are solved by partitioning: each key lives on one node, chosen by hashing the key.
+
+    How the node is chosen matters. With `hash(key) % N`, changing N from 10 to 11 moves about 90% of keys to a different node, so nearly the whole cache misses at once. Consistent hashing places nodes and keys on a ring. Adding an eleventh node moves only about one key in eleven.
+
+    Who does the routing is the second choice:
+
+    - **Client library.** Each app server knows the ring and talks to nodes directly. Fast, but every client must agree on the node list.
+    - **Proxy.** A layer such as Envoy or twemproxy routes requests. Clients stay simple, with one more network hop.
+    - **Cluster mode.** Redis Cluster divides keys into 16,384 slots and moves slots between nodes.
+
+    Replicas cover failure. Without them, a dead node makes its share of keys miss until they are rebuilt from the database.
+
+    **Watch out for.** Operations that span several keys, such as a transaction or a multi-key read. Once keys are on different nodes, these either fail or need all the keys forced onto one node with a shared key prefix.
+- id: measuring-whether-a-cache-works
+  q: How do you know whether a cache is doing its job?
+  level: Junior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching]
+  a: |-
+    **Short answer.** Watch the hit rate, the latency with and without a hit, the eviction rate and the load on the database behind it.
+
+    **Why.** A cache can be running and still not helping. Four numbers show it:
+
+    - **Hit rate.** Hits divided by all lookups. Above 90% is common for read-heavy data. If it is 30%, most requests pay for a cache lookup and then a database read as well.
+    - **Latency.** Compare the 99th percentile for hits and for misses. The gap is what the cache saves.
+    - **Evictions.** A steady stream of evictions with a low hit rate means the cache is too small for the data people ask for.
+    - **Database load.** The reason for the cache. If queries per second on the database did not drop, the cache is in the wrong place.
+
+    Small changes in hit rate matter more than they look. Going from 99% to 98% doubles the misses, so the database sees twice the read load.
+
+    **Watch out for.** One average hit rate for the whole cache. Break it down by key type. A single badly designed key, for example one that includes a timestamp and so never repeats, can sit at 0% and stay hidden inside a healthy average.
+- id: sizing-a-cache
+  q: How much memory does a cache need?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/fundamentals/capacity-planning]
+  a: |-
+    **Short answer.** Enough for the part of the data that gets most of the reads, not for all of it. Work out how many entries that popular part holds and how many bytes each one really takes in memory, then buy about a third more than the result.
+
+    **Why.** Access is uneven. In many systems about 20% of items receive about 80% of reads, and often the skew is stronger. Holding that 20% gets most of the benefit.
+
+    A worked example. A store has 50 million products, and each cached product is about 2 KB.
+
+    - Everything: 50 million × 2 KB = 100 GB.
+    - The hot 20%: 10 million × 2 KB = 20 GB.
+    - Add about 30% for per-key overhead and fragmentation: about 26 GB.
+    - Keep memory use under about 75% of the node: plan for roughly 35 GB, as one large node or three smaller ones.
+
+    Then check it against real traffic. Grow the cache while watching the hit rate. When doubling the memory adds less than a point or two of hit rate, you have passed the useful size.
+
+    **Watch out for.** Sizing only for memory. A node also has a limit on requests per second and on network throughput, and a cache of small, very hot values often reaches those limits first.
+
+- id: consumer-lag-keeps-growing
+  q: A queue consumer is falling behind and the lag keeps growing. What do you do?
+  level: Mid
+  category: system-design-patterns
+  subcategory: messaging-async
+  topics: [/system-design/patterns/back-pressure, /system-design/patterns/message-queues]
+  a: |-
+    **Short answer.** First find out which side changed: more messages coming in, or slower processing. Then add consumer capacity, make each message cheaper, or reduce what comes in.
+
+    **Why.** Lag is the gap between what producers have written and what consumers have finished. It grows whenever the arrival rate is higher than the processing rate. If 5,000 messages arrive each second and consumers finish 4,000, lag grows by 1,000 a second, which is 3.6 million messages after one hour.
+
+    Work through it in this order:
+
+    1. **Check the consumer's dependencies.** A slow database or a slow downstream API is the most common cause. More consumers will not help and can make it worse.
+    2. **Look for one bad message** that fails and is retried forever. Move it to a dead-letter queue.
+    3. **Scale out consumers**, up to the number of partitions.
+    4. **Batch the work**, for example one database write for 100 messages.
+    5. **Slow or shed at the source** if the backlog cannot be cleared in time.
+
+    Clearing a backlog needs spare capacity. Matching the arrival rate only stops the lag from growing.
+
+    **Watch out for.** Measuring lag only as a message count. Also track the age of the oldest unprocessed message, because that is the delay users feel.
+  followUps:
+    - q: When is it right to throw away a backlog and not process it?
+      level: Mid
+      topics: [/system-design/patterns/back-pressure]
+      a: |-
+        **Short answer.** When the messages lose their value with age, so that processing an old one helps nobody. Skip to the newest messages and accept the gap.
+
+        **Why.** Some data is only useful when fresh. A driver's location from 10 minutes ago is wrong by now. A "your friend is live" notification that arrives an hour late is worse than none. Working through such a backlog in order delays the fresh messages behind it, so users keep seeing old data even after the system recovers.
+
+        | Kind of message | Old messages | Action |
+        | --- | --- | --- |
+        | Location pings, live metrics | Worthless | Keep only the latest per key |
+        | Notifications | Harmful if late | Drop after a deadline, such as 5 minutes |
+        | Payments, orders, audit events | Still required | Never drop, process all |
+
+        A simple way to build this is to put a deadline on each message. The consumer checks it first and discards expired messages without doing the work.
+
+        **Watch out for.** Dropping silently. Count every dropped message and alert on it, so a data gap can be explained later.
+
+- id: which-requests-to-shed-first
+  q: When a service must shed load, how does it decide which requests to drop?
+  level: Senior
+  category: system-design-patterns
+  subcategory: messaging-async
+  topics: [/system-design/patterns/back-pressure, /system-design/patterns/rate-limiting]
+  a: |-
+    **Short answer.** Give every request a priority class at the edge, and drop the lowest class first. Decide before any expensive work starts, and reject fast.
+
+    **Why.** Requests are not equal. A checkout is worth more than a recommendation refresh, and a health check must never be dropped. A typical scheme has three or four classes:
+
+    | Class | Examples | Shed when |
+    | --- | --- | --- |
+    | Critical | Health checks, payments, logins | Never, or last |
+    | Normal | Page loads, searches | Heavy overload |
+    | Sheddable | Prefetch, recommendations, batch jobs | First sign of overload |
+
+    The class travels with the request as a header, so every service downstream applies the same rule.
+
+    Drop whole users or whole sessions where you can, and keep the rest fully working. Random dropping per request hurts far more than it looks. If a page needs 10 calls and each has a 10% chance of being dropped, only 0.9 to the power 10, about 35%, of pages load completely.
+
+    Add a per-tenant cap as well, so one noisy customer is shed before everyone else.
+
+    **Watch out for.** Clients that retry shed requests at once. The retries add load exactly when there is none to spare. Return `429` or `503` with `Retry-After`, and make sure clients back off.
+
+- id: why-autoscaling-does-not-stop-overload
+  q: Why is autoscaling alone not enough to protect a service from overload?
+  level: Junior
+  category: system-design-patterns
+  subcategory: messaging-async
+  topics: [/system-design/patterns/back-pressure, /system-design/fundamentals/capacity-planning]
+  a: |-
+    **Short answer.** Autoscaling takes minutes and overload takes seconds. Something else has to protect the service during the gap.
+
+    **Why.** Adding a server has several steps. The metrics must show the load, the scaler must decide, a machine must boot, the application must start, and the load balancer must see it as healthy. Together this is often 1 to 5 minutes. A traffic spike from a push notification or a sale can double the load in 10 seconds.
+
+    Two more limits apply:
+
+    - **The slow part may not scale.** If the database is the bottleneck, more application servers send it more queries and make things worse.
+    - **Scaling has a ceiling.** Account quotas and budgets cap how far you can grow.
+
+    So a service needs both. Bounded queues, concurrency limits and load shedding keep it alive in the first seconds. Autoscaling then raises capacity so that less traffic has to be rejected.
+
+    **Watch out for.** Scaling on CPU alone. A service that is stuck waiting on a slow dependency shows low CPU while requests pile up. Scale on queue length or in-flight requests as well.
+
+- id: files-in-object-storage-not-database
+  q: Why store uploaded files in object storage and not in the database?
+  level: Junior
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics:
+    [
+      /system-design/patterns/blob-storage-and-chunking,
+      /system-design/databases/object-storage,
+      /system-design/fundamentals/storage-types,
+    ]
+  a: |-
+    **Short answer.** Databases are built for many small rows that are queried and updated. Files are large, never queried inside, and rarely changed. Object storage holds them more cheaply and scales without a size limit.
+
+    **Why.** Putting a 10 MB photo in a database row causes several problems:
+
+    - **Memory.** The database keeps recent pages in memory. Large files push useful rows and indexes out.
+    - **Backups and replicas.** Every backup and every replica must copy all the file bytes, so both become slow.
+    - **Cost.** Database storage is fast disk attached to a server. Object storage costs several times less per GB.
+    - **Serving.** Each download holds a database connection. Object storage serves files over HTTP and plugs straight into a CDN.
+
+    The usual split is simple. The file goes to object storage under a key. The database row holds the key plus metadata: owner, size, type and upload time.
+
+    **Watch out for.** The two writes are not one transaction. Upload the file first, then write the row. A crash in between leaves a file with no row, which a cleanup job can delete. The other order leaves a row that points to nothing, which users will see as a broken file.
+
+- id: fixed-vs-content-defined-chunking
+  q: What is the difference between fixed-size and content-defined chunking?
+  level: Mid
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics: [/system-design/patterns/blob-storage-and-chunking, /system-design/case-studies/dropbox]
+  a: |-
+    **Short answer.** Fixed-size chunking cuts a file every N bytes. Content-defined chunking cuts where the bytes themselves match a pattern, so chunk edges survive inserts and deletes.
+
+    **Why.** With fixed 4 MB chunks, adding one byte at the start of a file shifts every later byte by one. Every chunk now has different content and a different hash. Deduplication finds nothing in common, and the whole file uploads again.
+
+    Content-defined chunking slides a small window over the file and computes a rolling hash, which is a hash that updates cheaply as the window moves one byte. It cuts whenever the hash matches a chosen pattern, for example when its lowest 22 bits are all zero. That happens on average once every 4 MB. Because the cut points depend on nearby bytes only, an insert changes one or two chunks and the rest keep their old hashes.
+
+    | | Fixed size | Content defined |
+    | --- | --- | --- |
+    | CPU cost | Very low | Higher, hashes every byte |
+    | Chunk size | Constant | Varies, needs a minimum and maximum |
+    | Good for | Video, images, append-only files | Documents and files edited in the middle |
+
+    **Watch out for.** Using content-defined chunking for media that never changes. It adds cost and gives no benefit there.
+  followUps:
+    - q: With deduplicated chunks, how do you safely delete chunks that no file uses any more?
+      level: Senior
+      topics: [/system-design/patterns/blob-storage-and-chunking]
+      a: |-
+        **Short answer.** Track which chunks are still referenced, and delete a chunk only after it has been unreferenced for a safe waiting period.
+
+        **Why.** One chunk can belong to many files. Deleting a file must not delete chunks that another file still needs. Two common methods:
+
+        - **Reference counts.** Each chunk has a counter. Adding a file raises it, deleting a file lowers it. Zero means the chunk is unused.
+        - **Mark and sweep.** A background job lists every chunk named by any live file, then removes chunks that are not on the list.
+
+        The hard case is a race. A new upload finds that chunk X already exists and skips sending it. At the same moment the cleaner sees X at zero references and deletes it. The new file now points to a missing chunk.
+
+        The usual guard is a grace period. A chunk is deleted only if it has had zero references for, say, 7 days, and an upload that reuses a chunk refreshes its timestamp.
+
+        **Watch out for.** Reference counts that drift after crashes. Run a periodic mark-and-sweep check to correct them, and make the delete a soft delete first so mistakes can be undone.
+
+- id: replication-vs-erasure-coding
+  q: How does erasure coding differ from keeping three copies of an object?
+  level: Mid
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics:
+    [
+      /system-design/patterns/blob-storage-and-chunking,
+      /system-design/databases/object-storage,
+      /system-design/case-studies/s3,
+    ]
+  a: |-
+    **Short answer.** Three copies survive two lost disks and cost 3 times the space. Erasure coding splits the object into data pieces plus extra parity pieces, and survives more losses for about 1.4 times the space.
+
+    **Why.** Take a common layout of 10 data pieces and 4 parity pieces, each on a different disk. Any 10 of the 14 pieces are enough to rebuild the object, so 4 disks can fail at once.
+
+    | | 3 copies | 10 + 4 erasure coding |
+    | --- | --- | --- |
+    | Space used | 3.0 times | 1.4 times |
+    | Failures survived | 2 | 4 |
+    | Read | Any one copy | Fetch 10 pieces |
+    | Repair of one lost piece | Copy from one disk | Read 10 pieces and compute |
+
+    For 1 PB of data, that is 3 PB of disk against 1.4 PB. At this scale the saving is large.
+
+    The cost is work. Reads touch more disks, and repairs use more network and CPU. Many stores therefore keep small or very hot objects as full copies and use erasure coding for large or colder ones.
+
+    **Watch out for.** Placing several pieces in the same rack or zone. One failure there removes several pieces at once. Spread the pieces across failure domains.
+
+- id: where-to-use-a-bloom-filter
+  q: Where would you use a Bloom filter, and where would it be the wrong tool?
+  level: Junior
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics: [/system-design/patterns/bloom-filter, /system-design/databases/lsm-trees, /system-design/patterns/caching]
+  a: |-
+    **Short answer.** Use it in front of an expensive lookup when most lookups are for things that are not there. Do not use it when a wrong "yes" causes harm and you have no second check.
+
+    **Why.** A Bloom filter is a small bit array that answers "definitely not here" or "maybe here". The first answer lets you skip the expensive step. Good uses:
+
+    - **Storage engines.** Each file on disk has a filter. A read skips every file that cannot hold the key.
+    - **Caches.** Reject ids that were never created before they reach the database.
+    - **Web crawlers.** Check "have I seen this URL" for billions of URLs in memory.
+    - **Sign-up forms.** A quick "this username is free" check before the real query.
+
+    <AnimatedDiagram name="databases/lsm-write-path" highlight={["reader", "bloom"]} caption="A read asks the Bloom filter first and skips files that cannot contain the key." />
+
+    It is the wrong tool when:
+
+    - Most lookups are hits. The filter says "maybe" every time and saves nothing.
+    - You need to list or count the items. It stores no items.
+    - A false "yes" is the final answer, for example blocking a payment because a card "might be" on a fraud list.
+
+    **Watch out for.** Treating "maybe here" as "here". Always confirm a positive against the real data.
+
+- id: sizing-a-bloom-filter
+  q: How do you decide how many bits and hash functions a Bloom filter needs?
+  level: Mid
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics: [/system-design/patterns/bloom-filter]
+  a: |-
+    **Short answer.** Start from two numbers: how many items you expect and what false positive rate you accept. Those fix the bits per item and the number of hash functions.
+
+    **Why.** The rule of thumb is about 1.44 bits per item for every halving of the error rate.
+
+    | False positive rate | Bits per item | Hash functions |
+    | --- | --- | --- |
+    | 10% | about 4.8 | 3 |
+    | 1% | about 9.6 | 7 |
+    | 0.1% | about 14.4 | 10 |
+
+    Example: 100 million URLs at 1% needs about 960 million bits, which is 120 MB. Storing the URLs themselves at 50 bytes each would need 5 GB.
+
+    The best number of hash functions is about 0.7 times the bits per item. Fewer hashes leave too many chances for a full match by accident. More hashes fill the array too fast and also cost CPU on every lookup.
+
+    Choose the error rate from the cost of a false positive. If it only means one extra disk read, 1% to 3% is fine. If it means an extra network call to another region, pay for 0.1%.
+
+    **Watch out for.** Sizing for today's item count. The memory is fixed at creation, so size for the count you expect at the end of the filter's life.
+  followUps:
+    - q: The set keeps growing past the size the filter was built for. What happens, and what can you do?
+      level: Mid
+      topics: [/system-design/patterns/bloom-filter]
+      a: |-
+        **Short answer.** The false positive rate climbs quickly, until the filter says "maybe" to almost everything. You must rebuild it larger or add a new filter beside it.
+
+        **Why.** Each insert sets more bits. A filter built for 1% at 100 million items is near 15% at 200 million and keeps getting worse. Nothing fails loudly. The filter stays correct, it only stops saving work.
+
+        A Bloom filter cannot be resized in place, because it does not store the original items and cannot hash them again into a bigger array. The options are:
+
+        - **Rebuild from the source data** into a larger filter, then swap. Simple when the items live in a database or on disk.
+        - **Chain filters.** When one fills up, add a new, larger one. Inserts go to the newest. Lookups check all of them. This is often called a scalable Bloom filter.
+        - **Rotate by time.** Keep one filter per day and drop old ones. This fits "seen recently" checks.
+
+        **Watch out for.** Not measuring it. Track the real false positive rate, meaning the share of "maybe" answers where the real lookup found nothing, and alert when it passes the target.
+
+- id: approximate-vs-exact-top-k
+  q: You need the top 10 most viewed items from a huge stream of events. When is an approximate count good enough, and how would you compute it?
+  level: Senior
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics: [/system-design/patterns/bloom-filter, /system-design/databases/analytical-databases]
+  a: |-
+    **Short answer.** Approximate is fine when the result is used for display or ranking and a small error cannot change a decision that involves money or fairness. Compute it with a Count-Min Sketch plus a small heap of the current leaders.
+
+    **Why.** Exact counting needs one counter per distinct item. With 500 million distinct items, that is many GB of memory per time window, and most of those items have only a few views.
+
+    A Count-Min Sketch is a small grid of counters, for example 5 rows by 20,000 columns, about 100,000 counters in total. Each event hashes to one counter per row and adds one. The estimate for an item is the smallest of its counters. Collisions can only push counts up, so the estimate is never too low. Next to the sketch, keep a heap of the 100 items with the highest estimates.
+
+    | Use | Approximate or exact |
+    | --- | --- |
+    | Trending list, popular searches | Approximate |
+    | Cache warming, hot key detection | Approximate |
+    | Billing by usage, ad payouts, contest winners | Exact |
+
+    A common design uses both. The sketch gives a live answer in seconds, and a batch job over the stored events gives exact numbers later.
+
+    **Watch out for.** Items near the cut-off. Positions 10 and 11 can swap because of the error. If that matters, count the top 100 candidates exactly.
+
+- id: which-failures-are-safe-to-retry
+  q: Which failed calls should a client retry, and which should it never retry?
+  level: Junior
+  category: system-design-patterns
+  subcategory: reliability-resilience
+  topics:
+    [
+      /system-design/patterns/circuit-breaker-and-retries,
+      /system-design/patterns/idempotency,
+      /system-design/fundamentals/http,
+    ]
+  a: |-
+    **Short answer.** Retry failures that are likely to be temporary, and only when repeating the call is safe. Never retry an error that says the request itself is wrong.
+
+    **Why.** A retry helps only if the next attempt can end differently.
+
+    | Failure | Retry | Reason |
+    | --- | --- | --- |
+    | Timeout, connection reset | Yes | The network or server may recover |
+    | `503`, `502`, `504` | Yes | The server is overloaded or restarting |
+    | `429` | Yes, after waiting | Wait for the time in `Retry-After` |
+    | `400`, `422` | No | The same bad input fails again |
+    | `401`, `403` | No | Fix the credentials or permissions first |
+    | `404` | No | The thing does not exist |
+
+    The second test is safety. After a timeout the client does not know whether the server did the work. Repeating a read is harmless. Repeating "create order" may create two orders, unless the request carries an idempotency key, a unique id that lets the server recognise the repeat.
+
+    Limit retries to 2 or 3 attempts, with a growing, randomised delay between them.
+
+    **Watch out for.** Retrying at every layer. If the app, the gateway and the service each retry 3 times, one failure becomes 27 calls. Retry in one place.
+
+- id: choosing-a-timeout-value
+  q: How do you choose the timeout for a call to another service?
+  level: Mid
+  category: system-design-patterns
+  subcategory: reliability-resilience
+  topics: [/system-design/patterns/circuit-breaker-and-retries, /system-design/fundamentals/latency-numbers]
+  a: |-
+    **Short answer.** Set it a little above the callee's slow-but-normal response time, usually its 99th or 99.9th percentile, and always below the time your own caller is willing to wait.
+
+    **Why.** A timeout has two jobs: free resources held by a stuck call, and leave time to do something else, such as a retry or a fallback.
+
+    Use measured latency. Suppose a service answers in 20 ms at the median and 80 ms at the 99th percentile. A timeout of 150 ms cuts off almost no healthy calls and still releases a stuck one quickly. A timeout of 50 ms would fail several percent of good calls. A timeout of 30 seconds, a common library default, lets every thread pile up behind one slow dependency.
+
+    Then check the budget from the top. If the user-facing request must finish in 1 second and this call may be tried twice, two attempts at 150 ms plus a short backoff fit easily. Two attempts at 600 ms do not.
+
+    Set a connect timeout separately and keep it short, since opening a connection inside one data centre takes a few milliseconds.
+
+    **Watch out for.** Setting a timeout once and never looking again. Latency changes as the callee grows. Review timeouts against real percentiles, and alert on the timeout rate.
+  followUps:
+    - q: A request passes through five services, each with its own timeout. What goes wrong, and how do you fix it?
+      level: Senior
+      topics: [/system-design/patterns/circuit-breaker-and-retries, /system-design/fundamentals/rpc]
+      a: |-
+        **Short answer.** Services deep in the chain keep working on requests that the caller has already given up on. Fix it by passing one deadline down the chain, so every service knows how much time is left.
+
+        **Why.** Suppose the edge gives up after 1 second, but each inner service has its own 2 second timeout. When the edge times out, the user sees an error, yet the four services below keep running queries for up to another second or more. That work is wasted, and it happens exactly when the system is already slow.
+
+        With deadline propagation, the first service sets a deadline, for example "now plus 1 second", and sends it with the request. Each service checks it before starting work:
+
+        - If the time left is too short to finish, fail at once.
+        - Otherwise use the remaining time, minus a small margin, as the timeout for its own calls.
+
+        Many RPC frameworks carry the deadline in request metadata. Cancelling in-flight work when the caller disconnects gives the same saving from the other direction.
+
+        **Watch out for.** Sending an absolute clock time between machines whose clocks differ. Send the remaining time, or allow for a small clock error.
+
+- id: bulkhead-pattern
+  q: What is the bulkhead pattern, and what problem does it solve?
+  level: Mid
+  category: system-design-patterns
+  subcategory: reliability-resilience
+  topics: [/system-design/patterns/circuit-breaker-and-retries, /system-design/patterns/back-pressure]
+  a: |-
+    **Short answer.** A bulkhead gives each dependency or each class of work its own limited share of resources. When one fills up, the others keep working.
+
+    **Why.** The name comes from ships, where walls split the hull so that one leak floods one section. In a service, the shared resource is usually threads or connections.
+
+    Take a service with 200 worker threads that calls payments, search and recommendations. Recommendations becomes slow and each call now waits 2 seconds. At 100 such requests per second, all 200 threads are stuck on recommendations within 2 seconds. Payments and search are healthy, but no thread is free to call them. One slow, optional feature has taken down the whole service.
+
+    With bulkheads, recommendations gets at most 20 concurrent calls. Call number 21 fails at once and the page shows a fallback. The other 180 threads stay free.
+
+    The same idea works at larger sizes: separate connection pools, separate queues for slow and fast jobs, or separate server groups for big customers.
+
+    | Gain | Cost |
+    | --- | --- |
+    | One failure stays contained | Each pool must be sized and monitored |
+    | Fast failure for the bad dependency | Idle capacity in one pool cannot help another |
+
+    **Watch out for.** Bulkheads without timeouts. A small pool still fills up and stays full if calls never give up.
+
+- id: strong-vs-eventual-by-feature
+  q: Give examples of features that need strong consistency and features where eventual consistency is fine.
+  level: Junior
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics: [/system-design/patterns/consistency-models, /system-design/databases/sync-vs-async-replication]
+  a: |-
+    **Short answer.** Use strong consistency where acting on old data causes a real loss, such as money, stock or permissions. Use eventual consistency where a short delay is harmless, such as counters, feeds and search results.
+
+    **Why.** Strong consistency means every read sees the latest write. Eventual consistency means copies may differ for a short time and then agree. Strong costs latency and can refuse requests during a network failure, so use it only where needed.
+
+    | Feature | Model | What goes wrong otherwise |
+    | --- | --- | --- |
+    | Account balance, payment | Strong | Money is spent twice |
+    | Last seat or last item in stock | Strong | Two people buy the same one |
+    | Unique username | Strong | Two accounts get one name |
+    | Password change, access removal | Strong | An old password or permission still works |
+    | Like and view counts | Eventual | A count is a few seconds old |
+    | News feed, search index | Eventual | A new post appears slightly late |
+    | Product reviews, profile photo | Eventual | Others see the old one briefly |
+
+    The test to apply: "If a user acts on a value that is 5 seconds old, what is the worst result?" If the answer is "nothing much", choose eventual.
+
+    **Watch out for.** Choosing one model for the whole product. A shop needs strong consistency for stock and payment and eventual consistency for reviews, in the same system.
+
+- id: read-your-writes-with-replicas
+  q: What is read-your-writes consistency, and how do you provide it when reads go to replicas?
+  level: Mid
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics:
+    [
+      /system-design/patterns/consistency-models,
+      /system-design/databases/single-leader-replication,
+      /system-design/databases/sync-vs-async-replication,
+    ]
+  a: |-
+    **Short answer.** It is the promise that a user always sees their own changes straight after making them. Provide it by sending that user's reads to the leader for a short time, or by making sure the replica has caught up to the user's last write.
+
+    **Why.** With asynchronous replication, a replica can be behind the leader, often by under a second and sometimes by much more. A user edits their profile, the page reloads from a replica, and the old profile appears.
+
+    Three common fixes:
+
+    1. **Read your own data from the leader.** A user's own profile comes from the leader, and other people's profiles come from replicas.
+    2. **Pin after a write.** For about 10 seconds after any write, send that user's reads to the leader.
+    3. **Track a position.** The write returns its position in the replication log. The client sends it with the next read, and a replica answers only when it has reached that position. Otherwise it waits or passes the read to the leader.
+
+    **Watch out for.** Storing the "recent write" marker only on one device. A user who saves on the phone and then looks on the laptop needs the marker kept on the server side, per user.
+  followUps:
+    - q: What are monotonic reads, and how do you guarantee them?
+      level: Mid
+      topics: [/system-design/patterns/consistency-models, /system-design/databases/single-leader-replication]
+      a: |-
+        **Short answer.** Monotonic reads mean a user never sees data go backwards in time. Once they have seen a newer state, a later read must not show an older one.
+
+        **Why.** Replicas lag by different amounts. A user refreshes a comment thread. The first request hits a replica that is up to date and shows 12 comments. The second hits a replica that is 5 seconds behind and shows 11. A comment has vanished, then it comes back on the next refresh. Nothing was lost, but it looks broken.
+
+        Two ways to prevent it:
+
+        - **Stick each user to one replica**, for example by hashing the user id. One replica only moves forward, so the user's view does too. If that replica fails, the user moves to another and may see one step back.
+        - **Carry the last seen position.** The client remembers the newest log position it has read from. A replica that is behind that position waits or passes the read on.
+
+        This guarantee is weaker than strong consistency. The user may still see slightly old data, only never older than what they saw before.
+
+        **Watch out for.** Round-robin load balancing across replicas. It is the usual cause of this problem.
+
+- id: pacelc-beyond-cap
+  q: What is PACELC, and what does it add to CAP?
+  level: Senior
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics:
+    [
+      /system-design/patterns/consistency-models,
+      /system-design/databases/replication-quorums,
+      /system-design/databases/sync-vs-async-replication,
+    ]
+  a: |-
+    **Short answer.** CAP only describes what a system does during a network partition. PACELC adds the normal case: when there is no partition, the system still has to choose between low latency and consistency.
+
+    **Why.** Read it as: if **P**artition, choose **A**vailability or **C**onsistency, **E**lse choose **L**atency or **C**onsistency.
+
+    Partitions are rare. The latency trade-off applies to every single request. To give a consistent answer, a write must reach several replicas before it is confirmed, and a read must check more than one copy or go to the leader. With replicas in two regions 70 ms apart, a synchronous write costs at least 70 ms more. Confirming after one local copy takes about 1 ms, and other regions may serve old data for a moment.
+
+    | Class | During a partition | Normal operation | Typical example |
+    | --- | --- | --- | --- |
+    | PA/EL | Stay available | Answer fast | Leaderless stores with small quorums |
+    | PC/EC | Refuse some requests | Wait for replicas | Consensus-based databases |
+    | PA/EC | Stay available | Wait for replicas | Less common mixes |
+
+    Many stores let you choose per request, through quorum sizes or a read option.
+
+    **Watch out for.** Labelling a design "AP" or "CP" and stopping there. Interviewers want to hear what a normal write waits for, and what that costs in milliseconds.
+
+- id: where-consistent-hashing-is-used
+  q: Where is consistent hashing used in real systems, and what does it give each of them?
+  level: Junior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics:
+    [
+      /system-design/patterns/consistent-hashing,
+      /system-design/patterns/caching,
+      /system-design/patterns/load-balancing,
+    ]
+  a: |-
+    **Short answer.** It is used wherever a key must map to one of many servers and the list of servers changes over time: cache clusters, partitioned databases, load balancers and CDNs.
+
+    **Why.** In each case, the gain is that adding or removing one server moves only a small share of keys.
+
+    | Where | Key | What it avoids |
+    | --- | --- | --- |
+    | Cache cluster | Cache key | Losing almost the whole cache when a node is added |
+    | Partitioned key-value database | Row key | Copying most of the data between nodes on every change |
+    | Load balancer | User id or session id | Moving users to a different server on every scale event |
+    | CDN | URL | Refetching most content from the origin when a cache server fails |
+    | WebSocket or chat gateways | User id | Losing track of which server holds a user's connection |
+
+    Take a cache with 10 nodes. With simple modulo hashing, adding an 11th node changes the home of about 90% of keys, so most requests miss and hit the database together. With consistent hashing about 1 key in 11 moves.
+
+    **Watch out for.** Using it where it is not needed. If servers are stateless and any of them can answer any request, round robin is simpler and spreads load more evenly.
+
+- id: consistent-vs-rendezvous-hashing
+  q: How does rendezvous hashing compare with a consistent hash ring?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/consistent-hashing]
+  a: |-
+    **Short answer.** Both move only a small share of keys when a server joins or leaves. Rendezvous hashing needs no ring: for each key it scores every server and picks the highest score.
+
+    **Why.** In rendezvous hashing, also called highest random weight hashing, the client computes `hash(key, server)` for each server and chooses the server with the largest value. If that server leaves, each of its keys goes to the server with its next highest score. No other key moves, and the lost server's keys spread evenly over the rest.
+
+    | | Hash ring with virtual nodes | Rendezvous hashing |
+    | --- | --- | --- |
+    | State to keep | Sorted list of ring points, often 100 or more per server | Only the list of servers |
+    | Lookup cost | Binary search, grows with log of ring points | One hash per server |
+    | Evenness of load | Good only with many virtual nodes | Even by design |
+    | Picking replicas | Walk clockwise to the next distinct servers | Take the top 2 or 3 scores |
+
+    With 10 or 50 servers, rendezvous is simpler and the per-key cost is tiny. With thousands of servers, one hash per server per lookup adds up, and a ring is the better choice.
+
+    **Watch out for.** Different clients holding different server lists. With either method, two clients that disagree on membership send the same key to different servers.
+
+- id: requests-during-ring-rebalance
+  q: A node joins a consistent hashing ring. What happens to reads and writes that arrive while data is still moving?
+  level: Senior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics:
+    [
+      /system-design/patterns/consistent-hashing,
+      /system-design/case-studies/key-value-store,
+      /system-design/patterns/sharding,
+    ]
+  a: |-
+    **Short answer.** The old owner keeps serving each key range until the new node has a full copy. Ownership switches only after that, and requests sent to the wrong node are passed on.
+
+    **Why.** Moving the data takes minutes or hours. If the new node answered for its ranges from the first second, reads would miss data that has not arrived yet. A safe join has stages:
+
+    1. **Announce.** The new node joins as "pending" for its ranges. The old owners still answer reads.
+    2. **Copy.** Existing data streams to the new node in the background.
+    3. **Dual write.** During the copy, new writes for those ranges go to both the old owner and the new node, so the copy never falls behind.
+    4. **Switch.** When the copy is complete, the new node becomes the owner and the old one deletes its copy later.
+
+    Clients learn about ring changes at different times. A node that receives a request for a range it no longer owns forwards it, or replies with the new owner so the client updates its view.
+
+    **Watch out for.** Adding many nodes at once. Each join adds copy traffic on top of live traffic. Limit the copy speed and add nodes one at a time.
+
+- id: cqrs-vs-event-sourcing-difference
+  q: What is the difference between CQRS and event sourcing, and can you use one without the other?
+  level: Mid
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics: [/system-design/patterns/cqrs-event-sourcing, /system-design/databases/polyglot-persistence]
+  a: |-
+    **Short answer.** CQRS is about having separate models for writing and reading. Event sourcing is about how the write side stores data: as a list of events, with no "current state" row as the source of truth. Each works without the other.
+
+    **Why.** They answer different questions.
+
+    | | CQRS | Event sourcing |
+    | --- | --- | --- |
+    | Question it answers | Who serves reads and who serves writes | What is the source of truth |
+    | Core idea | A write model and one or more read models | Append every change as an event, compute state by replaying |
+    | Main gain | Each side is shaped and scaled for its job | Full history, audit, rebuild of any view |
+
+    **CQRS alone** is common. Orders are written to a normal relational table, and a copy flows to a search index that serves the listing pages. There are no stored events.
+
+    **Event sourcing alone** is possible but awkward. Answering "all orders over 100 dollars" by replaying every order's events is far too slow, so in practice you build read views from the events. That is CQRS. This is why event sourcing nearly always arrives with CQRS, while CQRS often stands alone.
+
+    **Watch out for.** Adopting both because they are mentioned together. If the need is "reads and writes have different shapes", plain CQRS with a normal database is enough and much simpler.
+
+- id: cqrs-stale-read-after-save
+  q: In a CQRS system a user saves a change and the next page still shows the old value. How do you handle that?
+  level: Mid
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics: [/system-design/patterns/cqrs-event-sourcing, /system-design/patterns/consistency-models]
+  a: |-
+    **Short answer.** The read model is updated a moment after the write, so cover that gap for the user who made the change. Show the new value from the write response, or make the read wait for the right version.
+
+    **Why.** The command is stored first. A background consumer then updates the read model, usually within a few hundred milliseconds. A page that reloads at once can read too early.
+
+    Options, from simplest to strictest:
+
+    1. **Return the result in the command response.** The screen shows the saved data it already has and does not query the read model.
+    2. **Optimistic update.** The client applies the change locally and corrects itself on the next refresh.
+    3. **Version check.** The command returns a version number, for example 42. The next read asks for "version 42 or newer". The read side waits a short time, up to perhaps 500 ms, until its view reaches that version.
+    4. **Read from the write side** for the few screens where the user must see exact state, such as a payment confirmation.
+
+    **Watch out for.** No visibility of the delay. Measure how far each read model is behind the event stream and alert on it. A stuck consumer otherwise looks like "saves are not working".
+
+- id: changing-event-schema-in-event-store
+  q: Events in an event store are kept forever. How do you change the shape of an event after millions are already stored?
+  level: Senior
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics: [/system-design/patterns/cqrs-event-sourcing, /system-design/fundamentals/serialization]
+  a: |-
+    **Short answer.** Never edit stored events. Add a version to each event type, keep changes backward compatible where you can, and convert old versions to the newest shape when they are read.
+
+    **Why.** The event log is the source of truth and the audit trail. Rewriting it breaks both, so the code must be able to read every version ever written.
+
+    Techniques, in order of preference:
+
+    - **Additive change.** Add an optional field with a default. Old events are read as if the field held the default.
+    - **New version of the event.** For a real change of meaning, write `OrderPlaced` version 2 from now on. Version 1 events stay as they are.
+    - **Upcasting.** A small function converts version 1 to version 2 while loading. The business logic then handles only the newest shape. Converters chain: 1 to 2, then 2 to 3.
+    - **Copy and transform.** As a last resort, write a new stream from the old one with events converted, then switch over. Keep the old stream.
+
+    Store a type name and version number with every event from the first day.
+
+    **Watch out for.** Changing what an existing field means while keeping its name, such as an amount that moves from cents to whole units. Replays then give wrong totals with no error. Use a new field or a new version.
+
+- id: feed-stores-ids-not-posts
+  q: Why does a precomputed feed store post ids and not the full posts?
+  level: Junior
+  category: system-design-patterns
+  subcategory: messaging-async
+  topics: [/system-design/patterns/fan-out, /system-design/patterns/caching, /system-design/case-studies/twitter]
+  a: |-
+    **Short answer.** An id is tiny and never changes. Storing ids keeps the feeds small, and keeps each post in one place, so an edit or delete is one change.
+
+    **Why.** A feed is one list per user. With fan-out on write, a post by someone with 10,000 followers is added to 10,000 lists.
+
+    **Size.** A post id is 8 bytes. A post with text, author details, counts and media links is around 1 KB. For a feed of 800 entries:
+
+    | Stored per entry | One user's feed | 100 million users |
+    | --- | --- | --- |
+    | Id only | 6.4 KB | 640 GB |
+    | Full post | 800 KB | 80 TB |
+
+    **Changes.** If the author edits the post or the like count changes, a copy in every feed would need 10,000 updates. With ids, the post is updated once in the post store.
+
+    Reading the feed then takes two steps: fetch a page of about 20 ids from the feed list, then fetch those 20 posts from a post cache in one batched call. Popular posts are in that cache for everyone, so the second step is fast.
+
+    **Watch out for.** Fetching the posts one by one. Twenty separate calls per page is slow. Use a single multi-get.
+
+- id: feed-for-returning-inactive-user
+  q: With fan-out on write, how do you treat users who have not opened the app for months?
+  level: Mid
+  category: system-design-patterns
+  subcategory: messaging-async
+  topics: [/system-design/patterns/fan-out, /system-design/patterns/caching]
+  a: |-
+    **Short answer.** Stop pushing posts to their feeds, let the stored feed expire, and rebuild it with a pull when they come back.
+
+    **Why.** In most products a large share of accounts are inactive in any given month. Pushing every post to all followers spends write work and memory on feeds nobody will read.
+
+    A common design:
+
+    1. **Mark activity.** Record each user's last active time.
+    2. **Filter at fan-out.** Workers skip followers who have been inactive for more than, say, 30 days.
+    3. **Expire.** Give each stored feed a TTL so unused ones leave memory.
+    4. **Rebuild on return.** When the user opens the app and no feed exists, read recent posts from each account they follow, merge them by time or rank, keep the top few hundred, and store the result. Then resume push for this user.
+
+    The rebuild is a pull-style read. For someone following 300 accounts it might take a few hundred milliseconds, one time.
+
+    **Watch out for.** A wave of returning users, for example after a big push notification. Many rebuilds at once put heavy read load on the post store. Run rebuilds through a queue with a concurrency limit, and show a simple feed of popular posts until the personal one is ready.
+
+- id: hybrid-fan-out-threshold
+  q: In a hybrid feed, how do you decide which accounts are pushed and which are pulled?
+  level: Senior
+  category: system-design-patterns
+  subcategory: messaging-async
+  topics: [/system-design/patterns/fan-out, /system-design/case-studies/twitter, /system-design/case-studies/instagram]
+  a: |-
+    **Short answer.** Set the line where pushing one post would take longer than your freshness target or would use too much of the fan-out fleet. Then also cap how many pulled accounts a reader has to merge.
+
+    **Why.** Work it out from capacity. Suppose the fan-out workers can do 200,000 feed inserts per second beyond normal load, and a post should reach followers within 5 seconds. One post can then use about 1 million inserts. An account with 50 million followers would take 250 seconds of that capacity and delay every other post. So accounts above roughly 1 million followers are pulled.
+
+    Three refinements matter in practice:
+
+    - **Count active followers.** An account with 3 million followers of whom 500,000 are active costs 500,000 inserts.
+    - **Look at posting rate.** Followers times posts per day is the true write cost. A large account that posts once a week is cheap to push.
+    - **Protect the read side.** Each pulled account adds one lookup and a merge at read time. Keep each pulled account's recent posts in a cache, and cap how many are merged per read.
+
+    **Watch out for.** A hard line that accounts cross back and forth. Posts made just before a switch can be missed or shown twice. Deduplicate by post id at read time.
+
+- id: choosing-geohash-precision
+  q: How do you choose the cell size for a "find places within 2 km" query?
+  level: Mid
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics: [/system-design/patterns/geospatial-indexing, /system-design/case-studies/uber-eats]
+  a: |-
+    **Short answer.** Pick cells about as wide as the search radius. The search then covers the user's cell plus the ring of neighbours, and each cell holds a manageable number of items.
+
+    **Why.** Each extra geohash character makes cells about 32 times smaller in area.
+
+    | Geohash length | Approximate cell size |
+    | --- | --- |
+    | 5 | 4.9 km by 4.9 km |
+    | 6 | 1.2 km by 0.6 km |
+    | 7 | 150 m by 150 m |
+
+    For a 2 km radius:
+
+    - **Length 5:** the cell and its 8 neighbours cover about 15 km by 15 km. That is only 9 lookups, but the area is around 17 times larger than the circle, so most candidates are thrown away by the distance filter.
+    - **Length 7:** the circle covers several hundred cells. Very few candidates are wasted, but there are far too many lookups.
+    - **Length 6:** a few dozen cells cover the circle. This is a fair balance in a normal city.
+
+    Density changes the answer. If one length 6 cell in a city centre holds 5,000 restaurants, go finer there. In the countryside, go coarser. Storing each item under two or three lengths lets the query choose per request.
+
+    **Watch out for.** Skipping the exact distance filter. Cells are rectangles and the search area is a circle, so some candidates in the corner cells are outside the radius.
+
+- id: why-h3-uses-hexagons
+  q: Why do some location systems divide the map into hexagons and not squares?
+  level: Mid
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics: [/system-design/patterns/geospatial-indexing, /system-design/case-studies/google-maps]
+  a: |-
+    **Short answer.** Every neighbour of a hexagon is the same distance away and shares a full edge. That makes "nearby" simple and even in all directions.
+
+    **Why.** A square cell has 8 neighbours of two kinds. Four share an edge. Four touch only at a corner, and their centres are about 1.4 times farther away. A hexagon has 6 neighbours, all the same kind and all at the same distance.
+
+    This helps in three ways:
+
+    - **Radius searches.** One ring of hexagons around a cell is close to a circle. A ring of squares is a square, and its corners reach farther than its sides.
+    - **Movement.** A driver leaving a cell crosses into one of 6 equal neighbours. This gives cleaner counts of flow between cells.
+    - **Smoothing.** To compute demand or surge pricing, you average a cell with its neighbours. Equal distances mean equal weights.
+
+    | | Squares (geohash style) | Hexagons |
+    | --- | --- | --- |
+    | Neighbour distance | Two different distances | One distance |
+    | Parent and child cells | A parent splits exactly into children | Children only roughly fit the parent |
+    | Key in a plain database | Prefix of a string works | Needs a library to compute cells |
+
+    **Watch out for.** Assuming a coarse hexagon contains exactly its fine hexagons. It does not, so rolling up counts from fine to coarse cells is slightly approximate.
+
+- id: nearest-k-in-sparse-areas
+  q: A user asks for the 10 nearest drivers, but the cells around them are almost empty. How does the search work?
+  level: Senior
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics:
+    [
+      /system-design/patterns/geospatial-indexing,
+      /system-design/databases/r-tree,
+      /system-design/case-studies/uber-eats,
+    ]
+  a: |-
+    **Short answer.** Search outward in growing rings until you have enough candidates, then continue until no unsearched cell could hold a closer one. Stop at a maximum radius.
+
+    **Why.** A fixed "my cell plus neighbours" search suits a dense city. In a rural area the same 9 cells may hold 2 drivers.
+
+    1. Search the user's cell and the first ring of neighbours.
+    2. If fewer than 10 results are found, add the next ring. Repeat.
+    3. Once there are 10 candidates, note the distance to the 10th. Keep adding rings until the searched area fully covers a circle of that distance. A driver in an unsearched cell just outside the last ring can be closer than one found in a far corner.
+    4. Stop at a limit such as 20 km and return what was found.
+
+    Two ways to make this cheaper:
+
+    - **Switch to coarser cells** as the search grows. One ring of larger cells covers the same ground in 9 lookups.
+    - **Use a tree.** A quadtree or R-tree answers nearest-neighbour queries directly, because it visits the closest regions first and skips empty space.
+
+    **Watch out for.** Having no upper limit. On an empty map the search would keep growing and scan a whole country. Cap both the radius and the number of rings.
+
+- id: same-idempotency-key-different-body
+  q: A request arrives with an idempotency key the server has seen before, but the request body is different. What should the server do?
+  level: Mid
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics: [/system-design/patterns/idempotency, /system-design/fundamentals/api-design]
+  a: |-
+    **Short answer.** Reject it with a clear client error. Do not run the new request, and do not return the old stored response.
+
+    **Why.** An idempotency key means "this is the same operation as before". A different body under the same key means the client has a bug, such as reusing one key for every request, or creating keys from a timestamp that collides.
+
+    Both quiet options are wrong:
+
+    - **Returning the stored response** tells the client that a payment of 80 succeeded when the stored one was for 50. The client now believes something that never happened.
+    - **Running the new request** removes the protection that the key exists for.
+
+    To detect the case, store a fingerprint with the key: a hash of the request body, together with the user and the endpoint. On a repeat, compare fingerprints.
+
+    | Key found | Fingerprint | Action |
+    | --- | --- | --- |
+    | No | Not applicable | Process and store the result |
+    | Yes | Same | Return the stored response |
+    | Yes | Different | Reject, commonly with `422` or `409` |
+
+    **Watch out for.** Hashing fields that change between honest retries, such as a client timestamp or a trace id. A real retry would then look like a different request. Hash only the fields that define the operation.
+
+- id: crash-between-side-effect-and-key-save
+  q: The server charges the card, then crashes before it saves the result under the idempotency key. What happens on the retry, and how do you make it safe?
+  level: Senior
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics:
+    [/system-design/patterns/idempotency, /system-design/case-studies/kindle-payments, /system-design/patterns/saga]
+  a: |-
+    **Short answer.** Without care, the retry finds no finished record and charges again. Make it safe by recording the key before the charge, and by sending the same key to the payment provider so that it also refuses to charge twice.
+
+    **Why.** A charge at an outside provider and a write to your database cannot be one transaction. A crash can land between them.
+
+    1. **Reserve first.** Insert the key with status "started" before doing anything else. A unique constraint makes this atomic.
+    2. **Pass the key on.** Call the provider with an idempotency key derived from yours. If the call is repeated, the provider returns the first result and does not charge again.
+    3. **Save the result.** Store the outcome and mark the key "done".
+    4. **Recover.** A retry that finds "started" does not start from zero. It repeats step 2 with the same downstream key, then finishes step 3.
+
+    For effects inside your own database, the answer is simpler: write the business change and the key record in one local transaction, so both happen or neither does.
+
+    **Watch out for.** Records left at "started" for ever when the client never retries. Run a background job that finds old ones and completes them by asking the provider what happened.
+
+- id: why-have-a-single-leader
+  q: Why do many distributed systems pick a single leader at all?
+  level: Junior
+  category: system-design-patterns
+  subcategory: reliability-resilience
+  topics: [/system-design/patterns/leader-election, /system-design/databases/single-leader-replication]
+  a: |-
+    **Short answer.** One node making the decisions gives one clear order of events. That removes conflicts which are very hard to fix when several nodes decide at once.
+
+    **Why.** Some jobs go wrong if two nodes do them at the same time:
+
+    - **Database writes.** Two nodes accept different changes to the same row. Which one is right?
+    - **Scheduled jobs.** Two schedulers both run the nightly billing job, and customers are charged twice.
+    - **Assigning work.** Two coordinators give the same partition to different workers.
+
+    With a leader, every such decision goes through one place. The leader puts changes in a sequence, and followers copy that sequence. Everyone ends with the same result.
+
+    | Gain | Cost |
+    | --- | --- |
+    | One order of writes, no conflicts | All writes pass through one node, which limits write throughput |
+    | Simple to reason about | A short pause when the leader fails and a new one is chosen |
+    | Followers can serve reads | Reads from followers may be slightly old |
+
+    The costs are usually reduced by splitting data into many partitions, each with its own leader, so no single node handles everything.
+
+    **Watch out for.** Assuming there is always exactly one leader. During a failure, an old leader may still believe it is in charge for a few seconds. The system must be built so its late writes are refused.
+
+- id: how-a-distributed-lock-works
+  q: How does a distributed lock work, and why must it expire?
+  level: Mid
+  category: system-design-patterns
+  subcategory: reliability-resilience
+  topics: [/system-design/patterns/leader-election, /system-design/patterns/consistency-models]
+  a: |-
+    **Short answer.** A client takes the lock by creating a key in a shared, consistent store with an atomic "create only if absent" operation. The key has a time limit, so a client that crashes cannot hold the lock for ever.
+
+    **Why.** The steps are:
+
+    1. **Acquire.** The client creates the key, for example `lock/report-job`, with its own unique id as the value and a time to live of 30 seconds. Only one client can succeed.
+    2. **Renew.** While working, the holder extends the time every 10 seconds.
+    3. **Release.** When done, it deletes the key, but only if the value is still its own id.
+    4. **Expire.** If the holder dies, renewals stop and the store removes the key. Another client can now take it.
+
+    The expiry also creates the main risk. A holder that is paused for 40 seconds, for example by a long garbage collection, wakes up still believing it has the lock. Meanwhile someone else has taken it. For work where this would corrupt data, the protected resource must check a fencing token, a number that grows with every grant, and refuse the older holder.
+
+    **Watch out for.** Keeping the lock in a store that can lose it on failover. Use a coordination service built on consensus when correctness depends on the lock.
+  followUps:
+    - q: How do you choose the heartbeat interval and the timeout that triggers a failover?
+      level: Mid
+      topics: [/system-design/patterns/leader-election, /system-design/fundamentals/availability]
+      a: |-
+        **Short answer.** Make the timeout several times the heartbeat interval, and longer than the pauses a healthy node normally has. A shorter timeout gives faster failover and more false alarms.
+
+        **Why.** A follower cannot tell "the leader is dead" from "the leader is slow". A common setting is a heartbeat every 1 second and a timeout of 5 to 10 seconds, so several heartbeats must be missed in a row.
+
+        | Timeout | Good | Bad |
+        | --- | --- | --- |
+        | 1 to 2 seconds | Very short outage on a real failure | A brief network problem or pause causes a needless failover |
+        | 10 to 30 seconds | Few false failovers | Writes are down for that long on a real failure |
+
+        A needless failover is costly. Writes pause during the election, clients reconnect, and work in progress may be redone.
+
+        Total downtime is more than the timeout. It is detection time, plus election time, plus the time for clients to find the new leader. With a 10 second timeout, expect 15 to 20 seconds in total.
+
+        **Watch out for.** Every follower using the same timeout. They all start an election at the same moment and split the vote. Add a random extra delay to each.
+
+- id: paxos-vs-raft
+  q: Compare Paxos and Raft for a replicated log behind a fault-tolerant key-value store.
+  level: Senior
+  category: system-design-patterns
+  subcategory: reliability-resilience
+  topics:
+    [
+      /system-design/patterns/leader-election,
+      /system-design/case-studies/key-value-store,
+      /system-design/patterns/consistency-models,
+    ]
+  a: |-
+    **Short answer.** They give the same guarantees at about the same cost. Raft is specified as a complete, leader-based log protocol and is easier to build correctly. Paxos is more general and leaves more design work to the builder.
+
+    **Why.** Both need a majority of nodes to agree, both survive the loss of a minority, and both commit an entry in one round trip from the leader to a majority in the normal case.
+
+    | | Paxos (Multi-Paxos) | Raft |
+    | --- | --- | --- |
+    | Starting point | Agreement on one value, extended to a log | A replicated log from the start |
+    | Who can lead | Any node, which then fetches entries it is missing | Only a node whose log is already up to date |
+    | Log gaps | Allowed, filled in later | Not allowed, the log is continuous |
+    | Membership changes, snapshots | Left to each implementation | Part of the description |
+
+    For a key-value store, the log holds write commands, and each node applies them in order. Raft sends data only from leader to followers, which is easy to follow and test. Paxos variants allow more freedom, such as designs with no fixed leader.
+
+    Both make the same availability choice: the side of a partition without a majority stops accepting writes.
+
+    **Watch out for.** Writing either one yourself for production. Use a tested library or a store that already includes one.
+
+- id: load-balancing-algorithm-choice
+  q: Round robin, least connections or "pick two at random" for load balancing. How do you choose?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/load-balancing, /system-design/fundamentals/load-balancing-basics]
+  a: |-
+    **Short answer.** Use round robin when requests cost about the same. Use least connections when costs vary a lot. Use "two random choices" when there are many balancers that cannot share exact state.
+
+    **Why.**
+
+    | Algorithm | How it picks | Fits | Weak point |
+    | --- | --- | --- | --- |
+    | Round robin | Next server in turn | Short, similar requests on equal servers | Ignores how busy each server is |
+    | Weighted round robin | In turn, in proportion to a weight | Servers of different sizes | Weights are fixed |
+    | Least connections | Server with the fewest open requests | Mixed fast and slow requests, long connections | Needs a current count per server |
+    | Two random choices | Pick 2 servers at random, send to the less busy | Many independent balancers | Slightly less even than a full scan |
+    | Hash of a key | Same key goes to the same server | Caches, sessions held in memory | One hot key overloads one server |
+
+    Round robin fails when cost varies. If one request in ten takes 2 seconds, some servers collect several slow requests while others sit idle.
+
+    With 20 balancers all using least connections on slightly old data, they all pick the same "least loaded" server at once and overload it. Comparing two random servers avoids that.
+
+    **Watch out for.** A newly added server under least connections. It has zero connections and receives a flood. Ramp it up slowly.
+
+- id: designing-load-balancer-health-checks
+  q: How would you design health checks for servers behind a load balancer?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/load-balancing, /system-design/fundamentals/availability]
+  a: |-
+    **Short answer.** Give each server a cheap endpoint that says "I can serve traffic now". Probe it every few seconds, remove a server after a few failures in a row, and also watch real request errors.
+
+    **Why.** A check that only confirms the process is running misses real failures: a full disk, an exhausted connection pool, or a server still warming up.
+
+    Design choices:
+
+    - **What the endpoint tests.** The server's own state: it has started, loaded its config and has free worker threads. Keep it under a few milliseconds.
+    - **Timing.** A probe every 5 seconds with removal after 3 failures means a dead server gets traffic for up to 15 seconds.
+    - **Return.** Require 2 or 3 passes before adding a server back, so an unstable one does not flip in and out.
+    - **Passive checks.** Count errors and timeouts on real requests. This catches a failing server within about a second and needs no probe.
+
+    Keep two separate questions: "should this process be restarted" and "should it receive traffic". A server that is busy starting up should get no traffic, but must not be killed.
+
+    **Watch out for.** Checking shared dependencies inside the health endpoint. If it queries the database and the database has a brief problem, every server fails its check at the same moment.
+  followUps:
+    - q: Every server fails its health check at the same time. What should the load balancer do?
+      level: Senior
+      topics: [/system-design/patterns/load-balancing, /system-design/patterns/circuit-breaker-and-retries]
+      a: |-
+        **Short answer.** Keep sending traffic to all of them. When most of the fleet looks unhealthy at once, the check itself or a shared dependency is the likely cause, and removing every server guarantees a full outage.
+
+        **Why.** Health checks assume failures are independent: one server breaks and the others take over. If 100% fail in the same second, that assumption no longer holds. Common causes are a bad health check deploy, a slow shared database, or a network problem between the balancer and the servers.
+
+        Compare the two choices:
+
+        | Balancer action | If servers are in fact fine | If servers are in fact broken |
+        | --- | --- | --- |
+        | Remove all | Full outage, caused by the balancer | Full outage |
+        | Keep sending to all | Service continues | Errors, same as before |
+
+        Sending traffic is never worse. Many load balancers have this built in: when the healthy share drops below a set level, such as 50%, they ignore health status and spread traffic over every server.
+
+        Apply the same thinking to automatic restarts. Limit how many servers can be restarted or replaced at one time.
+
+        **Watch out for.** Silence. This mode hides a real problem, so it must raise a loud alert.
+
+- id: load-balancing-long-lived-connections
+  q: How does load balancing change for long-lived connections such as WebSockets or gRPC streams?
+  level: Senior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics:
+    [/system-design/patterns/load-balancing, /system-design/fundamentals/websockets, /system-design/fundamentals/rpc]
+  a: |-
+    **Short answer.** The balancer chooses a server once, when the connection opens. After that the load stays where it landed, so you must balance connections at connect time and rebalance them on purpose.
+
+    **Why.** With short HTTP requests, every request is a new chance to spread load. A WebSocket can stay open for hours. Three problems follow:
+
+    - **New servers stay empty.** After scaling from 10 to 12 servers, the two new ones have no connections, and the old ten are as full as before.
+    - **Deploys cause reconnect waves.** Restarting a server drops, say, 50,000 connections. They all reconnect within seconds.
+    - **Many requests on one connection.** gRPC sends many calls over one HTTP/2 connection. A balancer that works per connection sends all of them to one server.
+
+    Fixes:
+
+    1. Use least connections for new connections.
+    2. Set a maximum connection age, for example 30 minutes plus a random extra, so connections close politely and reconnect elsewhere.
+    3. Drain before deploys: ask clients to reconnect in small batches, with random delays.
+    4. For gRPC, balance per request with a layer 7 proxy or with client-side balancing.
+
+    **Watch out for.** Counting connections as the only measure of load. One connection may be idle and another may carry 1,000 messages a second.
+
+- id: sync-call-or-message-queue
+  q: When should one service call another directly, and when should it send a message through a queue?
+  level: Junior
+  category: system-design-patterns
+  subcategory: messaging-async
+  topics: [/system-design/patterns/message-queues, /system-design/fundamentals/rpc]
+  a: |-
+    **Short answer.** Call directly when the caller needs the answer to continue. Use a queue when the work can finish later and the caller only needs to know the request was accepted.
+
+    **Why.** A direct, synchronous call is simple and gives an answer at once. It also ties the two services together: if the callee is slow or down, so is the caller.
+
+    A queue separates them. The sender stores a message and moves on. The receiver works at its own pace and can be offline for a while.
+
+    | Situation | Choice |
+    | --- | --- |
+    | Check a password, read a price, check stock before showing "buy" | Direct call |
+    | Send an email, resize an image, update a search index | Queue |
+    | Sudden bursts, such as 10,000 uploads in one minute | Queue, to smooth the load |
+    | Several services must react to one event | Publish to a topic |
+    | The step is slow, around 30 seconds | Queue, then notify the user when done |
+
+    A typical order flow uses both. Payment approval is a direct call, because the user is waiting for yes or no. The receipt email, the analytics event and the warehouse notice go through a queue.
+
+    **Watch out for.** Using a queue and then waiting for the reply inside the same request. That has the delay of a queue and the tight coupling of a direct call.
+
+- id: kafka-partitions-consumer-groups-parallelism
+  q: How do partitions and consumer groups work in a log-based broker such as Kafka, and what limits parallelism?
+  level: Mid
+  category: system-design-patterns
+  subcategory: messaging-async
+  topics: [/system-design/patterns/message-queues, /system-design/case-studies/distributed-message-queue]
+  a: |-
+    **Short answer.** A topic is split into partitions, each an ordered log. Within one consumer group, each partition is read by exactly one consumer. So the number of partitions is the upper limit on parallel consumers.
+
+    **Why.** A producer picks a partition for each message, usually by hashing a key such as the order id. All messages with the same key land in the same partition and keep their order.
+
+    A consumer group is a set of consumers that share the work of one application. The broker assigns each partition to one member of the group. Each group keeps its own position, called an offset, in every partition. Two groups, such as billing and analytics, each read every message independently.
+
+    Example with 12 partitions:
+
+    | Consumers in the group | Result |
+    | --- | --- |
+    | 3 | Each reads 4 partitions |
+    | 12 | Each reads 1 partition, full parallelism |
+    | 20 | 12 are working, 8 sit idle |
+
+    When a consumer joins or dies, the group reassigns partitions. This is a rebalance, and reading can pause briefly while it happens.
+
+    To go faster with a fixed partition count, make each consumer quicker with batching, or hand messages to worker threads while keeping order per key.
+
+    **Watch out for.** One slow message. A partition is processed in order, so one stuck message holds back everything behind it in that partition.
+  followUps:
+    - q: You need more parallelism, so you add partitions to a live topic. What can break?
+      level: Senior
+      topics: [/system-design/patterns/message-queues, /system-design/patterns/consistent-hashing]
+      a: |-
+        **Short answer.** Per-key ordering can break for a while, because keys now map to different partitions than before.
+
+        **Why.** The usual rule is partition equals hash of the key modulo the partition count. Going from 12 to 24 partitions changes the result for about half of the keys. Order 77 had its earlier events in partition 5. Its new events go to partition 17. A consumer of partition 17 may process "order shipped" before another consumer has finished "order paid" from the backlog in partition 5.
+
+        Anything that depends on a key always sitting in one partition is also affected, such as a consumer that keeps per-key state in local memory.
+
+        Ways to handle it:
+
+        - **Plan ahead.** Create more partitions than needed at the start, for example 48 when 12 would do. Extra partitions cost little.
+        - **Drain first.** Pause producers, let consumers empty the old partitions, then add partitions and resume.
+        - **New topic.** Create a topic with the new count, switch producers to it, and let consumers finish the old topic before reading the new one.
+        - **Make consumers tolerant.** Carry a version number per entity and ignore events that arrive out of order.
+
+        **Watch out for.** Reducing the count later. Most log-based brokers do not let you remove partitions from a topic.
+
+- id: outbox-for-database-and-event
+  q: A service must save a row and publish an event about it. How do you make sure both happen or neither does?
+  level: Senior
+  category: system-design-patterns
+  subcategory: messaging-async
+  topics: [/system-design/patterns/message-queues, /system-design/patterns/saga, /system-design/patterns/idempotency]
+  a: |-
+    **Short answer.** Do not write to the database and the broker separately. Write the event into an outbox table in the same database transaction as the row, and let a separate relay publish it afterwards.
+
+    **Why.** Two separate writes can always be split by a crash:
+
+    | Order | Crash in between leaves |
+    | --- | --- |
+    | Save the row, then publish | A saved order that no other service ever hears about |
+    | Publish, then save the row | An event for an order that does not exist |
+
+    The database and the broker share no transaction, so retries alone cannot close this gap.
+
+    With an outbox, the order row and an "order created" row are inserted in one local transaction. Both exist or neither does. A relay then reads unpublished outbox rows in order, sends them to the broker, and marks them as sent. The relay either polls the table every 100 ms or so, or follows the database's change log, which adds less load and less delay.
+
+    If the relay crashes after sending and before marking, it sends the same event again. Delivery is therefore at least once, and consumers must ignore duplicates by event id.
+
+    **Watch out for.** An outbox table that only grows. Delete or archive sent rows, and alert on the age of the oldest unsent row. That number shows a stuck relay early.
+
+- id: sliding-window-log-vs-counter
+  q: What is the difference between a sliding window log and a sliding window counter for rate limiting?
+  level: Mid
+  category: system-design-patterns
+  subcategory: reliability-resilience
+  topics: [/system-design/patterns/rate-limiting, /system-design/case-studies/rate-limiter]
+  a: |-
+    **Short answer.** The log stores the time of every request and is exact. The counter stores two numbers per user and estimates the count, with a small error and far less memory.
+
+    **Why.** The log keeps a sorted list of request times per user. On each request, remove entries older than 60 seconds and count the rest. With a limit of 100 per minute, that is up to 100 timestamps per user, so 1 million active users at 8 bytes each need about 800 MB.
+
+    The counter keeps the count for the current fixed window and for the previous one. It estimates the sliding count as:
+
+    current count, plus previous count times the share of the previous window that still overlaps.
+
+    Example: the limit is 100. The previous minute had 80 requests, and the current minute has 30 so far and is 20 seconds old. The window still covers 40 of the previous 60 seconds, so the estimate is 30 plus 80 times 0.67, about 83. That is under 100, so the request is allowed.
+
+    The estimate assumes the previous window's requests were spread evenly.
+
+    **Watch out for.** Choosing the log for a high limit. At 10,000 requests per minute per key, storing every timestamp is very costly. Use the counter or a token bucket.
+
+- id: rate-limiter-precision-cost
+  q: How precise does a distributed rate limiter need to be, and what does extra precision cost?
+  level: Senior
+  category: system-design-patterns
+  subcategory: reliability-resilience
+  topics:
+    [
+      /system-design/patterns/rate-limiting,
+      /system-design/case-studies/rate-limiter,
+      /system-design/fundamentals/api-gateway,
+    ]
+  a: |-
+    **Short answer.** It depends on what the limit protects. Limits that guard capacity can be off by 5% to 10%. Limits tied to money or scarce resources need to be exact. Exactness costs a shared-store round trip on every request.
+
+    **Why.** An exact limiter checks one shared counter for every request. That adds about 1 ms of latency and makes the counter store a dependency of every call.
+
+    The cheaper design gives each gateway node a small local allowance. A node takes 50 tokens for a key in one call, then serves 50 requests from memory.
+
+    | | Exact, check every request | Local batches |
+    | --- | --- | --- |
+    | Shared-store calls | One per request | One per 50 requests |
+    | Added latency | About 1 ms each | Almost none |
+    | Worst overshoot | None | Nodes times batch size |
+
+    With 20 nodes and batches of 50, the worst case is 1,000 extra requests. Against a limit of 10,000 per minute that is 10%. Against a limit of 100 per minute it is far too much, so small limits need the exact path.
+
+    Use exact for "3 password attempts" or paid quotas, and approximate for protecting the service from a noisy client.
+
+    **Watch out for.** Tokens stranded on idle nodes. Unused local tokens must expire, or a user is refused while quota sits unused elsewhere.
+
+- id: compensation-vs-rollback
+  q: What is a compensating transaction, and how is it different from a database rollback?
+  level: Junior
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics: [/system-design/patterns/saga, /system-design/databases/relational-databases]
+  a: |-
+    **Short answer.** A rollback discards changes that were never committed, as if they did not happen. A compensating transaction is a new action that reverses the business effect of a change that was already committed and visible.
+
+    **Why.** Inside one database, a transaction can roll back because nobody else has seen its changes yet. In a saga, each step commits in its own service. By the time step 3 fails, steps 1 and 2 are permanent and other parts of the system may have acted on them. The only way back is forward: run a new step that cancels the effect.
+
+    | | Rollback | Compensation |
+    | --- | --- | --- |
+    | Who does it | The database, automatically | Code that you write for each step |
+    | What others saw | Nothing | The original change, for a while |
+    | Result | State exactly as before | State that is equivalent in business terms |
+    | Can it fail | Practically never | Yes, so it must be retried until it succeeds |
+
+    Examples: the compensation for "charge the card" is "refund the card". For "reserve the seat" it is "release the seat". The history stays visible. A bank statement shows a charge and a refund, not an empty page.
+
+    **Watch out for.** Assuming compensation restores everything. A refund can take days to reach the customer, and a released seat may already be taken by someone else.
+  followUps:
+    - q: Some steps cannot be undone, such as sending an email or shipping a parcel. How does a saga deal with them?
+      level: Mid
+      topics: [/system-design/patterns/saga]
+      a: |-
+        **Short answer.** Put the steps that cannot be undone as late as possible, after every step that might fail. Once the saga passes that point, it only moves forward and retries until it finishes.
+
+        **Why.** Order the saga in three parts:
+
+        1. **Steps that can be undone**, such as reserving stock and holding money on a card. If one fails, compensate the earlier ones.
+        2. **The point of no return**, often called the pivot. For an order, this is usually capturing the payment.
+        3. **Steps that must succeed in the end**, such as sending the confirmation email and creating the shipment. These are retried until they work. They are never compensated.
+
+        Anything that can be refused for a business reason belongs in part 1. A check such as "is the address deliverable" must run before the pivot, because after it there is no way to say no.
+
+        Two more tools help. Hold and capture separately where possible: holding money on a card can be released, a completed charge needs a refund. And where true undo is impossible, send a correction, for example a second email saying the order was cancelled.
+
+        **Watch out for.** Steps in part 3 that are not idempotent. They will be retried, so a repeat must not ship two parcels.
+
+- id: tcc-vs-saga
+  q: What is try-confirm-cancel, and how does it differ from a saga with compensations?
+  level: Mid
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics:
+    [/system-design/patterns/saga, /system-design/case-studies/hotel-booking, /system-design/case-studies/ticketmaster]
+  a: |-
+    **Short answer.** Try-confirm-cancel (TCC) first asks every service to reserve what it needs, then confirms all reservations or cancels all of them. A plain saga applies real changes step by step and reverses them if a later step fails.
+
+    **Why.** In TCC each service offers three operations:
+
+    - **Try.** Check and reserve. Hold 1 seat, hold 50 dollars. Nothing is final.
+    - **Confirm.** Make the reservation final. It must not fail for business reasons.
+    - **Cancel.** Release the reservation.
+
+    A coordinator calls Try on every service. If all succeed, it calls Confirm on each. If any fails, it calls Cancel on those that succeeded.
+
+    | | Saga with compensation | TCC |
+    | --- | --- | --- |
+    | Effect of a step | Real and visible at once | A hold, not yet final |
+    | Undo | Reverse a real change, such as a refund | Release a hold |
+    | What others see mid-flow | Changes that may be reversed | Reduced availability only |
+    | Demand on services | A compensation per step | Three operations and a reservation state per service |
+
+    TCC suits scarce items, such as seats, rooms and balances, where showing a change that is later reversed would confuse users or allow overselling.
+
+    **Watch out for.** Holds that never end. If the coordinator crashes after Try, the hold stays in place. Every reservation needs an expiry time, and Confirm and Cancel must be safe to repeat.
+
+- id: saga-lack-of-isolation
+  q: Sagas give up isolation. What can go wrong because of that, and how do you limit the damage?
+  level: Senior
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics:
+    [
+      /system-design/patterns/saga,
+      /system-design/patterns/consistency-models,
+      /system-design/databases/relational-databases,
+    ]
+  a: |-
+    **Short answer.** Other requests can see and change data while a saga is half finished. This allows dirty reads and lost updates. Limit it with pending states, version checks and careful ordering of steps.
+
+    **Why.** A saga commits each step, so its partial result is visible straight away. Typical problems:
+
+    - **Dirty read.** A saga adds 100 loyalty points, then fails and removes them. In between, the customer spent those points.
+    - **Lost update.** A saga reads an order, and a cancel request changes it. The saga then writes its own result over the cancellation.
+    - **Changed ground.** A step checks a credit limit. By the time a later step uses it, another saga has consumed the credit.
+
+    Countermeasures:
+
+    | Technique | What it does |
+    | --- | --- |
+    | Semantic lock | Mark the record "pending" so that others wait, refuse or treat it with care |
+    | Version check | Update only if the version is unchanged since it was read, otherwise re-read and decide again |
+    | Reorder steps | Grant benefits, such as points or credit, in the last step, after nothing can fail |
+    | Commutative updates | Use "add 10" and "subtract 10", which give the same result in any order |
+
+    **Watch out for.** Pending states that are never cleared. A saga that dies midway leaves records locked. Add a timeout and a recovery job that finishes or compensates stuck sagas.
+
+- id: sharding-vs-partitioning
+  q: What is the difference between partitioning and sharding?
+  level: Junior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/sharding, /system-design/databases/relational-databases]
+  a: |-
+    **Short answer.** Partitioning means splitting a large table into smaller pieces by a rule. Sharding is partitioning where the pieces live on different database servers.
+
+    **Why.** People often use the two words for the same thing, so define them when you use them.
+
+    | | Partitioning on one server | Sharding |
+    | --- | --- | --- |
+    | Where the pieces live | Same database server | Separate servers |
+    | Main gain | Smaller indexes, faster cleanup, queries that skip pieces | More write capacity and storage than one machine has |
+    | Joins and transactions | Work as normal | Hard across shards |
+    | Operations | Little extra work | Routing, rebalancing, many backups |
+
+    An example of partitioning on one server: an events table split by month. A query for last week reads only one piece. Removing data older than a year means dropping whole pieces, which takes seconds. Deleting the same rows one by one would take hours.
+
+    There is also vertical partitioning, which splits by columns or by tables. For example, move a large "description" column or the whole reviews table into its own store.
+
+    Sharding is the heavy option. It is needed when the data or the write rate no longer fits on one server.
+
+    **Watch out for.** Saying "we will partition the table" in an interview when you mean adding machines. Say which one you mean, because the costs are very different.
+
+- id: should-you-shard-at-all
+  q: A database is getting slow as load grows. How do you decide whether to shard it, and what would you try first?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics:
+    [/system-design/patterns/sharding, /system-design/fundamentals/scaling-journey, /system-design/patterns/caching]
+  a: |-
+    **Short answer.** Shard only when writes or data size are more than one primary server can take. Slow reads and slow queries have cheaper fixes, so try those first.
+
+    **Why.** Sharding removes easy joins, cross-row transactions and simple operations. It is very hard to undo. A single well-tuned server on modern hardware can hold a few terabytes and serve thousands of writes per second, which is enough for many products for years.
+
+    Work up this ladder and stop at the first step that solves the problem:
+
+    1. **Fix queries and indexes.** One missing index often explains "the database is slow".
+    2. **Use a bigger machine.** More memory so that the working data fits in RAM.
+    3. **Add a cache** for repeated reads.
+    4. **Add read replicas** when reads are the load.
+    5. **Archive old data** or partition tables by time on the same server.
+    6. **Split by function.** Move one heavy table or feature to its own database.
+    7. **Shard** the table that still does not fit.
+
+    <AnimatedDiagram name="fundamentals/scaling-journey" highlight={["cache", "replicas"]} caption="A cache and read replicas remove most read load before sharding is needed." />
+
+    The key question is whether the pressure comes from reads or writes. Replicas and caches multiply read capacity. Only sharding multiplies write capacity.
+
+    **Watch out for.** Waiting too long. Moving data while the primary is at 95% load is risky. Start planning when you can see the limit about a year ahead.
+
+- id: secondary-index-on-sharded-data
+  q: Data is sharded by user id, but you need to query by another field such as email or order status. How do secondary indexes work across shards?
+  level: Senior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics:
+    [
+      /system-design/patterns/sharding,
+      /system-design/databases/wide-column-stores,
+      /system-design/databases/newsql-databases,
+    ]
+  a: |-
+    **Short answer.** There are two choices. A local index lives inside each shard, and a query must ask every shard. A global index is a separate lookup table, partitioned by the indexed field, that points to the right shard.
+
+    **Why.**
+
+    | | Local index | Global index |
+    | --- | --- | --- |
+    | Where it lives | In each shard, covering only that shard's rows | In its own table, sharded by the indexed field |
+    | Write cost | One shard, one transaction | Two places: the row and the index entry |
+    | Read by that field | Ask all shards and merge | One index lookup, then one shard |
+    | Freshness | Always current | Often updated asynchronously, so it can lag |
+
+    With 64 shards, a local-index query sends 64 requests. Its latency is that of the slowest shard. This is acceptable for rare queries, such as an admin search, and too costly for a query on every page view.
+
+    A global index makes the read cheap and the write harder, because the row and the index entry sit on different shards.
+
+    Often the best answer is to avoid the problem. If "orders by status" is always asked for one user, the user id is in the query and one shard can answer.
+
+    **Watch out for.** A global index on a low-variety field such as status. All "pending" entries land in one index partition, which becomes a hot spot.
+  followUps:
+    - q: How do you enforce that an email address is unique when users are spread over many shards?
+      level: Senior
+      topics: [/system-design/patterns/sharding, /system-design/patterns/idempotency]
+      a: |-
+        **Short answer.** Keep a separate table keyed by email, where the database enforces uniqueness in one place. Claim the email there first, then create the user.
+
+        **Why.** A unique constraint works only inside one shard. If users are sharded by user id, two sign-ups with the same email can land on different shards, and each shard sees no conflict. Asking all shards "does this email exist" before inserting does not help either, because two requests can both check, both see nothing, and both insert.
+
+        The lookup table maps email to user id and is sharded by email. Every row for one email lives on one shard, so a normal unique key works there.
+
+        Sign-up flow:
+
+        1. Insert the email with the new user id into the lookup table. If the insert fails, the email is taken.
+        2. Create the user row on the user's shard.
+        3. Mark the lookup row as confirmed.
+
+        If step 2 fails, a cleanup job removes unconfirmed lookup rows after a few minutes, so the email is not blocked for ever.
+
+        The same table serves login by email: one lookup gives the user id and therefore the shard.
+
+        **Watch out for.** Different spellings of the same address. Normalise the email, at least to lower case, before using it as the key.
+
+- id: why-not-expose-sequential-ids
+  q: Why is it risky to show auto-increment ids in URLs and API responses, and what would you use?
+  level: Junior
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics:
+    [
+      /system-design/patterns/unique-id-generation,
+      /system-design/fundamentals/security,
+      /system-design/fundamentals/api-design,
+    ]
+  a: |-
+    **Short answer.** Sequential ids reveal how much business you do and make it easy to guess other valid ids. Show a random public id, and keep the sequential one inside the system.
+
+    **Why.** Two things leak.
+
+    - **Volume.** Someone places an order on Monday and gets order 50,000. On Tuesday they get order 50,600. They now know you take about 600 orders a day. Competitors and investors can track this.
+    - **Other records.** If `/invoices/1041` is mine, then `/invoices/1042` is someone else's. An attacker can walk through every id with a simple loop. If even one endpoint forgets a permission check, all records are exposed. Scraping the whole catalogue is also trivial.
+
+    Options:
+
+    | Approach | Notes |
+    | --- | --- |
+    | Random public id, such as a UUID, next to the internal id | Simple, cannot be guessed, needs one more indexed column |
+    | Time-ordered id with random bits | Sorts by time and is hard to guess, but shows the creation time |
+    | Encode or encrypt the number | Short, but relies on a secret that must stay secret |
+
+    The internal auto-increment key can remain for joins and storage, since it is compact and fast.
+
+    **Watch out for.** Treating a random id as access control. A random id only makes guessing hard. Every request must still check that this user may see this record.
+
+- id: strict-vs-roughly-ordered-ids
+  q: Do your ids need to be strictly increasing or only roughly ordered by time? What does each choice cost?
+  level: Mid
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics:
+    [
+      /system-design/patterns/unique-id-generation,
+      /system-design/patterns/leader-election,
+      /system-design/patterns/sharding,
+    ]
+  a: |-
+    **Short answer.** Roughly ordered ids can be created on any server with no coordination. Strictly increasing ids need one place that hands out every number, which becomes a bottleneck and a single dependency. Most features only need rough order.
+
+    **Why.** A Snowflake-style id starts with a timestamp, so ids from different servers sort by time to within the clock difference between machines, usually a few milliseconds. For a feed or a database index, that is fine.
+
+    Strict order means that if A was created before B anywhere in the system, A is smaller than B. Only a single sequencer can promise that. Every id then needs a network call to it, and its failure stops all writes.
+
+    | Need | Choice |
+    | --- | --- |
+    | Sort posts by time, keep index inserts close together | Roughly ordered |
+    | Order of messages inside one chat | A counter per chat |
+    | Entries in one account's ledger | A counter per account |
+    | One global order of all events | A single sequencer or a consensus log |
+
+    The usual trick is to narrow the scope. Strict order per chat or per account needs only a counter kept with that entity, on its own shard.
+
+    **Watch out for.** Using timestamps from different machines to decide which write "really" came first. Clocks differ, so the answer can be wrong.
+
+- id: snowflake-id-bit-budget
+  q: A Snowflake-style id has 64 bits. How would you split them, and what does each part limit?
+  level: Mid
+  category: system-design-patterns
+  subcategory: specialised-structures
+  topics: [/system-design/patterns/unique-id-generation]
+  a: |-
+    **Short answer.** The classic split is 1 unused sign bit, 41 bits of time in milliseconds, 10 bits of machine id and 12 bits of sequence. Each part sets a hard limit: years of life, number of machines, and ids per millisecond per machine.
+
+    **Why.** Do the arithmetic for each field.
+
+    | Field | Bits | Limit |
+    | --- | --- | --- |
+    | Sign | 1 | Kept at zero so that the id is positive in every language |
+    | Timestamp | 41 | 2 to the power 41 ms, about 69.7 years from a chosen start date |
+    | Machine id | 10 | 1,024 generators |
+    | Sequence | 12 | 4,096 ids per millisecond per machine, about 4 million per second |
+
+    Count time from your own start date, for example the first day of the project. Counting from 1970 wastes more than 50 of the 69 years.
+
+    The split can change to fit the system. A service with 10 generators and very high bursts can use 5 machine bits and 17 sequence bits. A system with many small generators can go the other way.
+
+    When the sequence runs out inside one millisecond, the generator waits for the next millisecond.
+
+    **Watch out for.** Passing 64-bit ids to JavaScript as numbers. Values above 2 to the power 53 lose precision, so send ids as strings in JSON.
+  followUps:
+    - q: What happens if two generators end up with the same machine id, and how do you prevent it?
+      level: Senior
+      topics: [/system-design/patterns/unique-id-generation, /system-design/patterns/leader-election]
+      a: |-
+        **Short answer.** They can produce the same id in the same millisecond, and nothing reports it at the time. Prevent it by having each generator claim its machine id from a coordination service and hold the claim only while it is alive.
+
+        **Why.** Uniqueness rests on one assumption: no two live generators share a machine id. If two do, both produce time T, machine 7, sequence 0. The clash shows up later as a failed insert or as one record overwriting another.
+
+        Typical causes:
+
+        - A machine id taken from the last bits of an IP address, when two hosts share those bits.
+        - A container restarted elsewhere while the old copy is still running.
+        - An id copied in a config file or a machine image.
+
+        Safer assignment:
+
+        1. On start, the generator claims a free id in a coordination service as a lease, which is a claim with an expiry time.
+        2. It renews the lease while running. If it cannot renew, it stops issuing ids before the lease ends.
+        3. A released id is reused only after a waiting period longer than any possible clock difference.
+
+        **Watch out for.** Generators that keep running after losing contact with the coordination service. They must stop, or another instance may be given the same id.
