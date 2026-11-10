@@ -61,7 +61,7 @@ interface FullNavSection extends Omit<HeaderNavSection, "groups"> {
     href: string;
     icon?: string;
     items?: unknown[];
-    categories?: { items: unknown[] }[];
+    categories?: { title: string; items: unknown[] }[];
   }[];
 }
 
@@ -85,4 +85,33 @@ export function headerNavSection(nav: FullNavSection): HeaderNavSection {
       count: (g.items?.length ?? 0) + (g.categories ?? []).reduce((n, c) => n + c.items.length, 0),
     })),
   };
+}
+
+/** One block of a group's article list in the header menu: an optional category heading and its articles. */
+export interface HeaderNavBlock {
+  /** Category title; absent for a group's uncategorised items. */
+  title?: string;
+  items: { title: string; href: string }[];
+}
+
+/** Every `on` section's article lists for the header menu: section key → group slug → blocks. */
+export type HeaderNavItems = Record<string, Record<string, HeaderNavBlock[]>>;
+
+/** Builds public/nav-items.json: titles and links only, loaded by the header when a menu first opens. */
+export function headerNavItems(navs: FullNavSection[]): HeaderNavItems {
+  type Item = { title: string; href: string };
+  const pick = (items: unknown[]) => (items as Item[]).map(({ title, href }) => ({ title, href }));
+  return Object.fromEntries(
+    navs.map((nav) => [
+      nav.key,
+      Object.fromEntries(
+        nav.groups.map((g) => {
+          const blocks: HeaderNavBlock[] = [];
+          if (g.items?.length) blocks.push({ items: pick(g.items) });
+          for (const c of g.categories ?? []) if (c.items.length) blocks.push({ title: c.title, items: pick(c.items) });
+          return [g.slug, blocks];
+        })
+      ),
+    ])
+  );
 }
