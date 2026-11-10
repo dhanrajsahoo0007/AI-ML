@@ -1,0 +1,338 @@
+# System design pattern questions that are not written inside an article. All answers are written by TokensToScale.
+- id: what-is-a-cache-and-where-to-place-it
+  q: What is a cache, and where would you place one in a system?
+  level: Junior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/fundamentals/cdn]
+  a: |-
+    **Short answer.** A cache is a small, fast copy of data that is slow or costly to get. Put it as close to the reader as you can, in front of whatever is slowest.
+
+    **Why.** Reading from memory takes well under a millisecond. A database query that hits disk or joins tables takes tens of milliseconds. Most systems read the same few things again and again, so a copy of the popular answers removes most of the slow work.
+
+    There are four usual places, from the user inwards:
+
+    | Place | What it holds | Example |
+    | --- | --- | --- |
+    | Browser or app | Files and responses for one user | Images, scripts |
+    | CDN | Public content, near the user | Product photos, video segments |
+    | Shared cache next to the service | Query results, sessions, computed objects | Redis or Memcached |
+    | Inside the database | Recently used pages | Buffer pool |
+
+    Start with the one that removes the most work. Static files go to the CDN. Repeated database reads go to a shared cache.
+
+    **Watch out for.** Adding a cache before you know what is slow. A cache adds a second copy of the data that can be out of date, so it should pay for that with a real saving.
+  followUps:
+    - q: What data should you not cache?
+      level: Junior
+      a: |-
+        **Short answer.** Data that changes on almost every read, data that is rarely read twice, and data where a stale value causes real harm.
+
+        **Why.** A cache helps only when the same answer is asked for again before it changes. Three cases fail that test:
+
+        - Values that change constantly, such as a live counter. The copy is out of date as soon as it is written.
+        - Values read once, such as a one-time report. You pay to store it and nobody reads it again.
+        - Values that must be exact at the moment of use, such as an account balance when money is about to move, or the number of seats left at the point of sale. Read these from the source of truth.
+
+        Personal data needs care too. A response for one user stored under a key that does not include the user id will be shown to someone else.
+
+        **Watch out for.** Treating "must be correct" as "never cache". A balance shown on a home screen can be a few seconds old. The same balance used to approve a payment cannot.
+- id: what-happens-if-the-cache-goes-down
+  q: What happens to your system if the cache goes down?
+  level: Senior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/patterns/circuit-breaker-and-retries]
+  a: |-
+    **Short answer.** Every read falls through to the database at once. If the database was sized for the 10% of reads that normally miss, it now gets ten times its usual load and can fail as well.
+
+    **Why.** A cache with a 90% hit rate hides nine reads out of ten from the database. Teams then size the database for what it sees, and the cache quietly becomes something the system cannot run without.
+
+    Plan for it in three layers:
+
+    1. **Make loss partial.** Run the cache as several nodes with replicas, with keys spread by consistent hashing. One dead node then loses a slice of the keys, not all of them.
+    2. **Protect the database.** Limit how many requests may go to the database at the same time. Reject or queue the rest and serve a fallback, such as slightly old data from a local in-process cache, or a simpler page.
+    3. **Come back slowly.** A restarted cache is empty. Let traffic back in steps, or warm the popular keys first, so the refill does not look like a second outage.
+
+    **Watch out for.** A short timeout that is missing. If the cache is slow and not dead, every request waits on it. Set a timeout of a few milliseconds and treat a timeout as a miss.
+  followUps:
+    - q: How do you warm a cold cache after a restart or a deploy?
+      level: Senior
+      a: |-
+        **Short answer.** Fill the most popular keys before the cache takes full traffic, and let real traffic back in gradually.
+
+        **Why.** An empty cache has a hit rate of zero, so for the first minutes the database carries every read. Three methods are common:
+
+        - **Replay.** Keep a list of the top keys, taken from recent access logs, and load them with a script before the node joins.
+        - **Copy.** Start the new node as a replica of a warm one, or restore from a snapshot on disk. Redis can do both.
+        - **Ramp.** Send 1% of traffic to the new node, then 5%, then 25%, watching database load at each step.
+
+        For deploys, avoid the problem. Replace cache nodes one at a time, so only a small share of keys is cold at any moment.
+
+        **Watch out for.** Changing the key format or the serialised shape of values in a release. Every existing entry becomes useless at the same moment, which is a full cold start that nobody planned.
+- id: cache-eviction-policy-choice
+  q: Which cache eviction policy would you choose, and why?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching]
+  a: |-
+    **Short answer.** Start with LRU (least recently used). Move to LFU (least frequently used) when a small set of items stays popular for a long time and bursts of one-off reads keep pushing them out.
+
+    **Why.** Memory is limited, so when the cache is full something must leave. The policy is a guess about what will not be needed again.
+
+    | Policy | Removes | Good when | Weak when |
+    | --- | --- | --- | --- |
+    | LRU | The item unused for the longest time | Recent use predicts the next use | A large scan touches many cold items and pushes out hot ones |
+    | LFU | The item used least often | Popularity is stable | An item that was hot last week stays too long |
+    | FIFO | The oldest item | You need the simplest thing | Popular old items are thrown away |
+    | TTL only | Items past their expiry | Freshness matters more than memory | Memory fills before anything expires |
+
+    In practice you combine a size-based policy with a TTL. Redis offers `allkeys-lru` and `allkeys-lfu`, and both are approximate: Redis samples a few keys and removes the best candidate, which is close to exact LRU for much less memory.
+
+    **Watch out for.** Picking a policy without measuring. The hit rate on your own traffic is the test, and the difference between LRU and LFU is often a few percent.
+  followUps:
+    - q: How would you build an LRU cache with O(1) get and put?
+      level: Mid
+      a: |-
+        **Short answer.** Combine a hash map with a doubly linked list. The map finds an entry in one step, and the list keeps entries in order of last use.
+
+        **Why.** Each need is covered by one structure. The hash map goes from key to the list node, so a lookup is O(1). The list has the most recently used entry at the head and the least recently used at the tail.
+
+        - `get(key)`: find the node in the map, unlink it and move it to the head. Return the value.
+        - `put(key, value)`: if the key exists, update it and move it to the head. If not, add a new node at the head. If the cache is now over its size, remove the tail node and delete its key from the map.
+
+        The list must be doubly linked. Removing a node from the middle needs its previous neighbour, and a singly linked list would have to walk from the head to find it.
+
+        For several threads, one lock around both structures is correct and simple. Under heavy load it becomes the bottleneck, so real caches split the keys into segments with a lock each, or record reads in a buffer and reorder the list later.
+
+        **Watch out for.** Forgetting to delete the key from the map when the tail is removed. The map then grows without limit.
+- id: handling-a-hot-key-in-a-cache
+  q: One key gets far more traffic than any other. How do you handle a hot key?
+  level: Senior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/patterns/sharding]
+  a: |-
+    **Short answer.** Spread the reads for that key over more than one place: a small in-process cache on each app server, several copies of the key across cache nodes, or both.
+
+    **Why.** Sharding spreads keys over nodes, but one key always lives on one node. If a celebrity profile gets 200,000 reads a second, the node that holds it is overloaded while the rest sit idle. Adding nodes does not help, because the key does not split.
+
+    What works:
+
+    - **Local cache in front.** Each app server keeps the hot value in its own memory for one or two seconds. 500 app servers then make about 500 requests a second to the shared cache, not 200,000.
+    - **Key copies.** Store the value under `key#1` to `key#10` on different nodes and have readers pick one at random. Writes must update all ten.
+    - **Read replicas.** Let replicas of the hot node serve reads.
+
+    You also have to find hot keys. Sample requests on the client or use the cache's own tooling, and alert when one key passes a share of total traffic.
+
+    **Watch out for.** The moment a hot key expires. Thousands of readers miss together and all rebuild the value. Refresh hot keys in the background before they expire.
+- id: choosing-a-cache-ttl
+  q: How do you choose a TTL for cached data?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching]
+  a: |-
+    **Short answer.** Ask how old the data may be before a user is harmed or confused, and use the longest TTL that stays inside that limit.
+
+    **Why.** A TTL (time to live) trades freshness against load. A longer TTL means more hits and less work for the database, and also means a change takes longer to show.
+
+    Work from the data:
+
+    | Data | Acceptable age | Typical TTL |
+    | --- | --- | --- |
+    | Static files with a version in the name | Forever | 1 year |
+    | Product description | Minutes | 5 to 15 minutes |
+    | Price or stock shown in a list | Seconds | 10 to 60 seconds |
+    | Session | Until idle | 30 minutes, renewed on use |
+
+    Even a very short TTL helps a busy key. If a key is read 5,000 times a second, a 1 second TTL removes 4,999 of every 5,000 database reads.
+
+    Two habits make TTLs safer. Add a small random amount, for example plus or minus 10%, so keys written together do not expire together. And when the application knows the data changed, delete the key at once and keep the TTL only as a safety net.
+
+    **Watch out for.** Using one TTL for everything. A single global value is either too stale for prices or too short for content that never changes.
+- id: write-behind-caching-risk
+  q: What is write-behind (write-back) caching, and when is it worth the risk?
+  level: Senior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/patterns/message-queues]
+  a: |-
+    **Short answer.** The application writes to the cache and returns straight away. The cache saves the change to the database later, in batches. It is worth it only when writes are very frequent and losing the last few seconds of them is acceptable.
+
+    **Why.** Batching turns many small database writes into a few large ones. A counter updated 1,000 times a second becomes one database write a second. Writes also stay fast when the database is slow for a moment.
+
+    The price is durability. The newest data exists only in cache memory until it is flushed. If the cache node dies first, those writes are gone, and the user was already told they succeeded.
+
+    Good fits: view counts, "last seen" times, likes on a busy post, game scores between checkpoints. Poor fits: orders, payments, anything a user would notice was missing.
+
+    To reduce the risk, replicate the cache, flush often, and keep the pending writes in a durable log or queue instead of memory alone. At that point the design is close to "write to a log, apply to the database later", which is often the clearer way to describe it.
+
+    **Watch out for.** Flush order. If two updates to one row are flushed out of order, the older value wins. Keep updates to the same key in order, or flush only the latest value per key.
+- id: delete-or-update-cache-on-write
+  q: When the database changes, should you update the cached value or delete it?
+  level: Senior
+  category: system-design-patterns
+  subcategory: data-consistency
+  topics: [/system-design/patterns/caching, /system-design/patterns/consistency-models]
+  a: |-
+    **Short answer.** Delete it. The next reader loads the fresh value from the database and puts it back.
+
+    **Why.** Updating looks more efficient but allows a race. Two writers, A then B, change the same row. The database ends with B's value. If their cache updates arrive in the other order, the cache ends with A's value and stays wrong until the TTL runs out. Deleting has no such order problem: two deletes in either order leave the key empty.
+
+    Deleting also avoids wasted work. If a value is written ten times between reads, updating builds the cached object ten times and nine of them are never read.
+
+    A smaller race remains with delete. A reader misses, reads the old row, then a writer updates the row and deletes the key, and then the reader stores its old value. It is rare, because the write would have to fit inside the short gap between a read and a cache set. The usual guards are a TTL on every key as a backstop, and for stricter cases a second delete a moment later or a version check when setting.
+
+    **Watch out for.** Deleting the key before writing to the database. A read in between reloads the old value into the cache, and nothing removes it afterwards. Write to the database first, then delete.
+- id: cache-penetration-missing-keys
+  q: Requests keep arriving for keys that do not exist, so every one misses the cache and hits the database. How do you stop it?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/patterns/bloom-filter]
+  a: |-
+    **Short answer.** Cache the "not found" answer for a short time, and for large key spaces put a Bloom filter in front that rejects ids that were never created.
+
+    **Why.** A normal cache stores only what exists. A request for user id 999999999 misses the cache, queries the database, finds nothing and stores nothing, so the next request repeats the whole trip. A bug in a client or an attacker sending random ids can turn this into the heaviest load on the database. This is often called cache penetration.
+
+    Two fixes, usually used together:
+
+    - **Negative caching.** Store a marker such as "none" under the key with a short TTL, 30 to 60 seconds. Repeated requests for the same missing id now stop at the cache. Keep the TTL short so a record created later shows up quickly.
+    - **Bloom filter.** Keep a compact set of all valid ids in memory. It can say "definitely not present" with no database call. At about 10 bits per id, 100 million ids need roughly 120 MB, with a false positive rate near 1%.
+
+    Check the input first as well. An id in the wrong format should be rejected before any lookup.
+
+    **Watch out for.** Negative caching alone against random ids. Each id is different, so the cache fills with markers and pushes out useful entries. That is the case the Bloom filter is for.
+- id: cache-avalanche-mass-expiry
+  q: What is a cache avalanche, and how is it different from a cache stampede?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching]
+  a: |-
+    **Short answer.** An avalanche is many keys becoming unavailable at the same time, so a large share of all reads reach the database together. A stampede is many requests rebuilding one key at the same time.
+
+    **Why.** The causes are different, so the fixes are different.
+
+    An avalanche usually starts in one of two ways. A batch job loads a million keys at 02:00 with a 1 hour TTL, and at 03:00 they all expire in the same second. Or a cache node fails and every key on it is gone.
+
+    | | Stampede | Avalanche |
+    | --- | --- | --- |
+    | Scope | One popular key | Many keys |
+    | Trigger | That key expires | Shared expiry time or node loss |
+    | Fix | One rebuilder per key, refresh early | Spread expiry times, replicas, limit database load |
+
+    For expiry, add a random amount to each TTL, for example 60 minutes plus or minus 6, so the expiries spread over 12 minutes. For node loss, use replicas and consistent hashing so one failure removes only a slice of keys. In both cases, cap the number of concurrent database queries so the database slows down instead of falling over.
+
+    **Watch out for.** Treating the two as one problem. A lock per key stops a stampede and does nothing for a million different keys expiring together.
+- id: local-cache-vs-shared-cache
+  q: When would you use an in-process cache on each server and when a shared cache such as Redis?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching]
+  a: |-
+    **Short answer.** Use an in-process cache for small, very hot data that may be slightly different on each server. Use a shared cache when all servers must see the same value or the data is too large to copy onto every server.
+
+    **Why.** The two differ in speed, consistency and size.
+
+    | | In-process | Shared (Redis, Memcached) |
+    | --- | --- | --- |
+    | Read cost | About 100 nanoseconds, no network | About 0.5 to 1 ms, one network round trip |
+    | Same on all servers | No, each has its own copy | Yes |
+    | Survives a deploy | No | Yes |
+    | Size | Limited by the app's memory | Many nodes, hundreds of GB |
+
+    With 200 app servers, an in-process cache means 200 separate copies. A value is loaded 200 times, and deleting it on one server leaves 199 stale copies. That is acceptable for feature flags or a country list, and not for a shopping cart.
+
+    Many systems use both. A small in-process layer with a TTL of a second or two sits in front of the shared cache and takes the hottest keys.
+
+    **Watch out for.** Invalidating an in-process cache. There is no single place to delete from, so either keep its TTL very short or broadcast invalidation messages to every server.
+- id: redis-vs-memcached
+  q: "Redis or Memcached: how do you choose?"
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/databases/key-value-stores]
+  a: |-
+    **Short answer.** Choose Redis unless all you need is a plain key-to-value cache on many cores and you want the simplest thing to run. Redis does more, and the extra features are usually what the design ends up needing.
+
+    **Why.**
+
+    | | Redis | Memcached |
+    | --- | --- | --- |
+    | Values | Strings, hashes, lists, sets, sorted sets, streams | Strings only |
+    | Persistence | Optional snapshots and an append-only log | None |
+    | Replication and failover | Built in | Not built in, done by the client or a proxy |
+    | Threads | Commands run on one thread | Many threads |
+    | Extras | Atomic scripts, pub/sub, per-key expiry, counters | Per-key expiry, counters |
+
+    The data types matter in an interview. A leaderboard is a sorted set. A rate limiter is an atomic counter with expiry, or a script. A session is a hash. With Memcached each of these means reading a blob, changing it in the application and writing it back.
+
+    Memcached's strengths are a small memory overhead per key and good use of many cores for simple gets and sets on large values.
+
+    **Watch out for.** Calling Redis a database because it can save to disk. With default settings it can lose the last second or so of writes on a crash, so do not make it the only copy of data you cannot rebuild.
+- id: scaling-a-cache-beyond-one-node
+  q: One cache node is no longer enough. How do you scale the cache?
+  level: Senior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/patterns/consistent-hashing, /system-design/patterns/sharding]
+  a: |-
+    **Short answer.** Split the keys over several nodes with consistent hashing, and give each node a replica so that losing one machine does not empty part of the cache.
+
+    **Why.** A single node runs out of memory first, then out of throughput. Both are solved by partitioning: each key lives on one node, chosen by hashing the key.
+
+    How the node is chosen matters. With `hash(key) % N`, changing N from 10 to 11 moves about 90% of keys to a different node, so nearly the whole cache misses at once. Consistent hashing places nodes and keys on a ring. Adding an eleventh node moves only about one key in eleven.
+
+    Who does the routing is the second choice:
+
+    - **Client library.** Each app server knows the ring and talks to nodes directly. Fast, but every client must agree on the node list.
+    - **Proxy.** A layer such as Envoy or twemproxy routes requests. Clients stay simple, with one more network hop.
+    - **Cluster mode.** Redis Cluster divides keys into 16,384 slots and moves slots between nodes.
+
+    Replicas cover failure. Without them, a dead node makes its share of keys miss until they are rebuilt from the database.
+
+    **Watch out for.** Operations that span several keys, such as a transaction or a multi-key read. Once keys are on different nodes, these either fail or need all the keys forced onto one node with a shared key prefix.
+- id: measuring-whether-a-cache-works
+  q: How do you know whether a cache is doing its job?
+  level: Junior
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching]
+  a: |-
+    **Short answer.** Watch the hit rate, the latency with and without a hit, the eviction rate and the load on the database behind it.
+
+    **Why.** A cache can be running and still not helping. Four numbers show it:
+
+    - **Hit rate.** Hits divided by all lookups. Above 90% is common for read-heavy data. If it is 30%, most requests pay for a cache lookup and then a database read as well.
+    - **Latency.** Compare the 99th percentile for hits and for misses. The gap is what the cache saves.
+    - **Evictions.** A steady stream of evictions with a low hit rate means the cache is too small for the data people ask for.
+    - **Database load.** The reason for the cache. If queries per second on the database did not drop, the cache is in the wrong place.
+
+    Small changes in hit rate matter more than they look. Going from 99% to 98% doubles the misses, so the database sees twice the read load.
+
+    **Watch out for.** One average hit rate for the whole cache. Break it down by key type. A single badly designed key, for example one that includes a timestamp and so never repeats, can sit at 0% and stay hidden inside a healthy average.
+- id: sizing-a-cache
+  q: How much memory does a cache need?
+  level: Mid
+  category: system-design-patterns
+  subcategory: scaling-traffic
+  topics: [/system-design/patterns/caching, /system-design/fundamentals/capacity-planning]
+  a: |-
+    **Short answer.** Enough for the part of the data that gets most of the reads, not for all of it. Estimate that hot set, multiply by the size of one entry plus overhead, and leave headroom.
+
+    **Why.** Access is uneven. In many systems about 20% of items receive about 80% of reads, and often the skew is stronger. Holding that 20% gets most of the benefit.
+
+    A worked example. A store has 50 million products, and each cached product is about 2 KB.
+
+    - Everything: 50 million × 2 KB = 100 GB.
+    - The hot 20%: 10 million × 2 KB = 20 GB.
+    - Add about 30% for per-key overhead and fragmentation: about 26 GB.
+    - Keep memory use under about 75% of the node: plan for roughly 35 GB, as one large node or three smaller ones.
+
+    Then check it against real traffic. Grow the cache while watching the hit rate. When doubling the memory adds less than a point or two of hit rate, you have passed the useful size.
+
+    **Watch out for.** Sizing only for memory. A node also has a limit on requests per second and on network throughput, and a cache of small, very hot values often reaches those limits first.

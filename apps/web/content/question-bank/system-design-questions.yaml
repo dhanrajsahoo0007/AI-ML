@@ -1,0 +1,153 @@
+# System design questions ("Design X") with the follow-ups interviewers ask next. All answers are written by
+# TokensToScale. Company tags mean "reported by candidates", see content/system-design/COMPONENTS.md section 5.2.
+- id: design-a-chat-app
+  q: Design a chat app like Messenger or WhatsApp, with one-to-one and group chat.
+  level: Mid
+  category: system-design-questions
+  subcategory: messaging-realtime
+  topics:
+    - /system-design/case-studies/facebook-messenger
+    - /system-design/case-studies/whatsapp
+    - /system-design/fundamentals/websockets
+  companies: [Meta, Microsoft, Uber, Lyft, Airbnb, X]
+  a: |-
+    **Short answer.** Every online phone keeps one open WebSocket to a chat server. A message is saved first, then pushed down the recipient's open connection, or sent as a mobile push if they are offline.
+
+    **What to clarify.** One-to-one only or groups too, and how large a group can be. Whether history is kept on the server. Which extras are in scope: receipts, presence, media, several devices per user. Agreeing on these first is worth two minutes, because a 100,000-member group is a different design from a 200-member one.
+
+    **The numbers that drive the design.**
+
+    - Open connections. With 500 million daily users and a third online at the busy hour, that is about 170 million open sockets. At roughly 100,000 sockets per server, the chat tier needs about 1,700 servers.
+    - Message rate. 500 million users sending 40 messages a day is 20 billion a day, about 230,000 a second on average and perhaps 3 times that at peak.
+    - Storage. At about 200 bytes a message, that is 4 TB of new text a day. The store must be write-heavy and split across many machines.
+
+    **Core design.**
+
+    1. The client opens a WebSocket through a load balancer to any chat server. The server records "user 42 is on chat server 17" in a session registry (an in-memory store with a short expiry).
+    2. To send, the client attaches its own unique id to the message. The chat server writes the message to the message store, partitioned by conversation id, and only then confirms "sent" to the sender.
+    3. The server looks up the recipient in the session registry and forwards the message to the chat server that holds their connection, which pushes it down the socket.
+    4. If the recipient has no connection, the message stays in the store and a push notification goes out through APNs or FCM. On reconnect the client asks for everything after the last message it has.
+    5. Group messages are written once. A fan-out worker reads the member list and delivers to each online member.
+
+    <AnimatedDiagram name="messenger/architecture" highlight={["chat", "session", "store", "push"]} caption="Save the message, find the recipient's chat server in the session registry, push it down the socket, or fall back to a mobile push." />
+
+    **The hardest part.** Delivery without loss or duplicates while servers and phones fail. The rule that makes it work: save before you confirm, let the client retry with the same id, and let the receiving client report the last message it holds so the server can resend the gap.
+
+    **Main trade-off.** Stateful chat servers make delivery fast but make deploys and failures harder, because a restart drops 100,000 connections that all reconnect at once. Plan for slow connection draining and reconnects with random delay.
+
+    **What a senior answer adds.** Per-conversation ordering with a server-assigned sequence number, not client clocks. A separate path for very large groups. Multi-region placement, so two users on different continents each connect nearby. End-to-end encryption and what it removes from the server (search, server-side previews).
+
+    **Watch out for.** Polling the database for new messages, or using the database row as the delivery mechanism. Neither holds up past a few thousand users.
+  followUps:
+    - q: Would you use WebSockets or long polling for chat, and why?
+      level: Mid
+      topics: [/system-design/fundamentals/choosing-realtime, /system-design/fundamentals/websockets, /system-design/fundamentals/long-polling]
+      companies: [Microsoft, Uber]
+      a: |-
+        **Short answer.** WebSockets, with long polling kept as a fallback for networks that block them.
+
+        **Why.** Chat traffic goes both ways and messages are small and frequent. A WebSocket is one long-lived connection that either side can write to at any time, with only a few bytes of framing per message. Long polling sends a full HTTP request for every delivery and has to reconnect after each one, so at 230,000 messages a second you pay for headers and connection handling many times over. Typing indicators and receipts make this worse, because they multiply the number of small messages.
+
+        Long polling still earns its place. Some company proxies and old mobile networks break WebSocket upgrades. A client that fails to upgrade can fall back to long polling against the same backend and lose only some efficiency.
+
+        **Watch out for.** Saying "WebSockets" and stopping. The interviewer usually wants the cost too: the connection is stateful, so you need a registry of which server holds which user, heartbeats to detect dead connections, and a plan for the reconnect storm when a server restarts.
+    - q: What happens to a message when the recipient is offline?
+      level: Mid
+      topics: [/system-design/fundamentals/push-notifications, /system-design/patterns/message-queues]
+      companies: [Meta, Lyft]
+      a: |-
+        **Short answer.** The message is already saved, so the server only has to wake the device with a push notification and let the app fetch what it missed when it reconnects.
+
+        **Why.** Storing before delivering means "offline" is not a special storage case. The chat server finds no entry for the recipient in the session registry, so it puts a job on a queue for the push service, which calls APNs for iPhones and FCM for Android. When the app opens, it connects and sends the id of the last message it holds for each conversation. The server returns everything newer.
+
+        Push providers do not promise delivery or order, and they may drop older notifications for a device that has been off for days. So a push is only a hint to come and sync. It is never the copy of the message that counts.
+
+        **Watch out for.** Sending the push from the chat server inside the send request. A slow push provider would then slow down every sender. Put a queue between them, and collapse many pending messages into one notification such as "5 new messages".
+    - q: The same user is signed in on a phone, a tablet and a laptop. How do you keep all three in sync?
+      level: Senior
+      topics: [/system-design/case-studies/facebook-messenger]
+      a: |-
+        **Short answer.** Treat each device as its own connection with its own position in each conversation, and deliver every message to every device of every member, including the sender's other devices.
+
+        **Why.** The session registry maps a user to a list of connections, not one. When a message arrives, the server pushes it to all of the recipient's online devices and also to the sender's other devices, so the laptop shows what was typed on the phone. Each device remembers the sequence number of the last message it has per conversation. A device that was closed for a week reconnects, reports its position and pulls the gap, with no effect on the others.
+
+        Read state is shared, not per device. Reading on the phone writes "user 42 has read up to message 870" on the server, and that update is pushed to the other devices so their unread badges clear.
+
+        **Watch out for.** Deleting a message from the server once one device confirms it. That works for a single phone and breaks as soon as a second device exists. With end-to-end encryption this gets harder still, because each device has its own key and the sender must encrypt once per device.
+    - q: How do you store chat history so a user can scroll back through years of messages?
+      level: Mid
+      topics: [/system-design/databases/wide-column-stores, /system-design/fundamentals/api-design]
+      a: |-
+        **Short answer.** Keep messages in a store partitioned by conversation id and sorted by a sequence number inside each conversation, and page backwards with a cursor.
+
+        **Why.** Almost every read is "the latest 50 messages of conversation X" or "the 50 before message N". If one conversation's messages sit together on disk in order, each of those is one short range read. A wide-column store such as Cassandra or HBase fits: the partition key is the conversation id and the sort key is the sequence number. It also handles the write rate, because writes are appends.
+
+        The API returns a page plus a cursor, for example `before=8841&limit=50`. A cursor based on the sequence number stays correct while new messages arrive. Page numbers would shift under the reader.
+
+        A conversation that runs for years can outgrow one partition. Add a time bucket to the key, such as conversation id plus month, so no partition grows without limit.
+
+        **Watch out for.** Partitioning by user id. A group message would then be written once per member, and a 500-member group turns one write into 500.
+    - q: The server confirms "sent" to the sender, then crashes before the message reaches the group. How do you make sure it is not lost?
+      level: Senior
+      topics: [/system-design/patterns/message-queues, /system-design/patterns/idempotency]
+      a: |-
+        **Short answer.** Confirm to the sender only after the message is saved in durable storage, and make delivery a separate step that reads from that storage and can be run again.
+
+        **Why.** The confirmation is a promise. If it is sent while the message is only in one server's memory, a crash breaks the promise. So the order is: write the message to the replicated store, then confirm. Delivery to members is driven by a log or queue that records "message 870 in conversation X needs fan-out". A worker takes the job, delivers, and marks it done. If the worker dies half way, another worker picks the job up after a timeout and runs it again.
+
+        Running it again means some members get the message twice from the server. That is fine, because each message has a stable id and the client ignores an id it already holds.
+
+        To keep the save and the "needs fan-out" record in step, write both in one place: either the message store itself is the log that workers follow, or the two are written in one transaction.
+
+        **Watch out for.** Writing to the database and then publishing to a queue as two separate calls. A crash between them leaves a saved message that nobody is ever told about.
+    - q: How does the design change for a group with 100,000 members?
+      level: Senior
+      topics: [/system-design/patterns/fan-out, /system-design/case-studies/facebook-messenger]
+      companies: [Microsoft, Airbnb]
+      a: |-
+        **Short answer.** Stop pushing every message to every member. Store the message once, push it only to members who have the conversation open, and let everyone else pull when they open it.
+
+        **Why.** For a 200-member group, delivering to each member costs 200 small pushes and is fine. At 100,000 members, one busy channel with 10 messages a second would mean a million deliveries a second from a single conversation. Most of those members are not looking at it.
+
+        So large groups switch to a different path. Chat servers subscribe to a channel topic only while one of their connected users has that conversation on screen. A new message is published once to the topic and reaches a few hundred chat servers, and each pushes it to its viewers. Other members get an updated unread marker at most, and often that is batched every few seconds.
+
+        Per-member features must be cut back as well. Read receipts become a count, not a list of names. Typing indicators are switched off. Push notifications go out only for mentions.
+
+        **Watch out for.** Using one design for all sizes. State the threshold, for example 1,000 members, and say the product behaves differently above it.
+    - q: A member is removed from a group while a message is on its way. Should they receive it, and how do you enforce the answer?
+      level: Senior
+      topics: [/system-design/patterns/consistency-models]
+      a: |-
+        **Short answer.** Decide by order, not by clock time. Membership changes and messages share one sequence in the conversation. A member receives a message only if it comes before their removal in that sequence.
+
+        **Why.** "At the same time" has no meaning across servers, so the system needs one place that orders events. If "remove user 42" is written to the conversation as event 871, then message 870 is delivered to them and message 872 is not. Everyone sees the same answer and it can be explained to a user.
+
+        Checking the member list in the database for every recipient of every message would be too slow. Give the member list a version number that goes up on every change, and keep it in a cache. The fan-out worker stamps each message with the membership version it used. Chat servers holding an older version reload the list before delivering.
+
+        The second check is on read. When a client pages through history, the server returns only messages inside the ranges where that user was a member.
+
+        **Watch out for.** Relying on the client to hide messages. A removed member with a modified client would still receive them.
+    - q: How do you keep unread counts correct for every user?
+      level: Senior
+      topics: [/system-design/patterns/caching]
+      a: |-
+        **Short answer.** Do not keep a counter that goes up and down. Store one number per user per conversation, the sequence number of the last message they have read, and work out the unread count as the conversation's latest sequence number minus that.
+
+        **Why.** A counter that is increased on every new message and reset on read has two writers that race. A retry adds one twice, a read on one device arrives late, and the badge is wrong until the user opens the chat. A "last read" position cannot drift in that way. Writing it twice gives the same result, and it only moves forward, so the server keeps the larger value when two devices disagree.
+
+        It is also cheap for groups. A message to a 500-member group updates one number on the conversation, not 500 counters.
+
+        The total badge on the app icon is the sum over conversations. Cache it per user and recompute it when a conversation's latest number or the user's read position changes.
+
+        **Watch out for.** Deleted messages and messages the user sent themselves. Both make "latest minus last read" slightly too high, so either count only other people's messages or accept "at least one unread" as the thing that must be right.
+    - q: How would you show which contacts are online?
+      level: Mid
+      topics: [/system-design/case-studies/facebook-messenger, /system-design/fundamentals/websockets]
+      a: |-
+        **Short answer.** Each connected client sends a small heartbeat every few seconds. A presence service keeps "user 42 was last seen at 10:15:05" in an in-memory store with a short expiry, and a user is shown as online while that entry is alive.
+
+        **Why.** A clean disconnect is rare on mobile. Phones go into tunnels and apps are killed, so the server often never sees the connection close. A heartbeat with an expiry of about 30 seconds turns "we have heard nothing" into "offline" without any special case.
+
+        Telling other people is the expensive part. If every status change were pushed to every contact, a user with 1,000 contacts who walks through patchy signal would cause thousands of updates a minute. Send presence only to people who can see it right now: those with the chat list or that conversation open. Everyone else asks for it when they open the screen.
+
+        **Watch out for.** Promising exact presence. It is acceptable for "online" to be 30 seconds out of date, and saying so early lets you choose the cheap design.
