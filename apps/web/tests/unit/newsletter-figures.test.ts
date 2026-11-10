@@ -3,6 +3,7 @@ import path from "node:path";
 import yaml from "js-yaml";
 import { describe, expect, it } from "vitest";
 import { figures as evals } from "../../design/newsletter-figures/evals-for-llm-apps";
+import { figures as tuning } from "../../design/newsletter-figures/is-fine-tuning-dead";
 import { figures as harness } from "../../design/newsletter-figures/harness-engineering";
 import { figures as loop } from "../../design/newsletter-figures/loop-engineering";
 import { wrap } from "../../design/newsletter-figures/kit";
@@ -12,7 +13,12 @@ import { stepsUsed } from "../../src/lib/svg-steps";
 // Newsletter figures are generated from design/newsletter-figures/<issue>.ts (content/newsletter/FIGURES.md).
 // The committed SVGs must match the code, so nobody hand-edits a generated file and loses it on the next run.
 
-const ISSUES = { "harness-engineering": harness, "loop-engineering": loop, "evals-for-llm-apps": evals };
+const ISSUES = {
+  "harness-engineering": harness,
+  "loop-engineering": loop,
+  "evals-for-llm-apps": evals,
+  "is-fine-tuning-dead": tuning,
+};
 const DIR = path.join(process.cwd(), "assets", "diagrams", "svg", "newsletter");
 
 describe("newsletter figures", () => {

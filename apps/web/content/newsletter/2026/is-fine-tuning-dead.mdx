@@ -1,0 +1,320 @@
+---
+title: "Is fine-tuning dead?"
+issue: 4
+date: "2026-12-08"
+summary: "Models get better every month, and OpenAI is closing its self-serve fine-tuning. Here's when training your own model still pays, and when it's wasted money."
+format: deep-dive
+series: inside-the-model
+tags: [fine-tuning, cost, llm-internals]
+level: intro
+cover: { motif: layers, palette: sand, seed: 4 }
+takeaways:
+  - "Try a better prompt first, then retrieval, then fine-tuning. Most problems end at step one or two."
+  - "Facts that change belong in retrieval. Behaviour that never changes is what you can train in."
+  - "The strongest case today is cost: a small tuned model doing one narrow job at high volume."
+  - "A fine-tune is frozen on the day you train it. Every new base model resets the comparison."
+  - "No eval set, no fine-tune. Without one you can't tell whether the training helped."
+related:
+  - /ai-system-design/genai-system-design/fine-tuning-llms
+  - /ai-system-design/genai-system-design/rag-fundamentals
+  - /ai-system-design/genai-system-design/prompt-engineering-types
+  - /ai-system-design/genai-system-design/cost-latency-optimization
+  - /ai-system-design/genai-system-design/scaling-laws-and-training
+share:
+  hook: "A team spends six weeks fine-tuning a model. Then a new one ships and beats it with a plain prompt. Is fine-tuning dead?"
+access: free
+status: draft
+audience: all
+---
+
+## Why this matters
+
+Picture a team with a support bot that keeps getting the tone wrong. They decide to fine-tune. They spend two
+weeks collecting examples, two weeks cleaning them and two weeks training and testing. The tuned model is clearly
+better. They ship it.
+
+A month later a new base model comes out. Someone tries it with the old plain prompt, just to see. It beats the
+tuned model. Six weeks of work now trails a model that needed none.
+
+This story is common enough that people now ask whether fine-tuning is dead. There's fresh evidence for that
+view. In May 2026 OpenAI began closing its self-serve fine-tuning to new customers.
+
+The honest answer is no, but it has been demoted. Fine-tuning used to be the first thing teams reached for. Today
+it's the last, and it wins in a much smaller set of cases. This issue shows which cases, and how to tell if yours
+is one of them.
+
+## The idea in plain English
+
+Think of a new hire. There are three ways to get better work out of them.
+
+- **A briefing.** You explain the task clearly and show two or three good examples. It takes minutes.
+- **A reference binder.** You hand over the documents they need and let them look things up. It takes days to
+  set up.
+- **Months of training.** You send them on a course until the skill becomes habit. It takes weeks or more.
+
+An AI model has the same three options, with different names.
+
+- **A prompt** is the briefing: the instructions and examples you send with each request.
+- **Retrieval** is the binder: a search step that finds the right documents and puts them in the prompt. You'll
+  often see it called RAG, short for retrieval-augmented generation.
+- **Fine-tuning** is the training: extra learning on your own examples, which changes the model itself.
+
+![Three ways to change a model: prompt, retrieval, fine-tuning](asset:diagrams/svg/newsletter/is-fine-tuning-dead/three-ways)
+
+You wouldn't send a new hire on a three-month course before explaining the task. The same order applies here.
+Each step costs more than the one before it, and each one is harder to undo.
+
+> [!NOTE]
+> **In plain English:** a prompt changes what you ask. Retrieval changes what the model can read. Fine-tuning
+> changes the model. Use the cheapest one that works.
+
+## How it works: what fine-tuning changes
+
+A language model is a very large pile of numbers called **weights**. They are set during training, and together
+they decide what the model writes. A large model has billions of them.
+
+Fine-tuning is more training, on a much smaller set of examples that you choose. Each example is an input paired
+with the output you want. The model reads them and its weights shift a little toward your kind of answer.
+
+The old way, **full fine-tuning**, adjusts every weight. That's slow and costly, and it leaves you with a full
+copy of the model to store and run.
+
+The common way today is lighter. The best-known method is called **LoRA**, short for low-rank adaptation. It
+leaves the original weights alone and trains a small add-on beside them.
+
+![What fine-tuning changes, step by step](asset:diagrams/svg/newsletter/is-fine-tuning-dead/what-changes#steps)
+
+The add-on is called an **adapter**. The 2021 LoRA paper measured the saving against full fine-tuning of GPT-3.
+It trained up to 10,000 times fewer numbers and needed about a third of the GPU memory. The adapter can also be
+merged back into the model, so answers come out just as fast.
+
+That's why a fine-tune no longer needs a research team. On a small open model, a training run can take an
+afternoon on one rented GPU.
+
+> [!IMPORTANT]
+> **Key idea:** the training run got cheap. Everything around it didn't. Hold that thought until the iceberg
+> below.
+
+## How it works: the moving baseline
+
+Here is the problem the team in the opening story ran into.
+
+A fine-tune is a snapshot. You take one base model on one day and train it. From then on your tuned model stays
+exactly as good as it was. The base models around it keep improving.
+
+![The moving baseline: a flat fine-tune line and a rising staircase of base models](asset:diagrams/svg/newsletter/is-fine-tuning-dead/moving-baseline)
+
+The chart is a sketch, not data. But the pattern is well documented. In November 2023 a Microsoft research team
+published a study known as Medprompt. They took GPT-4, a general model with no medical training of its own, and
+used careful prompting alone. It beat models that had been specially tuned for medicine, including Google's
+Med-PaLM 2. On one standard set of medical exam questions it cut the error rate by 27% and passed 90% for the
+first time.
+
+The lesson isn't that prompts always win. It's that a tuned model competes with every future base model, and you
+don't control when the next one arrives.
+
+There's a second cost hiding here. Your adapter is tied to the base model it was trained on. When that model is
+retired, your fine-tune goes with it. Moving to a newer model means training again, and testing again.
+
+## How it works: the hosted door is closing
+
+For years the easy route was to fine-tune a hosted model. You uploaded a file of examples, clicked a button and
+got back a private version of the model. That route is narrowing.
+
+![OpenAI's three wind-down dates for self-serve fine-tuning](asset:diagrams/svg/newsletter/is-fine-tuning-dead/hosted-winddown)
+
+OpenAI's guide now says it plainly: the company is winding down its fine-tuning platform. The dates come from its
+own deprecations page. New organisations lost access on May 7, 2026. Inactive ones followed on July 2. From
+January 6, 2027 no customer can start a new training job.
+
+Models that are already tuned keep working, but only until their base model is retired. For GPT-4.1 nano that
+date was October 23, 2026. For GPT-4.1 and GPT-4.1 mini it's January 14, 2027.
+
+The price list tells the same story. On November 10, 2026, OpenAI listed GPT-4.1 at $2.00 per million input
+tokens. A fine-tuned GPT-4.1 was listed at $3.00. So a tuned large model costs half as much again on every
+request, before you count the training.
+
+One company closing one product doesn't end a technique. What it does show is where fine-tuning now lives. It has
+moved away from large hosted models and toward small **open-weight** models: ones you can download, train and run
+on your own machines.
+
+## How it works: where it still wins
+
+So when is the training worth it? Five jobs keep coming up.
+
+![Five jobs where fine-tuning still wins](asset:diagrams/svg/newsletter/is-fine-tuning-dead/where-it-wins)
+
+1. **A strict output format.** Every reply must fit the same structure, and a prompt gets it right most of the
+   time but not all of it.
+2. **A fixed house style.** A voice that's easy to recognise and hard to describe. Examples in a prompt get
+   close, and hundreds of training examples get closer.
+3. **Narrow sorting at volume.** Putting messages into a fixed set of categories, millions of times.
+4. **A small, cheap, fast model.** A small model that's weak in general can be trained to do one job well. It then
+   runs at a fraction of the cost, and often faster.
+5. **Data that must stay in-house.** If your data can't leave your own servers, a hosted model is out. A small
+   open model that you tune and run yourself may be the only choice.
+
+Look at what the five share. Each is one narrow job, done the same way every time. None of them is "make the
+model smarter" or "teach the model our facts".
+
+That second one deserves a closer look, because it's the most common mistake. Fine-tuning is a poor way to add
+knowledge. Training nudges how a model behaves. It doesn't store your documents like a database. A model tuned on
+last year's price list will state last year's prices with full confidence. Facts that change belong in retrieval,
+where you can update a document in seconds.
+
+> [!IMPORTANT]
+> **Key idea:** fine-tune for behaviour, retrieve for facts. If the thing you want changes weekly, don't train it
+> in.
+
+## How it works: the real cost
+
+The training run is the part people price. It's also the smallest part.
+
+![The real cost of a fine-tune, drawn as an iceberg](asset:diagrams/svg/newsletter/is-fine-tuning-dead/true-cost)
+
+Take OpenAI's list price as a guide. Training on GPT-4.1 was listed at $25 per million tokens. A thousand
+examples of 500 tokens each, read three times, is 1.5 million tokens. That's under $40. On an open model with a
+rented GPU, the bill is often about the same size.
+
+Now look below the water.
+
+- **Collecting and labelling examples.** Someone has to find hundreds of good input and output pairs and check
+  each one. This is usually weeks of a skilled person's time.
+- **Building the eval set.** You need a test that tells you whether the tuned model is better. [Issue
+  #3](/newsletter/evals-for-llm-apps) covers how to build one.
+- **Hosting the tuned model.** If you run it yourself, you pay for a GPU around the clock, and someone must keep
+  it running.
+- **Watching for drift.** Your users and products change. A model trained on last spring's messages slowly gets
+  worse on this autumn's.
+- **Redoing it for each new base model.** Every upgrade means a new training run and a new round of tests.
+
+A prompt has almost none of these costs. That's the real reason to try it first.
+
+## A worked example
+
+Let's put numbers on the strongest case: narrow sorting at volume.
+
+A bank gets customer messages and must send each one to the right team. "My card hasn't arrived" goes to one
+team. "Why was I charged twice?" goes to another. There are 77 possible categories, and the bank handles about 2
+million messages a month.
+
+In September 2026 the engineer Azad Djan published a careful test of exactly this job. He used a public dataset
+called Banking77, with about 10,000 training messages and 3,080 test messages. He compared four ways of doing the
+work and reported the accuracy and the running cost of each. The score is a standard accuracy measure called
+macro F1, where 1.0 is perfect.
+
+![Four ways to sort 2 million messages a month, with score and cost](asset:diagrams/svg/newsletter/is-fine-tuning-dead/routing-math)
+
+The scores are Djan's. He reported the prompted models' costs per million messages, and we've doubled them for 2
+million. The two fixed costs are his monthly figures, unchanged.
+
+Three things stand out.
+
+**The biggest model wasn't the best.** Claude Opus 5 and Claude Haiku 4.5 scored the same, near 0.90, when each
+was shown ten examples of every category. Opus cost about seven times as much. On a narrow job, extra
+intelligence bought nothing.
+
+**The small tuned model won on both counts.** ModernBERT is tiny by today's standards, with 395 million weights.
+Trained on the 10,000 examples, it scored 0.933. It runs on a single GPU for about $584 a month, however many
+messages arrive. Against Haiku, it pays for itself above roughly 270,000 messages a month.
+
+**The cheapest option had no language model in it at all.** An old method that counts words and draws lines
+between categories scored 0.913. It beat both prompted models, for about $12 a month.
+
+That last row is the most useful one. Before you fine-tune anything, check whether a much simpler tool does the
+job.
+
+> [!NOTE]
+> **In plain English:** these are the results of one test on one dataset, and they count running costs only. The
+> labelled examples, the eval work and the engineer's time aren't in the table. They're the part of the iceberg
+> below the water.
+
+## How it works: the decision
+
+Put the whole issue into one picture and you get four questions.
+
+![Should you fine-tune? Four questions in order](asset:diagrams/svg/newsletter/is-fine-tuning-dead/decision-tree)
+
+1. **Got an eval set?** If you can't measure better or worse, stop and build one. OpenAI's own guide says to
+   invest in fine-tuning only after setting up evals.
+2. **Missing facts?** If the model fails because it lacks knowledge, use retrieval. Training won't fix it.
+3. **Prompt done properly?** Clear rules, a few good examples, and a format to follow. Many "we need to
+   fine-tune" problems end here.
+4. **Narrow and high volume?** If the job is broad, or small, the cost of owning a model won't pay back. Keep
+   prompting.
+
+Only a job that passes all four should reach fine-tuning. Even then, choose a small model, and plan to test it
+against every new base model that arrives.
+
+## What goes wrong
+
+> [!WARNING]
+> **Fine-tuning to add facts.** The tuned model sounds sure of itself and is out of date within weeks. Fix: keep
+> facts in documents and use retrieval. Train only behaviour.
+
+> [!WARNING]
+> **No eval set.** The team "feels" the tuned model is better and has no numbers. Fix: build the test first, and
+> score the plain prompt on it before you train anything.
+
+> [!WARNING]
+> **Too little data, or messy data.** OpenAI's guide allows as few as 10 examples and suggests starting with 50.
+> For a hard job you'll need far more, and one wrong label teaches the wrong habit. Fix: read every example
+> yourself before training on it.
+
+> [!WARNING]
+> **Forgetting the upgrade cost.** The fine-tune ships, the base model is retired a year later, and nobody
+> planned for the rebuild. Fix: keep the training data, the script and the eval set together, so a re-train is
+> one command.
+
+## The bigger picture
+
+Fine-tuning is turning into a tool for making models cheaper, not smarter.
+
+The clearest sign is **distillation**. You take a large, expensive model and have it answer thousands of real
+requests. Then you train a small model on those answers. The small model learns to copy the large one on that
+single job. You get most of the quality at a fraction of the running cost.
+
+The pieces also combine. A system can retrieve the facts, prompt for the task, and use a small tuned model for the
+one step that runs a million times a day. These aren't rival camps. They're three tools, and a mature system
+often uses all three.
+
+So the question has changed. It used to be "how do we fine-tune a model for our company?". Now it's "which single
+step is narrow enough, and busy enough, to deserve its own small model?". For most teams the answer is none. For
+a few it's worth a great deal.
+
+## Try it yourself
+
+> [!TIP]
+> Pick one AI feature you use or build. Walk it through the four questions above and write down where it stops.
+> If it stops at "fix the prompt", spend 30 minutes on that instead. If it reaches the end, work out your monthly
+> volume and compare it with the break-even in the worked example.
+
+## Words to know
+
+| Term             | Plain meaning                                                                |
+| ---------------- | ---------------------------------------------------------------------------- |
+| Weights          | The numbers inside a model that decide what it writes                        |
+| Base model       | The general model you start from, before any of your own training            |
+| Fine-tuning      | Extra training on your own examples, which changes the model's weights       |
+| Full fine-tuning | Adjusting every weight in the model                                          |
+| LoRA             | A light method that freezes the model and trains a small add-on beside it    |
+| Adapter          | That small add-on: the only part that learns                                 |
+| Retrieval (RAG)  | Searching your documents and putting the results into the prompt             |
+| Open weights     | A model you can download and run on your own machines                        |
+| Distillation     | Training a small model to copy a large one on a single job                   |
+| Drift            | The slow drop in quality as real inputs move away from the training examples |
+
+## Go deeper
+
+- [Fine-tuning LLMs](/ai-system-design/genai-system-design/fine-tuning-llms) on this site: the methods in depth,
+  from full fine-tuning to LoRA and its relatives.
+- [Deprecations](https://developers.openai.com/api/docs/deprecations), OpenAI: the wind-down dates for self-serve
+  fine-tuning, in OpenAI's own words.
+- [Supervised fine-tuning](https://developers.openai.com/api/docs/guides/supervised-fine-tuning), OpenAI: what
+  fine-tuning suits, how many examples to start with, and why evals come first.
+- [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685), Hu and others, 2021:
+  the paper behind the adapter method.
+- [Can Generalist Foundation Models Outcompete Special-Purpose Tuning?](https://arxiv.org/abs/2311.16452), Nori
+  and others, 2023: the Medprompt study, where prompting a general model beat tuned medical ones.
+- [Three fine-tuned small models vs. frontier models](https://azaddjan.com/2026/09/19/three-fine-tuned-small-models-vs-frontier-models-where-llm-cost-optimization-ends/),
+  Azad Djan, 2026: the Banking77 test behind the worked example, with full costs and method.

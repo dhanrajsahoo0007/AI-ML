@@ -26,6 +26,7 @@ const ISSUES: Record<string, () => Promise<{ figures: FigureDef[] }>> = {
   "harness-engineering": () => import("./harness-engineering"),
   "loop-engineering": () => import("./loop-engineering"),
   "evals-for-llm-apps": () => import("./evals-for-llm-apps"),
+  "is-fine-tuning-dead": () => import("./is-fine-tuning-dead"),
 };
 
 const OUT = path.join(process.cwd(), "assets", "diagrams", "svg", "newsletter");
