@@ -35,6 +35,11 @@ variant)` → SVG string, pure, runs in Node and the browser), `cover/social-car
   Confirmation and welcome are email jobs (`newsletter.confirm`, `newsletter.welcome`) sent with `enqueueEmail()`:
   on the email queue when the Worker has the binding, inline otherwise (`apps/web/src/features/email/AGENTS.md`).
 - `send/send-issue.ts` + `send/plan.ts`: the send script run by `.github/workflows/newsletter-send.yml`.
+- `kit/slides.ts` (pure: the carousel's slides, their HTML, the UTM-tagged URL and the suggested post) and
+  `kit/build-kit.ts` (`npm run newsletter:kit -w web -- <slug>`: renders the LinkedIn kit with Playwright into
+  `apps/web/.build/newsletter-kit/<slug>/`, owner-only output, never deployed). Figure slides use each figure's
+  sidecar `slide:` line.
+- `brand.ts`: `NEWSLETTER_NAME` and `NEWSLETTER_PROMISE` (plain Node; re-exported by `seo.ts`).
 - `rss.ts`, `seo.ts`, `issue-body.tsx`, `links.ts`; islands `signup-form.client.tsx`, `token-action.client.tsx`.
 
 ## Data flow

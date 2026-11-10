@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PAST_STEP_OPACITY, stepCount, stepsUsed, svgAtStep } from "./svg-steps";
+import { PAST_STEP_OPACITY, stepCount, stepsUsed, svgAtStep, svgComplete } from "./svg-steps";
 
 const SVG = `<svg viewBox="0 0 10 10"><rect id="base"/><g data-step="1"><circle/></g><g class="x" data-step="2"><path/></g><path data-step="3" d="M0 0"/></svg>`;
 
@@ -29,5 +29,15 @@ describe("svg build-up steps", () => {
 
   it("the last step shows everything", () => {
     expect(svgAtStep(SVG, 3)).not.toContain('display="none"');
+  });
+
+  it("the complete figure draws every step unfaded, with only the last step's caption", () => {
+    const svg = `<svg><g data-step="1"/><g data-step="2"/><text data-step-only="1">one</text><text data-step-only="2">two</text></svg>`;
+    const all = svgComplete(svg);
+    expect(all).not.toContain("opacity=");
+    expect(all).toContain('<g data-step="1"/>');
+    expect(all).toContain('<text data-step-only="1" display="none">one</text>');
+    expect(all).toContain('<text data-step-only="2">two</text>');
+    expect(svgComplete("<svg><g/></svg>")).toBe("<svg><g/></svg>");
   });
 });

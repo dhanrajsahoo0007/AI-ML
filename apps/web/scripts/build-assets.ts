@@ -43,7 +43,7 @@ import {
   type RenderedFile,
 } from "./build-assets.lib";
 import { DiagramRenderer, PNG_BACKGROUND, excalidrawVersion, renderImage, svgToPng } from "./build-assets.render";
-import { stepCount, svgAtStep } from "../src/lib/svg-steps";
+import { stepCount, svgAtStep, svgComplete } from "../src/lib/svg-steps";
 
 const APP_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.chdir(APP_DIR);
@@ -197,8 +197,9 @@ async function renderAsset(
       const steps = a.type === "svg" ? stepCount(svg) : 0;
       if (a.type === "svg" && size) {
         const name = `${slug}.png`;
-        // A build-up figure's plain PNG is its last step (step-only captions would overlap otherwise).
-        const full = steps ? svgAtStep(svg, steps) : svg;
+        // A build-up figure's plain PNG is the complete figure: every step at full strength, with the last
+        // step's caption (all the step-only captions would overlap).
+        const full = svgComplete(svg);
         const png = await svgToPng(full, size.width, path.join(dir, name), PNG_BACKGROUND.light);
         files.push({ name, format: "png", theme: "light", bytes: png.bytes, width: png.width, height: png.height });
         // Build-up figures (newsletter): one PNG per step, for email and the LinkedIn carousel. Only SVGs with

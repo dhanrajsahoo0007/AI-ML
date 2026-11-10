@@ -11,10 +11,7 @@ import { isPublished, type Issue } from "./source";
 // review outside production only, and never indexed.
 
 export const ARCHIVE_TITLE = "Newsletter";
-/** The newsletter's name on the masthead and in emails. Placeholder until the owner picks a name. */
-export const NEWSLETTER_NAME = "The Origins AI Learn Newsletter";
-/** One line under the name: the promise every issue keeps. */
-export const NEWSLETTER_PROMISE = "One idea from AI and system design, explained visually, in about ten minutes.";
+export { NEWSLETTER_NAME, NEWSLETTER_PROMISE } from "./brand";
 export const ARCHIVE_DESCRIPTION =
   "A short email digest on system design and AI engineering: one theme, three articles from the library and a question to take into your next design review.";
 

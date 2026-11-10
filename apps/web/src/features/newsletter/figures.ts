@@ -31,6 +31,8 @@ export interface FigureSource {
   file: string;
   alt?: string;
   caption?: string;
+  /** The line under the figure on a LinkedIn carousel slide. */
+  slide?: string;
   access: "free" | "premium";
   /** data-step layers of an SVG source, sorted. */
   steps: number[];
@@ -64,6 +66,7 @@ export function figureSource(id: string, assetsDir = defaultAssetsDir()): Figure
           file,
           alt: meta?.alt,
           caption: meta?.caption,
+          slide: meta?.slide,
           access: meta?.access ?? "free",
           steps: type === "svg" ? stepsUsed(fs.readFileSync(file, "utf8")) : [],
         }
@@ -136,7 +139,7 @@ export function resolveFigure(src: string): ResolvedFigure {
 
 /** The PNG of a figure (of its step, for a build-up figure), light theme: what email clients show. */
 export function figurePng(fig: Pick<ResolvedFigure, "asset" | "step" | "allSteps">): AssetVariant | undefined {
-  // `#steps` in email: the plain PNG, which for a build-up figure is its last (complete) step.
+  // `#steps` in email: the plain PNG, which for a build-up figure is the complete figure (every step, none faded).
   if (fig.allSteps) return figurePng({ asset: fig.asset });
   const pngs = fig.asset.variants.filter((v) => v.format === "png" && (v.theme ?? "light") === "light");
   return pngs.find((v) => v.step === fig.step) ?? (fig.step === undefined ? undefined : pngs.find((v) => !v.step));

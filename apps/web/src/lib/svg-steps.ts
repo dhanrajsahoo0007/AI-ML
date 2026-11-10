@@ -28,7 +28,8 @@ export function stepCount(svg: string): number {
  * The SVG as it looks at `step`: layers after it are hidden, layers before it are faded, the current one is drawn
  * as is and marked `data-step-current` (pages may style it). Unmarked content is always shown.
  */
-export function svgAtStep(svg: string, step: number): string {
+export function svgAtStep(svg: string, step: number, opts: { fadePast?: boolean } = {}): string {
+  const fade = opts.fadePast ?? true;
   return svg.replace(
     STEP_TAG_RE,
     (_m, tag: string, before: string, only: string | undefined, q: string, n: string, after: string, end: string) => {
@@ -37,8 +38,23 @@ export function svgAtStep(svg: string, step: number): string {
       if (only) extra = k === step ? "" : ` display="none"`;
       else
         extra =
-          k > step ? ` display="none"` : k < step ? ` opacity="${PAST_STEP_OPACITY}"` : ` data-step-current="true"`;
+          k > step
+            ? ` display="none"`
+            : k < step
+              ? fade
+                ? ` opacity="${PAST_STEP_OPACITY}"`
+                : ""
+              : ` data-step-current="true"`;
       return `<${tag}${before} data-step${only ?? ""}=${q}${n}${q}${after}${extra}${end}>`;
     }
   );
+}
+
+/**
+ * The whole build-up figure at once, nothing faded: every step drawn as is, with the last step's caption. What
+ * email, the LinkedIn carousel and any other single image of a `#steps` figure show.
+ */
+export function svgComplete(svg: string): string {
+  const last = stepCount(svg);
+  return last ? svgAtStep(svg, last, { fadePast: false }) : svg;
 }

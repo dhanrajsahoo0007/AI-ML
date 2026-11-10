@@ -44,3 +44,9 @@ Model: `apps/web/content/newsletter/2026/system-design-digest-0.mdx`.
 
 8. **Verify:** `npm run content-check -w web` (errors block; format warnings show what a deep dive still lacks); `npm run dev` → `/newsletter/<slug>` (drafts show a `noindex` review
    page outside production); a `--dry-run` render to check the email.
+
+9. **LinkedIn kit:** `npm run assets -w web`, then `npm run newsletter:kit -w web -- <slug>` writes
+   `apps/web/.build/newsletter-kit/<slug>/`: `carousel.pdf` (cover, "In 30 seconds", one slide per figure, close),
+   a PNG of every slide, `portrait.png`, `square.png`, `og.png` and `post.txt`. Give every figure a `slide:` line in its
+   sidecar (the kit warns when one falls back to the caption) and keep the deck at 8–12 slides. Posting is the
+   owner's step.
