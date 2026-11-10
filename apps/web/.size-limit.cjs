@@ -54,7 +54,9 @@ const ROUTES = [
     "120 kB",
     "190 kB",
   ],
-  ["companies", "/companies/page", [ROOT, "/companies/layout"], "145 kB", "195 kB"],
+  // All scripts measured at 195.1 kB after the question list gained its area filter and badges (+0.7 kB) and the
+  // header its logo mark (+0.25 kB); the limit was 195 kB with 194.2 kB measured before those.
+  ["companies", "/companies/page", [ROOT, "/companies/layout"], "145 kB", "197 kB"],
   ["pricing", "/pricing/page", [ROOT], "125 kB", "185 kB"],
   // Plan §15.1: ≤ 130 kB without the editor. CodeMirror and the runner workers load on interaction, in chunks
   // of their own that no page entry lists.

@@ -104,21 +104,21 @@ export function SiteHeader({
           </span>
         </Link>
 
-        <div className="relative hidden min-w-0 flex-1 items-center justify-center gap-2 self-stretch lg:flex xl:gap-5 2xl:gap-6">
+        <div className="relative hidden min-w-0 flex-1 items-center justify-center gap-2 self-stretch min-[1100px]:flex xl:gap-4">
           {navTree.map((section) => {
             const label = section.shortLabel ?? section.label;
             const active = isUnder(pathname, section.href) || openKey === section.key;
             // The underline of the current section takes that section's tint (data-tone on the link).
             const className = cn(itemClass(active), "after:bg-tint", section.comingSoon && "text-muted-foreground/70");
-            // The section's icon, in its tint when the section is current or its menu is open. Seven sections with
-            // icons need about 770px, so icons wait for a 1400px window and the arrows for 1900px; the tagline and Subscribe wait for 1800px; below 1400px the
-            // bar is labels only.
+            // The section's icon, in its tint when the section is current or its menu is open. The bar is sized for
+            // seven sections next to the logo mark and wordmark: the phone menu below 1100px, labels only up to
+            // 1440px, icons from 1440px, the tagline and Subscribe from 1800px, the arrows from 1900px.
             const SectionIcon = getIconComponent(section.icon);
             const icon = SectionIcon && (
               <SectionIcon
                 aria-hidden
                 className={cn(
-                  "hidden size-3.5 shrink-0 transition-colors min-[1400px]:block",
+                  "hidden size-3.5 shrink-0 transition-colors min-[1440px]:block",
                   active ? "text-tint" : "text-muted-foreground/80"
                 )}
               />
@@ -200,7 +200,7 @@ export function SiteHeader({
         </div>
 
         <div
-          className="ml-auto hidden shrink-0 items-center gap-2 lg:flex xl:gap-3"
+          className="ml-auto hidden shrink-0 items-center gap-2 min-[1100px]:flex xl:gap-3"
           onMouseEnter={() => setOpenKey(null)}
         >
           <SearchButton />
@@ -228,7 +228,7 @@ export function SiteHeader({
           {profileMenu}
         </div>
 
-        <div className="ml-auto flex items-center gap-1 lg:hidden">
+        <div className="ml-auto flex items-center gap-1 min-[1100px]:hidden">
           <SearchButton compact />
           <ThemeToggle />
           {profileMenuMobile}
