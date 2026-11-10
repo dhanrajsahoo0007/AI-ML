@@ -1,0 +1,2211 @@
+# System design fundamentals questions that are not written inside an article. All answers are written by TokensToScale.
+- id: rate-limit-algorithms-compared
+  q: Compare the fixed window, sliding window and token bucket rate limiting algorithms. Which would you pick for a public API?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: security
+  topics: [/system-design/fundamentals/abuse-protection, /system-design/patterns/rate-limiting]
+  a: |-
+    **Short answer.** I would pick a token bucket for a public API. It allows a short burst, holds a steady average, and needs only two numbers per client.
+
+    **Why.** All three answer the same question: has this client sent too much lately. They differ in how they count.
+
+    | Algorithm | How it counts | Strength | Weakness |
+    | --- | --- | --- | --- |
+    | Fixed window | One counter per client per minute | Simplest, one increment | A client can send a full limit at 0:59 and again at 1:01, so twice the limit in two seconds |
+    | Sliding window | Blends the current and previous window by how far the current one has run | Smooths the edge problem | Slightly more work, and the count is an estimate |
+    | Token bucket | A bucket refills at a fixed rate, and each request takes one token | Bursts up to the bucket size, steady rate after | Two settings to tune |
+
+    Real clients are bursty. A page load can fire 10 calls at once and then go quiet. A bucket of 20 tokens that refills at 5 a second lets that through, and still holds a script to 5 requests a second over time.
+
+    **Watch out for.** Storing a timestamp for every request to get an exact sliding window. At 1,000 requests a minute per client that is 1,000 entries per client, where a counter or a bucket needs two numbers.
+
+- id: rate-limiter-store-down-fail-open-or-closed
+  q: The shared store behind your rate limiter goes down. Should requests be let through or rejected?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: security
+  topics:
+    [
+      /system-design/fundamentals/abuse-protection,
+      /system-design/patterns/rate-limiting,
+      /system-design/fundamentals/availability,
+    ]
+  a: |-
+    **Short answer.** It depends on the route. Let ordinary reads through, which is called failing open. Reject on the few routes where abuse costs real money or safety, which is called failing closed. In both cases fall back to a rough local limit first.
+
+    **Why.** The limiter exists to protect the site. If a dead counter store makes it reject everything, the limiter has caused the outage it was meant to prevent. If it lets everything through on every route, an attacker only has to wait for that moment, or cause it.
+
+    A layered plan works well:
+
+    1. **Short timeout.** Give the counter lookup a few milliseconds. A slow store is treated like a dead one.
+    2. **Local fallback.** Each gateway copy keeps its own in-memory counter. With 10 copies and a limit of 100 a second, each copy allows 10. It is less exact, but it still stops a flood.
+    3. **Per-route policy.** Product pages fail open. Login, password reset, sending SMS codes and payment attempts fail closed, or drop to a much lower local limit.
+    4. **Alert.** A limiter running in fallback mode is an incident, even if users notice nothing.
+
+    **Watch out for.** Having no backstop behind the limiter. Services still need their own timeouts and concurrency caps, so a few minutes without limits does not overload the database.
+
+- id: when-short-polling-is-the-right-choice
+  q: When is plain short polling still the right choice over WebSockets or server-sent events?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics: [/system-design/fundamentals/ajax-polling, /system-design/fundamentals/choosing-realtime]
+  a: |-
+    **Short answer.** Choose polling when users can accept updates that are several seconds old, the number of clients is modest, and you want something that works everywhere with no new infrastructure.
+
+    **Why.** A poll is an ordinary HTTP request. It passes through every proxy, load balancer and CDN you already run. Any server can answer it, so there is no connection state to manage and deploys are simple.
+
+    Polling fits when:
+
+    - **Staleness is fine.** A build status, an order status or a dashboard that refreshes every 10 to 30 seconds.
+    - **Changes are frequent anyway.** If the data changes on almost every tick, few polls are wasted.
+    - **The audience is small.** 2,000 clients polling every 10 seconds is 200 requests a second, which one or two servers handle easily.
+    - **The page is short-lived.** A user watches an order for a few minutes and leaves.
+
+    Move to a push method when users need updates in under a second or two, or when most polls return nothing and the count of clients reaches the hundreds of thousands.
+
+    **Watch out for.** Choosing WebSockets because they sound more modern. Open connections need sticky routing, heartbeats and reconnect logic. That is real work, and a 10-second poll often gives the user the same experience.
+
+- id: server-controlled-polling-interval
+  q: How can the server change how often clients poll without shipping a new version of the app?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics: [/system-design/fundamentals/ajax-polling, /system-design/patterns/back-pressure]
+  a: |-
+    **Short answer.** Let the server tell the client when to ask again. Each response carries the next wait time, and the client obeys it instead of using a number fixed in its code.
+
+    **Why.** An interval written into a mobile app is frozen until users update, which can take weeks. If the server sends the interval, you can tune it in seconds.
+
+    The server can send the wait in a response header or a field in the body, for example "poll again in 5 seconds". This gives you three useful controls:
+
+    - **Adapt to the state.** An order that is out for delivery gets 5 seconds. An order placed for tomorrow gets 5 minutes. A finished order gets "stop polling".
+    - **Shed load.** During an incident, raise the interval from 5 to 20 seconds and polling traffic falls by 75% within one cycle.
+    - **Say no clearly.** An overloaded server answers 429 or 503 with a `Retry-After` header, and clients wait at least that long.
+
+    The client still keeps safe rules of its own: a minimum and maximum interval, a small random offset on every wait, and longer waits after each failure.
+
+    **Watch out for.** Clients that ignore the hint. One old app version polling every second can outweigh thousands of polite ones, so enforce a per-client rate limit on the server as well.
+
+- id: one-ip-many-domains
+  q: How can one server with a single public IP address host websites for many different domains?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/anatomy-of-a-request,
+      /system-design/fundamentals/http,
+      /system-design/fundamentals/tls,
+    ]
+  a: |-
+    **Short answer.** The browser states which site it wants inside the request. The server reads that name and picks the matching site. This is called virtual hosting.
+
+    **Why.** DNS can point many names at the same IP address. `shop.example.com` and `blog.example.org` can both resolve to one address. The network only delivers packets to that address, so the name must travel inside the request itself. It does so in two places:
+
+    1. **The `Host` header.** Every HTTP/1.1 request must carry it, for example `Host: shop.example.com`. HTTP/2 and HTTP/3 carry the same value in a field called `:authority`. The web server keeps a table from host name to site and routes on it.
+    2. **SNI (Server Name Indication).** With HTTPS, the server must present the right certificate before it can read any HTTP header. So the browser puts the host name in the first message of the TLS handshake, and the server picks the certificate from that.
+
+    This is how one load balancer or CDN address can serve thousands of customer domains.
+
+    **Watch out for.** Forgetting the default case. A request with an unknown host name should get a plain error page, never the first site in the configuration. Otherwise a stranger's domain pointed at your IP shows your site.
+
+- id: where-each-request-step-can-fail
+  q: A page fails to load. For each step of the request's journey, what can go wrong and what does the user see?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/anatomy-of-a-request,
+      /system-design/fundamentals/dns,
+      /system-design/fundamentals/http,
+    ]
+  a: |-
+    **Short answer.** Each step fails in its own way: DNS gives no address, TCP cannot connect, TLS refuses the certificate, the server returns a 5xx code, or the response is slow or cut off. The error type tells you which step to look at.
+
+    **Why.** A request is a chain, and the user's error message is the first clue to the broken link.
+
+    | Step | Typical failure | What the user sees |
+    | --- | --- | --- |
+    | DNS lookup | Record missing, name servers down | "Server not found" at once |
+    | TCP connect | Firewall drops packets, server is down | Spinner, then a timeout after many seconds |
+    | TLS handshake | Certificate expired or for the wrong name | A full-page security warning |
+    | Load balancer | No healthy servers behind it | 503, usually fast |
+    | App or database | Bug, overload, slow query | 500, or 504 after a long wait |
+    | Response | Connection drops midway | Half a page or a broken image |
+
+    A fast failure usually means something answered "no". A slow failure usually means nothing answered at all.
+
+    **Watch out for.** Testing only from your own laptop. Your DNS cache, your region and your network can hide the problem. Check from the outside, from more than one region, and compare with the load balancer's own logs.
+
+- id: service-to-service-authentication
+  q: Inside your system, how should one service prove its identity to another?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: security
+  topics: [/system-design/fundamentals/api-auth, /system-design/fundamentals/tls, /system-design/fundamentals/rpc]
+  a: |-
+    **Short answer.** Give every service its own identity and verify it on each call, usually with mutual TLS (mTLS), where both sides present a certificate. Pass the end user's identity along separately.
+
+    **Why.** A common early design trusts anything inside the private network. Then one compromised service, or one wrongly opened port, can call every other service as anyone. Two questions need separate answers on an internal call.
+
+    - **Which service is calling?** With mTLS, each service holds a short-lived certificate, often valid for hours, issued automatically by an internal certificate authority. The receiver checks it and then applies a rule such as "only checkout may call payments". A signed service token works too, when mTLS is hard to roll out.
+    - **For which user?** The gateway validates the user's token once and forwards the user id in a signed token or trusted header. The receiving service still checks ownership, for example that order 88 belongs to user 42.
+
+    The cost is running the certificate system: issuing, rotating and debugging certificates. A service mesh, a layer of small proxies beside each service, can do that work without code changes.
+
+    **Watch out for.** One shared secret used by all services. It identifies nobody, it is painful to rotate, and a leak from any service exposes all of them.
+
+- id: refresh-token-rotation
+  q: Why pair a short-lived access token with a refresh token, and what does refresh token rotation add?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: security
+  topics: [/system-design/fundamentals/api-auth]
+  a: |-
+    **Short answer.** The access token is checked on every request with no lookup, so it must expire quickly. The refresh token is checked only at the auth server, so it can live for weeks and be revoked. Rotation makes each refresh token single-use, which exposes a stolen one.
+
+    **Why.** A signed token cannot easily be taken back once issued. Keeping it to about 15 minutes limits what a thief can do. Asking the user to log in every 15 minutes is not acceptable, so the app holds a second, long-lived secret and trades it for new access tokens.
+
+    That second secret goes over the network far less often, and only to one server. The server looks it up in a database on each use, so deleting the row ends the session.
+
+    Rotation works like this:
+
+    1. Each refresh returns a new access token and a new refresh token.
+    2. The old refresh token is marked as used.
+    3. If a used token is presented again, two parties hold the same token. The server cancels the whole session and the user logs in again.
+
+    **Watch out for.** Flaky networks. A phone may send a refresh, lose the reply and retry with the old token. Allow a grace window of a few seconds for that retry, or honest users get logged out.
+
+- id: api-concurrent-edits-lost-update
+  q: Two staff members edit the same order through your API at the same moment. How do you stop one from silently overwriting the other?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: apis
+  topics: [/system-design/fundamentals/api-design, /system-design/fundamentals/http]
+  a: |-
+    **Short answer.** Use optimistic concurrency. Every read returns a version of the order, every write must name the version it was based on, and the server rejects a write whose version is out of date.
+
+    **Why.** Without a check, both people read version 7, both send their change, and the second write wins. The first person's change disappears with no error. This is called a lost update.
+
+    HTTP already has the tools:
+
+    1. `GET /v1/orders/88` returns the order with an `ETag` header, a version tag such as `"7"`.
+    2. The client sends its change with `If-Match: "7"`.
+    3. The server updates only where the stored version is still 7, and raises it to 8 in the same statement.
+    4. The second writer, still holding 7, gets `412 Precondition Failed`. Their app fetches version 8, shows the difference and lets them retry.
+
+    Two more choices shrink the problem. Use PATCH with only the changed fields, so edits to different fields are easier to merge. Return `428 Precondition Required` when a write has no `If-Match`, so no client can skip the check.
+
+    **Watch out for.** Comparing the version in application code and then writing. The check and the write must be one atomic database statement.
+
+- id: api-long-running-operations
+  q: An export of a customer's data takes three minutes to produce. How do you design the API call for it?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: apis
+  topics:
+    [
+      /system-design/fundamentals/api-design,
+      /system-design/patterns/message-queues,
+      /system-design/fundamentals/webhooks,
+    ]
+  a: |-
+    **Short answer.** Make it asynchronous. The first call starts a job and returns immediately with a job id. The client then checks a status URL until the job is done and downloads the result from a link.
+
+    **Why.** Holding one HTTP request open for three minutes is fragile. Load balancers and proxies often cut idle requests after 30 to 60 seconds, phones lose signal, and a retry would start the whole export again.
+
+    The flow:
+
+    1. `POST /v1/exports` with an idempotency key. The server writes a job row, puts a message on a queue and answers `202 Accepted` with a `Location` header pointing to `/v1/exports/exp_91`.
+    2. A worker builds the file and stores it in object storage.
+    3. `GET /v1/exports/exp_91` returns the status: `queued`, `running`, `succeeded` or `failed`, with a progress figure and a `Retry-After` hint.
+    4. On success, the status body includes a short-lived download link.
+
+    The job is now a resource. It can be listed, cancelled with DELETE, and inspected by support staff.
+
+    **Watch out for.** Jobs that never finish. Give each job a deadline, mark it failed with a clear error when the deadline passes, and delete old result files after a set time such as 7 days.
+  followUps:
+    - q: Should the client poll the job status, or should you call it back with a webhook?
+      level: Mid
+      topics: [/system-design/fundamentals/webhooks, /system-design/fundamentals/ajax-polling]
+      a: |-
+        **Short answer.** Offer polling to everyone and add a webhook for server-side integrations. A browser or phone can only poll, because it has no public address you can call.
+
+        **Why.** A webhook is an HTTP call from your system to a URL the customer registered. It tells them at once and wastes no requests. It also needs the customer to run a public endpoint, verify your signature and handle duplicates.
+
+        | | Polling | Webhook |
+        | --- | --- | --- |
+        | Who can use it | Any client | Servers with a public URL |
+        | Delay | Up to one polling interval | About a second |
+        | Wasted requests | Most polls say "still running" | None |
+        | Failure handling | Client simply asks again | You must retry and sign each call |
+
+        Keep the status endpoint as the source of truth. A webhook can be lost, so a careful client still checks the status if it has heard nothing after the expected time.
+
+        **Watch out for.** Sending the result data in the webhook body. Send the job id and status only, and let the receiver fetch the result with its own credentials.
+
+- id: what-does-not-belong-in-an-api-gateway
+  q: What logic should stay out of an API gateway, and why?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: apis
+  topics: [/system-design/fundamentals/api-gateway]
+  a: |-
+    **Short answer.** Keep business rules out. The gateway should handle concerns that are the same for every route, such as routing, authentication, rate limits, TLS and logging. Anything that needs to understand an order, a price or a user's data belongs in a service or a backend for frontend.
+
+    **Why.** The gateway sits in front of everything, so every change to it carries risk for every team. Its value comes from being small and boring.
+
+    | Belongs in the gateway | Belongs behind it |
+    | --- | --- |
+    | Routing by path and host | Pricing, discounts, eligibility rules |
+    | Checking a token's signature and scopes | Checking that this user owns this order |
+    | Rate limits and request size limits | Combining several services into one screen |
+    | Timeouts, request ids, access logs | Data validation that needs business meaning |
+
+    When business logic moves into the gateway, three things go wrong. Teams queue up behind the gateway team for every product change. A bad rule deploy can break all routes at once. And the logic becomes hard to test, because it lives in configuration far from the service that owns the data.
+
+    **Watch out for.** Request and response rewriting that grows quietly. Renaming one header is fine. Reshaping bodies for each client is a backend for frontend, and it deserves its own code and owner.
+
+- id: api-gateway-vs-load-balancer-vs-reverse-proxy
+  q: What is the difference between a reverse proxy, a load balancer and an API gateway?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: apis
+  topics:
+    [
+      /system-design/fundamentals/api-gateway,
+      /system-design/fundamentals/proxies,
+      /system-design/fundamentals/load-balancing-basics,
+    ]
+  a: |-
+    **Short answer.** All three sit between clients and servers and forward requests. A reverse proxy is the general idea. A load balancer is a reverse proxy whose main job is spreading traffic over identical servers. An API gateway is a reverse proxy that understands your API and applies rules per route and per caller.
+
+    **Why.** They answer different questions.
+
+    | | Main question | Typical work |
+    | --- | --- | --- |
+    | Reverse proxy | How do I hide and protect the servers? | TLS, caching, compression, forwarding |
+    | Load balancer | Which copy of this service gets the request? | Health checks, picking a server, removing dead ones |
+    | API gateway | Is this caller allowed to use this route, and where does the route live? | Auth, rate limits per key, routing `/rides` and `/payments` to different services |
+
+    In practice the same software can often play all three roles, and a real system stacks them. A request may pass a load balancer, reach one of several gateway copies, and then pass a second load balancer in front of the chosen service.
+
+    **Watch out for.** Saying you need only one of them. The gateway itself runs as several copies, so something must balance load across those copies too.
+
+- id: rpo-rto-and-backups
+  q: What are RPO and RTO, and how do they shape your backup and recovery plan?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics: [/system-design/fundamentals/availability, /system-design/databases/sync-vs-async-replication]
+  a: |-
+    **Short answer.** RPO (recovery point objective) is how much recent data you can afford to lose, measured in time. RTO (recovery time objective) is how long you can afford to be down. Together they decide which recovery method you must pay for.
+
+    **Why.** "We have backups" does not say enough. A nightly backup means that a failure at 11 pm loses up to 23 hours of data, and restoring 500 GB may take hours.
+
+    | Method | Data lost (RPO) | Time to recover (RTO) | Cost |
+    | --- | --- | --- | --- |
+    | Nightly backup | Up to 24 hours | Hours | Low |
+    | Backup plus continuous log shipping | Seconds to minutes | Tens of minutes to hours | Low to medium |
+    | Asynchronous replica in another zone | Usually under a few seconds | A minute or two | A second database |
+    | Synchronous replica | Zero | A minute or two | A second database and slower writes |
+
+    Pick per data type. Payments may need an RPO of zero. A search index can be rebuilt from the main database, so it needs no backup at all.
+
+    Replicas and backups solve different problems. A replica copies a mistaken `DELETE` within a second. Only a backup, or a point-in-time restore, brings the deleted rows back.
+
+    **Watch out for.** Stating targets you have never measured. The real RTO includes noticing the failure, deciding to act and redirecting traffic.
+  followUps:
+    - q: How do you know your backups will work on the day you need them?
+      level: Mid
+      topics: [/system-design/fundamentals/availability]
+      a: |-
+        **Short answer.** Restore them on a schedule. A backup counts only after a restore from it has been tested.
+
+        **Why.** Backup jobs fail quietly. The job can report success while the file is cut short, a new table is missing from it, or the key needed to decrypt it is gone. Teams usually find this out during the outage.
+
+        A practical routine:
+
+        - **Automatic restore test.** Every week, restore the latest backup into a scratch database and run checks: row counts within 1% of production, the newest record is recent, a few known queries return results.
+        - **Time it.** Record how long the restore takes. That number is your real recovery time for this method. If 500 GB takes 3 hours and the target is 1 hour, the plan needs to change.
+        - **Alert on age.** Page someone when the newest good backup is older than expected.
+        - **Keep copies apart.** Store backups in another region and another account, so one bad credential or one mistake cannot delete both data and backups.
+
+        **Watch out for.** A written recovery guide that only one person has ever followed. Have a different engineer run the restore each time.
+
+- id: error-budget-spent
+  q: What is an error budget, and what should change when the team has spent it?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics: [/system-design/fundamentals/availability, /system-design/fundamentals/non-functional-requirements]
+  a: |-
+    **Short answer.** The error budget is the amount of failure your SLO (service level objective, your internal target) allows. With a 99.9% target over 30 days, it is about 43 minutes of downtime, or 1 failed request in every 1,000. When it is gone, the team moves effort from features to reliability until it recovers.
+
+    **Why.** A target of 100% is impossible and would forbid every deploy. The budget turns "how reliable is enough" into a number that product and engineering share. While budget remains, the team may take risks: ship faster, run experiments, do migrations. When it runs low, risk is reduced.
+
+    A written policy, agreed in advance, makes this real:
+
+    - **Budget healthy.** Normal releases.
+    - **Burning fast.** For example, 10% of the month's budget used in one hour. Page the on-call engineer, because at that rate the budget lasts only 10 hours.
+    - **Budget spent.** Pause risky launches. Only fixes and reliability work ship. Review the incidents that used the budget.
+
+    Alerting on the burn rate is also better than alerting on single errors. It ignores small blips and catches slow leaks.
+
+    **Watch out for.** An SLO measured at the server only. If the load balancer cannot reach your service, the service logs show no errors while users see failures. Measure as close to the user as you can.
+
+- id: why-autoscaling-does-not-replace-capacity-planning
+  q: You have autoscaling turned on. Why do you still need capacity planning?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics: [/system-design/fundamentals/capacity-planning, /system-design/fundamentals/scaling-journey]
+  a: |-
+    **Short answer.** Autoscaling adds copies of stateless servers, slowly, up to a limit. It does not raise the ceiling of the database, it does not react in time for a sudden spike, and it cannot pass limits you have not planned for.
+
+    **Why.** Four gaps remain.
+
+    1. **Reaction time.** The scaler must see high load for a minute or two, start machines, and wait for them to boot and pass health checks. That is often 3 to 5 minutes. A ticket sale goes from 500 to 10,000 requests a second in under 10 seconds. For known events, add capacity ahead of time.
+    2. **Shared limits.** Twenty new app servers with 50 database connections each ask for 1,000 more connections. The database may allow 500. Scaling one tier moves the bottleneck to the next.
+    3. **Hard caps.** Cloud account quotas, free IP addresses in the subnet and the provider's spare stock in a zone all stop a scale-out. Know these numbers in advance.
+    4. **Cost.** A retry storm or a bot can scale you up for hours. A maximum size and a budget alert are part of the plan.
+
+    **Watch out for.** Scaling on CPU alone. A service waiting on a slow database shows low CPU and long queues, so the scaler does nothing. Scale on a signal that follows user pain, such as queue length or requests in flight.
+
+- id: cdn-private-content-signed-urls
+  q: How do you serve private content, such as paid course videos, through a CDN?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: networking
+  topics:
+    [/system-design/fundamentals/cdn, /system-design/fundamentals/api-auth, /system-design/databases/object-storage]
+  a: |-
+    **Short answer.** Use signed URLs or signed cookies. Your app checks that the user has paid, then hands out a link that carries an expiry time and a signature. The edge verifies the signature by itself and serves the file from its cache.
+
+    **Why.** Sending every video request through your app servers to check a login would bring all that traffic back to the origin.
+
+    The flow:
+
+    1. The user opens a lesson. The app checks the purchase in the database.
+    2. The app builds the video URL, adds an expiry such as 2 hours from now, and signs the path plus the expiry with a secret key shared with the CDN.
+    3. The player requests the URL. The edge recomputes the signature and checks the time. This takes microseconds and needs no call to you.
+    4. If valid, the edge serves the cached file. If not, it returns 403.
+
+    The signature is not part of the cache key, so all paying users share one cached copy.
+
+    For a video split into hundreds of segments, use one signed cookie that covers a whole path such as `/courses/42/`.
+
+    **Watch out for.** Leaving the origin bucket public. If the files can be fetched directly from storage, the signature at the edge protects nothing. Allow only the CDN to read the origin.
+  followUps:
+    - q: A signed video URL gets posted on a public forum. What limits the damage?
+      level: Senior
+      topics: [/system-design/fundamentals/cdn, /system-design/fundamentals/abuse-protection]
+      a: |-
+        **Short answer.** The expiry time is the main limit. Anything in the URL can be copied, so keep links short-lived and add signals that make a shared link less useful.
+
+        **Why.** A signed URL is a bearer credential, which means whoever holds it can use it. No setting makes a leaked link fully safe, so the aim is to keep the window small and to notice sharing.
+
+        - **Short expiry with renewal.** Sign for 5 to 10 minutes and have the player fetch a fresh link while the user is still logged in. A posted link dies quickly.
+        - **Bind it loosely.** Include the user id in the signed data so a leak can be traced to an account. Binding to an IP address is stricter but breaks for phones that move between Wi-Fi and mobile data.
+        - **Detect.** One user id fetching from 300 IP addresses in an hour is sharing. Suspend that account's ability to get new links.
+        - **Rotate keys for emergencies.** Changing the signing key cancels every outstanding link at once, at the cost of a brief error for honest users until their players renew.
+
+        **Watch out for.** Promising that content cannot be copied. A paying user can always record the screen. Signed URLs stop casual link sharing, and stronger protection needs encrypted video with a licence server.
+
+- id: cdn-for-dynamic-and-api-responses
+  q: Can a CDN help with dynamic pages and API responses, or only with static files?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: networking
+  topics: [/system-design/fundamentals/cdn, /system-design/patterns/caching, /system-design/fundamentals/http]
+  a: |-
+    **Short answer.** It helps with both. Many dynamic responses are the same for every user for a few seconds, so they can be cached briefly. And responses that cannot be cached at all still travel faster through the edge.
+
+    **Why.** Three techniques apply.
+
+    1. **Very short TTLs.** A product listing or a sports score requested 2,000 times a second can be cached for 1 second. The origin then answers about once a second per edge location, and nobody sees data more than a second old.
+    2. **Serve stale while refreshing.** The `stale-while-revalidate` directive lets the edge return the old copy at once and fetch a new one in the background. If the origin is down, `stale-if-error` lets the edge keep serving the last good copy.
+    3. **Faster path for uncacheable calls.** The user's TCP and TLS handshakes end at an edge a few milliseconds away. The edge keeps warm connections to the origin, so a user far away saves several round trips on every new connection.
+
+    Keep the personal parts of a page, such as the basket count, in a small separate call marked `private`.
+
+    **Watch out for.** Caching a personalised response under a shared key. If a response depends on a cookie or a header and the cache key ignores it, one user's account page is served to the next visitor. Mark such responses `private` or `no-store`.
+
+- id: rest-vs-grpc-between-internal-services
+  q: For calls between two of your own backend services, would you use REST or gRPC?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: apis
+  topics:
+    [
+      /system-design/fundamentals/choosing-an-api-style,
+      /system-design/fundamentals/rpc,
+      /system-design/fundamentals/rest,
+    ]
+  a: |-
+    **Short answer.** gRPC for busy internal calls where both sides are code you own. REST with JSON where the caller might be a browser, a partner or a person with a command-line tool.
+
+    **Why.** The two optimise for different readers.
+
+    | | REST with JSON | gRPC |
+    | --- | --- | --- |
+    | Format | Text, readable by people | Compact binary, often several times smaller |
+    | Contract | A document, checked by convention | A schema file that generates client and server code |
+    | Transport | Any HTTP version | HTTP/2, many calls on one connection |
+    | Streaming | Needs extra tools | Built in, both directions |
+    | Deadlines | You add them | Passed along the call chain |
+    | Debugging | Any HTTP tool works | Needs gRPC-aware tools |
+
+    Inside a system, the generated code and the shared schema catch mistakes at build time, and deadlines stop a slow service from holding callers forever. At the public edge, readability and wide client support matter more than a few saved milliseconds.
+
+    A team with five services and low traffic can stay on REST everywhere. One style done well beats two styles done poorly.
+
+    **Watch out for.** Load balancing. gRPC keeps one long connection and sends all calls over it, so a load balancer that balances per connection sends everything to one server. Use a balancer that works per request, or balance in the client.
+
+- id: sync-call-vs-message-queue-between-services
+  q: When should two services talk through a message queue instead of a direct call?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: apis
+  topics:
+    [
+      /system-design/fundamentals/choosing-an-api-style,
+      /system-design/patterns/message-queues,
+      /system-design/fundamentals/rpc,
+    ]
+  a: |-
+    **Short answer.** Call directly when the caller needs the answer to continue. Use a queue when the work can finish later, when the receiver may be slow or down, or when several services care about the same event.
+
+    **Why.** A direct call ties the two services together in time. If the receiver is down, the caller fails too. A queue stores the message until the receiver is ready.
+
+    Take an order. Checking stock and charging the card must happen before the customer sees "order confirmed", so those are direct calls. Sending the receipt email, updating the search index and telling the warehouse can each happen a few seconds later, so they go on a queue.
+
+    | | Direct call | Queue |
+    | --- | --- | --- |
+    | Caller gets a result | Yes, at once | No, only "accepted" |
+    | Receiver down | Caller fails or retries | Messages wait |
+    | Traffic spike | Hits the receiver at full force | Queue absorbs it, workers drain at their own pace |
+    | Tracing a problem | One request, one trace | Harder, the work happens later |
+
+    **Watch out for.** Treating a queue as free reliability. Messages can arrive twice or out of order, so consumers must be idempotent, which means that handling the same message twice has the same effect as handling it once. You also need an alert on queue depth.
+  followUps:
+    - q: The work is now asynchronous, but the user is waiting on a screen. How do they get the result?
+      level: Mid
+      topics: [/system-design/fundamentals/choosing-realtime, /system-design/fundamentals/api-design]
+      a: |-
+        **Short answer.** Answer the request at once with "accepted" and an id. Then deliver the outcome by one of three routes: the client polls a status URL, the server pushes over an open connection, or you send a notification.
+
+        **Why.** The first response only promises that the work was recorded. The user interface shows a pending state, such as "Processing your payment".
+
+        - **Poll a status endpoint.** Simplest. Good for results that take a few seconds to a few minutes.
+        - **Push on an open connection.** If the app already holds a WebSocket or a server-sent events stream, send a "job done" event on it. The result appears within about a second.
+        - **Notify.** For work that takes minutes or more, send a push notification or an email, because the user will have left the screen.
+
+        Many flows combine them: push for speed, with a poll every 10 seconds as a safety net in case the push is lost.
+
+        Often you can also do the small, important part directly and queue only the rest. Confirm the order in the request, and queue the email.
+
+        **Watch out for.** A spinner with no end. Set a time after which the screen says "this is taking longer than usual, we will notify you", and make sure the status can still be found later.
+
+- id: recovering-missed-events-after-reconnect
+  q: A client's live connection drops for 20 seconds and then reconnects. How does it get the events it missed?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics:
+    [
+      /system-design/fundamentals/choosing-realtime,
+      /system-design/fundamentals/server-sent-events,
+      /system-design/fundamentals/websockets,
+    ]
+  a: |-
+    **Short answer.** Give every event an increasing id per stream. The client remembers the last id it processed and sends it when it reconnects. The server replays everything after that id from a short log, then continues live.
+
+    **Why.** A push connection delivers only while it is open.
+
+    The parts:
+
+    1. **Ordered ids.** A sequence number per conversation, auction or user stream.
+    2. **A replay buffer.** The server side keeps recent events in a log or a capped list, for example the last 10 minutes.
+    3. **Resume on connect.** Server-sent events do this for you with the `Last-Event-ID` header. On a WebSocket you send the last id yourself in the first message.
+    4. **Deduplicate.** The client ignores any id at or below the last one it has seen, so a replay that overlaps does no harm.
+
+    The buffer must not live only in the memory of the server that held the connection. The client will often reconnect to a different server, so keep the log in a shared store.
+
+    **Watch out for.** A gap between replay and live. If the server finishes the replay and then subscribes to new events, anything published in between is lost. Subscribe first, hold the live events, replay, and then release them in order.
+  followUps:
+    - q: How long should the server keep events for replay, and what happens when a client has been away longer than that?
+      level: Senior
+      topics: [/system-design/fundamentals/choosing-realtime]
+      a: |-
+        **Short answer.** Keep enough to cover ordinary disconnects, usually a few minutes. A client that is further behind gets a fresh snapshot of the current state and then resumes the live stream.
+
+        **Why.** Most gaps are short: a lift, a tunnel, a server restart. A buffer of 5 to 10 minutes covers nearly all of them at a small cost. At 50 events a second and 100 bytes each, 10 minutes is 30,000 events and about 3 MB per stream.
+
+        A phone that was offline for a day does not want 4 million price ticks. It wants the current price.
+
+        So the server needs a clear third answer besides "here are your events":
+
+        1. The client reconnects with its last id.
+        2. If the id is still in the buffer, replay from it.
+        3. If it is older than the buffer, reply "reset". The client then loads the current state through a normal API call and resumes the stream from the id that snapshot was taken at.
+
+        Data where every item matters, such as chat messages, is different. It lives in a database, and the client pages through history by id.
+
+        **Watch out for.** Silently replaying from the oldest event you still have. The client then believes it is complete while a hole sits in its data.
+
+- id: heartbeats-on-long-lived-connections
+  q: Why do long-lived connections such as WebSockets need heartbeats, and how would you set the timing?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics:
+    [
+      /system-design/fundamentals/choosing-realtime,
+      /system-design/fundamentals/websockets,
+      /system-design/fundamentals/tcp-udp,
+    ]
+  a: |-
+    **Short answer.** A heartbeat is a tiny message sent on a quiet connection. It does two jobs: it stops devices in the middle from closing the connection for being idle, and it lets each side notice that the other has gone.
+
+    **Why.** TCP does not report a lost peer quickly. If a phone enters a tunnel, no closing packet is sent. The server keeps the connection in memory, and may keep sending messages into nothing for many minutes.
+
+    Idle limits are the second problem. Load balancers and proxies commonly close a connection after about 60 seconds of silence, and home routers and mobile networks drop their address mappings after an idle period too.
+
+    A common setup:
+
+    - Send a ping every 25 to 30 seconds, which is safely under a 60-second idle limit.
+    - If no reply arrives within about 10 seconds, or two pings are missed, close the connection and free its memory.
+    - The client does the same in the other direction and then reconnects, with a random delay.
+
+    The cost is small. One million connections with a 30-second ping is about 33,000 tiny messages a second across the fleet.
+
+    **Watch out for.** Every client pinging on the same clock second. Start each timer at a random offset. On mobile, avoid very short intervals, because each ping wakes the radio and drains the battery.
+
+- id: ssrf-fetching-user-supplied-urls
+  q: Your service fetches a URL that a user supplies, for example to build a link preview. What can go wrong?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: security
+  topics: [/system-design/fundamentals/common-attacks, /system-design/fundamentals/webhooks]
+  a: |-
+    **Short answer.** The attacker can make your server call addresses that only your server can reach. This is server-side request forgery, or SSRF. Your server sits inside the private network, so it can become the attacker's way in.
+
+    **Why.** If the preview service fetches any URL it is given, a user can submit the address of an internal admin panel and read the response in the preview. In a cloud, a well-known target is the instance metadata address, which can hand out the server's own credentials.
+
+    Defences, used together:
+
+    - **Check the destination, after DNS.** Resolve the host name, reject private, loopback and link-local address ranges, and connect to the exact address you checked. Otherwise a name can resolve to a safe address during the check and to an internal one during the fetch.
+    - **Do not follow redirects blindly.** Re-check every hop, and cap the number of hops.
+    - **Restrict the request.** Only `http` and `https`, standard ports, a short timeout, and a size cap such as 2 MB.
+    - **Isolate the fetcher.** Run it in a separate network segment with no route to internal services and no cloud credentials.
+
+    The same rules apply when you send webhooks to customer-supplied URLs.
+
+    **Watch out for.** A blocklist of text patterns such as "localhost". The same address can be written in many ways. Compare resolved IP addresses, not strings.
+
+- id: lossless-vs-lossy-compression
+  q: What is the difference between lossless and lossy compression, and where would you use each?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics: [/system-design/fundamentals/compression, /system-design/fundamentals/cdn]
+  a: |-
+    **Short answer.** Lossless compression gives back exactly the original bytes. Lossy compression throws away detail that people are unlikely to notice, and gets much smaller files in return. Use lossless for text and data, and lossy for photos, audio and video.
+
+    **Why.** Lossless methods such as gzip, Brotli and Zstandard find repetition. JSON repeats the same field names thousands of times, so it often shrinks 5 to 10 times. One changed byte in a program or a bank record is a bug, so these must come back exact.
+
+    Lossy methods such as JPEG for photos and H.264 for video use the limits of human sight and hearing. They keep less colour detail than brightness detail, and store only what changed between video frames. A 12 MB camera photo becomes a 300 KB JPEG that looks the same on a phone, about 40 times smaller.
+
+    | | Lossless | Lossy |
+    | --- | --- | --- |
+    | Typical saving | 2 to 10 times on text | 10 to 100 times on media |
+    | Use for | HTML, JSON, logs, database pages | Photos, audio, video |
+    | Never use for | | Code, documents, numbers |
+
+    **Watch out for.** Compressing twice. Running gzip over a JPEG or a video saves almost nothing and wastes CPU. Editing and saving a lossy file again also loses a little more quality each time, so keep the original upload and create the smaller versions from it.
+
+- id: compress-then-encrypt-and-its-risk
+  q: Should you compress data before or after you encrypt it, and is there any risk in combining the two?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/compression,
+      /system-design/fundamentals/encryption-and-hashing,
+      /system-design/fundamentals/tls,
+    ]
+  a: |-
+    **Short answer.** Compress first, then encrypt. Encrypted data looks random and will not shrink. The risk is that the compressed size can leak facts about a secret when an attacker controls part of the same message.
+
+    **Why.** Compression works by finding repeated patterns. Good encryption removes every pattern, so compressing afterwards saves about 0% and only uses CPU. For backups, files at rest and replication streams, the order is always compress, then encrypt.
+
+    The risk comes from length. Encryption hides the content but not the size. Suppose a response contains a secret token and also echoes back text the attacker chose, such as a search term. If the attacker's guess matches part of the secret, the compressor finds a repeat and the response gets a few bytes shorter. By watching sizes over many requests, the attacker can recover the secret one character at a time.
+
+    Practical rules:
+
+    - Do not compress secrets and attacker-controlled input together in one stream.
+    - Keep session tokens in headers and cookies, and leave compression off for the few responses that must carry secrets in the body.
+    - Compress static files and public data freely, because they hold nothing to steal.
+
+    **Watch out for.** Accepting compressed uploads without a limit. A few kilobytes can expand to gigabytes, so cap the size after decompression, not only before it.
+
+- id: dns-udp-vs-tcp
+  q: DNS normally runs over UDP. Why, and when does it use TCP?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: networking
+  topics: [/system-design/fundamentals/dns, /system-design/fundamentals/tcp-udp]
+  a: |-
+    **Short answer.** A DNS lookup is one small question and one small answer, so UDP does it in a single round trip with no connection setup. DNS moves to TCP when the answer is too large for one UDP packet, for copying whole zones between servers, and for encrypted DNS.
+
+    **Why.** TCP needs a handshake before any data moves, which adds a round trip. For a 50-byte question and a 100-byte answer that would double the time. Reliability is handled simply: if no answer arrives in a second or so, the client asks again or tries another server.
+
+    TCP takes over in these cases:
+
+    - **Large answers.** Classic DNS over UDP allowed 512 bytes. An extension raises that, commonly to about 1,200 bytes or more. If the answer still does not fit, the server sets a "truncated" flag and the client repeats the question over TCP. Answers with many records or with signatures can be that large.
+    - **Zone transfers.** A secondary name server copying all records from the primary uses TCP.
+    - **Private DNS.** DNS over TLS and DNS over HTTPS encrypt lookups and run over TCP, or over QUIC.
+
+    **Watch out for.** A firewall that allows only UDP on port 53. Small lookups work and large ones fail, which looks like a random fault for some domains only.
+
+- id: dns-provider-outage
+  q: Your DNS provider has a full outage. What happens to your site, and how would you prepare for that?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: networking
+  topics: [/system-design/fundamentals/dns, /system-design/fundamentals/availability]
+  a: |-
+    **Short answer.** Your servers stay healthy, but users slowly lose the ability to find them. Answers already cached keep working until their TTL (time to live) ends, then lookups fail. To prepare, serve the zone from two independent providers.
+
+    **Why.** DNS is a dependency in front of everything else. When it fails, load balancers and regions do not help, because nobody learns their addresses.
+
+    The failure arrives gradually. With a TTL of 5 minutes, most users are cut off within 5 minutes. With a TTL of 1 hour, the site fades over an hour, which may outlast a short outage.
+
+    Preparation:
+
+    1. **Two providers.** List name servers from both at your registrar and keep the two zones in sync from one source, such as a file in version control. Resolvers try another name server when one does not answer.
+    2. **Keep features portable.** Health-checked or location-based records work differently at each provider. Check that both can express what you need, or accept simpler answers from the backup.
+    3. **Practise.** Remove one provider in a test and confirm that traffic continues.
+
+    **Watch out for.** Planning to switch providers during the outage. The name server records at the registry are often cached for a day or two, so a change made mid-incident arrives far too late.
+
+- id: symmetric-vs-asymmetric-encryption
+  q: What is the difference between symmetric and asymmetric encryption, and why do real systems use both?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: security
+  topics: [/system-design/fundamentals/encryption-and-hashing, /system-design/fundamentals/tls]
+  a: |-
+    **Short answer.** Symmetric encryption uses one shared key to lock and unlock. Asymmetric encryption uses a pair: a public key anyone may have, and a private key only the owner holds. Systems use the asymmetric kind to agree on a key safely, then the symmetric kind for the data.
+
+    **Why.** Each one solves the other's weakness.
+
+    | | Symmetric | Asymmetric |
+    | --- | --- | --- |
+    | Keys | One, shared by both sides | A public and a private key |
+    | Speed | Very fast, gigabytes a second with CPU support | Hundreds to thousands of times slower |
+    | Main problem | How do both sides get the key without anyone seeing it? | Too slow for bulk data |
+    | Example | AES | RSA, elliptic curves |
+
+    Two strangers on the internet have no shared key yet, and they cannot send one in the open. Asymmetric methods let them prove identity and agree on a fresh secret over a public network. From then on, every byte is encrypted with a fast symmetric key built from that secret.
+
+    TLS works this way for every HTTPS connection. Encrypted files often follow the same idea: a symmetric key encrypts the file, and a second key protects that small key.
+
+    **Watch out for.** Saying that asymmetric encryption is "more secure" and should be used for everything. Both are secure at proper key sizes. They do different jobs.
+
+- id: integrity-hash-vs-hmac-vs-signature
+  q: You need to be sure a message or file was not changed on the way. When is a plain hash enough, and when do you need an HMAC or a digital signature?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: security
+  topics:
+    [
+      /system-design/fundamentals/encryption-and-hashing,
+      /system-design/fundamentals/webhooks,
+      /system-design/fundamentals/api-auth,
+    ]
+  a: |-
+    **Short answer.** A plain hash catches accidents. An HMAC proves the sender knew a secret that both sides share. A digital signature proves who sent the message to anyone who has the public key, and the receiver could not have forged it.
+
+    **Why.** The question is who might change the data, and who needs to check it.
+
+    | Tool | Key | Stops | Typical use |
+    | --- | --- | --- | --- |
+    | Hash, such as SHA-256 | None | Corruption on disk or in transfer | Checksums on uploaded chunks |
+    | HMAC | One shared secret | Tampering by anyone without the secret | Webhook signatures, signed cookies |
+    | Digital signature | Private key signs, public key verifies | Tampering, and the signer cannot deny it | Software updates, tokens checked by many services |
+
+    A plain hash offers no protection against an attacker. Anyone who changes the file can compute a new hash and send both.
+
+    HMAC is fast and simple, but every verifier holds the secret and could therefore create valid messages too. That is fine between two parties. With 30 services verifying one token, a signature is safer, because the services hold only the public key.
+
+    **Watch out for.** Signing without a timestamp or a unique id. A valid old message can be captured and sent again. Compare signatures with a constant-time function, so the time taken does not reveal how many characters matched.
+
+- id: estimate-number-of-servers
+  q: At peak, your service gets 12,000 requests a second. How many app servers do you need?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics: [/system-design/fundamentals/estimation, /system-design/fundamentals/capacity-planning]
+  a: |-
+    **Short answer.** Divide the peak rate by what one server can safely handle, then add spare machines for failures. With servers that handle 400 requests a second at a safe load, that is 30 servers plus spares, so between 33 and 45 depending on which failure you plan for.
+
+    **Why.** The estimate has three steps, and each assumption should be said aloud.
+
+    1. **Capacity of one server.** Suppose a request uses 10 ms of CPU. One core then does 100 requests a second, and an 8-core machine does 800 with every core fully busy.
+    2. **Safe load.** Latency climbs sharply as a server nears 100% busy, so plan for about 50% to 70%. At 50%, one server handles 400 requests a second. 12,000 divided by 400 is 30 servers.
+    3. **Failures and deploys.** Spread over 3 zones, that is 10 per zone. Losing a whole zone should not overload the other two, so add 5 per zone. The answer is 45 if you must survive a zone loss at peak, or about 33 if you only plan for single machines failing.
+
+    Then check the next limit. 36 servers with 20 database connections each need 720 connections, which the database may not accept.
+
+    **Watch out for.** Using the average rate. If 12,000 is the daily average and the peak is 3 times higher, every number above triples.
+  followUps:
+    - q: How do you find out how many requests one server can really handle?
+      level: Mid
+      topics: [/system-design/fundamentals/capacity-planning]
+      a: |-
+        **Short answer.** Measure it. Run a load test against one server with a realistic mix of requests, raise the rate in steps, and note where latency or errors pass your target.
+
+        **Why.** A figure worked out on paper, such as 10 ms of CPU per request, misses waiting on the database, memory pressure, garbage collection pauses and lock contention. Real capacity is often half the paper number.
+
+        The method:
+
+        1. Put one production-sized server behind the load generator, with real dependencies or realistic stand-ins.
+        2. Replay a mix that matches production, for example 80% reads and 20% writes. A test of one cheap endpoint overstates capacity.
+        3. Step the rate up: 100, 200, 400 requests a second, holding each for a few minutes.
+        4. Watch p99 latency, which is the time that 99% of requests beat. Capacity is the highest rate where p99 stays inside the target, for example 200 ms.
+
+        Production data confirms it. Look at the busiest hour and compare requests per server with CPU use. If servers sit at 35% CPU at 250 requests a second, about 500 is the safe planning limit.
+
+        **Watch out for.** Assuming capacity is constant. A new feature or a slower query changes it, so repeat the test after large releases.
+
+- id: can-one-cache-node-hold-the-hot-data
+  q: You want to cache user profiles for an app with 100 million users. Will one cache node do, or must you split it?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/estimation,
+      /system-design/patterns/caching,
+      /system-design/patterns/consistent-hashing,
+    ]
+  a: |-
+    **Short answer.** Estimate two things: how much memory the hot data needs, and how many requests a second the cache must answer. Here the hot set is about 24 GB, which fits on one large node, but you should still run three or more for failure and throughput.
+
+    **Why.** Do the memory first.
+
+    - 100 million users, 1 KB per profile: 100 GB for everyone.
+    - Only active users need caching. With 20 million daily users, the hot set is 20 GB.
+    - Add about 20% for keys and bookkeeping: 24 GB.
+
+    Then the request rate. If each active user causes 50 profile reads a day, that is 1 billion reads a day, about 12,000 a second on average and perhaps 36,000 at peak. One in-memory cache node can usually serve tens of thousands of simple reads a second, so one node is near its limit at peak.
+
+    The stronger reason to split is failure. If the only node dies, 36,000 reads a second fall on the database at once. With 4 nodes and keys spread by consistent hashing, a dead node sends only a quarter of the reads to the database.
+
+    **Watch out for.** Sizing the cache for all users. Caching 100 GB to serve the 20 GB that is ever read costs five times the memory for almost no gain in hit rate.
+
+- id: mapping-functional-requirements-to-api-and-data
+  q: You have agreed on the functional requirements. How do you turn them into an API and a data model?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/functional-requirements,
+      /system-design/fundamentals/api-design,
+      /system-design/fundamentals/interview-framework,
+    ]
+  a: |-
+    **Short answer.** Go through the requirements one at a time. The nouns become entities to store, and the verbs become endpoints. Each requirement should end up with at least one endpoint and the data that endpoint reads or writes.
+
+    **Why.** This keeps the design tied to what was asked. For a simple chat app:
+
+    | Requirement | Endpoint | Data touched |
+    | --- | --- | --- |
+    | Send a message to a user | `POST /v1/conversations/c1/messages` | Message, conversation |
+    | See the history of a conversation | `GET /v1/conversations/c1/messages?cursor=...` | Messages, ordered by time |
+    | See my list of conversations | `GET /v1/conversations` | Conversation, membership, last message |
+
+    Three entities come out: user, conversation and message, plus a membership link between users and conversations.
+
+    The mapping also shows what each read needs. "History, newest first" tells you that messages must be found by conversation and ordered by time. That decides the key or index before any database is named.
+
+    Then run the check both ways. A requirement with no endpoint is a gap. An endpoint or table with no requirement is extra scope, and it should be removed or raised with the interviewer.
+
+    **Watch out for.** Designing tables first and requirements second. You end up with a neat schema that cannot answer the main query without scanning everything.
+
+- id: interviewer-says-you-decide-on-requirements
+  q: You ask a clarifying question and the interviewer says, 'What do you think?' How do you move forward?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics: [/system-design/fundamentals/functional-requirements, /system-design/fundamentals/interview-framework]
+  a: |-
+    **Short answer.** Make a reasonable assumption, say it aloud with a one-line reason, write it down and continue. The interviewer is checking whether you can make decisions without being told what to do.
+
+    **Why.** Real projects start with unclear goals, and senior engineers are expected to fill gaps sensibly. More questions at this point look like stalling.
+
+    A good pattern has three parts:
+
+    1. **State the choice.** "I will assume group chats of up to 100 people."
+    2. **Give the reason.** "That covers friends and teams. Groups of 100,000 are a broadcast product with a different design."
+    3. **Leave a door open.** "If you want very large groups, I can come back to that later."
+
+    Choose assumptions that keep the problem interesting and still fit the time. Assuming 100 users in total removes every scaling question. Assuming every feature of a mature product leaves no time for depth. A mid-sized, well-known shape is usually right: tens of millions of users, the two or three main flows, one region to start.
+
+    Write the assumptions in a corner of the board. Later, when a design choice depends on one, point back to it.
+
+    **Watch out for.** Assuming silently. An unspoken assumption looks like a missed requirement when the interviewer thinks of the product differently from you.
+
+- id: graphql-schema-evolution-without-versions
+  q: GraphQL APIs usually have no v1 and v2. How do you change the schema without breaking apps that are already installed?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: apis
+  topics: [/system-design/fundamentals/graphql, /system-design/fundamentals/api-design]
+  a: |-
+    **Short answer.** Change the schema by adding, never by altering in place. Add new fields and types freely, mark old fields as deprecated, measure who still uses them, and remove a field only when its usage reaches zero.
+
+    **Why.** A GraphQL client names every field it wants. Adding a field therefore cannot break anyone, because no existing query asks for it.
+
+    The steps for a change, such as replacing a single `name` field with `firstName` and `lastName`:
+
+    1. Add the two new fields. The old one stays and keeps working.
+    2. Mark `name` with the `@deprecated` directive and a reason. Developer tools then warn anyone who uses it.
+    3. Record field usage per client version. Because each query lists its fields, the server knows exactly which apps still read `name`.
+    4. Remove it when the count is zero, or when the remaining app versions are old enough to be forced to update.
+
+    Mobile apps make step 4 slow. A version released two years ago may still be in use, so deprecated fields can live for a long time.
+
+    **Watch out for.** Changes that look harmless and are not. Making a nullable field non-null, changing a field's type, adding a required argument, or adding a value to an enum that old clients switch on can all break installed apps. Add a new field instead.
+
+- id: graphql-authorization-placement
+  q: In a GraphQL API, where do you enforce authorization?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: security
+  topics:
+    [/system-design/fundamentals/graphql, /system-design/fundamentals/api-auth, /system-design/fundamentals/api-gateway]
+  a: |-
+    **Short answer.** Authenticate once at the edge, and authorize in the business layer that loads each object, so the same rule applies on every path through the graph that reaches it.
+
+    **Why.** With REST, a gateway can protect a route such as `/admin/reports` by its URL. GraphQL has one URL, and one query can touch 20 types.
+
+    A graph also has many paths to the same data. An invoice may be reachable from `invoice(id)`, from `user.invoices` and from `order.invoice`. If the permission check sits in the first resolver only, the other two paths leak. A resolver is the function that fetches one field.
+
+    A sound layout:
+
+    1. **Gateway.** Verify the token, then pass the user id and scopes into the request context.
+    2. **Domain layer.** The function that loads an invoice takes the viewer as an argument and decides whether this viewer may see this invoice. Every resolver calls that function, so every path gets the same check.
+    3. **Field rules for sensitive fields.** Fields such as an email or a salary get their own check, and return null or an error for viewers without access.
+
+    **Watch out for.** Hiding a field from the schema explorer and calling it secure. Turning off introspection only hides the field names. A caller who guesses a name still gets the data unless the check exists.
+
+- id: http-stateless-and-staying-logged-in
+  q: HTTP is called a stateless protocol. What does that mean, and how does a website keep you logged in?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: networking
+  topics: [/system-design/fundamentals/http, /system-design/fundamentals/api-auth]
+  a: |-
+    **Short answer.** Stateless means each request stands alone. The protocol does not remember earlier requests. So the client sends proof of who it is with every request, usually in a cookie or a token.
+
+    **Why.** When you load a page and then click a link, the server sees two unrelated requests. Nothing in HTTP itself says they came from the same person.
+
+    Login works by adding a small piece of state that the client carries:
+
+    1. You send your email and password once.
+    2. The server checks them and replies with a `Set-Cookie` header containing a random session id, or returns a signed token.
+    3. The browser attaches that cookie to every later request to the site.
+    4. The server looks up the session id, or verifies the token's signature, and learns who is asking.
+
+    Statelessness is useful for scaling. Since a request carries everything needed to understand it, any of 20 servers behind a load balancer can answer it, as long as they can all read the session store or verify the token.
+
+    **Watch out for.** Mixing up two meanings. The protocol is stateless, but your application still has state: sessions, baskets and orders. The design question is where that state lives. Keep it in a shared store or in the client's token, not in the memory of one server.
+
+- id: resumable-large-file-upload-over-http
+  q: How would you let users upload a 2 GB file over HTTP so that a dropped connection does not mean starting again?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: networking
+  topics:
+    [
+      /system-design/fundamentals/http,
+      /system-design/patterns/blob-storage-and-chunking,
+      /system-design/databases/object-storage,
+    ]
+  a: |-
+    **Short answer.** Split the file into chunks, upload each chunk as its own request, and let the server report which chunks it already has. After a failure the client sends only the missing ones.
+
+    **Why.** A 2 GB upload at 10 megabits a second takes about 27 minutes. One network change in that time ruins a single-request upload, and the user starts again from zero.
+
+    The flow:
+
+    1. **Start.** The client asks the API to begin an upload and gets an upload id.
+    2. **Send chunks.** The client cuts the file into pieces, for example 8 MB each, which gives 256 chunks. Each goes in its own PUT with its chunk number and a checksum.
+    3. **Resume.** After a drop, the client asks "which chunks do you have for this upload id?" and continues from there. At most one 8 MB chunk per connection is sent again.
+    4. **Finish.** The client sends the final list of chunks. The server assembles them and checks a hash of the whole file.
+
+    Send the bytes straight to object storage with short-lived signed URLs, so your app servers handle only the small control calls.
+
+    **Watch out for.** Abandoned uploads. Chunks from uploads that never finish still take up storage, so expire them after a day or so.
+
+- id: reverse-system-design-defend-your-own-system
+  q: Walk me through a system you owned. Explain its architecture, the choices you made and how it failed.
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics: [/system-design/fundamentals/interview-framework, /system-design/fundamentals/non-functional-requirements]
+  companies: [Datadog]
+  a: |-
+    **Short answer.** Treat it as a design interview where you already know the answer. Lead the conversation: state the problem and its scale, draw the system, explain two or three decisions with the options you rejected, then describe a real failure and what changed afterwards.
+
+    **Why.** The interviewer is testing depth and ownership. They want to hear why each decision was made and what it cost.
+
+    A structure that fits about 15 minutes:
+
+    1. **Context, 2 minutes.** Who used it, and the numbers: requests a second, data size, latency target, team size.
+    2. **Architecture, 3 minutes.** Five to eight boxes, and one request followed from start to end.
+    3. **Decisions, 5 minutes.** For each one: the options, the constraint that decided it, and the price you paid. "We chose a queue over direct calls because the downstream service was down weekly. It cost us harder debugging."
+    4. **Failure, 3 minutes.** One real incident: how it was detected, the effect on users, the fix, and what you changed so it could not repeat.
+    5. **Hindsight, 2 minutes.** What you would do differently now.
+
+    **Watch out for.** Saying "we" for everything. State clearly which parts you designed, which you inherited and which you only used. Expect follow-up questions two levels deep on any box you draw, so draw only what you can explain.
+  followUps:
+    - q: Which of those decisions were yours, and what would you change if you built it again today?
+      level: Senior
+      topics: [/system-design/fundamentals/interview-framework]
+      a: |-
+        **Short answer.** Name your own decisions plainly, including one that turned out wrong. Then describe a specific change, the evidence that led you to it, and what the change would cost.
+
+        **Why.** This question checks honesty and judgement. An answer where every choice was perfect tells the interviewer that you did not look closely, or that you are hiding something.
+
+        A strong answer has three parts:
+
+        - **Ownership.** "I proposed the partitioning scheme and wrote the design document. The choice of database was made before I joined."
+        - **A real regret.** "I partitioned by customer id. Our largest customer grew to 30% of the traffic, and one partition ran hot for months."
+        - **The better design and its price.** "Today I would give large customers their own partitions from the start. It adds a routing table to maintain, which is why we avoided it then."
+
+        Tie the regret to information you gained later. That shows the first decision was reasonable for what was known, and that you learn from production.
+
+        **Watch out for.** Blaming other people, or picking a trivial regret such as "I would write more tests". Pick a design decision that had a visible cost.
+
+- id: stuck-or-unfamiliar-topic-in-design-interview
+  q: In a design interview, the interviewer asks about a technology you have never used, or you get stuck. What do you do?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics: [/system-design/fundamentals/interview-framework]
+  a: |-
+    **Short answer.** Say plainly what you do not know, then reason from what the component must do. Interviewers score your thinking far more than your memory of product names.
+
+    **Why.** Pretending is risky. The interviewer often knows the technology well, and two follow-up questions will show the gap. An honest sentence followed by clear reasoning is a good answer.
+
+    When you do not know a product:
+
+    1. **Admit it briefly.** "I have not used that one."
+    2. **Describe the need.** "Here we need a store that handles many writes and reads by key, and can lose a node without losing data."
+    3. **Offer what you know.** "I have used something similar, and I would expect the same trade-offs. Is that close to what you had in mind?"
+
+    When you are stuck on the design:
+
+    - Go back to the requirements and the numbers. They often rule out options.
+    - Say two options aloud with one cost each, and pick one. A stated choice can be corrected. Silence cannot.
+    - Start with the simplest version that works, and then ask what breaks first.
+    - Take a hint when it is offered. Using a hint well is scored as teamwork.
+
+    **Watch out for.** Long silences. Thirty seconds of quiet thinking is fine if you say "give me a moment to think". Several minutes with no words gives the interviewer nothing to score.
+
+- id: finding-where-time-goes-in-a-slow-request
+  q: The p99 latency of an endpoint went from 80 ms to 400 ms after no obvious change. How do you find where the time goes?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics: [/system-design/fundamentals/latency-numbers, /system-design/case-studies/metrics-and-logging]
+  a: |-
+    **Short answer.** Split the 400 ms into parts before changing anything. Measure the time in each hop, find the one part that grew, and only then look for the cause.
+
+    **Why.** A request is a chain: client network, load balancer, app code, cache, database, other services. Work from the outside in:
+
+    1. **Everyone or a slice.** Break p99 down by region, endpoint, server and customer. One slow server points to a different cause than a slowdown for all.
+    2. **One slow request.** A trace records the start and end of every call inside one request. Thirty queries of 10 ms each means too many calls. One call of 300 ms means that call is the problem.
+    3. **Waiting.** Time with no work in it is usually a queue: a full connection pool, a full thread pool, a lock, or a garbage collection pause.
+    4. **Changes.** Compare with deploys, config changes, data growth and traffic mix at the time the graph moved.
+
+    A query in the same zone should take a few milliseconds. If it takes 100 ms, it is scanning, waiting on a lock, or crossing a region.
+
+    **Watch out for.** Looking only at averages. A cause that hits 2% of requests leaves the average almost flat and still ruins p99.
+  followUps:
+    - q: You have no tracing in place. What is the cheapest way to get this breakdown?
+      level: Mid
+      topics: [/system-design/case-studies/metrics-and-logging]
+      a: |-
+        **Short answer.** Give every request an id at the edge, pass it to every service, and log one line per hop with that id and the time the hop took.
+
+        **Why.** A trace is, at its core, timed log lines that share an id. You can get most of the value in a day:
+
+        - The load balancer or gateway creates a request id and sends it as a header. Each service copies it into its outgoing calls and its logs.
+        - Each service logs the total time, plus the time of each outgoing call: database, cache, other services.
+        - Turn on the slow query log in the database, with a limit such as 100 ms.
+
+        Now search the logs for one slow request id and read its lines in order. The gap between "service A called B, 250 ms" and "B handled it in 20 ms" is time spent in the network or in a queue between them.
+
+        Later, replace this with a tracing library that samples about 1% of requests, plus all slow ones.
+
+        **Watch out for.** Clocks that differ between machines. Compare durations measured on one machine, and do not subtract timestamps taken on two.
+
+- id: sequential-vs-random-io-in-design
+  q: Why is reading data in order so much cheaper than reading it from random places, and which designs depend on that?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/latency-numbers,
+      /system-design/databases/lsm-trees,
+      /system-design/patterns/message-queues,
+    ]
+  a: |-
+    **Short answer.** A random read pays a fixed cost to find each small piece. A sequential read pays that cost once and then streams. Logs, queues and LSM storage engines are built to turn random work into sequential work.
+
+    **Why.** Take the usual numbers. An SSD reads one random 4 KB page in about 100 µs, and 1 MB in order in about 200 µs. One megabyte is 256 pages, so reading it page by page at random costs about 25 ms, more than 100 times the sequential read. On a hard disk the gap is far larger, because each random read moves an arm for about 10 ms.
+
+    The same shape appears on the network. One call that returns 100 rows costs one round trip. One hundred calls that return one row each cost one hundred.
+
+    Designs that use this:
+
+    - **Write-ahead logs.** A database appends each change to the end of one file before touching its data pages.
+    - **Log-based queues.** Kafka appends messages to a file and readers scan forward.
+    - **LSM trees.** Writes go to memory and are flushed as sorted files, with no in-place updates.
+    - **Batch APIs.** One request carries many ids.
+
+    **Watch out for.** Assuming SSDs made the difference disappear. They removed the moving arm, but the per-request cost is still there, and so is the round trip on the network.
+
+- id: round-robin-one-server-overloaded
+  q: Your load balancer uses round robin, so every server gets the same number of requests. One server is still overloaded. Why, and what would you change?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: networking
+  topics: [/system-design/fundamentals/load-balancing-basics, /system-design/patterns/load-balancing]
+  a: |-
+    **Short answer.** Equal request counts are not equal work. Requests differ in cost and servers differ in size. Switch to a rule that looks at how busy each server is, such as least connections, and add weights if the machines are different.
+
+    **Why.** Round robin takes turns: server 1, 2, 3, then 1 again. It is fair only when every request costs about the same and every server is the same. Three common cases break that:
+
+    - **Mixed requests.** Most requests take 5 ms, but a report export takes 5 seconds. A server that gets a few exports in a row falls behind while it keeps receiving its normal share.
+    - **Mixed servers.** A machine with 4 CPU cores gets the same share as one with 16.
+    - **Long-lived connections.** With WebSockets or gRPC, the balancer spreads connections, and some connections carry far more traffic than others.
+
+    | Rule | Picks | Good when |
+    | --- | --- | --- |
+    | Round robin | The next server in turn | Requests and servers are uniform |
+    | Weighted | By a fixed share per server | Servers differ in size |
+    | Least connections | The server with fewest open requests | Request cost varies a lot |
+    | Hash | The same server for the same key | You want cache hits per user or key |
+
+    **Watch out for.** A server that fails fast. It returns errors in 1 ms, so it always has the fewest open requests, and least connections sends it even more traffic. Health checks must remove it.
+
+- id: design-a-load-balancer-itself
+  q: Which kinds of load balancer have you used, and how would you design one yourself?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: networking
+  topics:
+    [
+      /system-design/fundamentals/load-balancing-basics,
+      /system-design/patterns/load-balancing,
+      /system-design/patterns/consistent-hashing,
+    ]
+  companies: [Microsoft]
+  a: |-
+    **Short answer.** Name the kinds first: DNS-based, layer 4 (forwards connections) and layer 7 (reads each request). A design has two parts: a data plane that moves traffic fast, and a control plane that decides where traffic may go.
+
+    **Why.** Separating the two keeps the hot path small.
+
+    - **Data plane.** For each new connection or request, pick a backend from an in-memory list and forward. Nothing on this path may call a database. A layer 4 balancer keeps a table from connection to backend so later packets follow the first. A layer 7 balancer ends the client connection, parses HTTP and reuses pooled connections to backends.
+    - **Control plane.** Holds the list of backends, runs health checks every few seconds, and pushes changes to all balancer nodes.
+    - **No single point of failure.** Run several balancer nodes. Clients reach them through one virtual IP that moves to a standby on failure, or through routing that spreads traffic over all nodes.
+    - **Surviving a node loss.** If nodes pick backends by consistent hashing on the connection's addresses and ports, any node makes the same choice, so a connection survives when its balancer node dies.
+
+    **Watch out for.** Listing products and stopping. The interviewer wants the mechanism: how a backend is chosen, how a dead one is noticed, and what happens to traffic in flight.
+  followUps:
+    - q: How do you take a server out of the pool for a deploy without failing the requests it is handling?
+      level: Mid
+      topics: [/system-design/fundamentals/load-balancing-basics, /system-design/fundamentals/availability]
+      a: |-
+        **Short answer.** Drain it. Tell the balancer to stop sending new requests to that server, let the requests in progress finish, and only then stop the process.
+
+        **Why.** Killing a server at once cuts every request it is serving. With 300 requests in flight, that is 300 errors per server per deploy. The order that avoids it:
+
+        1. The server starts failing its readiness check, or the deploy tool marks it as draining.
+        2. The balancer sends it no new requests. Existing ones continue.
+        3. The server waits for in-flight work, up to a limit such as 30 seconds, then exits.
+        4. The new version starts, passes its health check, and gets traffic again.
+
+        Do this to one server, or a small share of the fleet, at a time, so the rest can carry the load. Long-lived connections such as WebSockets need more: send a close message so clients reconnect elsewhere, spread over a minute.
+
+        A new server may also need a slow start, with traffic raised over 30 to 60 seconds while its caches and connection pools fill.
+
+        **Watch out for.** A drain time shorter than your slowest request. A 60 second upload is cut by a 30 second drain every time.
+
+- id: long-poll-broadcast-reconnect-herd
+  q: One event answers 100,000 held long-poll requests at the same moment. What happens next, and how do you keep the system stable?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics:
+    [
+      /system-design/fundamentals/long-polling,
+      /system-design/patterns/back-pressure,
+      /system-design/patterns/rate-limiting,
+    ]
+  a: |-
+    **Short answer.** All 100,000 clients get the reply and send a new request within the same second. That is a self-made traffic spike, and it repeats on every broadcast. Spread the reconnects with random delay, and make the reconnect request cheap.
+
+    **Why.** In normal use, long-poll requests end at different times, so new requests arrive evenly. With a 30 second hold, 100,000 clients produce about 3,300 new requests per second. A broadcast lines them all up: 100,000 requests in one second is 30 times that rate.
+
+    What helps:
+
+    - **Jitter.** The client waits a random 0 to 5 seconds before the next poll. The spike becomes 20,000 per second for 5 seconds. A message published in that gap is picked up by the cursor on the next request.
+    - **Keep connections alive.** Reuse the same HTTP connection so the new poll skips the TCP and TLS setup.
+    - **Cheap checks.** Validate the token locally and answer "nothing new" from memory, with no database read.
+    - **Shed load.** If a server is full, answer with a "retry after" time so clients back off.
+
+    **Watch out for.** Timeouts that line up for the same reason. After a server restart, every client it held reconnects together, then times out together 30 seconds later. Add a random part to the hold time as well.
+
+- id: why-long-polling-still-used
+  q: WebSockets and server-sent events exist. Why would a team still choose long polling today?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics:
+    [
+      /system-design/fundamentals/long-polling,
+      /system-design/fundamentals/choosing-realtime,
+      /system-design/fundamentals/websockets,
+    ]
+  a: |-
+    **Short answer.** Long polling is plain HTTP requests and responses, so it works through every proxy, firewall and load balancer, and with the tools a team already has. It fits when updates are rare, or as a fallback when a WebSocket cannot connect.
+
+    **Why.** A long poll looks like a slow normal request. Nothing in the network has to understand a new protocol.
+
+    | Reason | Detail |
+    | --- | --- |
+    | It works everywhere | Some company proxies and old networks break the WebSocket upgrade or buffer streamed responses |
+    | Existing tools still apply | Auth cookies, logging, rate limits and the load balancer all treat it as a normal request |
+    | Simple servers | Each request stands alone, and any server can answer the next one if the client sends a cursor |
+    | Low message rate | For a few events a minute, the extra request per event costs little |
+
+    The costs are real. Every message needs a new request with full headers, often 500 bytes or more. The server can only send when a request is waiting. The client can only send by opening another request. For chat with typing indicators, or anything that sends many messages a second, a WebSocket is the better tool.
+
+    **Watch out for.** Calling long polling obsolete. Many real-time libraries start with it or fall back to it, so a good answer treats it as the safe baseline.
+
+- id: nat-and-why-clients-open-connections
+  q: What is NAT, and how does it shape the way clients and servers talk to each other?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: networking
+  topics:
+    [
+      /system-design/fundamentals/networking,
+      /system-design/fundamentals/tcp-udp,
+      /system-design/fundamentals/choosing-realtime,
+    ]
+  a: |-
+    **Short answer.** NAT (network address translation) lets many devices with private addresses share one public IP address. Because of it, a server cannot open a connection to a phone or laptop. The client must connect first, and that fact drives every real-time design.
+
+    **Why.** There are about 4.3 billion IPv4 addresses, fewer than the number of devices. A home router or mobile carrier gives devices private addresses such as `192.168.1.20`. When a device sends a packet out, the router rewrites the source to its own public address and a port it picks, and stores that pairing in a table. Replies to that port are sent back to the device.
+
+    Three results matter in design:
+
+    - **Only outbound connections work.** An incoming packet with no table entry is dropped. This is why push to a client needs polling, a held connection or a push service.
+    - **Idle entries expire.** Many routers and carriers remove an entry after 30 seconds to a few minutes of silence. A quiet WebSocket then dies without either side being told, so long connections send heartbeats.
+    - **Many users share an address.** A whole office or campus can appear as one IP, so rate limits and bans by IP alone hit innocent users.
+
+    **Watch out for.** Designing a feature where the server "calls the device". Peer-to-peer calls need extra servers to help two devices behind NAT find each other.
+
+- id: sli-slo-sla-difference
+  q: What is the difference between an SLI, an SLO and an SLA, and how do they turn a non-functional requirement into something you can check?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/non-functional-requirements,
+      /system-design/fundamentals/availability,
+      /system-design/case-studies/metrics-and-logging,
+    ]
+  a: |-
+    **Short answer.** An SLI is the measurement. An SLO is the target you set for that measurement. An SLA is a contract with a customer that says what you owe them if you miss.
+
+    **Why.** "The API should be fast and reliable" cannot be tested. The three terms make it testable:
+
+    | Term | Meaning | Example |
+    | --- | --- | --- |
+    | SLI (indicator) | A number measured from real traffic | Share of requests answered without a server error in under 300 ms |
+    | SLO (objective) | The internal target for that number | 99.9% over 30 days |
+    | SLA (agreement) | The promise to customers, with a penalty | 99.5% a month, or a 10% credit |
+
+    Choose SLIs that match what users feel. Measure at the load balancer or the client, because a server that is down reports no errors of its own. Count good requests over all requests. Counting "minutes up" hides partial failures.
+
+    Set the SLA looser than the SLO. The gap is your safety margin: you get an alert when you miss the internal target, well before you owe anyone money.
+
+    **Watch out for.** A target of 100%. It can never be met, it blocks every deploy, and users cannot tell it from 99.99% because their own network fails more often than that.
+  followUps:
+    - q: What is an error budget, and how does a team use it?
+      level: Mid
+      topics: [/system-design/fundamentals/availability]
+      a: |-
+        **Short answer.** The error budget is the amount of failure the SLO allows. A team spends it on risk, such as deploys and experiments, and slows down when it runs out.
+
+        **Why.** An SLO of 99.9% means 0.1% of requests may fail. With 100 million requests in 30 days, the budget is 100,000 failed requests. Counted in time, 0.1% of 30 days is about 43 minutes.
+
+        This gives product and operations one shared number:
+
+        - **Budget left.** Ship often. A bad deploy that fails 20,000 requests is an accepted cost.
+        - **Budget nearly gone.** Freeze risky releases and spend the time on reliability work until the 30 day window recovers.
+        - **Budget never touched.** The target may be stricter than users need, and the team is paying for reliability nobody notices.
+
+        Alerts work on the burn rate, which is how fast the budget is being used. Burning a month of budget in one hour should page someone. Burning it evenly over the month should not.
+
+        **Watch out for.** Treating the budget as a goal to use up through carelessness. It is a limit that makes the cost of risk visible. It does not excuse an outage that better testing would have caught.
+
+- id: durability-vs-availability
+  q: What is the difference between durability and availability? Can a system have one without the other?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/non-functional-requirements,
+      /system-design/fundamentals/availability,
+      /system-design/databases/sync-vs-async-replication,
+    ]
+  a: |-
+    **Short answer.** Availability asks "can I use the system right now". Durability asks "is the data I saved still there". They fail in different ways, and you can have either one without the other.
+
+    **Why.** Think of a bank branch. If the doors are locked for an hour, the bank is unavailable, but your money is safe. If the vault burns down, the doors may be open, but the money is gone.
+
+    | | Availability | Durability |
+    | --- | --- | --- |
+    | Failure looks like | Errors or timeouts for a while | Data lost for good |
+    | Recovers by itself | Yes, when the service returns | No |
+    | Typical target | 99.9% to 99.99% of requests | Far higher, such as eleven nines for object storage |
+    | Bought with | Spare servers, failover, several zones | Copies on separate disks and sites, backups |
+
+    Examples of one without the other:
+
+    - **Durable but unavailable.** A database that is down for maintenance, with every write safe on disk.
+    - **Available but not durable.** An in-memory cache that answers every request and loses everything on restart.
+
+    Durability targets are stricter because the damage is permanent. An hour of downtime is forgotten. A lost photo library is not.
+
+    **Watch out for.** Thinking replicas are backups. A replica copies a mistaken delete within milliseconds. Durability also needs backups you can restore to a point in time, and that you have tested.
+
+- id: proxy-502-vs-504
+  q: Your reverse proxy returns some 502 and 504 errors, while the app's own dashboards look healthy. What does each code mean, and how do you find the cause?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: networking
+  topics:
+    [
+      /system-design/fundamentals/proxies,
+      /system-design/fundamentals/http,
+      /system-design/fundamentals/load-balancing-basics,
+    ]
+  a: |-
+    **Short answer.** Both codes are written by the proxy, which is why the app does not see them. A 502 means the proxy got no valid answer from the app: the connection was refused, reset or closed. A 504 means the proxy waited for the app and gave up.
+
+    **Why.** The app only records requests it finished. These failed before that.
+
+    | Code | Proxy saw | Usual causes |
+    | --- | --- | --- |
+    | 502 Bad Gateway | Refused, reset or broken response | App restarting or crashed, killed for memory, wrong port, app closed an idle connection |
+    | 504 Gateway Timeout | No response within its timeout | Slow query, a blocked thread pool, a downstream call with no timeout |
+
+    Steps to find it:
+
+    1. Read the proxy's error log. It names the backend address and the reason.
+    2. Match the times with deploys and restarts. Errors during each deploy mean servers are stopped without draining.
+    3. For 504, compare timeouts. If the proxy waits 30 seconds and the app's database call waits 60, the proxy always gives up first.
+    4. For rare 502s with no restart, check idle timeouts. If the app closes idle keep-alive connections after 5 seconds and the proxy keeps them for 60, the proxy sometimes sends a request on a connection the app has just closed.
+
+    **Watch out for.** Raising the proxy timeout to hide 504s. The slow requests remain, and they now hold connections for longer.
+
+- id: forward-proxy-https-connect
+  q: A company sends all staff web traffic through a forward proxy. How does HTTPS work through it, and can the proxy read the traffic?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: networking
+  topics: [/system-design/fundamentals/proxies, /system-design/fundamentals/tls]
+  a: |-
+    **Short answer.** The browser asks the proxy to open a tunnel to the site, then runs TLS through that tunnel directly with the site. By default the proxy sees the host name and the amount of data, and cannot read the content. It can read the content only if the company installs its own certificate authority on staff devices.
+
+    **Why.** There are two modes.
+
+    - **Tunnel.** The browser sends `CONNECT bank.example:443` to the proxy. The proxy opens a TCP connection to that host and from then on copies bytes in both directions. The TLS handshake happens between the browser and the bank, so the proxy holds no keys. It can still allow or block by host name and log who connected where and when.
+    - **Inspection.** The proxy ends the TLS connection itself and opens a second one to the real site. To do that it creates a certificate for `bank.example` on the fly, signed by a company certificate authority that every staff laptop has been set up to trust. Now the proxy sees full URLs and bodies, and can scan for malware or data leaks.
+
+    Inspection has costs. The proxy becomes a place where all staff traffic is readable, so a break-in there is serious.
+
+    **Watch out for.** Saying a proxy can never see HTTPS, or that it always can. The answer depends on whether the device trusts the proxy's certificate authority.
+
+- id: push-notification-fatigue-controls
+  q: Users complain that your app sends too many notifications, and some arrive twice. What controls do you build into the notification service?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics:
+    [
+      /system-design/fundamentals/push-notifications,
+      /system-design/patterns/idempotency,
+      /system-design/patterns/rate-limiting,
+    ]
+  a: |-
+    **Short answer.** Put every notification through one service that removes duplicates, applies each user's preferences, limits how many a user gets, and replaces old notifications with newer ones.
+
+    **Why.** When each team calls the push provider directly, nobody controls the total a user sees. One gate in front of the provider can apply the same checks to all:
+
+    1. **Deduplicate.** Every notification request carries an id made from the event, such as "order 812 shipped". The service stores ids it has sent for a day and drops repeats. Queues deliver at least once, so repeats are normal.
+    2. **Preferences.** A table per user and category: order updates on, marketing off. Check it before sending.
+    3. **Frequency caps.** For example, at most 3 marketing pushes a week. Urgent categories, such as a login code, skip the cap.
+    4. **Quiet hours.** Hold non-urgent pushes between 10 pm and 8 am in the user's own time zone.
+    5. **Collapse.** Give related pushes the same collapse key so "5 new messages" replaces "4 new messages" on the lock screen.
+    6. **Expiry.** Set a time to live. A "driver is 2 minutes away" push is useless an hour later.
+
+    **Watch out for.** Deduplicating only in memory on one worker. A retry handled by another worker sends the push again. Keep the sent ids in a shared store.
+
+- id: push-vs-socket-when-app-is-open
+  q: A chat app has a WebSocket open while the app is on screen, and push notifications for when it is not. How does the server decide which one to use for a new message?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics:
+    [
+      /system-design/fundamentals/push-notifications,
+      /system-design/fundamentals/websockets,
+      /system-design/case-studies/facebook-messenger,
+    ]
+  a: |-
+    **Short answer.** Save the message first. Then send it over the socket for every device that has one open, and send a push to the user's other devices. Let the client hide anything it has already shown, using the message id.
+
+    **Why.** The server keeps a registry: user and device to the gateway server that holds the socket. On a new message, the router looks up each of the recipient's devices.
+
+    | Device state | Action |
+    | --- | --- |
+    | Socket open, app on screen | Send on the socket. The app shows it in place, with no banner |
+    | No socket | Send a push through APNs or FCM |
+    | Socket entry exists but is stale | Send on the socket, wait a few seconds for an ack, then send a push |
+
+    The third row is the hard one. A phone that walked into a lift still looks connected until a heartbeat is missed, which can take 30 seconds. So the socket send needs an acknowledgement from the app, and a missing ack triggers the push.
+
+    That fallback can produce both a socket delivery and a push. Each message has one id, and the client ignores an id it already has.
+
+    **Watch out for.** Trusting presence as exact. It is always a few seconds behind. Design so that a wrong guess costs a duplicate that the client hides, and never a lost message.
+
+- id: offset-vs-cursor-pagination
+  q: A list endpoint returns a feed that changes all the time. Would you page it with offsets or with a cursor?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: apis
+  topics: [/system-design/fundamentals/rest, /system-design/fundamentals/api-design]
+  a: |-
+    **Short answer.** A cursor. Offsets get slower with depth and show duplicates or skip items when the list changes between pages. A cursor says "continue after this item", which stays correct and fast.
+
+    **Why.** With offsets, the client asks for `?offset=40&limit=20`. Two problems follow:
+
+    - **Shifting.** If 3 new posts arrive at the top while the user reads page 2, every item moves down 3 places. Page 3 then repeats 3 items the user has seen. A delete causes a skipped item.
+    - **Cost.** To serve offset 100,000, the database walks past 100,000 rows and throws them away. Page 5,000 is far slower than page 1.
+
+    With a cursor, the client sends back a marker from the last item it received, for example `?after=abc&limit=20`. The server runs a query such as "items older than this one, newest first, limit 20". An index goes straight to that point, so every page costs the same.
+
+    | | Offset | Cursor |
+    | --- | --- | --- |
+    | Jump to page 50 | Yes | No |
+    | Stable while the list changes | No | Yes |
+    | Cost of a deep page | Grows with depth | Constant |
+
+    Offsets are fine for small, stable lists, such as an admin table with page numbers.
+
+    **Watch out for.** Returning a total count on every page of a huge feed. Counting millions of rows can cost more than the page itself. Return a "has more" flag, or an estimate.
+  followUps:
+    - q: What do you put inside the cursor, and how do you avoid duplicates when many items share the same timestamp?
+      level: Senior
+      topics: [/system-design/fundamentals/api-design]
+      a: |-
+        **Short answer.** Put the sort values of the last item in the cursor, plus a unique id as a tie-breaker. Encode it as an opaque string so clients cannot depend on its contents.
+
+        **Why.** If the cursor is only a timestamp, and 30 items share the same second, "older than this timestamp" skips the rest of that second, and "older than or equal" repeats them. Sorting by two columns fixes it: created time, then id. The pair is unique, so the order is total.
+
+        The query becomes "items where (created time, id) comes before (cursor time, cursor id), newest first, limit 20". An index on those two columns in the same order serves it directly.
+
+        Practical details:
+
+        - **Opaque.** Base64-encode the values, and sign them if clients must not edit them. You can then change the format later without breaking anyone.
+        - **End of list.** Return no next cursor when fewer rows than the limit come back. A common trick is to fetch limit plus one row to know whether more exist.
+        - **Filters.** A cursor is valid only for the same sort and filter. Store them in the cursor, or reject a mismatch.
+
+        **Watch out for.** Ranked feeds. If the order comes from a score that changes between requests, no cursor on live data is stable. Compute the ranked list once per session, store the ids, and page through that snapshot.
+
+- id: versioning-a-rest-api
+  q: How do you version a REST API without breaking the clients that already use it?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: apis
+  topics:
+    [/system-design/fundamentals/rest, /system-design/fundamentals/api-design, /system-design/fundamentals/api-gateway]
+  a: |-
+    **Short answer.** Avoid new versions for as long as you can by making only additive changes. When a breaking change is needed, publish it as a new version next to the old one, and give clients a dated path to move.
+
+    **Why.** Old mobile apps stay installed for years, and partners update on their own schedule. So the first rule is to know which changes are safe.
+
+    | Safe (no new version) | Breaking (needs a new version) |
+    | --- | --- |
+    | Add an optional request field | Remove or rename a field |
+    | Add a response field | Change a field's type or meaning |
+    | Add a new endpoint | Make an optional field required |
+    | Add a new error code clients can ignore | Change the default sort or page size |
+
+    For a breaking change, the common ways to mark the version are a path prefix such as `/v2/appointments`, or a request header that carries a version or a date.
+
+    Then run both versions. Keep the old one as a thin layer that translates to the new code, measure who still calls it, announce an end date months ahead, and return a deprecation header until then.
+
+    **Watch out for.** New enum values. Adding the status "rescheduled" looks additive, but an old client with a strict switch statement may crash on it. Tell clients from day one to treat unknown values as a default case.
+
+- id: grpc-four-call-types
+  q: gRPC supports four kinds of call. What are they, and when would you use each?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: apis
+  topics: [/system-design/fundamentals/rpc, /system-design/fundamentals/choosing-realtime]
+  a: |-
+    **Short answer.** Unary, server streaming, client streaming and bidirectional streaming. They differ in whether each side sends one message or many. Use unary unless the data is naturally a stream.
+
+    **Why.** gRPC runs each call on one HTTP/2 stream, and a stream can carry many messages in each direction.
+
+    | Kind | Client sends | Server sends | Example |
+    | --- | --- | --- | --- |
+    | Unary | One | One | Get the price of an item |
+    | Server streaming | One | Many | Subscribe to a driver's location updates |
+    | Client streaming | Many | One | Upload a file in chunks, get one receipt |
+    | Bidirectional | Many | Many | Live speech to text: audio goes up, words come down |
+
+    Unary calls are the simplest to run. Each one can be retried, given a deadline, balanced to any server and traced on its own. Most service-to-service traffic is unary.
+
+    Streams save the cost of a new call per message and let the receiver slow the sender through HTTP/2 flow control. In return they are stateful. A stream stays on one server for its whole life, so a deploy cuts it, and the client needs code to reconnect and resume from the last message it handled.
+
+    **Watch out for.** Using a stream to return a large list. If the list fits in a few pages, unary calls with pagination are easier to retry and to cache. Keep streams for data that has no natural end, or that is too large to hold in memory.
+
+- id: rpc-is-not-a-local-call
+  q: An RPC framework makes a remote call look like a local function call. Why is that dangerous, and what must the caller handle?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: apis
+  topics:
+    [
+      /system-design/fundamentals/rpc,
+      /system-design/patterns/circuit-breaker-and-retries,
+      /system-design/patterns/idempotency,
+    ]
+  a: |-
+    **Short answer.** A local call either runs or the whole program has crashed. A remote call has a third result: no answer, and no way to know whether the work happened. The stub hides the network, but the caller still owns timeouts, retries and partial failure.
+
+    **Why.** Four differences stay, whatever the framework does.
+
+    | | Local call | Remote call |
+    | --- | --- | --- |
+    | Time | Nanoseconds | 0.5 ms in a data center, plus the work |
+    | Failure | Fails with the caller | Can fail, or hang, by itself |
+    | Unknown outcome | Never | A timeout can mean "not done" or "done, reply lost" |
+    | Arguments | Shared memory | Copied and encoded on every call |
+
+    What the caller must add:
+
+    - **A deadline on every call.** Without one, a slow dependency holds threads until the caller is stuck too.
+    - **Safe retries.** Retry only calls that are idempotent, meaning that running them twice has the same effect as once. For the rest, send an idempotency key.
+    - **A plan for failure.** Decide per call whether to fail the request, use a default, or serve cached data.
+    - **Fewer, larger calls.** A loop of 100 calls that was free in one process now costs 50 ms or more. Offer a batch method.
+
+    **Watch out for.** Hiding remote calls behind an interface that looks in-process. A teammate then puts one in a loop without knowing. Name and type remote calls so the cost is visible.
+
+- id: scaling-a-write-heavy-relational-database
+  q: Your relational database has replicas and a cache, but now the primary cannot keep up with writes. What are your options, in order?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/scaling-journey,
+      /system-design/patterns/sharding,
+      /system-design/databases/relational-databases,
+    ]
+  a: |-
+    **Short answer.** Replicas and caches only help reads, because every write still goes to the one primary. Reduce and cheapen the writes first, then buy a bigger primary, then split the data by function, and shard only when all of that is used up.
+
+    **Why.** Each step costs more than the one before, so take them in order.
+
+    1. **Make each write cheaper.** Drop unused indexes, since every index is an extra write per row. Batch many small inserts into one transaction.
+    2. **Remove writes that do not belong.** Move view counters, sessions and logs to a store built for them, or buffer them in a queue and write totals every few seconds.
+    3. **Scale up.** A larger machine with fast SSDs can take tens of thousands of simple writes a second.
+    4. **Split by function.** Put orders in one database and messages in another. Each has its own primary. Joins across them move into application code.
+    5. **Shard.** Split one large table across many databases by a key such as user id. Write capacity now grows with the number of shards.
+
+    Sharding is last because it changes the application: queries that span shards, transactions across shards and moving data between shards all become your problem.
+
+    **Watch out for.** Jumping to sharding because the table is "big". Size alone is rarely the limit. Check the write rate, lock waits and disk latency first.
+  followUps:
+    - q: How do you choose the shard key, and what does a bad choice look like?
+      level: Senior
+      topics: [/system-design/patterns/sharding, /system-design/patterns/consistent-hashing]
+      a: |-
+        **Short answer.** Pick the key that appears in almost every query and that spreads load evenly. For most products that is the user id or the tenant id.
+
+        **Why.** A good key meets three tests:
+
+        - **Most queries stay on one shard.** If every request starts with a user, sharding by user id keeps that user's rows together, so the common reads and transactions touch one database.
+        - **Load is even.** The key has many values and no single value holds a large share of the data or traffic.
+        - **It does not change.** Changing the key of a row means moving it to another shard.
+
+        Bad choices show the same few symptoms:
+
+        | Key | What goes wrong |
+        | --- | --- |
+        | Creation date | All new writes land on the newest shard |
+        | Country | One large country overloads its shard |
+        | A random id with no meaning | Every "show my orders" query must ask all shards |
+
+        One huge customer can break even a good key. Plan for giving a very large tenant a shard of its own.
+
+        **Watch out for.** Hashing with "key modulo number of shards". Adding one shard moves almost every row. Map keys to many small logical buckets, and assign buckets to servers, so growth moves only some buckets.
+
+- id: which-scaling-parts-does-a-small-system-need
+  q: "You are asked to design a payroll tool for a company of 5,000 employees. Which of these do you add, and why: a load balancer, a cache, sharding, a queue?"
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/scaling-journey,
+      /system-design/fundamentals/capacity-planning,
+      /system-design/fundamentals/non-functional-requirements,
+    ]
+  a: |-
+    **Short answer.** A load balancer with two app servers, yes, for availability. A queue, yes, for the monthly pay run. A cache and sharding, no. This system is small, and its hard requirement is correctness.
+
+    **Why.** Do the numbers first. If all 5,000 employees open a payslip in the same hour, that is 5,000 / 3,600, under 2 requests a second. One small server handles that many times over. Ten years of monthly payslips is 5,000 x 120 = 600,000 rows, which is tiny for one relational database.
+
+    | Part | Add it | Reason |
+    | --- | --- | --- |
+    | Load balancer and 2 servers | Yes | One server can die or be deployed without downtime. This is for failure, not load |
+    | Database replica and backups | Yes | Losing pay records is not acceptable |
+    | Queue and workers | Yes | The pay run computes 5,000 payslips and calls a bank. It should run in the background and resume after a crash |
+    | Cache | No | Reads are few, and a stale salary figure is worse than a 20 ms query |
+    | Sharding | No | The data fits one machine by a factor of thousands |
+
+    The effort goes into what matters here: transactions, so a pay run is never half applied, idempotent payment calls, an audit log of every change, and strict access rules.
+
+    **Watch out for.** Drawing the same large-scale diagram for every prompt. Each part you add must answer a number or a failure you named.
+
+- id: securing-a-poorly-secured-existing-design
+  q: You inherit a running system that was built with almost no security. How do you add it, and in what order?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: security
+  topics:
+    [
+      /system-design/fundamentals/security,
+      /system-design/fundamentals/api-auth,
+      /system-design/fundamentals/encryption-and-hashing,
+    ]
+  companies: [Salesforce]
+  a: |-
+    **Short answer.** Find out what you have and what is exposed, close the holes an outsider can reach today, and then add layers from the edge inwards without stopping the product.
+
+    **Why.** You cannot fix everything at once, so order the work by how likely and how costly each attack is.
+
+    1. **Map it.** List every entry point from the internet, every data store, what personal or payment data each holds, and every secret and who has it.
+    2. **Close what is open.** Move databases and admin tools off the public internet. Rotate any password or key found in code or chat. Turn on TLS everywhere.
+    3. **Fix identity.** Require authentication on every endpoint, and check on every call that the caller owns the record.
+    4. **Limit the blast radius.** Give each service its own database account with only the rights it needs. Put secrets in a vault. Separate networks so a web server cannot reach the payroll database.
+    5. **See what happens.** Central logs of sign-ins, permission failures and admin actions, with alerts.
+
+    Roll out each change in a report-only mode first where possible, so you learn which internal callers would break.
+
+    **Watch out for.** Starting with the most interesting control, such as encrypting every column, while an admin panel with a default password is still on the internet.
+  followUps:
+    - q: How do you turn on authorization checks in a live system without breaking the callers that depend on the old behaviour?
+      level: Senior
+      topics: [/system-design/fundamentals/api-auth, /system-design/fundamentals/api-gateway]
+      a: |-
+        **Short answer.** Ship the check in a mode that only logs what it would have blocked. Fix or approve the callers that show up, then switch to blocking one endpoint or one group of callers at a time.
+
+        **Why.** In an old system nobody knows every caller. A batch job, a partner script and an internal dashboard may all rely on an endpoint that asks for no token. Blocking on day one causes an outage that you created.
+
+        The steps:
+
+        1. **Log-only.** The check runs on every request and records the caller, the endpoint and the decision. Nothing is denied.
+        2. **Review.** After one or two weeks, the log shows real callers. Give each a proper identity and the smallest set of rights, or remove it.
+        3. **Enforce in slices.** Turn on blocking behind a flag, starting with the most sensitive endpoints. Watch the rate of 401 and 403 responses.
+        4. **Keep a fast way back.** The flag can return an endpoint to log-only within minutes.
+
+        The exception is a hole that is being attacked now. Close that at once and accept the breakage.
+
+        **Watch out for.** Leaving log-only mode on for months. Set a date for enforcement when you start, or the check never protects anything.
+
+- id: principle-of-least-privilege
+  q: What is the principle of least privilege? Give an example of applying it in a backend system.
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: security
+  topics: [/system-design/fundamentals/security, /system-design/fundamentals/api-auth]
+  a: |-
+    **Short answer.** Every person and every program gets only the access it needs for its job, and nothing more. When one of them is broken into or makes a mistake, the damage stops at what it was allowed to do.
+
+    **Why.** Assume something will be compromised: a stolen laptop, a leaked key, a bug that lets an attacker run a query. The question is then how far they can go.
+
+    Take a clinic system with three services and one database.
+
+    | Service | Shared admin account | Least privilege |
+    | --- | --- | --- |
+    | Booking | Can read and change everything | Read and write the appointments table only |
+    | Reminder sender | Can read and change everything | Read appointment times and phone numbers, write nothing |
+    | Reports | Can read and change everything | Read-only access to a copy with names removed |
+
+    With the shared account, an injection bug in the reminder sender lets an attacker delete every table. With separate accounts, the same bug exposes appointment times and phone numbers. That is still bad, but far smaller.
+
+    The same rule applies elsewhere: staff get production access for a few hours on request, API keys are limited to named actions, and services may call only the services they need.
+
+    **Watch out for.** Rights that only grow. People change teams and services lose features, but the access stays. Review it on a schedule and remove what has not been used for 90 days.
+
+- id: json-number-and-date-pitfalls
+  q: Your API sends money amounts, 64-bit ids and timestamps as JSON. What can go wrong, and how should each be encoded?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: apis
+  topics:
+    [
+      /system-design/fundamentals/serialization,
+      /system-design/fundamentals/api-design,
+      /system-design/fundamentals/rest,
+    ]
+  a: |-
+    **Short answer.** JSON has one number type with no stated size, and no date type. Many parsers read numbers as 64-bit floats, which cannot hold every large integer or every decimal exactly. Send money as integer minor units, large ids as strings, and times as ISO 8601 text in UTC.
+
+    **Why.** The format does not say how a number must be stored, so each language decides.
+
+    | Value | What goes wrong | Safer encoding |
+    | --- | --- | --- |
+    | Money, such as 19.99 | A float stores the nearest binary fraction. 0.1 + 0.2 gives 0.30000000000000004, and sums drift by a cent | An integer count of cents, 1999, plus a currency code |
+    | 64-bit id | JavaScript keeps integers exactly only up to 2 to the power 53, about 9 x 10^15. A larger id has its last digits changed without any error | A string |
+    | Timestamp | Seconds or milliseconds, local time or UTC: the reader has to guess | Text such as `2026-03-01T09:30:00Z` |
+
+    The id case is the one that reaches production. The server sends a correct number, the browser rounds it while parsing, and the next request asks for a record that does not exist.
+
+    Currencies also differ in their minor unit, so always send the currency with the amount.
+
+    **Watch out for.** Fixing this on the server only. The damage happens in the client's parser, so the wire format itself has to change.
+
+- id: row-vs-columnar-file-formats
+  q: Events arrive as Avro records, but the analytics team wants them stored as Parquet. What is the difference between a row format and a columnar format, and why use both?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: apis
+  topics:
+    [
+      /system-design/fundamentals/serialization,
+      /system-design/databases/analytical-databases,
+      /system-design/fundamentals/compression,
+    ]
+  a: |-
+    **Short answer.** A row format stores each record whole, one after another, which suits writing and reading one event at a time. A columnar format stores all values of one field together, which suits queries that read a few fields from billions of records. Pipelines write rows and convert to columns later.
+
+    **Why.** The two workloads are opposite.
+
+    | | Row format (Avro, Protobuf) | Columnar format (Parquet, ORC) |
+    | --- | --- | --- |
+    | Write one record | Append it, cheap | Costly, values go to many places |
+    | Read one whole record | One read | Must gather from every column |
+    | Read 3 fields of 50 | Reads all 50 | Reads only those 3 |
+    | Compression | Good | Better, since similar values sit together |
+
+    Take an event with 50 fields, and a query for the average order value per country. A row file makes the engine read every byte. A columnar file lets it read 2 columns and skip the other 48, so it touches about 4% of the data. A column of country codes also has few distinct values, so it compresses to a small fraction of its size.
+
+    A common pipeline: producers write Avro to a log such as Kafka, and a job writes Parquet files to object storage every few minutes or every hour.
+
+    **Watch out for.** Writing tiny Parquet files, one per event batch. Thousands of small files make queries slow. Compact them into files of 100 MB or more.
+
+- id: sse-six-connection-limit-and-auth
+  q: A dashboard opens one SSE stream per widget. After six widgets, the rest of the page stops loading. What is happening, and how do you fix it?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics: [/system-design/fundamentals/server-sent-events, /system-design/fundamentals/http]
+  a: |-
+    **Short answer.** Over HTTP/1.1, a browser opens at most about 6 connections to one domain. Each SSE stream holds one of them open for as long as it runs, so six streams use them all, and every other request to that domain waits. Serve the streams over HTTP/2, or send all widgets through one stream.
+
+    **Why.** A normal request frees its connection in milliseconds. A stream never does. The limit is counted per browser and per domain across all tabs, so a user with two tabs of three widgets each hits it as well.
+
+    Two fixes, best used together:
+
+    - **HTTP/2.** All requests to a domain share one TCP connection as separate streams, usually up to about 100 at once. Check every hop: if the load balancer speaks HTTP/1.1 to the browser, the limit is still there.
+    - **One stream, many topics.** Open a single SSE connection and name each event by type, such as `event: cpu` and `event: orders`. The page routes each event to the right widget.
+
+    A related limit: the browser's built-in `EventSource` cannot set custom headers, so a bearer token cannot go in an `Authorization` header. Use a cookie, or read the stream with `fetch`, which allows headers.
+
+    **Watch out for.** Spreading streams over several subdomains to get around the limit. It works, but multiplies connections on both sides. One multiplexed stream is the cleaner design.
+
+- id: streaming-llm-tokens-with-sse
+  q: A chat assistant streams its answer word by word. Why is SSE the usual choice, and what happens when the user presses Stop?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics:
+    [
+      /system-design/fundamentals/server-sent-events,
+      /system-design/case-studies/chatgpt,
+      /system-design/fundamentals/choosing-realtime,
+    ]
+  a: |-
+    **Short answer.** The traffic is one request up and a long run of small text pieces down, which is exactly the shape of SSE. Stop closes the connection, and the server must notice that and cancel the model run, because generation is the expensive part.
+
+    **Why.** A full answer can take 20 seconds to generate. Sending each token (a word piece) as it is produced lets the user start reading in under a second.
+
+    SSE fits because the client has nothing more to say after the prompt, and the stream is plain HTTP that passes through gateways, auth and logging unchanged.
+
+    Details that matter:
+
+    - **POST, not GET.** The prompt is too large and too private for a URL. Clients send a POST and read the response body as an event stream with `fetch`, since the built-in `EventSource` only does GET.
+    - **Stop.** The client aborts the request. The server sees the connection close and cancels the generation, which frees the GPU for another user.
+    - **Disconnects.** If the network drops mid-answer, either keep generating into a buffer so the client can resume, or cancel and let the user retry.
+    - **End marker.** Send a final event that says the answer is complete, so the client can tell "finished" from "cut off".
+
+    **Watch out for.** A proxy that buffers the response. The user then gets nothing for 20 seconds and everything at once.
+  followUps:
+    - q: The client disconnects but the model keeps generating for 30 more seconds. Why does that matter, and how do you detect the disconnect quickly?
+      level: Senior
+      topics: [/system-design/fundamentals/server-sent-events, /system-design/patterns/back-pressure]
+      a: |-
+        **Short answer.** The GPU is the scarce resource, and an answer nobody reads still uses it. Detect the closed connection at the server nearest the client and pass a cancel signal down to the model server.
+
+        **Why.** Suppose one GPU serves 20 streams at a time, and 10% of users leave mid-answer. If each abandoned run continues for 30 seconds, about 2 of the 20 slots are doing wasted work at any moment. At peak, that is capacity real users are queueing for.
+
+        Detection is harder than it sounds, because the request passes several hops:
+
+        - The edge server learns of the close when a write fails or the socket reports an end. With slow output, that write may be seconds away, so send a small keep-alive comment every few seconds to find dead clients sooner.
+        - Each hop must pass the cancel on. With gRPC between services, cancelling the call does this. With a queue between them, publish a cancel message keyed by the request id.
+        - The model server checks for cancellation between tokens and frees the slot.
+
+        Also set a hard limit: a maximum number of tokens and a maximum time per request, so a missed cancel cannot run for long.
+
+        **Watch out for.** A proxy in the middle that keeps the upstream connection open after the client has gone. Then no layer behind it ever sees the close.
+
+- id: soap-vs-rest-when-soap-still-fits
+  q: How is SOAP different from REST, and is there any case where you would still choose SOAP?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: apis
+  topics:
+    [
+      /system-design/fundamentals/soap,
+      /system-design/fundamentals/rest,
+      /system-design/fundamentals/choosing-an-api-style,
+    ]
+  a: |-
+    **Short answer.** SOAP is a strict protocol: every message is an XML envelope, and a formal contract lists every operation. REST is a style that uses HTTP itself, with URLs for things and methods for actions. For a new API, choose REST or gRPC. Use SOAP when the other side requires it.
+
+    **Why.** They come from different ideas about what an API is.
+
+    | | SOAP | REST |
+    | --- | --- | --- |
+    | Unit | An operation, such as TransferFunds | A resource, such as /transfers/812 |
+    | Message format | XML envelope only | Usually JSON |
+    | Use of HTTP | Mostly one URL, always POST | Methods, status codes and caching all carry meaning |
+    | Contract | WSDL, required and machine-readable | OpenAPI, optional |
+    | Security | Message-level signing and encryption defined by standards | TLS plus tokens |
+    | Size | Large, often several times the JSON | Small |
+
+    REST won for public and mobile APIs because it is lighter, easier to read and works with HTTP caches.
+
+    SOAP is still what you meet in banking, insurance, government, healthcare and older enterprise software. Those systems were built on it, and some rely on signed messages that stay verifiable after passing through several middle systems. When a bank offers only SOAP, you use SOAP for that one link.
+
+    **Watch out for.** Calling SOAP simply "old and bad". The better answer is that it solved real problems with heavy tools, and that you would wrap it behind one small adapter service so the rest of your platform never sees XML.
+
+- id: wsdl-vs-openapi-vs-proto
+  q: What is a WSDL file, and how does it compare with an OpenAPI document or a Protobuf file?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: apis
+  topics: [/system-design/fundamentals/soap, /system-design/fundamentals/rpc, /system-design/fundamentals/api-design]
+  a: |-
+    **Short answer.** All three are machine-readable contracts that describe an API well enough to generate client code. WSDL does it for SOAP in XML, OpenAPI for HTTP and JSON APIs, and a Protobuf file for gRPC. They differ in how strict they are and in who writes them.
+
+    **Why.** A contract lists the operations, the shape of each request and reply, and where to send them. Tools turn it into a typed client, so a wrong field name fails at build time and not in production.
+
+    | | WSDL | OpenAPI | Protobuf file |
+    | --- | --- | --- | --- |
+    | Describes | SOAP operations and XML types | URLs, methods, JSON bodies, status codes | Services, methods and binary messages |
+    | Written in | XML, usually generated by tools | YAML or JSON | A small schema language |
+    | Is it required | Yes, SOAP clients are built from it | No, many REST APIs have none or an outdated one | Yes, nothing works without it |
+    | Readable by people | Poorly | Fairly well | Well |
+
+    The practical lesson from WSDL is contract-first work. With a bank's WSDL you generate the client, and you never write XML by hand.
+
+    **Watch out for.** Trusting a contract that is generated from code after the fact. If the document and the server can drift apart, clients will find the gap in production. Check the contract in CI against the running service.
+
+- id: object-storage-eleven-nines-durability
+  q: An object store advertises eleven nines of durability. What does that mean, and how is it achieved?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [/system-design/fundamentals/storage-types, /system-design/databases/object-storage, /system-design/case-studies/s3]
+  a: |-
+    **Short answer.** Eleven nines is 99.999999999%: the expected chance of losing a given object in a year is about 1 in 100 billion. It comes from spreading redundant pieces of each object over many disks in several sites, checking them constantly, and rebuilding lost pieces faster than further failures can add up.
+
+    **Why.** Put the number in scale. Store 10 million objects and you expect to lose one about every 10,000 years. It is a design target from a failure model, and it does not cover deleting data by mistake.
+
+    A single disk fails at a rate of roughly 1% to 2% a year, so the system needs four things:
+
+    - **Redundancy.** Either full copies, or erasure coding, which splits an object into data pieces and adds parity pieces so that any large enough subset can rebuild the whole.
+    - **Independence.** Pieces go to different disks, racks and data centers, so one fire or power loss cannot take them all.
+    - **Checksums and scrubbing.** Every piece has a checksum. A background job reads everything on a schedule and finds silent corruption before a second failure makes it matter.
+    - **Fast repair.** When a disk dies, its pieces are rebuilt elsewhere within hours.
+
+    **Watch out for.** Mixing up durability and availability. The same service may promise 99.9% or 99.99% availability, so a request can fail today while the object is perfectly safe.
+  followUps:
+    - q: Why do large object stores use erasure coding and not simply three copies?
+      level: Senior
+      topics: [/system-design/databases/object-storage, /system-design/case-studies/s3]
+      a: |-
+        **Short answer.** Erasure coding gives the same or better protection for about half the disk space. The price is more CPU and slower, more complex repairs and reads.
+
+        **Why.** Compare the two for 1 GB of data.
+
+        | | Three copies | Erasure coding, 10 data plus 4 parity |
+        | --- | --- | --- |
+        | Raw space used | 3 GB | 1.4 GB |
+        | Failures survived | 2 | Any 4 of the 14 pieces |
+        | Read | Fetch one copy | Fetch 10 pieces and join them |
+        | Repair one lost piece | Copy from another replica | Read 10 pieces and compute the missing one |
+
+        At exabyte scale, the gap between 3 times and 1.4 times the data size is a very large number of disks, which is why cold and warm data is almost always coded.
+
+        Copies still have a place. Small objects cost more in bookkeeping than they save, and hot data benefits from single-read access. Many systems keep new or small objects as copies and code them later.
+
+        **Watch out for.** Forgetting the repair cost. Rebuilding one piece reads ten others across the network, so a rack failure triggers a large amount of traffic. Repair must be rate limited so that it does not slow user requests.
+
+- id: instance-store-vs-network-volume
+  q: A cloud server offers a fast local SSD that is erased when the server stops, and a network disk that survives. Which do you put a database on?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/storage-types,
+      /system-design/fundamentals/availability,
+      /system-design/databases/sync-vs-async-replication,
+    ]
+  a: |-
+    **Short answer.** Use the network disk for a single database server, because its data must outlive the machine. Use local SSDs only when the database keeps copies on other nodes, so that losing one node's disk loses nothing.
+
+    **Why.** The two disks trade speed for safety.
+
+    | | Local SSD | Network block volume |
+    | --- | --- | --- |
+    | Where it lives | Inside the host machine | A storage service, reached over the network |
+    | Latency per read | About 100 µs | Often around 1 ms, since it includes a network hop |
+    | Survives a host failure | No | Yes, it can be attached to a new server |
+    | Snapshots and resize | No | Yes |
+    | Copies kept by the provider | None | Several, inside one zone |
+
+    For a single primary database, the network volume is the default. When the host dies, a new server attaches the same volume and recovers in minutes.
+
+    Local SSDs fit systems that replicate at the software level. A Cassandra or Kafka cluster keeps three copies of each piece of data on different nodes. If one node is replaced with an empty disk, it copies its data back from the others. These systems gain the lower latency and lose nothing in safety. Caches and temporary files fit as well.
+
+    **Watch out for.** Thinking a network volume is a backup. It lives in one zone, and a mistaken delete is stored as faithfully as good data. You still need snapshots or backups in another location.
+
+- id: tcp-peer-vanishes-without-closing
+  q: A client has an open TCP connection to a server. The server loses power without sending anything. How and when does the client find out?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: networking
+  topics:
+    [
+      /system-design/fundamentals/tcp-udp,
+      /system-design/fundamentals/websockets,
+      /system-design/patterns/circuit-breaker-and-retries,
+    ]
+  a: |-
+    **Short answer.** If the client is only waiting to read, it may never find out. TCP sends nothing on an idle connection, so silence from a dead peer looks the same as silence from a quiet one. The application has to add timeouts or heartbeats.
+
+    **Why.** A normal close is an exchange: one side sends a FIN packet and the other acknowledges it. A machine that loses power, or a network cable that is cut, sends nothing at all.
+
+    What happens next depends on what the client does:
+
+    | Client is | Result |
+    | --- | --- |
+    | Sending data | No acknowledgement arrives. TCP resends with growing gaps and gives up after many minutes by default |
+    | Sending, and the server has rebooted | The server answers with a reset packet, and the client gets an error at once |
+    | Only reading | Nothing happens. The read waits for ever |
+
+    TCP keepalive exists, but on Linux it starts after 2 hours of idle time by default, which is far too slow. So real systems add their own checks:
+
+    - A read timeout on every request, such as 5 seconds.
+    - A heartbeat on long-lived connections, such as a ping every 20 seconds, with the connection closed after 2 missed replies.
+
+    **Watch out for.** A database or HTTP client with no read timeout. One dead peer then holds a thread for ever, and enough of them stop the whole service.
+
+- id: ephemeral-port-exhaustion
+  q: "A service that opens a new connection for every call to one backend starts failing under load with the error 'cannot assign requested address'. What is going on?"
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: networking
+  topics:
+    [/system-design/fundamentals/tcp-udp, /system-design/fundamentals/proxies, /system-design/fundamentals/networking]
+  a: |-
+    **Short answer.** The client machine has run out of source ports. Every connection to the same backend address and port needs a different local port, there are only about 28,000 by default on Linux, and a closed connection keeps its port reserved for a while. Reuse connections and the problem goes away.
+
+    **Why.** A TCP connection is identified by four values: source IP, source port, destination IP and destination port. When one client talks to one backend address, three of the four are fixed, so the source port is the only part that can vary. Linux picks it from a default range of 32768 to 60999, about 28,000 ports.
+
+    After the client closes a connection, that combination stays reserved in a state called `TIME_WAIT` for about 60 seconds. The limit is therefore about 28,000 / 60, or roughly 470 new connections a second to one destination. Above that, the kernel has no free port and returns the error.
+
+    Fixes, best first:
+
+    1. **Connection pooling or keep-alive.** Open 50 connections once and send every call over them.
+    2. **HTTP/2 or gRPC.** Many calls share one connection.
+    3. **More combinations.** More destination addresses or a wider port range raise the ceiling, but leave the waste in place.
+
+    **Watch out for.** Blaming the backend. Its dashboards look fine because the failed connections never left the client.
+
+- id: managing-tls-certificates-at-scale
+  q: Your site went down because a TLS certificate expired. How do you make sure that never happens again across 300 domains and services?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: networking
+  topics:
+    [/system-design/fundamentals/tls, /system-design/fundamentals/security, /system-design/fundamentals/availability]
+  a: |-
+    **Short answer.** Take people out of the renewal process. Issue and renew every certificate automatically, use short lifetimes so that renewal runs often, keep an inventory, and alert on the expiry date as seen from outside.
+
+    **Why.** A certificate is valid until a fixed date. After it, browsers show a full-page warning and API clients refuse to connect, so the result is a total outage that arrives on a known day. It still happens because yearly renewal is a manual task that someone forgets.
+
+    The parts of a fix:
+
+    - **Automation.** Use a protocol such as ACME, where a program proves control of the domain, receives the certificate and installs it, with no person involved.
+    - **Short lifetimes.** With 90 day certificates renewed at day 60, the process runs six times a year. A broken renewal shows up early, and there are 30 days to fix it.
+    - **Fewer places.** Terminate public TLS at the edge, so 300 domains live in one or two systems and not on 300 servers.
+    - **Inventory.** A list of every certificate, its owner and where it is installed, including internal ones.
+    - **Outside checks.** A monitor connects to each endpoint daily and alerts when fewer than 21 days remain. This catches a renewed certificate that was never deployed.
+
+    **Watch out for.** Checking only the certificate file on disk. A server often keeps serving the old one from memory until it is reloaded.
+  followUps:
+    - q: A server's private key has been stolen, but its certificate is valid for another two months. What do you do?
+      level: Senior
+      topics: [/system-design/fundamentals/tls, /system-design/fundamentals/encryption-and-hashing]
+      a: |-
+        **Short answer.** Replace the key and certificate everywhere at once, ask the certificate authority to revoke the old certificate, and assume revocation alone will not protect every client.
+
+        **Why.** With the key, an attacker who can get between a user and your site can pretend to be you until the certificate expires. The response has an order:
+
+        1. **Rotate.** Create a new key pair, get a new certificate and deploy it. With automated issuance this takes minutes.
+        2. **Revoke.** Tell the certificate authority the old certificate is compromised. It publishes that through revocation lists and status responses.
+        3. **Find the leak.** Learn how the key got out, or the new one goes the same way.
+        4. **Review what else it protected.** Rotate any session secrets or tokens that the same machine held.
+
+        Revocation is weak in practice. Many clients do not check it, or accept the certificate when the check cannot be reached. This is the strongest argument for short certificate lifetimes: a stolen 90 day certificate is useful for weeks, and a stolen 7 day one for days.
+
+        Past traffic is a separate question. TLS 1.3 uses a fresh key exchange per connection, so recorded old sessions stay unreadable. This property is called forward secrecy.
+
+        **Watch out for.** Reusing the old private key when you request the replacement certificate. The new certificate is then just as compromised.
+
+- id: webhook-url-ssrf-risk
+  q: Your platform lets customers register any URL to receive webhooks. What is the security risk for you, the sender, and how do you defend against it?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: apis
+  topics:
+    [
+      /system-design/fundamentals/webhooks,
+      /system-design/fundamentals/common-attacks,
+      /system-design/fundamentals/security,
+    ]
+  a: |-
+    **Short answer.** The risk is server-side request forgery, or SSRF. A customer registers a URL that points inside your own network, and your delivery workers, which sit inside that network, send the request for them. Defend by checking where every request really goes, and by running the senders in a network that can reach only the public internet.
+
+    **Why.** Your senders can reach things an outsider cannot: internal admin pages, databases, and the cloud metadata address `169.254.169.254`, which can hand out credentials. A webhook URL is a way to aim your servers at those targets.
+
+    Defences, in layers:
+
+    - **Validate the URL.** Allow only `https`, and only standard ports.
+    - **Check the resolved address.** Resolve the host name and refuse private, loopback and link-local ranges. Then connect to that exact address, so a second DNS lookup cannot return a different one.
+    - **No redirects.** Refuse them, or apply the same checks to every hop.
+    - **Isolate the senders.** Run them in a separate network segment whose firewall blocks all internal ranges. This still holds when a check in code is wrong.
+    - **Limit the damage.** Short timeouts, a response size limit, and never show the raw response body to the customer.
+
+    **Watch out for.** Checking the address only when the URL is registered. The customer can change the DNS record afterwards to point at an internal address. Check on every delivery.
+
+- id: recovering-missed-webhooks
+  q: Your webhook endpoint was down for four days, and the provider stopped retrying after three. How do you recover the events you missed, and how do you design so this is not a crisis?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: apis
+  topics:
+    [
+      /system-design/fundamentals/webhooks,
+      /system-design/fundamentals/ajax-polling,
+      /system-design/patterns/idempotency,
+    ]
+  a: |-
+    **Short answer.** Treat webhooks as a fast hint and the provider's API as the source of truth. Recover by fetching the missed events or the current state from the API, and run that same reconciliation on a schedule all the time.
+
+    **Why.** Providers retry for a limited time, often around three days, and then mark the event as failed. Some also disable an endpoint that keeps failing.
+
+    To recover:
+
+    1. **Re-enable the endpoint** in the provider's settings if it was switched off.
+    2. **Replay.** Many providers offer an events list that you can read from a point in time, or a resend button. Page through everything since the last event id you stored.
+    3. **Reconcile state.** Where there is no event list, list the objects that changed, such as payments updated in the last five days, and compare each with your own record.
+
+    Both paths feed the same handler as live webhooks. That handler is idempotent, so replaying an event does no harm.
+
+    To make it routine:
+
+    - Store the id and time of the last event handled.
+    - Run a reconciliation job every hour, or every night, that asks the API for changes and fixes any gaps.
+    - Alert when no webhook has arrived for longer than is normal for your traffic.
+
+    **Watch out for.** Building the recovery path only after the outage. A sweep that runs every day is tested every day.
+
+- id: authenticating-a-websocket-connection
+  q: How do you authenticate a WebSocket connection, given that the browser API cannot set an Authorization header?
+  level: Mid
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics:
+    [
+      /system-design/fundamentals/websockets,
+      /system-design/fundamentals/api-auth,
+      /system-design/fundamentals/common-attacks,
+    ]
+  a: |-
+    **Short answer.** Authenticate at the handshake or in the first message, with a credential that is safe to send that way. The usual choices are a session cookie with an Origin check, or a short-lived ticket fetched over normal HTTPS just before connecting.
+
+    **Why.** The browser's `WebSocket` constructor takes a URL and a list of subprotocols, and no custom headers. That leaves three options.
+
+    | Method | How it works | Main risk |
+    | --- | --- | --- |
+    | Cookie | The browser sends the site's cookies with the upgrade request | Another site can open a socket with the user's cookies, so the server must check the `Origin` header |
+    | One-time ticket | The client calls an authenticated endpoint, gets a random ticket valid for about 30 seconds and one use, and puts it in the socket URL | URLs appear in logs, which is why the ticket must be short-lived and single-use |
+    | First message | The socket opens without identity, and the client sends its token as the first frame | Unauthenticated sockets use resources, so close any that do not authenticate within a few seconds |
+
+    Authentication at connect time is only the start. Check authorization on each action, such as joining a room, because the handshake proved who the user is and said nothing about what they may see.
+
+    **Watch out for.** Skipping the Origin check with cookie auth. This attack is called cross-site WebSocket hijacking.
+  followUps:
+    - q: The access token expires after 15 minutes, but the socket stays open for hours. How do you handle that?
+      level: Senior
+      topics: [/system-design/fundamentals/websockets, /system-design/fundamentals/api-auth]
+      a: |-
+        **Short answer.** Tie the socket to the token's expiry. Either the client sends a fresh token over the socket before the old one runs out, or the server closes the socket at expiry and the client reconnects with a new token. Also give the server a way to end a user's sockets at once.
+
+        **Why.** A check made only at connect time means a user who was logged out, banned or removed from a team keeps receiving data until the socket happens to drop. That could be hours.
+
+        Two patterns:
+
+        - **Refresh in place.** The gateway stores each socket's expiry time. The client refreshes its token over HTTPS as usual and sends the new one as a control message. If none arrives in time, the gateway closes the socket with a code that means "authenticate again".
+        - **Reconnect.** The gateway closes at expiry and the client reconnects. This is simpler, but 100,000 sockets that reconnect every 15 minutes add about 110 handshakes a second, and clients need a cursor to resume.
+
+        For immediate removal, publish a "user 42 revoked" event on the same pub/sub channel the gateways already use. Each gateway closes that user's sockets within a second.
+
+        **Watch out for.** Membership changes that are not logouts. A user removed from one chat room still has a valid token. Check room membership when it changes, and do not rely on token expiry for it.
+
+- id: websocket-slow-consumer-backpressure
+  q: One client on a bad network reads far slower than the server sends. What happens inside the WebSocket server, and how should it respond?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: realtime-communication
+  topics:
+    [/system-design/fundamentals/websockets, /system-design/patterns/back-pressure, /system-design/fundamentals/tcp-udp]
+  a: |-
+    **Short answer.** Unsent messages pile up in the server's memory for that socket. Without a limit, a few slow clients can use up the memory and take down the server for everyone. Give each connection a bounded send queue, and decide what happens when it is full: drop, merge or disconnect.
+
+    **Why.** TCP has flow control. When the client's receive buffer is full, the server's operating system stops accepting more bytes for that connection. The application keeps producing messages, so its own queue grows. At 50 messages a second of 1 KB each, a stalled client gains 3 MB a minute. A thousand such clients is 3 GB.
+
+    | Data | When the queue is full |
+    | --- | --- |
+    | State that replaces itself, such as a price or a cursor position | Keep only the newest value per key and drop the older ones |
+    | A stream where gaps are fine, such as a live graph | Drop the oldest messages |
+    | Messages that must all arrive, such as chat | Close the socket. The client reconnects and fetches what it missed from the store by cursor |
+
+    Closing is fine here. The message store is the source of truth, and a client far behind is better served by one catch-up read.
+
+    **Watch out for.** One shared broadcast loop that writes to each socket in turn and waits. A single slow client then delays every client after it. Each connection needs its own queue and writer.
+
+- id: walking-through-a-system-you-owned
+  q: Walk me through a system you owned. What was the architecture, why did you make those choices, and how did it fail?
+  level: Senior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/what-is-system-design,
+      /system-design/fundamentals/interview-framework,
+      /system-design/fundamentals/non-functional-requirements,
+    ]
+  companies: [Datadog]
+  a: |-
+    **Short answer.** This is a design interview in reverse. Lead it yourself, in a fixed order: the problem and its numbers, the architecture in a few boxes, two or three decisions with the option you rejected, one real failure, and what you would change now.
+
+    **Why.** The interviewer is checking whether you understand why your system looks the way it does, and whether the decisions were yours. A structure that fits in about ten minutes:
+
+    1. **Context.** What the system does, for whom, and the scale: requests per second, data size, latency target, team size.
+    2. **Architecture.** Five to seven boxes and the path of one request through them.
+    3. **Decisions.** For each one: the options, the choice, and the reason tied to a number. "We chose a queue between ingest and processing because peaks were 8 times the average."
+    4. **Failure.** One incident: what broke, how you detected it, how long it lasted, what users saw, and what you changed afterwards.
+    5. **Hindsight.** What you would do differently, and what the next limit is.
+
+    Say "I" for your own work and "we" for the team's, and be ready to go one level deeper on anything you mention.
+
+    **Watch out for.** Choosing the largest system you were near over the one you know best. Depth on a modest system scores higher than a vague account of a famous one.
+
+- id: answering-what-are-the-trade-offs
+  q: An interviewer shows you two design options and asks for the trade-offs. How do you structure the answer?
+  level: Junior
+  category: system-design-fundamentals
+  subcategory: fundamentals
+  topics:
+    [
+      /system-design/fundamentals/what-is-system-design,
+      /system-design/fundamentals/interview-framework,
+      /system-design/fundamentals/non-functional-requirements,
+    ]
+  a: |-
+    **Short answer.** Say what each option gains and what it gives up, measured against the requirements of this system. Then pick one and name the condition that would change your choice.
+
+    **Why.** A trade-off means you cannot improve one property without paying in another.
+
+    A simple order:
+
+    1. **Name the properties that matter here.** Usually two or three of: latency, consistency, cost, complexity, how it fails.
+    2. **Compare on those.** A small table helps.
+    3. **Decide for this case.** Tie the choice to a requirement or a number.
+    4. **State the flip condition.** "If writes grew ten times, I would switch."
+
+    Example: store user sessions in the app server's memory, or in a shared store such as Redis.
+
+    | | In server memory | Shared store |
+    | --- | --- | --- |
+    | Read speed | Nanoseconds | About 0.5 ms, one network call |
+    | Server dies or is deployed | Its users are logged out | Nothing is lost |
+    | Adding servers | Needs sticky sessions | Any server can answer |
+    | Extra parts to run | None | One more system |
+
+    For a product with several servers and daily deploys, choose the shared store. The 0.5 ms is small, and logging users out on every deploy is not acceptable. For a one-server prototype, memory is fine.
+
+    **Watch out for.** Ending with "it depends" and stopping. Say what it depends on, then choose.

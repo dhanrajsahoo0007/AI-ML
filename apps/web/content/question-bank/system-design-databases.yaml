@@ -1,0 +1,1627 @@
+# System design database questions that are not written inside an article. All answers are written by TokensToScale.
+- id: oltp-vs-olap-why-not-analytics-on-production-db
+  q: What is the difference between OLTP and OLAP, and why should you not run analytics on the production database?
+  level: Junior
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/analytical-databases, /system-design/databases/relational-databases]
+  a: |-
+    **Short answer.** OLTP (online transaction processing) serves the application: many small reads and writes that each touch a few rows. OLAP (online analytical processing) serves reports: a few large queries that each scan millions of rows. One database tuned for the first is slow at the second, and the heavy queries hurt the users.
+
+    **Why.** The two workloads want opposite things.
+
+    | | OLTP | OLAP |
+    | --- | --- | --- |
+    | Typical query | Get order 812 | Revenue per country per month |
+    | Rows touched | 1 to 100 | Millions to billions |
+    | Columns used | Most of the row | 3 or 4 out of 50 |
+    | Latency goal | A few milliseconds | Seconds are fine |
+    | Storage layout | By row | By column |
+
+    A report that scans 200 million order rows on the production database reads every column of every row from disk. It pushes the hot pages out of memory and can hold resources for minutes. Checkout requests that took 5 ms now wait behind it.
+
+    The usual fix is to copy the data to a separate analytical store and run reports there. A read replica is a good first step for a small company. A columnar warehouse is the next step when scans grow large.
+
+    **Watch out for.** Treating the warehouse as live. The copy is usually seconds to hours behind, so do not use it for a decision that needs the current value, such as checking stock at checkout.
+
+- id: partition-pruning-and-sort-keys-in-a-warehouse
+  q: A query for one day of data scans the whole two-year table in your warehouse. Why does that happen, and how do you fix it?
+  level: Mid
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/analytical-databases]
+  a: |-
+    **Short answer.** The table is not laid out by date, so the engine cannot tell which files hold that day. Partition the table by date, or sort it by date, and filter on that column. The engine then skips almost all of the data without reading it.
+
+    **Why.** A columnar store keeps data in large blocks and records the minimum and maximum value of each column per block. When a query filters on a column, the engine compares the filter with those ranges and skips blocks that cannot match. This is called pruning.
+
+    Pruning only works when similar values sit together. If rows arrive in random date order, every block contains every date, and nothing can be skipped. Two tools fix this:
+
+    - **Partitioning** splits the table into separate parts, usually one per day or month. A query for one day reads 1 partition out of about 730.
+    - **A sort key** orders rows inside the table, so the min and max ranges of each block are narrow.
+
+    The saving is direct. If the table is 2 TB and one day is about 3 GB, a pruned query reads roughly 700 times less data.
+
+    **Watch out for.** Wrapping the partition column in a function or a cast in the filter. Many engines then cannot prune and scan everything again.
+
+- id: what-are-crdts-and-when-to-use-them
+  q: What are CRDTs, and when would you use them?
+  level: Mid
+  category: system-design-databases
+  subcategory: replication
+  topics: [/system-design/databases/automatic-conflict-resolution, /system-design/databases/multi-leader-replication]
+  a: |-
+    **Short answer.** A CRDT (conflict-free replicated data type) is a data structure that several replicas can change at the same time and still merge to the same result, with no coordination and no lost updates. Use one when many places must accept writes while offline or far apart, and the data fits one of the known types.
+
+    **Why.** When two replicas accept writes at the same moment, something must decide the final value. A CRDT builds that decision into the data type. Its merge function has three properties: the order of merges does not matter, grouping does not matter, and merging the same update twice changes nothing. With those three, replicas can exchange state in any order, any number of times, and all end with the same value.
+
+    Common types:
+
+    | Type | Merge rule | Example use |
+    | --- | --- | --- |
+    | Grow-only counter | Per-replica counts, take the maximum of each | Like counts, view counts |
+    | Add-wins set | An add beats a concurrent remove | Shopping cart items |
+    | Register | Keep the value with the highest timestamp | A profile field |
+    | Sequence | Each character has a unique position id | Shared text editing |
+
+    **Watch out for.** Expecting a CRDT to protect a rule such as "stock never goes below zero". Each replica decides alone, so two replicas can each sell the last item. Rules like that need coordination.
+  followUps:
+    - q: How does a CRDT counter avoid losing increments when two regions count at the same time?
+      level: Mid
+      topics: [/system-design/databases/automatic-conflict-resolution]
+      a: |-
+        **Short answer.** Each replica keeps its own count in a separate slot. A merge takes the larger number for each slot, and the value is the sum of all slots. No increment is lost and none is counted twice.
+
+        **Why.** A plain counter fails because two regions both read 10, both add 1, and both write 11. One increment is gone. A grow-only counter stores a small map from replica id to count.
+
+        Suppose region A has `A: 6, B: 4` and region B has `A: 5, B: 5`. Each made one increment the other has not seen. The merge takes the maximum per slot and gives `A: 6, B: 5`, so the total is 11, which is correct. Merging the same state again gives the same map, so duplicate messages are harmless.
+
+        To support decrements, keep two such counters, one for additions and one for subtractions, and report the difference.
+
+        **Watch out for.** Letting the map grow with every short-lived client. Give slots to a small fixed set of replicas, such as one per region, and let clients send their increments through one of them.
+
+- id: crdt-vs-operational-transformation-collaborative-editing
+  q: "For a collaborative text editor, would you use operational transformation or CRDTs? Explain the trade-off."
+  level: Senior
+  category: system-design-databases
+  subcategory: replication
+  topics: [/system-design/databases/automatic-conflict-resolution, /system-design/fundamentals/websockets]
+  a: |-
+    **Short answer.** With a central server and users who are mostly online, operational transformation (OT) is simpler to run and keeps documents small. With offline editing or peer-to-peer sync, a sequence CRDT is the safer choice because it needs no central ordering.
+
+    **Why.** Both solve the same problem. Two users type at position 5 at the same moment, and both edits must survive in the same order on every screen.
+
+    | | OT | Sequence CRDT |
+    | --- | --- | --- |
+    | Idea | Rewrite an incoming operation against the operations it did not see | Give every character a unique, ordered id |
+    | Needs a central server | In practice yes, to fix one order | No |
+    | Offline for days | Hard, long chains of transforms | Natural |
+    | Document overhead | Small | Extra id per character, plus markers for deleted text |
+    | Hard part | Transform functions are easy to get wrong | Memory use and cleanup of deleted text |
+
+    With OT, the server assigns each operation a version number. A client that sent an edit based on version 40 while the server is at 43 has its edit shifted past the three it missed. With a CRDT, the insert says "after character id X", which stays valid wherever X has moved.
+
+    **Watch out for.** Thinking either one resolves meaning. If two people rewrite the same sentence, both versions are kept and the result can be nonsense. The users still need to see each other's cursors.
+
+- id: how-a-database-index-works-and-checking-it-is-used
+  q: How does a database index work, and how do you check that a query really uses it?
+  level: Junior
+  category: system-design-databases
+  subcategory: storage-engines
+  topics: [/system-design/databases/b-trees, /system-design/databases/relational-databases]
+  a: |-
+    **Short answer.** An index is a separate, sorted structure that maps column values to the location of the rows. The database walks it in a few steps and avoids reading the whole table. To check it is used, ask the database for the query plan with `EXPLAIN`.
+
+    **Why.** Without an index, a query such as "find the user with this email" must read every row. On 50 million rows that is a full scan and takes seconds. A B-tree index on `email` keeps the emails sorted in pages. The database reads the root page, picks the child that covers the value, and repeats. Three or four page reads reach the row.
+
+    <AnimatedDiagram name="databases/btree-lookup" highlight={["root", "leaf"]} caption="A lookup walks from the root page down to one leaf page." />
+
+    The planner decides whether to use an index. `EXPLAIN` shows its choice, and `EXPLAIN ANALYZE` runs the query and shows real timings. Look for three things:
+
+    - **Index scan or sequential scan.** A sequential scan on a large table for a selective filter is the warning sign.
+    - **Estimated rows versus actual rows.** A large gap means statistics are out of date.
+    - **Rows removed by filter.** A high number means the index narrows too little.
+
+    **Watch out for.** Filters that hide the column. Applying a function to the column, or comparing it with a value of a different type, often stops the planner from using the index. On a tiny table the planner also skips the index on purpose, because a scan is cheaper.
+  followUps:
+    - q: You have an index on (country, created_at). Why does a query that filters only on created_at not use it?
+      level: Mid
+      topics: [/system-design/databases/b-trees]
+      a: |-
+        **Short answer.** A composite index is sorted by the first column, then by the second inside each value of the first. Dates are in order only within one country, so there is no single place to start for a date range across all countries.
+
+        **Why.** Think of a phone book sorted by family name, then first name. Finding everyone called "Asha" means reading the whole book, because the Ashas are spread over every family name.
+
+        The index helps queries that use a leading part of its columns:
+
+        | Filter | Uses the index well |
+        | --- | --- |
+        | country | Yes |
+        | country and created_at | Yes |
+        | created_at only | No |
+
+        The usual ordering rule: put columns compared with equals first, then the range column, then the sort column. For "orders for one customer in the last 30 days, newest first", the index is `(customer_id, created_at)`.
+
+        **Watch out for.** Adding one index per column and hoping the planner combines them. It sometimes can, but one well-ordered composite index is much faster than merging two separate ones.
+
+- id: what-an-index-costs-and-when-not-to-add-one
+  q: What does adding an index cost, and when would you not add one?
+  level: Mid
+  category: system-design-databases
+  subcategory: storage-engines
+  topics: [/system-design/databases/b-trees, /system-design/databases/relational-databases]
+  a: |-
+    **Short answer.** Every index makes writes slower, takes disk and memory, and has to be maintained. Skip it when the table is small, when the column has few distinct values, or when the table is written far more than it is queried by that column.
+
+    **Why.** An index is a second copy of some columns, kept sorted. The costs are:
+
+    - **Write cost.** Each insert updates every index. A table with 6 indexes does about 7 writes per insert: the row plus 6 index entries, each to a different page.
+    - **Space.** An index on a 100-byte column over 1 billion rows is on the order of 100 GB.
+    - **Update cost.** Changing an indexed column means removing one entry and adding another.
+
+    Cases where an index does not pay:
+
+    | Case | Why |
+    | --- | --- |
+    | A few thousand rows | A full scan is already under a millisecond |
+    | A boolean or status column | Half the table matches, so a scan is cheaper |
+    | An append-only log table read once a day | Millions of slower writes for one faster read |
+
+    A partial index helps with the status case: index only the rows where `status` is `pending`, if those are 1% of the table.
+
+    **Watch out for.** Indexes nobody uses. Check the index usage statistics every few months and drop the ones with zero scans.
+
+- id: cost-of-finding-one-row-sql-vs-nosql-and-scaling
+  q: Compare the cost of finding one row by key in a SQL database and in a key-value NoSQL store. Why is the relational database harder to scale?
+  level: Mid
+  category: system-design-databases
+  subcategory: database-selection
+  topics:
+    [
+      /system-design/databases/choosing-a-database,
+      /system-design/databases/relational-databases,
+      /system-design/databases/key-value-stores,
+    ]
+  a: |-
+    **Short answer.** On one machine the two are close: a B-tree lookup costs O(log n) page reads, which is 3 or 4 even for billions of rows, and a hash lookup costs O(1). The real difference is what each system promises. A relational database promises joins, transactions and secondary indexes across all rows, and those promises are hard to keep once data is split over many machines.
+
+    **Why.** A key-value store can place each key on a node by hashing it. Every request names one key, so it goes to one node. Adding nodes adds capacity almost in a straight line.
+
+    A relational database allows any query. That causes three problems when you split it:
+
+    | Feature | On one machine | Across 20 shards |
+    | --- | --- | --- |
+    | Join two tables | Local page reads | Rows may be on different shards, so network calls |
+    | Transaction over two rows | One log write | Needs two-phase commit |
+    | Unique constraint or secondary index | One index | Must be checked on every shard |
+
+    If the key is not unique, a B-tree keeps the duplicates next to each other and returns them in order. A plain hash store needs a list under the key.
+
+    **Watch out for.** Saying "SQL does not scale". One well-tuned primary handles tens of thousands of simple transactions per second, which is more than most products ever need.
+
+- id: acid-vs-base-explained
+  q: What do ACID and BASE mean, and how do you choose between them?
+  level: Junior
+  category: system-design-databases
+  subcategory: database-foundations
+  topics:
+    [
+      /system-design/databases/choosing-a-database,
+      /system-design/patterns/consistency-models,
+      /system-design/databases/relational-databases,
+    ]
+  a: |-
+    **Short answer.** ACID describes databases that keep data correct at every moment, even with crashes and concurrent users. BASE describes systems that stay available and fast by allowing copies to disagree for a short time. Choose ACID where a wrong value costs money or trust, and accept BASE where a short delay is harmless.
+
+    **Why.** ACID has four parts:
+
+    - **Atomic.** All steps of a transaction happen, or none do.
+    - **Consistent.** Rules such as "balance is never negative" hold after every transaction.
+    - **Isolated.** Concurrent transactions do not see each other's half-finished work.
+    - **Durable.** Once committed, data survives a crash.
+
+    BASE stands for "basically available, soft state, eventually consistent". The system answers every request, replicas may differ for a while, and they converge when writes stop.
+
+    | Data | Model | Reason |
+    | --- | --- | --- |
+    | Money transfer, seat booking, inventory | ACID | A double spend or double booking is a real loss |
+    | Like counts, view counts, feed, presence | BASE | A count that is 2 seconds old harms nobody |
+
+    Many systems use both. An order is written in an ACID transaction, and the search index and the recommendation feed catch up a moment later.
+
+    **Watch out for.** Treating this as SQL against NoSQL. Several NoSQL stores offer transactions, and a relational database read through an asynchronous replica gives you eventually consistent reads.
+
+- id: schemaless-in-practice-evolving-document-shape
+  q: Document databases are called schemaless. What does that mean in practice, and how do you change the shape of documents safely?
+  level: Mid
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/document-databases]
+  a: |-
+    **Short answer.** The database does not enforce one shape, so the schema lives in your application code. You change it without a migration that locks a table, but old and new shapes then sit side by side, and every reader must handle both until you clean up.
+
+    **Why.** In a relational table, adding a column is one statement and every row has it afterwards. In a document store you just start writing the new field. The 40 million documents written last year do not have it.
+
+    A safe change follows these steps:
+
+    1. **Make readers tolerant first.** Deploy code that accepts the old shape and the new shape, with a default when the field is missing.
+    2. **Write the new shape.** New and updated documents use it.
+    3. **Backfill.** A background job rewrites old documents in small batches, for example 1,000 at a time with a pause, so production traffic is not hurt.
+    4. **Remove the old code path** once a count query confirms no old documents remain.
+
+    Two tools help. A `schemaVersion` field in each document lets code branch clearly. Validation rules in the database, which most document stores support, reject writes that miss required fields.
+
+    **Watch out for.** Skipping the backfill. After three or four changes the code is full of branches for shapes nobody remembers, and an analytics query quietly ignores the documents that lack the field.
+
+- id: transactions-in-document-databases
+  q: Do document databases support transactions, and when does it matter?
+  level: Mid
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/document-databases, /system-design/databases/relational-databases]
+  a: |-
+    **Short answer.** A write to a single document is atomic in every mainstream document database. Several also offer transactions across documents, at a cost in speed. It matters when one business action must change two documents together, such as moving money between two accounts.
+
+    **Why.** The document model is designed so that data that changes together lives together. An order with its line items is one document, so adding an item and updating the total is one atomic write. No transaction is needed.
+
+    The trouble starts when the action crosses documents:
+
+    | Action | Documents touched | Needs a multi-document transaction |
+    | --- | --- | --- |
+    | Add an item to an order | 1 | No |
+    | Decrease stock and create an order | 2 | Yes, or a compensation step |
+    | Transfer between two wallets | 2 | Yes |
+
+    Multi-document transactions exist in stores such as MongoDB, but they hold locks longer, add round trips and, across shards, need a two-phase commit. If most of your writes need them, that is a sign the data is relational and a relational database fits better.
+
+    Otherwise, redesign so that both pieces live in one document.
+
+    **Watch out for.** Updating two documents one after the other with no transaction and no repair. A crash between the two writes leaves the stock reduced and no order, and nothing will ever notice.
+
+- id: supernodes-in-a-graph
+  q: What is a supernode in a graph, and how do you keep it from slowing down queries?
+  level: Senior
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/graph-databases, /system-design/patterns/fan-out]
+  a: |-
+    **Short answer.** A supernode is a node with a very large number of edges, such as a celebrity with 100 million followers. Any traversal that passes through it must consider all those edges. Handle it by never expanding it fully: filter edges by type and time, cap the expansion, and precompute what you can.
+
+    **Why.** A graph database is fast because a hop costs about as much as the number of edges on the node. For a normal user with 300 friends, two hops touch 300 times 300, which is 90,000 edges. If one of those friends is a supernode, that single hop adds 100 million.
+
+    Techniques that work:
+
+    - **Typed and indexed edges.** Store `FOLLOWS`, `LIKED` and `BLOCKED` separately, and index edges by time, so "the 50 newest followers" reads 50 entries.
+    - **Direction.** Walk from the small side. To test whether Asha follows a celebrity, look in Asha's 200 outgoing edges and leave the 100 million incoming ones alone.
+    - **Degree caps.** In a recommendation traversal, skip nodes above a limit such as 10,000 edges.
+    - **Precompute.** Keep the follower count as a stored number. Never count edges at read time.
+
+    **Watch out for.** Testing only with average users. Graph degree is heavily skewed, so the slowest 0.1% of queries are the ones that cross supernodes, and they decide your tail latency.
+
+- id: friends-of-friends-people-you-may-know
+  q: How would you compute "people you may know" from a friendship graph?
+  level: Mid
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/graph-databases, /system-design/databases/key-value-stores]
+  a: |-
+    **Short answer.** Find friends of friends who are not yet friends, and rank them by the number of mutual friends. The work is too heavy to run on every page load, so compute it offline or in the background and store the top results per user.
+
+    **Why.** The query is a two-hop traversal. With 300 friends who each have 300 friends, one user produces up to 90,000 candidates before removing duplicates. Count how many times each candidate appears: that number is the mutual friend count. Remove existing friends, blocked users and the user themself, then keep the top 50.
+
+    | Approach | When it fits |
+    | --- | --- |
+    | Live two-hop query in a graph database | Small graphs, or a rarely used feature |
+    | Batch job over the edge list, results in a key-value store | Large graphs, results may be a day old |
+    | Update on change: when A and B become friends, adjust candidates for their friends | Fresh results at large scale |
+
+    At read time the page does one key lookup, in a millisecond or two. Mutual count is only the first signal. Real systems add shared school or workplace, contact uploads and how recently the mutual friendships formed.
+
+    **Watch out for.** Expanding through very high degree accounts. A page that 5 million people follow makes all of them candidates for each other. Skip or down-weight nodes above a degree limit.
+
+- id: hash-index-over-append-only-log
+  q: How does a hash index over an append-only log work, and what are its limits?
+  level: Mid
+  category: system-design-databases
+  subcategory: storage-engines
+  topics: [/system-design/databases/hash-index, /system-design/databases/lsm-trees]
+  a: |-
+    **Short answer.** Every write is appended to the end of a file. An in-memory hash map stores, for each key, the position of its latest value in the file. A read is one map lookup and one disk read. The limits: all keys must fit in memory, and there are no range queries.
+
+    **Why.** Appending is the fastest thing a disk can do, since nothing is searched or moved. An update just appends a new record and points the map entry at it. The old record becomes garbage.
+
+    To stop the file growing forever, the engine closes it at a fixed size and starts a new segment. A background job, called compaction, copies only the latest value of each key into a fresh segment and deletes the old ones.
+
+    The memory cost is easy to estimate. With 100 million keys of about 20 bytes each, plus an 8-byte file offset and map overhead, the index needs roughly 4 to 6 GB of RAM.
+
+    | Strength | Limit |
+    | --- | --- |
+    | One disk read per lookup | Every key must fit in RAM |
+    | Very fast sequential writes | No "keys from A to F" scan, keys are in no order |
+
+    **Watch out for.** Using it where keys keep growing without bound. Once the key set outgrows memory, the design stops working, and a sorted structure such as an LSM tree or B-tree is needed.
+  followUps:
+    - q: The process crashes and the in-memory hash map is gone. How does the store recover?
+      level: Mid
+      topics: [/system-design/databases/hash-index]
+      a: |-
+        **Short answer.** It rebuilds the map by reading the log segments from oldest to newest and recording the last position seen for each key. To make that fast, the engine saves a snapshot of the map for each closed segment, so only the newest segment is scanned in full.
+
+        **Why.** The log is the source of truth, and the map is only a shortcut into it. Replaying everything is correct but slow: scanning 200 GB at 500 MB per second takes about 7 minutes. A small hint file per closed segment, holding just keys and offsets, can be loaded in seconds.
+
+        Two details matter. Each record carries a checksum, so a half-written record at the end of the file is detected and ignored. Deletes are appended as a special marker record, so that replay removes the key from the map and does not bring an old value back.
+
+        **Watch out for.** Dropping delete markers during compaction while an older segment still holds a value for that key. After the next restart the deleted key reappears.
+
+- id: hash-index-vs-b-tree-index
+  q: When would you choose a hash index over a B-tree index?
+  level: Junior
+  category: system-design-databases
+  subcategory: storage-engines
+  topics: [/system-design/databases/hash-index, /system-design/databases/b-trees]
+  a: |-
+    **Short answer.** Choose a hash index only when every query is an exact match on the full key. Choose a B-tree for anything else, which is why it is the default in most databases.
+
+    **Why.** A hash index runs the key through a hash function and jumps to a bucket. That is one step, whatever the table size. But hashing destroys order: the keys 100 and 101 land in unrelated buckets.
+
+    A B-tree keeps keys sorted. A lookup takes 3 or 4 steps, and the sorted order answers many more kinds of question.
+
+    | Query | Hash index | B-tree |
+    | --- | --- | --- |
+    | `id = 42` | Yes, 1 step | Yes, 3 or 4 steps |
+    | `id` between 40 and 60 | No | Yes |
+    | Order by `created_at`, first 20 | No | Yes |
+    | Name starts with "sam" | No | Yes |
+    | Smallest or largest value | No | Yes |
+
+    The speed gap on exact matches is small in practice. The top levels of a B-tree stay in memory, so both often cost one disk read or none.
+
+    Good uses of hashing: an in-memory cache, a session store keyed by token, or a join inside the query engine.
+
+    **Watch out for.** Picking a hash index for a tiny gain and then needing a range query six months later. Also note that a hash index cannot check a prefix of a composite key, while a B-tree on `(a, b)` can serve a filter on `a` alone.
+
+- id: phrase-queries-in-an-inverted-index
+  q: How does an inverted index answer a phrase query such as "new york", where the words must be next to each other?
+  level: Mid
+  category: system-design-databases
+  subcategory: storage-engines
+  topics: [/system-design/databases/inverted-index, /system-design/databases/search-engines]
+  a: |-
+    **Short answer.** The index stores the position of every term inside each document. The engine first finds the documents that contain both words, then keeps only those where a position of "york" is exactly one more than a position of "new".
+
+    **Why.** A basic postings list holds only document ids. That tells you a document has both words, with no information about where. A document about "a new bridge in the city of York" would match wrongly.
+
+    With positions, the entry for each document looks like this:
+
+    | Term | Document 7 positions | Document 9 positions |
+    | --- | --- | --- |
+    | new | 4, 31 | 2 |
+    | york | 5 | 18 |
+
+    Document 7 matches because 5 follows 4. Document 9 does not. The same data supports "within 3 words of each other" queries by allowing a larger gap.
+
+    Positions have a price. They can make the index two to four times larger than ids alone, and phrase queries are slower because the engine compares position lists for every candidate document.
+
+    A common speed-up for frequent phrases is to index word pairs, called shingles, as their own terms. Then "new york" becomes a single term lookup.
+
+    **Watch out for.** Removing stop words at index time. A phrase such as "to be or not to be" then has nothing left to match. Also keep the position gap the same in the index and query analyzers, or phrases stop lining up.
+
+- id: sharding-an-inverted-index-by-document-or-term
+  q: "An inverted index no longer fits on one machine. Do you split it by document or by term?"
+  level: Senior
+  category: system-design-databases
+  subcategory: partitioning
+  topics:
+    [/system-design/databases/inverted-index, /system-design/databases/search-engines, /system-design/patterns/sharding]
+  a: |-
+    **Short answer.** Split by document. Each shard holds a complete small index for its own subset of documents, every query goes to all shards, and a coordinator merges the top results. Splitting by term looks cheaper per query but is much harder to run.
+
+    **Why.**
+
+    | | By document | By term |
+    | --- | --- | --- |
+    | What a shard holds | Full index for some documents | Full postings lists for some terms |
+    | Query touches | All shards, in parallel | Only the shards owning the query terms |
+    | Multi-word query | Intersect locally on each shard | Ship long postings lists between machines |
+    | Indexing one document | One shard | One write per distinct term, many shards |
+    | Load balance | Even | Shards with common terms are hot |
+
+    With document sharding, each of 20 shards returns its best 10 results and the coordinator picks the best 10 of those 200.
+
+    The cost is fan-out. Every query hits every shard, so the slowest shard sets the response time. With 20 shards, a shard that is slow 1% of the time makes about 18% of queries slow. Mitigations are replicas with hedged requests, which means sending a second copy of a slow request to another replica, and a timeout that returns partial results.
+
+    **Watch out for.** Scoring differences. Term rarity is computed per shard, so the same document can score slightly differently depending on its shard. Route documents randomly so the shard statistics stay similar.
+
+- id: redis-persistence-rdb-vs-aof
+  q: How does Redis persist data to disk, and what can you lose in a crash?
+  level: Mid
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/key-value-stores, /system-design/patterns/caching]
+  a: |-
+    **Short answer.** Redis has two mechanisms: point-in-time snapshots, and an append-only file that logs every write. With snapshots alone you can lose minutes of writes. With the append-only file flushed once per second you can lose about one second. Neither makes Redis as safe as a database that flushes before it confirms each write.
+
+    **Why.**
+
+    | | Snapshot (RDB) | Append-only file (AOF) |
+    | --- | --- | --- |
+    | How | Copies the whole dataset to a file every few minutes | Appends each write command to a log |
+    | Loss on crash | Everything since the last snapshot | About 1 second with the usual setting |
+    | Restart speed | Fast, loads one compact file | Slower, replays the log |
+    | Cost while running | A burst of memory and disk during the copy | Steady small disk writes |
+
+    The snapshot is taken by a child process that shares memory with the parent. Pages that change during the copy are duplicated, so a write-heavy instance can briefly need much more memory than its dataset.
+
+    The append-only file has three flush settings: every write (safest, slowest), every second (the usual choice) and never (the operating system decides). Many teams enable both mechanisms, the log for safety and snapshots for fast restarts and backups.
+
+    **Watch out for.** Assuming a replica protects you. Replication is asynchronous, so a failover can drop the last few writes. And a primary that restarts empty with persistence turned off will replicate that empty state to its replicas.
+  followUps:
+    - q: Given that, would you use Redis as the primary database for a shopping cart?
+      level: Mid
+      topics: [/system-design/databases/key-value-stores]
+      a: |-
+        **Short answer.** It is acceptable if losing the last second of cart changes on a rare failover is tolerable and you turn on the append-only file and replicas. Keep the order itself, and anything involving payment, in a durable database.
+
+        **Why.** A cart is low-value, short-lived data that is read on almost every page. Redis fits the access pattern: one key per user, a hash of item id to quantity, and a TTL of perhaps 30 days. Reads and writes take well under a millisecond.
+
+        The risk is small and bounded. If a node fails, a few users see an item missing and add it again. Compare that with an order record, where a lost write means a customer paid and nothing ships.
+
+        A middle path is common: keep the cart in a durable store and cache it in Redis, so a Redis failure costs speed and no data.
+
+        **Watch out for.** Memory limits with an eviction policy that removes any key. Under pressure Redis would then delete carts silently. Use a policy that evicts only keys with a TTL, or size the memory so eviction never runs.
+
+- id: storing-a-list-relational-vs-key-value
+  q: "You need to store a list of items per user, such as a watchlist. How would you store it in a relational database and in a key-value store, and what does each cost to read?"
+  level: Junior
+  category: system-design-databases
+  subcategory: database-selection
+  topics:
+    [
+      /system-design/databases/key-value-stores,
+      /system-design/databases/relational-databases,
+      /system-design/databases/choosing-a-database,
+    ]
+  a: |-
+    **Short answer.** In a relational database, store one row per list item with an index on the user id. In a key-value store, store the whole list as one value under the user's key, or use a native list or set type if the store has one. The relational form is better for changing and querying single items. The key-value form is fastest for reading the whole list.
+
+    **Why.**
+
+    | | Relational: one row per item | Key-value: one value per user |
+    | --- | --- | --- |
+    | Read the whole list | Index range scan, returns N rows | One lookup, returns one blob |
+    | Add or remove one item | Insert or delete one row | Read, change and rewrite the whole value, unless the store has list commands |
+    | "Which users have item X?" | A second index answers it | Not possible without scanning or a second key |
+    | Very long lists | Page through with a limit | The value grows and every read moves all of it |
+
+    For a watchlist of 50 items both are fast. The difference shows at the extremes. A list of 100,000 items as one value means every small change rewrites megabytes.
+
+    **Watch out for.** Two clients editing the same blob at once. Both read the list, each adds an item, and the second write removes the first one's change. Use the store's atomic add command or a version check on write.
+
+- id: last-write-wins-and-how-it-loses-data
+  q: What is last write wins, and how can it lose data?
+  level: Junior
+  category: system-design-databases
+  subcategory: replication
+  topics: [/system-design/databases/last-write-wins, /system-design/databases/multi-leader-replication]
+  a: |-
+    **Short answer.** Last write wins (LWW) settles a conflict between two versions of a value by keeping the one with the newest timestamp and discarding the other. It is simple and all replicas end up agreeing. The discarded write is lost without any error, even though the database told that client the write succeeded.
+
+    **Why.** When two replicas accept writes to the same key before they have talked to each other, they hold different values. They need a rule that every replica applies the same way. "Highest timestamp wins" is such a rule, and it needs no extra storage.
+
+    Here is the loss. A shared shopping list holds `milk`. Two phones are briefly out of contact:
+
+    | Time | Phone A | Phone B |
+    | --- | --- | --- |
+    | 10:00:01 | Writes `milk, eggs` | |
+    | 10:00:02 | | Writes `milk, bread` |
+    | After sync | `milk, bread` | `milk, bread` |
+
+    Both users saw a success message. The eggs are gone, and nobody was told.
+
+    LWW is a reasonable choice when losing one of two concurrent writes does no harm: a "last seen" time, a cached value that will be recomputed, or a sensor reading where only the latest matters.
+
+    **Watch out for.** Using LWW on a value that is read, changed and written back, such as a list or a counter. That pattern turns every concurrent pair of edits into a lost update.
+  followUps:
+    - q: How can you make last write wins safe?
+      level: Mid
+      topics: [/system-design/databases/last-write-wins, /system-design/databases/automatic-conflict-resolution]
+      a: |-
+        **Short answer.** Arrange the data so that two concurrent writes never target the same key with different meanings. The two usual ways are to write each change under its own unique key, and to apply LWW per field or per element in place of the whole record.
+
+        **Why.** LWW loses data only when it must pick between two values that both matter.
+
+        - **Immutable writes.** Give every event a unique id, such as a UUID, and only ever insert. Two writers never share a key, so nothing is overwritten. A chat message or a sensor reading fits this.
+        - **Smaller units.** Store each list item as its own row or column with its own timestamp. In the shopping list case, adding eggs and adding bread touch different cells, and both survive. Wide-column stores work this way.
+        - **Add a condition.** For the cases that remain, use a compare-and-set write that succeeds only if the version is unchanged, and let the client retry.
+
+        **Watch out for.** Deletes. Removing an item with LWW needs a deletion marker with a timestamp, and a slow clock on the deleting device can let an older add win and bring the item back.
+
+- id: why-wall-clock-timestamps-cannot-order-writes
+  q: Why can you not trust wall-clock timestamps to order writes across machines, and what do you use instead?
+  level: Senior
+  category: system-design-databases
+  subcategory: replication
+  topics:
+    [
+      /system-design/databases/last-write-wins,
+      /system-design/patterns/consistency-models,
+      /system-design/patterns/unique-id-generation,
+    ]
+  a: |-
+    **Short answer.** Clocks on different machines disagree by milliseconds or more, and they can jump backwards. A write that really happened later can carry an earlier timestamp and lose. To order events safely, use logical clocks, which count events and ignore the time of day.
+
+    **Why.** A quartz clock drifts by tens of parts per million, which is a few seconds per day without correction. A time sync service keeps servers within a few milliseconds of each other on a good network, and worse on a bad one.
+
+    Now suppose node A's clock is 50 ms ahead. A user writes through A, then 20 ms later corrects the value through node B. B's timestamp is 30 ms older than A's. With last write wins, the correction is thrown away, and it stays thrown away.
+
+    Alternatives:
+
+    | Tool | What it gives |
+    | --- | --- |
+    | Lamport clock | One counter. Each node bumps it on every event and jumps past any larger value it receives. If A caused B, A's number is smaller |
+    | Version vector | One counter per replica. Tells "happened after" apart from "happened at the same time" |
+    | Hybrid logical clock | Physical time plus a counter. Close to real time and never goes backwards |
+
+    **Watch out for.** Client device clocks. A phone can be wrong by hours or set by hand, so never let a client timestamp decide which write wins.
+
+- id: leaderless-node-comes-back-after-missing-writes
+  q: In a leaderless database, a node was down for an hour and missed writes. How does it catch up?
+  level: Mid
+  category: system-design-databases
+  subcategory: replication
+  topics:
+    [
+      /system-design/databases/leaderless-replication,
+      /system-design/databases/replication-quorums,
+      /system-design/databases/wide-column-stores,
+    ]
+  a: |-
+    **Short answer.** Three mechanisms bring it back in line. Hinted handoff replays the writes that other nodes saved for it. Read repair fixes a key when a read notices the node is behind. A background comparison, called anti-entropy, finds and copies everything the first two missed.
+
+    **Why.** In a leaderless design the client, or a coordinator node, sends each write to all replicas of a key and waits for only some of them. With 3 replicas and a write quorum of 2, a write succeeds while one node is down. That node now holds old data.
+
+    | Mechanism | When it runs | What it covers |
+    | --- | --- | --- |
+    | Hinted handoff | When the node returns | Writes from the outage, while hints are kept, usually a few hours |
+    | Read repair | On each read | Only keys that are read. The newer version is written back to the stale node |
+    | Anti-entropy repair | In the background or on a schedule | Everything, including cold keys nobody reads |
+
+    During the gap, reads stay correct as long as the read quorum overlaps the write quorum. With 3 replicas, reading from 2 always includes at least one node that has the new value.
+
+    **Watch out for.** Skipping the scheduled repair. If a node misses a delete and the deletion marker is cleaned up on the other nodes before a repair runs, the old value spreads again and the deleted data comes back.
+
+- id: merkle-trees-for-comparing-replicas
+  q: What is a Merkle tree, and how do databases use it to compare replicas?
+  level: Senior
+  category: system-design-databases
+  subcategory: replication
+  topics: [/system-design/databases/leaderless-replication, /system-design/fundamentals/encryption-and-hashing]
+  a: |-
+    **Short answer.** A Merkle tree is a tree of hashes. Each leaf is the hash of a range of data, and each parent is the hash of its children. Two replicas compare the root hash first. If the roots match, all the data matches. If they differ, the replicas walk down only the branches that differ, and find the out-of-sync ranges after exchanging very little data.
+
+    **Why.** The simple way to compare two replicas is to send every key and value across the network. For 500 GB that takes hours and loads both nodes. Usually the replicas differ in a tiny fraction of keys, so most of that work is wasted.
+
+    With a tree, the cost follows the size of the difference. Split a replica's key range into about 1 million leaf ranges. The tree is then about 20 levels deep, because 2 to the power 20 is about 1 million. If one leaf range differs, the replicas compare around 20 pairs of hashes on the way down, then stream only that one range.
+
+    The trade-off is the build cost. Making the tree means reading and hashing all the data on each replica, which is heavy on disk and CPU.
+
+    **Watch out for.** Leaves that are too coarse. If each leaf covers 100 MB and a single row differs, the whole 100 MB range is streamed again.
+
+- id: lsm-read-path-and-why-reads-can-be-slow
+  q: Trace a point read through an LSM tree. Why can it be slow, and what keeps it fast?
+  level: Mid
+  category: system-design-databases
+  subcategory: storage-engines
+  topics: [/system-design/databases/lsm-trees, /system-design/patterns/bloom-filter, /system-design/databases/sstables]
+  a: |-
+    **Short answer.** The read checks the in-memory memtable first, then the on-disk SSTables from newest to oldest, and stops at the first one that has the key. It can be slow because the key may be in any of many files. Bloom filters, per-file indexes, a block cache and compaction keep the number of disk reads close to one.
+
+    **Why.** An LSM tree never updates in place, so several versions of a key can exist in different files. The newest one wins, which is why the search goes newest first.
+
+    <AnimatedDiagram name="databases/lsm-write-path" highlight={["reader", "bloom"]} caption="A read checks the memtable, then asks each SSTable's Bloom filter before touching disk." />
+
+    The worst case is a key that does not exist. Without help, the engine would look in every file. Three things prevent that:
+
+    - **Bloom filter per SSTable.** A small bit array in memory that says "definitely not here" or "maybe here". With about 10 bits per key the false positive rate is near 1%, so 99 of 100 useless file reads are skipped.
+    - **Sparse index per SSTable.** Points to the right block inside the file, so the read fetches one block of a few kilobytes.
+    - **Compaction.** Merges files so there are fewer places to look.
+
+    **Watch out for.** Range scans. A Bloom filter cannot answer "any key between A and F", so a scan must merge results from every file whose key range overlaps. Scans on an LSM tree with many overlapping files are much slower than point reads.
+
+- id: lsm-write-stalls-when-compaction-falls-behind
+  q: Your LSM-based database shows sudden pauses in writes under heavy ingest. What is happening, and what do you do about it?
+  level: Senior
+  category: system-design-databases
+  subcategory: storage-engines
+  topics: [/system-design/databases/lsm-trees, /system-design/patterns/back-pressure]
+  a: |-
+    **Short answer.** Compaction is falling behind. Flushed files pile up in the first level faster than the background merge can clear them, so the engine slows or stops writes on purpose to protect read speed and disk space. Fix it by giving compaction more capacity, reducing the write volume it must process, or smoothing the incoming load.
+
+    **Why.** Each memtable flush adds one file to level 0. Files in level 0 overlap in key range, so every read may have to check all of them. Engines set limits: at a first threshold they throttle writes, and at a second they stop them until compaction catches up. That stop is the stall you see.
+
+    The cause is arithmetic. With leveled compaction each byte is rewritten about 10 to 30 times over its life. At 50 MB per second of ingest, compaction must sustain 500 MB per second or more of disk writes.
+
+    Options, roughly in order:
+
+    1. **Check the disk.** Compaction and flushes share its throughput. Faster storage or a higher I/O allowance often ends the problem.
+    2. **Lower write amplification.** Size-tiered compaction rewrites data fewer times, at the cost of more space and slower reads.
+    3. **Rate-limit ingest** at a steady level.
+
+    **Watch out for.** Raising the stall thresholds to hide the symptom. Reads then slow down, disk usage climbs, and the eventual stall is longer.
+  followUps:
+    - q: What are write amplification, read amplification and space amplification?
+      level: Mid
+      topics: [/system-design/databases/lsm-trees]
+      a: |-
+        **Short answer.** They are three ratios that describe the overhead of a storage engine. Write amplification is bytes written to disk per byte the user wrote. Read amplification is the number of disk reads per query. Space amplification is disk used per byte of live data. Lowering one usually raises another.
+
+        **Why.** An LSM tree rewrites data when it merges files. If each byte is rewritten 15 times, write amplification is 15, and 1 TB of user writes costs 15 TB of disk writes, which wears out SSDs faster and uses I/O capacity.
+
+        | Compaction style | Write amp. | Read amp. | Space amp. |
+        | --- | --- | --- | --- |
+        | Leveled | High, about 10 to 30 | Low | Low, about 1.1 |
+        | Size-tiered | Low, about 4 to 10 | Higher | High, up to 2 during merges |
+
+        A B-tree sits at a different point: low read amplification, and write amplification that comes from rewriting a whole page for a small change.
+
+        **Watch out for.** Quoting one number as "the" cost of an engine. The ratios depend on the workload: update-heavy data amplifies space much more than insert-only data.
+
+- id: when-to-use-multi-leader-replication
+  q: When would you use multi-leader replication, and what is its main cost?
+  level: Mid
+  category: system-design-databases
+  subcategory: replication
+  topics: [/system-design/databases/multi-leader-replication, /system-design/databases/single-leader-replication]
+  a: |-
+    **Short answer.** Use it when writes must be accepted in more than one place: several regions that each need fast local writes, or devices that must keep working offline. The main cost is write conflicts. Two leaders can accept different changes to the same record, and you have to decide what the final value is.
+
+    **Why.** With a single leader, a user in Sydney writing to a leader in Virginia pays about 200 ms per write for the round trip. If the leader's region fails, writes stop until a failover finishes.
+
+    With a leader in each region, every user writes locally in a few milliseconds, and each leader sends its changes to the others in the background. A region can lose its link to the others and still take writes.
+
+    | | Single leader | Multi-leader |
+    | --- | --- | --- |
+    | Write latency far from the leader | High | Low |
+    | Survives a region outage for writes | After failover | Yes |
+    | Write conflicts | None | Possible |
+    | Unique constraints, auto-increment ids | Simple | Need care, for example id ranges per leader |
+
+    Other examples of the same model: a calendar app that syncs after being offline, where each device is a leader, and a collaborative document.
+
+    **Watch out for.** Choosing it only for higher write throughput. Every leader still applies every write, so total capacity does not grow. Sharding is the tool for throughput. Multi-leader is for location and availability.
+
+- id: avoiding-write-conflicts-in-multi-leader-setups
+  q: You run leaders in three regions. How do you design the system so that write conflicts rarely happen?
+  level: Senior
+  category: system-design-databases
+  subcategory: replication
+  topics:
+    [
+      /system-design/databases/multi-leader-replication,
+      /system-design/databases/automatic-conflict-resolution,
+      /system-design/fundamentals/dns,
+    ]
+  a: |-
+    **Short answer.** Give every record one home region and send all writes for that record there. Conflicts need two leaders writing the same record at the same time, so if each record has a single writer region in normal operation, conflicts happen only during failover or when a user's home changes.
+
+    **Why.** Resolving conflicts after the fact is hard and often loses data. Avoiding them is cheaper.
+
+    - **Home region per user or tenant.** Store the home in a small directory. The routing layer sends a user's writes to that region even when they travel. Reads can still be served locally.
+    - **Partition ownership by data.** European accounts are owned by the European leader.
+    - **Separate id spaces.** Each region creates ids from its own range or with its region number inside the id, so two inserts never collide.
+    - **Keep truly global data on a single leader.** Usernames and other values that must be unique worldwide go through one place, and that write is slower.
+
+    The cost is latency for the minority. A user whose home is Frankfurt and who is visiting Tokyo pays about 250 ms per write.
+
+    **Watch out for.** Failover. When a region dies and its users are moved to another leader, writes that had not replicated yet may arrive later and conflict. You still need a conflict rule and a way to audit what it discarded.
+
+- id: why-distributed-sql-writes-are-slower
+  q: Why is a single-row write slower in a distributed SQL database than in a single-node Postgres?
+  level: Mid
+  category: system-design-databases
+  subcategory: database-selection
+  topics:
+    [
+      /system-design/databases/newsql-databases,
+      /system-design/databases/sync-vs-async-replication,
+      /system-design/patterns/leader-election,
+    ]
+  a: |-
+    **Short answer.** Every write must be agreed by a majority of replicas before it is confirmed. That adds at least one network round trip to another machine, and a transaction that touches several ranges of data adds a commit protocol on top.
+
+    **Why.** A single-node database confirms a write after appending to its local log and flushing to disk, which is well under a millisecond on a fast SSD. A distributed SQL database keeps each range of rows on 3 or 5 replicas and uses a consensus protocol such as Raft, which is a way for replicas to agree on one order of writes. The leader of the range sends the write to the followers and waits for a majority.
+
+    | Replica placement | Added time per write |
+    | --- | --- |
+    | Same data centre zone | Under 1 ms |
+    | Three zones in one region | 1 to 3 ms |
+    | Three regions on one continent | 20 to 60 ms |
+    | Regions on different continents | 100 ms or more |
+
+    A transaction across several ranges adds a two-phase commit on top.
+
+    **Watch out for.** Chatty transactions. Ten statements sent one at a time each pay the network cost. Batch statements, keep related rows in the same range through the primary key design, and place the leaders close to the users who write.
+
+- id: clocks-in-distributed-sql-truetime
+  q: Why do distributed SQL databases care so much about clock accuracy?
+  level: Senior
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/newsql-databases, /system-design/patterns/consistency-models]
+  a: |-
+    **Short answer.** They give each transaction a timestamp and use those timestamps to order transactions across machines without asking a central node. If clocks disagree by more than the system assumes, a later transaction can get an earlier timestamp, and a reader can miss data that was already committed.
+
+    **Why.** The goal is a strong guarantee: if transaction A finishes before B starts, anywhere in the world, B sees A's effects. A single global counter would be a bottleneck, so these databases use time.
+
+    Two approaches are common:
+
+    | Approach | How it works | Cost |
+    | --- | --- | --- |
+    | Bounded uncertainty with special hardware | Atomic clocks and GPS receivers keep the error to a few milliseconds. The clock reports an interval, and a commit waits until that interval has passed | A wait of a few milliseconds on each write |
+    | Hybrid logical clocks on ordinary servers | Physical time plus a counter, with an assumed maximum offset such as 250 to 500 ms | A read that finds a value inside the uncertainty window must restart at a later timestamp |
+
+    **Watch out for.** A node whose clock drifts beyond the limit. Well-built systems make that node remove itself from the cluster, because staying up with a bad clock risks returning stale reads. Monitor clock offset the same way you monitor disk space.
+
+- id: object-storage-durability-replication-vs-erasure-coding
+  q: How does an object store reach eleven nines of durability without keeping many full copies of every object?
+  level: Senior
+  category: system-design-databases
+  subcategory: database-selection
+  topics:
+    [/system-design/databases/object-storage, /system-design/case-studies/s3, /system-design/fundamentals/availability]
+  a: |-
+    **Short answer.** It uses erasure coding. An object is cut into data pieces, extra parity pieces are computed from them, and the pieces are spread over separate disks, racks and data centres. Any sufficiently large subset of pieces can rebuild the object, so several can be lost at once. Constant checking and fast repair do the rest.
+
+    **Why.** Compare two schemes that both survive the loss of any pieces up to a limit:
+
+    | Scheme | Survives | Raw storage per 1 GB stored |
+    | --- | --- | --- |
+    | 3 full copies | 2 losses | 3 GB |
+    | 10 data + 4 parity pieces | 4 losses | 1.4 GB |
+
+    The coded scheme tolerates more failures and uses less than half the disk.
+
+    Durability comes from the gap between failure rate and repair speed. A disk fails about 1 to 2% of the time per year. Data is lost only if 5 of the 14 pieces fail before repair finishes. If a lost piece is rebuilt within hours, that combination is extremely unlikely.
+
+    Checksums on every piece and regular background scans catch silent corruption.
+
+    The trade-off is repair cost: rebuilding one lost piece means reading 10 others.
+
+    **Watch out for.** Mixing up durability and availability. Eleven nines means the data is not lost. The service can still be unreachable for minutes, and a bug or a mistaken delete removes data whatever the coding. Versioning and deletion protection cover that risk.
+
+- id: transactional-outbox-vs-change-data-capture
+  q: What is the transactional outbox pattern, and how does it compare with change data capture?
+  level: Mid
+  category: system-design-databases
+  subcategory: database-selection
+  topics:
+    [
+      /system-design/databases/polyglot-persistence,
+      /system-design/patterns/message-queues,
+      /system-design/patterns/idempotency,
+    ]
+  a: |-
+    **Short answer.** With an outbox, the service writes its business change and an event row into the same database transaction. A separate relay reads the event rows and publishes them to a queue. Change data capture (CDC) reads the database's own log and publishes every row change. Both remove the dual-write problem. The outbox publishes events you designed, and CDC publishes raw table changes.
+
+    **Why.** The problem is that a service cannot write to a database and to a queue atomically. If it crashes between the two, one has the change and the other does not. Both patterns make the database the only place the service writes.
+
+    | | Outbox | CDC |
+    | --- | --- | --- |
+    | What is published | A business event, such as "order placed" with chosen fields | Row-level changes, table by table |
+    | Application code change | Yes, write the event row | None |
+    | Coupling for consumers | To a stable event contract | To your table layout |
+    | Covers changes made outside the service | No | Yes, including manual fixes |
+
+    The two are often combined: the service writes outbox rows, and a CDC tool tails only the outbox table.
+
+    Delivery is at least once in both cases.
+
+    **Watch out for.** Consumers that are not idempotent, meaning safe to run twice with the same input. Put a unique event id in each message and have consumers ignore ids they have already processed.
+
+- id: detecting-drift-between-source-and-derived-stores
+  q: How do you find out that a derived store, such as a search index or a cache, no longer matches the source of truth?
+  level: Senior
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/polyglot-persistence, /system-design/databases/search-engines]
+  a: |-
+    **Short answer.** Measure it in two ways. Track lag, which tells you how far behind the pipeline is. Run reconciliation, which compares the two stores directly and catches events that were lost or applied wrongly. Lag monitoring alone will not notice a record that was silently skipped.
+
+    **Why.** A sync pipeline can fail quietly. A consumer may skip a message it could not parse, a bug may map a field wrongly, or someone may fix data by hand in one store. The pipeline looks healthy and the copies differ.
+
+    Layers of detection:
+
+    | Check | Catches | Cost |
+    | --- | --- | --- |
+    | Consumer lag and age of the last applied event | A slow or stuck pipeline | Very low |
+    | Row counts per day or per tenant in both stores | Missing or extra records | Low |
+    | Checksums per bucket, for example a hash over ids and versions for each 10,000 rows | Changed content, narrowed to a bucket | Medium |
+    | Synthetic record written every minute and searched for | The whole path end to end | Very low |
+
+    Store a version number or update time from the source in every derived record. Comparison then needs only ids and versions, with no need to compare full documents.
+
+    **Watch out for.** False alarms from records that are in flight. Compare only records older than the current lag, for example those unchanged for 5 minutes.
+
+- id: r-trees-and-moving-objects
+  q: Why is an R-tree a poor fit for tracking moving objects such as drivers, and what do you use instead?
+  level: Mid
+  category: system-design-databases
+  subcategory: storage-engines
+  topics:
+    [
+      /system-design/databases/r-tree,
+      /system-design/patterns/geospatial-indexing,
+      /system-design/case-studies/uber-eats,
+    ]
+  a: |-
+    **Short answer.** Each position change in an R-tree is a delete and an insert that may resize bounding rectangles up the tree and split nodes. With hundreds of thousands of updates per second, the tree spends its time reorganising. A grid of cells, such as geohash or H3, makes an update a simple key change, so it is the usual choice for live locations.
+
+    **Why.** An R-tree groups nearby objects under bounding rectangles and keeps those rectangles tight. That suits data that rarely changes: buildings, roads, delivery zones.
+
+    Driver positions are the opposite. If 1 million drivers report every 4 seconds, that is 250,000 updates per second.
+
+    With a cell grid the world is cut into fixed cells, each with an id. A driver's update is: compute the new cell id, and if it changed, remove the driver from the old cell's set and add them to the new one. Both are O(1) operations in an in-memory store, and no other driver's data is touched.
+
+    | | R-tree | Cell grid |
+    | --- | --- | --- |
+    | Update cost | Tree changes, possible splits | Two set operations |
+    | Shapes such as polygons | Yes | Points only, shapes need extra work |
+    | Sharding | Hard | Easy, by cell id |
+
+    **Watch out for.** Uneven density. One cell in a city centre can hold thousands of drivers while a rural one holds none. Use smaller cells in dense areas, or a hierarchical grid.
+
+- id: k-nearest-neighbour-search-in-an-r-tree
+  q: How does an R-tree find the five nearest objects to a point without checking every object?
+  level: Senior
+  category: system-design-databases
+  subcategory: storage-engines
+  topics: [/system-design/databases/r-tree, /system-design/patterns/geospatial-indexing]
+  a: |-
+    **Short answer.** It runs a best-first search with a priority queue. The queue holds tree nodes and objects, ordered by their smallest possible distance to the query point. The search always opens the closest entry next, and it stops once five objects have come out of the queue, because nothing left in the queue can be closer.
+
+    **Why.** For any bounding rectangle you can compute a lower bound: the distance from the query point to the nearest edge of the rectangle. No object inside can be closer than that. This bound lets the search skip whole subtrees safely.
+
+    Steps:
+
+    1. Put the root's rectangles in the queue with their lower-bound distances.
+    2. Pop the entry with the smallest distance.
+    3. If it is an inner node, push its children with their distances.
+    4. If it is an object, it is the next nearest result. Output it.
+    5. Repeat until five objects are output.
+
+    A useful property is that the search is incremental. If the caller filters results, for example "nearest five that are open now", it keeps popping until five pass the filter, with no restart.
+
+    **Watch out for.** Distances on raw latitude and longitude. A degree of longitude is about 111 km at the equator and about 55 km at 60 degrees north, so the ordering comes out wrong. Use a geography type or project the coordinates first.
+
+- id: acid-transactions-and-isolation-levels
+  q: Explain transaction isolation levels. Which problems does each level allow under concurrent access?
+  level: Mid
+  category: system-design-databases
+  subcategory: database-foundations
+  topics: [/system-design/databases/relational-databases, /system-design/patterns/consistency-models]
+  a: |-
+    **Short answer.** Isolation is the part of ACID that controls what one transaction can see of another that is running at the same time. Stricter levels prevent more anomalies and cost more waiting or more retries. Most applications run on read committed and add explicit locks for the few operations that need more.
+
+    **Why.** The anomalies, from mild to severe:
+
+    - **Dirty read.** You read a change that is later rolled back.
+    - **Non-repeatable read.** You read a row twice in one transaction and get different values.
+    - **Phantom.** You run the same range query twice and new rows appear.
+    - **Lost update.** Two transactions read a value, both change it, and one overwrites the other.
+    - **Write skew.** Two transactions each check a rule, then each change a different row, and together break the rule. Example: two doctors both go off call because each saw the other was on call.
+
+    | Level | Dirty read | Non-repeatable read | Phantom | Write skew |
+    | --- | --- | --- | --- | --- |
+    | Read committed | No | Possible | Possible | Possible |
+    | Repeatable read or snapshot | No | No | Depends on the engine | Possible |
+    | Serializable | No | No | No | No |
+
+    Serializable behaves as if transactions ran one at a time. The price is blocking, or aborted transactions that the client must retry.
+
+    **Watch out for.** Assuming names mean the same thing everywhere. The default level and the exact behaviour of "repeatable read" differ between databases, so check the manual for the one you use.
+  followUps:
+    - q: How do you avoid deadlocks in a busy transactional system?
+      level: Mid
+      topics: [/system-design/databases/relational-databases]
+      a: |-
+        **Short answer.** Make every transaction take its locks in the same order, keep transactions short, and retry the ones the database aborts. A deadlock needs two transactions that each hold a lock the other wants, and a fixed order makes that cycle impossible.
+
+        **Why.** The classic case is a money transfer. Transaction 1 locks account A then wants B. Transaction 2 locks B then wants A. Neither can continue. The database detects the cycle after a short wait and aborts one of them.
+
+        Practical rules:
+
+        - **Order the locks.** Always lock the account with the smaller id first, whatever the direction of the transfer.
+        - **Short transactions.** No network calls or user waits while holding locks. A transaction that lasts 5 ms collides far less than one that lasts 500 ms.
+        - **Lock what you will change up front**, with a locking read, so you do not upgrade locks halfway.
+        - **Index the filter columns.** Without an index, an update may lock many more rows than it changes.
+        - **Retry with a small random delay** when the database reports a deadlock.
+
+        At very high contention on a few rows, move the work to a queue so that one worker processes each key in turn.
+
+        **Watch out for.** Hidden lock order in bulk statements. Two batch updates that touch the same rows in different orders can deadlock. Sort the ids before the batch.
+
+- id: schema-migrations-on-a-large-live-table
+  q: How do you change the schema of a table with 500 million rows while the service stays online?
+  level: Senior
+  category: system-design-databases
+  subcategory: database-foundations
+  topics: [/system-design/databases/relational-databases, /system-design/databases/single-leader-replication]
+  a: |-
+    **Short answer.** Split the change into small steps that are each safe with both the old and the new application code running. The usual sequence is expand, migrate, contract: add the new structure, copy data across in the background while writing to both, switch reads, then remove the old structure.
+
+    **Why.** A direct change can take a lock that blocks all writes while the table is rewritten. On 500 million rows that can be many minutes of outage.
+
+    Example: replace a `name` column with `first_name` and `last_name`.
+
+    1. **Expand.** Add the two new columns as nullable. In most engines this changes only metadata and is instant.
+    2. **Dual write.** Deploy code that writes old and new columns together.
+    3. **Backfill.** A job fills the new columns in batches of a few thousand rows, with pauses. It watches replica lag and slows down when lag rises.
+    4. **Verify.** Count rows where old and new disagree. The count must be zero.
+    5. **Switch reads** to the new columns, behind a flag you can turn off.
+    6. **Contract.** Stop writing the old column, then drop it in a later release.
+
+    **Watch out for.** Lock queues. Even an instant change needs a short exclusive lock. If it waits behind one long-running query, every new query waits behind it. Set a lock timeout of a few seconds and retry.
+
+- id: what-is-a-quorum-read-and-write-sizes
+  q: What is a quorum in a replicated database, and how do the read and write quorum sizes trade off?
+  level: Junior
+  category: system-design-databases
+  subcategory: replication
+  topics:
+    [
+      /system-design/databases/replication-quorums,
+      /system-design/databases/leaderless-replication,
+      /system-design/patterns/consistency-models,
+    ]
+  a: |-
+    **Short answer.** A quorum is the minimum number of replicas that must answer before an operation counts as successful. With N replicas, W acknowledgements per write and R replies per read, a read is sure to include the newest write when W plus R is greater than N. Raising W makes writes slower and reads cheaper, and raising R does the opposite.
+
+    **Why.** The rule works because of overlap. With N = 3, W = 2 and R = 2, any 2 nodes that took the write and any 2 nodes that answer the read must share at least one node. That node has the new value, and its version number shows it is the newest.
+
+    | N, W, R | Tolerates for writes | Tolerates for reads | Fits |
+    | --- | --- | --- | --- |
+    | 3, 2, 2 | 1 node down | 1 node down | Balanced default |
+    | 3, 3, 1 | 0 nodes down | 2 nodes down | Read-heavy, writes may fail more often |
+    | 3, 1, 3 | 2 nodes down | 0 nodes down | Write-heavy, slow reads |
+    | 3, 1, 1 | 2 nodes down | 2 nodes down | Fastest, may return stale data |
+
+    **Watch out for.** Thinking W = 1 and R = 1 is safe because "the data gets there eventually". With those settings a read can hit a replica that has not yet received the write, and the user sees old data straight after saving.
+  followUps:
+    - q: Why is the number of replicas usually odd, such as 3 or 5?
+      level: Junior
+      topics: [/system-design/databases/replication-quorums]
+      a: |-
+        **Short answer.** An even number adds cost without adding fault tolerance. A majority of 3 is 2, so 1 node may fail. A majority of 4 is 3, so still only 1 node may fail, and you pay for an extra machine.
+
+        **Why.** Majority quorums need more than half of the nodes.
+
+        | Replicas | Majority | Failures tolerated |
+        | --- | --- | --- |
+        | 3 | 2 | 1 |
+        | 4 | 3 | 1 |
+        | 5 | 3 | 2 |
+        | 6 | 4 | 2 |
+
+        An odd count also behaves better when the network splits into two halves. With 4 nodes split 2 and 2, neither side has a majority and the whole system stops accepting writes. With 5 nodes, one side always has at least 3.
+
+        Three replicas is the common choice. Five is used when you must survive one planned outage, such as an upgrade, and one unplanned failure at the same moment.
+
+        **Watch out for.** Putting 2 of 3 replicas in the same data centre. Losing that one building then loses the majority.
+
+- id: stale-reads-despite-overlapping-quorums
+  q: You set W + R greater than N. Can a client still read stale or inconsistent data?
+  level: Senior
+  category: system-design-databases
+  subcategory: replication
+  topics:
+    [
+      /system-design/databases/replication-quorums,
+      /system-design/databases/leaderless-replication,
+      /system-design/databases/last-write-wins,
+    ]
+  a: |-
+    **Short answer.** Yes. The overlap rule guarantees that a read contacts at least one replica holding the latest successful write. It does not give the stronger guarantee, called linearizability, where the system behaves like a single copy.
+
+    **Why.** The cases interviewers look for:
+
+    - **Sloppy quorum.** When the proper replicas are unreachable, some stores accept the write on other nodes as a stand-in. The W acknowledgements then come from nodes outside the normal set, and a read of the proper nodes may miss the write.
+    - **Concurrent writes.** Two writes to one key reach replicas in different orders. If the winner is chosen by timestamp, clock error can make the older write win.
+    - **Write racing a read.** While a write is in progress, it exists on some replicas only. One read can see the new value and a later read, to different replicas, the old one.
+    - **Failed write that partly landed.** A write reaches 1 of 3 nodes and is reported as failed. It is not rolled back. A later read may return it, and read repair may then spread it.
+
+    If you need single-copy behaviour, use a system built on consensus, or the conditional-write feature some leaderless stores provide for specific operations, at a higher latency cost.
+
+    **Watch out for.** Calling quorum reads "strongly consistent" in an interview. Say "the read overlaps the latest acknowledged write", then name one of the cases above.
+
+- id: deep-pagination-in-a-search-engine
+  q: A user or a script wants page 5,000 of the search results. Why is that a problem, and how do you support it?
+  level: Mid
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/search-engines, /system-design/fundamentals/api-design]
+  a: |-
+    **Short answer.** With offset paging, every shard must build and sort all results up to the requested page, and the coordinator merges them all to throw nearly everything away. Replace offsets with a cursor: the client sends the sort values of the last result it saw, and each shard returns only what comes after that point.
+
+    **Why.** Take 10 shards, 20 results per page and page 5,000. The offset is 100,000. No shard knows which of its documents fall in the global top 100,020, so each one returns its own top 100,020. The coordinator sorts about 1 million entries and keeps 20. This is why search engines cap the offset, commonly at 10,000 results.
+
+    | Method | Cost of page N | Jump to any page | Fits |
+    | --- | --- | --- | --- |
+    | Offset and size | Grows with N | Yes | The first few pages in a UI |
+    | Cursor on the last sort values | Constant | No, only next | Infinite scroll, long lists |
+    | Snapshot with a scan cursor | Constant | No | Exporting all matches |
+
+    A cursor needs a sort order with no ties. Add a unique field such as the document id as the final sort key. Without it, tied documents can swap places between requests.
+
+    **Watch out for.** Offering page numbers far beyond what people use. Almost nobody reads past the first few pages, so show a limited range and ask users to refine the query.
+
+- id: zero-downtime-reindexing-with-aliases
+  q: You need to change a field mapping in a search index that holds 300 million documents. How do you do it with no downtime?
+  level: Senior
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/search-engines, /system-design/databases/polyglot-persistence]
+  a: |-
+    **Short answer.** Build a new index with the new mapping next to the old one, fill it while the old one keeps serving, then switch an alias from old to new in one atomic step. Applications always talk to the alias, never to a concrete index name.
+
+    **Why.** The type of an existing field cannot be changed in place, because the segments already on disk were built with the old analysis. A new index is the only way, and 300 million documents take hours to index, so the old one must stay live meanwhile.
+
+    Steps:
+
+    1. **Create** `products_v2` with the new mapping.
+    2. **Capture live changes.** Send ongoing updates to both indexes, or note the position in the change stream before the backfill starts.
+    3. **Backfill** from the source of truth where possible, or by copying from the old index. At 20,000 documents per second, 300 million take a little over 4 hours.
+    4. **Catch up** the changes that arrived during the backfill.
+    5. **Verify.** Compare counts, run a set of saved queries against both, and check relevance.
+    6. **Swap the alias.**
+    7. **Keep the old index** for a day as a rollback, then delete it.
+
+    **Watch out for.** Deletes during the backfill. A document copied to the new index and then deleted from the old one will stay in the new index unless deletes are also replayed.
+
+- id: what-is-single-leader-replication
+  q: What is single-leader replication, and what do you gain from it?
+  level: Junior
+  category: system-design-databases
+  subcategory: replication
+  topics: [/system-design/databases/single-leader-replication, /system-design/databases/relational-databases]
+  a: |-
+    **Short answer.** One node, the leader, accepts all writes. It sends every change to the other nodes, the followers, which apply the changes in the same order and serve reads. You gain more read capacity, a ready copy for failover, and a simple model with no write conflicts.
+
+    **Why.** Because only one node decides the order of writes, two clients can never create conflicting versions of a row. The leader records each change in a log, and followers replay that log.
+
+    <AnimatedDiagram name="databases/read-scaling" highlight={["primary", "replicas"]} caption="Writes go to the primary, and replicas replay its log and serve reads." />
+
+    What it gives you:
+
+    - **Read scaling.** A service with 95% reads can send them to 5 followers and keep the leader for writes.
+    - **Availability.** If the leader fails, a follower with an up-to-date copy is promoted.
+    - **Operational uses.** Take backups or run heavy reports on a follower without touching the leader.
+    - **Reads near users.** Place a follower in another region.
+
+    What it does not give you is more write capacity. Every write still goes through one machine, and every follower must apply every write as well.
+
+    **Watch out for.** Replication lag. Followers are usually a few milliseconds behind and sometimes seconds. A user who saves a profile and then reads from a follower may see the old version. Send a user's reads to the leader for a short time after they write.
+
+- id: leader-failover-and-what-can-go-wrong
+  q: The leader of your database dies. Walk through the failover and what can go wrong.
+  level: Senior
+  category: system-design-databases
+  subcategory: replication
+  topics:
+    [
+      /system-design/databases/single-leader-replication,
+      /system-design/patterns/leader-election,
+      /system-design/fundamentals/availability,
+    ]
+  a: |-
+    **Short answer.** Failover has four steps: detect that the leader is gone, choose the most up-to-date follower, promote it, and redirect clients and the other followers to it. The dangers are losing recent writes, having two leaders at once, and failing over when the leader was only slow.
+
+    **Why.** Each step has a decision in it.
+
+    1. **Detect.** Nodes exchange heartbeats. After a timeout, often 10 to 30 seconds, the leader is declared dead. A short timeout reacts faster but triggers on a brief pause or network glitch.
+    2. **Choose.** Pick the follower that has received the most of the leader's log. A majority vote makes the choice, so only one winner exists.
+    3. **Promote.** The follower starts accepting writes.
+    4. **Redirect.** Point clients and the other followers at the new leader.
+
+    What goes wrong:
+
+    | Problem | Cause | Mitigation |
+    | --- | --- | --- |
+    | Lost writes | Asynchronous replication: the last writes never reached a follower | At least one synchronous follower |
+    | Two leaders | The old leader was only cut off and still accepts writes | Fencing, majority vote |
+    | Needless failover | Timeout set too low, leader was under load | Tune the timeout, check from several observers |
+
+    **Watch out for.** The old leader coming back. It may hold writes the new leader never saw. It must rejoin as a follower and discard or set aside those writes. Letting it continue as leader corrupts data.
+  followUps:
+    - q: What is split brain, and how do you prevent it?
+      level: Senior
+      topics: [/system-design/patterns/leader-election, /system-design/databases/single-leader-replication]
+      a: |-
+        **Short answer.** Split brain is when two nodes both believe they are the leader and both accept writes. The data then diverges and cannot be merged automatically. Prevent it by requiring a majority to elect a leader and by fencing, which means making sure the old leader can no longer write.
+
+        **Why.** It usually starts with a network partition. The leader is alive but unreachable from the other nodes, so they promote a follower. Clients on the old side keep writing to the old leader.
+
+        Defences:
+
+        - **Majority quorum.** A node may lead only with votes from more than half the cluster. With 3 nodes, the isolated side has 1 vote and must step down.
+        - **Leases.** The leader holds a time-limited lease and stops serving when it cannot renew it.
+        - **Fencing tokens.** Each new leader gets a higher number. Storage rejects writes that carry a lower number than one it has already seen, so a stale leader is refused even if it still thinks it leads.
+        - **Forced shutdown.** The cluster manager powers off or isolates the old leader before promoting a new one.
+
+        **Watch out for.** Two-node clusters. With 2 nodes there is no majority after a split, so add a third small voter node in a separate location.
+
+- id: what-is-a-skip-list
+  q: What is a skip list, and why does a search in it take O(log n) steps?
+  level: Junior
+  category: system-design-databases
+  subcategory: storage-engines
+  topics: [/system-design/databases/skip-list, /system-design/databases/lsm-trees]
+  a: |-
+    **Short answer.** A skip list is a sorted linked list with extra layers of "express" links that jump over many elements. A search starts on the top layer, moves right while the next key is not too large, and drops down a layer when it is. Each layer has about half the elements of the one below, so the search takes about log n steps.
+
+    **Why.** A plain sorted linked list must be walked one element at a time, which is O(n). The extra layers work like express and local trains. The top layer stops at a few stations, the next at more, and the bottom layer at all of them.
+
+    The layers are built by chance. When an element is inserted, flip a coin: with probability one half it also appears in the layer above, then flip again for the next layer, and so on. On average:
+
+    | Layer | Share of elements | In a list of 1 million |
+    | --- | --- | --- |
+    | 0 (bottom) | All | 1,000,000 |
+    | 1 | 1 in 2 | 500,000 |
+    | 2 | 1 in 4 | 250,000 |
+    | 20 | 1 in a million | About 1 |
+
+    A search uses about 20 layers and a couple of steps on each, so around 40 comparisons for 1 million elements.
+
+    **Watch out for.** Calling the bound a guarantee. It is an expected cost that depends on random choices.
+
+- id: why-redis-and-memtables-use-skip-lists
+  q: Why do Redis sorted sets and LSM memtables use a skip list when a balanced tree gives the same O(log n)?
+  level: Mid
+  category: system-design-databases
+  subcategory: storage-engines
+  topics:
+    [/system-design/databases/skip-list, /system-design/databases/lsm-trees, /system-design/databases/key-value-stores]
+  a: |-
+    **Short answer.** A skip list is simpler to implement, easier to make safe for many threads, and very good at range scans. A balanced tree has the same time complexity, but it must rebalance, and rebalancing touches several nodes at once.
+
+    **Why.**
+
+    | | Skip list | Balanced tree such as red-black |
+    | --- | --- | --- |
+    | Insert | Link in one new node, a few pointer changes near it | May rotate and recolour nodes up the tree |
+    | Concurrent writers | Changes are local, so lock-free versions are practical | Rotations touch shared nodes, so locking is harder |
+    | Range scan | Walk the bottom list | In-order traversal, moving up and down |
+
+    For an LSM memtable the concurrency point decides it. Many threads insert at once, and readers must not be blocked. An insert into a skip list can be done with atomic pointer swaps, one level at a time, starting at the bottom.
+
+    For Redis sorted sets, the main needs are "members ranked 10 to 20" and "scores between X and Y". Redis stores a span count on each link, which is the number of elements the link skips, so it can find the element at a given rank in O(log n).
+
+    **Watch out for.** Cache behaviour. Skip list nodes are scattered in memory, so each step can be a cache miss. For read-mostly data on one thread, a B-tree with many keys per node is usually faster.
+
+- id: what-is-an-sstable-and-why-sorting-matters
+  q: What is an SSTable, and why does it matter that the keys are sorted?
+  level: Junior
+  category: system-design-databases
+  subcategory: storage-engines
+  topics: [/system-design/databases/sstables, /system-design/databases/lsm-trees]
+  a: |-
+    **Short answer.** An SSTable (sorted string table) is a file of key-value pairs stored in key order and never changed after it is written. The sorted order makes three things cheap: finding a key with a small index, merging files, and reading a range of keys.
+
+    **Why.** Compare it with an unsorted log, where the only way to find a key is to keep every key's position in memory.
+
+    - **Small index.** Because keys are in order, the index needs only one entry per block, for example every 4 KB. To find `user:5500`, look up the last index entry at or before it, read that one block and scan inside it.
+    - **Cheap merging.** Two sorted files merge the way merge sort does: read both from the start and always take the smaller key. This needs almost no memory, even for files far larger than RAM. When the same key is in both, keep the newer value.
+    - **Range reads.** "All keys from `user:5000` to `user:6000`" is one seek and a sequential read.
+
+    Being immutable helps too. A file that never changes needs no locks for readers, is simple to cache and back up, and cannot be half-updated by a crash.
+
+    **Watch out for.** Confusing the file with the engine. An SSTable is the on-disk format. The LSM tree is the system around it: memtable, log, many SSTables and compaction.
+
+- id: finding-a-key-inside-a-large-sstable
+  q: An SSTable is 1 GB on disk. How does the engine find one key in it without reading the whole file?
+  level: Mid
+  category: system-design-databases
+  subcategory: storage-engines
+  topics:
+    [/system-design/databases/sstables, /system-design/patterns/bloom-filter, /system-design/fundamentals/compression]
+  a: |-
+    **Short answer.** The file is divided into small blocks, and the end of the file holds an index with the first key and offset of each block, plus a Bloom filter. The engine checks the filter, searches the index in memory, and reads exactly one block from disk.
+
+    **Why.** A typical layout:
+
+    | Part | Content | Size for a 1 GB file |
+    | --- | --- | --- |
+    | Data blocks | Sorted key-value pairs, about 4 to 64 KB each, compressed one by one | Almost all of the file |
+    | Index block | One key and offset per data block | A few MB |
+    | Bloom filter | About 10 bits per key | About 12 MB for 10 million keys |
+    | Footer | Where the index and the filter are | A few bytes |
+
+    The lookup:
+
+    1. Ask the Bloom filter. If it says no, stop.
+    2. Binary search the index, which is held in memory, to find the block whose key range covers the key.
+    3. Read that block, one disk read of a few kilobytes, decompress it and search inside.
+
+    With 16 KB blocks, a 1 GB file has about 65,000 blocks, so the index has about 65,000 entries and a binary search takes 16 comparisons.
+
+    **Watch out for.** The block size trade-off. Larger blocks compress better and shrink the index, but each lookup reads and decompresses more data. Point-read workloads prefer small blocks, and scan workloads prefer large ones.
+
+- id: what-are-siblings-in-a-dynamo-style-store
+  q: What are siblings in a Dynamo-style database, and who resolves them?
+  level: Mid
+  category: system-design-databases
+  subcategory: replication
+  topics:
+    [
+      /system-design/databases/storage-siblings,
+      /system-design/databases/leaderless-replication,
+      /system-design/databases/automatic-conflict-resolution,
+    ]
+  a: |-
+    **Short answer.** Siblings are two or more values stored under one key because they were written concurrently, and the database cannot say that one replaced the other. The database keeps them all and returns them all on the next read. The application, or a mergeable data type, combines them and writes back one value.
+
+    **Why.** In a leaderless store any replica can accept a write. If two clients update the same key without having seen each other's write, there is no correct order. Keeping both loses nothing.
+
+    The classic example is a shopping cart:
+
+    1. The cart holds `book`. Clients A and B both read it.
+    2. A writes `book, pen`. B writes `book, lamp`.
+    3. The store sees that neither write knew of the other. It keeps both as siblings.
+    4. The next reader receives both values and a context token.
+    5. The application merges them into `book, pen, lamp` and writes that back with the token.
+
+    | Who resolves | How |
+    | --- | --- |
+    | Application on read | Custom merge, such as the union of cart items |
+    | The data type | A CRDT set or counter merges itself |
+    | The database | Last write wins, simple and lossy |
+
+    **Watch out for.** Removed items coming back. A plain union cannot tell "A removed the pen" from "B never had the pen". Record removals as markers, or use a set type that tracks adds and removes.
+  followUps:
+    - q: A key has collected thousands of siblings and reads are slow. What went wrong?
+      level: Senior
+      topics: [/system-design/databases/storage-siblings]
+      a: |-
+        **Short answer.** Clients are writing without sending back the context token from their last read, or nobody is resolving on read. Every such write looks concurrent with everything already stored, so it is added as one more sibling and none are ever removed.
+
+        **Why.** The store removes a sibling only when a write proves it has seen that sibling, by including the version information from a read. A blind write carries no such proof. One hundred blind writes to one key can leave one hundred values.
+
+        The effects grow together: each read returns every sibling, the object becomes megabytes in size, replication of that key slows down, and the node can run short of memory.
+
+        Fixes:
+
+        - **Always read before write** and pass the context back, or use the client library mode that does this.
+        - **Resolve on every read** and write the merged value back, so the count returns to one.
+        - **Use a CRDT type** for values many clients change at once.
+        - **Alert on sibling count and object size** per key, with a limit such as 50.
+
+        **Watch out for.** A hot key written by many servers at once, such as a global counter. Even correct clients create siblings faster than they resolve them. Give that data a different design, such as a counter type or one key per writer.
+
+- id: version-vectors-overwrite-vs-concurrent-write
+  q: How does a database tell that one write replaces another, as opposed to the two being concurrent?
+  level: Senior
+  category: system-design-databases
+  subcategory: replication
+  topics:
+    [
+      /system-design/databases/storage-siblings,
+      /system-design/databases/last-write-wins,
+      /system-design/databases/leaderless-replication,
+    ]
+  a: |-
+    **Short answer.** It attaches a version vector to every value: one counter per replica that has coordinated a write to that key. If every counter in vector X is greater than or equal to the matching counter in Y, then X has seen everything in Y and replaces it. If each vector is ahead in at least one counter, the writes were concurrent and both are kept.
+
+    **Why.** A single version number cannot do this. Two replicas that both go from version 3 to version 4 produce two different values with the same number.
+
+    With replicas A, B and C:
+
+    | Step | Vector | Meaning |
+    | --- | --- | --- |
+    | Write through A | A:1 | First version |
+    | Client reads it, writes through A | A:2 | Replaces A:1, since 2 is at least 1 |
+    | Another client had read A:1, writes through B | A:1, B:1 | Compared with A:2, A is lower and B is higher |
+    | Result | A:2 and A:1, B:1 are both kept | Concurrent, stored as siblings |
+    | Client reads both, merges, writes through C | A:2, B:1, C:1 | Covers both, replaces both |
+
+    The client must return the vector it read, as an opaque context value, with its next write. That is how the store learns what the client had seen.
+
+    **Watch out for.** Using one counter per client in place of one per replica. With millions of clients the vectors grow without limit.
+
+- id: what-is-a-suffix-tree-and-what-it-answers
+  q: What is a suffix tree, and what kind of query does it answer quickly?
+  level: Mid
+  category: system-design-databases
+  subcategory: storage-engines
+  topics: [/system-design/databases/suffix-tree, /system-design/databases/inverted-index]
+  a: |-
+    **Short answer.** A suffix tree is a tree that contains every suffix of a text, with shared beginnings merged into one path. It answers "does this pattern appear anywhere in the text, and where" in time proportional to the length of the pattern, whatever the length of the text.
+
+    **Why.** Every substring of a text is the start of some suffix. For the word `banana`, the suffixes are `banana`, `anana`, `nana`, `ana`, `na` and `a`. The substring `nan` is the start of the suffix `nana`. So if all suffixes are in a tree, searching for a pattern means walking down from the root, one character at a time. If the walk succeeds, the pattern occurs, and the leaves below that point list every position.
+
+    | Structure | Good at |
+    | --- | --- |
+    | Inverted index | Whole words and word prefixes |
+    | Trie of the keys | Prefixes of whole keys |
+    | Suffix tree | Any substring, repeated substrings, longest common substring |
+
+    Typical uses are DNA sequence search, where there are no word boundaries, and duplicate detection.
+
+    The trade-off is size. A suffix tree needs roughly 10 to 20 bytes per character of text, so 1 GB of text needs 10 to 20 GB of memory.
+
+    **Watch out for.** Proposing it for normal text search in a product. Users search by words, and an inverted index is far smaller and supports ranking.
+
+- id: substring-search-at-scale-suffix-tree-or-ngrams
+  q: "Users want to find products by any part of a name or code, so that 'x15' matches 'TX150-B'. With 100 million products, would you build a suffix tree?"
+  level: Senior
+  category: system-design-databases
+  subcategory: storage-engines
+  topics:
+    [
+      /system-design/databases/suffix-tree,
+      /system-design/databases/inverted-index,
+      /system-design/databases/search-engines,
+    ]
+  a: |-
+    **Short answer.** No. A suffix tree for that much text needs too much memory and is hard to update and to spread over machines. Use an n-gram index: break every name into overlapping pieces of 3 characters and store those pieces in an ordinary inverted index. It gives substring matching on systems you already know how to run.
+
+    **Why.** Estimate first. 100 million names of about 30 characters is 3 GB of text. A suffix tree at 10 to 20 bytes per character needs 30 to 60 GB of memory on one machine.
+
+    The n-gram approach: `TX150-B` becomes `tx1`, `x15`, `150`, `50-`, `0-b`. The query `x15` is one term lookup. A longer query such as `x150` becomes `x15` and `150`, the engine intersects the two postings lists, and then checks the few candidates against the real string to remove false matches.
+
+    | | Suffix tree | Suffix array | Trigram inverted index |
+    | --- | --- | --- | --- |
+    | Memory relative to the text | 10 to 20 times | About 4 to 8 times | About 3 to 5 times, on disk |
+    | Updates | Hard | Rebuild | Normal index writes |
+    | Sharding and replicas | Custom work | Custom work | Built into search engines |
+    | Filters and ranking alongside | No | No | Yes |
+
+    **Watch out for.** Queries shorter than the n-gram size. A 2-character query has no trigram to look up. Set a minimum query length, or add a 2-gram field for short codes and accept a larger index.
+
+- id: synchronous-vs-asynchronous-replication
+  q: What is the difference between synchronous and asynchronous replication?
+  level: Junior
+  category: system-design-databases
+  subcategory: replication
+  topics: [/system-design/databases/sync-vs-async-replication, /system-design/databases/single-leader-replication]
+  a: |-
+    **Short answer.** With synchronous replication, the leader waits until a follower confirms it has the write before telling the client "done". With asynchronous replication, the leader confirms at once and sends the change to followers afterwards. Synchronous is safer and slower. Asynchronous is faster and can lose the latest writes if the leader dies.
+
+    **Why.**
+
+    | | Synchronous | Asynchronous |
+    | --- | --- | --- |
+    | Client waits for | Leader and follower | Leader only |
+    | Added write latency | One round trip to the follower, about 1 ms in one region, 50 ms or more across regions | None |
+    | Leader dies | No confirmed write is lost | Writes not yet sent are lost |
+    | Follower is down or slow | Writes stall | No effect on writes |
+    | Follower reads | Up to date | May be behind |
+
+    An example makes the risk concrete. A leader takes 2,000 writes per second and its follower is 500 ms behind. If the leader's disk fails at that moment, about 1,000 confirmed writes exist nowhere else.
+
+    Because a fully synchronous setup stops whenever any follower is slow, most systems choose a mix: one follower is synchronous and the others are asynchronous.
+
+    **Watch out for.** Assuming replication replaces backups. Both modes copy mistakes faithfully. A wrong delete statement reaches every follower within milliseconds, and only a backup or a point-in-time restore brings the data back.
+
+- id: semi-synchronous-replication
+  q: What is semi-synchronous replication, and why do many production databases use it?
+  level: Mid
+  category: system-design-databases
+  subcategory: replication
+  topics:
+    [
+      /system-design/databases/sync-vs-async-replication,
+      /system-design/databases/single-leader-replication,
+      /system-design/fundamentals/availability,
+    ]
+  a: |-
+    **Short answer.** The leader waits for a confirmation from at least one follower, out of several, before it confirms the write to the client. The rest receive the change asynchronously. Every confirmed write then exists on two machines, and one slow or failed follower does not stop writes.
+
+    **Why.** It sits between two unattractive extremes. Waiting for all followers means the slowest one sets your write latency, and one dead follower blocks every write. Waiting for none means a leader crash loses data.
+
+    With 1 leader and 3 followers, where any 1 must confirm:
+
+    - Write latency is set by the fastest follower. If the round trips are 1, 2 and 40 ms, the write waits about 1 ms.
+    - Any one follower can fail or be restarted with no effect.
+    - If the leader dies, at least one follower has every confirmed write. Failover must promote that follower, so the failover tool compares log positions first.
+
+    | Mode | Confirmed writes lost on leader crash | A follower failure blocks writes |
+    | --- | --- | --- |
+    | Asynchronous | Possible | No |
+    | Semi-synchronous, any 1 of 3 | No | No, until all 3 are down |
+    | Fully synchronous, all | No | Yes |
+
+    **Watch out for.** The fallback setting. Some databases switch to asynchronous mode when no follower answers within a timeout, so that writes continue. That is a sensible availability choice, but for that period you have no durability guarantee. Alert when it happens.
+  followUps:
+    - q: Where would you place the synchronous follower?
+      level: Senior
+      topics: [/system-design/databases/sync-vs-async-replication, /system-design/fundamentals/availability]
+      a: |-
+        **Short answer.** In a different availability zone of the same region. That protects against the loss of a machine, a rack or a whole building, and adds only about 1 to 2 ms per write. Keep the cross-region copies asynchronous unless the business cannot lose a single write in a regional disaster.
+
+        **Why.** The placement sets what each write costs and what failure it survives.
+
+        | Synchronous follower in | Added latency | Survives |
+        | --- | --- | --- |
+        | Same rack | Under 0.5 ms | One machine failing |
+        | Another zone, same region | 1 to 2 ms | Loss of a data centre |
+        | Another region | 30 to 150 ms | Loss of a region |
+
+        Same-rack placement shares power and network with the leader, so one fault can take both. Cross-region placement makes every write pay a long round trip, and a problem on the link between regions stalls writes.
+
+        The usual layout is two synchronous candidates in two other zones, with either one allowed to confirm, plus an asynchronous follower in a second region for disaster recovery. Losing a whole region then loses at most the last second or so of writes.
+
+        **Watch out for.** Stating the recovery point as zero for a regional failure when the cross-region copy is asynchronous. Agree with the business how many seconds of loss are acceptable.
+
+- id: how-time-series-databases-compress-points
+  q: How can a time-series database store a metric point in one or two bytes when a timestamp and a value are 16 bytes raw?
+  level: Senior
+  category: system-design-databases
+  subcategory: database-selection
+  topics:
+    [
+      /system-design/databases/time-series-databases,
+      /system-design/fundamentals/compression,
+      /system-design/case-studies/metrics-and-logging,
+    ]
+  a: |-
+    **Short answer.** It stores the difference from what it expected, which is almost always zero. Timestamps arrive at a fixed interval and values change slowly, so both can be predicted from the previous points.
+
+    **Why.** Three ideas work together.
+
+    - **Store each series together.** All points of `cpu` for one host sit in one block. The series name and tags are stored once, with no repetition per point.
+    - **Delta of delta for timestamps.** A metric scraped every 15 seconds has timestamps that differ by 15, 15, 15. The difference between consecutive differences is 0, 0, 0. A zero is stored as a single bit.
+    - **XOR for values.** A floating-point value is compared bit by bit with the previous one. If they are identical, the result is all zeros and one bit is stored. If they are close, only the short run of bits that differ is stored.
+
+    | Per point | Raw | Compressed |
+    | --- | --- | --- |
+    | Timestamp | 8 bytes | Often 1 bit |
+    | Value | 8 bytes | 1 bit when unchanged, 1 to 3 bytes when it changes |
+    | Total | 16 bytes | About 1 to 2 bytes on average |
+
+    At 1 million points per second, a day is 86.4 billion points. That is about 1.4 TB raw and around 130 GB at 1.5 bytes per point.
+
+    **Watch out for.** Data that breaks the prediction. Irregular timestamps and noisy values, such as random floats, compress far less.
+
+- id: push-vs-pull-metrics-collection
+  q: "Should a metrics system pull from the services or should the services push? Compare the two."
+  level: Mid
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/time-series-databases, /system-design/case-studies/metrics-and-logging]
+  a: |-
+    **Short answer.** Pull, where the collector scrapes each service on a schedule, is simpler to operate inside one network and shows directly when a target is down. Push, where each service sends its metrics, fits short-lived jobs, locked-down networks and very large fleets. Many setups use pull inside a cluster and push from the cluster to central storage.
+
+    **Why.**
+
+    | | Pull | Push |
+    | --- | --- | --- |
+    | Who knows the targets | The collector, through service discovery | Each service knows the collector address |
+    | Detecting a dead service | A failed scrape is the signal | Silence is ambiguous: dead, or nothing to send |
+    | Short-lived batch jobs | May end before any scrape | Send before exiting |
+    | Firewalls and NAT | Collector must reach every target | Only outbound connections needed |
+    | Overload control | The collector sets the rate | Needs rate limits, a burst of senders can flood it |
+    | Debugging | Open the metrics endpoint in a browser | Inspect what was sent |
+
+    With pull, 10,000 targets scraped every 15 seconds is about 670 scrapes per second, which one collector handles well. Beyond that you shard collectors by target.
+
+    With push, an agent on each host usually batches points and retries, so the application does not block on the metrics system.
+
+    **Watch out for.** Pushing each event as it happens. A service handling 20,000 requests per second should not send 20,000 messages. Aggregate in the process into counters and histograms, and send those every 10 to 15 seconds.
+
+- id: hnsw-vs-ivf-vector-indexes
+  q: "HNSW and IVF are the two common vector index types. How does each work, and when do you pick which?"
+  level: Senior
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/vector-databases]
+  a: |-
+    **Short answer.** HNSW builds a layered graph in which each vector links to its near neighbours, and a query walks the graph towards the target. IVF groups vectors into clusters and a query scans only the few clusters closest to it. HNSW gives the best speed at high recall and needs the most memory. IVF, usually with compression, is the choice when the data is too large for RAM.
+
+    **Why.**
+
+    | | HNSW | IVF, often with product quantization |
+    | --- | --- | --- |
+    | Structure | Graph, sparse upper layers for long jumps | Cluster centres, each with a list of vectors |
+    | Query | Greedy walk, keeping a candidate list | Find the nearest clusters, scan their lists |
+    | Main tuning knob | Candidate list size at search time | Number of clusters probed |
+    | Memory | Full vectors plus links | Compressed codes, often 10 to 30 times smaller |
+    | Inserts | Incremental | Clusters need retraining when data drifts |
+
+    Size it. 100 million vectors of 768 float dimensions take 100 million times 768 times 4 bytes, about 307 GB, before any graph links. Compressing each vector to 64 bytes brings it to about 6.4 GB, which fits on one node, at the price of lower recall. A second pass that re-scores the top few hundred candidates with full vectors from disk recovers most of that loss.
+
+    **Watch out for.** Comparing indexes on speed alone. Always compare at the same recall, for example 95% of the true top 10.
+
+- id: metadata-filtering-with-vector-search
+  q: A vector search must return only documents the user is allowed to see. How do you combine the filter with the nearest-neighbour search?
+  level: Mid
+  category: system-design-databases
+  subcategory: database-selection
+  topics: [/system-design/databases/vector-databases, /system-design/databases/search-engines]
+  a: |-
+    **Short answer.** Apply the filter during the index search, so the engine keeps collecting neighbours until it has enough that pass. Filtering only after the search can return too few results or none. For filters that match a very small share of the data, skip the index and compare the query against the matching vectors directly.
+
+    **Why.** There are three ways, and the right one depends on how selective the filter is.
+
+    | Approach | How | Problem |
+    | --- | --- | --- |
+    | Post-filter | Take the top 10 neighbours, then drop the forbidden ones | If the user may see 1% of documents, on average 0.1 of the 10 survive |
+    | Pre-filter with exact scan | Find the allowed ids first, compute distances to all of them | Too slow when millions match |
+    | Filtered index search | Check the filter while walking the index, skip non-matching vectors but keep exploring | Needs engine support, slows down for very rare matches |
+
+    A good engine chooses by estimated match count. If a tenant owns 5,000 vectors out of 50 million, an exact scan of those 5,000 takes a few milliseconds and gives perfect recall.
+
+    **Watch out for.** Enforcing permissions only in the application after retrieval. Besides the empty-result problem, one bug then leaks another tenant's text into a prompt or a results page. Put the tenant filter inside the query, and treat it as a security control.
+  followUps:
+    - q: Could you fix post-filtering by simply asking for more neighbours, such as the top 1,000?
+      level: Mid
+      topics: [/system-design/databases/vector-databases]
+      a: |-
+        **Short answer.** It helps for mild filters and fails for selective ones. Over-fetching by a fixed factor works only if the filter keeps a predictable, fairly large share of results.
+
+        **Why.** The number you must fetch is roughly the number you want divided by the share that passes. For 10 results:
+
+        | Share passing the filter | Neighbours to fetch |
+        | --- | --- |
+        | 50% | About 20 |
+        | 10% | About 100 |
+        | 1% | About 1,000 |
+        | 0.01% | About 100,000 |
+
+        Fetching 100,000 neighbours from an approximate index is slow, and recall drops because the index is tuned to find the closest few. The pass rate also differs per user, so a fixed factor is too large for some and too small for others. And the average hides bad cases: the allowed documents may all be far from the query, so even 1,000 neighbours contain none.
+
+        Over-fetching by 2 to 5 times is a reasonable fallback when the engine has no filtered search and the filters are mild, such as "language is English".
+
+        **Watch out for.** Pagination. Page 2 needs the next set of passing results, so the over-fetch grows with every page.
+
+- id: partition-key-vs-clustering-key
+  q: What is the difference between a partition key and a clustering key in a wide-column store?
+  level: Junior
+  category: system-design-databases
+  subcategory: partitioning
+  topics:
+    [
+      /system-design/databases/wide-column-stores,
+      /system-design/patterns/sharding,
+      /system-design/patterns/consistent-hashing,
+    ]
+  a: |-
+    **Short answer.** The partition key decides which node stores a row. The clustering key decides the order of rows inside that partition. Together they form the primary key. The partition key answers "where is the data", and the clustering key answers "in what order do I read it".
+
+    **Why.** The store hashes the partition key and uses the hash to choose the nodes. All rows with the same partition key live together on the same replicas. Inside the partition, rows are kept sorted on disk by the clustering key.
+
+    Example: a table of sensor readings with partition key `sensor_id` and clustering key `reading_time`, newest first.
+
+    | Query | Result |
+    | --- | --- |
+    | Latest 100 readings for sensor 42 | One partition, one sequential read. Fast |
+    | Readings for sensor 42 in the last hour | One partition, a range on the clustering key. Fast |
+    | All readings above 90 degrees | No partition key, must scan every node. Avoid |
+
+    Size matters too. If one sensor sends a reading every second, its partition gains 86,400 rows per day and grows forever. Adding the day to the partition key, as in `(sensor_id, day)`, keeps each partition bounded.
+
+    **Watch out for.** Choosing the partition key the way you would choose a relational primary key. A unique id per row spreads data well but puts every row in its own partition, so no range query is possible.
+
+- id: supporting-a-second-query-pattern-in-cassandra
+  q: "Your Cassandra table is keyed by user id. Now you must also look up orders by restaurant. How do you support the second query?"
+  level: Mid
+  category: system-design-databases
+  subcategory: partitioning
+  topics:
+    [
+      /system-design/databases/wide-column-stores,
+      /system-design/databases/polyglot-persistence,
+      /system-design/patterns/cqrs-event-sourcing,
+    ]
+  a: |-
+    **Short answer.** Create a second table with the same data, partitioned by restaurant id, and write every order to both. In a wide-column store you design one table per query. A filter on a column that is not the partition key would have to ask every node.
+
+    **Why.** Data is placed by the hash of the partition key. Orders for one restaurant are spread over all user partitions, so on all nodes. A query without the partition key cannot be routed to one place.
+
+    | Option | How it works | Cost |
+    | --- | --- | --- |
+    | Second table, written by the application | `orders_by_restaurant` with key `(restaurant_id, day)` and order time as clustering key | Two writes per order, twice the storage |
+    | Built-in secondary index | Each node indexes its local rows | The query still contacts many nodes. Acceptable only together with a partition key |
+    | Server-managed materialized view | The database maintains the second table | Convenient, but has had consistency issues in some versions |
+
+    Duplication is the normal answer because writes are cheap in this kind of store and disk is cheaper than a cluster-wide scan.
+
+    **Watch out for.** The two tables drifting apart. The two writes are not one transaction, so one can fail. Use a logged batch where the store offers it, or retry with an idempotent write, which is a write that gives the same result when repeated, and reconcile periodically.
