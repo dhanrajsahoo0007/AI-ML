@@ -36,6 +36,8 @@ export function issueSeo(section: SectionDef, issue: Issue): PageSeo {
       modifiedTime: issue.date,
       sectionState: section.state,
       noindex: !isPublished(issue),
+      // The issue's own cover card (src/app/newsletter/[slug]/opengraph-image.tsx), not the site's.
+      image: { path: `${issue.href}/opengraph-image`, alt: `${issue.title}: issue cover` },
     }),
     jsonLd: jsonLdGraph(
       articleNode({

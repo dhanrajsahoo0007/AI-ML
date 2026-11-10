@@ -1,3 +1,4 @@
+import type { ResolvingMetadata } from "next";
 import { notFound } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { isPublished, loadIssues, NEWSLETTER_KIND, newsletterKind, seriesSeo } from "@/features/newsletter";
@@ -7,6 +8,7 @@ import { seriesIssues } from "@/features/newsletter/meta";
 import { SignupBox } from "@/features/newsletter/public";
 import { isRouteBuilt, routeSection, sectionOfKind } from "@/features/sections";
 import { JsonLd } from "@/features/seo";
+import { withParentImages } from "@/features/seo/public";
 
 // A newsletter series (plan §3): its name and promise, then its issues in reading order. Only series with at least
 // one issue built in this environment get a page; it is noindex until one of them is sent.
@@ -32,9 +34,9 @@ function findSeries(key: string) {
   return { section, series: { key, ...meta }, issues, hasSent: issues.some(isPublished) };
 }
 
-export async function generateMetadata({ params }: { params: Params }) {
+export async function generateMetadata({ params }: { params: Params }, parent: ResolvingMetadata) {
   const { section, series, hasSent } = findSeries((await params).series);
-  return seriesSeo(section, series, hasSent).metadata;
+  return withParentImages(seriesSeo(section, series, hasSent).metadata, parent);
 }
 
 export default async function NewsletterSeriesPage({ params }: { params: Params }) {

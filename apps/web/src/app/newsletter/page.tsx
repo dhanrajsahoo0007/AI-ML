@@ -1,3 +1,4 @@
+import type { ResolvingMetadata } from "next";
 import { Rss } from "lucide-react";
 import { Breadcrumb } from "@/components/breadcrumb";
 import {
@@ -17,14 +18,16 @@ import { issueLabels } from "@/features/newsletter/meta";
 import { SignupBox } from "@/features/newsletter/public";
 import { routeSection } from "@/features/sections";
 import { JsonLd } from "@/features/seo";
+import { withParentImages } from "@/features/seo/public";
 
 // The newsletter archive (plan §3): masthead and sign-up, then the topic filter and every issue as a large cover
 // card, newest first.
 
 export const dynamic = "force-static";
 
-export function generateMetadata() {
-  return archiveSeo(routeSection(NEWSLETTER_KIND)).metadata;
+// Passing `parent` keeps the site's share image; without it the page's own openGraph would carry none.
+export function generateMetadata(_props: unknown, parent: ResolvingMetadata) {
+  return withParentImages(archiveSeo(routeSection(NEWSLETTER_KIND)).metadata, parent);
 }
 
 export default function NewsletterArchivePage() {

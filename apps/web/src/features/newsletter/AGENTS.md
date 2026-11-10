@@ -105,6 +105,6 @@ as an email kind (`apps/web/src/features/email/AGENTS.md`, "Extend it").
 
 ## Tests
 
-`kind.test.ts`, `content-model.test.ts`, `cover/cover.test.ts`, `service.test.ts`, `store.test.ts`, `token.test.ts`, `rss.test.ts`, `send-plan.test.ts`,
+`kind.test.ts`, `content-model.test.ts`, `cover/cover.test.ts`, `service.test.ts`, `store.test.ts`, `token.test.ts`, `rss.test.ts`, `seo.test.ts`, `send-plan.test.ts`,
 `server.test.ts`, `unsubscribe-headers.test.ts`; E2E `apps/web/tests/e2e/newsletter.spec.ts` (subscribe → .eml →
 confirm → one-click unsubscribe).
