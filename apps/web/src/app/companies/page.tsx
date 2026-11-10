@@ -3,7 +3,7 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { CompanyExplorer } from "@/components/company-explorer";
 import { FadeIn } from "@/components/motion/fade-in";
 import { PageHeader } from "@/components/ui/editorial";
-import { questionItems, SourceCredit } from "@/components/mdx/question-bank";
+import { questionIcons, questionItems, SourceCredit } from "@/components/mdx/question-bank";
 import { premiumAnswerCategories } from "@/features/paywall";
 import { COMPANY_GROUPS, getCategories, getCompanies, getQuestions } from "@/lib/question-bank";
 import { routeSection, directoryRefs, getSection } from "@/features/sections";
@@ -43,7 +43,6 @@ export default async function CompaniesPage() {
   const categoryTitles = new Map(categories.map((c) => [c.slug, c.title]));
   // Each question's area (LLM, GenAI, System Design): the "Area" filter on a company's questions. Questions are
   // listed area by area, in the order of the topics, so a company's list reads LLM first, then GenAI, and so on.
-  const areaOf = new Map(categories.map((c) => [c.slug, c.group]));
   const topicRank = new Map(categories.map((c, i) => [c.slug, i]));
   const ordered = tagged
     .map((q, i) => ({ q, i }))
@@ -64,12 +63,16 @@ export default async function CompaniesPage() {
         />
       </FadeIn>
       <Suspense>
-        <CompanyExplorer groups={COMPANY_GROUPS} companies={companies} footer={<SourceCredit />}>
+        <CompanyExplorer
+          groups={COMPANY_GROUPS}
+          companies={companies}
+          footer={<SourceCredit />}
+          icons={questionIcons()}
+        >
           {questionItems(
             ordered,
             (q) => categoryTitles.get(q.category)!,
-            (q) => premiumAnswers.has(q.category),
-            (q) => areaOf.get(q.category)
+            (q) => premiumAnswers.has(q.category)
           )}
         </CompanyExplorer>
       </Suspense>

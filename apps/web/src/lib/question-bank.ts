@@ -1,4 +1,5 @@
 import "server-only";
+import { INTERVIEW_AREAS } from "./interview-areas";
 import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
@@ -74,9 +75,9 @@ export interface Company {
   loop: string;
 }
 
-// The areas an interview category belongs to, in display order: how models work (LLM), what is built on them
-// (GenAI) and how the systems around them are designed (System Design).
-export const CATEGORY_GROUPS = ["LLM", "GenAI", "System Design", "Machine Learning & Data Science", "Career & Applied"];
+// The areas an interview category belongs to, in display order (src/lib/interview-areas.ts): how models work (LLM),
+// what is built on them (GenAI) and how the systems around them are designed (System Design).
+export const CATEGORY_GROUPS = INTERVIEW_AREAS.map((a) => a.name);
 
 export const COMPANY_GROUPS = [
   "Frontier AI Labs",

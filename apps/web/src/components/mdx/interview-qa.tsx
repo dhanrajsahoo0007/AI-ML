@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowUpRight, ListCollapse, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CompanyChip, type CompanyTag } from "@/components/company-logo";
+import { interviewArea } from "@/lib/interview-areas";
 import {
   InterviewQuestion,
   QaController,
@@ -26,17 +27,56 @@ const COMPANY_FILTERS_SHOWN = 10;
 
 // Filter chips. The island sets aria-pressed, which drives the active style.
 const chipClass =
-  "rounded-full border border-hairline bg-paper px-3 py-1 text-[13px] text-ink-2 transition-colors hover:border-ink/40 aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-paper";
+  "inline-flex items-center gap-1.5 rounded-full border border-hairline bg-paper px-3 py-1 text-[13px] text-ink-2 transition-colors hover:border-ink/40 aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-paper [&[aria-pressed=true]_svg]:text-paper";
 // Company chips draw their own pill; this restyles it when pressed.
 const companyChipClass =
   "rounded-full [&[aria-pressed=true]>span]:border-ink [&[aria-pressed=true]>span]:bg-ink [&[aria-pressed=true]>span]:text-paper";
-const labelClass = "mr-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+// Wide enough for the longest label, "Company", so the chips of every row start on the same line.
+const labelClass = "w-[4.75rem] shrink-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+const badgeClass =
+  "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-2";
+
+// Level colours, as dots: the label itself stays ink for contrast.
+const LEVEL_DOT: Record<Level, string> = {
+  Junior: "var(--dg-green)",
+  Mid: "var(--dg-orange)",
+  Senior: "var(--dg-red)",
+};
+
+/**
+ * Icons for the list, rendered by the server: `area:<name>` for an area, `topic:<title>` for a topic
+ * (questionIcons() in question-bank.tsx). They arrive as elements so this file, which also runs in the browser on
+ * the companies page, does not pull the icon set into that page's bundle.
+ */
+export type QuestionIcons = Record<string, React.ReactNode>;
+
+function Icon({ icons, id, className }: { icons?: QuestionIcons; id: string; className?: string }) {
+  const icon = icons?.[id];
+  return icon ? <span className={cn("inline-flex shrink-0 [&>svg]:size-full", className)}>{icon}</span> : null;
+}
+
+function LevelDot({ level }: { level: Level }) {
+  return <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: LEVEL_DOT[level] }} />;
+}
+
+/** The question's area as a tinted pill with the area's icon. */
+function AreaBadge({ area, icons }: { area: string; icons?: QuestionIcons }) {
+  const meta = interviewArea(area);
+  return (
+    <span data-tone={meta?.tone} className={cn(badgeClass, "bg-tint-soft")}>
+      <Icon icons={icons} id={`area:${area}`} className="size-3 text-tint" />
+      {area}
+    </span>
+  );
+}
 
 interface InterviewQuestionsProps {
   title?: string;
   footer?: React.ReactNode;
   /** Company slug chosen outside the list (the companies page); replaces the company chips. */
   company?: string;
+  /** Icons of the areas and topics in the list (questionIcons()). */
+  icons?: QuestionIcons;
   children: React.ReactNode;
 }
 
@@ -49,8 +89,9 @@ function QuestionItem({
   companies,
   related,
   refs,
+  icons,
   children,
-}: InterviewQuestionProps & { index: number }) {
+}: InterviewQuestionProps & { index: number; icons?: QuestionIcons }) {
   return (
     <details
       data-qa-item
@@ -66,10 +107,20 @@ function QuestionItem({
           <span className="block font-display text-lg leading-snug text-ink transition-colors group-hover/q:text-primary">
             {question}
           </span>
-          {(category || level) && (
-            <span className="mt-2 flex flex-wrap items-center gap-x-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-              {category && <span>{category}</span>}
-              {level && <span className="text-primary">{level}</span>}
+          {(area || category || level) && (
+            <span className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+              {area && <AreaBadge area={area} icons={icons} />}
+              {level && (
+                <span className={cn(badgeClass, "border border-hairline")}>
+                  <LevelDot level={level} />
+                  {level}
+                </span>
+              )}
+              {category && (
+                <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  {category}
+                </span>
+              )}
             </span>
           )}
           {companies && companies.length > 0 && (
@@ -130,15 +181,33 @@ function QuestionItem({
   );
 }
 
-function FilterChip({ group, value, children }: { group: string; value: string; children: React.ReactNode }) {
+function FilterChip({
+  group,
+  value,
+  tone,
+  children,
+}: {
+  group: string;
+  value: string;
+  /** Tint of the chip's icon (an interview area's tone). */
+  tone?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <button type="button" data-qa-filter={group} data-value={value} aria-pressed={value === ""} className={chipClass}>
+    <button
+      type="button"
+      data-qa-filter={group}
+      data-value={value}
+      data-tone={tone}
+      aria-pressed={value === ""}
+      className={chipClass}
+    >
       {children}
     </button>
   );
 }
 
-export function InterviewQuestions({ title, footer, company, children }: InterviewQuestionsProps) {
+export function InterviewQuestions({ title, footer, company, icons, children }: InterviewQuestionsProps) {
   const questions = React.Children.toArray(children).filter(
     (child): child is React.ReactElement<InterviewQuestionProps> => React.isValidElement(child)
   );
@@ -157,12 +226,16 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
     (a, b) => b.count - a.count || a.company.name.localeCompare(b.company.name)
   );
 
-  const tagCounts = new Map<string, number>();
+  // Topic chips, each with the area it belongs to.
+  const tagMap = new Map<string, { name: string; count: number; area?: string }>();
   for (const q of questions) {
     const cat = q.props.category;
-    if (cat) tagCounts.set(cat, (tagCounts.get(cat) ?? 0) + 1);
+    if (!cat) continue;
+    const tag = tagMap.get(cat) ?? { name: cat, count: 0, area: q.props.area };
+    tag.count += 1;
+    tagMap.set(cat, tag);
   }
-  const tags = Array.from(tagCounts.entries()).map(([name, count]) => ({ name, count }));
+  const tags = Array.from(tagMap.values());
 
   // Areas (LLM, GenAI, System Design), in the order the questions arrive, which is area order.
   const areaCounts = new Map<string, number>();
@@ -212,88 +285,113 @@ export function InterviewQuestions({ title, footer, company, children }: Intervi
         </label>
       )}
 
-      {company === undefined && companyOptions.length > 1 && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className={labelClass}>Company</span>
-          <FilterChip group="company" value="">
-            Any
-          </FilterChip>
-          {companyOptions.map(({ company: c, count }, i) => (
-            <button
-              key={c.slug}
-              type="button"
-              data-qa-filter="company"
-              data-value={c.slug}
-              data-qa-extra={i >= COMPANY_FILTERS_SHOWN ? "" : undefined}
-              hidden={i >= COMPANY_FILTERS_SHOWN}
-              aria-pressed={false}
-              className={companyChipClass}
-            >
-              <CompanyChip company={c} count={count} />
-            </button>
-          ))}
-          {companyOptions.length > COMPANY_FILTERS_SHOWN && (
-            <button
-              type="button"
-              data-qa-more={companyOptions.length}
-              className="text-[13px] text-primary underline underline-offset-2"
-            >
-              Show all {companyOptions.length}
-            </button>
-          )}
-        </div>
-      )}
-
-      {areas.length > 1 && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className={labelClass}>Area</span>
-          <FilterChip group="area" value="">
-            Any
-          </FilterChip>
-          {areas.map(({ name, count }) => (
-            <FilterChip key={name} group="area" value={name}>
-              {name}
-              <span data-qa-tag-count className="ml-1.5 opacity-60">
-                {count}
-              </span>
+      <div data-qa-filters className="mb-6 space-y-3 rounded-xl border border-hairline bg-paper-2/40 p-4 empty:hidden">
+        {company === undefined && companyOptions.length > 1 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={labelClass}>Company</span>
+            <FilterChip group="company" value="">
+              Any
             </FilterChip>
-          ))}
-        </div>
-      )}
+            {companyOptions.map(({ company: c, count }, i) => (
+              <button
+                key={c.slug}
+                type="button"
+                data-qa-filter="company"
+                data-value={c.slug}
+                data-qa-extra={i >= COMPANY_FILTERS_SHOWN ? "" : undefined}
+                hidden={i >= COMPANY_FILTERS_SHOWN}
+                aria-pressed={false}
+                className={companyChipClass}
+              >
+                <CompanyChip company={c} count={count} />
+              </button>
+            ))}
+            {companyOptions.length > COMPANY_FILTERS_SHOWN && (
+              <button
+                type="button"
+                data-qa-more={companyOptions.length}
+                className="text-[13px] text-primary underline underline-offset-2"
+              >
+                Show all {companyOptions.length}
+              </button>
+            )}
+          </div>
+        )}
 
-      {levels.length > 1 && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className={labelClass}>Level</span>
-          <FilterChip group="level" value="">
-            Any
-          </FilterChip>
-          {levels.map((l) => (
-            <FilterChip key={l} group="level" value={l}>
-              {l}
+        {areas.length > 1 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={labelClass}>Area</span>
+            <FilterChip group="area" value="">
+              Any
             </FilterChip>
-          ))}
-        </div>
-      )}
+            {areas.map(({ name, count }) => (
+              <FilterChip key={name} group="area" value={name} tone={interviewArea(name)?.tone}>
+                <Icon icons={icons} id={`area:${name}`} className="size-3.5 text-tint" />
+                {name}
+                <span data-qa-tag-count className="opacity-60">
+                  {count}
+                </span>
+              </FilterChip>
+            ))}
+          </div>
+        )}
 
-      {tags.length > 1 && (
-        <div className="mb-6 flex flex-wrap gap-2">
-          <FilterChip group="tag" value="">
-            All
-          </FilterChip>
-          {tags.map(({ name, count }) => (
-            <FilterChip key={name} group="tag" value={name}>
-              {name}
-              <span data-qa-tag-count className="ml-1.5 opacity-60">
-                {count}
-              </span>
+        {levels.length > 1 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={labelClass}>Level</span>
+            <FilterChip group="level" value="">
+              Any
             </FilterChip>
-          ))}
-        </div>
-      )}
+            {levels.map((l) => (
+              <FilterChip key={l} group="level" value={l}>
+                <LevelDot level={l} />
+                {l}
+              </FilterChip>
+            ))}
+          </div>
+        )}
+
+        {tags.length > 1 && (
+          <div className="flex flex-wrap items-start gap-2 sm:flex-nowrap">
+            <span className={cn(labelClass, "pt-1.5")}>Topic</span>
+            <FilterChip group="tag" value="">
+              All
+            </FilterChip>
+            {/* On a phone the rows take the full width, under the label and the All chip. */}
+            <div className="min-w-0 basis-full space-y-2 sm:flex-1 sm:basis-0">
+              {/* Topics area by area, so a long list (a company can be asked about a dozen) reads as a few short rows. */}
+              {(areas.length > 1 ? areas.map((a) => a.name) : [undefined]).map((areaName) => (
+                <div key={areaName ?? "all"} data-qa-tag-row className="flex flex-wrap items-center gap-2">
+                  {areaName && (
+                    <span
+                      data-tone={interviewArea(areaName)?.tone}
+                      className="inline-flex w-full items-center gap-1 text-[11px] font-semibold tracking-[0.06em] text-muted-foreground uppercase sm:w-32 sm:shrink-0"
+                    >
+                      <Icon icons={icons} id={`area:${areaName}`} className="size-3 text-tint" />
+                      {areaName}
+                    </span>
+                  )}
+                  {tags
+                    .filter((t) => areaName === undefined || t.area === areaName)
+                    .map(({ name, count }) => (
+                      <FilterChip key={name} group="tag" value={name}>
+                        <Icon icons={icons} id={`topic:${name}`} className="size-3.5 text-muted-foreground" />
+                        {name}
+                        <span data-qa-tag-count className="opacity-60">
+                          {count}
+                        </span>
+                      </FilterChip>
+                    ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="flex flex-col">
         {questions.map((q, i) => (
-          <QuestionItem key={i} index={i + 1} {...q.props} />
+          <QuestionItem key={i} index={i + 1} icons={icons} {...q.props} />
         ))}
         <p data-qa-empty hidden className={cn("py-10 text-center text-sm text-muted-foreground")}>
           No questions match. Try a different search or filter.

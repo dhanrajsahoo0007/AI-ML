@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
-import { InterviewQuestions } from "@/components/mdx/interview-qa";
+import { InterviewQuestions, type QuestionIcons } from "@/components/mdx/interview-qa";
 import { Eyebrow } from "@/components/ui/editorial";
 import { cn } from "@/lib/utils";
 
@@ -22,11 +22,14 @@ export function CompanyExplorer({
   groups,
   companies,
   footer,
+  icons,
   children,
 }: {
   groups: string[];
   companies: ExplorerCompany[];
   footer: React.ReactNode;
+  /** Area and topic icons for the question list, rendered by the server page. */
+  icons?: QuestionIcons;
   children: React.ReactNode;
 }) {
   const [selected, setSelected] = useState("");
@@ -117,6 +120,7 @@ export function CompanyExplorer({
           title={current ? `Reported ${current.name} questions` : "Questions tagged with a company"}
           company={selected}
           footer={footer}
+          icons={icons}
         >
           {children}
         </InterviewQuestions>
