@@ -1,0 +1,279 @@
+---
+title: "Your AI demo is lying to you"
+issue: 3
+date: "2026-12-01"
+summary: "You can't fix what you don't measure. A visual guide to evals: how to test an LLM app so you know whether a change made it better or worse."
+format: deep-dive
+series: agent-engineering
+tags: [evals, reliability, agents]
+level: intro
+cover: { motif: grid-bloom, palette: sage, seed: 3 }
+takeaways:
+  - "Start by reading 50 real outputs and naming what went wrong. No tool can do this step for you."
+  - "Grade with code whenever no judgement is needed. It's instant, free and never changes its mind."
+  - "A model judge is useful only after you've checked that it agrees with a person, above all on the failures."
+  - "Run the eval on every change. A score that can't block a release is a dashboard nobody reads."
+related:
+  - /ai-system-design/genai-system-design/agentic-ai-evaluation
+  - /ai-system-design/genai-system-design/llmops-observability
+  - /ai-system-design/genai-system-design/hallucination-mitigation
+  - /ai-system-design/ml-system-design/automated-regression-testing
+  - /ai-system-design/ml-system-design/quality-metrics
+share:
+  hook: "It worked in the demo. Then you changed one line of the prompt. Three things got better, one broke, and nobody noticed for two weeks."
+access: free
+status: draft
+audience: all
+---
+
+## Why this matters
+
+Your support bot gets the refund policy wrong. You add one line to the prompt. You try five questions, and all
+five answers look right. You ship it.
+
+Two weeks later a customer complains. The bot now writes six paragraphs where one sentence would do. Your one line
+fixed the refunds and broke something else. Nobody saw it, because nobody was looking there.
+
+This is the normal way LLM apps go wrong. Normal code fails loudly: a test goes red, a server returns an error. An
+LLM fails quietly. The answer is still fluent and polite. It's just wrong, and it's wrong for a share of your
+users you can't see.
+
+The fix has a dull name: **evals**, short for evaluations. An eval is a repeatable test for an AI system. This
+issue shows how to build one from nothing: what to collect, how to grade it, and how to make the score count.
+
+## The idea in plain English
+
+Think of a driving test. Nobody gets a licence by saying "I drove to the shops once and it went fine". The
+examiner uses a fixed route with known hard parts: a hill start, a roundabout, a parallel park. Each part is
+marked pass or fail. Every learner takes the same test, so the results can be compared.
+
+An eval is a driving test for your app. It has three parts.
+
+- **A test set.** A fixed list of inputs, taken from real use and including the hard cases.
+- **A grader.** Something that marks each output pass or fail.
+- **A score.** The share that passed, tracked over time.
+
+A demo is the trip to the shops. You tried a few inputs you thought of, and you thought of the easy ones.
+
+![The demo shows 5 of 5 passing; the eval shows 162 of 200](asset:diagrams/svg/newsletter/evals-for-llm-apps/demo-vs-eval)
+
+Both numbers in the figure describe the same app on the same day. The demo says 100%. The eval says 81%. Only
+one of them tells you what your users will get.
+
+> [!NOTE]
+> An eval is a fixed set of real inputs, a way to mark each output pass or fail, and a score you watch over time.
+> It turns "it feels better" into "it went from 60% to 77%".
+
+## How it works: the loop
+
+Evals aren't a tool you install. They're a habit with five steps, and the steps repeat.
+
+![The eval loop: collect, read, name, check, run](asset:diagrams/svg/newsletter/evals-for-llm-apps/eval-loop#steps)
+
+1. **Collect.** Gather real inputs and the outputs your app gave. Logs are best. Before launch, write the inputs
+   yourself, and make them messy like real ones.
+2. **Read.** Open each one. Mark it pass or fail, and write one line on why.
+3. **Name.** Group your "why" lines. The same few problems come up again and again. Give each one a name.
+4. **Check.** Write one automatic check for each named problem.
+5. **Run.** Run all the checks every time the prompt, the model or the code changes.
+
+Then go round again. New logs bring new failures, and each new failure becomes a new check.
+
+Notice that the first three steps need no software at all. A spreadsheet is enough. Most teams skip these
+steps and go straight to a dashboard. That's the wrong way round.
+
+## How it works: read first, then count
+
+Step two is the one people avoid, because it sounds like manual work. It is manual work. It's also where nearly
+all the value is.
+
+Hamel Husain has helped many teams build evals. His advice is to make looking at your data as easy as you can,
+because teams that don't look at it end up measuring the wrong things. Eugene Yan's guide starts in the same
+place: label real outputs by hand before you automate anything.
+
+Here's what it looks like. You read 50 answers from the support bot and sort them.
+
+![Fifty answers sorted: 31 fine, 19 failed for four reasons](asset:diagrams/svg/newsletter/evals-for-llm-apps/failure-tally)
+
+Nineteen answers failed. But there aren't nineteen problems. There are four, and one of them causes almost half
+the failures. You now know what to fix first, and you know it from evidence.
+
+How many should you read? Enough that new problems stop turning up. Husain suggests starting with about 30 and
+going on until you stop learning anything new. Anthropic's guide for agents says 20 to 50 simple tasks, drawn
+from real failures, are a fine start.
+
+> [!IMPORTANT]
+> Mark each answer **pass or fail**, not 1 to 5. A pass or fail forces a decision. A "3 out of 5" lets you
+> avoid one, and two people rarely mean the same thing by it.
+
+## How it works: three graders
+
+Now you have named failures. Each one needs a check that runs without you. There are three kinds of grader.
+
+![Three graders: code, a model judge, a person](asset:diagrams/svg/newsletter/evals-for-llm-apps/grader-ladder#steps)
+
+**Code.** A few lines of ordinary code. Is the output valid JSON? Does it mention the 30-day refund window? Is
+it under 120 words? Does it contain a phone number it shouldn't? Code is instant and free, and it gives the same
+answer every time. "Too long to be useful" from our tally is a word count. Use code wherever you can.
+
+**A model judge.** Some questions need judgement. Is the tone polite? Does the answer agree with the policy
+document? Here you ask a second model to grade the first one. People call this _LLM-as-a-judge_. It costs a
+little per answer and takes seconds.
+
+**A person.** You, or someone who knows the subject. People are slow and costly, so you can't use them on every
+change. Their job is different: they set the standard that the other two graders are measured against.
+
+The rule is simple. Use the cheapest grader that can tell a good answer from a bad one.
+
+A good judge prompt asks one narrow question. "Does this answer state a refund window other than 30 days? Reply
+pass or fail, then give one sentence of reasoning." That works far better than "rate the quality of this
+answer". Write one judge per named failure, not one judge for everything.
+
+## How it works: trusting the judge
+
+A model judge is itself an LLM. It can be wrong in the same quiet way as the app it grades. So before you
+trust it, test it.
+
+The method is short. Take 50 answers you've already graded by hand. Run the judge on the same 50. Compare.
+
+![Your grades against the judge's grades on 50 answers](asset:diagrams/svg/newsletter/evals-for-llm-apps/judge-calibration)
+
+In this example you and the judge agree on 43 of 50 answers. That's 86%, and it sounds good.
+
+Now look at the top-right box. You failed 21 answers. The judge caught 16 of them and passed the other 5. It
+misses about one failure in four. Those 5 are the bugs that would reach your users with a green tick beside them.
+
+This is why one agreement number can mislead. Most answers are fine, so a judge that passes nearly everything
+still agrees with you most of the time. Check two things separately: how many real failures it catches, and how
+many good answers it wrongly fails. Yan's advice is to care most about the first.
+
+When the judge misses failures, read the ones it missed. Then tighten its prompt and add a few examples of your
+own grades with your reasons. Run the 50 again. Husain describes a judge reaching over 90% agreement after three
+rounds of this. There's no magic pass mark. The goal is a judge you'd trust to stand in for you.
+
+> [!IMPORTANT]
+> A judge you haven't checked is an opinion. Compare it with your own grades first, and look hardest at the
+> failures it let through.
+
+## How it works: evals as a gate
+
+A score helps only if something depends on it. So evals run in two places.
+
+![Before release the eval is a gate; after release it's a net](asset:diagrams/svg/newsletter/evals-for-llm-apps/offline-online)
+
+**Before release**, the eval is a gate. Every change to the prompt, the model or the retrieval code runs the
+whole test set. If the score falls below your pass mark, the change doesn't ship. This works just like the unit
+tests in ordinary software.
+
+**After release**, the eval is a net. You can't grade every real conversation, so you grade a sample. You're
+looking for failures your test set has never seen.
+
+The arrow at the bottom of the figure is the important one. Each new failure found in real traffic becomes a
+new test case. The test set grows, and next time the gate catches that problem before release.
+
+## A worked example
+
+Let's follow the support bot through one change. The numbers here are made up for teaching, but the shape is
+what real teams see.
+
+After reading logs, the team has a test set of 60 cases and one check for each of the four named failures. Two
+checks are code and two are model judges that the team has compared with their own grades. The first run gives
+36 passes out of 60, which is 60%.
+
+The biggest problem is the refund policy. So an engineer pastes the policy text into the prompt and adds a line:
+"If the customer asks for a person, offer one." Then the eval runs again.
+
+![One prompt change across 60 cases, by failure type](asset:diagrams/svg/newsletter/evals-for-llm-apps/before-after)
+
+The total rose from 36 to 46 passes, from 60% to 77%. Refund errors fell from 9 to 2. Missed requests for a
+person fell to zero.
+
+But look at the red row. "Too long to be useful" went from 4 to 7. With the full policy in the prompt, the bot
+began reciting it. This is the same bug as in the opening story. The difference is that the team saw it in two
+minutes, not two weeks.
+
+They add one more line: "Answer in three sentences or fewer unless asked for detail." They run it again. Only
+then do they ship.
+
+Two lessons come out of this. First, the total alone would have hidden the damage, so always look at the score
+for each failure type. Second, the team could make a bold change to the prompt because the eval would catch
+mistakes. Evals don't slow you down. They let you move quickly without guessing.
+
+## What goes wrong
+
+> [!WARNING]
+> **Scoring from 1 to 10.** Nobody can say what separates a 6 from a 7, and neither can a model. The scores
+> drift and the averages hide failures. Use pass or fail, with one sentence of reasoning.
+
+> [!WARNING]
+> **One "overall quality" score.** A single number can't tell you what to fix. It can even rise while one kind of
+> answer gets worse, as in the example. Keep one check per named failure and report each one.
+
+> [!WARNING]
+> **A test set that never changes.** Your users change, and so does your product. A test set from six months ago
+> tests the app you had then. Add the new failures you find in real traffic every week.
+
+> [!WARNING]
+> **A judge nobody checked.** An untested model judge gives you a neat number with nothing behind it. Compare it
+> with a person's grades before you rely on it, and again whenever you change its prompt or its model.
+
+## The bigger picture
+
+Everything so far graded one answer to one question. Agents are harder. An agent takes many steps, calls tools
+and changes things in the world. So there's more to measure.
+
+![Four things to measure in an agent run: outcome, steps, cost, time](asset:diagrams/svg/newsletter/evals-for-llm-apps/what-to-measure)
+
+**Grade the outcome first.** Did the file change? Was the ticket closed? Do the tests pass? Anthropic's guide
+warns against grading the exact path an agent took. Agents often find a valid route you didn't expect, and a
+strict path check fails good work.
+
+**Read the steps, but don't dictate them.** The record of an agent run is called a _transcript_ or _trace_. It
+shows why a run failed. Read it the way you read the 50 answers.
+
+**Watch cost and time.** An agent that gets the right result for $4 in ten minutes may be worse than one that
+does it for 20 cents in one.
+
+**Run each task more than once.** Agents vary from run to run. Suppose an agent succeeds on 75% of single
+tries. The chance that it succeeds three times in a row is about 42%. If your users need it to work every time,
+that second number is the honest one.
+
+This connects straight back to [Issue #2](/newsletter/loop-engineering). A loop needs a check to know when to
+stop. That check is a small eval. The better your evals, the longer you can let an agent work alone.
+
+## Try it yourself
+
+> [!TIP]
+> Take 20 real outputs from any AI feature you use or build. Put them in a spreadsheet. Mark each one pass or
+> fail, and write one reason for each fail. Then count the reasons. The most common one is your first check, and
+> you'll have found it in about 15 minutes.
+
+## Words to know
+
+| Term             | Plain meaning                                                               |
+| ---------------- | --------------------------------------------------------------------------- |
+| Eval             | A repeatable test for an AI system: fixed inputs, a grader and a score      |
+| Test set         | The fixed list of inputs you run every time                                 |
+| Grader           | Whatever marks an output pass or fail: code, a model or a person            |
+| Error analysis   | Reading real outputs and naming the kinds of failure                        |
+| LLM-as-a-judge   | Using a second model to grade the first one's output                        |
+| Calibration      | Comparing a judge's grades with a person's to see whether it can be trusted |
+| Regression       | Something that used to work and broke after a change                        |
+| Gate             | A check that blocks a release when the score is too low                     |
+| Trace            | The full record of what an agent did on one run                             |
+| Offline / online | Testing before release on your test set / after release on real traffic     |
+
+## Go deeper
+
+- [Agentic AI Evaluation](/ai-system-design/genai-system-design/agentic-ai-evaluation) on this site: how to
+  evaluate agents in depth.
+- [Your AI Product Needs Evals](https://hamel.dev/blog/posts/evals/), Hamel Husain: the three levels of
+  evaluation, and why looking at your data comes first.
+- [Using LLM-as-a-Judge For Evaluation](https://hamel.dev/blog/posts/llm-judge/), Hamel Husain: a complete
+  method for building a model judge and checking it against a domain expert.
+- [Product Evals in Three Simple Steps](https://eugeneyan.com/writing/product-evals/), Eugene Yan: label data,
+  align the evaluators, and run them on every change.
+- [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents),
+  Anthropic: tasks, trials and graders for agents, and why to grade outcomes over paths.
+- [Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices), OpenAI:
+  a general workflow and a list of common mistakes.
