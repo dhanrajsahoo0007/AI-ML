@@ -1,0 +1,302 @@
+---
+title: "API gateways and backends for frontends"
+description: "One front door for your API that checks callers, limits them, routes and reshapes calls, plus a small backend for each kind of client app."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  An API gateway is the single front door to your services: every outside request passes through it, so it can check who is calling, limit how often, and send the call to the right service.
+</KeyIdea>
+
+## The story
+
+You run Spokes, a bike-share app in one city with 3,000 bikes. Behind the app sit four small services: rides, bikes, payments and users. Three kinds of client call them. Riders use the phone app. Your fleet team uses a web dashboard. Twelve transit apps show your bikes on their own maps.
+
+At first, every client calls every service at its own address. The phone app has four hostnames built in. Each service checks login tokens with its own code, and the payments team forgot to check whether a token has expired. Then, at 8 am on a Monday, one transit partner ships a bug. Its app asks for nearby bikes 2,000 times a second. The bikes service tops out at about 1,500 requests a second, so it falls over. Riders open the app and see an empty map.
+
+Three problems in one morning: no single place to check callers, no way to slow one noisy caller down, and clients wired to your internal layout. A gateway fixes all three in one place.
+
+## How it works
+
+The idea is to stop letting the outside world see your services. Clients see one address, `api.spokes.app`. Behind it sits the <Term id="api-gateway">API gateway</Term>, a server whose only job is to handle the concerns every request shares. Your services sit on a private network and only take calls from inside.
+
+### Step 1: One front door routes every call
+
+<AnimatedDiagram name="fundamentals/api-gateway" step={1} caption="All three kinds of client call one gateway over HTTPS. The gateway routes each path to a service and talks to it over gRPC." />
+
+The gateway holds a routing table. `/rides/*` goes to the rides service, `/bikes/*` to bikes, and so on. When you split the bikes service in two next year, you change one line in that table. The phone app never notices, which matters because about a third of riders take months to install an app update.
+
+The gateway also ends <Term id="tls">TLS</Term>, the encryption behind HTTPS, so certificates live in one place. Then it does **protocol translation**: it turns the outside format into the inside one. Clients send JSON over HTTPS, because every browser and phone speaks it. Inside, your services talk gRPC, a form of <Term id="rpc">RPC</Term> that sends compact binary messages over long-lived connections. The gateway converts between the two, so each side uses what suits it.
+
+None of this is free. Each request now takes one more hop. Inside one data centre, a well-run gateway adds about 1 to 5 ms.
+
+<PremiumBreak />
+
+### Step 2: Check who is calling, and how often
+
+<AnimatedDiagram name="fundamentals/api-gateway" step={2} caption="The gateway verifies each token with keys it fetched from the auth service, and adds one to the caller's counter before it routes the call." />
+
+**Authentication** means proving who the caller is. When a rider logs in, the auth service gives the app a **token**: a short signed string that says "this is rider 81234, valid until 9:15". On every request, the gateway checks the token's signature and expiry. It does not call the auth service each time. It downloads the auth service's public signing keys every few minutes and checks signatures itself, which takes about 0.1 ms. So the payments bug from the story cannot happen: expiry is checked in one place for every service.
+
+The gateway then removes any identity headers the client tried to send, adds its own, and turns the call into gRPC:
+
+<Tabs title="One request at the gateway">
+  <Tab label="Arrives from the phone">
+
+```http
+GET /rides/active HTTP/1.1
+Host: api.spokes.app
+Authorization: Bearer eyJhbGciOi...
+```
+
+  </Tab>
+  <Tab label="Forwarded inside">
+
+```http
+POST /spokes.rides.v1.Rides/GetActiveRide HTTP/2
+content-type: application/grpc
+x-user-id: 81234
+x-request-id: 7f3c9a
+```
+
+  </Tab>
+  <Tab label="Over the limit">
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 1
+```
+
+  </Tab>
+</Tabs>
+
+The token is gone from the inside call. In its place is a user id the gateway vouches for, plus a **request id**: a random tag that every service writes into its logs, so you can follow one call across all of them.
+
+The second check is a <Term id="rate-limit">rate limit</Term>: a cap on how many requests one caller may send per second. Spokes gives each partner key 20 requests a second. With 12 partners, that caps partner traffic at 12 × 20 = 240 a second, well below what the bikes service can take. The buggy partner gets `429 Too Many Requests` after its first 20 calls each second. Riders never feel it.
+
+The counters live in a shared in-memory store, so all gateway copies see the same count. One counter per key is about 100 bytes. 40,000 riders plus 12 partners is about 4 MB, and each update takes about 0.5 ms. The [rate limiting](/system-design/patterns/rate-limiting) page compares the counting methods.
+
+### Step 3: A backend for the phone app
+
+Start with the two biggest parts of the phone's home screen: your active ride, if any, and the bikes near you. With only a gateway, the app fetches them in two calls. Phones on a mobile network pay about 100 ms for each round trip. Apps often send such calls one after the other, because the screen code is written as a chain. Even sent side by side, the phone still downloads both full responses over a weak signal.
+
+<AnimatedDiagram name="fundamentals/api-gateway-flow" stepper caption="Two mobile round trips become one. The mobile backend asks rides and bikes at the same time, inside the data centre." />
+
+Here is the arithmetic, with each service taking about 20 ms:
+
+- **Two calls from the phone:** 2 × (100 ms + 20 ms) = 240 ms, and 12 KB + 30 KB = 42 KB downloaded.
+- **One call to a backend that asks both at once:** 100 ms + 20 ms + a few ms of hops ≈ 125 ms, and 4 KB downloaded.
+
+Combining several service calls into one response is called **aggregation**. The 4 KB comes from trimming: the bikes service returns 50 bikes with every field, but the phone shows only the 10 closest, with distance and battery. The home screen also shows the wallet balance, so the mobile backend asks payments too, in the same parallel batch.
+
+<AnimatedDiagram name="fundamentals/api-gateway" step={3} caption="The phone's /home request now goes through a mobile backend, which calls rides, bikes and payments in parallel." />
+
+Where should that aggregation code live? You could write it in the gateway. But the gateway is shared by every client, so phone-specific screen logic would pile up there. Instead, you add a small service owned by the phone team: a **backend for frontend**, or **BFF**. It knows exactly what the phone's screens need and nothing else.
+
+### Step 4: A backend for each frontend
+
+<AnimatedDiagram name="fundamentals/api-gateway" step={4} caption="The web dashboard gets its own backend. Partner apps still call the public bikes API through the gateway, with no BFF." />
+
+The fleet dashboard wants something very different: a table of 3,000 bikes with filters for battery level and last service date. That is another shape of data, from other services. So it gets its own web BFF, owned by the dashboard team.
+
+Now each layer has one job:
+
+- **The gateway** handles what every request shares: TLS, tokens, rate limits, routing and request ids. It holds no screen logic.
+- **Each BFF** builds screens for one kind of client. It aggregates, trims and renames fields.
+- **The services** own the business rules and the data.
+
+Partner apps get no BFF. Their API is a public contract that many outside teams depend on, so it changes slowly, with versions such as `/v1/bikes`. The rule of thumb is one BFF per kind of client experience, not one per screen and not one per partner.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Spokes runs 4 gateway copies. Each keeps its own counter and allows 20 requests a second per partner. How many can a partner really send?" hint="A load balancer spreads the partner's calls over all copies.">
+    Up to 4 × 20 = 80 a second, four times the limit. That is why the counters live in a shared store, or why each copy enforces 20 ÷ 4 = 5 a second on its own.
+  </QuizItem>
+  <QuizItem question="A rider's home screen makes 3 calls one after the other over a 100 ms mobile network. Each service takes 20 ms. How long until the screen is ready, and with a BFF?" hint="Count round trips over the mobile network.">
+    Without a BFF: 3 × (100 + 20) = 360 ms. With a BFF that calls all three in parallel: about 100 + 20 + a few ms, so about 125 ms.
+  </QuizItem>
+  <QuizItem question="The rides service gets a request with X-User-Id: 81234. Should it trust that header?">
+    Only if it came from the gateway. The gateway must strip that header from every outside request and set it itself. Services should accept calls only from inside the network, and ideally check a signature too.
+  </QuizItem>
+</Quiz>
+
+<DecisionTree
+  title="Gateway, BFF, or both?"
+  tree={{
+    q: "Do clients outside your network call more than one service?",
+    no: { answer: "A load balancer in front of one service is enough for now", href: "/system-design/fundamentals/load-balancing-basics" },
+    yes: {
+      q: "Do your kinds of client need very different data from the same services?",
+      no: { answer: "One API gateway with a clean public API", href: "/system-design/fundamentals/api-design" },
+      yes: {
+        q: "Does each kind of client have its own team?",
+        yes: "A thin gateway plus one BFF per kind of client",
+        no: { answer: "A gateway plus one flexible API such as GraphQL", href: "/system-design/fundamentals/graphql" },
+      },
+    },
+  }}
+/>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Clients call services", "One gateway", "Gateway plus BFFs"]}
+  rows={[
+    ["Places that check tokens", "Every service", "1", "1"],
+    ["Can slow down one noisy caller", false, true, true],
+    ["Clients know internal service names", true, false, false],
+    ["Extra hops per request", "0", "1, about 1 to 5 ms", "2, about 2 to 8 ms"],
+    ["Mobile round trips for a 3-part screen", "3", "3", "1"],
+    ["Extra services to run", "0", "1 fleet", "1 fleet plus 1 per client type"],
+  ]}
+  caption="Spokes numbers. Hop costs are inside one data centre; a mobile round trip is about 100 ms."
+/>
+
+<ProsCons
+  pros={[
+    "One place for TLS, tokens, limits, logs and request ids",
+    "Services can move, split or merge without client updates",
+    "Each client gets responses shaped for its screens",
+    "Fewer and smaller mobile round trips",
+  ]}
+  cons={[
+    "Every request depends on the gateway, so it must never go down",
+    "One or two more hops, each a few milliseconds",
+    "Shared gateway config becomes a queue of change requests from every team",
+    "BFFs can copy the same logic, and drift apart",
+  ]}
+/>
+
+## In the wild
+
+- **Amazon API Gateway** is a managed gateway on AWS. It checks keys and tokens, throttles per client, and maps outside requests onto backend calls.
+- **Netflix Zuul** is the open-source gateway Netflix built to route and filter traffic from hundreds of device types to its services.
+- **Kong** and **Envoy** are common self-run gateways. Kong is built on NGINX. Envoy often runs both at the edge and as a small proxy next to each service inside.
+
+## Common pitfalls
+
+- **Business rules in the gateway.** "Riders with unpaid fares cannot start a ride" belongs in the rides service. A gateway full of rules becomes one big shared program that every team must edit.
+- **One BFF for every client.** It turns into a second shared gateway, with the same queue of competing changes.
+- **Trusting identity headers from outside.** If the gateway forwards a client's own `X-User-Id`, anyone can act as anyone.
+- **Retries at every layer.** If the phone, the gateway and the BFF each make up to 3 attempts, one failing call becomes 3 × 3 × 3 = 27 calls to a service that is already struggling. Retry in one layer only. See [circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries).
+- **A single gateway copy.** The front door you added for safety is now the one thing that can take the whole app down.
+
+## How to say it in an interview
+
+"I put an API gateway in front of the services as the single front door. It ends TLS, verifies tokens with cached signing keys, applies per-key rate limits with counters in a shared store, and routes by path, turning JSON over HTTPS into gRPC inside. It adds a few milliseconds, holds no business logic, and runs as a stateless fleet across zones. If the phone and web apps need very different data, I add one backend for frontend per client type. A BFF turns a 3-part phone screen into one mobile round trip instead of three. Partners call a versioned public API through the gateway, with no BFF."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is an API gateway, and why put one in front of your services?" level="Junior" category="APIs">
+    **Short answer.** It is a single front door for all outside requests. It handles the jobs every request shares, such as checking tokens, rate limits and routing, so each service does not have to.
+
+    **Why.** Without it, four services each checked tokens with their own code, and one forgot to check expiry. Clients had four hostnames built in, so splitting a service needed an app update. With a gateway, the token check happens once, in about 0.1 ms, and a route change is one line of config. The cost is one hop of about 1 to 5 ms.
+
+    <AnimatedDiagram name="fundamentals/api-gateway" step={1} highlight={["gateway"]} caption="Every client reaches the services only through the gateway." />
+
+    **Follow-ups the interviewer may ask.**
+    - What should never go in the gateway?
+    - How is a gateway different from a reverse proxy?
+
+    **Watch out for.** Describing it as a load balancer. A load balancer spreads load. A gateway also knows who is calling and what they are allowed to call.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why would a mobile app need a different backend from the website?" level="Junior" category="APIs">
+    **Short answer.** The two apps show different screens on different networks. A backend for frontend (BFF) gives each one exactly the data its screens need, in as few round trips as possible.
+
+    **Why.** A phone on a mobile network pays about 100 ms per round trip. If its home screen fetches the ride, nearby bikes and the wallet in 3 calls one after the other, that is 3 × (100 + 20) = 360 ms. A mobile BFF takes one call from the phone and asks the three services in parallel inside the data centre, so the screen is ready in about 125 ms. It also trims the ride and bikes data from 42 KB to about 4 KB. The web dashboard wants a 3,000-row table with filters instead, so it gets its own BFF.
+
+    <AnimatedDiagram name="fundamentals/api-gateway" path="phone>gateway>mbff>rides" caption="The phone's home request goes through its own backend, which calls the services for it." />
+
+    **Follow-ups the interviewer may ask.**
+    - Who should own the BFF code?
+    - When would you use GraphQL instead?
+
+    **Watch out for.** One BFF per screen. You end up with dozens of tiny services. One per kind of client experience is the usual split.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where should authentication happen: in the gateway or in each service?" level="Mid" category="Security">
+    **Short answer.** The gateway authenticates: it proves who the caller is by checking the token once. Each service still authorizes: it decides whether that caller may touch this ride or this wallet.
+
+    **Why.** The gateway verifies the token's signature with public keys it fetched from the auth service, which takes about 0.1 ms and needs no network call. It strips any identity headers the client sent and adds its own, such as `X-User-Id: 81234`. The rides service then checks that ride 55 belongs to user 81234. Only the service knows that rule.
+
+    <AnimatedDiagram name="fundamentals/api-gateway" step={2} highlight={["gateway", "auth"]} caption="The gateway checks tokens with keys from the auth service; it does not call auth on every request." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do services know the call really came from the gateway?
+    - A rider is banned at 9:00 but their token is valid until 9:15. What now?
+
+    **Watch out for.** Saying the services can skip all checks because the gateway did them. Any caller that gets inside the network, or a bug in a route, would then reach every service with no checks at all.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You run 10 gateway copies. How do you enforce a limit of 20 requests a second per API key?" level="Mid" category="Rate limiting">
+    **Short answer.** Keep the counters in a shared in-memory store that every gateway copy updates, or give each copy a share of the limit. The shared store is exact; the local share needs no extra call.
+
+    **Why.** With local counters only, a key spread across 10 copies could send 10 × 20 = 200 a second. A shared counter costs about 0.5 ms per request and about 100 bytes per key, so 50,000 keys need about 5 MB. A local limit of 20 ÷ 10 = 2 per copy is free, but it is unfair when the load balancer sends one caller's traffic unevenly.
+
+    <AnimatedDiagram name="fundamentals/api-gateway" step={2} highlight={["gateway", "limits"]} caption="Every gateway copy adds to the same counter before it routes the call." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens if the counter store is down: allow or reject?
+    - Which counting method would you pick, and why?
+
+    **Watch out for.** Limiting by IP address alone. A whole office or a mobile carrier can share one address, and an attacker can rotate thousands.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Every request goes through the gateway. How do you stop it from becoming a single point of failure or a bottleneck?" level="Senior" category="Reliability">
+    **Short answer.** Keep it stateless and run it as a fleet across at least two zones behind a load balancer. Keep it thin, with no business logic, and give it timeouts, limits and fallbacks of its own.
+
+    **Why.** Signing keys are cached and counters sit in a shared store, so any copy can serve any request. Spokes peaks at about 1,200 requests a second. Four copies that each handle 1,000, two in each of two zones, can lose a whole zone and still serve 2 × 1,000 = 2,000. If the counter store fails, the gateway falls back to rough local limits instead of rejecting everyone. Each route gets a timeout and a [circuit breaker](/system-design/patterns/circuit-breaker-and-retries), so a slow payments service cannot tie up threads that bikes calls need.
+
+    | Risk | Defence |
+    | --- | --- |
+    | One copy dies | Several copies in 2+ zones, health checks |
+    | Counter store down | Fall back to local limits per copy |
+    | One slow service | Per-route timeouts and circuit breakers |
+    | Bad config push | Staged rollout, instant rollback |
+
+    **Follow-ups the interviewer may ask.**
+    - Would you split partner traffic onto its own gateway fleet?
+    - How do you roll out a routing change safely?
+
+    **Watch out for.** Forgetting config. Many gateway outages come from one bad routing change pushed to every copy at once, not from a crashed machine.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A BFF calls five services to build one screen, and one of them is slow. What do you do?" level="Senior" category="Reliability">
+    **Short answer.** Call all five in parallel with a tight timeout on each, and return a partial screen when an optional part is late. Mark which parts are required, and fail the request only when one of those is missing.
+
+    **Why.** The screen waits for the slowest call. If each service is slower than 50 ms on 1 call in 100 (its p99), the chance that at least one of five is slow is $1 - 0.99^5 \approx 5\%$. So the screen hits that slow tail on about 1 request in 20. With a 60 ms timeout on the wallet balance, the home screen still shows the ride and bikes and hides the balance. A circuit breaker stops calling a failing service for a few seconds, so the BFF does not wait on it every time.
+
+    <AnimatedDiagram name="fundamentals/api-gateway" step={3} highlight={["mbff", "rides", "bikes", "payments"]} caption="The mobile BFF fans out to three services; the slowest one sets the screen's time." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does the phone show a missing section?
+    - Should the BFF cache the bikes list, and for how long?
+    - Where should retries happen: phone, BFF or service?
+
+    **Watch out for.** Calling the services one after another. Five calls of 20 ms each in a row cost 100 ms, against 20 ms in parallel.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Proxies, reverse proxies and gateways](/system-design/fundamentals/proxies)
+- [Load balancing basics](/system-design/fundamentals/load-balancing-basics)
+- [API design](/system-design/fundamentals/api-design)
+- [Authentication and authorization for APIs](/system-design/fundamentals/api-auth)
+- [GraphQL](/system-design/fundamentals/graphql)
+- [RPC and gRPC](/system-design/fundamentals/rpc)
+- [Rate limiting](/system-design/patterns/rate-limiting)
+- [Circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries)
+- [Design a rate limiter](/system-design/case-studies/rate-limiter)
+
+## Further reading
+
+- [Sam Newman, Backends For Frontends](https://samnewman.io/patterns/architectural/bff/): the article that named the BFF pattern, with advice on ownership and splitting.
+- [Microsoft Azure Architecture Center, Backends for Frontends pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/backends-for-frontends): when the pattern fits and when it does not.
+- [AWS documentation, Throttle requests to your REST APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-request-throttling.html): how a managed gateway applies per-client limits and bursts.
+- [Netflix Zuul on GitHub](https://github.com/Netflix/zuul): source and docs for a gateway built for many device types.

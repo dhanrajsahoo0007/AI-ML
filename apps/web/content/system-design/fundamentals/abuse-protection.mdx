@@ -1,0 +1,240 @@
+---
+title: "Rate limiting and abuse basics"
+description: "Why every public API needs limits, where to enforce them, what to count per user or per IP, and the signals that give a bot away."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  A rate limit caps how many requests one caller may make in a stretch of time, so a script, a scraper or a bug cannot use up what everyone else needs.
+</KeyIdea>
+
+## The story
+
+You run Shelfie, a marketplace for used books with 50,000 users. One Tuesday brings three problems at once.
+
+At 8 am, a script starts working through a list of 2 million stolen email and password pairs against your login page: 400 attempts a second, from 4,000 different IP addresses (the numbers that identify each machine on the internet). Sites leak passwords all the time, and people reuse them, so some of those pairs will work. This attack is called **credential stuffing**. At 9 am, a seller's inventory tool hits a bug and retries the same call in a loop, 300 times a second. All day, a rival shop's program copies every listing price, 50 requests a second. Copying a site's data with a program is called **scraping**.
+
+Only one of the three is a break-in attempt. All three hurt real readers. By 9:15 the login page has been timing out for over an hour, listings load slowly, and nobody can tell which problem causes what.
+
+## How it works
+
+Each of those callers is sending far more requests than any person would. A <Term id="rate-limit">rate limit</Term> is the rule that says "this caller gets at most N requests per time window". The window might be a second, a minute or an hour. The part of your system that counts requests and enforces the rule is the **rate limiter**.
+
+### Step 1: No limits, so every request costs you
+
+<AnimatedDiagram name="fundamentals/abuse-protection" step={1} caption="Without limits, the bot and the buggy tool pass through the gateway like everyone else, and the bot's logins pile up at the login service." />
+
+Shelfie's <Term id="api-gateway">API gateway</Term> is the one front door for every request. It checks login tokens and routes each call, but it never says no, so every request costs real work.
+
+Login is the expensive part. A safe login service stores each password as a slow hash: a scrambled form that is costly to compute on purpose, so stolen copies are hard to crack. Each check takes about 50 ms of CPU. With 8 CPU cores, the service can do 8 ÷ 0.05 = 160 checks a second. Real readers need about 2. The bot sends 400. The queue grows by 400 − 160 = 240 requests every second. Ten seconds in, 2,400 requests are waiting. At 160 a second, a real reader who joins that queue waits 2,400 ÷ 160 = 15 seconds, three times the app's 5 second timeout.
+
+That is the first reason for limits: **abuse is an availability problem**, not only a security one. Limits also keep one heavy caller from slowing the rest, and cap what you pay to serve requests nobody wanted.
+
+<PremiumBreak />
+
+### Step 2: A limiter at the front door
+
+<AnimatedDiagram name="fundamentals/abuse-protection" step={2} caption="The gateway asks the limiter before it routes. Callers over their limit get 429 Too Many Requests and never reach a service." />
+
+Now, before routing, the gateway asks the limiter whether this caller is under its limit. The limiter adds one to the caller's counter and compares the total with the limit. Under the limit, the request goes through. Over the limit, the gateway answers at once:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 1
+```
+
+`429` is the HTTP status code for "you are sending too fast". `Retry-After` tells a well-behaved client how many seconds to wait. The seller's tool sends an **API key** (a secret string that tells the server which customer a program belongs to), and that key has a limit of 20 requests a second. So 20 of its 300 calls a second go through and 280 get a 429. Each rejection costs about 0.5 ms for the counter check, not a trip to the database.
+
+The counters live in a shared in-memory store, so every gateway copy sees the same count. Say 50,000 users, 30,000 IP addresses and 2,000 API keys are active at once. At about 100 bytes per counter, that is 82,000 × 100 bytes, or about 8 MB. One small cache server holds that easily.
+
+How the limiter counts inside the window is its own topic. A **token bucket** allows short bursts, while a **fixed window** is the simplest but can let up to twice the limit through around a window edge. The [rate limiting pattern](/system-design/patterns/rate-limiting) compares them in depth.
+
+### Step 3: Choose what to count
+
+A limit needs a **key**: the thing you count per. The obvious choices each fail somewhere.
+
+<Compare
+  columns={["Key", "Known before login", "Shared by many people", "Cheap for an attacker to get more"]}
+  rows={[
+    ["IP address", true, "Often: offices, schools, mobile carriers", "Yes, proxies rent them out cheaply"],
+    ["User account", false, false, "Needs a new signup each time"],
+    ["API key", "Sent with each call", false, "Needs a new key each time"],
+    ["Target account (on login)", true, false, "No, it is the victim's"],
+  ]}
+  caption="No key is right for every endpoint. Login needs both IP and target account."
+/>
+
+**Per IP** is the one key every request carries, even before login. But one IP address often hides many people, and an attacker can rent thousands of addresses from proxies (machines that forward traffic for anyone who pays). A mobile carrier can put thousands of phones behind one public address, a trick called **carrier-grade NAT** (network address translation). A university library can put 2,000 students behind one. A limit of 10 logins a minute per IP would lock out the whole library at 9 am. IPv6, the newer and far larger address format, has the opposite problem: one home connection often gets a whole block of at least $2^{64}$ addresses. Count per block (the first 64 bits of the address) rather than per address, or the attacker gets a fresh address for every request.
+
+**Per user** or **per API key** is fairer, because each key belongs to one customer. It also maps to pricing: free keys get 10 requests a second, paid keys 100.
+
+**Per target account** is the key that matters most on login. Count failed logins against each account, whoever sends them. After 5 failures in 15 minutes, slow that account's logins down or ask for an email code. Then one attacker on many addresses still cannot guess one person's password.
+
+In practice you stack limits. Shelfie's login gets 30 attempts a minute per IP, 5 failures per 15 minutes per account, and a cap of 150 checks a second in total. That last one is a **global limit**. It stops the service from being pushed past the 160 checks a second it can do, whatever the cause.
+
+### Step 4: Enforce in layers
+
+You can enforce limits in three places. Each one knows different things and pays a different price to say no.
+
+| Layer | What it knows | Best for | Cost to reject |
+|---|---|---|---|
+| Edge (CDN or firewall) | IP, headers, path, country | Floods, known bad networks, coarse per-IP caps | Lowest: your servers never see it |
+| API gateway | API key, user from the token, route | Per-key and per-user quotas, fairness between customers | About 0.5 ms counter check |
+| Service | What the action means and its result | Failed logins per account, messages per user, money moved | A full request, maybe a database read |
+
+The **edge** is the outermost layer: a <Term id="cdn">CDN</Term> or a web application firewall (a filter for HTTP traffic) running in hundreds of locations. It absorbs floods your servers never see, but it knows little about your users. Only the **service** knows that a login failed or that one user sent 40 messages to strangers in a minute, so limits on meaning live there.
+
+A good rule: drop the cheapest-to-spot abuse as far out as you can, and put limits that need business knowledge as far in as they must go.
+
+### Step 5: When counting is not enough
+
+Go back to the 8 am bot: 400 attempts a second from 4,000 addresses is 400 ÷ 4,000 = 0.1 a second per address, or 6 a minute, well under the 30 per IP limit. It tries each stolen pair once, so no account sees more than one failure. It passes every per-key limit. Only the global cap of 150 a second protects the service, and it cannot tell people from scripts. Of about 402 attempts a second, 150 get through. That is 150 ÷ 402, about 37%, so about 6 in 10 real readers are turned away along with the bot.
+
+To catch a spread-out attack, you look for **bot signals**: traits that real people rarely show.
+
+- **Failure ratio.** Normally about 10% of Shelfie's 2 logins a second fail, so 0.2 failures a second. During the attack, nearly every checked login fails. Even with the global cap at 150 checks a second, that is about 148 failures a second, a jump of about 148 ÷ 0.2 = 740 times. That is easy to alarm on.
+- **Where it comes from.** Most of the bot's addresses belong to cloud hosting companies. Real readers come from home and mobile networks.
+- **What it skips.** A browser loads the login page, runs its scripts and keeps cookies. The bot posts straight to the login endpoint with none of that.
+- **How regular it is.** People pause and mistype. Scripts send at even intervals with identical headers.
+
+The scraper plays the same game: 20 cloud servers at 2.5 requests a second each. That is less than one busy university library sends, so a per-IP cap set high enough for the library never touches it. Its cloud addresses and missing cookies give it away instead.
+
+No single signal is proof, so systems add them into a **risk score**. A low score goes through. A middling score gets a challenge, such as a CAPTCHA (a puzzle that is easy for people and hard for programs) or an email code. A high score is blocked. Shelfie also checks new passwords against lists of leaked ones, so stolen pairs work less often. Most emails on the list have no Shelfie account, but if 1 attempt in 1,000 works, the full list takes over 2,000,000 ÷ 1,000 = 2,000 accounts, 4% of Shelfie's users.
+
+## Try it
+
+The simulator sends a steady stream plus a sudden burst through a limiter. Switch between the counting methods and watch which requests get through.
+
+<RateLimiterSim />
+
+<Quiz>
+  <QuizItem question="The buggy seller tool ignores Retry-After and keeps sending 300 requests a second against its limit of 20. How much work does that cost Shelfie?" hint="Price a rejection, not a request.">
+    About 280 rejections a second at 0.5 ms each, or 140 ms of limiter work per second, spread across the gateway copies. The listings service sees only 20 a second. Without the limiter, all 300 would reach the service and the database.
+  </QuizItem>
+  <QuizItem question="Shelfie allows 30 login attempts a minute per IP. A bot controls 4,000 addresses. How many attempts can it make without hitting that limit?" hint="The limit applies to each address on its own.">
+    4,000 × 30 = 120,000 a minute, or 2,000 a second. That is more than 12 times the 160 checks a second the login service can do. A per-IP limit multiplies by however many addresses the attacker holds.
+  </QuizItem>
+  <QuizItem question="Why is a per-account failure limit on login safe from a spread-out attacker but a per-IP limit is not?">
+    The attacker can rent more addresses cheaply, but cannot rent more copies of the victim's account. Counting against the account caps guesses at that account no matter where they come from.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<ProsCons
+  pros={[
+    "One bug or one bot cannot take the service down for everyone",
+    "Rejecting at the gateway costs about 0.5 ms instead of a full request",
+    "Limits per key turn into pricing tiers and fair shares",
+    "Failure counts and 429 rates are early warnings of an attack",
+  ]}
+  cons={[
+    "Per-IP limits punish shared addresses such as schools and mobile carriers",
+    "A shared counter store is one more thing that can fail or slow every request",
+    "Bots that spread out stay under every per-key limit",
+    "Challenges and blocks hit some real people too",
+  ]}
+/>
+
+## In the wild
+
+- **GitHub's REST API** allows 5,000 requests an hour per logged-in user, but only 60 an hour per IP for anonymous calls.
+- **Stripe** limits requests per account and returns 429. Its engineering blog describes a separate limiter on concurrent requests to protect its busiest endpoints.
+- **Cloudflare** applies rate limiting rules at the edge, counted per IP or other request traits. Its bot management gives each request a score from 1 to 99 built from many signals.
+
+## Common pitfalls
+
+- **Per-IP limits only.** They lock out shared addresses and barely slow an attacker with 4,000 proxies.
+- **Local counters on each gateway copy.** With N copies, a caller gets N times the limit.
+- **No `Retry-After`.** Clients that do not know when to retry tend to retry at once, which makes the overload worse.
+- **Failing closed on everything.** If the counter store goes down and every request is rejected, the limiter itself has taken the site down. Fail open (let requests through) on reads. Fail closed (reject) only where abuse is costly, such as login or payments.
+- **One limit for every endpoint.** A cached listing read (about 0.5 ms) and a password check (about 50 ms) differ in cost by 100 times. Give expensive endpoints their own limits.
+
+## How to say it in an interview
+
+"Limits protect availability first: one bot or one buggy client should not use up what everyone shares. I enforce them in three layers. The edge drops floods with coarse per-IP caps. The API gateway keeps per-key and per-user counters in a shared in-memory store, about 0.5 ms a check, and returns 429 with Retry-After. The services limit on meaning, such as failed logins per target account. I keep per-IP limits high, because carrier NAT puts thousands of people behind one address. For attacks that spread under every limit, I combine bot signals such as the failure ratio and source networks into a risk score, and challenge the middle band."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why would you rate limit an API at all?" level="Junior" category="Rate limiting">
+    **Short answer.** To keep one caller from using up capacity that everyone shares. That caller might be an attacker, a scraper or a customer with a bug.
+
+    **Why.** Shelfie's login service can check about 160 passwords a second. One bot sent 400 a second, so the queue grew by 240 every second and real readers timed out within seconds. A limit of 20 requests a second per API key also turned a buggy tool's 300 calls a second into 20 accepted and 280 rejected, at about 0.5 ms each instead of a database read.
+
+    <AnimatedDiagram name="fundamentals/abuse-protection" step={1} highlight={["bots", "gateway", "login"]} caption="With no limits, the bot's 400 attempts a second reach a login service that handles 160." />
+
+    **Follow-ups the interviewer may ask.**
+    - What status code and headers do you send back?
+    - How would a well-behaved client react?
+
+    **Watch out for.** Calling it only a security feature. Most limits protect availability and fairness, and many of the callers they stop are honest bugs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Should you rate limit per IP address or per user?" level="Mid" category="Rate limiting">
+    **Short answer.** Per user or per API key wherever you know who is calling, because it is fair and maps to pricing. Use per-IP only where you have nothing better, such as before login, and set it high.
+
+    **Why.** One address can hide many people. Carrier-grade NAT puts thousands of phones behind one public IP, and a university library puts 2,000 students behind one. A limit of 10 a minute per IP would reject almost all of them. Meanwhile an attacker rents thousands of addresses cheaply, and 4,000 addresses at 30 a minute each is 120,000 attempts a minute. On login, also count failures per target account: an attacker can buy more IPs but not more copies of your account.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you count IPv6 addresses?
+    - What do you limit on the signup endpoint, where no user exists yet?
+
+    **Watch out for.** Picking one key for everything. Real systems stack several limits on one endpoint.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where would you enforce rate limits: at the edge, in the API gateway, or in each service?" level="Mid" category="Rate limiting">
+    **Short answer.** In all three, each for what it knows best. The edge drops floods cheaply, the gateway enforces per-key and per-user quotas, and the service enforces limits that need business meaning.
+
+    **Why.** The earlier a request is rejected, the less it costs. A CDN absorbs floods your servers never see. The gateway knows the API key and the user from the token, so it gives each key 20 requests a second for a 0.5 ms check against shared counters. Only the login service knows a password check failed, so "5 failures per account in 15 minutes" lives there.
+
+    <AnimatedDiagram name="fundamentals/abuse-protection" step={2} highlight={["gateway", "limiter", "counters"]} caption="The gateway asks the limiter, which counts in a shared store, before any service sees the request." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens if the counter store is down?
+    - Why must gateway copies share counters?
+
+    **Watch out for.** Putting every limit in one layer. Edge-only limits cannot see users; service-only limits pay for every rejected request.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="An attacker tries 2 million leaked email and password pairs, once each, from 4,000 IPs, staying under every per-IP and per-account limit. How do you detect and stop it?" level="Senior" category="Security">
+    **Short answer.** Per-key counting cannot see it, so watch signals across all logins: failure ratio, source networks, missing browser behaviour. Add them into a risk score, challenge the risky band, and keep a global cap so the login service survives meanwhile.
+
+    **Why.** 400 attempts a second over 4,000 IPs is 6 a minute per IP, and each account sees one try. But the failure ratio jumps from about 10% of logins to nearly all of them. Most attacking addresses sit in cloud hosting networks, and the requests skip the login page and its cookies. If 1 attempt in 1,000 works, the list takes over 2,000 accounts in about 2,000,000 ÷ 400 = 5,000 seconds, under an hour and a half, so the response must be fast.
+
+    <Compare
+      columns={["Score band", "Action", "Cost to real users"]}
+      rows={[
+        ["Low", "Allow", "None"],
+        ["Middle", "CAPTCHA or email code", "A few seconds"],
+        ["High", "Block, alert", "Rare false blocks"],
+      ]}
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you stop the global cap from locking out real readers too?
+    - Which accounts would you force to reset their password?
+    - How do you measure false positives?
+
+    **Watch out for.** Answering "lower the per-IP limit". The attacker already sits below it, and a lower limit mostly hurts schools and mobile users.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Rate limiting (pattern)](/system-design/patterns/rate-limiting)
+- [API gateways and backends for frontends](/system-design/fundamentals/api-gateway)
+- [Authentication and authorization for APIs](/system-design/fundamentals/api-auth)
+- [CDNs](/system-design/fundamentals/cdn)
+- [Security](/system-design/fundamentals/security)
+- [Back-pressure](/system-design/patterns/back-pressure)
+- [Design a rate limiter](/system-design/case-studies/rate-limiter)
+
+## Further reading
+
+- [OWASP, Credential Stuffing Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html): defences against spread-out login attacks, from multi-factor login to device signals.
+- [RFC 6585, Additional HTTP Status Codes](https://www.rfc-editor.org/rfc/rfc6585): the standard that defines 429 Too Many Requests.
+- [Stripe engineering, Scaling your API with rate limiters](https://stripe.com/blog/rate-limiters): how one API runs several kinds of limiter side by side.
+- [Cloudflare docs, Rate limiting rules](https://developers.cloudflare.com/waf/rate-limiting-rules/): how limits are counted and applied at the edge.

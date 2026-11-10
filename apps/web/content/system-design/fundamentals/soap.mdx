@@ -1,9 +1,174 @@
 ---
 title: "SOAP"
-description: "XML envelopes, WSDL contracts, and where SOAP still shows up."
-status: outline
+description: "How SOAP wraps each call in an XML envelope, describes it in a WSDL contract and signs it with WS-Security, plus how to integrate with it."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** xML envelopes, WSDL contracts, and where SOAP still shows up.
+<KeyIdea>
+  SOAP is an older way for one program to call another, where every request and reply is a tagged text document in a fixed wrapper and a shared contract file describes every call.
+</KeyIdea>
+
+## The story
+
+You build a small savings app. To show balances and move money, it must call a partner bank. The bank sends you a `.wsdl` file, a certificate and one line: "our API is SOAP." Your team has only ever sent JSON, the curly-brace text format most web APIs use. Your first hand-written request comes back as HTTP 400 with a block of XML saying the security header is missing. This page explains what the bank expects, and how to wire it up without SOAP spreading through your code.
+
+## How it works
+
+SOAP is a message format. Each message is **XML**: text made of named, nested tags such as `<currency>EUR</currency>`. It usually travels in an HTTP POST, but HTTP only carries it. Everything that matters is inside the XML.
+
+### Step 1: The envelope and the body
+
+<AnimatedDiagram name="fundamentals/soap" step={1} caption="One HTTP POST carries one envelope; the Body names the operation and its fields." />
+
+Every message is one **envelope**, the outer XML element. Inside it, the **body** holds the call: the name of an **operation** (a function the bank offers, like `GetBalance`) and its arguments. It is a <Term id="rpc">remote procedure call</Term> written in XML.
+
+```xml
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"
+               xmlns:b="urn:example-bank:accounts:v2">
+  <soap:Header/>
+  <soap:Body>
+    <b:GetBalance>
+      <b:accountId>ACC-10442</b:accountId>
+      <b:currency>EUR</b:currency>
+    </b:GetBalance>
+  </soap:Body>
+</soap:Envelope>
+```
+
+The `xmlns` lines are **namespaces**. They say which vocabulary each tag comes from, so the bank's `accountId` never clashes with anyone else's. The `soap:` and `b:` prefixes point at those two namespaces. This envelope is about 300 bytes to carry two short values; a real bank's, with a few more fields, is usually around 500.
+
+<PremiumBreak />
+
+### Step 2: WSDL, the contract
+
+A **WSDL** file (Web Services Description Language) is an XML document that describes the whole API: every operation, the type of every field and the URL to call. For example, it says `currency` is a three-letter string and, for a transfer, `amount` is a decimal. REST APIs have a similar contract format called OpenAPI, but there it is optional.
+
+You rarely read a WSDL by hand. A tool turns it into code: `dotnet-svcutil` for .NET, Apache CXF's `wsdl2java` for Java, or the `zeep` library in Python, which reads it at run time. You get a client with a `getBalance(accountId, currency)` method. In Java or C#, a misspelled field then fails when you build the code, not in production. zeep catches it when the call is made, before anything is sent. This is SOAP's main strength: the contract is a file, and both sides build from it.
+
+### Step 3: WS-Security in the header
+
+<AnimatedDiagram name="fundamentals/soap" step={2} caption="The Header's Security block: a timestamp, the caller's certificate and a signature." />
+
+The **header** is the optional part of the envelope for facts about the message, not the call. Banks fill it with **WS-Security**, a standard for protecting the message itself:
+
+- A **timestamp** with an expiry, often 5 minutes, so a copy replayed an hour later is refused.
+- A **certificate**: a public file, vouched for by an authority, that names the caller and holds the caller's public key.
+- A **signature**: a value computed over the body and timestamp with the caller's private key, a secret only the caller holds. The bank checks it with the public key in the certificate. Change one byte, and the check fails.
+
+<Term id="tls">TLS</Term> already encrypts the connection, so why both? TLS protects the message only between two machines. Inside the bank it passes a gateway, a queue and an archive. The signature travels with the XML, so every stop can check who sent it, years later if needed. Many banks also require **mutual TLS**, where both sides show a certificate when the connection opens. That guards the pipe; the signature guards the message. The cost: the unsigned envelope is about 500 bytes, the signed one about 4 KB, and signing plus checking adds a few milliseconds.
+
+### Step 4: The reply, or a fault
+
+<AnimatedDiagram name="fundamentals/soap" step={3} caption="The reply uses the same envelope: a result in the Body, or a Fault in its place." />
+
+The reply is another envelope. On success its body holds `GetBalanceResponse`. On failure it holds a **fault**: a code (`Sender` means your request was wrong, `Receiver` means the bank failed; SOAP 1.1 calls them `Client` and `Server`), a readable reason, and a detail with the bank's own error code. SOAP 1.1 sends every fault as HTTP 500; SOAP 1.2 uses 400 for a `Sender` fault. So the status alone tells you little. Read the fault.
+
+### Step 5: Integrating with it
+
+<AnimatedDiagram name="fundamentals/soap-integration" caption="One adapter owns everything SOAP; the rest of your system makes a plain JSON call." />
+
+Keep SOAP at the edge. One **adapter** service owns the generated client, the signing key and the bank's quirks. Your other services call it with JSON. Then:
+
+1. **Generate the client, never hand-write XML.** Pin the WSDL version you tested.
+2. **Keep the key in a certificate store**, a locked-down service that holds keys and does the signing, such as a cloud key vault. Set an alert well before the certificate expires.
+3. **Log raw envelopes** in an access-controlled store, and mask account numbers wherever people read them. When the bank says "we never got it", that XML is your evidence.
+4. **Retry with care.** A timed-out transfer may have gone through. Send your own unique reference with each transfer and ask the bank for its status before retrying (see [Idempotency](/system-design/patterns/idempotency)).
+
+## Try it
+
+<Quiz>
+  <QuizItem question="The bank returns HTTP 500. Should the adapter retry?" hint="Look inside the body.">
+    Read the fault first. A `Sender` fault fails again on every retry. A `Receiver` fault or a timeout may pass later, but retry only reads like GetBalance, or transfers you have checked by reference.
+  </QuizItem>
+  <QuizItem question="A JSON balance call is about 80 bytes; the signed SOAP call is about 4 KB. At 200 calls a second, how much extra upload is that?" hint="Multiply the difference by the rate.">
+    $(4{,}000 - 80) \times 200 \approx 780$ KB a second, about 6 Mbit/s. Small for a server, which is why banks accept it for signed messages.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "SOAP", "REST with JSON"]}
+  rows={[
+    ["Contract", "WSDL, required", "OpenAPI, optional"],
+    ["Size of a small call", "About 500 bytes, 4 KB signed", "About 80 bytes"],
+    ["Proof on the message itself", "WS-Security signature", "Usually none beyond TLS"],
+    ["Easy to try with curl", false, true],
+    ["Typed client generated for you", true, "Only with OpenAPI"],
+  ]}
+  caption="SOAP trades size and simplicity for a strict contract and signed messages."
+/>
+
+## In the wild
+
+- **Banks and payment providers** expose account and payment services over SOAP, often next to newer REST APIs.
+- **Salesforce and SAP** still offer SOAP web services beside REST, for enterprise tools built around WSDL.
+- **Amadeus and Sabre**, the airline booking systems, built their partner APIs on SOAP, and many travel agencies still call them.
+- **Estonia's X-Road**, which links government databases, was built on signed SOAP messages.
+
+## Common pitfalls
+
+- **Building XML by string concatenation.** One unescaped `&` breaks the message.
+- **Letting SOAP types leak** into every service. When the bank ships v3, change one adapter, not twenty services.
+- **Clock drift.** A server 5 minutes off makes every timestamp look expired.
+- **Treating HTTP 500 as "retry".** Read the fault code.
+
+## How to say it in an interview
+
+"SOAP is an XML messaging protocol. Each call is an envelope with an optional header and a body that names an operation. A WSDL file describes every operation and type, so both sides generate typed clients. Its strength is WS-Security, which signs and timestamps the message itself, so the proof outlives the TLS connection. That is why banks, airlines and governments still use it. The costs are size (about 4 KB signed, against 80 bytes of JSON) and heavier tooling. To integrate, I put one adapter at the edge that owns the client and keys, logs raw XML, and offers JSON to everything else."
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is inside a SOAP message?" level="Junior" category="APIs">
+    **Short answer.** An envelope that holds an optional header and a required body. The body names the operation and its arguments, or, in a failed reply, a fault.
+
+    **Why.** The split lets software handle the message without knowing the call. A gateway can verify the header's signature on every message, whatever the operation, while only the bank's account code reads the body. A typical `GetBalance` envelope is about 500 bytes, and most of that is tags and namespaces, not data.
+
+    **Follow-ups the interviewer may ask.**
+    - How does the server know which operation to run?
+    - What should a receiver do with a header block it does not understand?
+
+    **Watch out for.** Calling SOAP a transport like HTTP. It is a message format, and HTTP is only its usual carrier.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The connection to the bank already uses TLS. Why does the bank also want WS-Security?" level="Mid" category="Security">
+    **Short answer.** TLS protects the bytes only on one connection and ends at the first gateway. WS-Security signs the message itself, so every later hop, and an audit years later, can check who sent it and that nobody changed it.
+
+    **Why.** A payment may cross a load balancer that ends TLS, an API gateway, a queue and a 10-year archive. Only a signature survives all of them. The timestamp, often 5 minutes, limits replays. The price is about 4 KB per message instead of 500 bytes, and a few milliseconds of signing.
+
+    **Follow-ups the interviewer may ask.**
+    - How would the bank stop a replay inside the 5-minute window?
+    - When would you also encrypt part of the body?
+
+    **Watch out for.** Saying WS-Security replaces TLS. Banks use both: mutual TLS for the pipe, signatures for the message.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your platform is JSON microservices, and payments must go through a bank's SOAP API. How do you design the integration?" level="Senior" category="Integration">
+    **Short answer.** One adapter service owns the SOAP side: the client generated from the WSDL, the signing key and a raw message log. Other services call it with JSON, and every transfer carries our own unique reference, so a retry can never pay twice.
+
+    **Why.** At 1 million transfers a day (about 12 a second), logging request and reply at about 4 KB each is 8 GB a day, or 720 GB for 90 days. On a timeout after 10 seconds, the adapter asks the bank for that reference's status before resending. A bank change then touches one service, not every caller.
+
+    <AnimatedDiagram name="fundamentals/soap-integration" path="svc>adapter>bank" caption="Only the adapter speaks SOAP; the payments service sends plain JSON." />
+
+    **Follow-ups the interviewer may ask.**
+    - The bank is down for 30 minutes. What do callers see?
+    - How do you test without the bank's sandbox?
+
+    **Watch out for.** Generating the SOAP client inside every service that needs the bank. Keys, certificates and WSDL versions then spread everywhere.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [REST](/system-design/fundamentals/rest) and [RPC](/system-design/fundamentals/rpc): the styles most teams pick today
+- [Choosing an API style](/system-design/fundamentals/choosing-an-api-style)
+- [TLS and HTTPS](/system-design/fundamentals/tls) and [API authentication](/system-design/fundamentals/api-auth)
+- [Idempotency](/system-design/patterns/idempotency) and [Circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries)
+
+## Further reading
+
+- [W3C, SOAP Version 1.2 Part 1: Messaging Framework](https://www.w3.org/TR/soap12-part1/): the envelope, header, body and fault rules.
+- [W3C, Web Services Description Language (WSDL) 1.1](https://www.w3.org/TR/wsdl): the contract format most SOAP APIs still ship.
+- [OASIS, Web Services Security: SOAP Message Security 1.1](https://docs.oasis-open.org/wss/v1.1/wss-v1.1-spec-os-SOAPMessageSecurity.pdf): timestamps, tokens and signatures in the header.
+- [Zeep documentation](https://docs.python-zeep.org/): a Python SOAP client that builds calls from a WSDL.

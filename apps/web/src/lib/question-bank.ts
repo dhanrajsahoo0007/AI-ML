@@ -3,14 +3,18 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 import matter from "gray-matter";
+import { z } from "zod";
 import { features, type FeatureFlag } from "@/config/features";
 import { allSections, isPathVisible, sectionOfKind } from "@/features/sections/registry";
+import { checkAnswerMdx, extractInterviewQuestions } from "@/lib/question-answer";
 
 // The interview question library: every question has a category and subsection from
 // content/question-bank/taxonomy.yaml. Questions come from two places:
 // - content/question-bank/<category>.yaml (entries with `source: outcome-school` are adapted from
 //   Outcome School's "AI Engineering Interview Questions Company Wise", Apache 2.0; answers are ours);
 // - practice questions inside articles, filed by content/question-bank/articles.yaml.
+// Answers from both places are MDX with a restricted component set (lib/question-answer.ts); the library pages
+// compile them with components/mdx/question-answer.tsx.
 
 export type Level = "Junior" | "Mid" | "Senior";
 export type QuestionSource = "outcome-school" | "original" | "article";
@@ -28,7 +32,10 @@ export interface LinkRef {
 export interface LibraryQuestion {
   id: string;
   q: string;
+  /** The answer as MDX (plan §6). Compile it with AnswerBody; never render it for a locked answer. */
   a: string;
+  /** Where the question is written, relative to content/ (for error messages). */
+  file: string;
   level?: Level;
   category: string;
   subcategory: string;
@@ -107,6 +114,21 @@ function slugify(s: string) {
     .slice(0, 60);
 }
 
+// A subsection is exactly these three strings. In a YAML flow mapping ({ slug: …, description: … }) an
+// unquoted comma ends the value, so an unquoted description with a comma would turn into extra keys.
+const subsectionSchema = z.strictObject({
+  slug: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().min(1),
+});
+
+/** Why a parsed taxonomy subsection is malformed, or null when it is fine. */
+export function subsectionProblem(s: unknown): string | null {
+  const parsed = subsectionSchema.safeParse(s);
+  if (parsed.success) return null;
+  return `${parsed.error.issues.map((i) => i.message).join("; ")} (quote values that contain commas)`;
+}
+
 function loadTaxonomy(errors: string[]): Category[] {
   type Raw = Omit<Category, "study"> & { study?: string[] };
   const raw = readYaml<Raw[]>(path.join(BANK_DIR, "taxonomy.yaml"));
@@ -121,6 +143,8 @@ function loadTaxonomy(errors: string[]): Category[] {
     }
     const subs = new Set<string>();
     for (const s of c.subsections) {
+      const problem = subsectionProblem(s);
+      if (problem) errors.push(`taxonomy ${c.slug}: subsection ${String(s.slug)}: ${problem}`);
       if (subs.has(s.slug)) errors.push(`taxonomy ${c.slug}: duplicate subsection ${s.slug}`);
       subs.add(s.slug);
     }
@@ -176,6 +200,7 @@ function loadYamlQuestions(
       }
       if (typeof r.q !== "string" || !r.q.trim()) errors.push(`${where}: missing q`);
       if (typeof r.a !== "string" || !r.a.trim()) errors.push(`${where}: missing a`);
+      else for (const problem of checkAnswerMdx(r.a)) errors.push(`${where}: ${problem}`);
       if (!LEVELS.includes(r.level as Level)) errors.push(`${where}: bad level ${String(r.level)}`);
       const category = String(r.category);
       const subcategory = String(r.subcategory);
@@ -200,6 +225,7 @@ function loadYamlQuestions(
         id: r.id,
         q: String(r.q).trim(),
         a: String(r.a).trim(),
+        file: `question-bank/${file}`,
         level: r.level as Level,
         category,
         subcategory,
@@ -213,15 +239,10 @@ function loadYamlQuestions(
   return out;
 }
 
-const QUESTION_RE = /<InterviewQuestion\s+((?:[^>"]|"[^"]*")*)>([\s\S]*?)<\/InterviewQuestion>/g;
-
-function attr(attrs: string, name: string) {
-  return new RegExp(`\\b${name}="([^"]*)"`).exec(attrs)?.[1];
-}
-
 // Practice questions written inside articles, filed under the article's subsection.
 function loadArticleQuestions(
   isSubsection: (cat: string, sub: string) => boolean,
+  companySlugByName: Map<string, string>,
   errors: string[]
 ): LibraryQuestion[] {
   const map = readYaml<Record<string, string>>(path.join(BANK_DIR, "articles.yaml"));
@@ -236,28 +257,25 @@ function loadArticleQuestions(
     }
     const { data, content } = matter(fs.readFileSync(file, "utf8"));
     const related = { href, title: (data.title as string) ?? href };
-    for (const m of content.matchAll(QUESTION_RE)) {
-      const q = attr(m[1], "question");
-      if (!q) continue;
-      const level = attr(m[1], "level") as Level | undefined;
-      const a = m[2]
-        .trim()
-        .split(/\n\s*\n/)
-        .map((p) =>
-          p
-            .split("\n")
-            .map((l) => l.trim())
-            .join(" ")
-        )
-        .join("\n\n");
+    const rel = path.relative(CONTENT, file);
+    for (const { question: q, level, answer: a, companies: names = [] } of extractInterviewQuestions(content)) {
+      const id = `${href}#${slugify(q)}`;
+      for (const problem of checkAnswerMdx(a)) errors.push(`${rel} ${id}: ${problem}`);
+      const companies: string[] = [];
+      for (const name of names) {
+        const slug = companySlugByName.get(name);
+        if (slug) companies.push(slug);
+        else errors.push(`${rel} ${id}: unknown company ${name}`);
+      }
       out.push({
-        id: `${href}#${slugify(q)}`,
+        id,
         q,
         a,
-        level: level && LEVELS.includes(level) ? level : undefined,
+        file: rel,
+        level: LEVELS.includes(level as Level) ? (level as Level) : undefined,
         category,
         subcategory,
-        companies: [],
+        companies,
         related,
         refs: [],
         source: "article",
@@ -324,7 +342,7 @@ function load(): Library {
 
   const questions = [
     ...loadYamlQuestions(isSubsection, companySlugByName, errors),
-    ...loadArticleQuestions(isSubsection, errors),
+    ...loadArticleQuestions(isSubsection, companySlugByName, errors),
   ];
   const ids = new Set<string>();
   for (const q of questions) {

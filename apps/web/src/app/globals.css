@@ -171,7 +171,9 @@
   }
 }
 
-/* Long-form MDX content */
+/* Long-form MDX content. Every descendant rule skips a `.not-prose` subtree (the teaching widgets' WidgetFrame):
+   these rules are unlayered, so they would otherwise beat the widgets' own Tailwind utilities on lists, tables
+   and pre. :where() keeps the guard from adding specificity. tests/unit/teach/prose-guard.test.ts checks it. */
 .prose-editorial {
   font-size: 1.0625rem;
   line-height: 1.75;
@@ -180,7 +182,7 @@
 .prose-editorial > * + * {
   margin-top: 1.25em;
 }
-.prose-editorial h2 {
+.prose-editorial h2:where(:not(.not-prose, .not-prose *)) {
   font-family: var(--font-inter), sans-serif;
   font-weight: 650;
   letter-spacing: -0.032em;
@@ -197,7 +199,7 @@
   padding-top: 0;
   border-top: 0;
 }
-.prose-editorial h3 {
+.prose-editorial h3:where(:not(.not-prose, .not-prose *)) {
   font-family: var(--font-inter), sans-serif;
   font-weight: 650;
   letter-spacing: -0.02em;
@@ -207,23 +209,23 @@
   color: var(--ink);
   margin-top: 1.75em;
 }
-.prose-editorial h4 {
+.prose-editorial h4:where(:not(.not-prose, .not-prose *)) {
   font-weight: 600;
   color: var(--ink);
   margin-top: 1.5em;
 }
-.prose-editorial ul {
+.prose-editorial ul:where(:not(.not-prose, .not-prose *)) {
   list-style: none;
   padding: 0;
 }
-.prose-editorial ul > li {
+.prose-editorial ul > li:where(:not(.not-prose, .not-prose *)) {
   position: relative;
   padding-left: 1.5em;
 }
-.prose-editorial li + li {
+.prose-editorial li + li:where(:not(.not-prose, .not-prose *)) {
   margin-top: 0.6em;
 }
-.prose-editorial ul > li::before {
+.prose-editorial ul > li:where(:not(.not-prose, .not-prose *))::before {
   content: "";
   position: absolute;
   left: 0;
@@ -232,29 +234,29 @@
   height: 1px;
   background: var(--navy);
 }
-.prose-editorial ol {
+.prose-editorial ol:where(:not(.not-prose, .not-prose *)) {
   list-style: decimal;
   padding-left: 1.5em;
 }
-.prose-editorial ol > li::marker {
+.prose-editorial ol > li:where(:not(.not-prose, .not-prose *))::marker {
   font-family: var(--font-mono-code), monospace;
   font-size: 0.85em;
   color: var(--navy);
 }
-.prose-editorial li > ul,
-.prose-editorial li > ol {
+.prose-editorial li > ul:where(:not(.not-prose, .not-prose *)),
+.prose-editorial li > ol:where(:not(.not-prose, .not-prose *)) {
   margin-top: 0.6em;
 }
-.prose-editorial strong {
+.prose-editorial strong:where(:not(.not-prose, .not-prose *)) {
   color: var(--ink);
   font-weight: 600;
 }
-.prose-editorial a {
+.prose-editorial a:where(:not(.not-prose, .not-prose *)) {
   color: var(--navy);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.prose-editorial code {
+.prose-editorial code:where(:not(.not-prose, .not-prose *)) {
   font-family: var(--font-mono-code), monospace;
   /* Show operators like <= literally, not as ligatures. */
   font-variant-ligatures: none;
@@ -263,7 +265,7 @@
   padding: 0.1em 0.35em;
   border-radius: 3px;
 }
-.prose-editorial pre {
+.prose-editorial pre:where(:not(.not-prose, .not-prose *)) {
   overflow-x: auto;
   padding: 1rem 1.25rem;
   background: var(--paper-2);
@@ -272,11 +274,11 @@
   font-size: 0.875rem;
   line-height: 1.6;
 }
-.prose-editorial pre code {
+.prose-editorial pre code:where(:not(.not-prose, .not-prose *)) {
   background: none;
   padding: 0;
 }
-.prose-editorial blockquote {
+.prose-editorial blockquote:where(:not(.not-prose, .not-prose *)) {
   font-family: var(--font-inter), sans-serif;
   font-weight: 500;
   letter-spacing: -0.015em;
@@ -286,18 +288,18 @@
   border-left: 2px solid var(--navy);
   padding-left: 1.25rem;
 }
-.prose-editorial hr {
+.prose-editorial hr:where(:not(.not-prose, .not-prose *)) {
   border-color: var(--hairline);
   margin: 2.5em 0;
 }
-.prose-editorial table {
+.prose-editorial table:where(:not(.not-prose, .not-prose *)) {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.9375rem;
   display: block;
   overflow-x: auto;
 }
-.prose-editorial th {
+.prose-editorial th:where(:not(.not-prose, .not-prose *)) {
   text-align: left;
   font-size: 0.75rem;
   font-weight: 600;
@@ -307,17 +309,17 @@
   border-bottom: 1px solid var(--ink);
   padding: 0.6rem 0.75rem 0.6rem 0;
 }
-.prose-editorial td {
+.prose-editorial td:where(:not(.not-prose, .not-prose *)) {
   border-bottom: 1px solid var(--hairline);
   padding: 0.6rem 0.75rem 0.6rem 0;
   vertical-align: top;
 }
-.prose-editorial img {
+.prose-editorial img:where(:not(.not-prose, .not-prose *)) {
   border: 1px solid var(--hairline);
   border-radius: 0.75rem;
 }
 /* Raw <details> Q&A blocks in MDX; unlayered so they override inline utilities. */
-.prose-editorial details {
+.prose-editorial details:where(:not(.not-prose, .not-prose *)) {
   margin: 0;
   padding: 0;
   border: 0;
@@ -328,7 +330,7 @@
 .prose-editorial > details:first-of-type {
   border-top: 1px solid var(--ink);
 }
-.prose-editorial summary {
+.prose-editorial summary:where(:not(.not-prose, .not-prose *)) {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -344,10 +346,10 @@
   line-height: 1.4;
   color: var(--ink);
 }
-.prose-editorial summary::-webkit-details-marker {
+.prose-editorial summary:where(:not(.not-prose, .not-prose *))::-webkit-details-marker {
   display: none;
 }
-.prose-editorial summary::after {
+.prose-editorial summary:where(:not(.not-prose, .not-prose *))::after {
   content: "+";
   flex-shrink: 0;
   display: grid;
@@ -360,18 +362,18 @@
   font-weight: 400;
   transition: transform 0.2s ease;
 }
-.prose-editorial details[open] summary::after {
+.prose-editorial details[open] summary:where(:not(.not-prose, .not-prose *))::after {
   transform: rotate(45deg);
 }
-.prose-editorial summary:hover {
+.prose-editorial summary:hover:where(:not(.not-prose, .not-prose *)) {
   color: var(--navy);
 }
-.prose-editorial details > div {
+.prose-editorial details > div:where(:not(.not-prose, .not-prose *)) {
   margin: 0;
   padding: 0 3rem 1.25rem 0.25rem;
   color: var(--ink-2);
 }
-.prose-editorial .katex-display {
+.prose-editorial .katex-display:where(:not(.not-prose, .not-prose *)) {
   overflow-x: auto;
   overflow-y: hidden;
   padding: 1rem;
@@ -449,6 +451,35 @@
 @media (prefers-reduced-motion: reduce) {
   .dg .dg-packet {
     display: none;
+  }
+}
+/* highlight and path props: everything not singled out fades back; the singled-out parts get a soft ring. The
+   CSS opacity wins over the group's opacity attribute, so a dimmed element looks the same in every build step. */
+.dg .dg-dim {
+  opacity: 0.25;
+  transition: opacity 0.2s ease;
+}
+.dark .dg .dg-dim {
+  opacity: 0.3;
+}
+.dg .dg-hl-ring {
+  animation: dg-pulse 2.4s ease-in-out infinite;
+}
+.dg[data-running="false"] .dg-hl-ring {
+  animation-play-state: paused;
+}
+/* Sequence diagrams: the tinted bar across a call that timed out. */
+.dg .dg-timeout rect {
+  fill-opacity: 0.22;
+}
+.dark .dg .dg-timeout rect {
+  fill-opacity: 0.32;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dg .dg-hl-ring,
+  .dg .dg-new-ring,
+  .dg .dg-flow {
+    animation: none;
   }
 }
 

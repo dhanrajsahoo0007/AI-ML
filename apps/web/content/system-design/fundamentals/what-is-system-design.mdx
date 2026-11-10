@@ -1,0 +1,218 @@
+---
+title: "What system design is"
+description: "What system design covers, the four questions every design answers, how this section is laid out, and a short path to start."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  System design is deciding which machines your software runs on, where its data is kept and how the parts talk to each other, so it keeps working as more people use it and as parts fail.
+</KeyIdea>
+
+## The story
+
+You build ToolShare, a small app where neighbours lend each other drills, ladders and hedge trimmers. It runs on one rented server, and 300 neighbours use it without trouble. Then a TV show features it. A month later 400,000 people open it every day, and at 8 pm each evening pages take ten seconds to load. One night the server's disk dies, and a week of bookings goes with it. The lending code never changed and was never the problem. The problem was the shape around it: one machine, one copy of the data, no plan for the evening rush. Fixing that shape is system design.
+
+## How it works
+
+### What counts as system design
+
+Writing code answers "how does this feature work?" System design answers a different question: "what pieces do we need, and how do they fit, so the feature works for this many people, this fast, this reliably?" A **server** is a computer that waits for requests and answers them. A **database** is a program that keeps data safe and finds it again quickly. A <Term id="load-balancer">load balancer</Term> spreads incoming requests across several servers. Design is choosing how many of each you need and how they connect.
+
+<Compare
+  columns={["Aspect", "Writing the code", "Designing the system"]}
+  rows={[
+    ["The question", "How do I store a booking?", "Where do bookings live, and what happens if that machine dies?"],
+    ["The unit you draw", "Functions and classes", "Machines, stores and the network between them"],
+    ["What you measure", "Does it give the right answer?", "Requests per second, milliseconds per request, minutes of downtime"],
+    ["What goes wrong", "A bug in one function", "A full disk, a slow network, a crowd at 8 pm"],
+  ]}
+  caption="Both matter. This section is about the right-hand column."
+/>
+
+### The four questions
+
+Every design, from ToolShare to a global video site, answers the same four questions. Ask them in this order. Each answer is a number or a short list, never an adjective.
+
+| Question | What you write down | ToolShare after the TV show |
+|---|---|---|
+| **1. What does it do?** | The features, as short user actions | List a tool, search nearby tools, book a tool, return it |
+| **2. How much?** | Users, requests per second at the peak, data per day | 400,000 daily users; about 700 requests a second at 8 pm; about 50 MB of new bookings a day |
+| **3. Where does the data live?** | Each kind of data, the store that holds it, how many copies | Accounts, tools and bookings in one database, with two copies |
+| **4. What breaks?** | The failures you plan for, and what the user sees | A dead server or a dead disk must not lose a booking or take the site down for more than a minute |
+
+Here is the arithmetic behind row 2. Each daily user opens the app about twice, and each visit makes about 15 requests (pages, searches, photos, a booking). So 400,000 x 2 x 15 = 12 million requests a day. A day has 86,400 seconds, so that is about 140 requests a second on average. The evening is about five times busier, so the peak is about 700 a second. You design for the peak <Term id="qps">QPS</Term> (queries per second), because the average never hurts you.
+
+Bookings are small: about 50,000 a day at about 1 KB each is 50 MB a day, or about 18 GB a year. One database machine holds that for years. So ToolShare's hard parts are the evening crowd and keeping the data safe, not the size of the data.
+
+The three steps below show what the answers do to the drawing.
+
+### Step 1: One server does everything (what it does)
+
+<AnimatedDiagram name="fundamentals/one-server-to-many" step={1} caption="Step 1: every user talks to one app server. It runs the code and keeps the data on its own disk." />
+
+With 300 neighbours, each opening the app twice a day, the server sees 300 x 2 x 15 = 9,000 requests a day. That is about one request every ten seconds. A modest server handles a few hundred requests a second, so it sits almost idle. One box is the right design here. It is cheap, there is one thing to watch, and a restart takes a minute that nobody notices.
+
+<PremiumBreak />
+
+### Step 2: More users (how much, and where the data lives)
+
+<AnimatedDiagram name="fundamentals/one-server-to-many" step={2} caption="Step 2: a load balancer spreads requests across three identical app servers, and the data moves to its own database machine." />
+
+Say a load test shows one app server handles about 300 requests a second. At 700 a second you need 700 / 300 = 2.3 servers, so three. The load balancer hands each request to a healthy server. For that to work, any server must be able to answer any request, so the data cannot stay on one server's disk. It moves to a separate database that all three share. App servers that keep nothing of their own between requests are called **stateless**, and they are what make "add another one" possible.
+
+### Step 3: Something will break (what breaks)
+
+<AnimatedDiagram name="fundamentals/one-server-to-many" step={3} caption="Step 3: the database copies every change to a replica, which takes over if the main database fails." />
+
+Step 2 fixed the crowd, but every booking still lives on one machine. About 1 to 2 of every 100 server disks fail each year, and power cuts and bad updates add more. So the database now sends every change to a second machine, a **replica**. Keeping copies like this is called <Term id="replication">replication</Term>, and it means a dead disk no longer takes the bookings with it. If the main database dies, the replica is promoted and the app carries on. That switch is called <Term id="failover">failover</Term>. Done automatically, it takes about 30 to 60 seconds.
+
+Look back at the three drawings. Each new box is there because one of the four answers asked for it. [Availability, reliability and the nines](/system-design/fundamentals/availability) shows how much each spare box buys, in minutes of downtime.
+
+### How this section is organised
+
+The section has four hubs. Each leans on one or two of the four questions.
+
+| Hub | What you learn there | Mostly answers |
+|---|---|---|
+| [Fundamentals](/system-design/fundamentals) | Requirements, availability, APIs, networking and how clients talk to servers | What does it do? How much? |
+| [Databases](/system-design/databases) | How stores keep, index, copy and split data, and how to pick one | Where does the data live? |
+| [Design patterns](/system-design/patterns) | Reusable fixes such as caching, sharding, queues, retries and rate limits | How much? What breaks? |
+| [Case studies](/system-design/case-studies) | Whole systems, built one requirement at a time | All four, together |
+
+Every concept page has the same shape: a one-sentence idea, a story, how it works with a diagram, a short quiz, trade-offs, real systems, pitfalls and interview questions. Key terms are linked to the [glossary](/system-design/glossary); hover over one or tap it to see a short definition.
+
+### A short reading path
+
+If you have about 45 minutes, read these four pages in order. Together they give you the vocabulary and the arithmetic that later pages assume.
+
+<LearningPath
+  title="Start here: about 45 minutes"
+  steps={[
+    { title: "Non-functional requirements", href: "/system-design/fundamentals/non-functional-requirements", minutes: 12 },
+    { title: "Availability, reliability and the nines", href: "/system-design/fundamentals/availability", minutes: 12 },
+    { title: "Load balancing", href: "/system-design/patterns/load-balancing", minutes: 10 },
+    { title: "Caching", href: "/system-design/patterns/caching", minutes: 10 },
+  ]}
+/>
+
+After that, read a whole system built step by step, such as [Design Facebook Messenger](/system-design/case-studies/facebook-messenger).
+
+## Try it
+
+<Quiz>
+  <QuizItem question="The ToolShare owner asks: 'Can people reserve a tool for a whole weekend?' Which of the four questions is this?" hint="Is it about volume, storage or failure?">
+    Question 1, what does it do. It is a feature, a new user action. It may change the others later (longer bookings mean more overlap checks), but first it goes on the feature list.
+  </QuizItem>
+  <QuizItem question="At 8 pm the site gets 700 requests a second and one app server handles about 300. How many servers do you need? How many if one may die during the peak?" hint="Round up, then plan for losing one.">
+    Three to carry the load: 700 / 300 = 2.3, rounded up. Four to survive losing one: with one dead, three servers must still carry 700 a second, about 233 each, which fits under 300. Two servers would need 350 each, which does not.
+  </QuizItem>
+  <QuizItem question="Each app server saves uploaded tool photos on its own disk. You add two more app servers. What goes wrong?" hint="Which server gets the next request for that photo?">
+    The load balancer can send the request for a photo to a server that never saw the upload, so the photo is missing two times out of three. That is question 3, where does the data live. Files must move to storage all servers share, such as an object store.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+Every box you add fixes one number and brings one more thing to run, watch and pay for.
+
+<Compare
+  columns={["Aspect", "One server (step 1)", "Load balancer, three app servers, database and replica (step 3)"]}
+  rows={[
+    ["Peak load it carries", "About 300 requests/s", "About 900 requests/s, and more by adding servers"],
+    ["One machine dies", "Site down, data possibly lost", "Site stays up; a dead database fails over in about a minute"],
+    ["Deploying new code", "A minute or two of downtime", "Restart one server at a time, no downtime"],
+    ["Machines to run and watch", "1", "6"],
+    ["Rough monthly cost", "About $40", "About $300 to $400"],
+  ]}
+  caption="Rough numbers for a small cloud setup. The right column costs about ten times more, so it is the right answer only once the numbers in the four questions call for it."
+/>
+
+## In the wild
+
+- **Stack Overflow** published in 2016 that it served about 200 million HTTP requests a day with nine web servers and a few large database machines: careful design beat a big box count.
+- **Netflix** has written that a database corruption in 2008 stopped it shipping DVDs for three days. That one failure pushed it to rebuild for "what breaks" and move to the cloud.
+- **Wikipedia** answers most readers from cache servers in several data centres, while edits go to a primary database: one site, two very different answers to "how much".
+
+## Common pitfalls
+
+- **Drawing boxes before asking the questions.** A design without numbers cannot be judged, because nobody knows what it must survive.
+- **Building for a billion users on day one.** ToolShare at 300 users needs one server. A ten-machine design at that size costs ten times more and fails in more ways.
+- **Forgetting the data.** Adding app servers is easy only after the data has moved off them. Files and sessions on local disks break the moment a second server appears.
+- **Assuming nothing breaks.** Disks, networks and deploys fail every week somewhere in a large fleet. Say what the user sees when each one fails.
+- **Answering in adjectives.** "Fast and scalable" is not an answer. "700 requests a second, with 99 of every 100 answered in under 300 ms" is.
+
+## How to say it in an interview
+
+System design is choosing the pieces of a system and how they connect, so it meets its targets for load, speed and failures. I start every design with four questions. What does it do: I list the core user actions. How much: I estimate users, peak requests per second and data per day, for example 400,000 daily users giving about 700 requests a second at the evening peak. Where does the data live: for each kind of data I pick a store and decide how many copies it needs. And what breaks: I name the failures I plan for, like a dead server or a dead disk, and what the user sees. Then I draw the smallest system that meets those numbers, usually starting from one server, and add a load balancer, more stateless servers or a replica only when a number forces me to. That way every box on the board has a reason I can defend.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is system design, and how is it different from writing the code for a feature?" level="Junior" category="Fundamentals">
+    **Short answer.** System design decides which pieces a system needs (servers, databases, caches, queues) and how they connect, so it handles its load and its failures. Writing code decides how one feature works inside one of those pieces.
+
+    **Why.** The same booking code can run on one machine for 300 users or on a dozen machines for 400,000. What differs is the shape around it: a load balancer to spread 700 requests a second, a separate database so any server can answer any request, and a replica so one dead disk does not lose a week of bookings. Code is judged by "does it give the right answer". A design is judged by numbers: requests per second, milliseconds per request, minutes of downtime and data lost when something fails.
+
+    **Follow-ups the interviewer may ask.**
+    - Name one decision that belongs to the design and not to the code.
+    - Can good code make up for a bad design? (Faster code raises one server's limit, but it does not save data when the disk dies.)
+
+    **Watch out for.** Describing system design as "drawing a big architecture diagram". The diagram is the output. The design is the reasoning from requirements and numbers to each box.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What does it mean for an app server to be stateless, and why does it matter when you add servers?" level="Junior" category="Scaling">
+    **Short answer.** A stateless server keeps nothing between requests that another server would need: no sessions, no uploaded files, no data. Every request carries or looks up what it needs, so any server can answer it, and adding a server is only a matter of starting one more copy.
+
+    **Why.** A load balancer sends each request to whichever server is healthy. If a user's session or photo lives on server 1 and the next request lands on server 2, the user is logged out or the photo is missing. With three servers that happens about two times in three. Moving shared state to a database, a cache or an object store fixes it, and then losing one server costs only its share of in-flight requests.
+
+    <AnimatedDiagram name="fundamentals/one-server-to-many" highlight={["app1", "app2", "app3", "db"]} caption="Three identical app servers keep nothing of their own; everything they share lives in the database." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where would you keep login sessions, and what does each choice cost?
+    - What about "sticky sessions" on the load balancer? When do they help and when do they hurt?
+
+    **Watch out for.** Calling a server stateless while it writes uploads or logs that users later read to its local disk. The state has to live outside every server, not only outside the code.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You get a one-line prompt: 'Design a tool-lending app.' What do you do in the first five minutes, before drawing anything?" level="Mid" category="Requirements">
+    **Short answer.** I answer four questions out loud: what does it do, how much, where does the data live, and what breaks. Each answer becomes a number or a short list that the rest of the design must meet.
+
+    **Why.** Without numbers I cannot tell whether one server is enough or forty are needed. So I list three or four core actions (list, search, book, return) and park the rest. I estimate load: 400,000 daily users x 2 visits x 15 requests = 12 million requests a day, about 140 a second, and about 700 at a peak five times the average. I size the data: 50,000 bookings a day at 1 KB is 50 MB a day, about 18 GB a year, which fits on one database. And I state the failures I plan for: one dead server or disk must not lose a booking. Those numbers already tell me the shape: a few stateless app servers, one database with a replica, and no sharding yet.
+
+    **Follow-ups the interviewer may ask.**
+    - Which number would change the design the most if it were ten times bigger?
+    - What would you leave out of scope, and why say so out loud?
+    - How do you pick a peak factor when you have no traffic data?
+
+    **Watch out for.** Starting with technology names ("I'll use Kafka and Cassandra") before any requirement or number exists. Interviewers read that as guessing.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your design has a load balancer, three app servers and one database. What breaks first, and what would you change?" level="Senior" category="Reliability">
+    **Short answer.** The single database is the first thing to fix: if it dies, every booking is unreachable and recent ones may be lost. I add a replica with automatic failover, then check that the load balancer and the app tier also survive losing one machine.
+
+    **Why.** A single point of failure is any part whose loss stops the whole system. The app servers are not one: lose one of three and the other two carry on. But with 700 requests a second and about 300 per server, two servers would each need 350, which is over their limit. So I run four app servers (N+1): with one dead, three carry about 233 each. The database is a true single point of failure. With a replica receiving every change and automatic failover, a dead primary costs about 30 to 60 seconds instead of hours, and synchronous copying to that replica means a confirmed booking survives. The load balancer is the third one; managed load balancers already run as several machines, and a self-run one needs a standby pair.
+
+    <AnimatedDiagram name="fundamentals/one-server-to-many" highlight={["lb", "db", "replica"]} caption="The parts to check for a single point of failure: the load balancer in front, the database, and the replica that takes over from it." />
+
+    **Follow-ups the interviewer may ask.**
+    - Should the database wait for the replica before confirming a booking? What does that cost per write?
+    - How does the system decide the old primary is really dead and not only slow?
+    - What breaks next once the database has a replica? (Read load, then the evening peak growing past what one primary can write.)
+
+    **Watch out for.** Saying "add more app servers" as the fix for reliability. More app servers add capacity; they do nothing for the one database every request depends on.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Non-functional requirements](/system-design/fundamentals/non-functional-requirements): turning "fast" and "reliable" into numbers that decide the boxes.
+- [Functional requirements](/system-design/fundamentals/functional-requirements): the "what does it do" question in detail.
+- [Availability, reliability and the nines](/system-design/fundamentals/availability): the "what breaks" question in minutes of downtime.
+- [Load balancing](/system-design/patterns/load-balancing) and [single-leader replication](/system-design/databases/single-leader-replication): the two boxes added in steps 2 and 3.
+- [Glossary](/system-design/glossary): every term used in this section, in one place.
+
+## Further reading
+
+- [Nick Craver, "Stack Overflow: The Architecture, 2016 Edition"](https://nickcraver.com/blog/2016/02/17/stack-overflow-the-architecture-2016-edition/): a large site run on few machines, with the numbers.
+- [Netflix, "Completing the Netflix Cloud Migration" (2016)](https://about.netflix.com/en/news/completing-the-netflix-cloud-migration): the 2008 outage and the rebuild it started.
+- [Google, Site Reliability Engineering, "Embracing Risk"](https://sre.google/sre-book/embracing-risk/): how to decide how much failure a system may have.

@@ -1,11 +1,295 @@
 ---
 title: "Server-Sent Events"
-description: "One-way streaming over HTTP, reconnection and use cases such as token streaming."
-status: outline
+description: "How a server streams events to a browser over one open HTTP response, how event ids let a dropped stream resume, and when SSE beats WebSockets."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** one-way streaming over HTTP, reconnection and use cases such as token streaming.
+<KeyIdea>
+  Server-sent events (SSE) let a server keep one HTTP response open and write a new message into it whenever something happens, so the browser hears news the moment it exists.
+</KeyIdea>
 
-**Related reading on this site:** [LLM Serving and Inference](/ai-system-design/genai-system-design/llm-serving-inference)
+## The story
+
+You run the live page for a city football club. On match day, 50,000 fans keep the page open on their phones. Over about 105 minutes (90 of play, plus half-time and stoppage), the commentator posts around 300 events: commentary lines, goals, cards, substitutions. That is one event every 21 seconds or so. Your first version polled every 5 seconds, which meant $50{,}000 / 5 = 10{,}000$ requests a second, and a goal still showed up 2.5 seconds late on average. Fans heard their neighbours cheer before their phone did. What you want is the reverse: the server speaks first, the instant the ball hits the net. Fans never send anything back during the match. They only listen.
+
+## How it works
+
+A few words first. **Streaming** means the server sends a response in pieces over time instead of all at once. **Server-sent events** is a small, standard text format for doing that over plain [HTTP](/system-design/fundamentals/http), plus a built-in browser object called **EventSource** that reads the stream, splits it into events and reconnects by itself when the connection breaks. The data flows one way: server to browser. If the browser needs to say something, it sends an ordinary request on the side.
+
+### Step 1: Open one long response
+
+<AnimatedDiagram name="fundamentals/server-sent-events" step={1} caption="The browser sends one GET. The server answers 200 with the event-stream type and never finishes the body." />
+
+When a fan opens the page, the browser runs `new EventSource("/matches/7/live")`. That sends a normal `GET` with `Accept: text/event-stream`. The live server answers `200 OK` with `Content-Type: text/event-stream` and then does something unusual: it never ends the response. The connection stays open, quiet, waiting. Compared with [short polling](/system-design/fundamentals/ajax-polling), a quiet minute now costs nothing but one idle connection, instead of 12 empty requests.
+
+<PremiumBreak />
+
+### Step 2: Events arrive as lines of text
+
+<AnimatedDiagram name="fundamentals/server-sent-events" step={2} caption="The feed publishes a goal and a card. The server writes each one down the open response with its id, and the browser remembers the last id." />
+
+At minute 23 the club scores. The match feed hands the event to the live server, which writes a few lines of text into the open response. The format is plain UTF-8 text with four field names:
+
+- `data:` the payload. Most apps put JSON here.
+- `event:` a name, such as `goal`, so the page can route it to the right handler. Without it the event is a plain `message`.
+- `id:` the event's id. The browser remembers the last one it saw.
+- `retry:` how many milliseconds the browser should wait before reconnecting.
+
+A blank line ends one event. A line that starts with a colon is a comment, which the browser ignores. Servers use comments as a **heartbeat**: a tiny write every 15 seconds or so, so that nothing on the path decides the connection is dead.
+
+<Tabs title="One stream, two sides">
+  <Tab label="What the server writes">
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+
+retry: 3000
+
+id: 41
+event: goal
+data: {"minute": 23, "score": "1-0", "scorer": "Okafor"}
+
+id: 42
+event: card
+data: {"minute": 31, "colour": "yellow", "player": "Lind"}
+
+: heartbeat
+```
+
+  </Tab>
+  <Tab label="What the browser runs">
+
+```ts
+const live = new EventSource("/matches/7/live");
+
+live.addEventListener("goal", (e) => showGoal(JSON.parse(e.data)));
+live.addEventListener("card", (e) => showCard(JSON.parse(e.data)));
+live.onmessage = (e) => addCommentary(JSON.parse(e.data)); // events without an "event:" line
+
+live.onerror = () => showBanner("Reconnecting..."); // the browser retries by itself
+```
+
+  </Tab>
+</Tabs>
+
+The goal reaches the fan one network trip after it is published, about 50 to 100 ms on a phone, instead of 2.5 seconds on average.
+
+### Step 3: The connection drops
+
+<AnimatedDiagram name="fundamentals/server-sent-events" step={3} caption="The phone loses signal. Events 43 and 44 are published while the fan is away, and the browser waits 3 seconds." />
+
+A fan walks into a stairwell and the phone loses signal for 10 seconds. The open response dies. Meanwhile the match goes on: event 43 (a substitution) and event 44 (a commentary line) are published, and this fan cannot receive them. The EventSource notices the break, waits the `retry` time the server set (3,000 ms here) and tries again, over and over, until the signal returns. If the server never set a `retry`, the browser picks its own default of a few seconds.
+
+### Step 4: Resume from the last id
+
+<AnimatedDiagram name="fundamentals/server-sent-events" step={4} caption="The browser reconnects and sends Last-Event-ID: 42. The server replays 43 and 44 from the log, then carries on live." />
+
+The browser reconnects with a new `GET`. This time it adds a header on its own: `Last-Event-ID: 42`, the last id it saw. That one header is the whole resume protocol. The server reads its log of recent events, finds everything after 42, writes 43 and 44 down the new response, and then carries on live with 45. The fan sees every event, in order, with nothing missed and nothing doubled.
+
+This only works if the server does its half. Two rules:
+
+1. **Ids must be in order within a stream**, so "after 42" means something. A per-match counter works. Random ids do not.
+2. **The server must keep recent events.** Something has to hold the events a fan missed. Here an event log keeps the last 10 minutes of each match, which is only about 30 events. A fan away for longer than that gets a `reset` event and reloads the full match state with one normal request.
+
+Here is a live server's handler with both rules, in Node.js:
+
+```ts
+// One SSE stream per fan. feed.subscribe() delivers live events; feed.after() reads the log.
+app.get("/matches/:id/live", async (req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no", // ask an Nginx proxy not to buffer this response
+  });
+  res.write("retry: 3000\n\n");
+
+  let sent = Number(req.headers["last-event-id"] ?? 0);
+  const push = (e: MatchEvent) => {
+    if (e.id <= sent) return; // never send an event twice
+    sent = e.id;
+    res.write(`id: ${e.id}\nevent: ${e.type}\ndata: ${JSON.stringify(e.body)}\n\n`);
+  };
+
+  // Subscribe first, so nothing published during the replay slips through the gap.
+  const queued: MatchEvent[] = [];
+  let replaying = true;
+  const stop = feed.subscribe(req.params.id, (e) => (replaying ? queued.push(e) : push(e)));
+  for (const e of await feed.after(req.params.id, sent)) push(e); // replay what the fan missed
+  replaying = false;
+  queued.forEach(push);
+
+  const beat = setInterval(() => res.write(": heartbeat\n\n"), 15_000);
+  req.on("close", () => {
+    stop();
+    clearInterval(beat);
+  });
+});
+```
+
+### Step 5: Through proxies, at 50,000 fans
+
+<AnimatedDiagram name="fundamentals/server-sent-events-fleet" stepper caption="Fifty thousand open streams behind an edge proxy, one pub/sub topic, and a log that lets a dropped fan catch up." />
+
+Now scale it to match day. In step 1 of this diagram, every fan holds one open response through the edge [proxy](/system-design/fundamentals/proxies) to one of four live servers, about $50{,}000 / 4 = 12{,}500$ streams each. An idle stream costs memory, not CPU. At about 20 KB each for the open connection, its <Term id="tls">TLS</Term> encryption state and its buffers, that is $12{,}500 \times 20$ KB, about 250 MB per server.
+
+In step 2 the commentator posts a goal. It goes to a **pub/sub** topic, a channel that hands each message to every subscriber. Every live server subscribes, so each one gets the goal once and writes it to its 12,500 streams. This one-to-many copy is called <Term id="fan-out">fan-out</Term>. At about 150 bytes an event, one goal is $50{,}000 \times 150$ bytes, about 7.5 MB leaving the fleet, sent in well under a second. In step 3 pub/sub also appends each event to the event log, which the live servers read when a fan reconnects with `Last-Event-ID`.
+
+The path in between is where SSE breaks in practice, because everything on it was built for short responses:
+
+- **Buffering.** A reverse proxy (a server in front of yours that forwards each request to it), such as Nginx, collects a response before passing it on (`proxy_buffering` is on by default). A 150-byte goal sits in its buffer and the fan sees nothing, or sees five events at once. Turn buffering off for the stream path, or send `X-Accel-Buffering: no`. A compression step (gzip) can hold bytes back the same way, so do not compress this route.
+- **Idle timeouts.** Many proxies and <Term id="load-balancer">load balancers</Term> close a connection that is silent for 60 seconds. The heartbeat comment every 15 seconds keeps the line busy. Raise the timeout too.
+- **Caching.** A <Term id="cdn">CDN</Term> must never cache or merge this response. `Cache-Control: no-cache` says so.
+- **Connection limits.** Over HTTP/1.1, a browser opens at most 6 connections per site, and each SSE stream holds one. Six tabs of the match page use them all, and the page's other requests stall. HTTP/2 carries many streams over one connection, so serve SSE over HTTP/2.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="A fan's connection drops after event 87 and comes back 20 seconds later. Events 88 to 90 happened meanwhile. What does the browser send, and what must the server do?" hint="The browser remembers one thing.">
+    The browser reconnects with `Last-Event-ID: 87`. The server reads its log after 87, replays 88, 89 and 90, then continues live. If the server keeps no log, the fan silently misses three events.
+  </QuizItem>
+  <QuizItem question="100,000 people watch a live dashboard. With SSE, how many requests a second does a quiet minute cost, compared with polling every 5 seconds?" hint="Polling cost = clients / interval.">
+    Polling costs $100{,}000 / 5 = 20{,}000$ requests a second, quiet or not. SSE costs no new requests at all: 100,000 open connections, plus one heartbeat write per stream every 15 seconds, about 6,700 tiny writes a second.
+  </QuizItem>
+  <QuizItem question="Your events reach the browser in clumps of about 4 KB, never one at a time. What is the most likely cause?">
+    A proxy on the path buffers the response and forwards it only when its buffer fills. Turn buffering off for the stream (`X-Accel-Buffering: no` for Nginx) and check that no compression step sits on that route.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<ProsCons
+  pros={[
+    "Plain HTTP: the same auth cookies, load balancers, logs and HTTP/2 you already run",
+    "Reconnect and resume are built in: the browser retries and sends Last-Event-ID",
+    "An idle client costs one open connection, not a request every few seconds",
+    "Updates arrive one network trip after they happen, about 50 to 100 ms",
+  ]}
+  cons={[
+    "One way only: the browser talks back with separate requests",
+    "Text only: binary data must be encoded, for example as base64, about 33% bigger",
+    "EventSource sends only GET and cannot add custom headers such as Authorization",
+    "Buffering proxies and idle timeouts on the path break it until you configure them",
+  ]}
+/>
+
+When does SSE beat a <Term id="websocket">WebSocket</Term>? A WebSocket is a two-way connection that starts as HTTP and then switches to its own framing. It wins when both sides talk often. SSE wins when the server does almost all the talking.
+
+<Compare
+  columns={["", "Short polling", "Server-sent events", "WebSockets"]}
+  rows={[
+    ["Who speaks first", "Client, on a timer", "Server, any time", "Either side"],
+    ["Delay after a change", "Half the interval on average", "One network trip", "One network trip"],
+    ["Cost of a quiet minute (50,000 fans)", "600,000 requests at 5 s", "200,000 heartbeats", "Pings, if you add them"],
+    ["Reconnect and resume", "Nothing to resume", "Built in (Last-Event-ID)", "You build it"],
+    ["Works as plain HTTP through proxies", true, "Yes, once buffering is off", "Needs Upgrade support"],
+    ["Binary messages", true, false, true],
+  ]}
+  caption="SSE sits in the middle: push like a WebSocket, plain HTTP like polling."
+/>
+
+<DecisionTree
+  title="SSE or something else?"
+  tree={{
+    q: "Does the server send far more messages than the client?",
+    yes: {
+      q: "Is the data text, such as JSON or tokens?",
+      yes: "Server-sent events. Send the rare client actions as normal POST requests.",
+      no: { answer: "WebSockets, so binary frames travel without base64", href: "/system-design/fundamentals/websockets" },
+    },
+    no: {
+      q: "Do both sides send several messages a second, like chat with typing indicators or a game?",
+      yes: { answer: "WebSockets", href: "/system-design/fundamentals/websockets" },
+      no: { answer: "Plain requests, or short polling if updates can wait", href: "/system-design/fundamentals/ajax-polling" },
+    },
+  }}
+/>
+
+## In the wild
+
+- **AI chat APIs** for large language models, such as OpenAI's and Anthropic's, stream generated text as server-sent events when you ask for streaming. They use a `fetch` request with a body and an `Authorization` header instead of EventSource, then read the `data:` lines as they arrive. See [Design ChatGPT](/system-design/case-studies/chatgpt).
+- **Wikimedia EventStreams** publishes every edit to Wikipedia as a public SSE stream, backed by Kafka, a durable event log. A client can resume after a drop instead of starting over.
+- **Firebase Realtime Database** offers a REST streaming mode: a client that asks for `text/event-stream` gets `put` and `patch` events whenever the data at that path changes.
+
+## Common pitfalls
+
+- **Ids with no log behind them.** The browser sends `Last-Event-ID`, but the server has nothing to replay, so every drop silently loses events.
+- **A reconnect storm after a deploy.** Restarting one server drops 12,500 fans, who all come back 3 seconds later. Drain servers one at a time (stop sending new fans to a server and let its streams close before you restart it), and send each client a slightly different `retry` value, say 2 to 10 seconds, to spread the return.
+- **Putting a token in the URL** because EventSource cannot set headers. URLs end up in logs. Use a cookie, or a short-lived ticket that is valid once.
+- **One database query per stream per event.** Read once, publish once, and let every server fan out from memory.
+
+## How to say it in an interview
+
+"Server-sent events are a standard way for a server to push text events to a browser over one long HTTP response. The server answers a GET with `text/event-stream` and keeps writing `data:` lines as things happen. The browser reconnects by itself and sends `Last-Event-ID`, so if the server uses ordered ids and keeps a short log, a client that drops resumes exactly where it left off. I pick SSE when traffic is mostly server to client, like live scores, notifications, progress bars or LLM token streams, because it is plain HTTP and resume is built in. The parts to get right are the path and the fleet: turn off proxy buffering, send a heartbeat every 15 seconds to beat idle timeouts, use HTTP/2, and fan events out through pub/sub to servers holding tens of thousands of streams each. If clients also send a steady stream of messages, or the data is binary, I would use WebSockets instead."
+
+<InterviewQuestions>
+  <InterviewQuestion question="What are server-sent events, and how are they different from polling?" level="Junior" category="Real-time">
+    **Short answer.** With SSE the client opens one HTTP request and the server keeps the response open, writing a text event into it whenever something happens. With polling the client keeps asking on a timer, and most answers are empty.
+
+    **Why.** Take 50,000 fans on a match page with an event every 21 seconds. Polling every 5 seconds costs $50{,}000 / 5 = 10{,}000$ requests a second, and a goal shows up 2.5 seconds late on average. With SSE there are 50,000 open connections and no new requests. The goal reaches each fan one network trip after it is published, about 50 to 100 ms.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens when the connection drops?
+    - How does the client send something back to the server?
+
+    **Watch out for.** Calling SSE two-way. The stream only goes from server to browser. The browser talks back with ordinary requests.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A fan's phone loses signal for 10 seconds during the match. How does an SSE client avoid missing the events published meanwhile?" level="Mid" category="Real-time">
+    **Short answer.** Every event carries an ordered id, and the browser remembers the last one. When it reconnects it sends `Last-Event-ID`, and the server replays everything after that id from a short log before going live again.
+
+    **Why.** EventSource does the client half for free: it waits the `retry` time, reconnects and adds the header. The server half is your job. Ids must increase within a stream, so "after 42" has a meaning. Something must keep recent events: here a log holds the last 10 minutes of each match, about 30 events, so it is tiny. The server subscribes to live events first, then replays the log after the given id, skipping any id it has already sent, so nothing falls through the gap. A fan away longer than the log window gets a `reset` event and reloads the full state with one request.
+
+    <AnimatedDiagram name="fundamentals/server-sent-events-fleet" highlight={["live", "log"]} caption="On reconnect the live server reads the event log after the fan's last id and replays what was missed." />
+
+    **Follow-ups the interviewer may ask.**
+    - How long should the log keep events, and what decides it?
+    - What if two live servers number events differently?
+
+    **Watch out for.** Saying "EventSource reconnects automatically, so nothing is lost". Reconnecting is automatic. Replaying is not: without ids and a log on the server, the fan misses every event published during the gap.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your SSE stream works on your laptop, but in production events arrive in clumps, and quiet streams die after about a minute. What is wrong?" level="Mid" category="Networking">
+    **Short answer.** Something between the browser and the server was built for short responses. A buffering proxy holds events back until its buffer fills, and an idle timeout of about 60 seconds closes streams that go quiet.
+
+    **Why.** Nginx buffers proxied responses by default, so a 150-byte event can wait in a 4 or 8 KB buffer until more events arrive. Compression middleware does the same. Turn buffering off for the stream path (`proxy_buffering off`, or the `X-Accel-Buffering: no` header) and skip gzip there. For the timeouts, write a comment line such as `: heartbeat` every 15 seconds, well inside the 60-second limit, and raise the idle timeouts for this path.
+
+    <AnimatedDiagram name="fundamentals/server-sent-events-fleet" path="fans>proxy>live" caption="Every hop between the fan and the live server must pass bytes through at once and tolerate a long, quiet response." />
+
+    **Follow-ups the interviewer may ask.**
+    - A customer behind a corporate proxy still gets nothing. What would you fall back to?
+    - Why would six open tabs freeze the rest of the page on HTTP/1.1?
+
+    **Watch out for.** Blaming the server code and adding manual flushes. The server already writes each event at once. The bytes are stuck in a hop it does not control.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A sports app must push live scores to 2 million concurrent viewers. Would you use SSE or WebSockets, and how would you run it?" level="Senior" category="Real-time">
+    **Short answer.** SSE, because viewers only receive and the payloads are small JSON events, so plain HTTP with built-in resume is the simpler fit. Run a fleet of stream servers that hold connections but no data of their own behind the load balancer, feed them from a pub/sub topic per match, and keep a short event log for replay.
+
+    **Why.** At about 40,000 streams per server, 2 million viewers need $2{,}000{,}000 / 40{,}000 = 50$ servers. Run 75 across three zones, 25 per zone, so losing a whole zone still leaves the 50 you need. In normal running each server holds $2{,}000{,}000 / 75$, about 26,700 streams. At about 20 KB per idle stream that is about 530 MB of connection state, rising to 800 MB at the 40,000 ceiling. A goal is one publish. Each of the 75 servers gets it once and writes about 26,700 copies, so about 300 MB leaves the fleet ($2{,}000{,}000 \times 150$ bytes) in under a second. The dangerous moment is a reconnect storm: if one server dies, its 26,700 viewers return together and each needs a TLS handshake and a log read. Send randomized `retry` values (2 to 10 seconds) and drain servers slowly on deploys. That spreads the return over about 8 seconds, roughly $26{,}700 / 8$, about 3,300 reconnects a second. Serve over HTTP/2 so a viewer with several tabs uses one connection.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you shed load if the reconnect storm still overwhelms the fleet?
+    - What changes if viewers can also send live reactions?
+
+    **Watch out for.** Choosing WebSockets because they sound more "real-time". Delivery delay is the same one network trip. You would rebuild resume yourself and gain a two-way channel nobody uses.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Ajax polling](/system-design/fundamentals/ajax-polling): the client asks on a timer, and why most answers are empty
+- [Long polling](/system-design/fundamentals/long-polling): the server holds each request until there is news, then the client asks again
+- [WebSockets](/system-design/fundamentals/websockets): a two-way connection for chat, games and live editing
+- [Choosing a real-time method](/system-design/fundamentals/choosing-realtime): polling, SSE, WebSockets and push side by side
+- [Proxies](/system-design/fundamentals/proxies): the hops that buffer and time out a stream
+- [Fan-out](/system-design/patterns/fan-out): copying one event to many readers at scale
+
+## Further reading
+
+- [WHATWG HTML Living Standard, Server-sent events](https://html.spec.whatwg.org/multipage/server-sent-events.html): the official definition of the stream format, EventSource and the reconnect rules.
+- [MDN, Using server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events): a practical guide to EventSource and the field names, with browser notes.
+- [NGINX documentation, ngx_http_proxy_module](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering): `proxy_buffering`, `proxy_read_timeout` and the `X-Accel-Buffering` header.

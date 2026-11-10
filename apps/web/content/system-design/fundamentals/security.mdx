@@ -1,11 +1,240 @@
 ---
-title: "Security"
-description: "Authentication, authorization, encryption in transit and at rest, and common attacks."
-status: outline
+title: "Security overview"
+description: "Defence in depth for a web system: the edge, app and data layers where attacks land, least privilege, and how to keep secrets out of reach."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** authentication, authorization, encryption in transit and at rest, and common attacks.
+<KeyIdea>
+  Security in system design means stacking several independent checks (at the edge, in the app and around the data) so that an attacker who gets past one still meets the next.
+</KeyIdea>
 
-**Related reading on this site:** [Guardrails and Safety](/ai-system-design/genai-system-design/guardrails-and-safety)
+## The story
+
+You run Checkup, an app where 300,000 patients book clinic appointments. At peak it serves about 800 requests a second, and the app servers can handle 1,500. In one bad week, three things happen.
+
+- **Monday.** A network of hijacked computers sends 50,000 requests a second at the booking page. Real patients see timeouts.
+- **Wednesday.** A patient logs in, opens `/appointments/1042`, changes the number to `1043`, and sees a stranger's booking, with their name and the reason for the visit.
+- **Friday.** An engineer notices that the database password sits in a code repository that was public for three days.
+
+Each attack lands somewhere different. The flood hits the front door. The changed number passes the front door and reaches your code. The leaked password goes straight for the data. No single lock would have stopped all three.
+
+## How it works
+
+An **attack** is any attempt to make the system do what its owner did not intend: fall over, show data to the wrong person, or hand over control. The **attack surface** is every place an attacker can send input: public URLs, open ports, login forms, even the code repository.
+
+**Defence in depth** means you never rely on one control. You put a check at each layer a request passes through, and you design each check as if the one before it has failed. A clinic already works this way: the front desk checks you have an appointment, the nurse checks your name against the chart, and the records room stays locked even to staff who got past both. A web system has three such layers:
+
+1. **The edge**: the machines that face the internet and receive every request first.
+2. **The app**: your code, which decides what a request may do.
+3. **The data**: the databases, backups and secrets behind the code.
+
+The diagram builds Checkup one layer at a time. The middle row is the normal path of a booking, from the patient's phone to the database. The red row at the bottom shows where each attack from the story lands.
+
+### Step 1: The edge stops floods before they cost anything
+
+<AnimatedDiagram name="fundamentals/security" step={1} caption="Step 1: every request enters through the edge gateway. The bot flood is filtered and rate-limited there, before it reaches an app server." />
+
+The edge is the cheapest place to say no. Checkup's **edge gateway** is a front-door server, often an <Term id="api-gateway">API gateway</Term> behind a <Term id="cdn">CDN</Term>. It does four jobs:
+
+- It is where the <Term id="tls">TLS</Term> connection ends. Traffic is encrypted between the phone and the gateway, and the gateway decrypts it so it can inspect it.
+- It runs a **WAF** (web application firewall): rules that drop requests matching known attack patterns or coming from **botnets**, networks of hijacked computers.
+- It applies a <Term id="rate-limit">rate limit</Term>: a cap on requests per address or per account.
+- It rejects malformed input early, such as a 50 MB upload sent to an **endpoint** (one URL the API answers) that expects 2 KB.
+
+Monday's flood shows why the edge needs more than one of these. The 50,000 requests a second come from 2,000 addresses, so 25 a second each. A rate limit of 2 a second per address, plenty for a person booking a slot, still lets 2,000 × 2 = 4,000 attack requests a second through. Add the 800 real ones and the app sees 4,800, about three times the 1,500 it can take. The WAF's bot rules then block, say, 1,800 of the 2,000 addresses. The remaining 200 × 2 = 400 requests a second plus the normal 800 come to 1,200, under the 1,500 limit. The WAF alone would have left 200 × 25 = 5,000 attack requests a second, still far too many. Neither control alone was enough; together they were.
+
+<PremiumBreak />
+
+### Step 2: The app checks who is asking and what they may see
+
+<AnimatedDiagram name="fundamentals/security" step={2} caption="Step 2: the forged request carries a real login, so the edge lets it pass. Only the app servers know the appointment belongs to someone else." />
+
+Wednesday's request looked perfect to the edge. It came from one address at a normal rate, with a valid login token. The problem was not who sent it but what it asked for. That needs two separate checks:
+
+- **Authentication** answers "who are you?" The patient logged in through the auth service and got a **token**, a signed note that says "this is patient 88". The gateway checks the signature with keys from the auth service.
+- **Authorization** answers "may you do this?" Only the app knows that appointment 1043 belongs to patient 91. So the app must ask on every call.
+
+```ts
+// GET /appointments/:id. The token proved who is calling; this checks what they may read.
+const [appt] = await db.query(
+  "SELECT * FROM appointments WHERE id = $1 AND patient_id = $2",
+  [req.params.id, req.user.id],
+);
+if (!appt) return res.status(404).end(); // same answer as "no such appointment"
+```
+
+Answering 404 (not found) rather than 403 (forbidden) also hides whether appointment 1043 exists. A missing ownership check is one of the most common bugs in real web apps, and rate limits only slow it down. Checkup's ids count upwards, so all 900,000 appointments sit at ids 1 to 900,000. An attacker who signs up 200 patient accounts and uses 200 addresses stays under every per-address and per-account limit at 2 requests a second each, and still reads them all in 900,000 / 400 = 2,250 seconds, about 37 minutes.
+
+### Step 3: The data layer assumes the code has already been beaten
+
+<AnimatedDiagram name="fundamentals/security" step={3} stepper caption="Step 3: the vault hands the app a database login that expires in an hour, and the database accepts connections only from the app servers. The leaked password has already expired." />
+
+The last layer plans for the worst case: someone has a password, a server or a disk they should not have. Three ideas carry most of the weight.
+
+**Least privilege.** Every person and every service gets only the access its job needs. Checkup's booking service reads and writes appointments. It never needs to delete them or read billing.
+
+```sql
+CREATE ROLE booking_app LOGIN;
+GRANT SELECT, INSERT, UPDATE ON appointments TO booking_app;
+-- no DELETE, no DROP, nothing on billing or staff tables
+```
+
+If an attacker takes over the booking service, the damage stops at those rights. The part of the system one stolen key can reach is its **blast radius**, and least privilege keeps it small.
+
+**Secrets out of code.** A **secret** is anything that grants access: a database password, an API key, a signing key. Secrets belong in a **secrets vault**, a service that stores them encrypted, logs every read, and creates short-lived logins on demand. Friday's password sat in public for 72 hours, and scanners that search public code for keys often find one within minutes. A password that never changes gave the attacker all 72 hours and more. A vault login that expires every hour would have been dead within the hour.
+
+**Network walls and encryption at rest.** The database accepts connections only from the app servers' private network, so a password alone gets nobody in from outside. **Encryption at rest** means the files on disk and the backups are encrypted, so a stolen disk or backup is unreadable. It does not stop someone with a valid login, because the database decrypts for anyone it lets in. So it sits beside least privilege, not in place of it.
+
+### The map to the other security pages
+
+Each layer has its own page with the details.
+
+| Layer | Typical attacks | First defences | Read next |
+|---|---|---|---|
+| Edge | Floods, bots, password guessing | CDN capacity, WAF rules, rate limits, TLS | [Rate limiting and abuse basics](/system-design/fundamentals/abuse-protection), [TLS and HTTPS](/system-design/fundamentals/tls) |
+| App | Missing ownership checks, injection (input that runs as code), replayed or forged requests | Authentication, authorization on every call, input checks | [API authentication](/system-design/fundamentals/api-auth), [Common attacks and defences](/system-design/fundamentals/common-attacks) |
+| Data | Stolen passwords, keys, disks and backups | Least privilege, secrets vault, encryption, private network | [Encryption, hashing and secrets](/system-design/fundamentals/encryption-and-hashing) |
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Checkup adds a stricter rate limit: 1 request a second per address. Does that fix Wednesday's bug?" hint="Count how long the 900,000 appointments take now with 200 accounts on 200 addresses.">
+    No. It halves the speed: 900,000 / 200 = 4,500 seconds, about 75 minutes. The attacker still reads every record. Only the ownership check in the app stops it.
+  </QuizItem>
+  <QuizItem question="The database disk is encrypted. An attacker steals the booking service's database login. What can they read?" hint="Who decrypts the data?">
+    Everything that login is allowed to read. The database decrypts for any valid login. Least privilege decides how much that is: here, appointments, but not billing or staff tables.
+  </QuizItem>
+  <QuizItem question="Which layer should block a 50 MB upload sent to an endpoint that expects 2 KB?" hint="Where is it cheapest to say no?">
+    The edge. Rejecting it there costs almost nothing. Letting it reach an app server ties up memory and a worker for every copy the attacker sends.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+Every control costs latency, money or engineering work. The numbers are typical sizes for a system like Checkup.
+
+<Compare
+  columns={["Control", "Stops", "Adds per request", "Main cost"]}
+  rows={[
+    ["WAF at the edge", "Known attack patterns, many bots", "About 1 ms", "Rules to tune; false positives block real users"],
+    ["Rate limit", "Floods, password guessing", "Under 1 ms", "A shared counter store; a whole office on one address can hit it"],
+    ["Ownership check in the app", "Reading other people's records", "Under 1 ms (one more filter in a query it already runs)", "Every endpoint must have it, with a test"],
+    ["Short-lived database logins", "Leaked passwords", "0 ms; one refresh an hour", "If the vault is down, new logins fail"],
+    ["Encryption at rest", "Stolen disks and backups", "A few percent of CPU", "Keys to manage and rotate"],
+  ]}
+  caption="Defence in depth is several cheap checks, not one expensive one."
+/>
+
+## In the wild
+
+- **Google's BeyondCorp** stopped trusting the office network. Every request to an internal tool is checked against the user and the device, wherever it comes from.
+- **AWS IAM roles** give servers temporary credentials that expire, one hour by default for an assumed role, instead of long-lived keys written into config files.
+- **HashiCorp Vault** can create a database user on demand with a lease and remove it when the lease ends, so no permanent app password exists.
+- **GitHub secret scanning** checks public repositories for key formats from partner providers and alerts the provider, so a leaked key can be revoked quickly.
+
+## Common pitfalls
+
+- **Trusting the inside.** "It is behind the firewall" fails the day one internal machine is taken over. Check requests between services too.
+- **Checking login but not ownership.** A valid token says who someone is, not what they may read. Wednesday's bug lives here.
+- **Secrets in code and logs.** Passwords in the repository, in a committed `.env` file, or printed in an error log are as public as the place they sit.
+- **One all-powerful database user.** If every service connects as an admin, one stolen key opens everything.
+- **Counting on encryption at rest.** It protects disks and backups, not data read through a valid login.
+
+## How to say it in an interview
+
+"I think about security as defence in depth across three layers. At the edge, the gateway ends TLS, runs WAF rules and rate limits, and rejects oversized input, so floods never reach the app. In the app, I authenticate every request with a signed token and authorize every request against the data: a valid login is not permission to read appointment 1043. At the data layer, each service gets least privilege, secrets live in a vault that issues short-lived logins, the database is only reachable from the app's private network, and disks and backups are encrypted. I design each layer assuming the one before it has failed."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is defence in depth, and why not rely on one strong firewall?" level="Junior" category="Security">
+    **Short answer.** Defence in depth means putting independent checks at every layer a request passes through: edge, app and data. A firewall only sees traffic at the network edge, so an attack that looks like normal traffic walks straight past it.
+
+    **Why.** Attacks land in different places. A flood of 50,000 requests a second shows at the edge. A user changing an id from 1042 to 1043 sends one normal-looking request, and only the app knows the record is someone else's. A leaked password skips both and goes to the database. One wall catches at most one of these.
+
+    **Follow-ups the interviewer may ask.**
+    - Which layer would you build first for a new product, and why?
+    - How do you stop the layers from slowing every request down?
+
+    **Watch out for.** Saying "we use HTTPS, so we are secure". TLS protects data on the wire; it does nothing about what a logged-in user is allowed to ask for.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is the difference between authentication and authorization?" level="Junior" category="Security">
+    **Short answer.** Authentication proves who is calling, usually with a login that produces a signed token. Authorization decides whether that caller may do this particular action on this particular record.
+
+    **Why.** They live in different places. The gateway can check a token's signature with keys from the auth service, in about a millisecond, without knowing anything about appointments. Only the app knows that appointment 1043 belongs to patient 91, so the ownership check belongs there, on every call.
+
+    <AnimatedDiagram name="fundamentals/security" step={2} highlight={["auth", "edge", "app"]} caption="The auth service and the gateway handle who you are; the app servers decide what you may see." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where would you store roles such as "clinic admin"?
+    - What happens to a token after the user logs out?
+
+    **Watch out for.** Treating a valid token as permission. Being logged in as patient 88 says nothing about patient 91's records.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A user changes /appointments/1042 to /appointments/1043 in the URL and sees someone else's booking. Where is the bug, and how do you fix it?" level="Mid" category="Security">
+    **Short answer.** The bug is a missing authorization check in the app: it loads the record by id without checking who owns it. Fix it by filtering on the owner in the query, returning 404 when nothing matches, and adding a test for every endpoint that takes an id.
+
+    **Why.** The edge cannot see this attack: one address, a normal rate, a valid token. Rate limits only slow it. With sequential ids and 900,000 appointments, 200 accounts on 200 addresses at 2 requests a second each read everything in 900,000 / 400 = 2,250 seconds, about 37 minutes. Random ids make guessing harder but are not a fix, because ids leak through links, emails and logs.
+
+    <AnimatedDiagram name="fundamentals/security" step={2} path="forged>app>db" caption="The forged request reaches the app servers; the ownership check there decides whether the database row comes back." />
+
+    ```sql
+    SELECT * FROM appointments WHERE id = $1 AND patient_id = $2;
+    ```
+
+    **Follow-ups the interviewer may ask.**
+    - How would you make sure every new endpoint gets this check?
+    - What if clinic staff need to see many patients' appointments?
+
+    **Watch out for.** Fixing it by switching to random ids and stopping there. Hidden is not the same as protected.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you manage database passwords and API keys for 40 services?" level="Mid" category="Security">
+    **Short answer.** Keep them in a secrets vault, not in code or config files. Give each service its own identity and its own narrow database role, and have the vault issue logins that expire in about an hour.
+
+    **Why.** A static password copied from a public repository works for as long as nobody rotates it, often months. A one-hour login is useless an hour later. Separate roles shrink the blast radius: a stolen booking-service login reads appointments, not billing. Across 40 services with 5 copies each, that is 200 logins renewed per hour, about 3 a minute, which a vault handles easily.
+
+    <AnimatedDiagram name="fundamentals/security" step={3} highlight={["vault", "app", "db", "leak"]} caption="The vault issues and rotates the app's database login, so the leaked password has already expired." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does a service prove its identity to the vault in the first place?
+    - What happens to running services if the vault is down for ten minutes?
+
+    **Watch out for.** Encrypting the config file and keeping the key next to it. That moves the secret; it does not protect it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your booking endpoint suddenly gets 50,000 requests a second from about 2,000 addresses, and your app handles 1,500. Walk me through how each layer responds." level="Senior" category="Reliability">
+    **Short answer.** The edge carries the load: CDN capacity absorbs the volume, WAF bot rules remove most attacking addresses, and rate limits cap what is left. Behind it, the app keeps its own limits on expensive calls, and fixed-size connection pools stop the database from being swamped.
+
+    **Why.** Do the arithmetic per control. 50,000 / 2,000 is 25 requests a second per address. A limit of 2 a second still lets 2,000 × 2 = 4,000 through; with 800 of real traffic that is 4,800, about three times capacity. If WAF rules block 1,800 addresses, the remaining 200 × 2 = 400 plus 800 of real traffic is 1,200, under 1,500. Each layer only has to do part of the job.
+
+    <AnimatedDiagram name="fundamentals/security" step={1} highlight={["flood", "edge"]} caption="The flood lands on the edge gateway, which filters and limits it before any app server sees it." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you avoid blocking a whole hospital that shares one public address?
+    - At what size of flood does your own edge stop being enough?
+
+    **Watch out for.** Answering "add more app servers". Autoscaling to absorb an attack turns it into a large bill and still lets the flood reach the database.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Encryption, hashing and secrets](/system-design/fundamentals/encryption-and-hashing)
+- [Common attacks and defences](/system-design/fundamentals/common-attacks)
+- [Rate limiting and abuse basics](/system-design/fundamentals/abuse-protection)
+- [API authentication](/system-design/fundamentals/api-auth)
+- [TLS and HTTPS](/system-design/fundamentals/tls)
+- [API gateway](/system-design/fundamentals/api-gateway)
+- [Rate limiting](/system-design/patterns/rate-limiting)
+
+## Further reading
+
+- OWASP, [Top 10 Web Application Security Risks](https://owasp.org/www-project-top-ten/), the most common ways real web apps get broken, with broken access control at the top.
+- NIST, [SP 800-207: Zero Trust Architecture](https://csrc.nist.gov/pubs/sp/800/207/final), the case for checking every request instead of trusting the network.
+- Google, [BeyondCorp: A New Approach to Enterprise Security](https://research.google/pubs/beyondcorp-a-new-approach-to-enterprise-security/), how one company moved checks from the network to each request.
+- HashiCorp, [Vault database secrets engine](https://developer.hashicorp.com/vault/docs/secrets/databases), how short-lived database logins work in practice.

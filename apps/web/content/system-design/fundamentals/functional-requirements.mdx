@@ -1,9 +1,228 @@
 ---
-title: "Functional Requirements"
-description: "Turning a vague prompt into the concrete features and user flows the system must support."
-status: outline
+title: "Functional requirements"
+description: "How to turn a vague prompt into a short, numbered list of what the system must do, F1 to Fn, with a clear out-of-scope line."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** turning a vague prompt into the concrete features and user flows the system must support.
+<KeyIdea>
+  A functional requirement is one thing a user can do with the system, written as a short sentence you can test and given a number so the rest of the design can point back to it.
+</KeyIdea>
+
+## The story
+
+You walk into an interview and hear one line: "Design a chat app." You feel the clock, so you start drawing at once. A <Term id="load-balancer">load balancer</Term>, some servers, a database, a queue. Ten minutes go into video calls, because they seem hard and interesting. At minute 32 the interviewer asks: "My phone is locked. How do I find out that a friend wrote to me?" You have no answer, because you never asked who uses the app or what they do. The interviewer never wanted video calls. They did want notifications.
+
+Both mistakes, the ten wasted minutes and the missing notifications, come from the same gap: five minutes of requirements that never happened. This page is about those five minutes.
+
+Two kinds of requirements shape every design:
+
+- **Functional requirements** say *what* the system does: "a user can send a text to a friend".
+- **Non-functional requirements** say *how well* it does it: speed (<Term id="latency">latency</Term>), uptime (<Term id="availability">availability</Term>), cost. "A message reaches an online friend within 200 ms" is one. They get their own page: [Non-functional requirements](/system-design/fundamentals/non-functional-requirements).
+
+A simple test tells them apart. If you can demo it with a button, it is functional. If you need a stopwatch, a load test or a calendar to check it, it is non-functional.
+
+## How it works
+
+Four moves take you from one vague line to a list the whole design can stand on. The diagram builds them up left to right.
+
+### Step 1: Start from the people, not the features
+
+<AnimatedDiagram name="fundamentals/functional-requirements" step={1} caption="Before any feature, name who uses the product." />
+
+Do not start by listing features. Start by naming the people who touch the product. For a chat app that is a member who sends and reads, a group admin who creates groups and adds people, and a member who is away with a locked phone. That third person is easy to forget. Yet they are the reason push notifications exist: alerts the phone's operating system shows even when the app is closed. That is the exact gap from the story.
+
+<PremiumBreak />
+
+### Step 2: List every flow you hear, without judging
+
+<AnimatedDiagram name="fundamentals/functional-requirements" step={2} caption="Ten candidate flows, written as plain actions." />
+
+Now ask what each person does, and write down every answer as a verb and an object: "send a text", "see who is online". Do not filter yet. Useful questions sound like this:
+
+- "Is this one-to-one chat, group chat, or both? How big can a group get?"
+- "Text only, or photos and video too?"
+- "Should a user see that a message was delivered and read?"
+- "Does a new phone need the old messages?"
+- "What happens when the recipient is offline?"
+
+Each question takes ten seconds and saves minutes later. After about two minutes you have ten candidate flows, more than you can build in the time left.
+
+### Step 3: Cut, number in priority order, and name what is out
+
+<AnimatedDiagram name="fundamentals/functional-requirements" step={3} caption="Seven requirements in scope, core flow first; three flows set aside on purpose." />
+
+Now cut. Three questions decide what stays:
+
+1. **Is it the core loop?** The core loop is the one action the product exists for. Without one-to-one chat there is no product, so it becomes F1.
+2. **Does it change the architecture?** Push notifications add a whole service. Read receipts add a write for every message read. Both earn a place.
+3. **Would the interviewer miss it?** If they mentioned it, keep it. If you are unsure, ask.
+
+Then number the survivors in priority order: F1 to F7. The numbers are not decoration. Later, every part of the design names the requirement it serves, such as "this step covers F2". A box that covers no requirement, functional or non-functional, is a box to question.
+
+Finally, write the out-of-scope list. Voice calls, search across all messages and payments are real features. You leave them out on purpose, and you say so out loud. That one sentence turns "they forgot search" into "they chose to skip search".
+
+Why seven? A 45-minute interview leaves about 20 minutes for building. Adding one requirement well takes about 3 minutes. So about 6 or 7 fit: $20 \div 3 \approx 7$. Fifteen would give each one about 80 seconds, which is too shallow to score.
+
+### Step 4: Write each one as a row you can test
+
+The last move turns the list into a table. Each row has an id, a short requirement and a note that makes it concrete. A good note holds a number or a limit.
+
+<RequirementsTable
+  kind="functional"
+  rows={[
+    { id: "F1", requirement: "One-to-one chat", notes: "A user sends a text to another user, who sees it while the app is open." },
+    { id: "F2", requirement: "Group chat", notes: "Groups of up to 250 members. The admin adds and removes people." },
+    { id: "F3", requirement: "Sent, delivered and read receipts", notes: "Three states per message; in a group, per member." },
+    { id: "F4", requirement: "Online status and typing", notes: "Show online or last seen, plus a typing hint in an open chat." },
+    { id: "F5", requirement: "Photos, video and files", notes: "Attachments up to 100 MB; the chat shows a preview first." },
+    { id: "F6", requirement: "History and sync", notes: "Scroll back through old messages. A new phone catches up on sign-in." },
+    { id: "F7", requirement: "Push notifications", notes: "A user whose app is closed gets a notification within seconds." },
+  ]}
+/>
+
+**Out of scope:** voice and video calls, search across all messages, payments inside a chat.
+
+"Testable" means a tester could write a pass or fail check from the row alone. Compare these two ways to write the same idea:
+
+<Compare
+  columns={["Vague", "Testable"]}
+  rows={[
+    ["Users can chat", "F1: a user sends a text to another user, who sees it while the app is open"],
+    ["Support groups", "F2: groups of up to 250 members; the admin adds and removes people"],
+    ["Handle media", "F5: attachments up to 100 MB, with a preview in the chat"],
+    ["Fast and reliable messaging", "Not functional at all. Move it to the non-functional list with a number."],
+  ]}
+  caption="The testable version names the actor, the action and a limit."
+/>
+
+The limits matter because they change the design. A group of 250 members means one message can turn into 250 deliveries. Copying one message out to many receivers is called <Term id="fan-out">fan-out</Term>. A group of 50,000 would need a different delivery path altogether. One number in a note can move whole boxes.
+
+Here is the payoff. When you build the design, each build step names the requirement it serves. In the [Messenger case study](/system-design/case-studies/facebook-messenger), step 3 exists only because of F7: the away user from step 1 forces a push service.
+
+<AnimatedDiagram name="messenger/architecture" step={3} highlight={["push"]} caption="Messenger build step 3 covers F7: the push service exists because a member can be away." />
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Is 'a message reaches an online friend within 200 ms' functional or non-functional?" hint="Could you check it with a button, or do you need a stopwatch?">
+    Non-functional. It describes how fast, not what the user can do. The functional half is F1, "send a text"; the 200 ms target is a latency requirement that belongs on the non-functional list.
+  </QuizItem>
+  <QuizItem question="The interviewer says 'groups can have up to 100,000 members'. Which part of your list changes, and why does it matter?" hint="Think about what one message costs.">
+    The note on F2 changes from 250 to 100,000. One message in such a group means up to 100,000 deliveries, so you can no longer push to every member on every send. The design needs a different path for very large groups, such as members pulling new messages when they open the chat.
+  </QuizItem>
+  <QuizItem question="You have 45 minutes and wrote 14 requirements. What do you do?">
+    Cut to about 6 or 7. With roughly 20 minutes to build, 14 items leave under 90 seconds each. Keep the core loop and anything that adds a component, then move the rest to the out-of-scope list and say so.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+How long the list is decides how deep you can go. Here is what each size costs in a 45-minute interview with about 20 minutes to build.
+
+<Compare
+  columns={["List size", "Time to write it", "Build time per item", "Main risk"]}
+  rows={[
+    ["3 items", "about 1 minute", "about 7 minutes", "Misses a flow the interviewer cares about"],
+    ["6 to 7 items", "about 4 minutes", "about 3 minutes", "Little; this is the usual target"],
+    ["12 or more items", "8 minutes or more", "under 2 minutes", "Every item stays shallow; no deep dive"],
+  ]}
+  caption="A short, deliberate list beats a long one. The out-of-scope line keeps the cut honest."
+/>
+
+## In the wild
+
+- **Google design docs** usually include a "Goals and non-goals" section near the top. The non-goals play the same role as an out-of-scope list.
+- **IETF standards** (the documents behind HTTP, TLS and DNS) use the keywords MUST, SHOULD and MAY from RFC 2119. Each one marks how firm a requirement is.
+- **Agile teams** write user stories in the form "As a member, I want to see when my message was read, so that I know my friend got it." Each story is a functional requirement with its reason attached.
+
+## Common pitfalls
+
+- **Starting with boxes.** Drawing a database before you know what users do means you design for a guess.
+- **Mixing in non-functional targets.** "Fast" or "scalable" is not something a user does. Move it to the non-functional list and give it a number.
+- **Listing everything.** Fifteen features in 45 minutes means none gets real depth.
+- **Silent cuts.** If you drop search without saying so, it looks like you forgot it. Name every cut.
+- **Notes without limits.** "Group chat" hides the question that matters: how big can a group get?
+
+## How to say it in an interview
+
+"Before I draw anything, I'd like to pin down what the app has to do. Who uses it? I hear a member who sends and reads, a group admin, and a member who is away with a locked phone. Let me list what each one does, then cut. In scope: F1 one-to-one chat, F2 group chat up to about 250 people, F3 receipts, F4 online status, F5 media, F6 history on a new phone, and F7 push notifications for the away user. F1 is the core loop, so I'll build it first. Out of scope: calls, search and payments. They are real features, but they would each need their own design. Does that match what you had in mind? Then I'll move on to the non-functional targets and the numbers, and every step I add later will say which F it covers."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a functional and a non-functional requirement? Give an example of each for a chat app." level="Junior" category="Requirements">
+    **Short answer.** A functional requirement says what the system does, such as "a user can send a text to a friend". A non-functional requirement says how well it does it, such as "the message arrives within 200 ms for an online friend".
+
+    **Why.** The two lists shape different parts of the design. Functional requirements decide which components exist: F7, push notifications, adds a push service. Non-functional targets decide how big and how redundant those components are: 99.99% uptime allows about 53 minutes of downtime a year, which means running at least two copies of every component. A quick test: if you can demo it with a button it is functional; if you need a stopwatch or a load test, it is non-functional.
+
+    **Follow-ups the interviewer may ask.**
+    - Is "messages are never lost" functional or non-functional?
+    - Which list would you write first, and why?
+
+    **Watch out for.** Putting "fast", "scalable" or "secure" on the functional list. They are properties, not actions, and without a number they cannot be tested.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="I say 'Design a chat app.' Walk me through your first five minutes." level="Mid" category="Requirements" companies={["Meta"]}>
+    **Short answer.** I name the people who use it, ask what each one does, and list every flow I hear. Then I cut to about seven numbered requirements in priority order, name what is out of scope, and confirm the list with you.
+
+    **Why.** A 45-minute interview leaves about 20 minutes to build, and each requirement takes about 3 minutes to add well, so about 7 fit. Starting from people finds flows a feature list misses: the member with a locked phone is the reason for push notifications. Limits in the notes, such as "groups up to 250 members", decide the delivery path later, because one message to 250 people is 250 deliveries.
+
+    <Compare
+      columns={["Minute", "What I do"]}
+      rows={[
+        ["0 to 1", "Name the users: member, group admin, member who is away"],
+        ["1 to 3", "Ask what each one does; write every flow down"],
+        ["3 to 4", "Cut and number F1 to F7, core loop first"],
+        ["4 to 5", "Say the out-of-scope list and confirm"],
+      ]}
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - Which of your seven would you drop first if we had 30 minutes?
+    - What question would you ask to size group chat?
+
+    **Watch out for.** Asking questions with no plan, or asking twenty of them. Five sharp questions that each change the design beat a long survey.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you decide what goes out of scope, and why say it out loud?" level="Mid" category="Requirements">
+    **Short answer.** I keep the core loop and anything that adds or changes a component, and I cut features that need their own separate design. I say the cut out loud so the interviewer can object now, not at minute 35.
+
+    **Why.** Voice calls need media relays and their own real-time protocol, which is a second system. Search across billions of messages needs an inverted index (a map from each word to the messages that contain it) and its own data pipeline. Each would eat 10 minutes or more of a 20-minute build. Naming them as out of scope shows I saw them and chose. A silent cut looks like a gap.
+
+    **Follow-ups the interviewer may ask.**
+    - The interviewer insists on search. What do you drop to make room?
+    - Can a feature be partly in scope?
+
+    **Watch out for.** Cutting something only because it is hard. If the interviewer named it in the prompt, it stays, and you trim elsewhere.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="At minute 25 I add a new requirement: users can delete a sent message for everyone. How do you handle it?" level="Senior" category="Requirements" companies={["Meta"]}>
+    **Short answer.** I add it as F8 with a note, then trace which existing components it touches before I change anything. Delete-for-everyone mostly reuses the message path: it is a small control message that travels the same route as F1 and F2, plus a marker in the message store.
+
+    **Why.** Numbered requirements make the change cheap to reason about. The delete has to reach every device that already got the message, so it rides the same fan-out as F2 and the same push path as F7 for devices that are away. In a 250-member group that is up to 250 small deliveries, the same as sending a message. The store keeps a deleted marker so that F6, history on a new phone, never shows the old text. So the new requirement adds no new box; it adds one message type and one field.
+
+    <AnimatedDiagram name="messenger/architecture" highlight={["chat", "bus", "fanout", "store", "push"]} caption="A delete travels the existing path: chat servers, message bus, fan-out, store and push." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if a device is offline for a week and then reconnects?
+    - Should there be a time limit on deleting, and does that change the design?
+    - How does this interact with end-to-end encryption?
+
+    **Watch out for.** Bolting on a new "delete service" without checking the existing flows. The skill being tested is tracing a new requirement through the numbered list you already have.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Non-functional requirements](/system-design/fundamentals/non-functional-requirements)
+- [Back-of-the-envelope estimation](/system-design/fundamentals/estimation)
+- [The interview framework](/system-design/fundamentals/interview-framework)
+- [Design Facebook Messenger](/system-design/case-studies/facebook-messenger)
+
+## Further reading
+
+- IETF, [RFC 2119: Key words for use in RFCs to Indicate Requirement Levels](https://www.rfc-editor.org/rfc/rfc2119): the short standard behind MUST, SHOULD and MAY.
+- Malte Ubl, [Design Docs at Google](https://www.industrialempathy.com/posts/design-docs-at-google/): how goals and non-goals open a real design document.
+- Atlassian, [User stories with examples and a template](https://www.atlassian.com/agile/project-management/user-stories): writing requirements from the user's point of view.

@@ -1,9 +1,310 @@
 ---
 title: "WebSockets"
-description: "Full-duplex connections, scaling connection servers and fallbacks."
-status: outline
+description: "How one HTTP request upgrades to a two-way connection, what frames and heartbeats do, and how to scale socket servers with gateways and pub/sub."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** full-duplex connections, scaling connection servers and fallbacks.
+<KeyIdea>
+  A WebSocket turns one HTTP request into a connection that stays open, so the browser and the server can each send a message the moment they have one.
+</KeyIdea>
+
+## The story
+
+You run a quiz app for classrooms. The teacher puts question 3 on the projector. Thirty students tap an answer on their phones, and the teacher's screen counts up: "12 of 30 answered", "18 of 30 answered". Your first version polls. Every phone asks the server "anything new?" once a second. In exam week, at 10 am, 6,000 classrooms run a quiz at once, about 200,000 phones in all. That is 200,000 requests a second, and almost every answer is "nothing new". You want the server to speak first when a question starts, and the phone to answer on the same line. That is what a <Term id="websocket">WebSocket</Term> gives you.
+
+## How it works
+
+A few words first. A **connection** here is a TCP connection: a reliable, ordered pipe of bytes between two machines (see [TCP and UDP](/system-design/fundamentals/tcp-udp)). Plain HTTP uses that pipe in turns: the client asks, the server answers, and the server can never speak first. A WebSocket keeps the pipe open and lets both sides send at any time. That is called **full duplex**, like a phone call, where both people can talk at once. Each message travels as a **frame**, a small packet of bytes with a short header.
+
+### Step 1: The upgrade handshake
+
+<AnimatedDiagram name="fundamentals/websockets" step={1} caption="The page asks to upgrade an ordinary HTTP request. The gateway agrees with 101 Switching Protocols, and the connection changes protocol." />
+
+The student's page runs `new WebSocket("wss://quiz.example.com/ws")`. The `wss://` means the connection is encrypted with <Term id="tls">TLS</Term>, like `https://`. The browser opens a TCP connection, does the TLS handshake, and sends a normal HTTP `GET` with two extra headers: `Upgrade: websocket` and a random `Sec-WebSocket-Key`. The <Term id="load-balancer">load balancer</Term> forwards it to a **socket gateway**, a server whose job is to hold open connections. The gateway answers `101 Switching Protocols`. From that byte on, the same TCP connection carries WebSocket frames instead of HTTP.
+
+<Tabs title="The handshake on the wire">
+  <Tab label="Request">
+
+```http
+GET /ws HTTP/1.1
+Host: quiz.example.com
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: cXVpei1yb29tLTQyLWtleQ==
+Sec-WebSocket-Version: 13
+Origin: https://quiz.example.com
+Cookie: session=...
+```
+
+  </Tab>
+  <Tab label="Response">
+
+```http
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: YK3St34Dp1pI2OqspwDB0kH28h4=
+```
+
+  </Tab>
+</Tabs>
+
+The `Sec-WebSocket-Accept` value proves the server understood the request. The server appends a fixed string from the standard to the key, hashes the result (with SHA-1) and sends it back as text (base64). It is not security. It only stops a confused HTTP server, or a cache, from replying with an old page by accident. Security comes from TLS, from checking the `Origin` header, and from checking the session cookie or a token during the handshake.
+
+<PremiumBreak />
+
+### Step 2: Frames in both directions
+
+<AnimatedDiagram name="fundamentals/websockets" step={2} caption="The quiz service pushes question 3 down the open socket. The student's answer comes back up the same connection. The load balancer only moves bytes now." />
+
+When the teacher starts question 3, the server writes a frame to each student's socket. No student asked. When a student taps B, the phone writes a frame back on the same connection. Nobody opens a new connection, and no HTTP headers are sent again.
+
+The frame header is tiny:
+
+| Part | Size | What it says |
+|---|---|---|
+| First byte | 1 byte | Is this the last piece of the message (the FIN bit)? What kind of frame (the opcode): text, binary, close, ping or pong |
+| Second byte | 1 byte | Is the payload masked? Its length, up to 125 bytes |
+| Extended length | 0, 2 or 8 bytes | Only for payloads over 125 bytes or over 64 KB |
+| Masking key | 4 bytes | Only on frames from the browser to the server |
+| Payload | the message | Your JSON, text or binary data |
+
+So the server sends `{"q":3,"choices":4}` (19 bytes) with a 2-byte header. The phone's answer carries 6 bytes of header, because browser frames are **masked**: the bytes are scrambled with a random 4-byte key. Masking stops a hostile page from crafting bytes that an old proxy would mistake for an HTTP request and cache. A poll, by contrast, carries about 800 bytes of HTTP headers, request plus response.
+
+### Step 3: Heartbeats, closing and reconnecting
+
+<AnimatedDiagram name="fundamentals/websockets" step={3} caption="The gateway pings every 30 seconds. A phone that loses signal stops answering, so the gateway closes its socket and frees the memory." />
+
+An open connection can die without a word. A phone enters a tunnel. A laptop lid closes. TCP does not notice for a long time: Linux sends its first keepalive probe after 2 hours of silence by default. Middle boxes are less patient. A home router or a NAT gateway (the box that shares one public address among many machines) drops a quiet connection after a few minutes, and many load balancers drop it after 60 seconds.
+
+A **heartbeat** fixes both problems. The gateway sends a **ping** frame every 30 seconds, and the browser answers with a **pong** automatically. The traffic keeps routers from treating the connection as idle. When no pong arrives for about 60 seconds, the gateway closes the socket, frees its memory and tells the quiz service that student 17 is offline. For 200,000 sockets, that is $200{,}000 / 30 \approx 6{,}700$ pings a second of a few bytes each. Browser code cannot send a ping frame itself, so many apps also send a small `{"t":"hb"}` message from the client, which lets the client notice a dead server too.
+
+A clean close is a **close frame** with a code: `1000` means normal, and `1001` means "going away", for example a server shutting down for a deploy. When the connection drops instead, the client reconnects. It waits a random, growing delay first, and tells the server the last message it saw, so it misses nothing:
+
+```ts
+let attempt = 0;
+let lastSeen = 0; // id of the last message this page received
+
+function connect() {
+  const ws = new WebSocket(`wss://quiz.example.com/ws?since=${lastSeen}`);
+  ws.onopen = () => { attempt = 0; };
+  ws.onmessage = (e) => { lastSeen = JSON.parse(e.data).id; };
+  ws.onclose = () => {
+    const cap = Math.min(30_000, 5_000 * 2 ** attempt++); // 5 s, 10 s, 20 s, then 30 s
+    setTimeout(connect, Math.random() * cap);             // jitter: wait anywhere from 0 to cap
+  };
+}
+```
+
+Some networks never let the upgrade through. Old corporate proxies strip the `Upgrade` header or cut long connections. Libraries then **fall back** to an older transport and keep the same message API on top. SignalR tries [server-sent events](/system-design/fundamentals/server-sent-events) and then [long polling](/system-design/fundamentals/long-polling). Socket.IO uses long polling.
+
+### Step 4: Many servers, each socket stuck to one
+
+<AnimatedDiagram name="fundamentals/websockets-scaling" step={1} caption="The load balancer spreads sockets across gateways and keeps each one where it landed. The teacher is on gateway 1; the students are on gateways 2 and 3." />
+
+One gateway holds a lot, but not everything. Each open socket costs memory for its TCP buffers, its TLS state and your own bookkeeping, about 30 KB when tuned. At 50,000 sockets that is $50{,}000 \times 30 \text{ KB} = 1.5 \text{ GB}$ of RAM, plus 50,000 file handles, the operating system's counter for each open file or socket (the default limit is often 1,024, so you raise it). Say you cap each gateway at 50,000 sockets. For 200,000 sockets you need 4 gateways. Run 6, so each holds about 33,000 and losing one leaves 5 at about 40,000.
+
+A socket is one long TCP connection, so it stays on the gateway where it landed. No setting is needed for that: the load balancer forwards the connection's bytes to the same gateway until it closes. **Sticky sessions** go one step further: they send a client's *next* connection to the same server, using a cookie or a hash of the client's address. You need them when a fallback transport spreads one session over many HTTP requests, or when a reconnect should find its state on the same server.
+
+Stickiness does not solve the real problem. Room 42's teacher is on gateway 1. Of the 30 students, 12 are on gateway 2 and 18 are on gateway 3. When the teacher starts question 3, gateway 1 has no socket to any student.
+
+### Step 5: A socket gateway with pub/sub
+
+<AnimatedDiagram name="fundamentals/websockets-scaling" step={2} caption="Gateways only hold connections. They pass every event to a stateless quiz service, which saves answers." />
+
+First, keep the gateways simple. A gateway checks the user at the handshake, holds the socket, runs heartbeats and passes each message to the quiz service. The quiz service holds the rules and the scores. It keeps no sockets, so you can deploy it many times a day without dropping a single connection. Gateways change rarely, which matters, because restarting one drops 33,000 sockets.
+
+<AnimatedDiagram name="fundamentals/websockets-scaling" step={3} caption="The quiz service publishes once to the room's channel. Each gateway with a member of room 42 gets one copy and writes it to its own sockets." />
+
+Next, connect the gateways with **pub/sub** (publish and subscribe): a message broker, such as Redis, with named channels. A publisher sends a message to a channel, and the broker delivers a copy to every subscriber of that channel. When a student in room 42 connects, their gateway subscribes to `room:42`, if it has not already. When the teacher starts question 3, the quiz service publishes one message to `room:42`. The broker delivers 3 copies, one per gateway, not one per phone. Each gateway writes the frame to its local sockets. This two-level <Term id="fan-out">fan-out</Term> keeps the broker's work tied to gateways, not to phones.
+
+For a message to one user, the gateway can subscribe to a `user:<id>` channel too. Or the system can keep a **connection registry** that maps each user to the gateway that holds them, as the [Messenger design](/system-design/case-studies/facebook-messenger) does.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Your gateways hold 40,000 sockets each, and you expect 300,000 at peak. How many gateways do you run?" hint="Plan for losing one gateway at peak.">
+    $300{,}000 / 40{,}000 = 7.5$, so 8 at the bare minimum. Add room to lose one at peak: with 9 gateways, each holds about 33,000. If one dies, the other 8 hold 37,500 each, still under the limit.
+  </QuizItem>
+  <QuizItem question="A load balancer closes connections that send nothing for 60 seconds. What heartbeat interval do you pick?" hint="The heartbeat has to beat the timeout with room to spare.">
+    Something well under 60 seconds, such as 25 to 30 seconds. Then even a delayed ping arrives before the timeout. Pinging every 59 seconds would lose connections whenever a ping runs late.
+  </QuizItem>
+  <QuizItem question="A room has 30 students spread over 3 gateways. The quiz service publishes one message to the room's channel. How many copies does the broker send, and how many frames reach phones?">
+    The broker sends 3 copies, one per subscribed gateway. The gateways write 30 frames between them, one per student. The broker's work grows with gateways, not with students.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["At exam peak (200,000 phones)", "Polling every 1 s", "WebSockets"]}
+  rows={[
+    ["Requests or frames per second when nothing happens", "200,000 requests", "about 6,700 pings"],
+    ["Header bytes per update", "about 800", "2 to 6"],
+    ["Time for a new question to reach a phone", "0.5 s on average, 1 s at worst", "one network trip, about 50 ms"],
+    ["Server state per user", "none", "about 30 KB, held all session"],
+    ["Losing a server", "the next poll goes elsewhere", "33,000 clients reconnect"],
+  ]}
+  caption="Same quiz app, two ways to keep 200,000 phones up to date."
+/>
+
+<ProsCons
+  pros={[
+    "The server speaks first: updates arrive in one network trip",
+    "Both sides talk on one connection, so chat, games and live editing fit",
+    "Tiny frame headers: 2 to 6 bytes instead of hundreds of bytes per request",
+    "Works in every modern browser and through most networks over wss:// on port 443",
+  ]}
+  cons={[
+    "Servers hold state: every open socket costs memory and pins a user to one machine",
+    "Deploys and crashes cause reconnect storms you must spread out",
+    "Needs heartbeats, reconnect logic and pub/sub that plain HTTP does not",
+    "HTTP caches, CDNs and most HTTP tooling cannot see inside the frames",
+  ]}
+/>
+
+If the data only flows from server to client, such as a live score, [server-sent events](/system-design/fundamentals/server-sent-events) are simpler. [Choosing a real-time method](/system-design/fundamentals/choosing-realtime) puts the options side by side.
+
+## In the wild
+
+- **Slack** keeps a WebSocket from each desktop and web client to gateway servers. The gateways subscribe to the channels each user is in and pass new messages down the socket.
+- **Discord** runs a WebSocket "gateway" for bots and clients. The server tells each client how often to send heartbeats, about every 40 seconds, and closes connections that stop.
+- **Amazon API Gateway** offers managed WebSocket APIs. It holds the connections, gives each one an id, and your backend sends a message to a user by posting to that id. Idle connections close after 10 minutes, and every connection closes after 2 hours.
+
+## Common pitfalls
+
+- **Expecting sticky sessions to deliver messages.** Stickiness keeps a user on one gateway. It does not get the teacher's message to students on other gateways. You need pub/sub or a connection registry.
+- **No heartbeats.** Proxies drop quiet sockets after 60 seconds, and dead phones stay "online" for hours. Ping every 25 to 30 seconds and close after about two missed pongs.
+- **Reconnecting all at once.** A crashed gateway sends 33,000 clients back within a second. A random first delay of 0 to 5 seconds cuts that to about 6,600 a second, and each failed try doubles the window.
+- **Proxy defaults.** nginx closes a proxied connection after 60 seconds without data, unless you raise `proxy_read_timeout`. It also needs the `Upgrade` and `Connection` headers passed through.
+- **Skipping the Origin check.** Browsers send cookies with the upgrade request, and WebSockets skip the browser's cross-origin checks (CORS). A hostile page can open a socket as your user unless you check `Origin` or use a token.
+- **Unbounded send buffers.** A phone on a slow network reads slower than you write. Cap each socket's queue (say 1 MB), then drop updates that can be replaced, or close the socket.
+
+## How to say it in an interview
+
+"A WebSocket starts as an HTTP request with an Upgrade header. The server answers 101, and the same TCP connection becomes a two-way channel of small frames with 2 to 6 bytes of header. I use it when both sides send often and need sub-second updates, like chat or a live quiz; if only the server pushes, I pick server-sent events. The hard part is scale, because every socket is state on one server. At about 50,000 sockets per gateway, 200,000 users need 4 gateways, so I run 6 for headroom. Gateways only hold connections and run heartbeats every 30 seconds. A stateless service holds the logic. To reach users on other gateways, the service publishes to a pub/sub channel per room or per user, and every subscribed gateway writes to its local sockets. Clients reconnect with jittered backoff and resume from the last message id, so a gateway crash or a deploy does not send everyone back at the same instant."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What happens, step by step, when a browser opens a WebSocket?" level="Junior" category="Real-time">
+    **Short answer.** The browser sends a normal HTTP GET with `Upgrade: websocket` and a random key. The server answers `101 Switching Protocols` with a hash of that key, and from then on the same TCP connection carries WebSocket frames in both directions.
+
+    **Why.** Starting from HTTP lets WebSockets use port 443, TLS and the load balancers that already handle web traffic. The handshake costs one round trip on top of the TCP and TLS setup. With TLS 1.3 and a phone at about 50 ms per trip, that is 3 trips (TCP, TLS, upgrade), roughly 150 ms in all, paid once per session instead of once per message. After the 101, each message needs only a 2 to 6 byte frame header.
+
+    <AnimatedDiagram name="fundamentals/websockets" step={1} caption="The upgrade: one HTTP request, one 101 answer, then frames." />
+
+    **Follow-ups the interviewer may ask.**
+    - What is `Sec-WebSocket-Accept` for, and is it a security feature?
+    - How do you authenticate the user during the handshake?
+
+    **Watch out for.** Saying a WebSocket is "a different port" or "not HTTP at all". It begins as HTTP on the same port, which is why it passes through most networks.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When would you choose WebSockets over polling or server-sent events?" level="Junior" category="Real-time">
+    **Short answer.** Choose WebSockets when both sides send messages often and the user needs updates in under a second, such as chat, multiplayer games or live collaboration. If only the server pushes, server-sent events are simpler. If updates are rare and a few seconds of delay is fine, polling is simplest.
+
+    **Why.** Polling 200,000 phones once a second costs 200,000 requests a second, most of them empty, and still leaves updates up to a second late. A WebSocket costs nothing when idle except a ping every 30 seconds, and an update arrives in one network trip. The price is state: each open socket holds about 30 KB on one server.
+
+    **Follow-ups the interviewer may ask.**
+    - What would you use for a delivery-tracking page that updates every minute?
+    - What do you do for users behind a proxy that blocks the upgrade?
+
+    **Watch out for.** Picking WebSockets for everything "because it is real-time". For one-way updates you take on reconnect logic, heartbeats and stateful scaling for no gain.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why do WebSocket connections need heartbeats when TCP already has keepalive?" level="Mid" category="Reliability">
+    **Short answer.** TCP keepalive starts far too late, after 2 hours by default on Linux, and proxies drop quiet connections much sooner. A ping every 25 to 30 seconds keeps the path open and finds dead clients within about a minute.
+
+    **Why.** Load balancers commonly close idle connections after 60 seconds, and NAT devices after a few minutes, so a quiet but healthy socket gets cut. A phone that loses signal never sends a close frame, so without a heartbeat the server keeps its 30 KB of state and shows the user "online" for hours. For 200,000 sockets, a 30-second ping is about 6,700 tiny frames a second. After about two missed pongs, the server closes the socket and marks the user offline.
+
+    <AnimatedDiagram name="fundamentals/websockets" step={3} caption="Ping, pong, then a missed pong and a close." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why do many apps also send a heartbeat from the client?
+    - How do you avoid marking a user offline during a brief signal drop?
+
+    **Watch out for.** Setting the heartbeat equal to the proxy timeout. A ping that runs a little late then loses the connection; stay well under it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Chat works on one server. You add a second server, and some messages never arrive. Why, and how do you fix it?" level="Mid" category="Real-time" companies={["Meta"]}>
+    **Short answer.** The sender and the receiver are now connected to different servers, and a server can only write to sockets it holds. Connect the servers with pub/sub: each server subscribes to the rooms or users it holds, and every message is published to that channel.
+
+    **Why.** With one server, every socket is local. With two, about half of all conversations cross servers. The sender's server gets the message but has no socket to the receiver. With a channel per room, one publish reaches every server that has a member: a room of 30 spread over 3 servers costs the broker 3 deliveries, and those servers write the 30 frames locally.
+
+    <AnimatedDiagram name="fundamentals/websockets-scaling" path="quiz>pubsub>gw3" caption="One publish to room:42 reaches gateway 3, which writes to its 18 students." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you deliver a message to one user instead of a room?
+    - What happens to a message published while the receiver is reconnecting?
+
+    **Watch out for.** Answering "turn on sticky sessions". Stickiness keeps each user on one server; it does nothing to get a message from one server to another.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Do WebSockets need sticky sessions?" level="Mid" category="Load balancing">
+    **Short answer.** Once a WebSocket is open, it is one TCP connection, so it stays on its server with no extra setup. You need sticky sessions only when a session spans several connections: a fallback transport like long polling, or a reconnect that should land where the user's state is.
+
+    **Why.** A load balancer forwards an upgraded connection byte by byte to the server that accepted it. The problem starts with fallbacks. Socket.IO's long-polling mode sends many HTTP requests for one session, and they must all reach the server holding that session. If you keep no state on gateways and resume from the client's last message id, a reconnect can land anywhere, and you can drop stickiness entirely.
+
+    <AnimatedDiagram name="fundamentals/websockets-scaling" highlight={["lb", "gw1", "gw2", "gw3"]} caption="The load balancer keeps each open socket on the gateway that accepted it." />
+
+    **Follow-ups the interviewer may ask.**
+    - Should the load balancer work at layer 4 (TCP) or layer 7 (HTTP) for WebSockets?
+    - What goes wrong with cookie stickiness when one gateway gets far more users than the others?
+
+    **Watch out for.** Treating stickiness as the scaling plan. It decides where a socket lives, not how messages reach other servers.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Size a socket tier for 200,000 concurrent connections. What happens when one server dies, and how do you deploy without dropping everyone?" level="Senior" category="Capacity">
+    **Short answer.** At about 50,000 sockets per gateway you need 4; run 6, so each holds about 33,000 and losing one leaves 5 at about 40,000. Clients reconnect with random jittered backoff, and deploys drain gateways slowly instead of restarting them all at once.
+
+    **Why.** Memory sets the limit: about 30 KB per socket is 1.5 GB for 50,000 sockets, plus one file handle each. When a gateway dies, its 33,000 clients reconnect. If they all retry within a second, the other 5 gateways face 33,000 TLS handshakes at once, which can tip them over too. With the first retry spread at random over 5 seconds, that is $33{,}000 / 5 = 6{,}600$ a second in all, or about 1,300 per gateway. For a deploy, take a gateway out of the load balancer, send close code 1001 to its sockets in batches over 10 minutes, then restart it. Keep business logic out of gateways so they rarely need a deploy. Also check the load balancer: each of its source addresses can open only about 28,000 to 64,000 connections to one gateway address and port.
+
+    <Compare
+      columns={["Event", "Reconnects", "Spread over", "Handshakes per second"]}
+      rows={[
+        ["Gateway crash, no jitter", "33,000", "about 1 s", "about 33,000"],
+        ["Gateway crash, jitter", "33,000", "5 s", "about 6,600"],
+        ["Planned drain", "33,000", "10 min", "about 55"],
+      ]}
+      caption="The same 33,000 sockets, three ways to move them."
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - How does a reconnecting client avoid missing messages?
+    - What metric tells you a gateway is close to its limit?
+
+    **Watch out for.** Sizing for the average and forgetting the herd. A tier that runs fine at 33,000 sockets each can fall over when one gateway dies and its clients return all at once.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="At exam peak, every answer updates the teacher's '18 of 30 answered' counter, and the socket tier falls behind. How do you redesign the fan-out?" level="Senior" category="Real-time" companies={["Microsoft"]}>
+    **Short answer.** Coalesce the updates. The quiz service counts answers per room and publishes the counter at most once a second, only to the teacher. Then cap each socket's send queue so one slow screen cannot hold back the rest.
+
+    **Why.** 200,000 students answering once every 30 seconds is about 6,700 answers a second. If each answer publishes a room update that goes to all 31 sockets, the broker makes about $6{,}700 \times 3 \approx 20{,}000$ deliveries a second (three gateways per room), and the gateways write about $6{,}700 \times 31 \approx 208{,}000$ frames a second. Almost all of them are counters nobody needs that often. With one counter message per room per second, sent to the teacher only, there are at most 6,000 publishes, deliveries and frames a second (one per room). A counter can be replaced: if the teacher's socket is slow, drop the old value and send the newest. For messages that must arrive, such as the question itself, cap the queue (say 1 MB) and close a socket that stays over it, so the client reconnects and resumes. Limiting a sender that is too fast like this is called back-pressure.
+
+    **Follow-ups the interviewer may ask.**
+    - Which messages can you drop or merge, and which must arrive in order?
+    - Would you shard the pub/sub broker by room, and what does that change?
+
+    **Watch out for.** Adding gateways and broker capacity first. The load is waste you created by publishing every change, and batching cuts the frames by about 35 times ($208{,}000 / 6{,}000$).
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [HTTP](/system-design/fundamentals/http): the request the handshake starts as
+- [Ajax polling](/system-design/fundamentals/ajax-polling) and [Long polling](/system-design/fundamentals/long-polling): the simpler ways to get updates
+- [Server-sent events](/system-design/fundamentals/server-sent-events): a one-way stream from server to browser
+- [Choosing a real-time method](/system-design/fundamentals/choosing-realtime): all the options side by side
+- [Load balancing basics](/system-design/fundamentals/load-balancing-basics): how connections are spread across servers
+- [Fan-out](/system-design/patterns/fan-out) and [Back-pressure](/system-design/patterns/back-pressure): delivering one event to many sockets without drowning
+- [Design Facebook Messenger](/system-design/case-studies/facebook-messenger): chat servers, a session registry and push in a full design
+
+## Further reading
+
+- [RFC 6455, The WebSocket Protocol](https://www.rfc-editor.org/rfc/rfc6455): the standard, with the handshake, frame format, masking and close codes.
+- [MDN, The WebSocket API](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API): the browser interface, events and examples.
+- [Amazon API Gateway, WebSocket APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html): a managed socket gateway with connection ids and limits.
+- [Slack Engineering, Real-time Messaging](https://slack.engineering/real-time-messaging/): how gateway servers and channel servers deliver messages at Slack's scale.

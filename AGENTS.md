@@ -18,19 +18,18 @@ practice on top. Goal: the fastest, clearest place to learn how real systems are
 confirmed at sign-up; purchases by adults), interview candidates, working engineers, and **international buyers,
 the primary source of income**.
 
-| Section (key)                            | Kind            | What it is for                                                    |
-| ---------------------------------------- | --------------- | ----------------------------------------------------------------- |
-| GenAI & LLM Systems (`ai-system-design`) | `docs`          | Transformers, LLMs, RAG, agents, production AI system design      |
-| Classic System Design (`system-design`)  | `docs`          | Fundamentals, databases, patterns and case studies                |
-| Cloud (`cloud`)                          | `docs`          | AWS / Google Cloud / Azure services by job, mapped across clouds  |
-| Interview Practice (`interviews`)        | `question-bank` | Question library by category, answers, company tags               |
-| Company Questions (`companies`)          | `directory`     | Aggregates company tags from Interview Practice and DSA           |
-| DSA (`dsa`)                              | `problems`      | Topics and problems with an in-browser runner (public tests only) |
-| Newsletter (`newsletter`)                | `newsletter`    | Issues as MDX: web archive plus double opt-in email               |
-| ML System Design (`ml-system-design`)    | `docs`          | Parked: `off` everywhere except local                             |
+| Section (key)                            | Kind            | What it is for                                                                             |
+| ---------------------------------------- | --------------- | ------------------------------------------------------------------------------------------ |
+| GenAI & LLM Systems (`ai-system-design`) | `docs`          | GenAI hub (LLMs, RAG, agents, AI case studies) + ML System Design hub (parked: local only) |
+| Classic System Design (`system-design`)  | `docs`          | Fundamentals, databases, patterns and case studies                                         |
+| Cloud (`cloud`)                          | `docs`          | AWS / Google Cloud / Azure services by job, mapped across clouds                           |
+| Interview Practice (`interviews`)        | `question-bank` | Question library by category, answers, company tags                                        |
+| Company Questions (`companies`)          | `directory`     | Aggregates company tags from Interview Practice and DSA                                    |
+| DSA (`dsa`)                              | `problems`      | Topics and problems with an in-browser runner (public tests only)                          |
+| Newsletter (`newsletter`)                | `newsletter`    | Issues as MDX: web archive plus double opt-in email                                        |
 
 Release states per environment are in `apps/web/content/sections.yaml` (today Cloud is `hidden` in production;
-DSA and Newsletter are `off`).
+DSA and Newsletter are `off`; the ML System Design hub of `ai-system-design` is `off` outside local via `hubRelease`).
 
 **Business model:** freemium per article (hubs, outlines and chosen articles free; premium articles show a preview
 and a paywall), Pro as a monthly or yearly subscription, regional purchasing-power price tiers A/B/C (100% / ~70% /
@@ -155,7 +154,7 @@ only). Build outputs (src/generated/, .build-cache/, public/\_a/) are gitignored
 | Monitoring and analytics (off by default) | `apps/web/src/features/observability/`, `apps/web/src/features/analytics/`                         |
 | Business placeholders, crawler list       | `apps/web/src/config/business.ts`, `apps/web/src/config/crawlers.ts`                               |
 | Regional price tiers (country → A/B/C)    | `apps/web/src/config/pricing-tiers.ts` (pricing page, middleware, billing reporting)               |
-| UI components                             | `apps/web/src/components/` (mdx, article, diagrams, cloud, db, ui)                                 |
+| UI components                             | `apps/web/src/components/` (mdx, article, diagrams, teach, cloud, db, ui)                          |
 
 ## Repo map
 

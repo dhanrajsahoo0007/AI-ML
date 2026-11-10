@@ -1,0 +1,270 @@
+---
+title: "Push notifications"
+description: "How an app server reaches a closed app through APNs and FCM: device tokens, collapsing, badges, silent pushes, and why delivery is best-effort."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  A push notification is a short message your server hands to Apple or Google, who deliver it to a phone over a connection the phone's operating system already keeps open, even when your app is closed.
+</KeyIdea>
+
+## The story
+
+You run Lockbox, a parcel-locker app with 2 million installs. A courier puts a parcel in locker 14 on Elm Street at 6:12 pm and closes the door. The customer, Priya, is on a bus with her phone in her pocket and the Lockbox app closed. She needs to know two things: the parcel is there, and the code to open the locker expires in 48 hours. Your server knows this at 6:12 pm. The hard part is telling her phone.
+
+Your first idea is to keep a <Term id="websocket">WebSocket</Term> open from the app to your servers, as a chat app does while it is on screen. That fails here. When Priya leaves an app, iOS suspends it within seconds, and Android soon limits it too. A closed app runs no code, so it holds no connection and hears nothing. And if each of her 40 apps kept its own connection alive, the radio would wake 40 times as often and the battery would be flat by lunch.
+
+So phones do it differently. The operating system keeps **one** encrypted connection to its vendor's push service: **APNs** (Apple Push Notification service) on iPhones, **FCM** (Firebase Cloud Messaging) on Android. Every app shares it. Your server never talks to the phone. It talks to Apple or Google, and they talk to the phone.
+
+## How it works
+
+Three parties take part. The **provider** is your server, the one that decides to send. The **push service** is APNs or FCM. The **device** is the phone, with your app installed but maybe not running.
+
+### Step 1: The phone gets a device token and registers it
+
+<AnimatedDiagram name="fundamentals/push-notifications" step={1} caption="The push service gives the app a device token; the app sends it to your token API, which saves it under the user's id." />
+
+The first time Priya allows notifications, the app asks the operating system for a **device token**. The OS gets it from APNs or FCM. A device token is a long string that only the push service can decode. Think of it as an address that means "this app, on this phone". It is not a phone number and it says nothing about Priya.
+
+The app sends the token to your **token API**, which saves it next to her user id. One user often has several tokens: a phone, a tablet, maybe a second phone. Tokens also change. A reinstall, a restore onto a new phone or clearing the app's data each gives a new one. So the app sends its current token on every start. Your server does an **upsert** (insert the row, or update it if it already exists), which is cheap and keeps the table fresh.
+
+```sql
+CREATE TABLE device_tokens (
+  token       TEXT PRIMARY KEY,       -- one row per app install
+  user_id     BIGINT NOT NULL,        -- who is signed in on that install
+  platform    TEXT NOT NULL,          -- 'ios' or 'android'
+  app_version TEXT,
+  last_seen   TIMESTAMPTZ NOT NULL    -- bumped on every app start
+);
+CREATE INDEX device_tokens_by_user ON device_tokens (user_id);
+```
+
+The token is the primary key, not the user. If Priya signs out and her partner signs in on the same tablet, the same token now belongs to a different user, and the upsert moves it.
+
+<PremiumBreak />
+
+### Step 2: An event becomes a push
+
+<AnimatedDiagram name="fundamentals/push-notifications" step={2} caption="The locker event reaches the notify service, which looks up tokens, queues one job per token, and workers send each one to APNs or FCM." />
+
+At 6:12 pm the parcel service emits `parcel.delivered` for user 77, Priya. The **notify service** decides what to say and to whom. It looks up her tokens and finds two, phone and tablet, so it puts two jobs on the **push queue**. This is <Term id="fan-out">fan-out</Term>: one event becomes one message per device.
+
+**Push workers** take jobs off the queue and send each one to APNs or FCM as an HTTPS request. APNs requires HTTP/2 and FCM accepts it, so a worker keeps a few long-lived connections open and runs many requests on each at once. Both providers check who is sending: APNs wants a short-lived signed token (a JWT, signed with a key from your Apple developer account), and FCM wants an OAuth access token, a short-lived pass Google issues to your server for your Firebase project.
+
+<Tabs title="The same push, two providers">
+  <Tab label="APNs (iPhone)">
+
+```http
+POST /3/device/<device-token> HTTP/2
+Host: api.push.apple.com
+authorization: bearer <JWT signed with your Apple key>
+apns-topic: com.lockbox.app
+apns-push-type: alert
+apns-priority: 10
+apns-expiration: 1794355200
+apns-collapse-id: parcel-88213
+
+{"aps": {"alert": {"title": "Parcel delivered",
+                   "body": "Locker 14, Elm St. Code valid for 48 h."},
+         "badge": 2, "sound": "default"},
+ "parcel_id": "88213"}
+```
+
+  </Tab>
+  <Tab label="FCM (Android)">
+
+```http
+POST /v1/projects/lockbox-prod/messages:send HTTP/1.1
+Host: fcm.googleapis.com
+Authorization: Bearer <OAuth 2.0 access token>
+Content-Type: application/json
+
+{"message": {
+  "token": "<device-token>",
+  "notification": {"title": "Parcel delivered",
+                   "body": "Locker 14, Elm St. Code valid for 48 h."},
+  "android": {"priority": "HIGH", "ttl": "172800s",
+              "collapse_key": "parcel-88213"},
+  "data": {"parcel_id": "88213"}}}
+```
+
+  </Tab>
+</Tabs>
+
+A few fields matter for design:
+
+- **Size.** Both providers cap the **payload** (the message body) at 4 KB. Send a short text and an id, never the whole parcel record. The app fetches details from your API when Priya taps.
+- **Expiry.** If the phone is off, the provider holds the message for a while. `apns-expiration` (a UNIX time, here 48 hours ahead) and FCM's `ttl` (172,800 s = 48 × 3,600) say when to give up. This is the message's <Term id="ttl">TTL</Term>: past it, the news is useless.
+- **Collapsing.** `apns-collapse-id` and FCM's `collapse_key` name a slot. A newer message with the same key replaces the older one instead of stacking, so "Parcel delivered" followed by "Code changed" shows as one notification. On Android, set `android.notification.tag` too, to replace one that is already on screen.
+
+Why a queue and not a direct call from the notify service? Because the provider is a remote service you do not control. It can be slow, it can answer `429 Too Many Requests`, and your traffic can jump from 30 pushes a second to thousands during a broadcast. The queue absorbs the jump, the workers send at a steady rate, and a failed job waits and tries again without blocking the parcel service. See [Message queues](/system-design/patterns/message-queues).
+
+### Step 3: Dead tokens come back
+
+<AnimatedDiagram name="fundamentals/push-notifications" step={3} caption="APNs answers 410 Unregistered (FCM: UNREGISTERED) for a token that no longer works, and the worker deletes it." />
+
+Every send gets an answer, and the answer is your only feedback. Sort each answer into one of three groups:
+
+| Answer | Meaning | What the worker does |
+| --- | --- | --- |
+| `200` | The provider accepted it | Mark the job done |
+| APNs `410 Unregistered`, FCM `UNREGISTERED`, a bad-token `400` | This token is dead, usually an uninstall | Delete the token, do not retry |
+| `429`, `5xx` server error, timeout | The provider is busy or failing | Retry later, waiting longer each time |
+
+Note what `200` does **not** mean. It means Apple or Google took the message. It does not mean the phone got it, and it never means Priya read it. Neither provider calls your server back when a phone receives a message.
+
+Dead tokens pile up fast. If 2% of 2 million installs go away each month, that is 40,000 dead tokens a month, each wasting a request on every broadcast. Delete on `410`, and also prune tokens whose `last_seen` is old. Firebase suggests apps refresh their token about once a month, so a token silent for two months probably points at a phone no one uses.
+
+Retry with **exponential backoff**: wait about 1 s, then 2 s, then 4 s, and add a little random **jitter** so thousands of failed jobs do not all retry at the same instant. Retries also need care for another reason. A worker that times out does not know whether the provider got the request, so it may send twice. Keep the same collapse id on the retry. Then a duplicate replaces the first copy instead of showing twice, which makes the retry close to <Term id="idempotent">idempotent</Term>. See [Circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries).
+
+### Step 4: Best-effort, badges and silent pushes
+
+Push delivery is **best-effort**: the provider tries, but makes no promise. Here are the ways a message can quietly not arrive:
+
+- **The phone is offline for long.** APNs keeps only the newest notification for your app while a phone is offline. FCM keeps up to 100 non-collapsible messages per device, then drops them all and tells the app that messages were lost. Anything past its expiry is thrown away.
+- **The user said no.** Notifications are off for your app, Focus or Do Not Disturb is on, or the user swiped it away unread.
+- **The OS saves power.** Battery saver, and Doze (Android's deep sleep for an idle phone), can delay normal-priority messages until the phone wakes.
+- **The app was force-quit** on an iPhone. Background pushes are not delivered to it until the user opens the app again.
+
+So treat a push as a **hint**, not as the record. The truth lives on your server: the parcel, its locker and its code sit in your database, and the app shows them on open. For news that really matters, add a second channel. If Priya has not opened the app 6 hours before the code expires, Lockbox sends an SMS.
+
+Pushes also come in different kinds:
+
+<Compare
+  columns={["Kind", "What the user sees", "Wakes your app", "How to send it"]}
+  rows={[
+    ["Alert", "A banner, a sound, an entry in the notification list", "Only if they tap", "APNs push type alert, priority 10; FCM notification message"],
+    ["Badge", "A number on the app icon", false, "APNs aps.badge = the full count; on Android, most home screens show a dot or the number of notifications"],
+    ["Silent (background)", "Nothing", "Yes, for a few seconds, if the OS allows", "APNs content-available 1, push type background, priority 5; FCM data-only message"],
+  ]}
+  caption="Alert pushes talk to the user; silent pushes talk to the app."
+/>
+
+Two details trip people up. First, an APNs badge is the **whole number**, not "+1". To show 2 waiting parcels, your server must know there are 2 and send `"badge": 2`. When Priya collects one, send `"badge": 1`, or the icon is wrong until she opens the app. Second, silent pushes are rationed. Apple asks for no more than two or three an hour per app and may hold them back. Use them to prefetch data before the user opens the app, never as the only way something important arrives.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="APNs answered 200 for Priya's push. Can Lockbox mark the parcel as 'customer notified'?" hint="What did the 200 confirm, and who sent it?">
+    No. The 200 only says Apple accepted the request. The phone may be off, notifications may be disabled, or the banner may be swiped away. Lockbox can record "push sent". It learns the customer actually knows only when the app opens the parcel screen or she collects the parcel.
+  </QuizItem>
+  <QuizItem question="A user has 3 waiting parcels and collects one. Your server sends a push with a badge of -1 to take one off. Why is that wrong?" hint="Is the badge field a change or a value?">
+    The badge field is not a change. It sets the number on the icon, so the server must work out the new count and send `"badge": 2`. Apple keeps no counter for you.
+  </QuizItem>
+  <QuizItem question="A worker times out sending 'Parcel delivered' and retries. Both copies arrive. How do you stop the user seeing two banners?" hint="Look at the headers in step 2.">
+    Give both copies the same collapse id (`apns-collapse-id`, or FCM's `collapse_key` plus a notification tag on Android). The second copy then replaces the first instead of adding a new entry.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<ProsCons
+  pros={[
+    "Reaches a closed app: no running code needed on the phone",
+    "One shared OS connection, so each extra app adds almost no battery cost",
+    "Apple and Google run the connections to billions of phones; you run a few HTTP/2 connections",
+    "Free to send for APNs and FCM",
+  ]}
+  cons={[
+    "Best-effort: no delivery receipt, and messages can be dropped or delayed",
+    "4 KB payload, so the app must fetch details from your API",
+    "Tokens change and die, so you must keep a token table clean",
+    "Users can turn it off, and an app that pushes too much gets turned off",
+  ]}
+/>
+
+Of the ways a server can speak first, push is the only one that works when the app is closed. While the app is on screen, a [WebSocket](/system-design/fundamentals/websockets) or [server-sent events](/system-design/fundamentals/server-sent-events) stream is faster, carries more data and lets the app confirm each message. Many apps use both: the socket while the user is looking, push when they are not.
+
+## In the wild
+
+- **Apple APNs** takes requests over HTTP/2 at `api.push.apple.com`, authenticated with a JWT signed by a key from your developer account, with a 4 KB payload limit.
+- **Firebase Cloud Messaging** sends to Android over its own connection and to iPhones by passing the message on to APNs, so one API can reach both.
+- **Web Push** lets websites send notifications through push services run by the browser makers, following the IETF's HTTP push standard (RFC 8030). Safari on iPhone supports it for web apps added to the home screen.
+
+## Common pitfalls
+
+- **Treating 200 as "delivered".** It means "accepted". Keep the truth on your server.
+- **Never deleting dead tokens.** Every broadcast gets slower each month. Delete on `410` and `UNREGISTERED`.
+- **Keeping tokens after sign-out.** The next person on that device gets the previous user's notifications. Unlink the token at sign-out.
+- **Putting private data in the payload.** The text can show on a locked screen. "Your parcel has arrived" is fine; the locker code is not.
+- **Pushing too often.** Each unwanted push is a reason to switch notifications off. On an iPhone the app cannot ask again after a no; only the user can turn it back on in Settings.
+
+## How to say it in an interview
+
+"To reach a closed app I use APNs and FCM. The phone's OS keeps one connection to Apple or Google, and my server sends to them, not to the phone. The app gets a device token and registers it with my token service on every start, stored per install with the user id and a last-seen time. When an event happens, a notify service looks up the user's tokens and queues one job per token. Workers send each job over HTTP/2 with a collapse id, an expiry and a payload under 4 KB. The answers drive cleanup: 410 or UNREGISTERED deletes the token, 429 and 5xx retry with backoff. A 200 only means accepted, so the push is a hint. The real state lives on my server and the app syncs on open. For anything critical, like an expiring locker code, I add a fallback such as SMS."
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a device token, and why can't your server send a notification straight to the phone?" level="Junior" category="Real-time">
+    **Short answer.** A device token is an address that APNs or FCM gives one app install on one phone. Your server cannot reach the phone itself, because a closed app runs no code and holds no connection, so it sends to Apple or Google with that token and they deliver over the connection the OS keeps open.
+
+    **Why.** Phones usually have no public address, and mobile networks block connections that start from outside. The OS keeps one encrypted connection to its vendor, so 40 apps cost the battery one connection instead of 40. Your server sends an HTTPS request with the token to the provider, and the provider finds the right phone. The token changes on reinstall, restore or cleared app data, so the app re-sends it on every start.
+
+    **Follow-ups the interviewer may ask.**
+    - What should happen to a token when the user signs out?
+    - Can one user have several tokens? How do you send to all of them?
+
+    **Watch out for.** Saying the token is the phone number or a permanent device id. It is per app install, it changes, and it can stop working at any time.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you keep the device-token table accurate as users reinstall, switch phones and uninstall?" level="Mid" category="Data modeling">
+    **Short answer.** Key the table by token, upsert it from the app on every start, and let the provider's answers delete the dead ones. Also unlink tokens at sign-out and prune tokens not seen for a few months.
+
+    **Why.** With 2 million installs and 2% churn a month, about 40,000 tokens go dead each month, close to half a million a year, and each one wastes a request on every broadcast. With the token as the primary key, a user who signs in on a shared tablet moves the row to themselves instead of leaving two owners. On `410 Unregistered` or `UNREGISTERED` the worker deletes the row and does not retry. A daily job removes rows whose `last_seen` is more than about 60 days old, since a healthy app refreshes its token at least monthly.
+
+    <AnimatedDiagram name="fundamentals/push-notifications" step={3} highlight={["tokenapi", "tokens", "workers", "apns"]} caption="Tokens come in through the token API and are deleted when a send to APNs or FCM reports them dead." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where would you shard this table if it held 500 million tokens?
+    - How do you avoid deleting a token that only failed because of a temporary error?
+
+    **Watch out for.** Retrying a `410`. It will never succeed, and it takes worker time from live tokens on every later send.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Push delivery is best-effort. How do you make sure a customer still learns their locker code before it expires?" level="Mid" category="Reliability">
+    **Short answer.** Treat the push as a hint and keep the truth on the server: the parcel, its locker and its code live in the database, and the app shows them on open. Track whether the customer has seen it, and if not, escalate to a second channel such as SMS before the deadline.
+
+    **Why.** A `200` from APNs means only "accepted". The phone can be off for days (APNs keeps only the newest notification per app), notifications can be disabled, or the banner can be swiped away. So Lockbox records two facts per parcel: `push_sent_at` and `seen_at` (set when the app loads the parcel screen or the locker opens). A scheduler checks parcels whose code expires within 6 hours and have no `seen_at`, and sends an SMS. If 5% of 300,000 daily parcels need the fallback, that is 15,000 SMS a day. At about 1 to 5 cents each, that costs a few hundred dollars a day, which is cheaper than handling uncollected parcels.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you stop the SMS and the push both firing for someone who already collected the parcel?
+    - Would a silent push help here?
+
+    **Watch out for.** Answering "retry the push until it is delivered". Your server cannot see delivery, so there is nothing to retry on, and repeated alerts teach users to turn notifications off.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Marketing wants to send one push to all 20 million users at 9 am. What do you design for?" level="Senior" category="Scalability">
+    **Short answer.** Read tokens in batches into the push queue and let a pool of workers send at a controlled rate over many HTTP/2 connections. Then spread the send over 15 to 30 minutes, because the real danger is not the providers but your own API when millions of people tap at once.
+
+    **Why.** With about 1.3 tokens per user that is 26 million sends. To finish in 5 minutes you need $26{,}000{,}000 / 300 \approx 87{,}000$ requests a second. If one HTTP/2 connection keeps 100 requests in flight and each takes about 100 ms, it sends about 1,000 a second, so you need about 90 connections, for example 15 workers with 6 each. Read the token table shard by shard, in pages of a few thousand rows, never as one giant query. The second wave is what breaks things. Say 5% of users, 1 million people, open the app within a minute of their push. Sent within one minute, that is about 17,000 extra requests a second on your API, all for the same campaign screen. Spread over 20 minutes, it is under 1,000 a second, and a cached campaign screen absorbs the rest. Workers also slow down on `429`, and each job keeps one collapse id so a retry never shows twice.
+
+    | Send window | Sends per second | Extra API load from 1 million taps |
+    | --- | --- | --- |
+    | 1 min | about 430,000 | about 17,000/s |
+    | 5 min | about 87,000 | about 3,300/s |
+    | 20 min | about 22,000 | about 830/s |
+
+    **Follow-ups the interviewer may ask.**
+    - How do you send at 9 am in each user's own time zone?
+    - How do you cancel a campaign half-way through?
+
+    **Watch out for.** Sizing only the sender. The provider side is the easy half; the tap-through spike on your own backend is what takes the site down.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [WebSockets](/system-design/fundamentals/websockets): a live two-way connection while the app is open
+- [Server-sent events](/system-design/fundamentals/server-sent-events) and [Long polling](/system-design/fundamentals/long-polling): the server speaks first, over plain HTTP
+- [Choosing a real-time method](/system-design/fundamentals/choosing-realtime): polling, streams, sockets and push side by side
+- [Message queues](/system-design/patterns/message-queues) and [Fan-out](/system-design/patterns/fan-out): the queue and the one-to-many step in the send path
+- [Circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries): backoff when the provider says slow down
+- [Design WhatsApp](/system-design/case-studies/whatsapp) and [Design Facebook Messenger](/system-design/case-studies/facebook-messenger): push as the offline path of a chat system
+
+## Further reading
+
+- [Apple Developer, Sending notification requests to APNs](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns): the HTTP/2 request, headers such as collapse id and expiration, and the error answers.
+- [Firebase, Best practices for FCM registration token management](https://firebase.google.com/docs/cloud-messaging/manage-tokens): how tokens change, how often to refresh them, and when to treat one as stale.
+- [Firebase, Set and manage message options](https://firebase.google.com/docs/cloud-messaging/concept-options): collapsible messages, priority, time to live and the offline storage limits.
+- [IETF RFC 8030, Generic Event Delivery Using HTTP Push](https://www.rfc-editor.org/rfc/rfc8030): the open standard behind Web Push.

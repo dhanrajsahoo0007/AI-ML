@@ -1,13 +1,17 @@
 import fs from "node:fs";
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 import matter from "gray-matter";
+import yaml from "js-yaml";
 import { frontmatterSchema } from "../../src/features/sections/schema";
+import { extractInterviewQuestions } from "../../src/lib/question-answer";
 import { dbE2E, loginAs, origin, reseed, SKIP_REASON } from "../fixtures/users";
 import {
   canSign,
   expiredEntitlement,
   foreignKidEntitlement,
   paywallBuilt,
+  premiumManifest,
   signedEntitlement,
 } from "../fixtures/paywall";
 import { loadBuiltRoutes } from "./support/built-routes";
@@ -47,6 +51,49 @@ async function signedVisitors(): Promise<Visitor[]> {
     { name: "free-tier cookie", headers: { cookie: await signedEntitlement({ tier: "free" }) } },
     { name: "unknown-kid cookie", headers: { cookie: await foreignKidEntitlement() } },
   ];
+}
+
+/**
+ * Premium interview answers that contain a diagram (plan §6.2), found the way the suite finds premium content:
+ * the build's premium manifest lists the routes of every `access: premium` category in
+ * content/question-bank/taxonomy.yaml. Each answer comes from the category's YAML file or from an article
+ * filed under it in articles.yaml. `text` is a run of plain words from the answer, so it is matched as is in
+ * HTML and in RSC payloads.
+ */
+function premiumDiagramAnswers(): { routes: string[]; answers: { id: string; text: string }[] } {
+  const content = path.resolve(__dirname, "../../content");
+  const bank = path.join(content, "question-bank");
+  const read = (file: string) => (fs.existsSync(file) ? yaml.load(fs.readFileSync(file, "utf8")) : undefined);
+  const taxonomy = (read(path.join(bank, "taxonomy.yaml")) ?? []) as { slug: string; access?: string }[];
+  const premium = new Set(taxonomy.filter((c) => c.access === "premium").map((c) => c.slug));
+  const sections = (read(path.join(content, "sections.yaml")) ?? []) as { kind?: string; href?: string }[];
+  const bankHref = sections.find((s) => s.kind === "question-bank")?.href;
+  if (!bankHref) return { routes: [], answers: [] };
+  // Routes look like <bank href>/<category> and <bank href>/<category>/<subsection>.
+  const categoryOf = (route: string) => route.slice(bankHref.length).split("/")[1] ?? "";
+  const routes = premiumManifest().routes.filter((r) => r.startsWith(`${bankHref}/`) && premium.has(categoryOf(r)));
+  const built = new Set(routes.map(categoryOf));
+
+  const sources: { id: string; a: string }[] = [];
+  for (const slug of built) {
+    const rows = (read(path.join(bank, `${slug}.yaml`)) ?? []) as { id: string; a?: string }[];
+    sources.push(...rows.map((r) => ({ id: `${slug}.yaml ${r.id}`, a: r.a ?? "" })));
+  }
+  const articles = (read(path.join(bank, "articles.yaml")) ?? {}) as Record<string, string>;
+  for (const [href, target] of Object.entries(articles)) {
+    const file = path.join(content, `${href}.mdx`);
+    if (!built.has(target.split("/")[0]) || !fs.existsSync(file)) continue;
+    for (const q of extractInterviewQuestions(matter(fs.readFileSync(file, "utf8")).content)) {
+      sources.push({ id: `${href} ${q.question}`, a: q.answer });
+    }
+  }
+  const answers = sources.flatMap(({ id, a }) => {
+    if (!a.includes("<AnimatedDiagram")) return [];
+    const prose = a.replace(/<[A-Z][^>]*>/g, " ");
+    const text = (prose.match(/[A-Za-z0-9][A-Za-z0-9 ]{22,}[A-Za-z0-9]/g) ?? []).sort((x, y) => y.length - x.length)[0];
+    return text ? [{ id, text }] : [];
+  });
+  return { routes, answers };
 }
 
 /** Paths around the fixture that must never carry its premium body. */
@@ -131,6 +178,38 @@ test.describe("paywall leak suite @leak @core", () => {
     await context.setExtraHTTPHeaders(pro.headers);
     await page.goto(FIXTURE_ROUTE);
     await expect(page.getByText(CANARY)).toBeVisible();
+  });
+
+  test("premium interview answers with diagrams: no answer text and no diagram SVG without Pro", async ({
+    request,
+  }) => {
+    const { routes, answers } = premiumDiagramAnswers();
+    test.skip(
+      answers.length === 0,
+      "no premium interview answer with an <AnimatedDiagram> in this build; the locked path is unit-tested in src/components/mdx/question-bank.test.ts"
+    );
+    const hits: Hit[] = [];
+    for (const visitor of [...NON_ENTITLED_VISITORS, ...(await signedVisitors())]) {
+      for (const url of routes) {
+        for (const s of await fetchPageSurfaces(request, url, visitor)) {
+          const where = `${visitor.name} ${s.surface} ${s.url}`;
+          expect(s.status, where).toBe(200);
+          // Locked answers render no diagram at all, so no diagram node may be in the page.
+          hits.push(...scanText(s.body, /data-node=/, `${where} (diagram SVG)`));
+          for (const a of answers) hits.push(...scanText(s.body, a.text, `${where} (answer ${a.id})`));
+        }
+      }
+    }
+    expect(report(hits)).toEqual([]);
+
+    // With Pro the same answers are in the category pages, so the checks above can't pass by looking for text
+    // that never renders.
+    if (!canSign()) return;
+    const pro: Visitor = { name: "pro", headers: { cookie: await signedEntitlement({ tier: "pro" }) } };
+    const pages = await Promise.all(routes.map((url) => request.get(url, { headers: pro.headers })));
+    const html = (await Promise.all(pages.map((r) => r.text()))).join("\n");
+    expect(html).toContain("data-node=");
+    for (const a of answers) expect(html, a.id).toContain(a.text);
   });
 
   // Every built page through every surface, anonymous and with a forged cookie.

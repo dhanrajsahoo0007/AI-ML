@@ -1,0 +1,262 @@
+# Glossary for the Classic System Design section. Read by src/lib/glossary.ts (zod-validated).
+#
+# Entry format:
+#   - id: kebab-case, unique; what <Term id="..."> and /system-design/glossary#<id> use
+#     term: the display name
+#     short: one plain sentence, at most 160 characters (shown in the hover definition)
+#     long: optional, a short paragraph for the glossary page
+#     related: optional, ids of other entries
+#
+# Keep `short` readable on its own: all ages read this.
+
+- id: latency
+  term: Latency
+  short: How long one request takes from sending it to getting the answer back, usually measured in milliseconds.
+  long: Latency is the time one operation takes end to end. Most systems report it as percentiles (p50, p99) because the average hides the slow requests users notice most.
+  related: [throughput, p99]
+
+- id: throughput
+  term: Throughput
+  short: How much work a system completes per unit of time, such as requests or bytes per second.
+  long: Throughput and latency are different. A system can handle a lot of requests per second (high throughput) while each one still takes a long time (high latency).
+  related: [latency, qps]
+
+- id: qps
+  term: QPS
+  short: Queries per second, the number of requests a system receives or handles each second.
+  long: QPS (or RPS, requests per second) is the usual unit for sizing a system. Estimate the average first, then plan for the peak, often 2 to 5 times the average.
+  related: [throughput]
+
+- id: availability
+  term: Availability
+  short: The share of time a system answers correctly, often written as "nines", such as 99.9% (about 8.8 hours of downtime a year).
+  long: Availability is measured over a period, usually a month or a year. Each extra nine costs more. 99.9% allows about 43 minutes of downtime a month; 99.99% allows about 4 minutes.
+  related: [sla, slo, failover]
+
+- id: consistency
+  term: Consistency
+  short: Whether every reader sees the same data at the same time after a write.
+  long: Strong consistency means a read always returns the latest write. Weaker models let readers see older data for a while in exchange for speed or availability.
+  related: [eventual-consistency, read-your-writes, stale-read]
+
+- id: replication
+  term: Replication
+  short: Keeping copies of the same data on more than one machine, so reads can scale and a failure does not lose data.
+  long: Replication can be synchronous (the write waits for the copies) or asynchronous (the copies catch up later). The choice decides how much data a crash can lose.
+  related: [leader, failover, consistency]
+
+- id: sharding
+  term: Sharding
+  short: Splitting one large dataset into pieces (shards) stored on different machines, each holding a part of the keys.
+  long: Sharding spreads data and load. The hard parts are choosing the shard key, moving data when machines are added, and queries that need many shards at once.
+  related: [partition, hash-ring, hot-key]
+
+- id: partition
+  term: Partition
+  short: One slice of a dataset or a stream, handled by one machine or process at a time; also a network split between machines.
+  long: 'The word has two meanings. In storage and streaming a partition is a slice of the data (a shard). In the CAP theorem it is a network failure that cuts machines off from each other.'
+  related: [sharding, consistency]
+
+- id: cache
+  term: Cache
+  short: A fast store that keeps copies of recent or popular data so repeated reads skip the slower source.
+  long: Caches trade freshness for speed. Every cache needs a rule for how long data stays (TTL) and what happens when the source changes (invalidation).
+  related: [ttl, cdn, hot-key]
+
+- id: cdn
+  term: CDN
+  short: Content delivery network, a set of servers near users that serve copies of static files such as images and scripts.
+  long: A CDN cuts latency by answering from a server close to the user and reduces load on the origin. It is a cache for files, usually keyed by URL.
+  related: [cache, dns]
+
+- id: load-balancer
+  term: Load balancer
+  short: A component that spreads incoming requests across several servers and stops sending to servers that fail health checks.
+  long: Load balancers work at the connection level (L4) or the HTTP level (L7). They enable horizontal scaling and are the usual place for TLS termination.
+  related: [failover, api-gateway]
+
+- id: idempotent
+  term: Idempotent
+  short: An operation that gives the same result whether it runs once or many times, so retries are safe.
+  long: Networks fail and clients retry. If "charge the card" is idempotent (for example by sending an idempotency key), a retry cannot charge twice.
+  related: [rpc]
+
+- id: quorum
+  term: Quorum
+  short: The minimum number of replicas that must agree for a read or write to count, typically a majority.
+  long: With N replicas, writing to W and reading from R copies where W + R > N guarantees a read overlaps the latest write. Quorums are how replicated systems stay correct during failures.
+  related: [consensus, replication]
+
+- id: leader
+  term: Leader
+  short: The one replica that accepts writes and tells the others what changed; the others are followers.
+  long: Leader-based replication keeps writes ordered. When the leader fails, a new one must be chosen (failover), and the gap can cause lost or duplicated writes.
+  related: [replication, failover, consensus]
+
+- id: wal
+  term: WAL
+  short: Write-ahead log, a file where a database records each change before applying it, so a crash cannot lose committed data.
+  long: The WAL is appended sequentially, which is fast. On restart the database replays it. The same log also feeds replication and change-data-capture.
+  related: [transaction, replication]
+
+- id: index
+  term: Index
+  short: A data structure that lets a database find rows by a column's value without scanning the whole table.
+  long: Indexes make reads faster and writes slower, because every write must update them. B-trees serve ranges; hash indexes serve exact lookups.
+  related: [transaction]
+
+- id: transaction
+  term: Transaction
+  short: A group of reads and writes that either all happen or none do.
+  long: Transactions let code treat several steps as one. The ACID properties describe what a database promises about them.
+  related: [acid, isolation, wal]
+
+- id: acid
+  term: ACID
+  short: Atomic, Consistent, Isolated, Durable, the four promises a database makes about transactions.
+  long: Atomic means all or nothing. Consistent means rules are kept. Isolated means transactions do not see each other's half-done work. Durable means committed data survives a crash.
+  related: [transaction, isolation]
+
+- id: isolation
+  term: Isolation
+  short: How much one running transaction can see of another's unfinished changes.
+  long: Isolation levels range from read uncommitted to serializable. Stronger levels prevent more anomalies but allow less concurrency.
+  related: [acid, transaction]
+
+- id: eventual-consistency
+  term: Eventual consistency
+  short: Replicas may disagree for a while after a write, but they converge if writes stop.
+  long: Eventual consistency is common in systems that favor availability. Readers can see stale data; design the product so that is acceptable, or add stronger guarantees where needed.
+  related: [consistency, stale-read, replication]
+
+- id: fan-out
+  term: Fan-out
+  short: One event producing many outputs, such as one post being delivered to every follower's feed.
+  long: Fan-out on write does the work when the event happens; fan-out on read does it when someone asks. Celebrity accounts with millions of followers often need a mix.
+  related: [hot-key]
+
+- id: back-pressure
+  term: Back pressure
+  short: A way for a slow consumer to tell a fast producer to slow down, instead of being flooded.
+  long: Without back pressure, queues grow until memory runs out. Bounded buffers, blocking sends and explicit credits are common ways to apply it.
+  related: [rate-limit]
+
+- id: rate-limit
+  term: Rate limit
+  short: A cap on how many requests a client may make in a time window; extra requests are rejected or delayed.
+  long: Rate limits protect a service from abuse and overload. Token bucket and sliding window are the usual algorithms; the limit is often enforced at the API gateway.
+  related: [back-pressure, api-gateway]
+
+- id: circuit-breaker
+  term: Circuit breaker
+  short: A guard that stops calling a failing service for a while so the failure does not spread.
+  long: After enough errors the breaker opens and calls fail fast. After a timeout it lets a few calls through to test recovery, then closes again.
+  related: [failover]
+
+- id: consensus
+  term: Consensus
+  short: Getting several machines to agree on one value or order of events even when some of them fail.
+  long: Consensus protocols such as Raft and Paxos elect leaders and replicate logs safely. They power coordination services and the metadata layer of many databases.
+  related: [quorum, leader]
+
+- id: hash-ring
+  term: Hash ring
+  short: Consistent hashing, placing servers and keys on a ring so adding or removing a server moves only a small share of keys.
+  long: With plain modulo hashing, changing the server count remaps almost every key. A hash ring with virtual nodes keeps the data movement small and the load even.
+  related: [sharding, cache]
+
+- id: bloom-filter
+  term: Bloom filter
+  short: A small probabilistic structure that answers "definitely not present" or "maybe present" for a key.
+  long: Bloom filters never give a false negative but can give false positives. Storage engines use them to skip files that cannot contain a key.
+  related: [index]
+
+- id: blob
+  term: Blob
+  short: Binary large object, a file such as an image or video stored as one opaque unit, usually in object storage.
+  long: Blobs are stored outside the main database, in a service like S3, and referenced by URL or key. The database keeps only the metadata.
+  related: [cdn]
+
+- id: ttl
+  term: TTL
+  short: Time to live, how long a cached or stored item stays valid before it expires.
+  long: TTLs bound staleness without explicit invalidation. Short TTLs keep data fresh but send more traffic to the source.
+  related: [cache, dns]
+
+- id: sla
+  term: SLA
+  short: Service level agreement, a promise to customers about availability or latency, with consequences if it is missed.
+  long: An SLA is a contract. It is usually looser than the internal objective (SLO) so there is room before a breach.
+  related: [slo, sli, availability]
+
+- id: slo
+  term: SLO
+  short: Service level objective, the internal target for a metric, such as 99.9% of requests under 300 ms.
+  long: SLOs guide engineering decisions. The gap between the SLO and 100% is the error budget that can be spent on releases and experiments.
+  related: [sla, sli]
+
+- id: sli
+  term: SLI
+  short: Service level indicator, the measured value an SLO is set on, such as the share of successful requests.
+  long: Good SLIs measure what users experience, such as success rate and latency at the edge, not internal CPU numbers.
+  related: [slo, sla]
+
+- id: failover
+  term: Failover
+  short: Switching to a standby machine or replica when the primary fails.
+  long: Failover can be automatic or manual. Automatic failover is faster but risks a split brain if the old primary is only slow, not dead.
+  related: [leader, replication, availability]
+
+- id: hot-key
+  term: Hot key
+  short: One key or partition that gets far more traffic than the others and overloads its machine.
+  long: Hot keys come from popular items, celebrity accounts or bad shard keys. Fixes include caching, splitting the key, and spreading writes with a suffix.
+  related: [sharding, cache, fan-out]
+
+- id: stale-read
+  term: Stale read
+  short: A read that returns data older than the latest write, usually because it hit a replica that has not caught up.
+  long: Stale reads are the price of asynchronous replication. Decide per feature whether they are acceptable; read from the leader where they are not.
+  related: [eventual-consistency, read-your-writes]
+
+- id: read-your-writes
+  term: Read-your-writes
+  short: A guarantee that after you write something, your own later reads will see it.
+  long: Read-your-writes is a common middle ground. It can be implemented by reading from the leader for a short time after a write, or by tracking a version per session.
+  related: [consistency, stale-read]
+
+- id: p99
+  term: p99
+  short: The 99th percentile, the latency that 99% of requests beat; 1 in 100 requests is slower.
+  long: Percentiles show the tail. A page that calls 100 services sees the p99 of each one on most loads, so tail latency matters more than the average.
+  related: [latency]
+
+- id: rpc
+  term: RPC
+  short: Remote procedure call, calling a function on another machine as if it were local, for example with gRPC.
+  long: RPC frameworks handle serialization, connections and timeouts. Every call can fail or be duplicated, so handlers should be idempotent and callers should set deadlines.
+  related: [idempotent]
+
+- id: websocket
+  term: WebSocket
+  short: A long-lived two-way connection between a browser and a server, used for chat and live updates.
+  long: Unlike HTTP requests, a WebSocket stays open, so the server can push messages. Scaling it means tracking which server holds each user's connection.
+  related: [load-balancer]
+
+- id: dns
+  term: DNS
+  short: Domain name system, the lookup that turns a name like example.com into an IP address.
+  long: DNS answers are cached with a TTL. It is also a traffic-steering tool, since answers can point users to the nearest region or away from a failed one.
+  related: [cdn, ttl]
+
+- id: tls
+  term: TLS
+  short: Transport layer security, the encryption behind HTTPS that keeps traffic private and proves the server's identity.
+  long: TLS handshakes cost a round trip or two, which is why connections are reused. It is often terminated at the load balancer or CDN.
+  related: [load-balancer, cdn]
+
+- id: api-gateway
+  term: API gateway
+  short: A single entry point in front of many services that handles routing, authentication, rate limits and logging.
+  long: The gateway keeps cross-cutting concerns out of each service. It can become a bottleneck or a single point of failure, so it is run as a replicated, stateless tier.
+  related: [load-balancer, rate-limit]

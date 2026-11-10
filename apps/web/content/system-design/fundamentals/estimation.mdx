@@ -1,0 +1,262 @@
+---
+title: "Back-of-the-envelope estimation"
+description: "Turn users and habits into requests per second, storage and bandwidth with round numbers, worked through for a photo app, a chat app and a URL shortener."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Back-of-the-envelope estimation turns a few guesses about users and their habits into rough numbers for traffic, storage and bandwidth, so you know how big a system must be before you draw it.
+</KeyIdea>
+
+## The story
+
+A friend is launching a photo-sharing app and asks you to plan the servers. There are no logs and no traffic yet, only her hope: "10 million people a day, each posting a couple of photos." Is that one server or a thousand? One disk or a warehouse of them? You grab a napkin. Ten minutes later you know the app must accept about 700 uploads a second at its busiest and store about 10 terabytes of new photos every day. Those two numbers already rule out "one server with a big disk". This page teaches those ten minutes.
+
+## How it works
+
+An estimate answers four questions. How many requests arrive each second? How much worse is the busiest moment? How much data piles up? How many bytes cross the network each second? We answer them in that order, with the photo app as the running example.
+
+### Step 1: Assumptions become a daily total
+
+<AnimatedDiagram name="fundamentals/estimation" step={1} caption="Two guesses, users per day and actions per user, multiply into a daily total." />
+
+Start with two guesses. **Daily active users** (DAU) is how many different people use the app on a normal day. **Actions per user** is how often each of them does the thing you are sizing. For the photo app: 10 million users x 2 uploads = 20 million uploads a day. Write the guesses down where everyone can see them, so a disagreement changes one number, not the whole design.
+
+<PremiumBreak />
+
+### Step 2: The daily total becomes a rate
+
+<AnimatedDiagram name="fundamentals/estimation" step={2} caption="Divide by the seconds in a day to get the average rate." />
+
+Servers care about requests per second, called <Term id="qps">QPS</Term> (queries per second). A day has 86,400 seconds. On a whiteboard, round it to 100,000; the error is only about 15%. So 20 million uploads a day is 20M / 86,400, about 230 uploads a second on average. A shortcut worth memorising: **1 million a day is about 12 a second.**
+
+### Step 3: Size for the peak, not the average
+
+<AnimatedDiagram name="fundamentals/estimation" step={3} caption="Multiply the average by a peak factor to get the busiest rate." />
+
+People do not post evenly. They post after dinner and during big matches. The **peak factor** is the busiest rate divided by the average. For an app used across a few nearby time zones, 2 to 3 is a sensible first guess. For a ticket sale or a live event, 10 or more. With a factor of 3, the photo app must handle 230 x 3, about 700 uploads a second.
+
+<AnimatedDiagram name="fundamentals/estimation-peak" stepper caption="One day of uploads. The average is about 230 a second, but at 21:00 the app sees about 700." />
+
+A server sized for 230 a second idles at 4 am and drowns at 9 pm. Size servers, databases and queues for the peak, then add headroom (spare capacity), because a machine near 100% busy builds long queues.
+
+### Step 4: Storage
+
+<AnimatedDiagram name="fundamentals/estimation" step={4} caption="Storage follows the daily total: items per day, times size, times days kept." />
+
+Storage follows the daily total, not the peak: **items per day x bytes per item x days kept**. A compressed photo is about 500 KB, so 20M x 500 KB = 10 TB a day, about 3.65 PB a year. <Term id="replication">Replication</Term> keeps 3 copies so a dead disk loses nothing, which makes about 11 PB for each year the business keeps photos. Each photo also has **metadata**, a small record of owner, caption and time, at about 500 bytes: only 10 GB a day. A gap of 1,000 times says photos and records belong in different stores.
+
+### Step 5: Bandwidth
+
+<AnimatedDiagram name="fundamentals/estimation" step={5} caption="Bandwidth follows the peak: busiest rate times bytes per request." />
+
+**Bandwidth** is how many bytes cross the network each second, so it follows the peak. Uploads at peak are 700/s x 500 KB = 350 MB/s. Network links are sold in bits, 8 to a byte, so that is 2.8 Gbit/s.
+
+Reads are far bigger. At 100 views per user a day, the app serves 1 billion views a day: about 11,600 a second on average and 35,000 at peak. At full size that is 17.5 GB/s, or 140 Gbit/s. That number is why photo apps send resized images from a <Term id="cdn">CDN</Term>, a network of servers near users that keep copies of popular files.
+
+### Your toolkit: numbers to keep handy
+
+The photo app climbed the whole size ladder: a 500 KB photo, 10 GB of records a day, 10 TB of photos a day, 11 PB a year. Each rung (KB, MB, GB, TB, PB) is 1,000 times the one before. Strictly it is 1,024, a power of two, but that gap of a few percent per rung never changes a design.
+
+- **Time:** a day is 86,400 s (about 10^5), a month about 2.6 million s, a year about 31.5 million s.
+- **Rates:** 1 million a day is about 12 a second; 1 billion a day is about 12,000 a second.
+- **Sizes:** a 64-bit id or timestamp is 8 bytes. A UUID (a random 128-bit id) is 16 bytes. A chat message with its ids is a few hundred bytes, and a compressed phone photo a few hundred KB.
+- **Limits:** a 32-bit counter stops at about 4.3 billion, fewer than the photo app's uploads in a year.
+- **Network:** 1 Gbit/s carries 125 MB/s.
+
+For how long things take, rather than how many there are, see [latency numbers](/system-design/fundamentals/latency-numbers).
+
+### Worked example 1: the photo app
+
+<EstimateTable
+  rows={[
+    { quantity: "Uploads", assumption: "10M users x 2 photos a day", result: "20M a day, about 230/s average, 700/s peak" },
+    { quantity: "Views", assumption: "100 per user per day", result: "1B a day, about 35,000/s peak" },
+    { quantity: "New storage", assumption: "500 KB per photo", result: "10 TB a day, 3.65 PB a year, about 11 PB with 3 copies" },
+    { quantity: "Upload bandwidth", assumption: "700/s x 500 KB", result: "350 MB/s, about 2.8 Gbit/s" },
+    { quantity: "View bandwidth", assumption: "35,000/s x 500 KB", result: "about 140 Gbit/s at full size" },
+  ]}
+  note="Views outnumber uploads 50 to 1. View bandwidth, not the upload rate, shapes this design."
+/>
+
+**What the numbers say.** 700 uploads a second is a modest load for a few app servers. Petabytes of photos belong in an object store, a service that holds each file as one <Term id="blob">blob</Term>, while a database keeps the small records. And 140 Gbit/s of views needs resized images and a CDN.
+
+### Worked example 2: a chat app
+
+Assume 50 million daily users who each send 40 messages, and about 200 bytes per message with its ids and timestamp.
+
+<EstimateTable
+  rows={[
+    { quantity: "Messages", assumption: "50M users x 40 a day", result: "2B a day, about 23,000/s average, 70,000/s peak" },
+    { quantity: "Deliveries", assumption: "each message reaches 2 devices", result: "about 140,000/s at peak" },
+    { quantity: "New storage", assumption: "200 bytes per message", result: "400 GB a day, 146 TB a year, about 440 TB with 3 copies" },
+    { quantity: "Delivery bandwidth", assumption: "140,000/s x 200 bytes", result: "28 MB/s, about 0.22 Gbit/s" },
+    { quantity: "Open connections", assumption: "1 in 5 users online at peak", result: "10 million at once" },
+  ]}
+  note="The bytes are small. The message rate and the open connections are the hard numbers."
+/>
+
+**What the numbers say.** Bandwidth fits in a fraction of one network link. The hard parts are 70,000 writes a second, more than one database machine should take, so messages are split across many machines (<Term id="sharding">sharding</Term>). And 10 million open <Term id="websocket">WebSocket</Term> connections (links that stay open so the server can push messages) at about 100,000 per server need about 100 chat servers.
+
+### Worked example 3: a URL shortener
+
+Assume 100 million new short links a day, 100 clicks per link, and about 500 bytes per stored link (long URL, code, owner, dates, index overhead). Links are kept for 5 years, and most clicks go to about 10 million popular links.
+
+<EstimateTable
+  rows={[
+    { quantity: "New links", assumption: "100M a day / 86,400 s", result: "about 1,160/s average, 3,500/s peak" },
+    { quantity: "Redirects", assumption: "100 clicks per link", result: "10B a day, about 116,000/s average, 350,000/s peak" },
+    { quantity: "Storage", assumption: "500 bytes per link", result: "50 GB a day, 18 TB a year, about 90 TB in 5 years" },
+    { quantity: "Code length", assumption: "about 180B links in 5 years, 62 symbols per character", result: "6 characters = 57B codes (too few), 7 = 3.5 trillion" },
+    { quantity: "Cache", assumption: "10M popular links x 500 bytes", result: "about 5 GB" },
+  ]}
+  note="A read-heavy system: 100 reads for every write, and the popular links fit in one machine's memory."
+/>
+
+**What the numbers say.** 350,000 redirects a second cannot all reach the database, but a 5 GB <Term id="cache">cache</Term>, a copy of popular data kept in memory, can absorb most of them. The code length is a powers check. Each character is one of 62 symbols (a to z, A to Z, 0 to 9), so 6 characters give 62^6, about 5.7 x 10^10 codes, short of 180 billion. Seven give 62^7, about 3.5 x 10^12, nearly 20 times what 5 years needs.
+
+## Try it
+
+The calculator starts on the photo app. "Actions per user" counts reads and writes together (2 uploads + 100 views = 102, with 50 reads per write). It shows average bandwidth and one copy of storage, so multiply by the peak factor and by the number of copies yourself.
+
+<EstimateCalculator title="Photo app estimates" dau={10000000} actionsPerUser={102} peakFactor={3} payloadBytes={500000} retentionDays={1825} readWriteRatio={50} />
+
+<Quiz>
+  <QuizItem question="A food delivery app takes 5 million orders a day, mostly at lunch and dinner. Peak factor 6. What is the peak order rate?" hint="1 million a day is about 12 a second.">
+    5M / 86,400 is about 58 orders a second. Times 6 is about 350 a second at peak.
+  </QuizItem>
+  <QuizItem question="A service sends 2,000 responses a second at peak, each 250 KB. Is a 1 Gbit/s link enough?" hint="Convert bytes to bits.">
+    2,000 x 250 KB = 500 MB/s, which is 4 Gbit/s. A 1 Gbit/s link carries only 125 MB/s, so you need about four times that, before headroom.
+  </QuizItem>
+  <QuizItem question="A log pipeline writes 1 KB events at 50,000 a second and keeps them 30 days with 3 copies. How much disk?" hint="Rate x seconds per day x size x days x copies.">
+    50,000 x 86,400 is about 4.3 billion events, so about 4.3 TB a day. 30 days is about 130 TB, and 3 copies about 390 TB.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<ProsCons
+  pros={[
+    "Takes minutes, needs no data, and catches 10x mistakes before they become hardware orders",
+    "Shows which resource dominates: 2.8 Gbit/s of uploads versus 140 Gbit/s of views points at the CDN",
+    "Makes assumptions explicit, so a disagreement becomes one number to change",
+  ]}
+  cons={[
+    "Only as good as the guesses: a wrong DAU or peak factor scales every result by the same error",
+    "Averages hide skew: one celebrity or one viral link can overload a single machine",
+    "Ignores overheads such as indexes, retries, replication traffic and headers, which can add 30 to 100%",
+  ]}
+/>
+
+## In the wild
+
+- **Twitter** reported in 2013 that it averaged about 5,700 tweets a second but hit 143,199 a second during a TV broadcast in Japan, a peak factor of about 25.
+- **WhatsApp** said in 2020 that it delivers about 100 billion messages a day: divide by 86,400 and that is over 1 million a second on average.
+- **Amazon** reported that DynamoDB peaked at about 126 million requests a second during Prime Day 2023.
+
+## Common pitfalls
+
+- **Sizing for the average.** The system fails at the moment most people use it.
+- **Mixing bits and bytes.** Links are sold in bits, disks in bytes. Forgetting the factor of 8 is the most common slip.
+- **Forgetting copies and retention.** Multiply one year of one copy by replicas and by the years kept.
+- **False precision.** "11,574.07 requests a second" claims a certainty you do not have. Say "about 12,000".
+- **Stopping at the numbers.** Always say what a number implies: "350,000 reads a second, so a cache in front of the store."
+
+## How to say it in an interview
+
+Before I draw anything, I'd like two minutes for rough numbers. I'll assume 10 million daily users who each upload 2 photos and view 100. That is 20 million uploads a day, about 230 a second, and about 700 at a peak factor of 3. Views are 50 times that, about 35,000 a second at peak. At 500 KB a photo we add 10 TB a day, roughly 11 PB a year with three copies, so photos go to an object store and only small records to the database. Full-size views at peak would be about 140 Gbit/s, so I'll serve resized images through a CDN. Tell me if any assumption looks off and I'll adjust.
+
+<InterviewQuestions>
+  <InterviewQuestion question="How do you turn a number of daily active users into requests per second?" level="Junior" category="Estimation">
+    **Short answer.** Multiply daily users by actions per user, then divide by 86,400 seconds for the average rate. Multiply by a peak factor, usually 2 to 3, to get the rate you size for.
+
+    **Why.** 10 million users x 2 uploads = 20 million a day. 20M / 86,400 is about 230 a second, and x 3 is about 700. Rounding 86,400 to 100,000 is only about 15% off, and 1 million a day is about 12 a second.
+
+    <AnimatedDiagram name="fundamentals/estimation" path="dau>perday>qps>peak" caption="Users times actions, divided by seconds in a day, times the peak factor." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you pick a peak factor for a ticketing site?
+    - How do you split the rate into reads and writes?
+
+    **Watch out for.** Stopping at the average. A system sized for 230 a second falls over every evening.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why do we size for peak traffic instead of the average?" level="Junior" category="Estimation">
+    **Short answer.** Users arrive in waves, so the busiest hour can be several times the daily average. A system that only handles the average fails when the most people are using it.
+
+    **Why.** A photo app averaging 230 uploads a second sees about 30 at 4 am and about 700 at 9 pm. Wait times climb steeply as a server nears 100% busy. Plan servers for about 1,200 a second, so the 700 peak keeps them near 60% busy. That keeps replies fast and leaves room for one machine to fail.
+
+    **Follow-ups the interviewer may ask.**
+    - Can autoscaling let you size for the average?
+    - What peak factor would you use for a live sports app?
+
+    **Watch out for.** "Autoscaling handles it." New servers take minutes to start; a spike arrives in seconds.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Estimate the storage a photo-sharing app needs for five years." level="Mid" category="Estimation" companies={["Meta"]}>
+    **Short answer.** About 18 PB of photos as one copy, about 55 PB with three copies, plus a little metadata. Photos go in an object store, metadata in a database.
+
+    **Why.** 10 million users x 2 photos x 500 KB = 10 TB a day. x 365 x 5 is about 18 PB, and three copies make about 55 PB. Metadata at 500 bytes a photo is 10 GB a day, about 18 TB over five years: a thousandth of the photo bytes.
+
+    <AnimatedDiagram name="fundamentals/estimation" highlight={["perday", "storage"]} caption="Storage follows the daily total, not the peak rate." />
+
+    **Follow-ups the interviewer may ask.**
+    - What do several resized versions of each photo add?
+    - How would cold storage for old photos change the cost?
+
+    **Watch out for.** Using the peak rate for storage. Storage follows the daily total; the peak sizes servers and bandwidth.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A URL shortener creates 100 million links a day and each is clicked 100 times. What does that tell you about the design?" level="Mid" category="Estimation">
+    **Short answer.** It is read-heavy: about 1,200 writes a second against about 350,000 reads a second at peak. Put a cache in front of the store, and use 7-character codes.
+
+    **Why.** 100M / 86,400 is about 1,160 writes a second, and 10 billion clicks a day is about 116,000 a second, 350,000 at peak. If most clicks go to about 10 million popular links, caching them takes 10M x 500 bytes = 5 GB, which fits in one machine's memory. Five years is about 180 billion links; 62^6 gives 57 billion codes, too few, and 62^7 gives 3.5 trillion.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to the cache when one link goes viral?
+    - Would you return a 301 or a 302, and how does that change the load?
+
+    **Watch out for.** Treating reads and writes as one number. The 100 to 1 split is the reason for the cache.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A chat app has 50 million daily users. Which number is hardest to plan for?" level="Senior" category="Estimation" companies={["Meta"]}>
+    **Short answer.** The message rate and the open connections, not bytes. Peak sends are about 70,000 a second, and about 10 million devices hold a connection open at once.
+
+    **Why.** 40 messages per user is 2 billion a day, about 23,000 a second and 70,000 at peak. At 200 bytes each, delivery is only about 28 MB/s and storage about 146 TB a year. But 70,000 writes a second must be split across many database machines. And if 1 in 5 users is online at peak, 10 million connections at about 100,000 per server need about 100 servers.
+
+    **Follow-ups the interviewer may ask.**
+    - How does a 500-member group change the delivery rate?
+    - What happens to 10 million connections during a deploy?
+
+    **Watch out for.** Spending the time on bytes. In chat the bytes are cheap and the counts are expensive.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your estimate said 10 servers, but production needs 40 at peak. What did the estimate probably miss?" level="Senior" category="Estimation">
+    **Short answer.** Usually the real peak factor, skew between users, and per-request overhead. Each can add 2x, and they multiply.
+
+    **Why.** A peak factor guessed at 3 may really be 6 for a one-country app: 2x. If 1% of users get 30% of the traffic, the machines holding them run hot while others idle: another 1.5x to 2x. Each user request may also turn into several internal calls, plus retries, logging and replication. 2 x 2 is already 4x, turning 10 servers into 40.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you test the estimate before launch?
+    - Which of these can the design fix, rather than more servers?
+
+    **Watch out for.** Blaming the arithmetic. The division is rarely wrong; the assumptions are. State them and check them with a load test.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Latency numbers that matter](/system-design/fundamentals/latency-numbers): how long things take, the companion to how many there are.
+- [Non-functional requirements](/system-design/fundamentals/non-functional-requirements): where the scale targets you estimate are written down.
+- [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning): turning these numbers into servers and finding what breaks first.
+- [The interview framework](/system-design/fundamentals/interview-framework): where estimation fits in a 45-minute interview.
+- [Caching](/system-design/patterns/caching) and [Sharding](/system-design/patterns/sharding): the two most common answers to a big number.
+- [Design a URL Shortener](/system-design/case-studies/url-shortener) and [Design WhatsApp](/system-design/case-studies/whatsapp): two of the worked examples, carried into full designs.
+
+## Further reading
+
+- [Twitter Engineering, "New Tweets per second record, and how!"](https://blog.twitter.com/engineering/en_us/a/2013/new-tweets-per-second-record-and-how): a real peak 25 times the average, and how the system absorbed it.
+- [AWS News Blog, "Prime Day 2023 Powered by AWS: All the Numbers"](https://aws.amazon.com/blogs/aws/prime-day-2023-powered-by-aws-all-the-numbers/): peak request rates from one of the largest planned traffic events.
+- [Google, The Site Reliability Workbook, "Managing Load"](https://sre.google/workbook/managing-load/): how real services plan for peaks, headroom and overload.

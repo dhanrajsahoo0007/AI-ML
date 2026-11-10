@@ -6,7 +6,7 @@ import { articlesOf, hubsOf, loadDocItems, loadNavIndex, NAV_INDEX_FILE, section
 import { parseHubMarkup } from "./hub-markup";
 
 // The `docs` kind: MDX hubs and articles under content/<section>/, served by the shared
-// app/(content)/[section] routes. GenAI & LLM Systems, Classic System Design, Cloud and ML System Design.
+// app/(content)/[section] routes. GenAI & LLM Systems, Classic System Design and Cloud.
 
 function lineOf(file: string, needle: RegExp): number | undefined {
   const lines = fs.readFileSync(file, "utf8").split("\n");

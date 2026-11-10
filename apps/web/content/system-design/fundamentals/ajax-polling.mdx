@@ -1,9 +1,275 @@
 ---
 title: "Ajax Polling"
-description: "Short polling on a timer, its cost and when it is good enough."
-status: outline
+description: "How short polling asks a server for news on a timer, why most of those calls come back empty, and how to pick an interval that is good enough."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** short polling on a timer, its cost and when it is good enough.
+<KeyIdea>
+  Short polling means the page asks the server "anything new?" on a fixed timer, which is easy to build but spends most of its requests hearing "no".
+</KeyIdea>
+
+## The story
+
+You run a small online bakery. After checkout, the customer lands on an order page that shows one line: "Baking", then "Out for delivery", then "Delivered". An order takes about 45 minutes, and the status changes three times in that window. The customer keeps the page open on their phone and wants to see each change without pressing reload. Your first version does the obvious thing. Every 5 seconds, the page asks your server, "What is the status of order 1042?" It works on day one. On a Friday at 7 pm, 20,000 order pages are open at once. Your servers now answer 4,000 requests a second, and almost every answer is "still baking".
+
+## How it works
+
+Two words first. **Ajax** (Asynchronous JavaScript and XML) is the old name for a page that uses JavaScript to fetch data in the background and update part of the screen without a reload. Today the data is usually JSON and the call is `fetch()`, but the name stuck. **Polling** means asking again and again on a schedule. **Short polling** is the plain version: the server answers at once, whether or not it has news, and the client waits a fixed **interval** before it asks again. (Its cousin, [long polling](/system-design/fundamentals/long-polling), makes the server hold the request open until there is news.)
+
+### Step 1: Ask, get an answer, wait
+
+<AnimatedDiagram name="fundamentals/ajax-polling" step={1} caption="The first poll: the API reads the order, answers with the status and a version tag, and the page starts a 5-second timer." />
+
+At t = 0 s the page sends `GET /orders/1042/status`. The API server reads the row from the orders database and answers `200 OK` with `"baking"`. It also sends an **ETag**, a short version tag for this answer (`v1`). The page draws the status and sets a timer for 5 seconds. Every poll is an ordinary, independent HTTP request (see [HTTP](/system-design/fundamentals/http)). The server keeps nothing between polls, so any server behind a <Term id="load-balancer">load balancer</Term> can answer any of them.
+
+<PremiumBreak />
+
+### Step 2: Most answers say nothing new
+
+<AnimatedDiagram name="fundamentals/ajax-polling" step={2} caption="An empty poll: the page says which version it holds, the API still reads the database, and the answer is 304 Not Modified." />
+
+At t = 5 s the page asks again. This time it sends `If-None-Match: v1`, which means "I already have version v1". Nothing changed, so the server answers `304 Not Modified` with no body. The same happens at t = 10 s.
+
+That empty answer is cheap for the network but not free. The request still crosses the internet, passes the load balancer, wakes an API server and, in this design, costs a database read. Count them for one order:
+
+- The page stays open for 45 minutes: $45 \times 60 = 2{,}700$ seconds.
+- One poll every 5 seconds: $2{,}700 / 5 = 540$ polls.
+- Only 3 of them carry a change. The other 537, about 99.4%, come back empty.
+
+<Tabs title="Two answers to the same poll">
+  <Tab label="Something changed">
+
+```http
+GET /orders/1042/status HTTP/1.1
+If-None-Match: "v1"
+
+HTTP/1.1 200 OK
+ETag: "v2"
+Content-Type: application/json
+
+{"status": "out_for_delivery"}
+```
+
+  </Tab>
+  <Tab label="Nothing changed">
+
+```http
+GET /orders/1042/status HTTP/1.1
+If-None-Match: "v1"
+
+HTTP/1.1 304 Not Modified
+ETag: "v1"
+```
+
+  </Tab>
+</Tabs>
+
+### Step 3: A change waits for the next tick
+
+<AnimatedDiagram name="fundamentals/ajax-polling" step={3} caption="The kitchen marks the order out for delivery at 12 s. The page only finds out at its next poll, at 15 s." />
+
+At t = 12 s the kitchen tablet marks the order "out for delivery". The server knows at once, but it cannot tell the page. In short polling only the client starts a conversation. The page learns the news at its next poll, at t = 15 s, three seconds late.
+
+That delay is the price of the interval. A change can land at any moment between two polls, so on average it waits half the interval, and at worst the whole interval. With a 5-second interval the customer sees a change about 2.5 s late on average and 5 s late at worst, plus one round trip (the request going out and the answer coming back), about 100 ms on a phone.
+
+So the interval is a dial between freshness and cost. Here is the same dial for the 20,000 open pages on Friday night:
+
+<Compare
+  columns={["Interval", "Polls per second (20,000 pages)", "Average delay", "Worst delay", "Polls per order (45 min)"]}
+  rows={[
+    ["1 s", "20,000", "0.5 s", "1 s", "2,700"],
+    ["5 s", "4,000", "2.5 s", "5 s", "540"],
+    ["15 s", "about 1,330", "7.5 s", "15 s", "180"],
+    ["30 s", "about 670", "15 s", "30 s", "90"],
+  ]}
+  caption="Polls per second = open pages / interval. Halving the delay doubles the load, whether or not anything changed."
+/>
+
+To pick the interval, start from the user, not the server. Ask how late a change can be before the user notices or is harmed. A delivery status that is 15 seconds late hurts nobody. A "your table is ready" alert that is 30 seconds late might. Then check the load: open clients divided by the interval gives the <Term id="qps">requests per second</Term>, and that must fit your servers with room to spare.
+
+### Step 4: The bill at dinner peak
+
+<AnimatedDiagram name="fundamentals/ajax-polling-fleet" stepper caption="Where 4,000 polls a second land, and how a cache keeps the empty ones away from the database." />
+
+Now add up all the pages. 20,000 pages polling every 5 seconds is $20{,}000 / 5 = 4{,}000$ requests a second. How many of those carry news? Each order changes 3 times in 2,700 seconds, so $20{,}000 \times 3 / 2{,}700 \approx 22$ changes a second. You serve 4,000 requests to deliver 22 updates: about 1 useful answer in 180.
+
+Bytes add up too. Over HTTP/1.1 a phone sends about 700 bytes of headers per request (cookies are most of it), and a `304` comes back at about 300 bytes. That is about 1 KB per poll, so $4{,}000 \times 1 \text{ KB} \approx 4$ MB a second, or about 32 Mbit/s, of traffic that says "no news". HTTP/2 compresses repeated headers and shrinks this, but the request count stays the same. A poll every 5 seconds also keeps each phone's radio from going back to sleep, which drains the battery.
+
+In the first step of this diagram every poll reads the database. 4,000 simple reads by order id each second is within reach of one well-sized database. But the load grows with open pages, not with news: a promotion that brings 200,000 open pages means 40,000 reads a second for the same trickle of updates. Step 2 adds a small status <Term id="cache">cache</Term> that holds each open order's status and ETag. A poll is now a memory lookup of well under a millisecond, and the database sees only misses. In step 3, when the kitchen changes a status, the API writes it to the database and overwrites the cache entry, so the next poll gets a `200` with `v2`.
+
+### Step 5: Polling politely
+
+A polling client is a load generator that you ship to every customer. A few habits keep it from hurting you:
+
+- **Send the version you have.** `If-None-Match` turns most answers into a body-less `304`.
+- **Stop when nothing more can change.** Once the order says "Delivered", stop the timer.
+- **Slow down when nobody is looking.** If the tab is hidden, poll every 60 seconds instead of every 5. A hidden tab then sends 1 poll a minute instead of 12, so if half the open tabs sit in the background, total load drops by almost half.
+- **Back off on errors.** On a `429 Too Many Requests` or a `5xx`, double the wait each time, up to a cap, and respect a `Retry-After` header. Retrying at full speed makes a struggling server worse.
+- **Add jitter.** Jitter is a small random change to each wait. Without it, pages that loaded at the same moment poll at the same moment forever.
+
+```ts
+// Poll order status every 5 s, politely. render() and sleep() are small app helpers.
+async function watchOrder(id: string) {
+  let etag = "";
+  let wait = 5_000;
+  while (true) {
+    try {
+      const res = await fetch(`/orders/${id}/status`, {
+        headers: etag ? { "If-None-Match": etag } : {},
+      });
+      if (res.status === 200) {
+        etag = res.headers.get("ETag") ?? "";
+        const { status } = await res.json();
+        render(status);
+        if (status === "delivered") return; // nothing more can change
+        wait = 5_000;
+      } else if (res.status === 304) {
+        wait = 5_000; // no news, back to the normal pace
+      } else if (res.status === 429 || res.status >= 500) {
+        const retryAfter = Number(res.headers.get("Retry-After")) * 1_000 || 0;
+        wait = Math.max(Math.min(wait * 2, 60_000), retryAfter); // back off, up to 1 minute
+      }
+    } catch {
+      wait = Math.min(wait * 2, 60_000); // network error: back off too
+    }
+    const base = document.visibilityState === "hidden" ? 60_000 : wait;
+    await sleep(base * (0.8 + Math.random() * 0.4)); // jitter: +/- 20%
+  }
+}
+```
+
+## Try it
+
+<Quiz>
+  <QuizItem question="A page polls every 10 seconds. A change happens at a random moment. About how late does the user see it, on average and at worst?" hint="The change can land anywhere between two polls.">
+    About 5 seconds on average (half the interval) and 10 seconds at worst (the whole interval), plus one round trip.
+  </QuizItem>
+  <QuizItem question="50,000 dashboards poll every 2 seconds, and the data behind them changes once a minute. How many requests a second do you serve, and what share is useful?" hint="Requests per second = clients / interval.">
+    $50{,}000 / 2 = 25{,}000$ requests a second. Each dashboard sees one change per 30 polls, so only about 1 in 30 answers (about 3%) is useful. Moving to a 10-second interval would cut the load to 5,000 a second and make updates about 4 seconds later on average.
+  </QuizItem>
+  <QuizItem question="Your server answers an empty poll with 304 Not Modified. Has the poll become free?">
+    No. The 304 saves the body, but the request still costs a connection, the load balancer, an API server, <Term id="tls">TLS</Term> work and a status lookup. It also wakes the phone's radio. To cut those costs, poll less often, answer from a cache, or switch to a method where the server speaks first.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<ProsCons
+  pros={[
+    "Plain HTTP requests: works through every proxy, firewall and corporate network",
+    "Stateless servers: any server answers any poll, so scaling out is easy",
+    "Easy to cache, rate-limit and debug with ordinary HTTP tools",
+    "The client controls the load: slow down, back off or stop at will",
+  ]}
+  cons={[
+    "Most requests come back empty: 537 of 540 for one bakery order",
+    "Updates arrive half an interval late on average, a full interval at worst",
+    "Load grows with the number of open clients, not with the amount of news",
+    "Frequent polls keep a phone's radio awake, which costs battery",
+  ]}
+/>
+
+<DecisionTree
+  title="Is short polling good enough?"
+  tree={{
+    q: "Can users wait 5 seconds or more to see a change?",
+    yes: {
+      q: "Is open clients divided by the interval a load your servers handle easily, say under 10,000 requests a second?",
+      yes: "Short polling is fine. Add ETags, jitter, backoff and a status cache.",
+      no: { answer: "Long polling or server-sent events, so clients with no news cost little", href: "/system-design/fundamentals/long-polling" },
+    },
+    no: {
+      q: "Does the client also send a steady stream of messages to the server?",
+      yes: { answer: "WebSockets", href: "/system-design/fundamentals/websockets" },
+      no: { answer: "Server-sent events", href: "/system-design/fundamentals/server-sent-events" },
+    },
+  }}
+/>
+
+## In the wild
+
+- **GitHub's REST API** lets clients poll for repository events. Responses carry an ETag and an `X-Poll-Interval` header that tells the client how many seconds to wait. A `304` reply does not count against the client's <Term id="rate-limit">rate limit</Term>.
+- **AWS SDK waiters** poll for you. For example, the boto3 "instance running" waiter calls `DescribeInstances` every 15 seconds and gives up after 40 tries.
+- **The "202 Accepted" pattern** on many APIs starts a slow job, answers `202` with a status URL and often a `Retry-After` header, and lets the client poll that URL. Report exports and video processing work this way.
+
+## Common pitfalls
+
+- **Polling every second "to feel real-time".** That is 5 times the load of a 5-second interval, for updates most users would not notice were late.
+- **Hitting the database on every poll.** Answer from a cache holding status and version; read the database only on a miss.
+- **Never stopping.** A timer that keeps running after "Delivered", or in a tab left open overnight, is pure waste.
+- **Polls in lockstep, retries at full speed.** After a deploy, every page reloads at once and polls at the same instant. When the server fails, steady retries become a flood. Jitter and backoff fix both.
+- **Using it for chat or games.** When people expect sub-second updates, an interval short enough to feel live costs far too much. Use [WebSockets](/system-design/fundamentals/websockets) or [server-sent events](/system-design/fundamentals/server-sent-events).
+
+## How to say it in an interview
+
+"Short polling means the client asks the server for news on a fixed interval, and the server answers right away, often with nothing new. It is plain HTTP on stateless servers, so it works everywhere and scales by adding servers. The cost is wasted requests and delay: 20,000 clients at 5 seconds is 4,000 requests a second even when almost nothing changes, and updates arrive half an interval late on average. I pick the interval from how stale the user can tolerate, then make each poll cheap with ETags, a status cache, jitter and backoff. If users need sub-second updates, I move to long polling, server-sent events or WebSockets."
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is short polling, and what does it cost compared with the server pushing updates?" level="Junior" category="Real-time">
+    **Short answer.** The client asks the server for news on a fixed timer, and the server answers at once, even when there is nothing new. It is simple and works over plain HTTP, but most requests are wasted and every update waits for the next poll.
+
+    **Why.** An order page open for 45 minutes and polling every 5 seconds sends 540 requests to learn about 3 changes, so 537 are empty. A change lands at a random moment between polls, so the user sees it 2.5 seconds late on average and 5 seconds late at worst. With server push, the server sends exactly 3 messages, as soon as each change happens.
+
+    **Follow-ups the interviewer may ask.**
+    - How does long polling change those numbers?
+    - Why does polling drain a phone's battery?
+
+    **Watch out for.** Saying polling is "real-time". It is periodic. How fresh the data is depends entirely on the interval.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you choose the polling interval for a delivery-tracking page?" level="Mid" category="Real-time">
+    **Short answer.** Start from how stale the user can tolerate, then check that open clients divided by the interval fits the backend. For delivery status, 5 to 15 seconds is usually right, and you can slow down further when the tab is hidden.
+
+    **Why.** Average delay is half the interval, and load is clients divided by the interval. For 20,000 open pages, a 15-second interval is about 1,330 polls a second with a 7.5-second average delay; a 1-second interval is 20,000 polls a second with a 0.5-second delay. Nobody is harmed by seeing "out for delivery" 7 seconds late, so going from 15 s to 1 s buys little and costs 15 times the load. The interval can also adapt: faster when the courier is close, every 60 seconds when the tab is hidden, and stop at "Delivered". If the server sends the next interval in a response header, you can tune it without shipping a new app.
+
+    **Follow-ups the interviewer may ask.**
+    - How would the server tell clients to slow down during an incident?
+    - What changes if the page shows the courier moving on a map?
+
+    **Watch out for.** Picking the shortest interval "to be safe". Load scales with 1 / interval, and the user rarely notices the difference.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="20,000 clients poll an order-status endpoint every 5 seconds. How do you keep the backend healthy?" level="Mid" category="Real-time">
+    **Short answer.** Make each empty poll as cheap as possible. Clients send an ETag so most answers are a body-less 304, and a status cache answers the polls so the database sees only misses and real writes.
+
+    **Why.** The load is $20{,}000 / 5 = 4{,}000$ requests a second, but only about 22 a second carry a change ($20{,}000 \times 3 / 2{,}700$). If every poll reads the database, its load grows with open pages: a promotion with 200,000 open pages means 40,000 reads a second for the same trickle of news. A cache entry per open order (status plus ETag) answers in well under a millisecond. When the kitchen updates an order, the API writes the database and overwrites the cache entry, so the next poll returns 200 with the new version. The API servers stay stateless, so you add servers behind the load balancer as the client count grows.
+
+    <AnimatedDiagram name="fundamentals/ajax-polling-fleet" highlight={["api", "cache"]} caption="The status cache answers almost every poll; the database is read only on a miss." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to the database if the cache restarts at peak?
+    - How would you rate-limit a buggy client that polls every 100 ms?
+
+    **Watch out for.** Jumping straight to WebSockets. 4,000 cheap cached reads a second is modest. Rebuilding on persistent connections adds connection state, sticky routing and reconnect storms that this feature may not need.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="After a deploy, your polling traffic arrives as a spike every 5 seconds instead of a smooth line. What is going on, and how do you fix it?" level="Senior" category="Reliability">
+    **Short answer.** The deploy made every client reload at about the same moment, so they now poll in lockstep. Add random jitter to the first poll and to every wait, and back off with jitter on errors.
+
+    **Why.** 20,000 clients at 5 seconds should average 4,000 requests a second. In lockstep, all 20,000 arrive within a few hundred milliseconds of each other. If they land within 200 ms, that is a burst of about 100,000 requests a second, 25 times the average, followed by near silence. The burst fills connection pools and queues, and the slow responses can trigger client retries, which make the next burst bigger. A random first delay of 0 to 5 seconds spreads the clients across the interval. A per-tick jitter of plus or minus 20% keeps them from drifting back into step. On errors, exponential backoff with jitter stops the herd from returning all together.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you shed load if the burst still arrives?
+    - At what client count would you move to server-sent events or WebSockets, and why?
+
+    **Watch out for.** Only adding servers. Capacity sized for a 25-times burst sits idle the rest of the time, and the lockstep stays. Spreading the requests fixes the cause.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [HTTP](/system-design/fundamentals/http): the requests every poll is made of, and how ETags and 304s work
+- [Long polling](/system-design/fundamentals/long-polling): the server holds the request until there is news
+- [Server-sent events](/system-design/fundamentals/server-sent-events): one open response the server keeps writing to
+- [WebSockets](/system-design/fundamentals/websockets): a two-way connection for chat and games
+- [Choosing a real-time method](/system-design/fundamentals/choosing-realtime): polling, SSE, WebSockets and push side by side
+- [Caching](/system-design/patterns/caching) and [Rate limiting](/system-design/patterns/rate-limiting): keeping polls cheap and bounded
+
+## Further reading
+
+- [RFC 6202, Known Issues and Best Practices for the Use of Long Polling and Streaming in Bidirectional HTTP](https://www.rfc-editor.org/rfc/rfc6202): why plain polling wastes requests, and what long polling and streaming change.
+- [GitHub Docs, REST API endpoints for events](https://docs.github.com/en/rest/activity/events): a real polling API with ETags and a server-set poll interval.
+- [Microsoft Azure Architecture Center, Asynchronous Request-Reply pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/async-request-reply): the 202 Accepted, status URL and Retry-After flow for polling slow jobs.
+- [MDN, Page Visibility API](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API): how a page knows it is hidden, so it can poll less.

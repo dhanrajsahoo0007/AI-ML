@@ -56,7 +56,14 @@ export function parseRegistry(text: string, file = REGISTRY_FILE): SectionEntry[
 
 /** Each entry with its state for `env`, in `order`. */
 export function resolveSections(entries: SectionEntry[], env: AppEnv): SectionDef[] {
-  return entries.map((s) => ({ ...s, state: s.release[env] })).sort((a, b) => a.order - b.order);
+  return entries
+    .map((s) => {
+      const offHubs = Object.entries(s.hubRelease ?? {})
+        .filter(([, release]) => release[env] === "off")
+        .map(([hub]) => hub);
+      return { ...s, state: s.release[env], ...(offHubs.length > 0 ? { offHubs } : {}) };
+    })
+    .sort((a, b) => a.order - b.order);
 }
 
 let cache: { env: AppEnv; sections: SectionDef[] } | null = null;
@@ -112,23 +119,43 @@ export function sectionOfKind(kind: SectionKindName): SectionDef {
   return matches[0];
 }
 
+/** The section that owns the glossary (`glossary: true` in sections.yaml), if any, in any release state. */
+export function glossarySection(): SectionDef | undefined {
+  return allSections().find((s) => s.glossary);
+}
+
 /** The section a site path belongs to, if any. */
 export function sectionForPath(href: string): SectionDef | undefined {
   const pathname = href.split(/[?#]/)[0];
   return allSections().find((s) => pathname === s.href || pathname.startsWith(`${s.href}/`));
 }
 
-/** True unless the path belongs to a section that is not `on` (paths outside sections are visible). */
+/** Path prefixes of a section's hubs that are `off` in this environment (see `hubRelease`). */
+function offHubPrefixes(s: Pick<SectionDef, "href" | "offHubs">): string[] {
+  return (s.offHubs ?? []).map((hub) => `${s.href}/${hub}`);
+}
+
+/** True when the path is inside a hub that is `off` in this environment. */
+export function isInOffHub(href: string): boolean {
+  const pathname = href.split(/[?#]/)[0];
+  const s = sectionForPath(pathname);
+  return !!s && offHubPrefixes(s).some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
+/**
+ * True unless the path belongs to a section that is not `on`, or to a hub that is `off` (paths outside
+ * sections are visible).
+ */
 export function isPathVisible(href: string): boolean {
   const s = sectionForPath(href);
-  return !s || s.state === "on";
+  return !s || (s.state === "on" && !isInOffHub(href));
 }
 
 export interface HiddenRoutesManifest {
   env: AppEnv;
   /** Path prefixes of `hidden` sections: middleware admits admins only, everyone else gets 404. */
   hidden: string[];
-  /** Path prefixes of `off` sections: their pages are not built. */
+  /** Path prefixes of `off` sections and `off` hubs: their pages are not built. */
   off: string[];
 }
 
@@ -138,7 +165,10 @@ export function hiddenRoutes(): HiddenRoutesManifest {
   return {
     env: resolveAppEnv(),
     hidden: sections.filter((s) => s.state === "hidden").map((s) => s.href),
-    off: sections.filter((s) => s.state === "off").map((s) => s.href),
+    off: [
+      ...sections.filter((s) => s.state === "off").map((s) => s.href),
+      ...sections.filter((s) => s.state !== "off").flatMap(offHubPrefixes),
+    ],
   };
 }
 

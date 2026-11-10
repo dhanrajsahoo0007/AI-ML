@@ -1,0 +1,282 @@
+---
+title: "Serialisation: JSON, Protobuf and Avro"
+description: "How one record becomes bytes as JSON text, Protobuf or Avro, what each costs in bytes, and how each copes when the record's shape changes."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Serialisation turns a record in a program's memory into a row of bytes that can be sent or saved, and the format you pick decides how big those bytes are and what happens when the record changes shape.
+</KeyIdea>
+
+## The story
+
+You run an e-scooter rental in a big city. Each of your 120,000 scooters sends a small status every 10 seconds: its id, its battery level, its odometer and whether it is locked. That is $120{,}000 / 10 = 12{,}000$ messages a second, or about a billion a day. The scooters send JSON. A queue keeps every message, and each night a job reads the day's data and sends crews to swap any battery below 20%. Two things go wrong in the first month. First, the storage bill: at this rate, a year of raw JSON comes to about 26 TB. Then the firmware team renames the field `battery` to `battery_pct`. Half the fleet updates over the weekend. The nightly job looks for `battery`, finds nothing on the updated scooters, treats the missing number as 0, and sends crews to about 60,000 scooters, most of them with plenty of charge. Neither failure is about the network. Both are about how a record becomes bytes, and what happens when the record's shape changes.
+
+## How it works
+
+Inside a program, the scooter status is an object. Its fields sit wherever the language put them in memory, linked by pointers (memory addresses) that mean nothing to another machine. To send it or save it, you must lay it out as one flat row of bytes. That step is **serialisation**, also called **encoding**. Turning the bytes back into an object is **deserialisation**, or **decoding**.
+
+Every format answers two questions. How does a reader know where each field starts and ends? And how does it know which field is which? JSON answers both with text. Protobuf and Avro answer with a **schema**: a written description of the record's fields and their types that both sides agree on in advance.
+
+### Step 1: JSON writes everything as text
+
+<AnimatedDiagram name="fundamentals/serialization" step={1} caption="The scooter status as JSON: 69 bytes, and 51 of them are names, quotes, commas and braces." />
+
+JSON is a **text format**: every byte is a readable character, so you can open a message and read it. Here is the status:
+
+```json
+{"scooter_id":"SC-208","battery":87,"odometer_km":1290,"locked":true}
+```
+
+That is 69 bytes. Only 18 of them are values. The rest are names and punctuation, repeated in every one of the billion messages a day. The highlighted box is the worst case: `,"odometer_km":` spends 15 bytes to label a 4-byte value. Numbers travel as digits, so the reader must scan text to find where each number ends and then convert it.
+
+In return, JSON is **self-describing**. The names travel with the data, so any reader in any language can decode a message with no schema at all. That makes it the default for public APIs, config files and logs.
+
+<PremiumBreak />
+
+### Step 2: Protobuf replaces each name with a number
+
+**Protocol Buffers** (Protobuf) is a **binary format**: its bytes only make sense to a reader that has the schema. The schema lives in a `.proto` file, and every field gets a number:
+
+```text
+message ScooterStatus {
+  string scooter_id  = 1;
+  int32  battery     = 2;
+  int32  odometer_km = 3;
+  bool   locked      = 4;
+}
+```
+
+<AnimatedDiagram name="fundamentals/serialization-bytes" step={1} caption="Protobuf: a tag byte before each field, a length before the string, then the values. 15 bytes." />
+
+Each field starts with a one-byte **tag**. The tag holds the field number and a **wire type**, a hint about the value's shape (a number, or a run of bytes with a length in front). Whole numbers travel as **varints**, which use one byte for values up to 127 and one more byte for each further 7 bits. So 87 fits in one byte, and 1290 needs two. Field numbers 1 to 15 get a one-byte tag, so give them to the fields you send most.
+
+The result is 15 bytes: 4 tags, 1 length and 10 bytes of values. The reader uses code generated from the `.proto` file to turn tag 2 back into `battery`. A reader that meets a field number it does not know skips it, which is what lets old and new versions run side by side. Protobuf is the format behind [gRPC](/system-design/fundamentals/rpc), a widely used <Term id="rpc">RPC</Term> framework for calls between services.
+
+### Step 3: Avro drops the tags as well
+
+**Apache Avro** goes one step further. Its schema is written in JSON and lists the fields in order:
+
+```json
+{
+  "type": "record",
+  "name": "ScooterStatus",
+  "fields": [
+    { "name": "scooter_id",  "type": "string" },
+    { "name": "battery",     "type": "int" },
+    { "name": "odometer_km", "type": "int" },
+    { "name": "locked",      "type": "boolean" }
+  ]
+}
+```
+
+<AnimatedDiagram name="fundamentals/serialization-bytes" step={2} caption="Avro: no tags. The string's length, then each value in the order the schema lists them. 12 bytes." />
+
+The bytes are only the values, one after another, in schema order. The reader knows the first thing is a string, the next two are ints and the last is a boolean. Avro ints use **zigzag** encoding, which maps 0, -1, 1, -2, 2 to 0, 1, 2, 3, 4, so small negative numbers stay small. The cost is that a positive number doubles: 87 is sent as 174, which needs 2 bytes. The total is 12 bytes.
+
+The catch is that a reader cannot decode a single byte without the exact schema the writer used, called the **writer's schema**. Decode with any other schema as if it were the writer's and you get garbage or an error. Avro solves this in two ways. In a data file, the schema is written once in the file's header, so a million records share it. On a stream of messages, each message carries a short schema id, and a service called a **schema registry** maps ids to schemas (Step 4).
+
+Here are all three to the same scale:
+
+<AnimatedDiagram name="fundamentals/serialization" stepper caption="One scooter status at 11 px per byte: 69 bytes as JSON, 15 as Protobuf, 12 as Avro." />
+
+<Numbers
+  items={[
+    { value: "26 TB", label: "a year as JSON", hint: "69 B x 1.04 billion x 365" },
+    { value: "5.7 TB", label: "a year as Protobuf", hint: "15 B per status" },
+    { value: "4.5 TB", label: "a year in Avro files", hint: "12 B per status" },
+  ]}
+/>
+
+The arithmetic: $12{,}000 \times 86{,}400 \approx 1.04$ billion messages a day. As JSON that is $69 \times 1.04 \times 10^9 \approx 72$ GB a day, about 26 TB a year. As Avro it is about 12 GB a day, about 4.5 TB a year. These are sizes before [compression](/system-design/fundamentals/compression), which shrinks JSON far more than it shrinks binary, because repeated names compress well. Compressed in large batches, the gap often narrows to a factor of two or three. Compression also costs CPU on both ends.
+
+### Step 4: Changing the shape without breaking readers
+
+Records change. You add a field, rename one or retire one. This is **schema evolution**, and two words describe whether a change is safe:
+
+- **Backward compatible**: code with the new schema can read data written with the old one. You need this when old data sits on disk for years.
+- **Forward compatible**: code with the old schema can read data written with the new one. You need this during a **rolling deploy**, when servers switch to new code a few at a time, so some writers already send the new shape while some readers still run the old code.
+
+Here is the story's rename, `battery` to `battery_pct`, in each format:
+
+<Tabs title="Renaming battery to battery_pct">
+  <Tab label="JSON">
+    The name is in the bytes, so the rename changes every message. Old readers look for `battery`, find nothing and fall back to whatever their code does with a missing value. In the story that was 0. Nothing checks the change. The safe way is slow: write both names for a while, teach readers to accept either, then drop the old one. Readers should also fail loudly on a missing required field instead of guessing.
+  </Tab>
+  <Tab label="Protobuf">
+    The name never travels. Field 2 is still field 2, so the rename changes no bytes and old readers keep working. Adding `speed_kmh = 5` is also safe: old readers skip field 5. The dangers are changing a field's type or reusing a number. If you delete field 3 and later give 3 to a new field, old readers misread it. Mark retired numbers `reserved`. Also, a missing number reads as 0, the same trap as the story, unless the field is marked `optional`.
+  </Tab>
+  <Tab label="Avro">
+    Avro matches fields by name, using two schemas at once: the writer's schema and the **reader's schema** the job was built with. Fields only the writer has are skipped. Fields only the reader has take the reader's default, and with no default, decoding fails with an error, not a silent 0. A rename is written as `{ "name": "battery_pct", "type": "int", "aliases": ["battery"] }`. Ship the reader first: the battery job learns the new name and its alias, so it reads old and new records alike. Then the firmware switches.
+  </Tab>
+</Tabs>
+
+With Avro on a message stream, the schema registry turns these rules into a gate:
+
+<AnimatedDiagram name="fundamentals/serialization-registry" stepper caption="The ingest service registers its schema and sends id 42 with every 12-byte record. The battery job fetches schema 42 once to decode. A breaking change never gets an id." />
+
+1. The ingest service registers its schema, now version 2 with the rename and its alias, and the registry gives it id 42.
+2. Each message on the **Kafka topic** (a durable log that producers append to and consumers read at their own pace; see [message queues](/system-design/patterns/message-queues)) is 1 marker byte, the 4-byte id and the 12 Avro bytes: 17 bytes in all.
+3. The battery job reads id 42, fetches that schema once and caches it, and decodes with it.
+4. A deploy changes `battery` from int to string. Before it ships, the CI pipeline (the automated checks that run on every code change) asks the registry whether the new schema is compatible. The registry answers 409 (conflict), so the change never ships.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Avro has no tags. Why does battery: 87 still take 2 bytes in Avro, the same as in Protobuf?" hint="Look at what zigzag does to a positive number.">
+    Protobuf spends 1 byte on the tag and 1 on the value, because 87 fits in a 7-bit varint. Avro spends no byte on a tag, but zigzag doubles 87 to 174, which is over 127, so the varint needs 2 bytes. A value of 63 or less would take 1 byte in Avro.
+  </QuizItem>
+  <QuizItem question="A scooter reports a temperature of -5 as a Protobuf int32. How many bytes does the field take?" hint="int32 has no zigzag.">
+    Eleven: a 1-byte tag and a 10-byte varint, because a negative int32 is written as a 64-bit number with all the high bits set. Declare the field `sint32`, which uses zigzag, and -5 becomes 9, so the field takes 2 bytes. In Avro, -5 is 1 byte.
+  </QuizItem>
+  <QuizItem question="You add speed_kmh to the Avro reader schema with no default, then run the job over last month's files. What happens?" hint="Last month's writer schema has no such field.">
+    Decoding fails. The reader wants a field the writer never wrote and has no default to fill in. Give it one, for example `"type": ["null", "int"], "default": null`. A registry checking backward compatibility would refuse the schema before it ships.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "JSON", "Protobuf", "Avro"]}
+  rows={[
+    ["Bytes for the scooter status", "69", "15", "12 (17 on Kafka with the id)"],
+    ["Readable by eye", true, false, false],
+    ["Schema needed to read", "No", "Yes, compiled into code", "Yes, the writer's exact schema"],
+    ["How a field is found", "By name in the bytes", "By tag number", "By position in the schema"],
+    ["Rename a field", "Breaks old readers", "Safe on the wire", "Safe with an alias, readers first"],
+    ["Code generation", "Not needed", "Usual", "Optional"],
+    ["Usual home", "Public APIs, config, logs", "Calls between services", "Event streams, data files"],
+  ]}
+  caption="JSON trades bytes for readability. Protobuf and Avro trade readability for size and a checked contract."
+/>
+
+<DecisionTree
+  title="Which format for this data?"
+  tree={{
+    q: "Will browsers, partners or people read it directly?",
+    yes: { answer: "JSON, with a published schema such as OpenAPI", href: "/system-design/fundamentals/rest" },
+    no: {
+      q: "Is it a call between services that reply right away?",
+      yes: { answer: "Protobuf, usually through gRPC", href: "/system-design/fundamentals/rpc" },
+      no: {
+        q: "Is it events or files that many teams read for years?",
+        yes: "Avro with a schema registry (or Protobuf with one)",
+        no: "Protobuf or JSON; pick what your tools already speak",
+      },
+    },
+  }}
+/>
+
+## In the wild
+
+- **Apache Kafka** setups often pair Avro with Confluent Schema Registry, which prefixes each message with a marker byte and a 4-byte schema id. The registry also accepts Protobuf and JSON Schema.
+- **gRPC** sends every call as Protobuf, and Google uses Protobuf for much of its stored and transmitted data.
+- **Apache Iceberg**, a table format for data lakes, keeps its manifest files (the lists of data files in a table) in Avro.
+
+## Common pitfalls
+
+- **Large integers in JSON.** JavaScript reads every JSON number as a 64-bit float, which is exact only up to about $9 \times 10^{15}$. A 64-bit id above that loses its last digits. Send such ids as strings.
+- **Binary data in JSON.** Raw bytes must first be turned into text with base64, which turns every 3 bytes into 4 characters, a third more.
+- **Negative numbers as Protobuf `int32`.** Each one takes 10 bytes. Use `sint32` or `sint64` for fields that go negative.
+- **Treating "missing" as 0.** JSON readers and proto3 (the current Protobuf syntax) both make it easy, and it is the story's bug. Fail loudly, or use a type that can say "not set".
+- **Losing old Avro schemas.** A file or message is unreadable without its writer's schema. Keep every version in the registry for as long as the data lives.
+
+## How to say it in an interview
+
+Serialisation is how a record becomes bytes. JSON writes names and values as text, so it is readable and needs no schema, but most of a small message is names. For one scooter status that is 69 bytes against 15 for Protobuf and 12 for Avro. Protobuf replaces each name with a numbered tag, and the `.proto` file is a contract that both sides compile. Avro drops the tags too and writes values in schema order, so the reader needs the writer's exact schema, from a file header or a schema registry. I would use JSON at the public edge, Protobuf for calls between services, and Avro or Protobuf with a registry for event streams that many teams read. Then I would talk about evolution: add fields with defaults, never reuse a field number, and check every schema change in CI or the registry before it ships.
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is serialisation, and what is the difference between a text format and a binary format?" level="Junior" category="Serialization">
+    **Short answer.** Serialisation turns an in-memory object into a flat row of bytes that can be sent or stored, and deserialisation turns it back. A text format such as JSON writes everything as readable characters; a binary format such as Protobuf writes compact bytes that only make sense with a schema.
+
+    **Why.** Memory layout and pointers mean nothing on another machine, so every network call and every file needs some encoding. The scooter status is 69 bytes as JSON because the names travel in every message. As Protobuf it is 15 bytes, because each name becomes a one-byte tag and numbers become varints. Text is easy to debug and needs no shared schema. Binary is smaller, faster to decode and checked against a contract.
+
+    **Follow-ups the interviewer may ask.**
+    - What does the reader of a Protobuf message need that a JSON reader does not?
+    - Where would you still choose JSON inside a company?
+
+    **Watch out for.** Saying binary is always better. For a public API, a config file or a log line that people read, JSON's readability is worth far more than the bytes.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A teammate wants to switch your public REST API from JSON to Protobuf to save bandwidth. What do you say?" level="Junior" category="APIs">
+    **Short answer.** I would keep JSON at the public edge. The saving is small next to what partners and browsers lose, and Protobuf fits better behind the gateway.
+
+    **Why.** Do the sums first. At 5,000 requests a second with 2 KB JSON responses, that is about 10 MB/s before compression. With HTTP compression on, each response is more like a few hundred bytes, and Protobuf might save about half of what is left. Against this, partners can no longer call the API with `curl` or read the response, every client needs generated code, and browsers need an extra library. If bandwidth really is the problem, check compression, pagination and field selection first.
+
+    **Follow-ups the interviewer may ask.**
+    - When would a binary format at the edge make sense? (A mobile app you own on slow networks.)
+    - How would you offer both formats from one service?
+
+    **Watch out for.** Comparing raw JSON with raw Protobuf. Real traffic is compressed, and compression closes much of the gap for text.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Avro bytes contain no field names and no tags. How does a reader decode them, and how does that work on a Kafka topic?" level="Mid" category="Serialization">
+    **Short answer.** The reader needs the exact schema the writer used, which tells it the order and type of every field. On Kafka, each message starts with a marker byte and a 4-byte schema id, and the consumer fetches that schema from a schema registry once and caches it.
+
+    **Why.** The Avro scooter status is 12 bytes: a string length, six letters, two zigzag varints and a boolean. Without the schema those bytes could be anything. The registry adds 5 bytes per message, so 17 bytes in all, still a quarter of the 69-byte JSON. Lookups are cheap because a topic usually has a handful of schema versions, so each consumer makes one registry call per version, not one per message. The registry also checks each new schema for compatibility before it gets an id.
+
+    <AnimatedDiagram name="fundamentals/serialization-registry" step={2} path="ingest>kafka>job>registry" caption="The id travels with every message. The schema travels once per consumer." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to consumers if the registry is down?
+    - Why not put the full schema in every message?
+
+    **Watch out for.** Assuming a reader can decode with its own schema alone. The bytes are laid out by the writer's schema, so treating any other schema as the writer's, even one with the same fields in a different order, reads the wrong bytes into the wrong fields.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What do backward and forward compatibility mean for a schema, and which do you need during a rolling deploy?" level="Mid" category="Data modeling">
+    **Short answer.** Backward compatible means new code can read old data; forward compatible means old code can read new data. During a rolling deploy you usually need both, because old and new writers and readers run side by side for a while.
+
+    **Why.** Say 200 ingest servers update over 30 minutes. For that half hour, some write the new schema and some the old, and the battery job may run either version. Data also outlives code: a job reading three years of files meets every schema version ever written, which needs backward compatibility against all of them, not only the last one. Adding a field with a default is safe both ways. Removing a field that readers require, or changing its type, breaks at least one direction.
+
+    <Compare
+      columns={["Change", "Protobuf", "Avro"]}
+      rows={[
+        ["Add a field", "Safe with a new number", "Safe with a default"],
+        ["Remove a field", "Safe; reserve the number", "Safe if readers have a default"],
+        ["Rename a field", "Safe on the wire", "Needs an alias"],
+        ["Change int to string", "Breaks", "Breaks"],
+      ]}
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - Which side do you upgrade first under backward-only compatibility?
+    - How would you enforce these rules in CI?
+
+    **Watch out for.** Testing a new schema only against the previous version. Old files on disk can be many versions back.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You are designing an event pipeline: a billion events a day into Kafka, read by 20 teams, kept for three years. Which format do you pick, and how do you keep it from breaking?" level="Senior" category="Data modeling">
+    **Short answer.** A binary format with a schema registry, Avro or Protobuf, with compatibility checked against every earlier version before a schema gets an id. Raw JSON is too big for three years and gives 20 teams no contract.
+
+    **Why.** At the scooter record's size, raw JSON is about 72 GB a day, about 78 TB over three years. Avro files are about 12 GB a day, about 14 TB. Both shrink with compression, but the contract matters more than the bytes. With 20 consumer teams, a silent rename like the story's would break someone every month. With a registry set to check all earlier versions, an unsafe change fails in the producer's CI, and every message carries the id of the schema that wrote it. Avro has an edge for long-lived files, because data tools such as Spark read Avro files natively with the schema in the header. Protobuf is the better fit if the same messages also flow through gRPC services.
+
+    <AnimatedDiagram name="fundamentals/serialization-registry" highlight={["registry", "ci"]} caption="The registry is the gate: an incompatible schema never gets an id, so it never reaches the topic." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you make a change that really is breaking, such as splitting one field into two?
+    - When would you convert the archive to a columnar format such as Parquet?
+    - Who owns the schemas: the producing team or a central group?
+
+    **Watch out for.** Treating the registry as optional plumbing. It holds the only key to decoding three years of data, so it needs backups and the same uptime as Kafka.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [RPC and gRPC](/system-design/fundamentals/rpc)
+- [REST](/system-design/fundamentals/rest)
+- [Compression and encoding](/system-design/fundamentals/compression)
+- [Message queues](/system-design/patterns/message-queues)
+- [Analytical databases](/system-design/databases/analytical-databases)
+
+## Further reading
+
+- Protocol Buffers documentation, [Encoding](https://protobuf.dev/programming-guides/encoding/): tags, wire types and varints, byte by byte.
+- Apache Avro, [Specification](https://avro.apache.org/docs/current/specification/): the binary encoding and the rules for resolving a writer's schema against a reader's.
+- Confluent, [Schema Registry overview](https://docs.confluent.io/platform/current/schema-registry/index.html): the wire format, ids and compatibility modes.
+- Martin Kleppmann, [Schema evolution in Avro, Protocol Buffers and Thrift](https://martin.kleppmann.com/2012/12/05/schema-evolution-in-avro-protocol-buffers-thrift.html): a short comparison of how the three handle change.

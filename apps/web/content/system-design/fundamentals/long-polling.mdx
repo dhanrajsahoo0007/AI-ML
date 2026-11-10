@@ -1,9 +1,257 @@
 ---
 title: "Long Polling"
-description: "Holding requests open until data arrives, and its scaling trade-offs."
-status: outline
+description: "How long polling holds a request open until news arrives, how timeouts and reconnects keep it safe, and what the waiting requests cost a server."
+updated: 2026-11-09
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** holding requests open until data arrives, and its scaling trade-offs.
+<KeyIdea>
+  Long polling means the page asks the server "anything new?" and the server waits to answer until it has news or a timer runs out, so the page hears about changes almost at once without asking over and over.
+</KeyIdea>
+
+## The story
+
+You run an online furniture shop with a help chat in the corner of every page. A customer types "Will this sofa fit through a 70 cm door?" and waits. An agent answers 40 seconds later, and the customer expects the reply to appear the moment the agent presses send. Your first idea is [short polling](/system-design/fundamentals/ajax-polling): ask the server every second. That feels live, but at the evening peak 30,000 chat windows are open. The servers take 30,000 requests a second to deliver about 500 new messages. Long polling flips the deal: each chat window asks once, and the server keeps the question until it has something to say.
+
+## How it works
+
+A few words first. A **long poll** is an ordinary [HTTP](/system-design/fundamentals/http) request that the server does not answer right away. The server **holds** it: the connection stays open and nothing is sent yet. The server answers as soon as there is news, or when a **hold timeout** (here 30 seconds) runs out. Then the client sends the next request at once. Each request carries a **cursor**, a marker for the last thing the client has seen. In a chat it is the number of the last message: "give me messages after 17".
+
+### Step 1: The request waits on the server
+
+<AnimatedDiagram name="fundamentals/long-polling" step={1} caption="The page asks for messages after 17. The poll server finds none, so it holds the request open for up to 30 seconds." />
+
+The page sends `GET /chats/77/messages?after=17` to a **poll server**, a server whose job is to hold these requests. The server works in a careful order. First it subscribes to chat 77's **topic**, a named channel, on a **pub/sub** system: a message bus that hands each message published on a topic to every server listening on it. Then it reads the message store for anything after 17. Subscribing first means a message saved during the read still reaches it. It finds nothing, so it keeps the request open and sends nothing back.
+
+<PremiumBreak />
+
+### Step 2: A new message answers it
+
+<AnimatedDiagram name="fundamentals/long-polling" step={2} caption="The agent's reply is saved as message 18 and published. The poll server answers the waiting request at once, and the page asks again." />
+
+The agent presses send. The chat service saves the reply as message 18 and publishes it on chat 77's topic. The poll server hears it within about a millisecond and writes `200 OK` with message 18 onto the connection that was already open. No new connection has to be set up, so most of the <Term id="latency">latency</Term> is the trip to the customer's device, about 50 ms. The reply is on screen in about 0.1 seconds.
+
+The page asks again at once, now with `after=18`. For about one round trip, roughly 100 ms, it has no request open. A message that lands in that gap is safe in the store, and the next request picks it up because the cursor says "after 18".
+
+<Tabs title="Two ways a held request ends">
+  <Tab label="News arrived">
+
+```http
+GET /chats/77/messages?after=17 HTTP/1.1
+Host: shop.example.com
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"messages": [{"seq": 18, "from": "agent", "text": "Yes, it is 68 cm deep."}]}
+```
+
+  </Tab>
+  <Tab label="Timer ran out">
+
+```http
+GET /chats/77/messages?after=18 HTTP/1.1
+Host: shop.example.com
+
+HTTP/1.1 204 No Content
+```
+
+  </Tab>
+</Tabs>
+
+### Step 3: Nothing for 30 seconds
+
+<AnimatedDiagram name="fundamentals/long-polling" step={3} caption="After 30 seconds with no news, the server answers 204 No Content and the page asks again." />
+
+Most of the time nobody types. After 30 seconds the server answers `204 No Content`, the HTTP code for "done, nothing to send", and the page asks again. Why not hold for an hour? Because other machines on the path close connections that look idle. A <Term id="load-balancer">load balancer</Term> or [reverse proxy](/system-design/fundamentals/proxies) often cuts a connection after 60 seconds with no traffic, and mobile networks drop quiet connections too. If a proxy cuts first, the client sees an error instead of a clean empty answer. The rule: **the hold timeout must be shorter than every idle timeout on the path.** Here that is 30 seconds against 60.
+
+Now count requests for the 30,000 chats, each getting about one message a minute:
+
+- Timeouts: each chat re-asks at least every 30 seconds, so at most $30{,}000 / 30 = 1{,}000$ requests a second.
+- Messages: each one ends a request early, $30{,}000 / 60 = 500$ a second.
+- Total: at most about $1{,}500$ requests a second, a little less in practice because a message also restarts the clock.
+
+Polling every second costs 30,000 requests a second, 20 times more, and only 1 answer in 60 carries a message. For long polling it is about 1 in 3 ($500 / 1{,}500$).
+
+### Step 4: Connection lost, reconnect with the cursor
+
+<AnimatedDiagram name="fundamentals/long-polling" step={4} caption="The held request dies when a server restarts. Message 19 is saved while nobody is listening. The retry asks for everything after 18 and gets it." />
+
+Connections fail. A poll server restarts during a deploy, or a phone moves from Wi-Fi to mobile data. While the page has no request open, the agent sends message 19. No poll server is listening for chat 77, and a pub/sub system like this one drops a message that nobody is subscribed to.
+
+Nothing is lost, because the page still has its cursor. It waits about a second plus a small random amount, called **jitter**, and asks again with `after=18`. The load balancer may pick a different poll server. That server reads the store, finds message 19 and answers at once. **The cursor and the store make delivery complete; the open connection only makes it fast.**
+
+Two habits finish the client. If errors repeat, it doubles its wait each time (1, 2, 4, 8 seconds, up to about 30). This **exponential backoff** keeps a sick server from being hammered. And it guards against duplicates. Subscribing before reading means a message saved during the read can arrive twice, once from the store and once from pub/sub. The server merges by message number, and the client also skips any number it has already shown.
+
+```ts
+// Follow chat 77. The server holds each request for up to 30 s.
+async function followChat(chatId: string, lastSeq: number) {
+  let backoff = 1_000;
+  while (true) {
+    try {
+      const res = await fetch(`/chats/${chatId}/messages?after=${lastSeq}`, {
+        signal: AbortSignal.timeout(40_000), // a little longer than the 30 s hold
+      });
+      if (res.status === 200) {
+        for (const m of (await res.json()).messages) {
+          if (m.seq > lastSeq) { render(m); lastSeq = m.seq; } // skip duplicates
+        }
+      } else if (res.status !== 204) throw new Error(`HTTP ${res.status}`);
+      backoff = 1_000; // 200 or 204: ask again at once
+    } catch {
+      await sleep(backoff * (0.5 + Math.random())); // backoff with jitter
+      backoff = Math.min(backoff * 2, 30_000);
+    }
+  }
+}
+```
+
+### Step 5: What the waiting costs
+
+<AnimatedDiagram name="fundamentals/long-polling-fleet" stepper caption="30,000 held requests spread over three poll servers, and the pub/sub topic that finds the one server holding each chat's request." />
+
+Long polling saves requests but moves the cost to connections. At any moment the fleet holds about 30,000 open requests, one per chat window. A waiting request uses almost no CPU. It uses memory, a **socket** (the operating system's end of a network connection) and a **file descriptor**, the handle the operating system gives a program for each open connection. How much that hurts depends on how the server is built:
+
+- **One thread per request.** Many classic web servers give each request a thread from a pool of about 200. A held request keeps its thread asleep, so 30,000 of them need $30{,}000 / 200 = 150$ nearly idle servers. A bigger pool helps only so far: each thread reserves about 1 MB of memory as its working space (its stack), so 30,000 threads need about 30 GB only to wait.
+- **An event loop.** An event loop is one thread that watches many connections at once and works only on those with something to do. Node.js and Netty work this way, and Go's lightweight goroutines get the same effect. A waiting request becomes a small object, thousands per thread. At about 30 KB per held request for socket buffers, encryption state and the request itself, 10,000 take about 300 MB. A server could hold more, but a cap of about 10,000 limits how many clients one restart sends back at once. Three servers carry 30,000, and a fourth lets one restart safely.
+
+Linux often starts a process with a limit of 1,024 open file descriptors, so a poll server needs that raised to tens of thousands. The load balancer holds the same 30,000 connections and must be sized for them.
+
+Step 2 of the diagram shows the other cost: finding the right server. The reply reaches the chat service, but chat 77's waiting request lives on poll server 2. Each poll server subscribes to the topics of the chats it holds, so pub/sub sends the message to server 2 and no other. The dashed lines to servers 1 and 3 carry other chats. The bottom route is the catch-up path: any server can read the store after a client's cursor.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="A proxy on the path cuts connections idle for 45 seconds. What hold timeout would you pick?" hint="Which side should end the request, the server or the proxy?">
+    About 25 to 30 seconds. The server must answer before the proxy gives up, so the client gets a clean 204 and asks again at once instead of an error and a backoff.
+  </QuizItem>
+  <QuizItem question="80,000 dashboards long-poll with a 20-second hold, and their data changes about every 5 minutes. About how many requests a second arrive?" hint="Add the timeouts and the changes.">
+    Timeouts: $80{,}000 / 20 = 4{,}000$ a second. Changes: $80{,}000 / 300 \approx 270$ a second. At most about 4,300 a second, almost all empty timeouts. A longer hold, if the path allows it, cuts the load nearly in proportion.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<ProsCons
+  pros={[
+    "News arrives in about 0.1 s, not half a polling interval later",
+    "About 1,500 requests a second instead of 30,000 for the help chat",
+    "Plain HTTP requests: work through corporate proxies and firewalls that break WebSockets or buffer streams",
+  ]}
+  cons={[
+    "Every open client holds a request: memory, a socket and a file descriptor each",
+    "Needs pub/sub or similar to reach the server holding the request",
+    "Timeouts must stay under every idle limit, and reconnects need a cursor, backoff and jitter",
+  ]}
+/>
+
+<Compare
+  columns={["30,000 open chats", "Short polling (1 s)", "Long polling (30 s)", "Server-sent events", "WebSockets"]}
+  rows={[
+    ["Requests per second", "30,000", "about 1,500 at most", "near 0 once open", "near 0 once open"],
+    ["Delay for a new message", "about 0.5 s average", "about 0.1 s", "about 0.1 s", "about 0.1 s"],
+    ["Held open on the server", "nothing between polls", "30,000 requests", "30,000 streams", "30,000 sockets"],
+    ["Plain request and response", true, true, false, false],
+    ["Client sends on the same connection", false, false, false, true],
+  ]}
+  caption="Long polling gets push-like speed from ordinary requests. Streaming methods also drop the re-asking, but need proxies that allow long-lived connections."
+/>
+
+## In the wild
+
+- **Amazon SQS** `ReceiveMessage` waits up to 20 seconds (`WaitTimeSeconds`) for a message instead of returning empty, which cuts empty responses and cost.
+- **The Telegram Bot API** `getUpdates` takes a `timeout` to wait for new updates, and its `offset` works as the cursor.
+- **HashiCorp Consul** "blocking queries" take the last `index` the client saw and a `wait` time, and return when the data changes or the wait ends.
+- **The Dropbox API** has a `longpoll` endpoint that returns when files in a folder change.
+
+## Common pitfalls
+
+- **A hold longer than a proxy's idle timeout.** The proxy cuts first and every reconnect goes through backoff.
+- **No cursor.** A message that lands between two requests is lost. Always resume from the last seen id.
+- **Everyone reconnecting at once.** When a server holding 10,000 requests restarts, all 10,000 return in the same second. Add jitter to retries and to the hold timeout.
+- **Many tabs on HTTP/1.1.** Browsers open about six connections per host, and each tab's long poll takes one. Use HTTP/2, which shares one connection, or share one poll between tabs.
+
+## How to say it in an interview
+
+"Long polling is a request the server holds until it has news. The client asks with a cursor, like 'messages after 17', and the server answers with new messages or an empty 204 after about 30 seconds, safely under the 60-second idle timeouts on the path. Pub/sub makes delivery fast; the cursor, with backoff and jitter on reconnect, makes it complete. The cost moves from requests to connections: 30,000 clients send about 1,500 requests a second instead of 30,000, but hold 30,000 requests, so I run event-loop servers at about 10,000 each. I pick it when WebSockets may be blocked; if the client also streams data up, I use WebSockets."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is long polling, and how is it different from short polling?" level="Junior" category="Real-time">
+    **Short answer.** In short polling the server answers at once, usually with "nothing new", and the client asks again on a timer. In long polling the server holds the request until there is news or a timeout of about 30 seconds, so changes arrive almost at once and few requests are wasted.
+
+    **Why.** For 30,000 chat windows with about one message a minute, one-second polling costs 30,000 requests a second and a message waits about 0.5 seconds. A 30-second hold costs at most $30{,}000 / 30 + 30{,}000 / 60 = 1{,}500$ a second, and a message arrives in about 0.1 seconds because a request is already waiting.
+
+    <AnimatedDiagram name="fundamentals/long-polling" step={2} caption="The held request is answered the moment message 18 is published." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does the server send when the timeout ends with no news?
+    - What happens to a message that arrives between two requests?
+
+    **Watch out for.** Calling long polling free because it sends fewer requests. Every waiting client now holds a connection on the server.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you choose the hold timeout, and what goes wrong if it is too long?" level="Mid" category="Real-time">
+    **Short answer.** Pick a hold safely below the shortest idle timeout between client and server, often 25 to 30 seconds when load balancers cut idle connections at 60. Too long, and a proxy or mobile network closes the connection first, so the client sees errors instead of a clean empty answer.
+
+    **Why.** A held request sends no bytes, so every hop sees it as idle. When the server ends it with a 204, the client re-asks at once. When a proxy cuts it, the client gets a network error and waits through backoff, losing real-time delivery for seconds. The hold also sets load for 30,000 clients:
+
+    | Hold | Timeout requests a second | Risk |
+    | --- | --- | --- |
+    | 15 s | 2,000 | Safe almost everywhere |
+    | 30 s | 1,000 | Safe under 60 s idle limits |
+    | 90 s | about 330 | Cut by load balancers at their usual 60 s default |
+
+    **Follow-ups the interviewer may ask.**
+    - Why add jitter to the hold timeout?
+    - What should the client's own request timeout be?
+
+    **Watch out for.** Taking the longest hold to save requests. You save a few hundred requests a second and break on every proxy with a shorter limit.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A message is published while the client has no long-poll request open. How do you make sure it is not lost or shown twice?" level="Mid" category="Reliability">
+    **Short answer.** Store every message with an increasing number and have the client send the last number it has. The server reads the store after that number before holding the request, and the client skips any number it has already shown.
+
+    **Why.** Between a reply and the next request there is a gap of about 100 ms, and after a dropped connection it can be seconds. Pub/sub usually delivers only to current listeners, so an event in the gap reaches nobody, but the next request says "after 18" and the store returns message 19. Order matters on the server: subscribe first, then read. Read first, and a message saved in between waits up to 30 seconds for the next timeout. Subscribing first can deliver a message twice, once from the read and once from pub/sub, so the server merges by number and the client drops any number it has already shown.
+
+    <AnimatedDiagram name="fundamentals/long-polling" step={4} caption="The retry asks for everything after 18, and the store returns message 19, saved while no request was open." />
+
+    **Follow-ups the interviewer may ask.**
+    - How long must the store keep messages?
+    - What changes if a client can be offline for a day?
+
+    **Watch out for.** Trusting the open connection for delivery. Connections drop on every deploy and network change; only the cursor and the store make delivery complete.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You need to hold 300,000 long-poll requests at once. How do you size the fleet, and how does an event reach the right server?" level="Senior" category="Scalability">
+    **Short answer.** Use event-loop servers holding about 10,000 requests each, so about 30 servers plus spares, with raised file-descriptor limits and a load balancer sized for the same connections. Each poll server subscribes on pub/sub to the topics of the clients it holds, so an event goes only to the server with the waiting request.
+
+    **Why.** At about 30 KB per held request, 10,000 take about 300 MB. Thread-per-request servers with 200 threads would need 1,500 machines. One load balancer address can open only about 28,000 connections to one poll server, because Linux's default local port range is 32768 to 60999; that is fine at 10,000 per server but not at 50,000. Plan for restarts: when a server dies, its 10,000 clients reconnect, and 0 to 5 seconds of jitter turns that into about 2,000 requests a second spread over the rest. Before a deploy, drain a server: stop sending it new requests and answer its held ones with 204 in batches.
+
+    <AnimatedDiagram name="fundamentals/long-polling-fleet" highlight={["bus", "poll1", "poll2", "poll3"]} caption="Pub/sub delivers each chat's message to the one poll server subscribed to it." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens when one topic, such as a site-wide announcement, has 300,000 subscribers?
+    - When would you move to WebSockets or server-sent events?
+
+    **Watch out for.** Sizing by requests per second. With one message per client a minute that is about $10{,}000 + 5{,}000 = 15{,}000$ a second, and the CPU sits nearly idle. Memory, sockets and file descriptors set the server count.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Ajax polling](/system-design/fundamentals/ajax-polling): short polling and how to pick its interval
+- [Server-sent events](/system-design/fundamentals/server-sent-events) and [WebSockets](/system-design/fundamentals/websockets): keeping one connection open instead of re-asking
+- [Choosing a real-time method](/system-design/fundamentals/choosing-realtime): all the options side by side
+- [Proxies](/system-design/fundamentals/proxies) and [Load balancing basics](/system-design/fundamentals/load-balancing-basics): the idle timeouts a long poll must stay under
+- [Fan-out](/system-design/patterns/fan-out) and [Circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries): one event to many listeners, and retrying without a stampede
+- [Design Facebook Messenger](/system-design/case-studies/facebook-messenger): pushing messages to open clients at scale
+
+## Further reading
+
+- [RFC 6202, Known Issues and Best Practices for the Use of Long Polling and Streaming in Bidirectional HTTP](https://www.rfc-editor.org/rfc/rfc6202): the IETF's notes on how long polling behaves and where it breaks.
+- [Amazon SQS Developer Guide, Short and long polling](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-short-and-long-polling.html): a production long-polling API and how it reduces empty responses.
+- [Telegram Bot API, getUpdates](https://core.telegram.org/bots/api#getupdates): long polling with a timeout and an offset that works as a cursor.
+- [HashiCorp Consul, Blocking queries](https://developer.hashicorp.com/consul/api-docs/features/blocking): the index-and-wait pattern for watching data change.

@@ -266,7 +266,7 @@ const SITE_PAGE_ROUTES: Record<string, string> = { "pricing-faq": "/pricing" };
 
 /**
  * MDX file → page, from the section registry (docs sections and newsletter issues, through their kind for
- * `access`) and content/pages. Pages of `off` sections are included with visible: false.
+ * `access`) and content/pages. Pages of `off` sections and `off` hubs are included with visible: false.
  */
 export async function contentPages(contentDir: string): Promise<Map<string, PageInfo>> {
   const { allSections } = await import("../src/features/sections/registry");
@@ -276,9 +276,11 @@ export async function contentPages(contentDir: string): Promise<Map<string, Page
   for (const section of allSections()) {
     if (section.kind !== "docs") continue;
     const kind = kindOf(section);
-    for (const item of loadDocItems(section)) {
+    const offHubs = section.offHubs ?? [];
+    for (const item of loadDocItems(section, { includeOffHubs: true })) {
       const access = kind.access?.(section, item) ?? "free";
-      pages.set(item.file, { href: item.href, visible: section.state === "on", access });
+      const visible = section.state === "on" && !offHubs.includes(item.hub);
+      pages.set(item.file, { href: item.href, visible, access });
     }
   }
   // Newsletter issues: a review page outside production for drafts, so their figures ship where the page is built.
@@ -673,10 +675,10 @@ export function animatedSpecsModule(ids: string[]) {
   return `${GENERATED}
 // Every AnimatedDiagram spec in apps/web/assets/diagrams/animated/, keyed by asset ID. Server-only by use:
 // the Diagram wrapper looks a spec up here and passes just that spec to the client component.
-import type { DiagramSpec } from "./types";
+import type { AnySpec } from "./types";
 ${imports}
 
-export const ANIMATED_SPECS: Record<string, DiagramSpec> = {
+export const ANIMATED_SPECS: Record<string, AnySpec> = {
 ${map}
 };
 `;

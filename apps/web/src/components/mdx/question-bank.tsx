@@ -1,6 +1,6 @@
-import * as React from "react";
 import Link from "next/link";
 import { InterviewQuestions, InterviewQuestion } from "@/components/mdx/interview-qa";
+import { AnswerBody } from "@/components/mdx/question-answer";
 import { getCompanies, type LibraryQuestion } from "@/lib/question-bank";
 
 const SOURCE_URL = "https://github.com/pallavi-shekhar/ai-engineering-interview-questions-company-wise";
@@ -27,50 +27,6 @@ export function SourceCredit() {
   );
 }
 
-function renderInline(text: string) {
-  return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).map((part, j) => {
-    if (part.length > 1 && part.startsWith("`") && part.endsWith("`")) return <code key={j}>{part.slice(1, -1)}</code>;
-    if (part.length > 4 && part.startsWith("**") && part.endsWith("**"))
-      return (
-        <strong key={j} className="font-semibold text-ink">
-          {part.slice(2, -2)}
-        </strong>
-      );
-    return <React.Fragment key={j}>{part}</React.Fragment>;
-  });
-}
-
-// Answers are blocks separated by blank lines: paragraphs, "- " bullet lists or "1. " numbered
-// lists, with `inline code` and **bold**.
-function renderAnswer(text: string) {
-  return text
-    .trim()
-    .split(/\n\s*\n/)
-    .map((block, i) => {
-      const lines = block
-        .split("\n")
-        .map((l) => l.trim())
-        .filter(Boolean);
-      if (lines.every((l) => l.startsWith("- ")))
-        return (
-          <ul key={i} className="list-disc space-y-1 pl-5">
-            {lines.map((l, j) => (
-              <li key={j}>{renderInline(l.slice(2))}</li>
-            ))}
-          </ul>
-        );
-      if (lines.every((l) => /^\d+\. /.test(l)))
-        return (
-          <ol key={i} className="list-decimal space-y-1 pl-5">
-            {lines.map((l, j) => (
-              <li key={j}>{renderInline(l.replace(/^\d+\. /, ""))}</li>
-            ))}
-          </ol>
-        );
-      return <p key={i}>{renderInline(block)}</p>;
-    });
-}
-
 // Stands in for a Pro answer on public pages (plan §9.1): the answer text is not in the page at all.
 function LockedAnswer() {
   return (
@@ -83,8 +39,9 @@ function LockedAnswer() {
   );
 }
 
-// Library questions as <InterviewQuestion> elements; `tagOf` labels each one for the topic chips. Answers for
-// which `locked` is true are replaced by the Pro placeholder.
+// Library questions as <InterviewQuestion> elements; `tagOf` labels each one for the topic chips. Answers are
+// MDX compiled by AnswerBody (components/mdx/question-answer.tsx). An answer for which `locked` is true is
+// replaced by the Pro placeholder and is never compiled, so its text and diagrams are not in the page.
 export function questionItems(
   questions: LibraryQuestion[],
   tagOf?: (q: LibraryQuestion) => string,
@@ -101,7 +58,7 @@ export function questionItems(
       related={q.related}
       refs={q.refs}
     >
-      {locked?.(q) ? <LockedAnswer /> : renderAnswer(q.a)}
+      {locked?.(q) ? <LockedAnswer /> : <AnswerBody question={q} />}
     </InterviewQuestion>
   ));
 }

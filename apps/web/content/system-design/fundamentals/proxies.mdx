@@ -1,0 +1,294 @@
+---
+title: "Proxies, reverse proxies and gateways"
+description: "Forward and reverse proxies, where TLS ends, sidecar proxies between services, and what an API gateway adds on top of a plain proxy."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  A proxy is a middleman server that passes requests along for someone else: a forward proxy speaks for a group of clients, and a reverse proxy speaks for a group of servers.
+</KeyIdea>
+
+## The story
+
+Maya works in an office of 400 people. At her desk she opens your bookshop, `shop.example.com`, and looks at a novel. The page loads in under a second. Her request passed through two middlemen she never sees.
+
+The first belongs to her company. Every laptop in the office sends its web traffic through one machine. That machine blocks gambling sites and writes down which sites people visit. The outside world sees one office address instead of 400 laptops.
+
+The second belongs to you. Your shop runs on three app servers. None of them is reachable from the internet. One machine at the front holds the shop's public address and its certificate, the signed file that proves to browsers this really is your shop. It takes Maya's request and hands it to whichever app server is free.
+
+Both machines are proxies. They work for opposite sides, and that difference is the whole topic.
+
+## How it works
+
+A proxy sits between a client and a server. It receives the request, may check or change it, sends it on, and passes the answer back. Neither end has to know the other's real address.
+
+### Step 1: The forward proxy speaks for the clients
+
+<AnimatedDiagram name="fundamentals/proxies" step={1} caption="Every office laptop sends its traffic through one forward proxy. Outside sites see the proxy's address, not the laptops." />
+
+A **forward proxy** sits on the client's side. The office's IT team runs it, and every laptop is set up to use it. When Maya asks for any outside site, the request leaves through the proxy. The shop sees it come from `198.51.100.7`, the office's public address, not from Maya's laptop.
+
+Why would a company want this? Three reasons, all about controlling what goes out:
+
+- **Filtering.** The proxy refuses requests to blocked sites.
+- **Logging.** The proxy writes down each site a laptop connects to. One news page can open connections to 20 sites, so say 1,000 connections per person a day. 400 people × 1,000 = about 400,000 log lines a day, in one place.
+- **One exit.** Partners can allow one office address through their firewalls instead of 400.
+
+Most traffic today is HTTPS, which is encrypted. So how does a forward proxy pass it along? The browser asks the proxy to open a tunnel:
+
+```http
+CONNECT shop.example.com:443 HTTP/1.1
+Host: shop.example.com:443
+
+HTTP/1.1 200 Connection Established
+```
+
+After that, the proxy copies encrypted bytes both ways. It knows the site name, but not the page or its content. To see inside, a company must install its own certificate on every laptop and decrypt traffic in the middle. That is called TLS interception. Some large companies do it to scan for malware. It reads private traffic and is easy to get wrong, so it needs care.
+
+<PremiumBreak />
+
+### Step 2: The reverse proxy speaks for the servers
+
+<AnimatedDiagram name="fundamentals/proxies" step={2} caption="The shop's reverse proxy holds the public address. It ends the encryption and passes plain HTTP to one of three private app servers." />
+
+A **reverse proxy** sits on the server's side. You run it, and clients think it is the shop. Only the proxy has a public address, `203.0.113.20`. The app servers live on private addresses like `10.0.1.11` that the internet cannot reach, so attackers see one machine, not three. The proxy also:
+
+- **Spreads the load.** The shop peaks at 600 requests per second. Each app server handles about 300, so three give 900. If one dies, the proxy stops sending to it, and the other two give 600, just enough for the peak. Spreading load like this is the job of a <Term id="load-balancer">load balancer</Term>, and most reverse proxies do it.
+- **Routes by path.** `/images/` can go to a file store and everything else to the app servers.
+- **Reuses connections.** The proxy keeps about 20 open connections to each app server and reuses them, so the app servers rarely pay to set one up.
+- **Caches.** It can serve the shop's logo without asking any app server.
+
+All this costs one extra hop. Inside one data centre, that hop adds well under 1 ms.
+
+Maya's single request crossed both proxies. Hers hid her laptop from the shop. Yours hid your servers from her. The only difference is whose side each proxy is on.
+
+### Step 3: Where TLS ends
+
+<Term id="tls">TLS</Term> is the encryption behind the padlock in HTTPS. The point where encrypted traffic is decrypted is where TLS **terminates**. You have to pick that point, and the reverse proxy is the usual choice.
+
+<AnimatedDiagram name="fundamentals/proxies" step={2} path="internet>rproxy>app2" caption="TLS ends at the reverse proxy. From there, the request travels as plain HTTP inside the data centre." />
+
+People often say this saves CPU on the app servers. Check the numbers. A new TLS connection costs about 1 ms of CPU. Browsers reuse connections, so say 1 request in 10 opens a new one. At 600 requests per second that is 60 new connections per second: 60 × 1 ms = 60 ms of CPU each second, or 6% of one core. Real, but small.
+
+The bigger wins: the certificate lives on one machine, so renewals happen in one place, and the proxy can read each request to route it. There are three common choices:
+
+<Compare
+  columns={["", "End TLS at the proxy", "End, then re-encrypt", "Pass through"]}
+  rows={[
+    ["Proxy can read paths and headers", true, true, false],
+    ["Traffic inside the data centre is encrypted", false, true, true],
+    ["Where the public certificate lives", "Proxy only", "Proxy, plus internal certificates", "Every app server"],
+    ["New-connection work per client", "1 handshake at the proxy", "1 at the proxy; inside connections are reused", "1 at the app server"],
+    ["Fits", "Small sites on a trusted network", "Payment or health data, shared networks", "Strict end-to-end rules, non-HTTP traffic"],
+  ]}
+  caption="Pass-through proxies route on the site name the client sends in the clear at the start of TLS, since they cannot read anything else."
+/>
+
+The shop starts with the first choice. When it takes card payments, it moves to the second, so no one inside the network can read the traffic.
+
+### Step 4: Sidecars, a proxy next to every service
+
+A year later the shop has 30 small services, written in three languages. Each one calls others. Each needs timeouts, retries, encryption between services, and metrics. Writing that into a library three times, and keeping all three the same, is slow and error-prone.
+
+So you move that logic into a small proxy beside every copy of every service, on the same machine. This is a **sidecar**, named after the small car bolted to a motorbike. Kubernetes is a popular system for running many copies of many services on a fleet of machines. In it, a service copy and its sidecar run together as one unit called a pod.
+
+<AnimatedDiagram name="fundamentals/proxies-sidecar" stepper caption="Orders calls Payments through two sidecars. The sidecars speak mutual TLS; a control plane hands them their rules and certificates." />
+
+1. **One call, two sidecars.** The Orders app sends a plain HTTP call to its own sidecar on `localhost`, the machine's address for itself. That sidecar finds a healthy Payments copy, encrypts the call and sends it. Both sides prove who they are with certificates, which is called mutual TLS (mTLS). The Payments sidecar checks the caller and hands the call over as plain HTTP. TLS now ends inside each pod.
+2. **A control plane configures them all.** A central service gives every sidecar its routes, retry rules and certificates. It is not on the request path. All the sidecars plus the control plane are called a **service mesh**.
+
+The cost is real. 30 services with 4 copies each means 120 sidecars. At about 50 MB of memory each, that is 120 × 50 MB = 6 GB. Each call crosses two sidecars, adding roughly 1 ms at the median and more at the <Term id="p99">p99</Term>. A checkout that makes a chain of 5 calls pays about 5 ms extra.
+
+### Step 5: What a gateway adds
+
+Your shop opens an API to 50 partner bookshops and a mobile app. Now the front door needs to know *who* is calling, not only *where* to send the call. That job belongs to an <Term id="api-gateway">API gateway</Term>: a reverse proxy that understands your API.
+
+On each request, the gateway checks the caller's API key or token. It applies a <Term id="rate-limit">rate limit</Term> per partner, such as 100 requests per second. It routes `/books` to the catalog service and `/orders` to the orders service. It can also reshape requests, serve two API versions at once, and count usage for billing.
+
+How does a gateway differ from the reverse proxy and load balancer you already have? Load balancers come in two kinds. A layer 4 one moves whole connections and never reads the HTTP inside. A layer 7 one reads each request, so it can route by path.
+
+<Compare
+  columns={["", "Reverse proxy", "Load balancer", "API gateway"]}
+  rows={[
+    ["Main job", "Stand in front of servers", "Spread load over copies", "Front door for an API"],
+    ["Hides server addresses", true, true, true],
+    ["Routes by path", true, "Only layer 7 ones", true],
+    ["Knows who the caller is", "Rarely", false, true],
+    ["Per-caller limits and usage counts", false, false, true],
+    ["Added time per request", "Under 1 ms", "Under 1 ms", "About 1 to 5 ms"],
+  ]}
+  caption="Gateway time depends on how it checks the caller: a local token check is fast, a call to an auth service is slower."
+/>
+
+These names describe jobs, not products. One piece of software, such as NGINX or Envoy, can be your reverse proxy, load balancer, sidecar and gateway. Ask what the middleman must know: only where servers are, or also who the caller is.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Your reverse proxy's logs show every request from Maya's company coming from one address. Whose proxy is that address?" hint="Whose side hides the laptops?">
+    The office's forward proxy. It sends every laptop's traffic out from one address, `198.51.100.7`, so the shop cannot tell Maya from her 399 colleagues.
+  </QuizItem>
+  <QuizItem question="A forward proxy carries an HTTPS request with CONNECT. Can it log which book Maya looked at?" hint="What is still in the clear after the tunnel opens?">
+    No. It sees the site name, `shop.example.com`, and the number of bytes. The path `/books/42` travels inside the encrypted tunnel, unless the company intercepts TLS.
+  </QuizItem>
+  <QuizItem question="Why does a sidecar run on the same machine as its service?">
+    The service talks to it over `localhost`, which costs a fraction of a millisecond and never crosses the network unencrypted. The sidecar also lives and dies with that copy of the service.
+  </QuizItem>
+</Quiz>
+
+<DecisionTree
+  title="Which middleman do you need?"
+  tree={{
+    q: "Does it act for your own people going out to other sites?",
+    yes: "A forward proxy: filtering, logging, one outbound address",
+    no: {
+      q: "Is it for calls between your own services inside the cluster?",
+      yes: { answer: "Sidecar proxies in a service mesh" },
+      no: {
+        q: "Do outside apps or partners call you with keys or tokens?",
+        yes: { answer: "An API gateway", href: "/system-design/fundamentals/api-gateway" },
+        no: { answer: "A reverse proxy or load balancer", href: "/system-design/fundamentals/load-balancing-basics" },
+      },
+    },
+  }}
+/>
+
+## Trade-offs
+
+Putting any proxy in the request path:
+
+<ProsCons
+  pros={[
+    "One place for certificates, logs and access rules",
+    "Servers stay private; only the proxy faces the internet",
+    "Servers can be added, removed or moved without clients noticing",
+    "Connection reuse, caching and compression in one spot",
+  ]}
+  cons={[
+    "One more hop: well under 1 ms in a data centre, more for a sidecar pair",
+    "One more thing to fail, so you run at least two",
+    "The server no longer sees the client's address on its own",
+    "Timeouts, buffering and upload limits must match the app's",
+  ]}
+/>
+
+A service mesh trades memory and a few milliseconds per call chain for the same rules in every service. It pays off with many services in several languages. With five services in one language, a shared library is cheaper.
+
+## In the wild
+
+- **NGINX and HAProxy** are the most common reverse proxies in front of web apps. HAProxy also works as a layer 4 load balancer.
+- **Envoy** was built at Lyft and is the sidecar in the Istio service mesh. Many teams also use it at the edge.
+- **Squid** is a long-lived open-source forward proxy that schools, offices and internet providers use for filtering and caching.
+- **Cloudflare** runs reverse proxies in hundreds of cities in front of millions of sites, so TLS ends close to each visitor.
+
+## Common pitfalls
+
+- **Trusting `X-Forwarded-For` as sent.** A client can write its own. Trust only the entries your own proxies added.
+- **Timeouts that do not match.** The proxy gives up at 30 s and returns an error, while the app works on for 60 s. The client retries, and now the work runs twice.
+- **One proxy and no spare.** The proxy you added for reliability becomes the single thing that takes the site down. Run two, with a shared address that moves on failure.
+- **Buffering a stream.** Many proxies collect a whole response before sending it on. That breaks [server-sent events](/system-design/fundamentals/server-sent-events). [WebSockets](/system-design/fundamentals/websockets) also need the upgrade allowed and long idle timeouts.
+- **Calling the inside network safe forever.** Plain HTTP behind the proxy is fine until someone gets inside.
+
+## How to say it in an interview
+
+"A proxy is a middleman. A forward proxy works for clients: an office routes all outbound traffic through it to filter, log and share one address. A reverse proxy works for servers: it holds the public address and certificate, ends TLS, routes by path, balances load across private servers and reuses connections, for well under a millisecond per hop. I end TLS at the reverse proxy, and re-encrypt inside when the data is sensitive. I pass the client's address on in a `Forwarded` or `X-Forwarded-For` header. With many services in several languages, I put sidecar proxies next to each one for mTLS, retries and metrics, and accept about 1 ms per call. When outside callers need keys, quotas and versioned routes, the reverse proxy becomes an API gateway."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a forward proxy and a reverse proxy?" level="Junior" category="Networking">
+    **Short answer.** A forward proxy acts for clients and hides them from the servers they visit. A reverse proxy acts for servers and hides them from the clients that call them.
+
+    **Why.** An office of 400 laptops sends all traffic out through a forward proxy, so outside sites see one address and the company filters and logs about 400,000 connections a day in one place. A shop puts a reverse proxy in front of three private app servers, so clients see one public address while the proxy ends TLS and spreads 600 requests per second across the servers.
+
+    <AnimatedDiagram name="fundamentals/proxies" highlight={["fproxy", "rproxy"]} caption="One request crosses both: the office's forward proxy on the left and the shop's reverse proxy on the right." />
+
+    **Follow-ups the interviewer may ask.**
+    - Who configures each one: the client or the site owner?
+    - Is a load balancer a reverse proxy?
+
+    **Watch out for.** Defining them by the direction the data flows. Data flows both ways through both. The difference is whose side the proxy is on.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where would you terminate TLS in a typical web system, and why?" level="Mid" category="Security">
+    **Short answer.** At the reverse proxy or load balancer at the edge, so certificates live in one place and the proxy can read requests to route them. Re-encrypt from the proxy to the servers when the data is sensitive or the network is shared.
+
+    **Why.** The CPU saving is smaller than people think. At 600 requests per second with 1 in 10 opening a new connection, 60 handshakes at about 1 ms each use 6% of one core. The real gains are one certificate to renew, path routing, added headers, and pooled connections to the servers.
+
+    <AnimatedDiagram name="fundamentals/proxies" path="internet>rproxy>app2" caption="HTTPS reaches the reverse proxy, which decrypts it and forwards plain HTTP to an app server." />
+
+    **Follow-ups the interviewer may ask.**
+    - When would you pass TLS through untouched?
+    - How do services inside prove who they are to each other?
+
+    **Watch out for.** Treating plain HTTP inside the data centre as automatically safe. For card or health data, security reviews and some compliance rules expect encryption on every hop.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Behind your reverse proxy, every request in the app logs shows the same IP address. Why, and how do you get the real client address?" level="Mid" category="Networking">
+    **Short answer.** The app's connection comes from the proxy, so the app sees the proxy's address. Have the proxy add the client's address in a header, and have the app read it only from proxies it trusts.
+
+    **Why.** For HTTP, the standard header is `Forwarded` and the common one is `X-Forwarded-For`:
+
+    ```http
+    GET /books/42 HTTP/1.1
+    Host: shop.example.com
+    X-Forwarded-For: 198.51.100.7
+    X-Forwarded-Proto: https
+    ```
+
+    A layer 4 proxy does not read HTTP, so it cannot add headers. It prepends a short PROXY protocol line to the connection instead. Even then, a client behind an office forward proxy shows up as the office's address, so a rate limit keyed on it treats 400 people as one caller.
+
+    **Follow-ups the interviewer may ask.**
+    - A client sends a fake `X-Forwarded-For`. What does your app log?
+    - How would you rate limit fairly when one address hides a whole office?
+
+    **Watch out for.** Taking the first entry in `X-Forwarded-For`. The client wrote that one. Read from the right and stop at the first address that is not your own proxy.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You already have a load balancer. Why would you add an API gateway?" level="Mid" category="APIs">
+    **Short answer.** A load balancer decides where a request goes. A gateway also decides whether the caller may make it, how often, and against which version of the API.
+
+    **Why.** With 50 partners and a mobile app, every request must carry a key or token that is checked. Each partner needs its own limit, such as 100 requests per second, and usage must be counted for billing. Doing that in each of 30 services means 30 copies of the same logic. The gateway does it once, for about 1 to 5 ms per request.
+
+    **Follow-ups the interviewer may ask.**
+    - What breaks if the gateway is down, and how do you avoid that?
+    - Which checks belong in the gateway and which in the service?
+
+    **Watch out for.** Putting business rules in the gateway. It should check identity and limits; what a user may do with an order stays in the orders service.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What does a sidecar proxy give you, and when is a service mesh not worth it?" level="Senior" category="Architecture">
+    **Short answer.** A sidecar moves network logic out of the service: mutual TLS, retries, timeouts, routing and metrics, the same in every language. It is not worth it for a few services in one language, where a shared library does the job with less memory and latency.
+
+    **Why.** Each call crosses two sidecars, adding roughly 1 ms at the median, so a chain of 5 calls pays about 5 ms. 120 service copies at about 50 MB per sidecar use 6 GB of memory. In return, a control plane rotates certificates and changes retry rules for every service at once, with no redeploys.
+
+    <AnimatedDiagram name="fundamentals/proxies-sidecar" highlight={["oside", "pside"]} caption="Both apps speak plain HTTP to their own sidecar; only the sidecars talk to each other, over mutual TLS." />
+
+    **Follow-ups the interviewer may ask.**
+    - Retries in the sidecar and retries in the app: what happens to load during an outage?
+    - What happens to traffic if the control plane goes down?
+    - How would you roll a mesh out to 30 services without a big-bang change?
+
+    **Watch out for.** Saying the control plane sits on the request path. It only pushes configuration. If it stops, sidecars keep their last rules and calls keep flowing.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Networking basics](/system-design/fundamentals/networking)
+- [DNS](/system-design/fundamentals/dns)
+- [TLS](/system-design/fundamentals/tls)
+- [Load balancing basics](/system-design/fundamentals/load-balancing-basics)
+- [API gateway](/system-design/fundamentals/api-gateway)
+- [CDN](/system-design/fundamentals/cdn)
+- [Rate limiting](/system-design/patterns/rate-limiting)
+- [Circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries)
+
+## Further reading
+
+- [RFC 9110, HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110): how HTTP defines proxies and gateways, and the `CONNECT` method.
+- [RFC 7239, Forwarded HTTP Extension](https://www.rfc-editor.org/rfc/rfc7239): the standard header for passing the client's address through proxies.
+- [Envoy documentation, What is Envoy](https://www.envoyproxy.io/docs/envoy/latest/intro/what_is_envoy): one proxy used as edge proxy, sidecar and gateway.
+- [NGINX documentation, NGINX Reverse Proxy](https://docs.nginx.com/nginx/admin-guide/web-server/reverse-proxy/): headers, buffering and timeouts in a widely used reverse proxy.

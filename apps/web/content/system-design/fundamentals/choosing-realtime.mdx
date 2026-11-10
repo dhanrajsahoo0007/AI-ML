@@ -1,0 +1,291 @@
+---
+title: "Choosing a real-time method"
+description: "Short polling, long polling, server-sent events, WebSockets and push notifications on one timeline, with rules for picking one."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Pick a real-time method by asking three questions: who needs to talk, how soon the news must arrive, and whether the user's app is even open.
+</KeyIdea>
+
+## The story
+
+You run an auction site for vintage cameras. On a weekday evening, 50,000 people have an item page open. Each page shows the current price. In the last 10 minutes of a big sale, about 2,000 bidders crowd into a live room where they bid and chat. A bidder whose phone is in their pocket, with the app closed, wants to hear "You've been outbid". A seller wants to know when a 2-minute sales export is ready to download. Your first version handles all four the same way: every screen asks the server "anything new?" every 2 seconds. That is $50{,}000 \div 2 = 25{,}000$ requests a second, and almost every answer is "no". And the outbid alert never reaches a closed app at all.
+
+## How it works
+
+Here, **real-time** means the user sees a change soon after it happens, without pressing reload. "Soon" depends on the feature. A sales export can be a few seconds late. A bid in the final minute should arrive within a few hundred milliseconds. That is close to the floor. A message takes about 100 ms to cross the internet to a phone and back, which is the round-trip <Term id="latency">latency</Term>.
+
+There are five common methods. They differ in two ways: who starts each conversation, and what stays open between messages. The diagram follows one moment through four of them. Four browsers watch the same item on one app server, each using a different method. At t = 3 s, a new bid of \$120 lands on the server. Each step shows how one browser hears about it. The fifth method, push notifications, works without an open app, so it gets its own step at the end.
+
+### Step 1: Short polling asks on a timer
+
+<AnimatedDiagram name="fundamentals/choosing-realtime" step={1} caption="Short polling: the page asked at t = 0 s and asks again at t = 5 s, so the bid at t = 3 s shows up 2 seconds late." />
+
+With **short polling**, the browser sends an ordinary HTTP request on a fixed timer, the **interval**. The server answers at once, news or not. Here the page asks at t = 0 s and gets the old price, \$110. The bid lands at t = 3 s, but the server has no way to tell the page. The page sees \$120 only at its next poll, at t = 5 s.
+
+A change can land at any moment between two polls. So on average it waits half the interval, and at worst the whole interval. With a 5-second interval, that is 2.5 s on average and 5 s at worst. The load is open pages divided by the interval: $50{,}000 \div 5 = 10{,}000$ <Term id="qps">requests a second</Term>, whether or not anything changed. Each empty answer still costs about 1 KB of headers and a trip through your servers. [Ajax polling](/system-design/fundamentals/ajax-polling) covers how to make each poll cheap.
+
+<PremiumBreak />
+
+### Step 2: Long polling waits for news
+
+<AnimatedDiagram name="fundamentals/choosing-realtime" step={2} caption="Long polling: the server holds the request until the bid lands, answers at t = 3 s, and the browser asks again straight away." />
+
+With **long polling**, the browser sends a request and the server does not answer until it has news. The request is **held**: it stays open on the server, waiting. When the bid lands at t = 3 s, the server answers the held request at once. The browser shows \$120 and sends the next request right away.
+
+If nothing happens for a while, the server answers "no news" after about 30 seconds, and the browser asks again. Proxies are machines that pass traffic between the browser and your server, and a <Term id="load-balancer">load balancer</Term> spreads requests across your servers. Most of them close a connection that has been quiet for too long, often 60 seconds. This is the **idle timeout**, and 30 seconds stays safely under it. So 50,000 idle pages cost about $50{,}000 \div 30 \approx 1{,}700$ requests a second instead of 10,000, and news arrives in about one network trip.
+
+The price is held requests. The server keeps 50,000 of them open at once, so it must be able to wait on many requests cheaply, without a whole worker stuck on each one. There is also a gap: between one answer and the next request, a second bid could arrive. The browser sends the id of the last bid it saw (`?after=41`), so the server can hand over anything it missed. [Long polling](/system-design/fundamentals/long-polling) goes deeper.
+
+### Step 3: Server-sent events keep one response open
+
+<AnimatedDiagram name="fundamentals/choosing-realtime" step={3} caption="Server-sent events: one request opens a stream at t = 0 s, and the bid arrives on it as one small event at t = 3 s." />
+
+With **server-sent events** (SSE), the browser sends one request, and the server answers with a response that never ends. Whenever there is news, the server writes a few lines of text to that open response. Browsers have a built-in `EventSource` object that opens the stream, reads each event and reconnects by itself if the stream drops.
+
+Each event can carry an `id`. On a reconnect, the browser sends the last id it saw in a `Last-Event-ID` header, so the server can replay what was missed. A bid event is about 60 bytes, compared with about 1 KB for a poll. To stop proxies from closing a quiet stream, the server sends a short comment line every 15 to 30 seconds, called a **heartbeat**.
+
+SSE is one-way: only the server talks on the stream. When the browser wants to place a bid, it sends a normal `POST`. That is fine for most screens, because users read far more often than they write. Two limits to know. On HTTP/1.1 a browser allows only 6 open connections per site, counted across all tabs. So a seventh tab's stream stalls. HTTP/2 carries many streams over one connection, which lifts the limit. And a proxy that **buffers** (collects the response before passing it on) will deliver events in late clumps unless you turn buffering off. See [Server-sent events](/system-design/fundamentals/server-sent-events).
+
+### Step 4: A WebSocket opens a two-way pipe
+
+<AnimatedDiagram name="fundamentals/choosing-realtime" step={4} caption="WebSocket: an Upgrade request turns into a two-way connection; the server pushes the bid, and the browser sends its own bid back on the same connection." />
+
+A <Term id="websocket">WebSocket</Term> starts as an HTTP request with an `Upgrade: websocket` header. The server answers `101 Switching Protocols`, and from then on the connection is no longer HTTP. It is a pipe where either side can send a message, called a **frame**, at any time. In the diagram the server pushes the \$120 bid, and one second later the browser sends its own \$125 bid on the same connection.
+
+Frames are tiny. A small message from the server carries 2 bytes of framing; one from the browser carries 6, because browsers add a 4-byte mask. The mask is a random key mixed into the data, so a hostile page cannot craft bytes that trick an old proxy into caching them. That suits traffic that flows both ways, often: chat, game moves, cursors in a shared document.
+
+<Tabs title="What each one looks like on the wire">
+  <Tab label="SSE stream">
+
+```http
+GET /items/88/bids HTTP/1.1
+Accept: text/event-stream
+Last-Event-ID: 41
+
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+
+: heartbeat
+
+id: 42
+event: bid
+data: {"item": 88, "price": 120}
+
+```
+
+  </Tab>
+  <Tab label="WebSocket handshake">
+
+```http
+GET /rooms/88/live HTTP/1.1
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: WhwJ4rR9P4hhwKop5dcQSw==
+Sec-WebSocket-Version: 13
+
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: xuTjggOlDma1gnfa5GdlgLfsYEY=
+```
+
+  </Tab>
+</Tabs>
+
+The cost is everything HTTP used to do for you. There is no built-in resume, so you add message ids yourself. You also send your own ping frames to spot dead connections. Each open connection is state on one server. So the load balancer must keep each connection on the server it first reached, which is called **sticky routing**. And when a server restarts, every client on it reconnects at the same moment. See [WebSockets](/system-design/fundamentals/websockets).
+
+### Step 5: Push notifications reach a closed app
+
+The four methods above all need your app or page to be open. A phone suspends a closed app within seconds and drops its connections. Only the operating system keeps one connection open, to its vendor's push service: **APNs** (Apple Push Notification service) on iPhones and **FCM** (Firebase Cloud Messaging) on Android. Browsers have the same idea, called **Web Push**.
+
+When the app is installed, it gets a **device token**, an address for that app on that phone, and sends it to your server. To alert the bidder, your server sends a small message (at most about 4 KB) with that token to APNs or FCM, which delivers it to the phone. Delivery is best effort. The phone may be offline, the system may delay or merge alerts, and the user may have turned them off. So treat a push as a doorbell, not the parcel: it says "you've been outbid", and when the user taps it, the app opens and fetches the true price from your server. See [Push notifications](/system-design/fundamentals/push-notifications).
+
+## Try it
+
+Walk the tree for each of the four auction features from the story.
+
+<DecisionTree
+  title="Which real-time method?"
+  tree={{
+    q: "Must the user hear about it while the app or tab is closed?",
+    yes: { answer: "Push notification, then fetch the details when the app opens", href: "/system-design/fundamentals/push-notifications" },
+    no: {
+      q: "Does the client also send messages often on this screen, as in chat, games or shared editing?",
+      yes: { answer: "WebSocket", href: "/system-design/fundamentals/websockets" },
+      no: {
+        q: "Must updates arrive within about a second?",
+        yes: {
+          q: "Can every hop on the path (proxies, load balancer, server) keep a streaming response open?",
+          yes: { answer: "Server-sent events", href: "/system-design/fundamentals/server-sent-events" },
+          no: { answer: "Long polling", href: "/system-design/fundamentals/long-polling" },
+        },
+        no: { answer: "Short polling with an interval of 5 s or more", href: "/system-design/fundamentals/ajax-polling" },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The seller's export takes about 2 minutes. Why is short polling a better fit than an SSE stream?" hint="Count the polls, then think about what a stream costs to run.">
+    Polling every 5 seconds for 2 minutes is $120 \div 5 = 24$ requests, and the seller sees "ready" about 2.5 seconds late on average, which nobody notices. A stream for one job adds an open connection and reconnect logic for no real gain.
+  </QuizItem>
+  <QuizItem question="An item page shows the price, and the viewer bids maybe once in ten minutes. Why not a WebSocket?" hint="Which way does almost all the traffic flow?">
+    Almost every message goes from server to browser. SSE carries those over plain HTTP, with reconnect and resume built in. The rare bid is an ordinary `POST`, so a two-way pipe buys nothing and costs custom resume, pings and sticky routing.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Short polling", "Long polling", "SSE", "WebSocket", "Push notification"]}
+  rows={[
+    ["Who talks", "Client asks", "Client asks, server waits", "Server only", "Both sides", "Server, through APNs or FCM"],
+    ["Delay for a change", "Half the interval (2.5 s at 5 s)", "About one network trip", "About one network trip", "About one network trip", "Usually seconds, no promise"],
+    ["Requests/s, 50,000 idle clients", "10,000 at a 5 s interval", "About 1,700 at a 30 s hold", "About 0, heartbeats only", "About 0, pings only", "0 on your servers"],
+    ["Open connections on your servers", "None between polls", "50,000", "50,000", "50,000", "None"],
+    ["Works with the app closed", false, false, false, false, true],
+    ["Two-way on one channel", false, false, false, true, false],
+    ["Resume after a drop", "Next poll catches up", "Send the last id seen", "Built in (Last-Event-ID)", "Build it yourself", "Missed alerts may be merged or lost"],
+    ["Passes ordinary HTTP proxies", true, true, "Yes, if they do not buffer", "Only if they allow Upgrade", "Not on your path"],
+  ]}
+  caption="Idle cost uses 50,000 open pages. Each open connection holds about 20 KB of memory with HTTPS encryption, so 50,000 of them need about $50{,}000 \times 20$ KB, or 1 GB, across the fleet."
+/>
+
+Back at the auction site, each feature gets its own method:
+
+| Feature | Method | Load at the evening peak |
+| --- | --- | --- |
+| Price on 50,000 item pages | SSE, bids sent as `POST` | 50,000 open streams, about 1 GB of memory, near-zero idle requests |
+| Live room, 2,000 bidders | WebSocket | About 5 chat messages a second, each sent to 2,000 people: 10,000 frames a second |
+| "You've been outbid", app closed | Push notification | One message to APNs or FCM per alert |
+| Sales export ready | Short polling, every 5 s | 24 polls per export |
+
+The 25,000 requests a second from the first version drop to about 100. If each of the 50,000 viewers bids about once in 10 minutes, that is $50{,}000 \div 600 \approx 83$ bid `POST`s a second, plus a few export checks. What remains is the cost of 50,000 open streams and their heartbeats.
+
+## In the wild
+
+- **OpenAI and Anthropic's APIs** stream generated text as server-sent events when a request sets `stream: true`, so the first words appear before the whole answer is written.
+- **Slack's apps** keep a WebSocket open to receive messages, typing indicators and presence as they happen.
+- **Socket.IO**, a popular JavaScript library, connects with HTTP long polling first, then upgrades to a WebSocket when the network allows it.
+- **Chat apps on phones** reach users with the app closed by sending each alert to APNs or FCM, then syncing the real messages when the app opens.
+
+## Common pitfalls
+
+- **WebSockets for everything.** A one-way feed of prices or scores gets custom resume, pings and sticky routing for no gain. SSE does that job over plain HTTP.
+- **Forgetting the closed app.** No connection-based method reaches a suspended app. If the feature must reach users in their pocket, design the push path from day one.
+- **Streams through a buffering proxy.** Events pile up and arrive in late clumps. Turn off buffering for the stream route (for nginx, send `X-Accel-Buffering: no`).
+- **No resume plan.** A phone switching from Wi-Fi to cellular drops its connection for a few seconds. Without event ids, bids in that gap are lost.
+- **Reconnect storms.** When a server holding 50,000 connections restarts, all 50,000 clients reconnect at once. Add a random delay (**jitter**) to every reconnect, and wait longer after each failed try (**backoff**).
+
+## How to say it in an interview
+
+"I pick the method per feature, not per system, with three questions: who talks, how fast the news must arrive, and whether the app is open. If it is a slow job and a few seconds of delay is fine, I use short polling, because it is plain HTTP that keeps nothing open; the cost is clients divided by interval, so 50,000 clients at 5 seconds is 10,000 requests a second. If the server mostly pushes, like prices or a chatbot's answer as it is written, I use server-sent events: one open response, resume built in, and the client writes with normal POSTs. If both sides send often, like chat or games, I use WebSockets and accept the work: sticky routing, my own message ids and pings, and jittered reconnects. Long polling is my fallback where streaming is blocked. And if the user must hear about it with the app closed, nothing connection-based works, so I send a push notification through APNs or FCM as a doorbell and let the app fetch the details."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between short polling, long polling, server-sent events and WebSockets?" level="Junior" category="Real-time">
+    **Short answer.** Short polling asks on a timer and gets an answer at once; long polling asks and the server holds the request until there is news. Server-sent events keep one HTTP response open for the server to write to, and a WebSocket turns the connection into a two-way pipe.
+
+    **Why.** Take one bid that lands at t = 3 s. A page polling every 5 seconds sees it at t = 5 s, 2 s late, and pays 10,000 requests a second for 50,000 pages even when nothing changes. The held long-poll request, the open SSE stream and the WebSocket all deliver it in about one network trip. Only the WebSocket lets the browser send its own bid back on the same connection.
+
+    <AnimatedDiagram name="fundamentals/choosing-realtime" caption="The same bid heard four ways: polling waits for its next tick, the other three hear it at once." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does each one recover after the network drops?
+    - Which ones work through a corporate proxy?
+
+    **Watch out for.** Calling short polling "real-time". Its delay is set by the interval, on average half of it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A user should learn they were outbid even when the app is closed. What do you build?" level="Junior" category="Real-time" companies={["Apple"]}>
+    **Short answer.** A push notification through APNs on iOS or FCM on Android, carrying a short alert. When the user taps it, the app opens and fetches the current price from your server.
+
+    **Why.** A phone suspends a closed app within seconds and drops its connections, so polling, SSE and WebSockets have nothing to send on. The operating system keeps one connection to its push service for all apps. Your server sends the alert, at most about 4 KB, with the device token, and the push service delivers it. Delivery is best effort: alerts can be late, merged or dropped. So the push says "you were outbid", and the app reads the truth when it opens.
+
+    **Follow-ups the interviewer may ask.**
+    - What do you do when APNs reports that a device token is no longer valid?
+    - How would you avoid sending 40 alerts in a minute during a bidding war?
+
+    **Watch out for.** Saying "keep a WebSocket open in the background". The operating system will not let a closed app hold one.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You need to stream an LLM's answer to a browser token by token. Server-sent events or WebSockets?" level="Mid" category="Real-time" companies={["OpenAI", "Anthropic"]}>
+    **Short answer.** Server-sent events. The traffic is one-way, from server to browser, and SSE carries it over plain HTTP.
+
+    **Why.** The user sends one prompt with a normal `POST`, and the model sends back hundreds of tokens over 10 to 30 seconds. Each token event is a few dozen bytes on an open response. In practice the `POST`'s own response is the event stream, read with `fetch`, because `EventSource` only sends `GET`. That loses the automatic reconnect, which matters little for a 30-second answer. SSE works through standard load balancers and HTTP/2, and needs no sticky routing beyond the one open request. A WebSocket would add a protocol switch, your own message ids and pings, and a stateful connection, all for a channel where the client says nothing after the prompt.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens if a proxy between you and the browser buffers the response?
+    - How does the user stop a long answer halfway through?
+
+    **Watch out for.** Picking WebSockets because the stream "feels real-time". Both are equally fast for one-way data; SSE is simpler to run.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="50,000 item pages poll for the current price every 5 seconds. Estimate the cost and compare it with server-sent events." level="Mid" category="Estimation">
+    **Short answer.** Polling costs $50{,}000 \div 5 = 10{,}000$ requests a second whether or not prices change, with updates 2.5 s late on average. SSE costs 50,000 open connections, about 1 GB of memory, and almost no requests while idle.
+
+    **Why.** Each empty poll is about 1 KB of headers and reply, so polling moves about $10{,}000 \times 1 \text{ KB} = 10$ MB a second, about 80 Mbit/s, mostly saying "no change". With SSE, a bid event is about 60 bytes and goes only to the pages watching that item. Heartbeats every 30 seconds add $50{,}000 \div 30 \approx 1{,}700$ tiny writes a second. At about 20 KB per connection with TLS, 50,000 streams need about 1 GB, which fits on one server; spread them over 3 or 4 so a restart drops only a share.
+
+    | | Short polling (5 s) | SSE |
+    | --- | --- | --- |
+    | Requests per second, idle | 10,000 | about 0 |
+    | Traffic, idle | about 10 MB/s | heartbeats only |
+    | Average delay | 2.5 s | about one network trip |
+    | Server state | none | 50,000 open streams |
+
+    **Follow-ups the interviewer may ask.**
+    - At what client count, or what delay target, would you switch from polling to SSE?
+    - How do you route a new bid to the server holding a given page's stream?
+
+    **Watch out for.** Comparing only requests per second. SSE moves the cost from requests to held connections, and those need memory, heartbeats and a reconnect plan.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design message delivery for a chat app where some users are online and some have the app closed." level="Senior" category="Real-time" companies={["Meta"]}>
+    **Short answer.** Online users hold a WebSocket to a chat server, and a registry maps each user to the server holding their connection, so a message is forwarded there and pushed down the socket. If the user has no live connection, the message is stored and a push notification goes out through APNs or FCM, and the app syncs from the store when it opens.
+
+    **Why.** Chat is two-way and frequent (messages, typing indicators, read receipts), which is the WebSocket case. 10 million online users at about 100,000 connections per server is 100 chat servers, so the sender's server rarely holds the recipient too; the registry lookup is an in-memory read of well under 1 ms. A closed app has no socket, so the push service is the only way in. Every message is written to the store before delivery, so a dropped push or a dropped socket never loses it; the client asks for everything after the last id it saw.
+
+    <AnimatedDiagram name="messenger/architecture" step={3} highlight={["chat", "session", "push"]} caption="Chat servers hold the open connections, the session registry finds the right one, and the push service covers users whose app is closed." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you keep message order within one conversation?
+    - What happens to a message sent while the recipient is switching from Wi-Fi to cellular?
+
+    **Watch out for.** Using push as the delivery channel. It is a best-effort doorbell; the store and the sync on open are what make delivery reliable.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your WebSocket fleet holds 2 million connections on 40 servers. A deploy restarts one server at a time. What goes wrong, and how do you design for it?" level="Senior" category="Reliability">
+    **Short answer.** Each restart drops about 50,000 clients, and if they all reconnect in the same second, the rest of the fleet drowns in new handshakes. Drain each server slowly before it stops, make clients reconnect with random jitter and backoff, and let them resume from the last message id they saw.
+
+    **Why.** $2{,}000{,}000 \div 40 = 50{,}000$ connections per server. In steady state, if a client stays connected for about 30 minutes, the fleet sees about $2{,}000{,}000 \div 1{,}800 \approx 1{,}100$ reconnects a second. Each reconnect costs a TLS handshake (about 1 ms of CPU), a login check, a write to the session registry and a read of missed messages. If 50,000 clients come back in one second, that is about 45 times the normal rate, and the registry and message store take the worst of it. Spread over 30 seconds with jitter, it is about 1,700 a second, roughly 1.5 times normal. Draining helps too: the old server stops taking new connections and closes the existing ones in batches over a few minutes. Without resume ids, every client must also reload its whole state, which multiplies the load on the stores.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you tell clients the right reconnect delay from the server side?
+    - What should a client do with messages it tried to send while disconnected?
+
+    **Watch out for.** Adding servers to absorb the spike. The burst comes from clients acting in lockstep, and spreading them out is what fixes it.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Ajax polling](/system-design/fundamentals/ajax-polling): making each poll cheap with ETags, caching, jitter and backoff
+- [Long polling](/system-design/fundamentals/long-polling): held requests, timeouts and catching up after a gap
+- [Server-sent events](/system-design/fundamentals/server-sent-events): event ids, reconnects and streaming through proxies
+- [WebSockets](/system-design/fundamentals/websockets): connection servers, sticky routing and reconnect storms
+- [Push notifications](/system-design/fundamentals/push-notifications): device tokens, APNs and FCM
+- [Choosing an API style](/system-design/fundamentals/choosing-an-api-style): the same per-conversation thinking for request-and-response APIs
+- [Design Facebook Messenger](/system-design/case-studies/facebook-messenger): WebSockets and push in one design
+
+## Further reading
+
+- [RFC 6455, The WebSocket Protocol](https://www.rfc-editor.org/rfc/rfc6455): the handshake, frame format and masking rules.
+- [WHATWG HTML Standard, Server-sent events](https://html.spec.whatwg.org/multipage/server-sent-events.html): the event stream format, `EventSource`, reconnects and `Last-Event-ID`.
+- [RFC 6202, Known Issues and Best Practices for the Use of Long Polling and Streaming in Bidirectional HTTP](https://www.rfc-editor.org/rfc/rfc6202): the costs and traps of long polling and HTTP streaming.
+- [Firebase Cloud Messaging documentation](https://firebase.google.com/docs/cloud-messaging): how device tokens, message types and delivery work for Android and the web.

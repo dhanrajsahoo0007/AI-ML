@@ -1,0 +1,197 @@
+---
+title: "Load balancing basics"
+description: "Why many servers sit behind one address, how layer 4 and layer 7 balancers differ, and what health checks and sticky sessions do."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  A load balancer is one front door that every user knows; behind it, the balancer shares requests among many servers and skips any server that is broken.
+</KeyIdea>
+
+## The story
+
+You run StudyNook, a homework help site. Every school night at 8 pm, about 4,000 requests a second arrive as students open their assignments. One app server handles about 1,500 requests a second before pages start to slow down. So you buy four servers: three to carry the peak, and one spare in case a server dies. Now there is a puzzle. Students type `studynook.example` into a browser. Which of the four machines should that name point to? And when server 3 crashes at 8:15 pm, who stops sending students to it? This page answers both questions.
+
+## How it works
+
+A <Term id="load-balancer">load balancer</Term> is a program, or a box, that sits between users and your servers. Users connect to it. It picks a server for them and passes their traffic along. Your servers sit behind it on a private network that users never see.
+
+### Step 1: One entry point, and a balancer that forwards connections
+
+<AnimatedDiagram name="fundamentals/load-balancing-basics" step={1} caption="A layer 4 balancer picks a server when a connection opens, then forwards every byte of that connection to the same server." />
+
+The site's name resolves through <Term id="dns">DNS</Term> to one address: the balancer's. That single entry point is what lets you change everything behind it. You can add a fifth server, replace a broken one, or deploy new code, and no student ever sees a new address.
+
+The simplest balancer works at **layer 4**, the transport layer. That is where [TCP and UDP](/system-design/fundamentals/tcp-udp) live, the rules that carry bytes between two machines ([Networking basics](/system-design/fundamentals/networking) explains the layers). Data travels in small chunks called packets. A layer 4 balancer sees only each packet's addresses and ports: the IP address names a machine, and the port names a program on it. When a student's laptop opens a TCP connection to port 443, the HTTPS port, the balancer picks a server, say server 2. From then on, every byte of that connection goes to server 2. The balancer never reads the bytes, so it does not need to decrypt anything. That makes it very fast: a layer 4 balancer adds tens of microseconds and can carry millions of open connections.
+
+<PremiumBreak />
+
+### Step 2: A balancer that reads each request
+
+<AnimatedDiagram name="fundamentals/load-balancing-basics" step={2} caption="A layer 7 balancer ends TLS, reads each HTTP request and sends it to the pool that serves that path." />
+
+A **layer 7** balancer works at the application layer, where HTTP lives. It ends the student's encrypted <Term id="tls">TLS</Term> connection itself, so it can read each request: the method, the path, the headers and the cookies. Then it chooses a server for every request, not for every connection.
+
+Now StudyNook can send `/api/*` to the homework API servers and `/video/*` to video servers with big network cards, while plain pages go to a small web pool. A pool is a group of servers that do the same job. The balancer can also retry a failed request on another server. The price is work. Decrypting and parsing every request costs CPU, and the balancer now holds two connections per student: one to the student and one to the server. Inside a data center that usually adds well under a millisecond of <Term id="latency">latency</Term>.
+
+### Step 3: Picking a server
+
+Every balancer needs a rule for choosing. **Round robin** takes turns: 1, 2, 3, 4, 1, 2. **Least connections** picks the server with the fewest open requests, which helps when some requests take 5 ms and others 5 seconds. **Weighted** gives a server twice as big twice the share. **Hash** keeps the same client on the same server. The [load balancing pattern page](/system-design/patterns/load-balancing) compares them in depth, and the simulator below shows all four.
+
+### Step 4: Health checks
+
+A balancer must know which servers are alive. With an **active health check**, it asks each server a small question every few seconds. That question is called a probe:
+
+```http
+GET /healthz HTTP/1.1
+Host: app-3.internal
+
+HTTP/1.1 200 OK
+Content-Length: 2
+
+ok
+```
+
+A typical setting: probe every 5 seconds, mark a server down after 2 failed probes in a row, and mark it up again after 3 good ones. So a crashed server keeps receiving traffic for up to about 10 seconds. At 1,000 requests a second per server, that is up to 10,000 failed requests. A **passive health check** shrinks the window: it watches real traffic and pulls a server out after, say, 5 errors in a row. A layer 7 balancer can also retry a failed request on another server, so the student never sees the error. Once server 3 is out, the other three each carry about 1,333 requests a second, still under their 1,500 limit. That is the spare doing its job.
+
+### Step 5: Sticky sessions
+
+Suppose StudyNook keeps each student's half-written answer in the memory of whichever server they first reached. The next request may land on a different server, and the draft is gone. A **sticky session** fixes this by pinning a student to one server. A layer 7 balancer does it with a cookie:
+
+<Tabs title="Two ways to keep a student's draft">
+  <Tab label="Sticky cookie">
+    The first response carries `Set-Cookie: lb=app-2`. The browser sends the cookie back on every request, and the balancer sends each request to app-2. A layer 4 balancer cannot read cookies, so it hashes the client's address instead. It works, but app-2 holds the only copy of the draft. If app-2 dies, every student pinned to it, about a quarter of them, loses their work.
+  </Tab>
+  <Tab label="Shared session store">
+    Every server keeps drafts in a shared store, such as Redis (a fast in-memory database), keyed by a session id in the cookie. Any server can serve any request, so the balancer is free to pick the least busy one, and a dead server loses nothing. Each request pays one extra network round trip to the store, about half a millisecond inside a data center.
+  </Tab>
+</Tabs>
+
+Servers that keep no per-user state in memory are called **stateless**, and they are the usual goal. Stickiness then becomes an optional speed-up rather than something correctness depends on. One exception is a <Term id="websocket">WebSocket</Term>: it is one long connection, so it stays on one server for as long as it is open, whatever the balancer does.
+
+## Try it
+
+<LoadBalancerSim servers={4} algorithm="round-robin" requests={24} />
+
+Run round robin first and watch the slow requests (solid border) pile up on whichever server drew them. Then switch to least connections and replay the same stream: new requests steer around servers still busy with slow ones.
+
+<Quiz>
+  <QuizItem question="StudyNook has 4 servers, each good for 1,500 requests a second, and a peak of 4,000. What happens when one server dies? And when two die?" hint="Divide the peak by the servers that are left.">
+    One down: $4{,}000 / 3 \approx 1{,}333$ each, still under 1,500, so students notice nothing. Two down: $4{,}000 / 2 = 2{,}000$ each, a third over the limit, so pages slow down and requests start to time out.
+  </QuizItem>
+  <QuizItem question="An internal service sends 2,000 requests a second to the homework API over one long-lived HTTP/2 connection (HTTP/2 lets many requests share one connection). There are 4 API servers behind a layer 4 balancer. How are the requests spread?" hint="What does a layer 4 balancer choose once per connection?">
+    They are not spread at all. The balancer picked one server when the connection opened, so that server gets all 2,000 requests a second, over its 1,500 limit, while three servers sit idle. A layer 7 balancer would choose per request: about 500 each.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Layer 4 balancer", "Layer 7 balancer"]}
+  rows={[
+    ["What it sees", "Addresses and ports", "Method, path, headers, cookies"],
+    ["Chooses a server", "Once per connection", "Once per request"],
+    ["Added latency", "Tens of microseconds", "Up to about 1 ms"],
+    ["Needs the TLS certificate", false, true],
+    ["Route by path or header", false, true],
+    ["Retry a failed request elsewhere", false, true],
+    ["Carries any TCP or UDP protocol", true, false],
+    ["Even spread over long HTTP/2 connections", false, true],
+  ]}
+  caption="Layer 4 is fast and protocol-blind. Layer 7 is slower per request but understands what it carries."
+/>
+
+Many large sites use both: a layer 4 tier at the front spreads connections across a fleet of layer 7 proxies, which then route each request.
+
+## In the wild
+
+- **AWS** sells both kinds: the Network Load Balancer works at layer 4 and the Application Load Balancer at layer 7.
+- **HAProxy** runs in either mode: `mode tcp` forwards connections, `mode http` reads requests.
+- **Google's Maglev** is a software layer 4 balancer that spreads traffic for Google's services across ordinary machines.
+
+## Common pitfalls
+
+- **One balancer, no backup.** The front door becomes the one thing whose failure takes the whole site down. Run at least two, with <Term id="failover">failover</Term> between them; managed cloud balancers do this for you.
+- **Health checks that only ask "is the process running?"** A server can answer `/healthz` while every one of its database connections is busy. Check what the server needs to serve a request. But do not make every server fail its check because one shared database is slow, or the balancer pulls out every server at once.
+- **Layer 4 in front of long-lived connections.** HTTP/2, gRPC (a protocol for calls between services) and WebSockets keep one connection open for minutes or hours, so a layer 4 balancer leaves one server hot and the rest idle.
+- **Removing a server mid-request.** During a deploy, stop sending it new requests and let open ones finish before shutting it down. This is called **draining**, and 30 seconds is a common limit.
+
+## How to say it in an interview
+
+I put a load balancer in front of every tier with more than one server, so clients see one stable address and I can add or replace servers behind it. Then I pick the layer. Layer 4 forwards whole TCP connections by address and port: very fast and protocol-blind, but long-lived HTTP/2 or gRPC connections spread badly. Layer 7 ends TLS and routes each request by path, retries failures and spreads load evenly, for some CPU and up to about a millisecond. Health checks take a dead server out within seconds, and retries hide the gap. I keep servers stateless, with sessions in a shared store, so I do not depend on sticky sessions. And I run the balancers in pairs, so the front door is not a single point of failure.
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does a load balancer do, and why not give clients the addresses of the servers directly?" level="Junior" category="Load balancing">
+    **Short answer.** A load balancer gives clients one stable address and shares their traffic among several servers, skipping servers that fail health checks. Handing out server addresses directly ties every client to machines that come and go.
+
+    **Why.** If you publish four server addresses in DNS, resolvers and browsers cache the answer for minutes, so clients keep trying a dead server until it expires. A balancer notices the failure in about 10 seconds (two failed probes 5 seconds apart) and stops sending traffic there. It also lets you add a fifth server at peak, or roll out new code one server at a time, without any client noticing.
+
+    **Follow-ups the interviewer may ask.**
+    - Is DNS round robin ever good enough?
+    - What happens if the load balancer itself fails?
+
+    **Watch out for.** Saying a load balancer makes one server faster. It adds capacity by letting you run more servers, and adds availability by routing around dead ones; each request still takes as long as one server needs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is the difference between a layer 4 and a layer 7 load balancer, and when would you choose each?" level="Mid" category="Load balancing">
+    **Short answer.** A layer 4 balancer sees only addresses and ports and forwards whole TCP or UDP connections, so it is fast and works with any protocol. A layer 7 balancer ends TLS, reads each HTTP request and chooses a server per request, so it can route by path, retry and spread long connections evenly.
+
+    **Why.** Layer 4 adds tens of microseconds and can hold millions of connections, which suits raw TCP traffic, game servers on UDP, or the very front of a large site. Layer 7 costs CPU for decryption and parsing, up to about a millisecond, but it can send `/api/*` and `/video/*` to different pools. It also fixes a real layer 4 trap: one HTTP/2 connection carrying 2,000 requests a second lands on a single server under layer 4, and is spread about 500 per server across four servers under layer 7.
+
+    <AnimatedDiagram name="fundamentals/load-balancing-basics" highlight={["lb4", "lb7"]} caption="Top: the layer 4 balancer forwards connections. Bottom: the layer 7 balancer reads each request's path." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where would you end TLS, and does traffic behind the balancer need encrypting again?
+    - Why do large sites put a layer 4 tier in front of layer 7 proxies?
+
+    **Watch out for.** "Layer 7 is always better because it is smarter." It needs the certificate, costs more per request and only understands the protocols it parses. For non-HTTP traffic, layer 4 is the right tool.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does a load balancer know a server is unhealthy, and what can go wrong with health checks?" level="Mid" category="Reliability">
+    **Short answer.** It probes each server on a schedule, such as `GET /healthz` every 5 seconds, and also watches real responses for errors. A server that fails enough checks in a row is taken out of rotation until it passes again.
+
+    **Why.** With 2 failures needed at a 5 second interval, a crashed server can keep receiving traffic for about 10 seconds. At 1,000 requests a second that is up to 10,000 failed requests, unless passive checks pull it out sooner or the balancer retries failures on another server. Thresholds trade speed for stability: 1 failure reacts in 5 seconds but one slow probe pulls a healthy server out, and it keeps dropping out and coming back.
+
+    **Follow-ups the interviewer may ask.**
+    - Should the health check call the database?
+    - What should the balancer do if every server fails its check at once?
+
+    **Watch out for.** A deep health check that fails whenever a shared dependency is slow. Every server fails together, the balancer removes all of them, and a slow database becomes a full outage. Many balancers send traffic to every server when none look healthy, for exactly this reason.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Our app keeps user sessions in server memory and relies on sticky sessions. What problems does that cause, and how would you change it?" level="Senior" category="Load balancing">
+    **Short answer.** Sticky sessions make each server the only holder of its users' state, so load spreads unevenly, and a crash or deploy logs out or loses the work of every user pinned to that server. I would move session state to a shared store and make the servers stateless, keeping stickiness only as an optional cache hint.
+
+    **Why.** With 4 servers, a crash wipes out about a quarter of all active sessions at once. Stickiness also defeats the balancer: a server that drew a few heavy users stays hot, because their requests cannot go anywhere else. Deploys slow down too, since pinned sessions must end before a server can be drained. A shared store such as Redis costs about half a millisecond per request inside a data center, and replicating it keeps sessions alive when one store node fails.
+
+    | | Sticky, state in memory | Stateless, shared store |
+    | --- | --- | --- |
+    | Server crash | its users lose sessions | nothing lost |
+    | Load spread | uneven | even |
+    | Extra cost per request | none | one store read, about 0.5 ms |
+
+    **Follow-ups the interviewer may ask.**
+    - How would you migrate live users without logging everyone out?
+    - WebSocket connections are sticky by nature. How do you deploy a chat server without dropping users?
+
+    **Watch out for.** Treating "use IP hash instead of a cookie" as a fix. It is still stickiness, and it gets worse: many students behind one school network share an address, so they all land on the same server.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Load balancing (pattern)](/system-design/patterns/load-balancing): algorithms, global balancing and keeping the balancer itself available.
+- [Networking basics](/system-design/fundamentals/networking)
+- [IP, TCP and UDP](/system-design/fundamentals/tcp-udp)
+- [TLS and HTTPS](/system-design/fundamentals/tls)
+- [Proxies, reverse proxies and gateways](/system-design/fundamentals/proxies)
+- [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+- [Consistent hashing](/system-design/patterns/consistent-hashing)
+
+## Further reading
+
+- [Matt Klein, Introduction to modern network load balancing and proxying](https://blog.envoyproxy.io/introduction-to-modern-network-load-balancing-and-proxying-a57f6ff80236), a longer tour of layer 4 and layer 7 designs by the author of Envoy.
+- [Eisenbud et al., Maglev: A Fast and Reliable Software Network Load Balancer (NSDI 2016)](https://www.usenix.org/conference/nsdi16/technical-sessions/presentation/eisenbud), how Google runs layer 4 balancing on ordinary machines.
+- [AWS, What is Elastic Load Balancing?](https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/what-is-load-balancing.html), a managed service with both layer 4 and layer 7 balancers, health checks and sticky sessions.

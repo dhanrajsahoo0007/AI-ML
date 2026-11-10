@@ -1,0 +1,256 @@
+---
+title: "Encryption, hashing and secrets"
+description: "Symmetric and asymmetric encryption, data in transit and at rest, salted password hashing with bcrypt or Argon2, and where to keep the keys."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Encryption locks data so only someone with the key can read it again, hashing turns data into a fingerprint that cannot be turned back, and a safe system uses each in its place and keeps the keys away from the data.
+</KeyIdea>
+
+## The story
+
+You run StitchBox, a small online shop that sells knitting kits to 40,000 customers. A contractor copies last night's database backup to a laptop to test a feature, and the laptop is stolen from a car. That one file holds every order with a home address. It holds the users table, where each password was run once through SHA-256, a fast fingerprint function, with nothing added. And it holds a config file with the live API key for your payment provider.
+
+How bad is this? It depends on three choices you made months ago. Was the backup encrypted, and where was its key? Were the passwords hashed in a way that is slow to guess? And did the API key ever belong in that file?
+
+## How it works
+
+Three tools do the work:
+
+- **Encryption** scrambles data with a **key**, a secret random number (32 bytes for the common AES-256). With the key you get the data back. Without it the data is noise. The scrambled form is **ciphertext**; the readable form is **plain text**.
+- **Hashing** runs data through a one-way function and gets a short fingerprint, the **hash**. The same input always gives the same hash, and nobody can run it backwards.
+- **Secrets management** decides where keys, passwords and API keys live, who may fetch them, and how often they change.
+
+Data is **in transit** while it moves between machines and **at rest** while it sits on a disk or in a backup. Each state needs its own lock.
+
+### Step 1: Data in transit
+
+<AnimatedDiagram name="fundamentals/encryption-and-hashing" step={1} caption="Step 1: every hop, from the customer's browser to the database, runs inside TLS." />
+
+A card number typed at home crosses networks you do not control. <Term id="tls">TLS</Term> wraps each connection, so anyone tapping a cable sees only ciphertext. The <Term id="load-balancer">load balancer</Term>, the front door that spreads requests across app servers, ends the public connection. StitchBox then opens fresh TLS connections to the app and to the database, because "inside our network" still means cables and machines you share.
+
+TLS mixes two kinds of encryption, for speed:
+
+- **Symmetric encryption** uses one key to lock and unlock. AES is the standard, and it is fast. The catch: both sides need the same key, and you cannot send it across the internet in the clear.
+- **Asymmetric encryption** uses a key pair. The **public key** can go to anyone; the **private key** stays with its owner. What one locks, only the other opens. The private key also makes **signatures** that anyone with the public key can check. RSA and elliptic-curve schemes are the common kinds, and they are thousands of times slower than AES.
+
+So TLS uses the slow kind briefly, to prove who the server is and agree on a fresh symmetric key, then the fast kind for every byte after. The [TLS page](/system-design/fundamentals/tls) walks through the handshake.
+
+<Compare
+  columns={["", "Symmetric (AES-256)", "Asymmetric (RSA, elliptic curve)"]}
+  rows={[
+    ["Keys", "One shared secret", "A public and private pair"],
+    ["Key size", "32 bytes", "256 bytes for RSA-2048, 32 for a curve key"],
+    ["Speed on one core", "Several GB per second", "About 1,000 to 2,000 RSA signatures per second"],
+    ["Main job", "Bulk data: disks, backups, traffic", "Signatures, proving who a server is, agreeing on a key"],
+  ]}
+  caption="Asymmetric keys solve the sharing problem; symmetric keys do the heavy lifting."
+/>
+
+<PremiumBreak />
+
+### Step 2: Data at rest
+
+<AnimatedDiagram name="fundamentals/encryption-and-hashing" step={2} caption="Step 2: database pages and the nightly backup are stored as AES-256 ciphertext. The app still works with plain text in memory." />
+
+Encryption at rest means the bytes on disk are ciphertext. Had StitchBox's backup been encrypted, the thief would hold 500 GB of noise. Most cloud disks and databases do this by default or with one setting.
+
+But the database decrypts its pages, the blocks it keeps rows in, as it reads them. So anyone who can query it sees plain text, including an attacker who tricks the app into running their own query (**SQL injection**). Encryption at rest can sit at three layers, and each stops a different thief:
+
+<Compare
+  columns={["Layer", "Who decrypts", "Stops", "Does not stop"]}
+  rows={[
+    ["Disk or volume", "The storage system", "A stolen or discarded drive", "Anyone logged in to the server or database"],
+    ["Database (transparent data encryption)", "The database engine", "Stolen data files and backups", "A stolen database password, SQL injection"],
+    ["Application, per field", "Your code, only where needed", "Admins and leaked query results", "A bug in the app that holds the key"],
+  ]}
+  caption="The closer to the app you encrypt, the more you protect, and the more work you take on."
+/>
+
+Field-level encryption has a cost: the database cannot search or sort ciphertext. StitchBox might encrypt home addresses, which only shipping reads, but not order dates.
+
+### Step 3: Keys live apart from the data
+
+<AnimatedDiagram name="fundamentals/encryption-and-hashing" step={3} caption="Step 3: a key service keeps the master key; only a wrapped data key sits next to the data, and the app fetches its own secrets at start-up." />
+
+A locked backup is useless if its key sits in the same file. The usual design is **envelope encryption**:
+
+1. A **data key**, a random AES key, encrypts the data.
+2. A **master key** encrypts the data key. This **wrapped** data key is stored beside the data.
+3. The master key never leaves a **key management service** (KMS): a hardened service, often backed by tamper-resistant hardware, that wraps and unwraps keys on request and logs every call.
+
+To read the backup, the database asks the KMS to unwrap the data key and decrypts locally. The laptop thief has the wrapped key but no right to call the KMS, so the file stays noise.
+
+Envelopes make **key rotation**, replacing a key on a schedule, cheap. Rotating StitchBox's master key re-wraps one 32-byte data key instead of re-encrypting 500 GB. A KMS call takes a few milliseconds, so the database caches the unwrapped key rather than calling per row. Envelopes also make deletion possible. Give each customer's files their own data key, wrapped by that customer's own key in the KMS. Old backups still hold the wrapped data key, but once the KMS key is destroyed nobody can unwrap it, so every copy turns to noise at once. This is **crypto-shredding**.
+
+### Step 4: Passwords are hashed, not encrypted
+
+<AnimatedDiagram name="fundamentals/encryption-and-hashing-salt-layout" stepper caption="Ana and Ben share a password. Plain SHA-256 gives them the same hash; a salt and a slow hash do not. Values after step 1 are shortened examples." />
+
+StitchBox never needs a password back; it only checks that today's password matches. So it stores a hash, hashes what the user types at login, and compares. There is no key to steal.
+
+A plain hash still fails twice.
+
+**Same password, same hash.** Ana and Ben both chose `sunflower1`, so their rows match. An attacker hashes a billion common passwords once and checks every row at once. The fix is a **salt**: 16 random bytes per user, mixed in before hashing and stored next to the hash. The salt is not secret. It only makes each hash unique, so each user must be attacked separately.
+
+**Fast hashes are fast for attackers too.** One gaming graphics card (GPU) computes about 20 billion SHA-256 hashes per second. Against StitchBox's 40,000 users and a billion guesses each:
+
+- Unsalted SHA-256: 1,000,000,000 / 20,000,000,000 = 0.05 seconds for everyone at once.
+- Salted SHA-256: 0.05 seconds × 40,000 users = 2,000 seconds, about 33 minutes.
+- Salted bcrypt at cost 12: about 1,500 guesses per second, so 1,000,000,000 / 1,500 ≈ 670,000 seconds, about 8 days per user. For all 40,000 users that is about 850 years.
+
+**bcrypt** and **Argon2** are password hashes: slow on purpose, with a cost setting you raise as hardware improves. Argon2id, the Argon2 variant to pick for new systems, also makes every guess use memory. At the minimum that OWASP, a web security nonprofit, suggests (19 MiB per guess), a 24 GB GPU fits only about 24,000 / 19 ≈ 1,260 guesses at once, where SHA-256 runs tens of thousands side by side.
+
+The slowness costs you too. One bcrypt check at cost 12 takes about 250 ms on a server core, so 8 logins per second at peak need 8 × 0.25 = 2 cores. Put a [rate limit](/system-design/patterns/rate-limiting) on the login page so nobody can burn that CPU for you. And slow hashing does not save weak passwords: one from the top 10,000 list falls in about 10,000 / 1,500 ≈ 7 seconds, so block known breached passwords at sign-up.
+
+### Step 5: Secrets the app itself uses
+
+The payment API key is a **secret**: a credential that lets your software act for you, like a database password. The app needs the real value, so a hash will not do.
+
+Secrets go in a **secrets manager** (step 3 of the first diagram). The app proves who it is with an identity the platform gives it, such as a cloud role, fetches its secrets at start-up and keeps them only in memory. Nothing secret sits in the repository, the image or the backup, and every fetch is logged. Better still are secrets that expire: some managers give each app instance a database login that lasts an hour.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="The thief also has the users table. Why is a salt not enough on its own?" hint="Count the guesses per second.">
+    A salt forces the attacker to crack each user separately, but with SHA-256 each user still falls to a billion guesses in 0.05 seconds. You also need a slow password hash, bcrypt or Argon2id, so each guess costs real time and memory.
+  </QuizItem>
+  <QuizItem question="StitchBox's database disk is encrypted. An attacker finds a SQL injection bug in the search page. Do they see plain text?" hint="Who decrypts the pages?">
+    Yes. The database decrypts pages as it reads them and returns readable rows to any query. Disk encryption stops stolen disks and files, not queries.
+  </QuizItem>
+  <QuizItem question="You rotate the master key in your KMS. Do you re-encrypt the 500 GB database?" hint="What does the master key encrypt?">
+    No. The master key encrypts only data keys. You re-wrap the 32-byte data key with the new master key and leave the data alone.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+The choice that matters most in a breach is how passwords are hashed. The numbers assume one modern gaming GPU on the attacker's side and one server core on yours.
+
+<Compare
+  columns={["Password storage", "Attacker guesses per second", "Server time per login", "Memory per guess"]}
+  rows={[
+    ["SHA-256, no salt", "About 20 billion, all users at once", "Under 1 microsecond", "Almost none"],
+    ["SHA-256 with salt", "About 20 billion, one user at a time", "Under 1 microsecond", "Almost none"],
+    ["bcrypt, cost 12, with salt", "About 1,500", "About 250 ms", "About 4 KB"],
+    ["Argon2id, 19 MiB, 2 passes", "Low thousands; only about 1,260 fit in 24 GB at once", "Tens of ms", "19 MiB"],
+  ]}
+  caption="Slow, salted, memory-hard hashing turns a 33-minute crack into centuries for good passwords."
+/>
+
+## In the wild
+
+- **AWS KMS and Google Cloud KMS** use envelope encryption: storage services ask the KMS to wrap and unwrap data keys, and master keys stay inside.
+- **HashiCorp Vault** can issue short-lived database logins per application, so no long-lived password exists to leak.
+- **Dropbox** has described hashing passwords with SHA-512, then bcrypt, then encrypting the result with a key kept apart from the database, often called a **pepper**.
+
+## Common pitfalls
+
+- **Encrypting passwords instead of hashing them.** Whoever gets the key gets every password.
+- **Keeping the key next to the data.** A key in the same config file, repository or backup unlocks it for the same thief.
+- **Inventing your own scheme.** Use a tested library and its defaults, such as AES-GCM. A classic homemade bug is reusing a **nonce**, a number that must never repeat under one AES-GCM key.
+- **Secrets in code or logs.** A key committed to git stays in its history after you delete the file.
+- **Forgetting bcrypt's 72-byte limit.** bcrypt silently ignores input past 72 bytes. Cap password length or use Argon2id.
+
+## How to say it in an interview
+
+"In transit, I'd run TLS on every hop, inside the network too. At rest, AES-256 on disks and backups, which stops stolen files but not someone who can query the database, so the most sensitive fields get encrypted in the app as well. Keys use envelope encryption: data keys encrypt data, a KMS holds the master key, and rotation re-wraps only data keys. Passwords are never encrypted. I store a salted Argon2id or bcrypt hash tuned to about 250 ms, which turns a GPU crack of a leaked table from minutes into centuries. App secrets live in a secrets manager, fetched at start-up, short-lived where possible."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between hashing and encryption, and when would you use each?" level="Junior" category="Security">
+    **Short answer.** Encryption is reversible: anyone with the key gets the original back. Hashing is one-way: it gives a fixed-size fingerprint that cannot be turned back into the input.
+
+    **Why.** Encrypt when you need the data again, such as an address the shipping service must print. Hash when you only need to check a match, such as a password at login or a file that may have changed.
+
+    <Compare
+      columns={["", "Encryption", "Hashing"]}
+      rows={[
+        ["Reversible", true, false],
+        ["Needs a key", true, false],
+        ["Output size", "About the input size", "Fixed, 32 bytes for SHA-256"],
+        ["Typical use", "Card tokens, addresses, backups", "Passwords, checksums, deduplication"],
+      ]}
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - What is an HMAC, and where would you use one?
+    - Why does a checksum not prove who sent a file?
+
+    **Watch out for.** Saying "we encrypt passwords with SHA-256". SHA-256 is a hash, and on its own it is too fast for passwords.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you store user passwords?" level="Junior" category="Security">
+    **Short answer.** Store a salted hash from a slow password hashing function, Argon2id or bcrypt, never the password or an encrypted copy. At login, hash the typed password with the stored salt and settings and compare.
+
+    **Why.** A random 16-byte salt per user makes identical passwords hash differently, so each user is cracked alone. A slow function cuts a GPU from about 20 billion SHA-256 guesses per second to about 1,500 bcrypt guesses at cost 12, so a billion guesses against one user take about 8 days instead of 0.05 seconds.
+
+    <AnimatedDiagram name="fundamentals/encryption-and-hashing-salt-layout" step={3} caption="The stored string carries the algorithm, its cost settings, the salt and the hash, so a login is checked with no key." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you raise the cost later without forcing every user to reset?
+    - What is a pepper, and where would you keep it?
+
+    **Watch out for.** Thinking the salt must be secret. It sits in plain sight next to the hash; its job is to make every hash unique.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Our database has encryption at rest turned on. Which attacks does that stop, and which does it not?" level="Mid" category="Security">
+    **Short answer.** It stops anyone who gets the raw bytes: a stolen disk, a copied data file, a leaked backup. It does not stop anyone who can talk to the database, because the database decrypts pages for every query.
+
+    **Why.** SQL injection, a stolen database password or an over-privileged admin all see plain text. For the most sensitive fields, such as home addresses, encrypt in the application with a key only the services that need it can use, so the database stores only ciphertext.
+
+    <AnimatedDiagram name="fundamentals/encryption-and-hashing" step={2} caption="The pages and the backup are ciphertext, but the app still reads plain text through its database connection." />
+
+    **Follow-ups the interviewer may ask.**
+    - What do you lose when you encrypt a field in the application?
+    - How would you still look up a customer by an encrypted email address?
+
+    **Watch out for.** Ticking "encryption at rest" and calling the data protected. It is one layer against one kind of thief.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design key management for a multi-tenant SaaS that stores customer files. How do rotation and deletion work?" level="Senior" category="Security">
+    **Short answer.** Envelope encryption with one key per tenant inside a KMS, which wraps that tenant's data key. Rotation re-wraps data keys instead of re-encrypting files, and destroying a tenant's KMS key makes all its files unreadable, backups included.
+
+    **Why.** Rotating a tenant's key re-wraps one 32-byte data key, not terabytes of files. Deletion works because the wrapped data key in every backup needs that KMS key to open. KMS calls take a few milliseconds, so services cache unwrapped data keys for a few minutes. Per-tenant keys also confine a leak to one tenant. The cost is key count: AWS KMS charges about 1 dollar per key per month, so 5,000 tenants cost about 5,000 dollars a month.
+
+    <AnimatedDiagram name="fundamentals/encryption-and-hashing" step={3} caption="Only the wrapped data key sits next to the data; unwrapping it needs a call to the key service." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to reads if the KMS is down for ten minutes?
+    - How would you rotate a data key itself, not only the tenant key?
+
+    **Watch out for.** Deleting the wrapped data key from the live database and calling the tenant shredded. Old backups still hold a copy, and the KMS key can still open it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A live payment API key was pushed to a public Git repository an hour ago. What do you do now, and how do you stop it happening again?" level="Senior" category="Security">
+    **Short answer.** Revoke the key with the provider right away, issue a new one through the secrets manager, and check the provider's logs for calls from unknown addresses. Deleting the commit is not enough: bots scan public repositories within minutes, and the key stays in git history and every clone.
+
+    **Why.** Revoking closes the hole; cleanup does not. To prevent a repeat, apps fetch secrets at start-up so none sit in code, secret scanning runs on every push, and short-lived credentials cap any future leak at their lifetime, such as an hour.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you rotate a database password with no downtime?
+    - Who may read production secrets, and how is that logged?
+
+    **Watch out for.** Rewriting git history and calling it done. Assume the key was copied the moment it went public.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Security overview](/system-design/fundamentals/security)
+- [TLS and HTTPS](/system-design/fundamentals/tls)
+- [API authentication](/system-design/fundamentals/api-auth)
+- [Common attacks and defences](/system-design/fundamentals/common-attacks)
+- [Rate limiting](/system-design/patterns/rate-limiting)
+- [Object storage](/system-design/databases/object-storage)
+
+## Further reading
+
+- OWASP, [Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html), current settings for Argon2id, bcrypt and scrypt.
+- IETF, [RFC 9106: Argon2 Memory-Hard Function](https://www.rfc-editor.org/rfc/rfc9106), the specification and its recommended parameters.
+- AWS, [AWS KMS concepts](https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html), envelope encryption and data keys in a real key service.
+- Dropbox Tech Blog, [How Dropbox securely stores your passwords](https://dropbox.tech/security/how-dropbox-securely-stores-your-passwords), a layered hashing scheme in production.

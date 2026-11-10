@@ -1,0 +1,256 @@
+---
+title: "A request's journey"
+description: "Follow one web request from the browser to the database and back, hop by hop, and see where each millisecond of latency hides."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  A web request passes through a chain of stops, from your browser across the internet to a server and its database and back, and the wait you feel is the sum of every stop.
+</KeyIdea>
+
+## The story
+
+Ana lives in Lisbon. She opens a small online bookshop and taps **My orders**. The shop's servers sit in a data center (a building full of servers) in Frankfurt, about 1,900 km away. About 160 milliseconds later her 12 orders appear. A few seconds later she opens **My orders** again, and this time it takes about 45 ms. Same shop, same servers, same network.
+
+This page follows her first tap hop by hop. <Term id="latency">Latency</Term> is the time between asking and getting the answer, and one millisecond (ms) is a thousandth of a second.
+
+## How it works
+
+Here is the whole trip as a map, with the cost on each arrow. The app server runs the shop's own code. The other boxes are plumbing that almost every web request crosses; the steps below explain each one.
+
+<AnimatedDiagram name="fundamentals/anatomy-of-a-request-hops" caption="One page load as a map: six boxes, about 160 ms in all, most of it on the arrows that cross the internet." />
+
+A **round trip** is a message out plus its reply back. Light in fibre covers about 200 km per millisecond, and the cable route from Lisbon to Frankfurt is about 2,500 km, so a round trip takes at least 2 × 12.5 = 25 ms. Routers and detours make it about 40 ms. Most of this page is counting round trips.
+
+### Step 1: Find the address
+
+<AnimatedDiagram name="fundamentals/anatomy-of-a-request" step={1} caption="Hop 1: the browser turns the shop's name into an address." />
+
+Computers find each other by number (an IP address such as 203.0.113.7), not by name. So the browser first asks <Term id="dns">DNS</Term>, the internet's phone book, for the address of shop.example. A resolver (a DNS server that looks up names for its customers) at Ana's internet provider answers in about 20 ms. The timeline draws it as a note on the browser lane. The answer carries a <Term id="ttl">TTL</Term> (time to live), say 5 minutes, and until it runs out the browser skips this hop.
+
+<PremiumBreak />
+
+### Step 2: Open a secure connection
+
+<AnimatedDiagram name="fundamentals/anatomy-of-a-request" step={2} caption="Hops 2 and 3: two round trips to Frankfurt before a single byte of the request is sent." />
+
+Next the browser opens a **TCP connection**. TCP is the protocol that makes sure bytes arrive complete and in order. Opening one is a **handshake**: the browser says hello (SYN) and the server says hello back (SYN-ACK). That is one round trip, 40 ms.
+
+Then comes <Term id="tls">TLS</Term>, the layer that encrypts traffic and proves the server really is shop.example. In TLS 1.3 the browser sends its keys, and the server answers with its own keys and its certificate (a signed ID card for the site). Another round trip, another 40 ms.
+
+Both handshakes end at the <Term id="load-balancer">load balancer</Term>, the front door that spreads requests over many app servers. It holds the certificate and decrypts the traffic, which is called "terminating" TLS.
+
+Running total: 20 + 40 + 40 = 100 ms, and the request has not left Ana's phone yet.
+
+### Step 3: Ask, and do the work
+
+<AnimatedDiagram name="fundamentals/anatomy-of-a-request" step={3} caption="Hops 4 to 8: one trip across the internet, then about 20 ms of work inside the data center." />
+
+Now the browser sends the request. HTTP is the language browsers and web servers speak, and `GET /orders` asks for the orders page. It crosses the internet once, half a round trip: 20 ms. The load balancer forwards it to a healthy app server; inside one building that hop costs about 1 ms.
+
+The app server checks the <Term id="cache">cache</Term> first: a fast, in-memory copy of recently read data. Ana's orders are not there (a **miss**), which takes 1 ms to learn. So the app queries the database, where an <Term id="index">index</Term> on the user id finds her 12 orders in about 8 ms. The app turns the rows into JSON, the text format the browser reads, in 10 ms. Without making Ana wait, it also saves a copy of that finished JSON in the cache for 60 seconds.
+
+Inside the data center: 1 + 1 + 8 + 10 = 20 ms. That is everything the shop's own building adds.
+
+### Step 4: Carry the answer home
+
+<AnimatedDiagram name="fundamentals/anatomy-of-a-request" step={4} stepper caption="The full journey: nine hops, about 160 ms, 140 ms of it travel. Use the numbers to replay each step." />
+
+The response goes back the way it came, with the status `200 OK` (HTTP's code for success), and crosses the internet in 20 ms.
+
+Add it up: 20 + 40 + 40 + 20 + 1 + 1 + 8 + 10 + 20 = **160 ms**. About 140 ms is spent on the network (20 for DNS, 120 crossing to Frankfurt and back) and only 20 ms inside the data center. Waiting on the network cost 140 / 20 = 7 times as much as everything inside the data center.
+
+### Step 5: The second tap
+
+<AnimatedDiagram name="fundamentals/anatomy-of-a-request-hops" path="browser>lb>app>cache" caption="The second tap: no DNS, no handshakes, and a cache hit. The browser arrow now carries only the 20 ms request; the database sits idle." />
+
+When Ana taps again, three things are already in place. The address is still cached, so DNS costs 0 ms. The browser kept the connection open, so both handshakes cost 0 ms. And the cache holds her orders, so the database is skipped.
+
+New total: 20 (request) + 1 (forward) + 1 (cache hit) + 2 (wrap the stored JSON in a response) + 20 (response) = **44 ms**. Nothing got faster. The system did less.
+
+### Where the time hides
+
+| Hop | In the story | What makes it slower | What helps |
+|---|---|---|---|
+| 1. DNS | 20 ms | A cold resolver asks other DNS servers in turn: 100 ms or more | Longer TTLs |
+| 2-3. TCP and TLS | 80 ms | A new connection per request; TLS 1.2 needs two round trips | Reuse connections; TLS 1.3; end TLS near the user |
+| 4 and 9. Travel | 40 ms | Distance; a large response needs several round trips | Serve from closer; send less |
+| 5. Load balancer | 1 ms | Overload | Rarely the problem |
+| 6. Cache | 1 ms | Misses; an empty cache after a restart | Sensible TTLs; warm the cache |
+| 7. Database | 8 ms | No index; one query per row; waiting for a lock or a connection | Indexes; batch queries; a connection pool |
+| 8. App work | 10 ms | Waiting in line behind other requests | More servers; less work per request |
+
+The worst delay does not look like work: **waiting in line**. An app server with 50 workers (threads that each handle one request at a time), each request holding one for 20 ms, finishes 50 / 0.02 = 2,500 requests a second. At 2,600 a second, 100 extra pile up every second. After a minute 6,000 are waiting, and a new request waits 6,000 / 2,500 = 2.4 seconds before the app server even starts on it.
+
+Real hops also vary. The <Term id="p99">p99</Term>, the time that 99 of every 100 requests beat, is often several times the typical value. Nine hops give a request nine chances to hit a slow one.
+
+## Try it
+
+Compare a round trip inside a data center (about half a millisecond) with one across a continent, in a 160 ms window: Ana's first tap. The ladder's cross-continent row (about 150 ms) is a longer trip than Lisbon to Frankfurt (40 ms).
+
+<LatencyLadder title="Inside the building versus across a continent" compareTo="dc-rtt" highlight="cross-continent" windowMs={160} />
+
+<Quiz>
+  <QuizItem question="The shop moves from Frankfurt to Madrid, cutting the round trip from Lisbon from 40 ms to 10 ms. Roughly what does Ana's first tap cost now?" hint="Count round trips, not hops.">
+    About 70 ms: 20 (DNS) + 10 (TCP) + 10 (TLS) + 5 (request) + 20 (work) + 5 (response). The code did not change, yet the page got more than twice as fast.
+  </QuizItem>
+  <QuizItem question="The team halves the JSON work from 10 ms to 5 ms. How much faster is the first tap?" hint="What share of 160 ms is 5 ms?">
+    5 ms, about 3%. Worth doing, but only after the round trips.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+Every shortcut that saves time moves a cost elsewhere.
+
+<Compare
+  columns={["Shortcut", "Time saved in the story", "What it costs"]}
+  rows={[
+    ["Keep connections open", "80 ms on every later request", "Memory on the load balancer for each idle connection"],
+    ["Cache the order list for 60 s", "About 16 ms: the 8 ms query and most of the 10 ms JSON work", "Ana may see a list up to 60 s old"],
+    ["End TLS at an edge server in Lisbon", "About 70 ms on a first visit: two 5 ms handshakes instead of two 40 ms ones", "One more hop, and one more place that holds the certificate"],
+  ]}
+  caption="Shortcuts trade time for memory, freshness or trust."
+/>
+
+## In the wild
+
+- **Browser developer tools** split every request into these phases: Chrome's Network panel shows DNS lookup, initial connection, SSL and waiting as separate bars.
+- **HTTP/3** runs over QUIC, a newer transport that merges the connection and TLS handshakes into one round trip.
+- **CDNs** such as Cloudflare and Amazon CloudFront run servers in hundreds of cities. They end TLS near the user and keep warm connections to the origin, so only one long round trip remains.
+
+## Common pitfalls
+
+- **Tuning the code first.** The code is 20 ms out of 160. Count round trips before you profile functions.
+- **A new connection for every call**, between services too. A fresh TLS connection to the database on every request pays the handshakes every time.
+- **Forgetting the cold path.** After a deploy, caches are empty and connections are new, so everyone pays close to Ana's first tap.
+
+## How to say it in an interview
+
+"A request is a chain of hops, and the user waits for their sum. DNS costs about 20 ms uncached. TCP and TLS cost one round trip each, 80 ms on a 40 ms link, before the request is even sent. On a first visit, 140 of 160 ms is network and 20 ms is our code. So I remove round trips first: reuse connections, end TLS near the user, cache close to the reader. Then I look inside the data center for queues, missing indexes and one query per row."
+
+<InterviewQuestions>
+  <InterviewQuestion question="What happens between typing a URL and seeing the page?" level="Junior" category="Networking">
+    **Short answer.** The browser finds the IP address with DNS, opens a TCP connection and a TLS session, and sends an HTTP request. A load balancer forwards it to an app server, which reads a cache or the database and sends the response back.
+
+    **Why.** On a 40 ms round trip: DNS about 20 ms, TCP 40 ms, TLS 1.3 40 ms, request and response 20 ms each, and 10 to 30 ms inside the data center. A first visit lands near 160 ms, mostly travel.
+
+    <AnimatedDiagram name="fundamentals/anatomy-of-a-request-hops" path="browser>lb>app>db" caption="The main path: browser, load balancer, app server, database." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which of these steps does the next request skip?
+    - What does the load balancer do besides forwarding?
+
+    **Watch out for.** Jumping from DNS straight to HTTP. The two handshakes in between are often the most expensive part of a first visit.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why is the second visit to a page often much faster than the first?" level="Junior" category="Latency">
+    **Short answer.** The second request skips work the first one paid for: the DNS answer is cached, the connection is open, and the data is often in a server-side cache. One round trip plus a few milliseconds is left.
+
+    **Why.** A 160 ms first visit is 20 ms DNS, 80 ms handshakes, 40 ms request and response, and 20 ms server work. The second visit pays 0 for DNS and handshakes, and a cache hit cuts the server work to about 4 ms: 40 + 4 = 44 ms. Almost everything removed was waiting, not computing.
+
+    <AnimatedDiagram name="fundamentals/anatomy-of-a-request-hops" path="browser>lb>app>cache" caption="The warm path: an open connection, then a cache hit. The DNS resolver and the database sit idle." />
+
+    **Follow-ups the interviewer may ask.**
+    - How long does a connection stay open, and who decides?
+    - What happens when the cache entry has expired?
+
+    **Watch out for.** Crediting the browser's page cache. Browsers rarely store a personal page such as an order list; the time came back from DNS caching, connection reuse and the server's cache.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A page takes 800 ms to load. How do you find out where the time goes?" level="Mid" category="Performance">
+    **Short answer.** Split the 800 ms into network time and server time, then split each by hop. Browser timing shows DNS, connect, TLS, waiting and download; a server trace explains the waiting.
+
+    **Why.** A typical breakdown from the browser:
+
+    | Phase | Time | What it says |
+    |---|---|---|
+    | DNS | 30 ms | The resolver is fine |
+    | Connect (TCP) | 120 ms | A round trip is 120 ms: users are far away |
+    | TLS | 120 ms | The same round trip again |
+    | Waiting | 480 ms | 120 ms of travel plus 360 ms on the server |
+    | Download | 50 ms | A large response |
+
+    The trace of the 360 ms shows, say, 30 queries in a row at 10 ms each: 300 ms. Two fixes follow: batch the queries, and end connections closer to users.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you collect these numbers from real users, not your own laptop?
+    - What would you suspect if "waiting" is high only at peak hours?
+
+    **Watch out for.** Profiling code first. Here 240 ms is handshakes, and no code change touches that.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where would you terminate TLS, and why?" level="Mid" category="Networking">
+    **Short answer.** At the load balancer or at an edge server near users, so handshakes are short and app servers do not each hold certificates. If the internal network is not trusted, re-encrypt to the app servers over long-lived connections.
+
+    **Why.** A handshake costs one round trip to wherever TLS ends: about 40 ms from Lisbon to Frankfurt, about 5 ms to an edge server in Lisbon. Internal connections open once and serve thousands of requests, so re-encrypting costs almost nothing per request.
+
+    <AnimatedDiagram name="fundamentals/anatomy-of-a-request-hops" highlight={["browser", "lb"]} caption="Both handshakes run between the browser and whatever ends TLS, here the load balancer." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does the app server lose when TLS ends before it, and how do you pass it along?
+    - How do you rotate a certificate without dropping connections?
+
+    **Watch out for.** "End TLS on every app server, for security." It spreads private keys across many machines and does not make the user's handshake any shorter.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Users in Sydney say the site is slow. Your servers are in Frankfurt. What do you do?" level="Senior" category="Latency">
+    **Short answer.** Count round trips first: at about 290 ms each, distance outweighs everything else. Then cut them, cheapest first: end TLS at an edge server in Sydney, cache what you can there, and only then consider a region in Australia.
+
+    **Why.** Today a first visit costs DNS 20 + TCP 290 + TLS 290 + request and response 290 + server 20 = about 910 ms. An edge server in Sydney (10 ms round trip) with warm connections to Frankfurt gives 20 + 10 + 10 + 290 + 20 = about 350 ms.
+
+    <Compare
+      columns={["Option", "First visit", "What it costs"]}
+      rows={[
+        ["Do nothing", "about 910 ms", "Users leave"],
+        ["Edge server ends TLS", "about 350 ms", "A CDN bill and one more hop"],
+        ["Edge also caches the page", "about 50 ms", "Only for pages many users share, or short TTLs"],
+        ["Region in Australia", "about 70 ms", "Copying data across regions; deciding where writes go"],
+      ]}
+      caption="Cutting round trips to Sydney, from cheapest to most expensive."
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - Which parts of a personal page can still be cached at the edge?
+    - With a region in Australia, where does a write from Sydney go?
+
+    **Watch out for.** Adding servers in Frankfurt or tuning the database. Neither changes a round trip set by the speed of light in fibre.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The database's p99 is 20 ms, but the endpoint's p99 is 400 ms. Where could the rest be hiding?" level="Senior" category="Performance">
+    **Short answer.** In the gaps between hops: queues, waiting for a free connection, calls made one after another, and retries. Measure time spent waiting, not only time spent working.
+
+    **Why.** Four places:
+
+    - **Connection pool.** 20 connections at 10 ms per query serve about 2,000 queries a second. At 2,200 a second, requests queue for a connection, and the database's metrics never see that wait.
+    - **Calls in a row.** If each of 10 serial queries has a 1% chance of being slow, at least one is slow $1 - 0.99^{10} \approx 10\%$ of the time, so slow queries set the endpoint's tail.
+    - **Retries.** A call that times out at 100 ms and is retried costs 100 ms plus the retry.
+    - **Thread queues.** Requests wait for a free worker before any work starts.
+
+    **Follow-ups the interviewer may ask.**
+    - How would a trace show time spent waiting for a pool?
+    - How would you make the 10 serial queries cheaper?
+
+    **Watch out for.** Adding up each component's p99. Percentiles do not add, and a wait between components shows on no component's dashboard.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Latency numbers](/system-design/fundamentals/latency-numbers)
+- [Networking](/system-design/fundamentals/networking)
+- [DNS](/system-design/fundamentals/dns)
+- [TCP and UDP](/system-design/fundamentals/tcp-udp)
+- [TLS](/system-design/fundamentals/tls)
+- [Load balancing basics](/system-design/fundamentals/load-balancing-basics)
+- [CDN](/system-design/fundamentals/cdn)
+- [Caching](/system-design/patterns/caching)
+
+## Further reading
+
+- [Ilya Grigorik, High Performance Browser Networking](https://hpbn.co/): a free book on what TCP, TLS and HTTP cost in round trips.
+- [RFC 8446, TLS 1.3](https://www.rfc-editor.org/rfc/rfc8446): the standard, including the one-round-trip handshake.
+- [MDN, Resource timing](https://developer.mozilla.org/en-US/docs/Web/API/Performance_API/Resource_timing): measuring each phase of a request in real users' browsers.
+- [Jeffrey Dean and Luiz André Barroso, The Tail at Scale](https://research.google/pubs/the-tail-at-scale/): why slow outliers dominate requests that touch many servers.

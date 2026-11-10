@@ -1,0 +1,300 @@
+---
+title: "CDNs and edge"
+description: "How a content delivery network keeps copies of your files near readers: origin and edge, hits and misses, TTLs, purges, push vs pull."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  A content delivery network keeps copies of your files on servers in many cities, so each reader downloads from a server nearby instead of from your one server far away.
+</KeyIdea>
+
+## The story
+
+You sell hand-printed posters. Your shop runs on one server in Virginia. A product page is 60 KB of HTML plus 25 photos, about 3 MB in all. A reader in Mumbai opens it. A round trip is one message sent and its reply received. Every round trip between Mumbai and Virginia takes about 200 ms. Before any page moves, the browser and the server swap setup messages called handshakes. One round trip sets up the connection (TCP). A second agrees on encryption (<Term id="tls">TLS</Term>). Asking for the page costs a third. That is 600 ms before the first byte of HTML arrives. The photos need several more round trips. The page takes about 2 seconds to appear.
+
+Then a travel vlogger in India links your shop. In one evening hour, 200,000 people open a product page. That is 200,000 × 3 MB = 600 GB in an hour, or 600 × 8 = 4,800 gigabits over 3,600 seconds, about 1.3 gigabits per second (Gbps). Your server's network link carries 1 Gbps. Photos clog the link, pages stall, and checkouts time out. The fix for both problems is a <Term id="cdn">content delivery network (CDN)</Term>.
+
+## How it works
+
+Two words carry this whole page.
+
+- **Origin.** The server that holds the real, master copy of your files. In the story, your server in Virginia.
+- **Edge.** A CDN server in a city near readers, at the outer rim of the network. A CDN runs edge servers in hundreds of cities. Each site, often a room of servers inside a data centre, is called a point of presence (PoP).
+
+Each edge keeps a <Term id="cache">cache</Term>: a local store of copies of files it has already fetched. You point your images domain, say `img.shop.example.com`, at the CDN. The CDN then steers each reader to a nearby edge, usually in one of two ways. Its [DNS](/system-design/fundamentals/dns) servers can answer with the address of an edge near the asker. Or every edge announces the same address, and the internet's routing delivers each packet to the closest one. That second trick is called anycast.
+
+### Step 1: The first request is a miss
+
+<AnimatedDiagram name="fundamentals/cdn" step={1} caption="Reader A asks the Mumbai edge for a photo. The edge has no copy, so it fetches one from the origin in Virginia and keeps it." />
+
+Reader A asks the Mumbai edge for `/img/poster-42.jpg`. The edge looks the file up by its cache key, usually the host name plus the path. It has no copy. That is a **cache miss**. The edge fetches the photo from the origin, stores it, and sends it on.
+
+Reader A still waits for the trip to Virginia, but less than before. The two handshakes end at the edge, 10 ms away, so they cost about 20 ms instead of 400. The edge keeps its connection to the origin open, so the fetch costs one long round trip. Two 10 ms handshakes, one 10 ms round trip for the request and reply between reader and edge, and 200 ms for the edge's trip to Virginia: the photo arrives in about 10 + 10 + 10 + 200 = 230 ms, plus the transfer.
+
+The origin tells the edge how long to keep the copy, in a response header:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: image/jpeg
+Cache-Control: public, max-age=86400
+ETag: "p42-v3"
+```
+
+`max-age=86400` is the copy's <Term id="ttl">time to live (TTL)</Term>: 86,400 seconds, one day. `public` says any shared cache may store it. The `ETag` is a short fingerprint of this version of the file. Step 3 uses it.
+
+<PremiumBreak />
+
+### Step 2: The next request is a hit
+
+<AnimatedDiagram name="fundamentals/cdn" step={2} caption="Reader B asks for the same photo two minutes later. The edge answers from its copy, and the origin does no work." />
+
+Reader B in Mumbai asks for the same photo two minutes later. The edge has a fresh copy. That is a **cache hit**. The answer comes back in about 10 ms, and the origin never hears about it.
+
+The share of requests an edge answers without the origin is its **hit ratio**. Run the spike again with a 95% hit ratio. The origin now sends 5% of 600 GB, which is 30 GB in the hour. That is 30 × 8 = 240 gigabits over 3,600 seconds, about 67 Mbps. A link that was 130% full is now under 7% full.
+
+Two details keep the origin calm when many readers arrive at once:
+
+- **Request collapsing.** If 500 readers miss on the same new photo in the same second, the edge sends one request to the origin and makes the other 499 wait for it.
+- **Origin shield.** Every PoP has its own cache, so 300 PoPs could each miss once on every file. A shield is one middle cache layer between the edges and the origin. Edges miss into the shield, and only the shield's misses reach the origin.
+
+### Step 3: The TTL runs out
+
+<AnimatedDiagram name="fundamentals/cdn" step={3} caption="Reader C arrives the next day. The copy is past its TTL, so the edge asks the origin whether it changed and gets a small 304 reply." />
+
+Reader C arrives the next day. The edge still holds the photo, but its TTL has run out. The copy is now **stale**: it may still be right, but the edge must check before it trusts it again. The edge does not download the whole file again. It asks the origin a conditional question: "send it only if it no longer matches this fingerprint."
+
+```http
+GET /img/poster-42.jpg HTTP/1.1
+Host: img.shop.example.com
+If-None-Match: "p42-v3"
+
+HTTP/1.1 304 Not Modified
+Cache-Control: public, max-age=86400
+ETag: "p42-v3"
+```
+
+The photo has not changed, so the origin answers `304 Not Modified`, a reply of a few hundred bytes instead of 120 KB. The edge resets the clock and keeps serving its copy for another day. This check is called **revalidation**.
+
+What if you change a file before its TTL ends? Removing or replacing copies early is **invalidation**. You have three tools.
+
+<Tabs title="Three ways to change a cached file">
+  <Tab label="Versioned names">
+    Put a fingerprint of the content in the file name: `poster-42.a1b2c3.jpg`. A new version gets a new name, and the HTML points to it. Old copies are not wrong. Nobody asks for them any more. You can then cache files for a year (`max-age=31536000, immutable`). The word `immutable` tells browsers the file will never change, so they skip rechecking it. This is the best default for images, scripts and stylesheets.
+  </Tab>
+  <Tab label="Purge">
+    Ask the CDN's API to drop a path from every edge. Depending on the provider, a purge reaches every location in under a second or in a few minutes. It does not reach copies already sitting in readers' browsers. Keep it for mistakes, such as a wrong price on a product photo.
+  </Tab>
+  <Tab label="Short TTL">
+    Give files that must change in place a TTL of 30 to 60 seconds. Readers see a change within a minute, and the origin answers one revalidation per file per edge each minute. This suits HTML pages whose address must stay the same.
+  </Tab>
+</Tabs>
+
+### Step 4: Pull or push
+
+Everything so far is a **pull CDN**: the edge pulls a file from your origin the first time someone asks. A **push CDN** works the other way round. You upload files to the CDN's own storage ahead of time, and edges never ask your server.
+
+<Compare
+  columns={["", "Pull CDN", "Push CDN"]}
+  rows={[
+    ["Who puts the file on the CDN", "The edge, on its first miss", "You, before anyone asks"],
+    ["First reader of a new file", "Waits for the origin, about 230 ms in the story", "Served from the CDN at once"],
+    ["Origin must stay up to serve misses", true, false],
+    ["Storage you pay the CDN for", "Only files readers asked for", "Everything you upload"],
+    ["Setup when files change", "None, beyond cache headers", "An upload step in every release"],
+    ["Fits best", "Sites with many files that change", "Large files known in advance: video, game patches"],
+  ]}
+  caption="Most websites use pull. Push wins when one big file meets a huge audience at the same moment."
+/>
+
+Many setups mix the two. You upload files to [object storage](/system-design/databases/object-storage), a service that stores files by name, and a pull CDN uses that storage as its origin.
+
+### Step 5: What belongs on a CDN
+
+A file belongs on the CDN when many readers want the same bytes. A response that differs per person does not.
+
+<Compare
+  columns={["Content", "Cache at the edge?", "Typical TTL", "Why"]}
+  rows={[
+    ["Scripts, stylesheets, fonts with versioned names", true, "1 year", "Never change under one name"],
+    ["Product photos", true, "1 day, then revalidate", "Same bytes for every reader"],
+    ["Video segments", true, "Days", "Biggest share of bytes on most sites"],
+    ["Public HTML, same for everyone", true, "30 to 60 s", "Absorbs spikes; a change shows within a minute"],
+    ["Public API data, such as a price list", true, "A few seconds", "Even 5 s turns thousands of calls into one per edge"],
+    ["Cart, account and order pages", false, "None", "Different for every reader"],
+    ["Checkout and other writes", false, "Never", "A write must reach the origin"],
+  ]}
+  caption="Uncached traffic can still pass through the edge, which finishes the TLS handshake nearby and filters attack traffic."
+/>
+
+The edge can also run small pieces of your code, often called edge functions. Common jobs are redirects, picking which test version a reader sees, and checking a login token before a request travels to the origin. They run within a few milliseconds of the reader. They are not a place for work that needs your database, which still lives in Virginia.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Your photos have max-age=86400. You upload a fixed photo under the same name. When does every reader see the fix?" hint="Two kinds of caches hold copies.">
+    Up to a day later. Edges keep the old copy until its TTL ends, and browsers that already have it keep theirs too. A purge clears the edges but not the browsers. Giving the fixed file a new name solves both.
+  </QuizItem>
+  <QuizItem question="The Mumbai edge has a 95% hit ratio. Out of 1,000 requests, how many reach the origin?">
+    About 50. With an origin shield, fewer still, because some of those 50 are answered by the shield.
+  </QuizItem>
+  <QuizItem question="Why does a CDN help a far-away reader even on a cache miss?" hint="Count the round trips to Virginia.">
+    The TCP and TLS handshakes end at the edge, 10 ms away, instead of costing two 200 ms round trips. The edge's connection to the origin is already open, so the miss costs one long round trip instead of three.
+  </QuizItem>
+  <QuizItem question="Should the cart page be cached at the edge?">
+    No. Each reader's cart is different, and a cached cart could show one person's items to another. Mark it `Cache-Control: private, no-store`. It can still pass through the edge for the nearby handshake and attack filtering.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<ProsCons
+  pros={[
+    "A far reader's round trip drops from about 200 ms to about 10 ms",
+    "At a 95% hit ratio, the origin serves 1 request in 20",
+    "Spikes and floods of attack traffic spread over hundreds of locations",
+    "Cached files can keep serving for a while if the origin goes down",
+  ]}
+  cons={[
+    "Readers can see an old copy until the TTL ends or a purge lands",
+    "You pay per GB delivered and per request",
+    "One wrong header can leak a private page or crash the hit ratio",
+    "Bugs get harder to trace: origin, edge, or an old copy?",
+    "Per-reader responses gain little beyond the shorter handshake",
+  ]}
+/>
+
+## In the wild
+
+- **Akamai** started in the late 1990s and runs edge servers in thousands of locations, many inside internet providers' own networks.
+- **Cloudflare** announces the same addresses from more than 300 cities, so anycast routing sends each reader to a nearby site.
+- **Amazon CloudFront** offers Origin Shield, an extra cache layer in one region, and often uses Amazon S3 buckets as its origin.
+- **Netflix Open Connect** is Netflix's own CDN. Its servers sit inside internet providers' networks, and Netflix fills them with video overnight, when traffic is low. That is a push CDN at a very large scale.
+
+## Common pitfalls
+
+- **Caching a personal page.** A missing `private` header lets the edge store one reader's account page and serve it to the next reader.
+- **Tracking parameters in the cache key.** `?utm_source=vlog` and `?utm_source=mail` become two different keys, so every campaign link misses. Drop parameters that do not change the response from the key.
+- **A long TTL on unversioned files.** A fix then takes a day to show, and a purge cannot reach browsers.
+- **Purging everything at once.** Every edge misses together, and the origin gets the spike the CDN was hiding.
+- **An open origin.** If anyone can reach the origin directly, attackers skip the CDN. Accept traffic only from the CDN's addresses, or require a secret header.
+
+## How to say it in an interview
+
+"A CDN puts copies of my static content on edge servers near users. The origin keeps the master copy. On a miss, the edge fetches from the origin, stores the copy for the TTL in `Cache-Control`, and serves it. Every later hit costs about 10 ms instead of a 200 ms trip across the world, and the origin sees only the misses: 5% of traffic at a 95% hit ratio. When the TTL ends, the edge revalidates with an ETag and usually gets a tiny 304. For changes I use versioned file names with a one-year TTL, a short TTL for HTML, and purges only for mistakes. I default to a pull CDN with an origin shield, and use push for huge files with a known release time. Personal pages and writes are not cached, but they can still pass through the edge for TLS and protection."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a CDN, and why does it make a website faster?" level="Junior" category="Networking">
+    **Short answer.** A CDN is a network of edge servers in many cities that keep copies of a site's files. Readers download from a nearby edge instead of from the faraway origin, so each round trip is short and the origin does less work.
+
+    **Why.** A reader in Mumbai is about 200 ms from an origin in Virginia, and about 10 ms from an edge in Mumbai. A page that needs five or six round trips drops from over a second of waiting to well under 100 ms. At a 95% hit ratio, the origin also serves only 1 request in 20.
+
+    <AnimatedDiagram name="fundamentals/cdn" step={2} path="reader-b>edge" caption="A hit: the reader's request stops at the Mumbai edge and never crosses to Virginia." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does a reader get sent to the nearest edge?
+    - What kinds of files would you not put on a CDN?
+
+    **Watch out for.** Saying a CDN makes the server faster. The server is unchanged; the data travels a shorter distance, and fewer requests reach the server.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Walk me through what happens at the edge on a cache miss." level="Junior" category="Caching">
+    **Short answer.** The edge builds a cache key from the request, finds no copy, and fetches the file from the origin. It stores the copy with the TTL from the `Cache-Control` header and returns it to the reader.
+
+    **Why.** The reader still pays for one trip to the origin, about 230 ms in total from Mumbai to Virginia. That is less than going direct, because the handshakes end at the edge and the edge reuses an open connection to the origin. Every later reader of that file gets a hit until the TTL runs out.
+
+    <AnimatedDiagram name="fundamentals/cdn" step={1} path="reader-a>edge>origin" caption="A miss: the edge forwards the request to the origin, keeps the photo and returns it." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if 500 readers miss on the same file in the same second?
+    - What goes into the cache key, and what should stay out?
+
+    **Watch out for.** Saying the reader gets an error or a redirect on a miss. The edge handles the miss itself; the reader only sees a slower response.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You deployed new CSS, but many users still see the old styles hours later. Why, and how do you stop it from happening again?" level="Mid" category="Caching">
+    **Short answer.** The file kept its name, so edges and browsers keep serving their cached copy until its TTL ends. Put a content fingerprint in the file name, such as `app.3f9c1d.css`, cache it for a year, and let the HTML point to the new name.
+
+    **Why.** With `max-age=86400`, a copy cached a minute before the deploy can live almost 24 more hours. A CDN purge clears the edges in seconds to minutes, but it cannot reach the copies in millions of browsers. A new name is a new cache key everywhere, so the first request for it is a miss and gets the new file. The HTML itself gets a short TTL, such as 60 seconds, so the new name reaches readers within a minute.
+
+    | Approach | Edges updated | Browsers updated |
+    | --- | --- | --- |
+    | Wait for the TTL | up to 24 h | up to 24 h |
+    | Purge | seconds to minutes | up to 24 h |
+    | Versioned name | within 60 s, once the HTML points to the new name | within 60 s, once the HTML refreshes |
+
+    **Follow-ups the interviewer may ask.**
+    - What does the `immutable` directive add?
+    - How do you roll back a bad deploy with versioned names?
+
+    **Watch out for.** Answering "purge the CDN" and stopping there. That leaves every browser cache stale.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="For an online store, what would you serve through the CDN, and with what TTLs?" level="Mid" category="Caching" companies={["Amazon"]}>
+    **Short answer.** Cache everything that is the same for every reader: versioned scripts and styles for a year, product photos for a day with revalidation, and public pages for 30 to 60 seconds. Do not cache carts, accounts or checkout, but still route them through the edge.
+
+    **Why.** Photos and scripts are most of the bytes on a product page, almost all of the 3 MB page in the story, so caching them removes most of the origin's bandwidth. A 60-second TTL on a popular product page turns, say, 1,000 views a second into one origin request per edge per minute. With 300 edges that is 300 requests a minute, about 5 a second instead of 1,000. Personal pages would leak data if cached. Writes must reach the origin. The edge still helps those by finishing TLS nearby and dropping attack traffic.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you cache a page that shows the same product to everyone but a different cart count?
+    - Prices change during a sale. How stale may a cached price be?
+
+    **Watch out for.** Caching an HTML page that includes the reader's name or cart. One reader's page is then served to strangers.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Tomorrow 500,000 players will download a 3 GB game patch in the first hour. How do you keep the origin alive?" level="Senior" category="Scalability">
+    **Short answer.** Serve the patch from a CDN and never let the crowd reach the origin. Push the file to the CDN's storage before launch, or pull it through an origin shield and warm the shield and edges ahead of time. Split the patch into chunks the client fetches with range requests, which ask for one slice of bytes at a time.
+
+    **Why.** The total is 500,000 × 3 GB = 1.5 PB in an hour: 1.5 × 10^15 × 8 bits over 3,600 s, about 3.3 Tbps. No single origin carries that. With a plain pull CDN, each of 300 PoPs misses once, so the origin sends 300 × 3 GB = 900 GB at the moment of launch, mostly at once. With a shield of about 10 regional caches, the origin sends about 10 × 3 GB = 30 GB. With push, it sends 3 GB once, the day before. Request collapsing at each layer stops thousands of first-second misses from each becoming an origin fetch.
+
+    <AnimatedDiagram name="fundamentals/cdn" step={1} highlight={["edge", "origin"]} caption="The edge-to-origin hop is what to protect: shields, collapsing and pre-pushing all cut the misses that cross it." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you check that every region is warm before launch?
+    - What if the patch has a bug and you must replace it an hour in?
+    - Would you use more than one CDN provider?
+
+    **Watch out for.** Sizing only the CDN's bandwidth. The launch-moment misses from hundreds of edges are what take the origin down.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your CDN hit ratio fell from 95% to 70% overnight. What happened to the origin, and how do you find the cause?" level="Senior" category="Reliability">
+    **Short answer.** Origin traffic went from 5% to 30% of requests, six times the load. Look for what changed the cache key or the cacheability of responses in the last deploy or marketing push, and compare hit ratios by path and by response header.
+
+    **Why.** Common causes, each easy to check in CDN logs:
+
+    - A new query parameter, such as a tracking tag, in the cache key, so each link variant misses.
+    - A new `Vary` header, such as `Vary: User-Agent`, which splits one file into thousands of variants.
+    - The origin started sending `Set-Cookie` or `Cache-Control: no-store`, which many CDNs do not cache by default.
+    - A purge of everything, or a build that renames every file without changing it.
+
+    Break the hit ratio down by path prefix and status code. A drop limited to one prefix points at one header or route. A drop everywhere points at a purge or a CDN configuration change.
+
+    **Follow-ups the interviewer may ask.**
+    - Which alert would have caught this before the origin felt it?
+    - Why can a byte hit ratio stay high while the request hit ratio falls?
+
+    **Watch out for.** Scaling up the origin and moving on. The extra servers hide a cache bug that keeps costing money and latency.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [DNS](/system-design/fundamentals/dns)
+- [Networking basics](/system-design/fundamentals/networking)
+- [HTTP](/system-design/fundamentals/http)
+- [TLS](/system-design/fundamentals/tls)
+- [Latency numbers](/system-design/fundamentals/latency-numbers)
+- [Caching](/system-design/patterns/caching)
+- [Blob storage and chunking](/system-design/patterns/blob-storage-and-chunking)
+- [Design Netflix](/system-design/case-studies/netflix)
+- [Design YouTube](/system-design/case-studies/youtube)
+
+## Further reading
+
+- [RFC 9111, HTTP Caching](https://www.rfc-editor.org/rfc/rfc9111): the standard behind `Cache-Control`, freshness, revalidation and shared caches.
+- [Amazon CloudFront Developer Guide, Origin Shield](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/origin-shield.html): how an extra cache layer cuts requests to the origin.
+- [Netflix Open Connect](https://openconnect.netflix.com/): how Netflix places its own servers inside internet providers and fills them ahead of time.
+- [Cloudflare Learning Center, What is a CDN?](https://www.cloudflare.com/learning/cdn/what-is-a-cdn/): a short illustrated overview of edges and caching.

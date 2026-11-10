@@ -1,0 +1,225 @@
+---
+title: "Files, blocks and objects"
+description: "Block, file and object storage: what each one gives you, what it costs, and where databases, logs and photos should live."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  Block storage is a raw disk for one server, file storage is a folder many servers can share, and object storage is a huge bucket of whole files you fetch by name over the web.
+</KeyIdea>
+
+## The story
+
+You run Pantry, a recipe site, on one server with one 1 TB disk. Everything sits on that disk. The database runs on Postgres, a popular open-source database, and takes 40 GB. About 300,000 recipe photos at 2 MB each take 600 GB. The app's log files and the editors' recipe-card templates take a little more. It works for a year.
+
+Then a cooking show mentions you, and you add a second web server. Three things break in the first week:
+
+- An editor saves a new template on server A, and server B never sees it. A reader uploads a photo to server A, the next page load lands on server B, and the reader sees a broken image.
+- Readers now upload 5,000 photos a day: 5,000 × 2 MB = 10 GB a day. With about 350 GB free, the disk is full in 350 / 10 = 35 days, sooner once the logs are counted.
+- When the one disk fails, the database, the photos and the logs all go with it.
+
+Your data is not one kind of thing, but one disk treats it as if it were. The fix is to give each kind of data the storage built for it.
+
+## How it works
+
+Storage comes in three shapes. The difference that matters most is what the server sees when it talks to the storage.
+
+- **Block storage** shows a raw disk: a long row of numbered, fixed-size chunks called blocks, often 4 KB each. The server asks for "block 1,048,576" and gets 4 KB back. The disk knows nothing about files.
+- **File storage** shows folders and files with names and permissions, as your laptop does. The files sit on another machine, reached over the network.
+- **Object storage** shows a flat set of keys in a bucket. You send a whole file with `PUT` and get it back whole with `GET`, over HTTP.
+
+The diagram gives each shape its share of Pantry's data, one step at a time.
+
+### Step 1: Block storage, a disk for one server
+
+<AnimatedDiagram name="fundamentals/storage-types" step={1} caption="The database server reads and writes 4 KB blocks on its own block volume. No other server touches that disk." />
+
+The Postgres server gets its own disk, a 500 GB SSD volume (SSD: a flash-memory disk). On the cloud this is a network disk, such as an AWS EBS volume, that the server sees as if it were plugged in. The database lays its own structure on top: data files cut into 8 KB pages, each two 4 KB blocks, and a <Term id="wal">write-ahead log</Term> it appends to before every change.
+
+That is the job block storage does best. Saving one recipe rewrites a few 8 KB pages in the middle of a large file, many times a second. The time one request waits for its answer is its <Term id="latency">latency</Term>. A local SSD answers a small read in about 0.1 ms, and a network block volume in roughly 0.5 to 2 ms. The price is sharing: the volume belongs to one server at a time. Two servers writing the same raw blocks would scramble each other's data, because neither knows the other's file layout.
+
+The web servers have block disks too: their boot disks, which the operating system starts from. Each server appends its log lines there. An append costs microseconds, so logging never slows a page down.
+
+<PremiumBreak />
+
+### Step 2: File storage, one folder, many servers
+
+<AnimatedDiagram name="fundamentals/storage-types" step={2} caption="Both web servers mount the same shared folder over NFS, so a file saved through one server is there for the other." />
+
+Pantry's editors use a publishing tool that saves recipe-card templates and site settings as files in a folder. Both web servers must see the same folder. A file server, often a managed one such as AWS EFS, holds it, and every web server **mounts** it: attaches the remote folder at a local path, say `/mnt/shared`. Programs then open `/mnt/shared/templates/card.html` as if the file were local.
+
+The servers and the file server talk in a protocol: **NFS** on Linux, **SMB** on Windows. It carries ordinary file operations such as open, read, write, rename and lock. The file server keeps the one copy of every file, so two servers can share it safely. A lock stops them editing one template at the same moment.
+
+Each operation is a network round trip of 1 to a few ms, so software that opens thousands of small files gets slow. File storage is also the priciest per gigabyte. Use it when existing software needs a normal folder on several servers, not for 600 GB of photos.
+
+### Step 3: Object storage, photos and old logs over HTTP
+
+<AnimatedDiagram name="fundamentals/storage-types" step={3} stepper caption="Photos live in a bucket and reach readers through a CDN. The servers move their old log files into the same bucket every hour." />
+
+The photos move to an object store, such as Amazon S3. Each photo becomes an **object**: its bytes, a little metadata (type, size), and a key such as `photos/recipe-8812/hero.jpg`. The slashes in a key are only characters, not real folders. With no folders to lock and no in-place edits, one bucket can hold billions of objects.
+
+Pantry's database row for a recipe stores only the photo's key. To upload, the web server hands the browser a signed URL: a link that allows one upload for a few minutes. The browser sends the photo straight to the bucket, so 2 MB uploads never tie up a web server. Readers fetch photos through a [CDN](/system-design/fundamentals/cdn) (content delivery network: servers around the world that keep copies of popular files near readers). The CDN asks the bucket only when it has no copy.
+
+Object storage trades speed for scale. The first byte of an object takes roughly 20 to 200 ms to arrive. You cannot change 10 bytes in the middle of an object. You upload a new one instead. In return, the store keeps copies in several data centres, has no practical size limit, and costs less than a third of a block volume per gigabyte ($0.023 against $0.08).
+
+The same bucket fixes the logs. Every hour each server compresses its log file and uploads it, and it deletes local files older than three days. The boot disk stays small, and a year of history stays cheap.
+
+Here is where everything on Pantry now lives:
+
+<Compare
+  columns={["Data", "Size today", "Lives on", "Why"]}
+  rows={[
+    ["Postgres database", "40 GB", "Block volume", "Rewrites 8 KB pages in place, many times a second"],
+    ["Fresh log lines", "A few GB per server", "Each server's own block disk", "Appending locally costs microseconds"],
+    ["Templates and settings", "About 1 GB", "Shared folder (NFS)", "The publishing tool expects a folder; both servers need it"],
+    ["Recipe photos", "600 GB, +10 GB a day", "Bucket, behind a CDN", "Written once, read whole, by millions of readers"],
+    ["Old log files", "Grows every hour", "Bucket", "Rarely read, kept for a year, cheap per GB"],
+  ]}
+  caption="One site, three kinds of storage. Each row is a decision you can explain in one sentence."
+/>
+
+## Try it
+
+<DecisionTree
+  title="Where should this data live?"
+  tree={{
+    q: "Does a program rewrite small pieces of it many times a second, like a database does?",
+    yes: { answer: "Block storage: a disk attached to that one server" },
+    no: {
+      q: "Must several servers open and change the same files through normal folders and paths?",
+      yes: "File storage: a shared folder over NFS or SMB",
+      no: {
+        q: "Is it written once and then read whole, like a photo, a video, a backup or an old log file?",
+        yes: { answer: "Object storage: a bucket, with a CDN in front for public files", href: "/system-design/databases/object-storage" },
+        no: "Start on the server's own block disk, and move it once it grows or must be shared",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Why can't two servers safely write to the same block volume at once?" hint="Who knows where each file's blocks are?">
+    Each server keeps its own picture of which blocks belong to which file. Neither sees the other's changes, so they overwrite each other's blocks and corrupt the disk. Shared writing needs a file server, or special software built for a shared disk.
+  </QuizItem>
+  <QuizItem question="Pantry stores 600 GB of photos. Roughly what does that cost a month on object storage at about $0.023 per GB, and on a shared file system at about $0.30 per GB?">
+    600 × 0.023 ≈ $14 a month on object storage, and 600 × 0.30 = $180 a month on file storage. That is about 13 times more, for a feature (folders and locks) that photos do not need.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Block", "File", "Object"]}
+  rows={[
+    ["What you see", "Numbered blocks", "Folders and files", "Keys in a bucket"],
+    ["Shared by many servers", false, true, true],
+    ["Typical latency per request", "0.1 to 2 ms", "1 to a few ms", "20 to 200 ms to first byte"],
+    ["Change a few bytes in the middle", true, true, false],
+    ["How large it grows", "Up to tens of TB per volume", "Petabytes", "No practical limit on the total"],
+    ["Rough price per GB per month", "About $0.08", "About $0.30", "About $0.023"],
+    ["Copies kept", "Inside one data centre", "Often across data centres", "Across several data centres"],
+    ["Best for", "Databases, boot disks", "Shared folders for existing software", "Media, backups, logs, data files"],
+  ]}
+  caption="Prices are rough US list prices for the cheapest general-purpose tier of AWS EBS, EFS and S3. Other clouds are close."
+/>
+
+The pattern: the more servers share the storage and the larger it grows, the further it sits from the program and the slower each request is. You pay for sharing and scale with latency.
+
+## In the wild
+
+- **Amazon EBS, EFS and S3** are the block, file and object services on AWS. Google Cloud (Persistent Disk, Filestore, Cloud Storage) and Azure (Managed Disks, Azure Files, Blob Storage) offer the same three.
+- **Snowflake**, a cloud data warehouse, keeps table data as compressed files in object storage and caches the hot parts on the local disks of its compute machines. Object storage holds the truth, block storage holds the speed.
+- **Dropbox** keeps file contents in Magic Pocket, its own object store, and file names and folders in a separate metadata database. Users see folders; underneath it is object storage.
+
+## Common pitfalls
+
+- **Putting the database on a shared folder.** NFS adds a network round trip to every page write. With the wrong mount settings it can lose a write the database believes is safe. Use a block volume.
+- **Treating object keys like folders.** Renaming a "folder" in a bucket means copying and deleting every object inside it. Pick keys you will never need to rename, such as ones built from ids.
+- **Storing photos in the database.** A 2 MB <Term id="blob">blob</Term> in every row bloats backups and fills the database's memory with image bytes. Store the key in the row and the bytes in a bucket.
+- **Keeping every log on local disk forever.** The disk fills at night and the app stops. Ship logs to a bucket and delete local copies after a few days.
+
+## How to say it in an interview
+
+"I pick storage by how the data is used. The database gets a block volume, because it rewrites small pages in place, needs about a millisecond per write, and only one server should own those blocks. User media goes in object storage, because it is written once and read whole. That costs about $0.023 per GB a month, keeps copies across data centres, and sits behind a CDN, with only the object key in the database. Logs go to local disk first, then get compressed and shipped to a bucket. I use shared file storage only when existing software needs a real folder on several servers, because it is the most expensive per gigabyte."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between block, file and object storage?" level="Junior" category="Storage">
+    **Short answer.** Block storage is a raw disk of numbered blocks, attached to one server, with the lowest latency. File storage is a shared folder over the network that many servers mount, and object storage is a bucket of whole files you `PUT` and `GET` by key over HTTP.
+
+    **Why.** They trade closeness for sharing. A block volume answers in about 0.1 to 2 ms but serves one server. A shared folder serves many servers at 1 to a few ms per operation. Object storage serves anyone at 20 to 200 ms to the first byte, holds unlimited data, and costs about $0.023 per GB a month.
+
+    <AnimatedDiagram name="fundamentals/storage-types" highlight={["volume", "share", "bucket"]} caption="The three kinds side by side: one disk per server, one folder for many servers, one bucket for everyone." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which one would you put a database on, and why?
+    - Can you change part of an object in place?
+
+    **Watch out for.** Describing them by product name only ("EBS, EFS, S3"). Say what each one exposes: blocks, files, or whole objects by key.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Users upload profile photos and recipe photos. Where do you store them, and how do they get there?" level="Mid" category="Storage" companies={["Meta"]}>
+    **Short answer.** The image bytes go to object storage, and the database row keeps the object key, size and owner. The app server gives the client a short-lived signed URL, the client uploads straight to the bucket, and readers fetch photos through a CDN.
+
+    **Why.** Photos are written once and read whole, which is what object storage does well. At 10 GB of new photos a day, a year adds about 3.6 TB. In a bucket that is about 3,600 × $0.023 ≈ $83 a month by the end of the year. Uploading straight to the bucket keeps 2 MB uploads off the web servers. A CDN in front hides the bucket's tens of milliseconds to the first byte, and most reads never reach the bucket.
+
+    <AnimatedDiagram name="fundamentals/storage-types" step={3} path="readers>cdn>bucket" caption="The read path for a photo: the reader asks the CDN, and the CDN asks the bucket only on a miss." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you make thumbnails in several sizes?
+    - How do you keep private photos private if the CDN serves them?
+
+    **Watch out for.** Saving uploads on the web server's local disk. It works with one server and fails the day a second server joins.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why not run Postgres with its data directory on NFS, or straight on S3?" level="Mid" category="Databases">
+    **Short answer.** A database rewrites small pages in place and must know when each write is safely on disk, which block storage gives in about a millisecond. NFS adds a network round trip and weaker safety rules to every write, and object storage cannot change part of an object at all.
+
+    **Why.** A busy Postgres server writes thousands of 8 KB pages a second and flushes its write-ahead log on every commit. On a local SSD a flush takes well under a millisecond. On a shared folder each flush is a round trip of 1 to a few ms, and with the wrong mount settings a network blip can lose a write the database was told was saved. On S3, changing one 8 KB page would mean uploading the whole multi-gigabyte data file again.
+
+    <AnimatedDiagram name="fundamentals/storage-types" step={1} path="db>volume" caption="The database server owns its block volume and reads and writes 4 KB blocks directly." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you survive losing the block volume?
+    - Some cloud databases keep their data in object storage. How do they make it fast?
+
+    **Watch out for.** Saying object storage is "too slow" and stopping there. The deeper reason is that objects cannot be edited in place, so the database's write pattern does not fit.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Twenty servers write 50 GB of logs a day in total, and you must keep them for a year. Where do the logs live, from the first line to the last day?" level="Senior" category="Storage">
+    **Short answer.** Each server appends to a local file on its own block disk, and a small shipping program compresses and uploads it to object storage every few minutes. A search system keeps the last one to two weeks for fast queries, and older files age into a cheaper storage tier in the bucket until a lifecycle rule (a bucket setting that moves or deletes objects by age) deletes them after a year.
+
+    **Why.** Per server that is 50 / 20 = 2.5 GB a day, so three days of local files is about 7.5 GB, a small slice of a boot disk. Logs compress about ten times, so a year is 50 GB × 365 ≈ 18 TB raw, about 1.8 TB in the bucket. At about $0.023 per GB that is 1,800 × 0.023 ≈ $41 a month by the end of the year. A colder tier (a cheaper storage class for rarely read data, with a fee per read) cuts that further. A shared file system would cost about 13 times as much per gigabyte, for locks that logs never need.
+
+    | Age | Where | Why |
+    | --- | --- | --- |
+    | Seconds to 3 days | Local block disk | Appends cost microseconds |
+    | 0 to 14 days | Search index | Fast queries during incidents |
+    | Minutes to 1 year | Object storage, colder tier later | Cheap, durable, rarely read |
+
+    **Follow-ups the interviewer may ask.**
+    - A server dies before it ships its last batch. How much do you lose, and how do you shrink that?
+    - An auditor asks for one user's logs from eight months ago. How long does it take?
+
+    **Watch out for.** Mounting one shared folder on all 20 servers and writing logs there. Every log line becomes a network round trip, and one slow file server stalls every app.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Object storage](/system-design/databases/object-storage)
+- [Blob storage and chunking](/system-design/patterns/blob-storage-and-chunking)
+- [CDNs and edge](/system-design/fundamentals/cdn)
+- [Compression and encoding](/system-design/fundamentals/compression)
+- [Design Dropbox](/system-design/case-studies/dropbox)
+- [Design S3](/system-design/case-studies/s3)
+
+## Further reading
+
+- [Amazon EBS User Guide](https://docs.aws.amazon.com/ebs/latest/userguide/what-is-ebs.html): how network block volumes attach to servers, and their performance limits.
+- [Amazon EFS User Guide](https://docs.aws.amazon.com/efs/latest/ug/whatisefs.html): a managed NFS file system that many servers mount at once.
+- [Amazon S3 User Guide](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html): buckets, keys, consistency and storage classes.
+- [Dropbox Tech Blog, Inside the Magic Pocket](https://dropbox.tech/infrastructure/inside-the-magic-pocket): how Dropbox built its own object store.

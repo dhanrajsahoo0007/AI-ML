@@ -1,0 +1,299 @@
+---
+title: "Webhooks and callbacks"
+description: "How one server tells another that something happened: a signed POST, retries with backoff, duplicates, ordering and replay protection."
+updated: 2026-11-09
+---
+
+## In one sentence
+
+<KeyIdea>
+  A webhook is a web address you give to another service, so it can send you a request the moment something happens instead of you asking it over and over.
+</KeyIdea>
+
+## The story
+
+You run Glow, a small online lamp shop. Customers pay by card through a payment provider. A payment does not always finish when the customer clicks Pay: the bank may ask for a code by text, and some payments settle minutes or even hours later. Your shop needs to know when order 1042 is paid, so the warehouse can pack the lamp.
+
+The first idea is to keep asking. Every 5 seconds your server asks the provider: "Is order 1042 paid yet?" About 20 orders are waiting at any moment, so that is 20 / 5 = 4 requests a second, or 4 × 86,400 ≈ 350,000 a day. You take about 2,000 payments a day, so about 170 questions get "not yet" for every "yes".
+
+The second idea is to be told. You give the provider a URL, `https://glow.example/hooks/payments`, and say: "When a payment succeeds, send a POST here." Now there is about one request per payment, 2,000 a day, each within a second of the payment. That URL is a webhook.
+
+Then on Monday you deploy (release a new version of your code) at 14:02, and for 40 seconds your server answers nothing. The POST for order 1042 lands in that gap. Did you lose the payment? Could the customer get two lamps? Could a stranger fake a payment? This page answers all three.
+
+## How it works
+
+A **callback** is an address you hand to someone so they can call you back later. A **webhook** is a callback over HTTP: the **sender** (here, the payment provider) makes an HTTP POST to an **endpoint** (a URL on your server that accepts requests) whenever an **event** happens. An event is a small record of one thing that happened, with its own id, a type such as `payment.succeeded`, and the data.
+
+### Step 1: The event becomes a signed POST
+
+<AnimatedDiagram name="fundamentals/webhooks" step={1} caption="The payment succeeds and becomes event evt_81. The sender signs it and POSTs it to the shop, but the shop is mid-deploy and the first try gets no answer." />
+
+When the card payment for order 1042 succeeds, the provider records event `evt_81`. A webhook sender picks it up and POSTs it as JSON to your endpoint. Before sending, it signs the message with an **HMAC**, a short code computed from the message and a secret key that only you and the provider know. Anyone can read the body. Without the secret, no one can produce a code that matches it.
+
+<Tabs>
+  <Tab label="The request">
+
+```http
+POST /hooks/payments HTTP/1.1
+Host: glow.example
+Content-Type: application/json
+Webhook-Id: evt_81
+Webhook-Timestamp: 1794232920
+Webhook-Signature: v1,aeAhT9+g10VyShUlM6wMPtMz5ADUE+9QVc3T1TjUIUI=
+
+{"id":"evt_81","type":"payment.succeeded","created":1794232920,
+ "data":{"order_id":1042,"amount":4900,"currency":"usd"}}
+```
+
+  </Tab>
+  <Tab label="Your reply">
+
+```http
+HTTP/1.1 200 OK
+Content-Length: 0
+```
+
+Any 2xx status (200 to 299) means "I have it, stop sending". The body is ignored.
+
+  </Tab>
+</Tabs>
+
+The timestamp is the signing time, counted in seconds since 1 January 1970 (here, 14:02 UTC). Try 1 arrives during the deploy. The sender waits 10 seconds, gets no answer, and schedules a retry.
+
+<PremiumBreak />
+
+### Step 2: No answer means try again, later and later
+
+<AnimatedDiagram name="fundamentals/webhooks" step={2} caption="Try 2 gets through. The shop checks the signature and stores the event, but its 200 reply is lost, so the sender still sees a failure." />
+
+The sender's rule: only a 2xx reply within the timeout counts as delivered. A timeout, a 500 or a refused connection all mean "try again". Each wait is 4 times longer than the last, which is called **exponential backoff**. The sender also adds **jitter**, a random change of about 20% to each wait, so deliveries that all failed in the same minute, say during a network blip, do not all come back in the same second.
+
+| Try | Wait before it | Time since try 1 |
+|---|---|---|
+| 1 | none | 0 |
+| 2 | 30 s | 30 s |
+| 3 | 2 min | 2.5 min |
+| 4 | 8 min | about 10.5 min |
+| 5 | 32 min | about 43 min |
+| 6 | about 2 h | about 2.8 h |
+| 7 | about 8.5 h | about 11.4 h |
+| 8 to 12 | 12 h each (the cap) | about 23 h to about 71 h |
+
+A 40-second deploy is over by try 2 or, at worst, try 3, 2.5 minutes in. Even a full day of downtime is covered, since try 9 comes at about 35 hours. After try 12, about 3 days in, the sender gives up and moves the event to a **dead-letter queue**: a holding area for messages that could not be delivered, where a person can look at them and send them again.
+
+Now the twist. Try 2 reaches you. You check it, store it and reply 200, but the connection drops on the way back. The sender cannot tell "never arrived" from "arrived, reply lost", so it retries. This makes webhooks **at-least-once**: each event arrives one or more times, never zero (until the sender gives up).
+
+So reply fast. Store the event and return 200 in a few milliseconds, and do slow work, such as emailing the customer, later in a background worker: a separate process that works through stored jobs. If your handler takes 12 seconds, the sender times out at 10 and retries an event you already handled.
+
+### Step 3: The same event, twice
+
+<AnimatedDiagram name="fundamentals/webhooks" step={3} caption="Try 3 carries the same event id. The inbox already has it, so the shop answers 200 and does no new work. Order 1042 is paid once." />
+
+Your handler must be <Term id="idempotent">idempotent</Term>: handling the same event twice must have the same effect as handling it once. The event id makes that possible. You keep an **inbox table** with the event id as its primary key (a column whose value must be unique), so the database refuses a second row with the same id.
+
+```sql
+CREATE TABLE webhook_inbox (
+  event_id     text PRIMARY KEY,
+  type         text NOT NULL,
+  body         jsonb NOT NULL,
+  received_at  timestamptz NOT NULL DEFAULT now(),
+  processed_at timestamptz
+);
+
+-- 1 row inserted: a new event. 0 rows: a duplicate, so do nothing.
+INSERT INTO webhook_inbox (event_id, type, body)
+VALUES ('evt_81', 'payment.succeeded', '{"order_id": 1042}')
+ON CONFLICT (event_id) DO NOTHING;
+```
+
+A worker reads rows where `processed_at` is empty and marks each order paid. Make that action safe on its own too: `UPDATE orders SET status = 'paid' WHERE id = 1042 AND status = 'pending'` changes nothing the second time.
+
+Reply 200 to a duplicate, not 409 Conflict. Any non-2xx reply means "retry", so the sender would keep sending it for 3 days. Keep ids longer than the retry window, say 7 days: at 2,000 events a day, that is only 14,000 rows.
+
+### Step 4: Is it really from the provider?
+
+Your endpoint is a public URL. Anyone who finds it can POST `{"type":"payment.succeeded","data":{"order_id":1042}}` and get a free lamp. So before you store anything, you check the signature.
+
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+const TOLERANCE_S = 300; // 5 minutes
+
+export function verify(rawBody: string, headers: Headers, secret: string): boolean {
+  const id = headers.get("webhook-id") ?? "";
+  const ts = Number(headers.get("webhook-timestamp"));
+  const sent = (headers.get("webhook-signature") ?? "").replace(/^v1,/, "");
+
+  // 1. Refuse old or future-dated messages, so a captured request cannot be resent hours later.
+  if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > TOLERANCE_S) return false;
+
+  // 2. Recompute the code over exactly the bytes that were signed.
+  const expected = createHmac("sha256", secret).update(`${id}.${ts}.${rawBody}`).digest("base64");
+
+  // 3. Compare in constant time, so the response time reveals nothing about the right answer.
+  const a = Buffer.from(expected);
+  const b = Buffer.from(sent);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+```
+
+Three details matter. First, check the **raw body**, the exact bytes received. If you parse the JSON and turn it back into text, one changed space or key order changes the HMAC completely. Second, the timestamp sits inside the signed text, so an attacker cannot swap in a fresh one.
+
+Third, the timestamp defends against a **replay attack**: someone captures a genuine signed request and sends it again later. A replay more than 5 minutes later fails the clock check. A replay within 5 minutes passes it, but its event id is already in the inbox, so it does nothing. Together the two defences close the gap, as long as your clock is accurate (network time sync keeps server clocks within a few milliseconds).
+
+HTTPS still matters: <Term id="tls">TLS</Term> encrypts the request on the way. But HTTPS only proves to the sender that it reached your server. It does not prove to you who sent the request. That is the signature's job.
+
+### Step 5: The sender's side, and why order is not promised
+
+<AnimatedDiagram name="fundamentals/webhooks-pipeline" stepper caption="Both sides of one webhook. Step 2 adds the retry timer and the dead letters." />
+
+On the provider's side, the payment and its event are saved in one database commit, in an **outbox table**, so a crash right after the payment cannot lose the event. A relay, a small process that reads the outbox, copies new events to a delivery queue, one job per event per endpoint. Senders sign and POST each job. A failed job waits on a retry timer and goes back on the queue, until it moves to dead letters after 3 days.
+
+Each job retries on its own schedule, so events can arrive out of order. Change the story a little: the deploy runs long and try 2 fails too. Meanwhile the customer cancels, and `evt_82` (refunded) is created at 14:03 and delivered at once. Then `evt_81` (paid) arrives at about 14:04:30, on try 3. Applied in arrival order, the order ends up "paid" after it was refunded, and the warehouse ships a refunded lamp.
+
+Three fixes, often used together:
+
+- **Compare versions.** Store the event's `created` time (or a version number) on the order, and ignore any event older than the one you already applied.
+- **Treat the event as a hint.** On any event for order 1042, fetch the order's current state from the provider's API and act on that.
+- **Allow only forward moves.** A refunded order can never go back to paid.
+
+Why not have the sender keep order? Sending one customer's events strictly one at a time would let one stuck event block all later ones for up to 3 days. So most providers promise neither order nor single delivery.
+
+## Try it
+
+<Quiz>
+  <QuizItem question="Your handler emails the customer before it replies, which takes 15 seconds. The sender's timeout is 10 seconds. What happens?" hint="What does the sender see at second 10?">
+    The sender sees a timeout and retries, even though you handled the event. Each retry can send another email unless the handler checks the inbox first. Fix: store the event, reply 200 in milliseconds, and send the email from a background worker.
+  </QuizItem>
+  <QuizItem question="An attacker resends yesterday's genuine, correctly signed request. What stops it?" hint="Two defences.">
+    The timestamp is a day old, far outside the 5-minute window, so the signature check fails. A replay inside the window would pass that check, but its event id is already in the inbox, so it does nothing.
+  </QuizItem>
+  <QuizItem question="Why check the signature over the raw body instead of the parsed JSON?">
+    Turning parsed JSON back into text can change spaces, key order or number format. The HMAC covers exact bytes, so one changed byte gives a completely different code and a genuine message fails.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Webhook", "Polling every 5 s"]}
+  rows={[
+    ["Requests a day for 2,000 payments", "About 2,000, plus retries", "About 350,000"],
+    ["Delay before you know", "Under 1 s while you are up", "Up to 5 s"],
+    ["You need a public URL", true, false],
+    ["Survives your 1-hour outage", "Yes, the sender retries", "Yes, you ask again when back"],
+    ["Who does the retry work", "The sender", "You"],
+    ["Duplicates and wrong order", "Yes, you must handle them", "No, you read the current state"],
+  ]}
+  caption="Glow's numbers: 20 orders waiting at any moment, 2,000 payments a day."
+/>
+
+Many teams use both. Webhooks bring news fast, and a slow poll, say once an hour, catches anything that ended in dead letters. That hourly check is called **reconciliation**: comparing your records with the source and fixing any gaps.
+
+## In the wild
+
+- **Stripe** signs the timestamp and body with HMAC-SHA256 in a `Stripe-Signature` header. Its libraries refuse timestamps older than 5 minutes by default, and live-mode deliveries retry with exponential backoff for up to 3 days.
+- **GitHub** sends an HMAC-SHA256 of the body in `X-Hub-Signature-256` and expects a reply within 10 seconds. It does not retry failed deliveries on its own; you redeliver them by hand or through the API.
+- **Shopify** sends a base64 HMAC-SHA256 of the body in `X-Shopify-Hmac-Sha256`.
+- **Standard Webhooks** is an open spec for the `webhook-id`, `webhook-timestamp` and `webhook-signature` headers used on this page.
+
+## Common pitfalls
+
+- **Doing the work before replying.** Slow handlers time out and cause retries.
+- **Replying non-2xx to duplicates or unknown event types.** The sender retries for days. Reply 200 instead.
+- **Comparing signatures with `==`.** A normal comparison stops at the first wrong character, which leaks timing.
+- **No timestamp check.** A captured request then works forever.
+- **Sender side: posting to any URL a customer types.** An endpoint such as `http://169.254.169.254/` points into your own cloud network. This is **server-side request forgery (SSRF)**: tricking your server into calling addresses only it can reach. Resolve the host name, block private address ranges, and connect only to the address you checked.
+
+## How to say it in an interview
+
+"A webhook is a callback over HTTP: when an event happens, the provider POSTs it to a URL the customer registered. I sign each POST with an HMAC over the event id, a timestamp and the raw body; the receiver checks it in constant time and refuses anything older than 5 minutes. Only a 2xx within about 10 seconds counts, so the sender retries with exponential backoff and jitter for about 3 days, then dead-letters the event. That makes delivery at-least-once, so the receiver stores events by id in an inbox table, replies 200 at once and works later. Order is not promised, so it compares versions or fetches current state. An hourly reconciliation catches the rest."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a webhook, and when would you use one instead of polling?" level="Junior" category="APIs">
+    **Short answer.** A webhook is a URL that another service calls with a POST when an event happens. Use one when events are rare compared with how often you would have to ask, and you want to hear about them quickly.
+
+    **Why.** A shop polling every 5 seconds for 20 waiting orders makes 4 requests a second, about 350,000 a day, to learn about 2,000 payments. A webhook needs about 2,000, each within a second of the event. The cost: a public endpoint, plus handling retries and duplicates.
+
+    <AnimatedDiagram name="fundamentals/webhooks" step={1} caption="The provider calls the shop as soon as the payment succeeds; if the shop does not answer, the provider tries again later." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens if your server is down when the webhook is sent?
+    - How do you know the request really came from the provider?
+
+    **Watch out for.** Saying webhooks remove the need for polling. Deliveries can end in dead letters, so a slow reconciliation poll is still a good safety net.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does your endpoint know a webhook really came from the provider and is not a replay?" level="Mid" category="Security">
+    **Short answer.** The provider signs each request with an HMAC over the event id, a timestamp and the raw body, using a secret only the two of you share. The receiver recomputes it, compares in constant time, refuses timestamps more than about 5 minutes off, and ignores event ids it has already stored.
+
+    **Why.** Without the secret, an attacker cannot produce a matching HMAC-SHA256. The timestamp is signed, so it cannot be refreshed. A replay older than 5 minutes fails the clock check; one inside the window hits the inbox's unique id and does nothing.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you rotate the secret without dropping events? (Sign with both old and new secrets for a day; accept either.)
+    - Why not allow-list the provider's IP addresses instead?
+    - Why must you verify before parsing the JSON?
+
+    **Watch out for.** Saying HTTPS is enough. HTTPS proves your server's identity to the sender. It says nothing about who sent the request to you.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The provider sends the same payment event twice. How do you make sure the order is not shipped twice?" level="Mid" category="Reliability">
+    **Short answer.** Store each event in an inbox table keyed by its event id, so the database refuses a second copy. A duplicate gets a 200 and no new work, and the business action is itself a conditional update.
+
+    **Why.** Delivery is at-least-once: a lost 200 looks like a failure, so the sender retries. If only 0.1% of replies are lost, 2,000 events a day still gives 2,000 × 0.001 = 2 duplicates a day, or about 730 a year. Keeping ids for 7 days, longer than the 3-day retry window, costs about 14,000 rows.
+
+    <AnimatedDiagram name="fundamentals/webhooks-pipeline" highlight={["endpoint", "inbox", "worker"]} caption="The endpoint saves each event by id; the worker acts only on new rows." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if the worker crashes after marking the order paid but before marking the event processed?
+    - Why reply 200 and not 409 to a duplicate?
+
+    **Watch out for.** Deduplicating in one server's memory. It is lost on restart and not shared between your app servers, so a retry that lands on another server gets processed again.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Webhook events for the same order arrive out of order. How do you handle it?" level="Senior" category="Consistency">
+    **Short answer.** Never rely on arrival order. Compare each event's version or created time with what you have stored, or treat the event as a hint and fetch the current state from the provider, and only allow forward state changes.
+
+    **Why.** Each event retries on its own schedule, so a "paid" event stuck in retries can arrive 90 seconds after the "refunded" event for the same order. Applied in arrival order, the order ends up paid. Strict per-customer ordering at the sender would fix this, but one stuck event would block all later ones for up to 3 days.
+
+    **Follow-ups the interviewer may ask.**
+    - Fetching state costs one API call per event. When does that stop being cheap?
+    - What if events for two different objects depend on each other?
+
+    **Watch out for.** Sorting by event id. Ids are often random, and even time-ordered ids from many machines do not give a reliable order.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design the webhook delivery system for a payments platform that sends 50 million events a day to 100,000 customer endpoints." level="Senior" category="System design">
+    **Short answer.** Save each event with its payment in an outbox, queue one job per endpoint, and let a pool of senders sign and POST with a 10-second timeout. Failures go to a delayed retry queue with backoff and jitter for about 3 days, then to dead letters. Each endpoint gets its own concurrency limit, so one broken customer cannot slow the rest.
+
+    **Why.** 50 million a day is about 580 a second; assume a peak of 5 times that, about 2,900 a second. If 90% of POSTs reply in 0.3 s and 10% hit the 10 s timeout, the average POST is open for 0.9 × 0.3 + 0.1 × 10 ≈ 1.27 s, so about 2,900 × 1.27 ≈ 3,700 are open at once (requests per second × seconds each one stays open). A customer with 5% of traffic (about 29 events a second) who is down for 6 hours builds about 29 × 21,600 ≈ 630,000 jobs. At 2 KB each that is about 1.3 GB, which belongs in the queue, not in sender memory.
+
+    <AnimatedDiagram name="fundamentals/webhooks-pipeline" step={2} path="queue>senders>retry>dlq" caption="Failed jobs leave the senders, wait on the retry timer and end in dead letters, so senders stay free for healthy endpoints." />
+
+    **Follow-ups the interviewer may ask.**
+    - When do you pause or disable an endpoint that fails for days?
+    - How do customers replay events from dead letters?
+    - How do you stop customers registering internal addresses (SSRF)?
+
+    **Watch out for.** Retrying inside the sender with a sleep. That holds a worker and a connection for hours. Retries belong in a delayed queue.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Idempotency](/system-design/patterns/idempotency)
+- [Circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries)
+- [Message queues](/system-design/patterns/message-queues)
+- [AJAX polling](/system-design/fundamentals/ajax-polling)
+- [WebSockets](/system-design/fundamentals/websockets)
+- [Authentication and authorization for APIs](/system-design/fundamentals/api-auth)
+- [Choosing an API style](/system-design/fundamentals/choosing-an-api-style)
+
+## Further reading
+
+- [Stripe documentation, Receive Stripe events in your webhook endpoint](https://docs.stripe.com/webhooks): signatures, the 5-minute tolerance, retries and handling duplicates in one guide.
+- [GitHub documentation, Validating webhook deliveries](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries): checking `X-Hub-Signature-256` with code in several languages.
+- [Standard Webhooks](https://www.standardwebhooks.com/): an open spec for webhook headers, signing and retries, with libraries.
+- [RFC 2104, HMAC: Keyed-Hashing for Message Authentication](https://www.rfc-editor.org/rfc/rfc2104): the definition of the HMAC construction.
