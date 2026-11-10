@@ -21,7 +21,7 @@ export const questionBankKind: SectionKind<Category> = {
     ]);
   },
 
-  // One group per category, one item per subsection.
+  // One group per category (under its area as `heading`), one item per subsection.
   nav(section, items) {
     return navSection(
       section,
@@ -30,6 +30,7 @@ export const questionBankKind: SectionKind<Category> = {
         title: c.title,
         href: categoryHref(section, c),
         icon: c.icon,
+        heading: c.group,
         items: c.subsections.map((s) => ({
           slug: s.slug,
           title: s.title,

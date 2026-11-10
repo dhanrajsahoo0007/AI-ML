@@ -79,7 +79,7 @@ export function SiteHeader({
 
   const itemClass = (active: boolean) =>
     cn(
-      "relative inline-flex items-center gap-1.5 whitespace-nowrap py-1 text-[13px] transition-colors xl:text-sm",
+      "relative inline-flex items-center gap-1.5 whitespace-nowrap py-1 text-[12.5px] transition-colors xl:text-sm",
       active
         ? "text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-ink"
         : "text-muted-foreground hover:text-ink"
@@ -92,7 +92,7 @@ export function SiteHeader({
       onMouseEnter={() => clearTimeout(closeTimer.current)}
       className="sticky top-0 z-40 w-full border-b border-hairline/80 bg-paper"
     >
-      <nav aria-label="Main" className="flex h-16 w-full items-center gap-4 px-4 sm:px-6 xl:gap-6">
+      <nav aria-label="Main" className="flex h-16 w-full items-center gap-3 px-4 sm:px-6 xl:gap-6">
         <Link href="/" className="flex shrink-0 items-baseline gap-3">
           <span className="font-display text-xl whitespace-nowrap sm:text-2xl">{siteConfig.name}</span>
           <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground min-[1800px]:inline">
@@ -100,7 +100,7 @@ export function SiteHeader({
           </span>
         </Link>
 
-        <div className="relative hidden min-w-0 flex-1 items-center justify-center gap-2.5 self-stretch lg:flex xl:gap-5 2xl:gap-6">
+        <div className="relative hidden min-w-0 flex-1 items-center justify-center gap-2 self-stretch lg:flex xl:gap-5 2xl:gap-6">
           {navTree.map((section) => {
             const label = section.shortLabel ?? section.label;
             const active = isUnder(pathname, section.href) || openKey === section.key;
@@ -362,6 +362,17 @@ function useNavItems() {
   return items;
 }
 
+// Consecutive groups that share a heading (Interview Practice: the topics of one area), in order.
+function runsByHeading<G extends { heading?: string }>(groups: G[]) {
+  const runs: { heading?: string; groups: G[] }[] = [];
+  for (const g of groups) {
+    const last = runs.at(-1);
+    if (last && last.heading === g.heading) last.groups.push(g);
+    else runs.push({ heading: g.heading, groups: [g] });
+  }
+  return runs;
+}
+
 // Two panes: the section's groups stacked on the left, the hovered (or focused) group's articles on the right.
 function SectionPanel({
   section,
@@ -414,41 +425,52 @@ function SectionPanel({
         </Link>
       </div>
       {section.groups.length > 0 && groupsOnly && (
-        <ul className="grid grid-cols-2 gap-2 overflow-y-auto p-4 lg:grid-cols-3">
-          {section.groups.map((group) => {
-            const Icon = group.icon ? getIconComponent(group.icon) : undefined;
-            return (
-              <li key={group.slug}>
-                <Link
-                  href={group.href}
-                  aria-current={isUnder(pathname, group.href) ? "true" : undefined}
-                  className={cn(
-                    "group/card flex h-full items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors hover:border-tint/60 hover:bg-paper-2/60",
-                    isUnder(pathname, group.href) ? "border-ink/30 bg-paper-2" : "border-hairline"
-                  )}
-                >
-                  {Icon && (
-                    <Icon
-                      aria-hidden
-                      className={cn(
-                        "size-4 shrink-0 group-hover/card:text-tint",
-                        isUnder(pathname, group.href) ? "text-tint" : "text-muted-foreground"
-                      )}
-                    />
-                  )}
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-ink">{group.title}</span>
-                    {group.count > 0 && (
-                      <span className="block text-xs text-muted-foreground">
-                        {group.count} {unit}
-                      </span>
-                    )}
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="overflow-y-auto p-4">
+          {runsByHeading(section.groups).map((run, r) => (
+            <div key={run.heading ?? r} className="mt-5 first:mt-0">
+              {run.heading && (
+                <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  {run.heading}
+                </p>
+              )}
+              <ul className="grid grid-cols-2 gap-2 lg:grid-cols-3">
+                {run.groups.map((group) => {
+                  const Icon = group.icon ? getIconComponent(group.icon) : undefined;
+                  return (
+                    <li key={group.slug}>
+                      <Link
+                        href={group.href}
+                        aria-current={isUnder(pathname, group.href) ? "true" : undefined}
+                        className={cn(
+                          "group/card flex h-full items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors hover:border-tint/60 hover:bg-paper-2/60",
+                          isUnder(pathname, group.href) ? "border-ink/30 bg-paper-2" : "border-hairline"
+                        )}
+                      >
+                        {Icon && (
+                          <Icon
+                            aria-hidden
+                            className={cn(
+                              "size-4 shrink-0 group-hover/card:text-tint",
+                              isUnder(pathname, group.href) ? "text-tint" : "text-muted-foreground"
+                            )}
+                          />
+                        )}
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium text-ink">{group.title}</span>
+                          {group.count > 0 && (
+                            <span className="block text-xs text-muted-foreground">
+                              {group.count} {unit}
+                            </span>
+                          )}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
       )}
       {section.groups.length > 0 && !groupsOnly && (
         <div className="flex h-[30rem] max-h-full min-h-0">

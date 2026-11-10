@@ -30,7 +30,14 @@ describe("header nav payload", () => {
     for (const section of header) {
       for (const group of section.groups) {
         expect(Object.keys(group).sort()).toEqual(
-          ["count", "href", "slug", "title", ...(group.icon ? ["icon"] : [])].sort()
+          [
+            "count",
+            "href",
+            "slug",
+            "title",
+            ...(group.icon ? ["icon"] : []),
+            ...(group.heading ? ["heading"] : []),
+          ].sort()
         );
       }
     }
