@@ -1,5 +1,4 @@
 import { publicNav, type PublicNavLink } from "@/features/sections/public";
-import { business } from "./business";
 
 // Section links come from the registry (content/sections.yaml), resolved at build for the current
 // environment: only `on` sections, and only those with pages (not "coming soon" kinds).
@@ -11,7 +10,7 @@ const extraNav: { href: string; label: string; navGroup: PublicNavLink["navGroup
 ];
 
 export const siteConfig = {
-  name: business.BRAND,
+  name: "TokensToScale",
   tagline: "AI system design",
   description:
     "TokensToScale is a one-stop place to prepare for AI and system design interviews: deep-dives on LLMs, RAG, agents and production AI systems, classic system design case studies, and interview questions tagged with the companies that ask them.",
