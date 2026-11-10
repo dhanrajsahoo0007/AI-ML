@@ -8,6 +8,7 @@ import { ArrowRight, ChevronDown, ChevronRight, Gem, Menu } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { getIconComponent } from "@/lib/icons";
+import { BrandMark } from "@/components/brand-mark";
 import { siteConfig } from "@/config/site";
 import { ThemeToggle } from "@/components/theme";
 import { SearchButton } from "@/features/search/search-dialog.client";
@@ -93,8 +94,11 @@ export function SiteHeader({
       className="sticky top-0 z-40 w-full border-b border-hairline/80 bg-paper"
     >
       <nav aria-label="Main" className="flex h-16 w-full items-center gap-3 px-4 sm:px-6 xl:gap-6">
-        <Link href="/" className="flex shrink-0 items-baseline gap-3">
-          <span className="font-display text-xl whitespace-nowrap sm:text-2xl">{siteConfig.name}</span>
+        <Link href="/" className="flex shrink-0 items-center gap-3">
+          <span className="flex items-center gap-2">
+            <BrandMark className="size-7 sm:size-8" />
+            <span className="font-display text-xl whitespace-nowrap sm:text-2xl">{siteConfig.name}</span>
+          </span>
           <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground min-[1800px]:inline">
             {siteConfig.tagline}
           </span>
