@@ -103,7 +103,8 @@ export function SiteHeader({
           {navTree.map((section) => {
             const label = section.shortLabel ?? section.label;
             const active = isUnder(pathname, section.href) || openKey === section.key;
-            const className = cn(itemClass(active), section.comingSoon && "text-muted-foreground/70");
+            // The underline of the current section takes that section's tint (data-tone on the link).
+            const className = cn(itemClass(active), "after:bg-tint", section.comingSoon && "text-muted-foreground/70");
             const content = (
               <>
                 {label}
@@ -120,6 +121,7 @@ export function SiteHeader({
             return section.comingSoon ? (
               <span
                 key={section.key}
+                data-tone={section.tone}
                 tabIndex={0}
                 onMouseEnter={() => open(section.key)}
                 onFocus={() => open(section.key)}
@@ -131,6 +133,7 @@ export function SiteHeader({
             ) : (
               <Link
                 key={section.key}
+                data-tone={section.tone}
                 href={section.href}
                 onMouseEnter={() => open(section.key)}
                 onFocus={() => open(section.key)}

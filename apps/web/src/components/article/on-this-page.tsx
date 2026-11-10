@@ -77,7 +77,7 @@ function TocList({
                 "-ml-px block border-l py-1 text-[13px] leading-snug transition-colors",
                 h.level === 3 ? "pl-6" : "pl-3",
                 isActive
-                  ? "border-ink font-medium text-ink"
+                  ? "border-tint font-medium text-ink"
                   : "border-transparent text-muted-foreground hover:border-ink/30 hover:text-ink"
               )}
             >

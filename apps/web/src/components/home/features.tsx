@@ -7,6 +7,8 @@ import { getIconComponent } from "@/lib/icons";
 
 export function Features() {
   const { features } = siteConfig;
+  // Each card takes the tint of the section it links to (sections.yaml `tone`), the one place the hues meet.
+  const toneOf = (href: string) => siteConfig.nav.find((s) => href === s.href || href.startsWith(`${s.href}/`))?.tone;
 
   return (
     <Section
@@ -24,11 +26,16 @@ export function Features() {
               <Link
                 key={feature.href}
                 href={feature.href}
-                className="group flex flex-col bg-paper p-7 transition-colors duration-300 hover:bg-accent-soft/50"
+                data-tone={toneOf(feature.href)}
+                className="group flex flex-col bg-paper p-7 transition-colors duration-300 hover:bg-tint-soft/60"
               >
                 <div className="flex items-center justify-between">
                   <MonoIndex value={i + 1} />
-                  {Icon && <Icon aria-hidden className="size-5 text-primary" />}
+                  {Icon && (
+                    <span className="flex size-9 items-center justify-center rounded-lg bg-tint-soft text-tint">
+                      <Icon aria-hidden className="size-[18px]" />
+                    </span>
+                  )}
                 </div>
                 <h3 className="mt-10 font-display text-2xl leading-tight">{feature.title}</h3>
                 <p className="mt-3 flex-1 text-[15px] leading-relaxed text-muted-foreground">{feature.description}</p>
