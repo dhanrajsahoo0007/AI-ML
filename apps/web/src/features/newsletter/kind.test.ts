@@ -200,11 +200,10 @@ describe("newsletter kind", () => {
     expect(out).toContain("warning: 0 takeaway(s); deep dive issues have 3–5");
   });
 
-  it("nav groups issues by year with draft status", () => {
-    const items = loadIssues(section);
-    const nav = newsletterKind.nav(section, items);
+  it("nav is a plain link to the archive, with no dropdown groups", () => {
+    const nav = newsletterKind.nav(section, loadIssues(section));
     expect(nav.href).toBe(section.href);
     expect(nav.comingSoon).toBeUndefined();
-    expect(nav.groups.flatMap((g) => g.items ?? []).length).toBe(items.filter((i) => isBuilt(i)).length);
+    expect(nav.groups).toEqual([]);
   });
 });

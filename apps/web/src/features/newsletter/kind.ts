@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { navSection, type ContentError, type NavGroup, type SectionKind } from "../sections/kind";
+import { navSection, type ContentError, type SectionKind } from "../sections/kind";
 import { SUBSCRIBE_KIND as NEWSLETTER_KIND } from "../sections/public";
 import { allSections } from "../sections/registry";
 import type { SectionDef } from "../sections";
@@ -65,23 +65,10 @@ export const newsletterKind: SectionKind<Issue> = {
     return items.filter((i) => isBuilt(i)).map((i) => ({ slug: i.slug }));
   },
 
-  // One group per year, newest first.
-  nav(section, items) {
-    const groups: NavGroup[] = [];
-    for (const issue of items.filter((i) => isBuilt(i))) {
-      let group = groups.find((g) => g.slug === issue.year);
-      if (!group) {
-        group = { slug: issue.year, title: issue.year, href: section.href, items: [] };
-        groups.push(group);
-      }
-      group.items!.push({
-        slug: issue.slug,
-        title: issue.title,
-        href: issue.href,
-        status: isPublished(issue) ? "published" : "draft",
-      });
-    }
-    return navSection(section, groups);
+  // No groups: the top bar shows the newsletter as a plain link to its archive, which is where readers browse
+  // issues (by topic and series), so there is no dropdown to open.
+  nav(section) {
+    return navSection(section, []);
   },
 
   sitemap(section, items) {
