@@ -4,6 +4,7 @@ import { articleNode, breadcrumbNode, jsonLdGraph, pageMetadata } from "../seo/p
 import { listingPageSeo } from "../seo/pages";
 import type { PageSeo } from "../seo";
 import type { SectionDef } from "../sections";
+import { seriesHref } from "./catalog";
 import { NEWSLETTER_KIND, newsletterKind } from "./kind";
 import { isPublished, type Issue } from "./source";
 
@@ -11,6 +12,7 @@ import { isPublished, type Issue } from "./source";
 // review outside production only, and never indexed.
 
 export const ARCHIVE_TITLE = "Newsletter";
+export { NEWSLETTER_NAME, NEWSLETTER_PROMISE } from "./brand";
 export const ARCHIVE_DESCRIPTION =
   "A short email digest on system design and AI engineering: one theme, three articles from the library and a question to take into your next design review.";
 
@@ -60,4 +62,28 @@ export function utilityPageMetadata(section: SectionDef, path: string, title: st
     sectionState: section.state,
     noindex: true,
   });
+}
+
+/** A series page: indexed once the series holds a sent issue. */
+export function seriesSeo(
+  section: SectionDef,
+  series: { key: string; title: string; description: string },
+  hasSent: boolean
+): PageSeo {
+  const path = seriesHref(section.href, series.key);
+  return {
+    metadata: pageMetadata({
+      path,
+      title: `${series.title}: a newsletter series`,
+      description: series.description,
+      sectionState: section.state,
+      noindex: !hasSent,
+    }),
+    jsonLd: jsonLdGraph(
+      breadcrumbNode(
+        [{ label: "Home", href: "/" }, { label: section.label, href: section.href }, { label: series.title }],
+        path
+      )
+    ),
+  };
 }

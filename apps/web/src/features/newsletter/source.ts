@@ -3,7 +3,15 @@ import path from "node:path";
 import matter from "gray-matter";
 import { CONTENT_DIR, resolveAppEnv } from "../sections/registry";
 import type { SectionDef } from "../sections";
-import { issueFrontmatterSchema, type IssueAudience, type IssueStatus } from "./schema";
+import { bodyStats, readingMinutes } from "./body-stats";
+import type { CoverSpec } from "./cover/catalog";
+import {
+  issueFrontmatterSchema,
+  type IssueAudience,
+  type IssueFormat,
+  type IssueLevel,
+  type IssueStatus,
+} from "./schema";
 
 // Reads newsletter issues from content/<section>/<yyyy>/<slug>.mdx. Build time only (fs), and no JSX
 // imports, so content-check and the send script can load it with plain Node.
@@ -27,6 +35,19 @@ export interface Issue {
   status: IssueStatus;
   sendAt?: Date;
   audience: IssueAudience;
+  /** "Issue #N"; undefined on an unnumbered draft. */
+  number?: number;
+  format: IssueFormat;
+  series?: string;
+  tags: string[];
+  level?: IssueLevel;
+  /** Minutes: frontmatter `readingTime`, else computed from the body. */
+  readingTime: number;
+  cover?: CoverSpec;
+  takeaways: string[];
+  related: string[];
+  /** LinkedIn hook; falls back to the summary. */
+  hook: string;
 }
 
 function issuesDir(section: Pick<SectionDef, "key">) {
@@ -44,6 +65,7 @@ export function readIssueFile(section: Pick<SectionDef, "href">, file: string, y
   // name the file instead of crashing.
   const fm = parsed.success ? parsed.data : undefined;
   const str = (v: unknown, fallback: string) => (typeof v === "string" && v ? v : fallback);
+  const summary = fm?.summary ?? str(data.summary, "");
   return {
     slug,
     year,
@@ -53,11 +75,21 @@ export function readIssueFile(section: Pick<SectionDef, "href">, file: string, y
     body: content,
     title: fm?.title ?? str(data.title, slug),
     date: fm?.date ?? `${year}-01-01`,
-    summary: fm?.summary ?? str(data.summary, ""),
+    summary,
     access: fm?.access ?? "premium",
     status: fm?.status ?? "draft",
     sendAt: fm?.sendAt,
     audience: fm?.audience ?? "all",
+    number: fm?.issue,
+    format: fm?.format ?? "deep-dive",
+    series: fm?.series,
+    tags: fm?.tags ?? [],
+    level: fm?.level,
+    readingTime: fm?.readingTime ?? readingMinutes(bodyStats(content)),
+    cover: fm?.cover,
+    takeaways: fm?.takeaways ?? [],
+    related: fm?.related ?? [],
+    hook: fm?.share?.hook ?? summary,
   };
 }
 

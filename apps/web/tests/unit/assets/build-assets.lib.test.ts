@@ -111,6 +111,17 @@ describe("asset IDs", () => {
       "CloudMapping diagrams/animated/messenger/architecture",
     ]);
   });
+
+  it("finds newsletter figures written as Markdown images with an asset: source", () => {
+    const refs = findRefs(
+      "Intro.\n\n![Loop](asset:diagrams/svg/newsletter/x/loop#step=2)\n\n![Hero](asset:diagrams/svg/newsletter/x/hero)\n" +
+        "![Raw](https://cdn.example/x.png)"
+    );
+    expect(refs.map((r) => `${r.component} ${r.id}`)).toEqual([
+      "Figure diagrams/svg/newsletter/x/loop",
+      "Figure diagrams/svg/newsletter/x/hero",
+    ]);
+  });
 });
 
 describe("indexAssets + checkAssets", () => {

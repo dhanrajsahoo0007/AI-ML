@@ -3,6 +3,7 @@ import path from "node:path";
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import { Client } from "pg";
 import { signWebhook } from "../../src/features/email/webhook-signature";
+import { NEWSLETTER_NAME } from "../../src/features/newsletter/brand";
 import { dbE2E, loginAs, origin, SKIP_REASON, testUserEmail } from "../fixtures/users";
 import { builtAppEnv, buildSections } from "./support/registry";
 
@@ -125,8 +126,8 @@ test.describe(`newsletter, APP_ENV=${env} @core`, () => {
     test("archive, issue page and RSS (titles and summaries only)", async ({ page, request }) => {
       const href = section!.href;
       await page.goto(href);
-      await expect(page.locator("h1")).toHaveText("Newsletter");
-      await expect(page.getByRole("button", { name: "Subscribe", exact: true })).toBeVisible();
+      await expect(page.locator("h1")).toHaveText(NEWSLETTER_NAME);
+      await expect(page.getByRole("button", { name: "Subscribe", exact: true }).first()).toBeVisible();
 
       const issue = await page.goto(`${href}/${SAMPLE_ISSUE}`);
       expect(issue?.status()).toBe(200);

@@ -35,6 +35,13 @@ const issue = (over: Partial<Issue> = {}): Issue => ({
   access: "free",
   status: "scheduled",
   audience: "all",
+  number: 1,
+  format: "digest",
+  tags: [],
+  readingTime: 1,
+  takeaways: [],
+  related: [],
+  hook: "The summary.",
   ...over,
 });
 
@@ -73,6 +80,22 @@ describe("email templates", () => {
     expect(text).toContain("The summary.");
     expect(text).not.toContain("Premium-only paragraph.");
     expect(emailCarriesBody({ access: "premium", audience: "pro" })).toBe(true);
+  });
+
+  it("issue callouts become labelled boxes; plain quotes stay quotes", async () => {
+    const body = "> [!TIP]\n> Name the weakest part.\n\n> Just a quote.\n";
+    const { html, text } = await renderIssueEmail(issue({ body }), { unsubscribeUrl: "https://site.example/u" });
+    expect(html).toContain("TRY IT");
+    expect(html).toContain("Name the weakest part.");
+    expect(html).not.toContain("[!TIP]");
+    expect(text).toContain("Just a quote.");
+  });
+
+  it("issue tables and code blocks can't widen the email", async () => {
+    const body = "| A | B |\n| --- | --- |\n| one | two |\n\n```text\n" + "x".repeat(200) + "\n```\n";
+    const { html } = await renderIssueEmail(issue({ body }), { unsubscribeUrl: "https://site.example/u" });
+    expect(html).toMatch(/<table[^>]*style="[^"]*table-layout:fixed[^"]*width:100%/);
+    expect(html).toMatch(/<pre[^>]*style="[^"]*white-space:pre-wrap/);
   });
 
   it("issue images must be PNG", async () => {

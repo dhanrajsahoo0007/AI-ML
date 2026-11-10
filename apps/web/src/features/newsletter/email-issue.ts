@@ -3,7 +3,9 @@ import { createElement as h, Fragment, type ComponentProps, type ReactElement } 
 import remarkGfm from "remark-gfm";
 import { renderEmail, type RenderedEmail, IssueEmail, s } from "../email";
 import { absoluteUrl } from "../seo/public";
-import { isPng } from "./links";
+import { CALLOUT_ATTR, CALLOUTS, isCalloutType, remarkCallouts } from "./callouts";
+import { figurePng, resolveFigure } from "./figures";
+import { ASSET_SCHEME, isFigureOnly, isPng } from "./links";
 import type { Issue } from "./source";
 
 // Renders an issue's MDX to the email HTML and text parts (plan §15.2: the same MDX becomes the web page and the
@@ -14,21 +16,56 @@ import type { Issue } from "./source";
 const absolute = (href = "") => (href.startsWith("/") ? absoluteUrl(href) : href);
 
 const emailComponents = {
-  p: ({ children }: ComponentProps<"p">) => h(Text, { style: s.text }, children),
+  // A figure is an image alone in a paragraph; its caption is a paragraph of its own, so don't nest it in one.
+  p: ({ children }: ComponentProps<"p">) =>
+    isFigureOnly(children) ? h(Fragment, null, children) : h(Text, { style: s.text }, children),
   a: ({ href, children }: ComponentProps<"a">) => h(Link, { href: absolute(href), style: s.link }, children),
   h2: ({ children }: ComponentProps<"h2">) => h(Heading, { as: "h2", style: s.h2 }, children),
   h3: ({ children }: ComponentProps<"h3">) => h(Heading, { as: "h3", style: s.h3 }, children),
   ul: ({ children }: ComponentProps<"ul">) => h("ul", { style: s.list }, children),
   ol: ({ children }: ComponentProps<"ol">) => h("ol", { style: s.list }, children),
   code: ({ children }: ComponentProps<"code">) => h("code", { style: s.code }, children),
-  blockquote: ({ children }: ComponentProps<"blockquote">) => h("blockquote", { style: s.quote }, children),
+  blockquote: ({ children, ...rest }: ComponentProps<"blockquote">) => {
+    const type = (rest as Record<string, unknown>)[CALLOUT_ATTR];
+    if (typeof type === "string" && isCalloutType(type)) {
+      // A callout: a tinted, labelled box (email clients ignore most CSS, so it stays simple).
+      return h(
+        "div",
+        { style: s.callout },
+        h(Text, { style: s.calloutLabel }, CALLOUTS[type].label.toUpperCase()),
+        children
+      );
+    }
+    return h("blockquote", { style: s.quote }, children);
+  },
   hr: () => h(Hr, { style: s.hr }),
+  pre: ({ children }: ComponentProps<"pre">) => h("pre", { style: s.pre }, children),
+  table: ({ children }: ComponentProps<"table">) =>
+    h("table", { style: s.table, role: "presentation", cellPadding: 0, cellSpacing: 0 }, children),
+  th: ({ children }: ComponentProps<"th">) => h("th", { style: s.th }, children),
+  td: ({ children }: ComponentProps<"td">) => h("td", { style: s.td }, children),
   img: ({ src, alt }: ComponentProps<"img">) => {
     const url = typeof src === "string" ? src : "";
+    if (url.startsWith(ASSET_SCHEME)) return figureImg(url);
     if (!isPng(url)) throw new Error(`email images must be PNG: ${url}`);
     return h(Img, { src: absolute(url), alt: alt ?? "", style: { maxWidth: "100%", height: "auto" } });
   },
 };
+
+/** An `asset:` figure: its PNG (of the step, for a build-up figure) with the caption under it. */
+function figureImg(src: string): ReactElement {
+  const fig = resolveFigure(src);
+  const png = figurePng(fig);
+  if (!png?.url) {
+    throw new Error(`figure ${src}: no public PNG; the issue must be visible in this build (npm run assets -w web)`);
+  }
+  return h(
+    Fragment,
+    null,
+    h(Img, { src: absoluteUrl(png.url), alt: fig.alt, width: 536, style: s.figure }),
+    fig.caption ? h(Text, { style: s.figureCaption }, fig.caption) : null
+  );
+}
 
 interface RenderIssueOptions {
   /** Footer unsubscribe link: Resend's {{{RESEND_UNSUBSCRIBE_URL}}} placeholder for broadcasts. */
@@ -45,7 +82,7 @@ async function compileBody(source: string): Promise<ReactElement> {
   const { content } = await compileMDX({
     source,
     components: emailComponents,
-    options: { parseFrontmatter: false, mdxOptions: { remarkPlugins: [remarkGfm] } },
+    options: { parseFrontmatter: false, mdxOptions: { remarkPlugins: [remarkGfm, remarkCallouts] } },
   });
   return content;
 }
@@ -66,7 +103,23 @@ export async function renderIssueEmail(issue: Issue, opts: RenderIssueOptions): 
           "."
         )
       );
+  const kicker = [issue.number !== undefined && `Issue #${issue.number}`, `${issue.readingTime} min read`]
+    .filter(Boolean)
+    .join(" · ");
   return renderEmail(
-    h(IssueEmail, { title: issue.title, summary: issue.summary, webUrl, unsubscribeUrl: opts.unsubscribeUrl }, body)
+    h(
+      IssueEmail,
+      {
+        title: issue.title,
+        summary: issue.summary,
+        webUrl,
+        unsubscribeUrl: opts.unsubscribeUrl,
+        // The cover PNG route (app/newsletter/[slug]/share/[file]); built for every issue with a cover.
+        coverUrl: issue.cover ? absoluteUrl(`${issue.href}/share/email.png`) : undefined,
+        kicker,
+        takeaways: emailCarriesBody(issue) ? issue.takeaways : [],
+      },
+      body
+    )
   );
 }
