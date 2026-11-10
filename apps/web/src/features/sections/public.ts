@@ -63,7 +63,7 @@ interface FullNavSection extends Omit<HeaderNavSection, "groups"> {
     href: string;
     icon?: string;
     items?: unknown[];
-    categories?: { title: string; items: unknown[] }[];
+    categories?: { title: string; icon?: string; items: unknown[] }[];
   }[];
 }
 
@@ -94,6 +94,8 @@ export function headerNavSection(nav: FullNavSection): HeaderNavSection {
 export interface HeaderNavBlock {
   /** Category title; absent for a group's uncategorised items. */
   title?: string;
+  /** The category's icon key (src/lib/icons.ts), shown before its heading. */
+  icon?: string;
   /** `slug` is set for directory sections only: the company whose logo the menu shows. */
   items: { title: string; href: string; slug?: string }[];
 }
@@ -116,7 +118,8 @@ export function headerNavItems(navs: FullNavSection[]): HeaderNavItems {
             const blocks: HeaderNavBlock[] = [];
             if (g.items?.length) blocks.push({ items: pick(g.items) });
             for (const c of g.categories ?? [])
-              if (c.items.length) blocks.push({ title: c.title, items: pick(c.items) });
+              if (c.items.length)
+                blocks.push({ title: c.title, ...(c.icon ? { icon: c.icon } : {}), items: pick(c.items) });
             return [g.slug, blocks];
           })
         ),

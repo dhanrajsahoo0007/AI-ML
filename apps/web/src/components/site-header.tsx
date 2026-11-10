@@ -157,7 +157,10 @@ export function SiteHeader({
           ))}
 
           {openSection && (
-            <div className="fixed left-1/2 top-16 z-50 w-[60rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-hairline bg-paper shadow-[0_24px_48px_-24px_rgba(17,17,17,0.45)]">
+            <div
+              data-tone={openSection.tone}
+              className="fixed left-1/2 top-16 z-50 w-[60rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-hairline bg-paper shadow-[0_24px_48px_-24px_rgba(17,17,17,0.45)]"
+            >
               <SectionPanel
                 key={openSection.key}
                 section={openSection}
@@ -391,7 +394,7 @@ function SectionPanel({
                     {Icon && (
                       <Icon
                         aria-hidden
-                        className={cn("size-4 shrink-0", isActive ? "text-primary" : "text-muted-foreground")}
+                        className={cn("size-4 shrink-0", isActive ? "text-tint" : "text-muted-foreground")}
                       />
                     )}
                     <span className="min-w-0 flex-1">
@@ -440,29 +443,35 @@ function SectionPanel({
                   <CompanyMenuItems items={blocks.flatMap((b) => b.items)} onNavigate={onNavigate} />
                 ) : blocks.length > 0 ? (
                   <div className="columns-2 gap-8">
-                    {blocks.map((block, i) => (
-                      <div key={block.title ?? i} className="mb-4">
-                        {block.title && (
-                          <p className="mb-1.5 break-after-avoid text-[13px] font-semibold text-ink">{block.title}</p>
-                        )}
-                        <ul>
-                          {block.items.map((item) => (
-                            <li key={item.href} className="break-inside-avoid">
-                              <Link
-                                href={item.href}
-                                aria-current={pathname === item.href ? "page" : undefined}
-                                className={cn(
-                                  "block py-1 text-sm leading-snug transition-colors hover:text-primary",
-                                  pathname === item.href ? "font-medium text-ink" : "text-muted-foreground"
-                                )}
-                              >
-                                {item.title}
-                              </Link>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
+                    {blocks.map((block, i) => {
+                      const BlockIcon = block.icon ? getIconComponent(block.icon) : undefined;
+                      return (
+                        <div key={block.title ?? i} className="mb-4">
+                          {block.title && (
+                            <p className="mb-1.5 flex break-after-avoid items-center gap-2 text-[13px] font-semibold text-ink">
+                              {BlockIcon && <BlockIcon aria-hidden className="size-3.5 shrink-0 text-tint" />}
+                              {block.title}
+                            </p>
+                          )}
+                          <ul>
+                            {block.items.map((item) => (
+                              <li key={item.href} className="break-inside-avoid">
+                                <Link
+                                  href={item.href}
+                                  aria-current={pathname === item.href ? "page" : undefined}
+                                  className={cn(
+                                    "block py-1 text-sm leading-snug transition-colors hover:text-primary",
+                                    pathname === item.href ? "font-medium text-ink" : "text-muted-foreground"
+                                  )}
+                                >
+                                  {item.title}
+                                </Link>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">
