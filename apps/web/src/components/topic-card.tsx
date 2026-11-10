@@ -9,9 +9,11 @@ interface TopicCardProps {
   description: string;
   childCount?: number;
   categories?: string[];
+  /** Position in the section's reading order, shown as "Part N". */
+  step?: number;
 }
 
-export function TopicCard({ href, icon, title, description, childCount, categories }: TopicCardProps) {
+export function TopicCard({ href, icon, title, description, childCount, categories, step }: TopicCardProps) {
   const IconComp = icon ? getIconComponent(icon) : null;
 
   return (
@@ -19,8 +21,13 @@ export function TopicCard({ href, icon, title, description, childCount, categori
       href={href}
       className="group flex h-full flex-col rounded-xl border border-hairline bg-paper p-6 transition-all duration-300 hover:-translate-y-0.5 hover:border-ink/30 hover:shadow-[0_18px_40px_-24px_rgba(17,17,17,0.35)] sm:p-7"
     >
-      <div className="flex size-10 items-center justify-center rounded-lg bg-paper-2 text-primary">
-        {IconComp ? <IconComp aria-hidden className="size-5" /> : <span className="text-lg">{icon}</span>}
+      <div className="flex items-center justify-between">
+        <div className="flex size-10 items-center justify-center rounded-lg bg-paper-2 text-primary">
+          {IconComp ? <IconComp aria-hidden className="size-5" /> : <span className="text-lg">{icon}</span>}
+        </div>
+        {step != null && (
+          <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Part {step}</span>
+        )}
       </div>
 
       <h2 className="mt-6 font-display text-2xl leading-tight">{title}</h2>
@@ -38,7 +45,9 @@ export function TopicCard({ href, icon, title, description, childCount, categori
 
       <div className="mt-6 flex items-center justify-between border-t border-hairline pt-5 text-sm">
         <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-          {childCount != null && categories ? `${childCount} topics · ${categories.length} categories` : "Guide"}
+          {childCount != null && categories
+            ? `${childCount} topics · ${categories.length} ${categories.length === 1 ? "category" : "categories"}`
+            : "Guide"}
         </span>
         <span className="inline-flex items-center gap-1.5 font-medium text-ink">
           Read

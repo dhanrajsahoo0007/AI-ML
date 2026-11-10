@@ -3,7 +3,9 @@ import path from "node:path";
 import { navSection, type ContentError, type NavCategory, type NavGroup, type SectionKind } from "../sections/kind";
 import { DESCRIPTION_MAX, docGroupSchema, frontmatterSchema, type SectionDef } from "../sections/schema";
 import { articlesOf, hubsOf, loadDocItems, loadNavIndex, NAV_INDEX_FILE, sectionDir, type DocItem } from "./source";
+import { CONTENT_DIR } from "../sections/registry";
 import { parseHubMarkup } from "./hub-markup";
+import { hubCategories as allHubCategories, sectionGroups } from "./groups";
 
 // The `docs` kind: MDX hubs and articles under content/<section>/, served by the shared
 // app/(content)/[section] routes. GenAI & LLM Systems, Classic System Design and Cloud.
@@ -18,18 +20,8 @@ function escape(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function lastSegment(href: string) {
-  return href.split("/").filter(Boolean).at(-1) ?? href;
-}
-
 function hubCategories(section: SectionDef, hub: string): NavCategory[] {
-  const entry = loadNavIndex(section).hubs.find((h) => h.slug === hub);
-  return (entry?.categories ?? [])
-    .filter((c) => c.cards.length > 0)
-    .map((c) => ({
-      title: c.title,
-      items: c.cards.map((card) => ({ slug: lastSegment(card.href), title: card.title, href: card.href })),
-    }));
+  return allHubCategories(section, hub).map(({ title, items }) => ({ title, items }));
 }
 
 function hubGroups(hub: DocItem) {
@@ -48,11 +40,19 @@ export const docsKind: SectionKind<DocItem> = {
     return items.map((i) => ({ slug: i.segments }));
   },
 
-  // One nav group per hub, or one per frontmatter `groups` entry; categories and cards come from the
-  // section's _index.yaml, and hubs without an index entry list their articles flat.
+  // The section's own `groups` (sections.yaml) when it sets them. Otherwise one nav group per hub, or one per
+  // frontmatter `groups` entry; categories and cards come from the section's _index.yaml, and hubs without an index
+  // entry list their articles flat. Hubs none of whose categories are in a section group keep their own group, after
+  // the section groups.
   nav(section, items) {
     const groups: NavGroup[] = [];
+    const own = sectionGroups(section, items);
+    for (const g of own) {
+      groups.push({ slug: g.slug, title: g.name, href: g.href, icon: g.icon, categories: g.categories });
+    }
+    const grouped = new Set(own.flatMap((g) => g.categories.map((c) => c.title)));
     for (const hub of hubsOf(items)) {
+      if (own.length > 0 && hubCategories(section, hub.slug).some((c) => grouped.has(c.title))) continue;
       const base = { slug: hub.slug, title: hub.title, href: hub.href, icon: hub.icon };
       const children = articlesOf(items, hub.slug);
       if (children.length === 0) {
@@ -218,6 +218,32 @@ export const docsKind: SectionKind<DocItem> = {
     for (const hub of hubsOf(items)) {
       if (articlesOf(items, hub.slug).length > 0 && !index.hubs.some((h) => h.slug === hub.slug)) {
         push(indexFile, `hub ${hub.slug} has articles but no entry`, undefined, "warning");
+      }
+    }
+
+    // Section groups (sections.yaml `groups`): every category named exists once in the index, sits in one group,
+    // and no category of an indexed hub is left out (it would vanish from the section index and the menus).
+    if (section.groups?.length) {
+      const registry = path.join(CONTENT_DIR, "sections.yaml");
+      // Every hub counts here, also one that is off in this environment: its categories are still valid names.
+      const everyHub = loadNavIndex({ key: section.key, offHubs: [] }).hubs;
+      const titles = everyHub.flatMap((h) => h.categories.filter((c) => c.cards.length > 0).map((c) => c.title));
+      const seen = new Set<string>();
+      for (const g of section.groups) {
+        checkIcon(registry, g.icon, `${section.key} group ${g.name}`);
+        for (const c of g.categories) {
+          const line = lineOf(registry, new RegExp(`- ${escape(c)}$`));
+          const hits = titles.filter((t) => t === c).length;
+          if (hits === 0)
+            push(registry, `${section.key} group "${g.name}": no category "${c}" in ${rel(indexFile)}`, line);
+          if (hits > 1)
+            push(registry, `${section.key} group "${g.name}": category "${c}" is in more than one hub`, line);
+          if (seen.has(c)) push(registry, `${section.key}: category "${c}" is in more than one group`, line);
+          seen.add(c);
+        }
+      }
+      for (const t of titles) {
+        if (!seen.has(t)) push(registry, `${section.key}: category "${t}" is in no group, so its pages are not listed`);
       }
     }
     return errors;

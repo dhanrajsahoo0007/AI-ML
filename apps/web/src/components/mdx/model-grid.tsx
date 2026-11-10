@@ -2,6 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { resolveIcon, resolveCategoryIcon } from "@/lib/icons";
+import { slugify } from "@/lib/doc-headings";
 
 export function ModelCategory({
   title,
@@ -15,7 +16,8 @@ export function ModelCategory({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mt-16 mb-16 first:mt-0">
+    // The id is the target of the section index, sidebar and header-menu group links (features/docs/groups.ts).
+    <div id={slugify(title)} className="mt-16 mb-16 scroll-mt-24 first:mt-0">
       <div className="mb-8">
         <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
           <span className="flex size-8 items-center justify-center rounded-lg bg-paper-2 text-primary [&_svg]:size-4">

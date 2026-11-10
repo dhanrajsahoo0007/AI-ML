@@ -54,6 +54,9 @@ redirects, and to write the hidden-routes manifest that `apps/web/src/middleware
 - New kind: add the name to `SECTION_KINDS` and `KINDS_WITH_ROUTES` in `schema.ts`, implement `SectionKind` in its
   own feature, register it in `kinds.ts`, add a thin route folder under `apps/web/src/app/`, then extend
   `literals.test.ts` allow-list and the registry contract tests.
+- Reorder or regroup a docs section: edit its `groups` list in `apps/web/content/sections.yaml` (group name, icon,
+  description, hub category titles). `apps/web/src/features/docs/groups.ts` resolves it for the section index, the
+  sidebar and the header menu; `next dev` must be restarted to pick up the change.
 - New registry field: add it to `sectionEntrySchema` (strict, so unknown fields fail), document it in the YAML
   header comment.
 

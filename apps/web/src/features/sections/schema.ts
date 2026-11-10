@@ -79,6 +79,23 @@ export const sectionEntrySchema = z
      * section.
      */
     hubRelease: z.record(slug, hubReleaseSchema).optional(),
+    /**
+     * Docs only: the section's reading order. Each group is a named list of hub category titles (from the
+     * section's _index.yaml) and may draw from more than one hub. Replaces the per-hub frontmatter `groups` on the
+     * section index, in the sidebar and in the header menu.
+     */
+    groups: z
+      .array(
+        z
+          .object({
+            name: z.string().min(1),
+            icon: z.string().optional(),
+            description: z.string().min(1).optional(),
+            categories: z.array(z.string().min(1)).min(1),
+          })
+          .strict()
+      )
+      .optional(),
     /** Old URLs that now live in this section; `fallback` is used while the section is not `on`. */
     redirects: z
       .array(z.object({ from: z.string(), to: z.string(), fallback: z.string().optional() }).strict())
@@ -101,6 +118,9 @@ export const registrySchema = z.array(sectionEntrySchema).superRefine((sections,
     }
     if (s.hubRelease && s.kind !== "docs") {
       ctx.addIssue({ code: "custom", path: [i, "hubRelease"], message: "hubRelease is for docs sections only" });
+    }
+    if (s.groups && s.kind !== "docs") {
+      ctx.addIssue({ code: "custom", path: [i, "groups"], message: "groups is for docs sections only" });
     }
   });
   const glossaries = sections.flatMap((s, i) => (s.glossary ? [i] : []));
