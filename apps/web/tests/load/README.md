@@ -42,7 +42,7 @@ Inputs the runner builds:
 
 - **URLs**: every prerendered 200 page in `.next/prerender-manifest.json`, minus the sections the middleware gates in
   this build (`src/generated/hidden-routes.json`).
-- **Entitlement cookie**: a `tier=pro` `oa_ent` token signed with `signEntitlement` from `src/server/edge/entitlement.ts`
+- **Entitlement cookie**: a `tier=pro` `tts_ent` token signed with `signEntitlement` from `src/server/edge/entitlement.ts`
   and a throwaway 256-bit key, which the runner also gives the preview Worker as `ENTITLEMENT_SECRET`. Until the
   paywall lands there are no premium pages, so `premium_pages` fetches articles with that cookie; set
   `PREMIUM_URLS=/a,/b` to target real ones (then it also checks the response isn't publicly cacheable).

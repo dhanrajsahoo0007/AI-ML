@@ -9,11 +9,11 @@ import { call, setupAuthTestEnv, testLoginAs } from "./test-helpers";
 // and errors never leak internals.
 
 describe("originAllowed", () => {
-  const allowed = ["https://example.com", "https://*-origins.example.workers.dev"];
+  const allowed = ["https://example.com", "https://*-tokenstoscale.example.workers.dev"];
   it("matches exact origins and single-label wildcards", () => {
     expect(originAllowed("https://example.com", allowed)).toBe(true);
-    expect(originAllowed("https://pr-12-origins.example.workers.dev", allowed)).toBe(true);
-    expect(originAllowed("https://a.b-origins.example.workers.dev", allowed)).toBe(false);
+    expect(originAllowed("https://pr-12-tokenstoscale.example.workers.dev", allowed)).toBe(true);
+    expect(originAllowed("https://a.b-tokenstoscale.example.workers.dev", allowed)).toBe(false);
     expect(originAllowed("https://example.com.evil.test", allowed)).toBe(false);
     expect(originAllowed("http://example.com", allowed)).toBe(false);
     expect(originAllowed(null, allowed)).toBe(false);

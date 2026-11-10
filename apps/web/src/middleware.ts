@@ -25,21 +25,21 @@ import {
 
 // Edge middleware (plan §1, §5.1.1). Runs before the page cache on every content route.
 // NO database and no Node APIs here (AGENTS.md rule 1): only the build manifest, env vars and the
-// signed `oa_ent` cookie. Imports are limited to src/server/edge/** and build manifests.
+// signed `tts_ent` cookie. Imports are limited to src/server/edge/** and build manifests.
 //
 // - production on a host other than BETTER_AUTH_URL's (workers.dev, version preview URLs) → 308 to the canonical
 //   host, unless the deploy smoke key is presented (server/edge/host-guard.ts, security review M2)
 // - SECTIONS_KILL sections → 503 maintenance page
 // - `off` sections → 404 (their pages are not built)
-// - `hidden` sections → 404 unless `oa_ent` carries role=admin; admitted responses are never cached
+// - `hidden` sections → 404 unless `tts_ent` carries role=admin; admitted responses are never cached
 //   by shared caches
-// - premium pages (src/generated/premium-routes.json, plan §9.2) → the full page only with a valid `oa_ent`
+// - premium pages (src/generated/premium-routes.json, plan §9.2) → the full page only with a valid `tts_ent`
 //   carrying tier=pro (private, never stored by shared caches); everyone else gets the public preview, by a
 //   rewrite to `<path>/_preview`. HTML, RSC (`RSC: 1`, `?_rsc=`) and prefetch requests all hit the page path,
 //   so they are gated alike. The full page is prerendered into the server-only cache (R2 on Cloudflare,
 //   .next/server under `next start`), never into public static assets (open-next.config.ts).
 // - /pricing → its variant for checkout (live when the paywall is on and DODO_API_KEY is set) × the visitor's
-//   regional price tier (`oa_region` cookie, else cf-ipcountry): server/edge/pricing-variant.ts
+//   regional price tier (`tts_region` cookie, else cf-ipcountry): server/edge/pricing-variant.ts
 
 const manifest = loadManifest();
 const premiumManifest = loadPremiumManifest();
@@ -106,7 +106,7 @@ export async function middleware(request: NextRequest) {
 
 /**
  * The tier the paywall serves. On `next dev` (APP_ENV=local, inlined at build) the site can run with the paid or
- * the unpaid view without signing in or out: the `oa_local_view` cookie set by the local view switch
+ * the unpaid view without signing in or out: the `tts_local_view` cookie set by the local view switch
  * (components/local-view-switch.client.tsx), else LOCAL_VIEW_AS from .env.local. `paid` → Pro, `unpaid` → free,
  * `real` or unset → the signed-in user's own tier. Every other build ignores both.
  */
@@ -116,7 +116,7 @@ function viewerTier(
   tier: "free" | "pro" | null
 ): "free" | "pro" | null {
   if (process.env.APP_ENV !== "local") return tier;
-  const view = request.cookies.get("oa_local_view")?.value ?? env.LOCAL_VIEW_AS;
+  const view = request.cookies.get("tts_local_view")?.value ?? env.LOCAL_VIEW_AS;
   if (view === "paid") return "pro";
   if (view === "unpaid") return "free";
   return tier;

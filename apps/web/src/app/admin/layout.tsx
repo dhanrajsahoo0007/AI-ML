@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export const metadata: Metadata = {
-  title: { absolute: "Admin · Origins AI Learn" },
+  title: { absolute: "Admin · TokensToScale" },
   robots: { index: false, follow: false, nocache: true },
 };
 

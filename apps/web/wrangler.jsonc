@@ -10,7 +10,7 @@
 // Bindings and `vars` are not inherited by environments, so each environment repeats them.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "origins-ai-learn",
+  "name": "tokenstoscale",
   // worker.mjs wraps OpenNext's generated .open-next/worker.js (Sentry per request when SENTRY_DSN is set; room
   // for a queue consumer). Build that first: `npm run cf:build -w web`.
   "main": "worker.mjs",
@@ -34,7 +34,7 @@
   // R2 incremental cache (open-next.config.ts): used by builds with the paywall on, so full premium pages are
   // never public static assets (plan §9.2). Locally (`npm run preview -w web`) wrangler simulates the bucket;
   // nothing is created in any account.
-  "r2_buckets": [{ "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "origins-ai-learn-cache-local" }],
+  "r2_buckets": [{ "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "tokenstoscale-cache-local" }],
 
   // Workers Rate Limiting for /api/* (plan §11.6), one binding per named limit in src/server/rate-limit.ts (same
   // numbers; src/server/rate-limit.test.ts keeps them in sync). namespace_id is an integer we choose, unique per
@@ -60,34 +60,34 @@
   // TODO(account): per environment, the R2 cache bucket (required for preview and staging, which build
   // with the paywall on) plus the media buckets:
   // "r2_buckets": [
-  //   { "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "origins-ai-learn-cache-<env>" },
+  //   { "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "tokenstoscale-cache-<env>" },
   //   // Public media (media.<domain>), large free assets (plan §5.6).
-  //   { "binding": "MEDIA_PUBLIC", "bucket_name": "origins-ai-learn-media-public" },
+  //   { "binding": "MEDIA_PUBLIC", "bucket_name": "tokenstoscale-media-public" },
   //   // Premium media, served only through the Worker after an entitlement check.
-  //   { "binding": "MEDIA_PRIVATE", "bucket_name": "origins-ai-learn-media-private" },
+  //   { "binding": "MEDIA_PRIVATE", "bucket_name": "tokenstoscale-media-private" },
   // ],
   // TODO(account, Phase 4): Hyperdrive in front of Neon, one config per environment (`wrangler hyperdrive create`).
   // Only /api/* handlers and the account pages use it (src/server/db/client.ts reads it per request; without it,
   // DATABASE_URL). Locally the binding is optional: `localConnectionString` is the Docker Postgres.
-  // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id-local>", "localConnectionString": "postgres://origins:origins@127.0.0.1:54329/origins_dev" }],
+  // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id-local>", "localConnectionString": "postgres://tts:tts@127.0.0.1:54329/tts_dev" }],
   // TODO(account): Analytics Engine dataset for paywall, checkout, webhook and web-vitals metrics (plan §10.5;
   // src/server/edge/analytics.ts is a no-op without it). The dataset is created on first write.
-  // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_local" }],
+  // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "tokenstoscale_local" }],
   // TODO(account): Cloudflare Queue for transactional email, so /api/* never waits on Resend. This Worker is both
   // producer (EMAIL_QUEUE → enqueueEmail() in src/features/email/queue.ts) and consumer (handleEmailQueue() in
   // src/features/email/queue-consumer.ts, wired as the Worker entry's queue() handler). Messages that still fail
   // after max_retries (backoff 30 s doubling to 1 h, about 2 h in all) go to the dead-letter queue, kept for
   // inspection and replay. max_concurrency 1 stays under Resend's default API rate limit. Without the binding
   // email is sent inline. The owner creates both queues per environment first:
-  // `npx wrangler queues create origins-ai-learn-email-<env>` and `npx wrangler queues create origins-ai-learn-email-dlq-<env>`.
+  // `npx wrangler queues create tokenstoscale-email-<env>` and `npx wrangler queues create tokenstoscale-email-dlq-<env>`.
   // Locally wrangler simulates queues (no account); worker.mjs already wires the consumer, so only this block is left.
   // "queues": {
-  //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "origins-ai-learn-email-local" }],
-  //   "consumers": [{ "queue": "origins-ai-learn-email-local", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "origins-ai-learn-email-dlq-local" }],
+  //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "tokenstoscale-email-local" }],
+  //   "consumers": [{ "queue": "tokenstoscale-email-local", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "tokenstoscale-email-dlq-local" }],
   // },
 
   "env": {
-    // One Worker (origins-ai-learn-preview) holds a version per PR, each with its own preview URL
+    // One Worker (tokenstoscale-preview) holds a version per PR, each with its own preview URL
     // (`wrangler versions upload --env preview --preview-alias pr-<n>`). Never routed to a domain.
     "preview": {
       "workers_dev": true,
@@ -110,11 +110,11 @@
       ],
       // TODO(account): r2_buckets as above (preview names), and:
       // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id-preview>" }],
-      // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_preview" }],
+      // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "tokenstoscale_preview" }],
       // TODO(account): the transactional email queue (src/features/email/queue.ts), preview names; see the top level.
       // "queues": {
-      //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "origins-ai-learn-email-preview" }],
-      //   "consumers": [{ "queue": "origins-ai-learn-email-preview", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "origins-ai-learn-email-dlq-preview" }],
+      //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "tokenstoscale-email-preview" }],
+      //   "consumers": [{ "queue": "tokenstoscale-email-preview", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "tokenstoscale-email-dlq-preview" }],
       // },
     },
     // Deployed from `development`. TODO(account): route `staging.<domain>` once the zone exists:
@@ -142,11 +142,11 @@
       ],
       // TODO(account): r2_buckets as above (staging names), and:
       // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id-staging>" }],
-      // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_staging" }],
+      // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "tokenstoscale_staging" }],
       // TODO(account): the transactional email queue (src/features/email/queue.ts), staging names; see the top level.
       // "queues": {
-      //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "origins-ai-learn-email-staging" }],
-      //   "consumers": [{ "queue": "origins-ai-learn-email-staging", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "origins-ai-learn-email-dlq-staging" }],
+      //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "tokenstoscale-email-staging" }],
+      //   "consumers": [{ "queue": "tokenstoscale-email-staging", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "tokenstoscale-email-dlq-staging" }],
       // },
     },
     // Deployed from `main` through the `production` GitHub environment. workers.dev stays on because
@@ -176,11 +176,11 @@
       ],
       // TODO(account): r2_buckets as above (production names), and:
       // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<hyperdrive-config-id-production>" }],
-      // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "origins_ai_learn_production" }],
+      // "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "tokenstoscale_production" }],
       // TODO(account): the transactional email queue (src/features/email/queue.ts), production names; see the top level.
       // "queues": {
-      //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "origins-ai-learn-email-production" }],
-      //   "consumers": [{ "queue": "origins-ai-learn-email-production", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "origins-ai-learn-email-dlq-production" }],
+      //   "producers": [{ "binding": "EMAIL_QUEUE", "queue": "tokenstoscale-email-production" }],
+      //   "consumers": [{ "queue": "tokenstoscale-email-production", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "max_concurrency": 1, "dead_letter_queue": "tokenstoscale-email-dlq-production" }],
       // },
     },
   },

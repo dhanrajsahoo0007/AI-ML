@@ -9,7 +9,7 @@ import { TEST_USERS, testUserEmail, type TestUserKey } from "../../src/server/db
 // provider, signalled by E2E_DB=1:
 //
 //   npm run db:up -w web
-//   export DATABASE_URL=postgres://origins:origins@127.0.0.1:54329/origins_dev
+//   export DATABASE_URL=postgres://tts:tts@127.0.0.1:54329/tts_dev
 //   export E2E_DB=1 ENABLE_TEST_LOGIN=1 TEST_LOGIN_KEY=local-e2e-test-login-key
 //   export BETTER_AUTH_URL=http://127.0.0.1:3100 BETTER_AUTH_SECRET=local-e2e-secret-0123456789abcdef0123
 //   export DB_QUERY_LOG_FILE=$PWD/apps/web/test-results/db-queries.log

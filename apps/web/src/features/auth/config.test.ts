@@ -35,12 +35,12 @@ describe("authConfig", () => {
       {
         BETTER_AUTH_SECRET: SECRET,
         BETTER_AUTH_URL: "https://staging.example.com",
-        TRUSTED_ORIGINS: " https://*-origins.example.workers.dev/ , https://staging.example.com",
+        TRUSTED_ORIGINS: " https://*-tokenstoscale.example.workers.dev/ , https://staging.example.com",
         GOOGLE_CLIENT_ID: "id",
       },
       "staging"
     );
-    expect(c.trustedOrigins).toEqual(["https://staging.example.com", "https://*-origins.example.workers.dev"]);
+    expect(c.trustedOrigins).toEqual(["https://staging.example.com", "https://*-tokenstoscale.example.workers.dev"]);
     expect(c.google).toBeNull();
     expect(isGoogleConfigured({ GOOGLE_CLIENT_ID: "id" })).toBe(false);
     expect(isGoogleConfigured({ GOOGLE_CLIENT_ID: "id", GOOGLE_CLIENT_SECRET: "x" })).toBe(true);
@@ -111,7 +111,7 @@ describe("safeNextPath (security review M1)", () => {
 
   it("never returns something a browser would resolve off-origin", () => {
     for (const bad of bypasses) {
-      expect(new URL(safeNextPath(bad), "https://origins.example").origin).toBe("https://origins.example");
+      expect(new URL(safeNextPath(bad), "https://tokenstoscale.example").origin).toBe("https://tokenstoscale.example");
     }
     expect(safeNextPath(42)).toBe("/account");
   });

@@ -16,7 +16,7 @@ security, pricing FAQ), fills in business placeholders, and renders them in a co
 - `billing-period.client.tsx`: `<BillingPeriod>`, the monthly/yearly switch on the pricing page (sets
   `data-period`; prices are server-rendered and shown with CSS variants).
 - `region-switcher.client.tsx`: `<RegionSwitcher countries>`, "Show prices for" on the pricing page: a select and
-  an "Update prices" button (no reload on change, WCAG 3.2.2) that set or clear the `oa_region` cookie and reload
+  an "Update prices" button (no reload on change, WCAG 3.2.2) that set or clear the `tts_region` cookie and reload
   `/pricing`. Country names are made at build time with `Intl.DisplayNames`.
 
 ## Data flow

@@ -12,7 +12,7 @@ import {
 } from "../fixtures/paywall";
 
 // @core paywall (plan §9.2, §12.2): who sees a premium page's preview + paywall and who sees the full page.
-// Signed `oa_ent` cookies are made with the server's ENTITLEMENT_SECRET; the session cases (free, expired pro,
+// Signed `tts_ent` cookies are made with the server's ENTITLEMENT_SECRET; the session cases (free, expired pro,
 // pro) use the test login and the refresh endpoint, so they need E2E_DB=1.
 
 const PREVIEW_TEXT = "The paywall preview may show this paragraph to anyone.";
@@ -71,7 +71,7 @@ test.describe("paywall @core", () => {
   });
 
   for (const [name, cookie] of [
-    ["forged cookie", async () => "oa_ent=eyJhbGciOiJIUzI1NiJ9.eyJ0aWVyIjoicHJvIn0.forged"],
+    ["forged cookie", async () => "tts_ent=eyJhbGciOiJIUzI1NiJ9.eyJ0aWVyIjoicHJvIn0.forged"],
     ["expired signed cookie", expiredEntitlement],
     ["cookie from an unknown key", foreignKidEntitlement],
     ["valid free-tier cookie", () => signedEntitlement({ tier: "free" })],
@@ -133,7 +133,7 @@ test.describe("paywall with real sessions @core", () => {
     const res = await refresh(page);
     expect(await res.json()).toMatchObject({ tier: "pro", hold: false });
     const cookies = await context.cookies();
-    expect(cookies.find((c) => c.name === "oa_ent")).toMatchObject({ httpOnly: true, sameSite: "Lax" });
+    expect(cookies.find((c) => c.name === "tts_ent")).toMatchObject({ httpOnly: true, sameSite: "Lax" });
     await page.goto(FIXTURE_ROUTE);
     await expectFull(page);
   });
@@ -141,9 +141,9 @@ test.describe("paywall with real sessions @core", () => {
   test("a signed-in Pro reader whose cookie expired is let back in from the preview", async ({ page, context }) => {
     await loginAs(context, "pro_monthly");
     await refresh(page);
-    // Drop oa_ent but keep the readable hint, as after 15 idle minutes.
-    const hint = (await context.cookies()).find((c) => c.name === "oa_ent_hint")!;
-    await context.clearCookies({ name: "oa_ent" });
+    // Drop tts_ent but keep the readable hint, as after 15 idle minutes.
+    const hint = (await context.cookies()).find((c) => c.name === "tts_ent_hint")!;
+    await context.clearCookies({ name: "tts_ent" });
     expect(hint).toBeTruthy();
     await page.goto(FIXTURE_ROUTE);
     await expect(page.getByRole("heading", { name: PREMIUM_HEADING })).toBeVisible({ timeout: 15_000 });

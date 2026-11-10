@@ -28,7 +28,7 @@ const ready = (async () => {
   const pyodide = await scope.loadPyodide!({ indexURL: PYODIDE_BASE_URL });
   lockdown(scope);
   pyodide.runPython(PY_HARNESS);
-  return pyodide.globals.get("__oa_run_case");
+  return pyodide.globals.get("__tts_run_case");
 })();
 
 ready.then(

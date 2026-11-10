@@ -6,7 +6,7 @@ The question text of entries marked `source: outcome-school` in this folder's ca
 by Outcome School, Copyright (C) 2026 Outcome School, licensed under the Apache License,
 Version 2.0 (see `LICENSE-outcome-school.txt`). Source revision: commit `8fcbddc4ff69` (2026-10-30).
 
-Changes made by Origins AI Learn:
+Changes made by TokensToScale:
 
 - Selected only AI and ML questions; coding, SQL and generic behavioral questions were not imported.
 - Edited some question wording for clarity, merged near-duplicate questions, and normalized company names.

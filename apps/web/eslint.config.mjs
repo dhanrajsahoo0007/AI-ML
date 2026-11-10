@@ -2,7 +2,7 @@ import { dirname } from "path";
 import { fileURLToPath } from "url";
 import { FlatCompat } from "@eslint/eslintrc";
 import boundaries from "eslint-plugin-boundaries";
-import origins from "./eslint-rules/index.mjs";
+import tts from "./eslint-rules/index.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -209,16 +209,16 @@ const eslintConfig = [
   // ── Project rules (eslint-rules/, tests in tests/unit/eslint-rules.test.ts) ──
   {
     files: ["src/**/*.{ts,tsx,mts,mjs}"],
-    plugins: { origins },
+    plugins: { tts },
     rules: {
-      "origins/no-server-only-in-client": "error",
+      "tts/no-server-only-in-client": "error",
     },
   },
   {
     files: ["src/app/api/**/route.{ts,tsx}"],
-    plugins: { origins },
+    plugins: { tts },
     rules: {
-      "origins/api-route-wrapper": [
+      "tts/api-route-wrapper": [
         "error",
         {
           wrappers: [

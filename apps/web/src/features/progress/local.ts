@@ -7,7 +7,7 @@ export const MAX_MERGE_ITEMS = 500;
 // Signed-out progress lives in this browser's localStorage (never tokens or personal data) until the learner
 // signs in; then /sign-in/complete merges it into the account and clears it.
 
-const LOCAL_PROGRESS_KEY = "oa_progress_v1";
+const LOCAL_PROGRESS_KEY = "tts_progress_v1";
 
 /** Fired on `window` after this page changes the stored progress, so progress marks elsewhere on it can update. */
 export const PROGRESS_EVENT = "oa-progress";

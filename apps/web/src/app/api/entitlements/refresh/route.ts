@@ -2,7 +2,7 @@ import { authConfig, route } from "@/features/auth";
 import { refreshEntitlementCookie } from "@/features/entitlements";
 import { serverEnv } from "@/server/env";
 
-// Re-issues the `oa_ent` entitlement cookie from the database (plan §9.2, §11.3). Called after sign-in, after
+// Re-issues the `tts_ent` entitlement cookie from the database (plan §9.2, §11.3). Called after sign-in, after
 // checkout success and by the client islands shortly before the cookie expires. Signed-out callers get 401 and
 // both entitlement cookies cleared. One small read through Hyperdrive per active reader every ~13 minutes.
 export const POST = route({

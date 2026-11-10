@@ -9,7 +9,7 @@ sign-in.
 - `contentKeySchema`, `progressKindSchema` (`complete | bookmark`), `mergeItemSchema`, `MAX_MERGE_ITEMS` (500).
 - `setProgress(db, userId, key, kind, on)`, `listProgress(db, userId)`, `mergeProgress(db, userId, items)`.
 - Client island by path: `merge-local-progress.client.tsx` (runs on `/sign-in/complete`); `local.ts` holds the
-  browser-side `localStorage` helpers (`oa_progress_v1`).
+  browser-side `localStorage` helpers (`tts_progress_v1`).
 - Progress marks outside the article: `completed-provider.client.tsx` (mounted by the docs section layout) reads this
   browser's completed keys with `use-completed.client.ts` and fills the context in
   `apps/web/src/lib/completed.client.ts`. The sidebar (`apps/web/src/components/content-sidebar.tsx`) shows a tick and a

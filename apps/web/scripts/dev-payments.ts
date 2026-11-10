@@ -251,7 +251,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       res,
       200,
       "Test checkout",
-      `<p class="muted">Origins AI Learn · ${yearly ? "Pro yearly" : "Pro monthly"}</p>
+      `<p class="muted">TokensToScale · ${yearly ? "Pro yearly" : "Pro monthly"}</p>
        <p class="price">${price}</p>
        <p class="muted">Sample price · ${escapeHtml(c.email)} · billing country ${escapeHtml(c.country)}</p>
        <form method="post"><button>Pay ${price.split(" ")[0]} (test)</button></form>

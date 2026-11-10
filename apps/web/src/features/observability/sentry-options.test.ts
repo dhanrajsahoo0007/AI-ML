@@ -13,19 +13,19 @@ describe("scrubEvent", () => {
     ]) {
       expect(scrubEvent({ request: { url } } as Event)).toBeNull();
     }
-    expect(isLocalHost("originsai.example")).toBe(false);
+    expect(isLocalHost("tokenstoscale.example")).toBe(false);
   });
 
   it("keeps only the user ID and removes cookies, query strings, bodies and identifying headers", () => {
     const event = scrubEvent({
       user: { id: "u_1", email: "a@b.co", ip_address: "1.2.3.4", username: "jane" },
       request: {
-        url: "https://originsai.example/pricing?email=a@b.co#x",
-        cookies: { oa_ent: "1" },
+        url: "https://tokenstoscale.example/pricing?email=a@b.co#x",
+        cookies: { tts_ent: "1" },
         query_string: "email=a@b.co",
         data: { card: "4242" },
         headers: {
-          Cookie: "oa_ent=1",
+          Cookie: "tts_ent=1",
           Authorization: "Bearer x",
           "CF-Connecting-IP": "1.2.3.4",
           "X-Forwarded-For": "1.2.3.4",
@@ -35,7 +35,7 @@ describe("scrubEvent", () => {
     } as Event);
     expect(event).toEqual({
       user: { id: "u_1" },
-      request: { url: "https://originsai.example/pricing", headers: { "User-Agent": "UA" } },
+      request: { url: "https://tokenstoscale.example/pricing", headers: { "User-Agent": "UA" } },
     });
   });
 

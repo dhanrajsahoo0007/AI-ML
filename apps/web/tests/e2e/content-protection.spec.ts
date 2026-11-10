@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const ARTICLE = "/ai-system-design/genai-system-design/tokenization";
 const LEGAL = "/legal/terms";
-const NOTICE = /^Content © Origins AI Learn\. Read it at http.+\/ai-system-design\/genai-system-design\/tokenization$/;
+const NOTICE = /^Content © TokensToScale\. Read it at http.+\/ai-system-design\/genai-system-design\/tokenization$/;
 
 async function open(page: Page, path: string) {
   await page.goto(path);
@@ -72,7 +72,7 @@ test.describe("content protection", () => {
     await expect(page.locator("main")).toBeHidden();
     for (const article of await page.locator("article").all()) await expect(article).toBeHidden();
     const after = await page.evaluate(() => getComputedStyle(document.body, "::after").content);
-    expect(after).toContain("Content © Origins AI Learn. Read it at");
+    expect(after).toContain("Content © TokensToScale. Read it at");
   });
 
   test("right-click and drag are blocked on content only", async ({ page }) => {

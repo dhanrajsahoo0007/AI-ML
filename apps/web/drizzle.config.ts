@@ -5,10 +5,7 @@ import { assertDatabaseAllowed, readAppEnv } from "./src/server/db/config";
 // Migrations are additive only (plan §8.1, §20): add tables, columns and enum values; never rename or drop in
 // the same release. Apply them with `npm run db:migrate -w web` (src/server/db/migrate.ts), not `drizzle-kit
 // push`. The least-privilege roles live in src/server/db/sql/roles.sql and are applied by hand, never here.
-const url =
-  process.env.DATABASE_URL_DIRECT ??
-  process.env.DATABASE_URL ??
-  "postgres://origins:origins@127.0.0.1:54329/origins_dev";
+const url = process.env.DATABASE_URL_DIRECT ?? process.env.DATABASE_URL ?? "postgres://tts:tts@127.0.0.1:54329/tts_dev";
 assertDatabaseAllowed(url, readAppEnv());
 
 export default defineConfig({

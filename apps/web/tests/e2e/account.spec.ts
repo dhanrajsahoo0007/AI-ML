@@ -33,7 +33,7 @@ test.describe("account @core", () => {
       page.waitForEvent("download"),
       page.getByRole("button", { name: "Download my data (JSON)" }).click(),
     ]);
-    expect(download.suggestedFilename()).toMatch(/^origins-ai-learn-export-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(download.suggestedFilename()).toMatch(/^tokenstoscale-export-\d{4}-\d{2}-\d{2}\.json$/);
     const text = fs.readFileSync((await download.path())!, "utf8");
     const data = JSON.parse(text);
     expect(data.profile.email).toBe(testUserEmail("on_hold"));

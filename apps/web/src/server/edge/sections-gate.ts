@@ -6,7 +6,7 @@ import { z } from "zod";
 //
 //   kill switch  SECTIONS_KILL lists the section  → 503 maintenance page (everyone, admins included)
 //   off          section not built                → 404
-//   hidden       built, not announced             → 404 unless the `oa_ent` cookie has role=admin
+//   hidden       built, not announced             → 404 unless the `tts_ent` cookie has role=admin
 //   otherwise                                     → pass through
 
 /** Shape of src/generated/hidden-routes.json (see hiddenRoutes() in src/features/sections/registry.ts). */

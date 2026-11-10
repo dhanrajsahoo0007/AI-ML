@@ -20,16 +20,16 @@ describe("decideHost", () => {
   });
 
   it("redirects workers.dev and preview-URL hosts to the canonical origin, keeping path and query", () => {
-    expect(at("https://origins-ai-learn-production.acme.workers.dev/interviews?company=google")).toEqual({
+    expect(at("https://tokenstoscale-production.acme.workers.dev/interviews?company=google")).toEqual({
       action: "redirect",
       location: "https://learn.example/interviews?company=google",
     });
-    expect(at("https://abc123-origins-ai-learn-production.acme.workers.dev/")).toMatchObject({ action: "redirect" });
+    expect(at("https://abc123-tokenstoscale-production.acme.workers.dev/")).toMatchObject({ action: "redirect" });
     expect(at("https://www.learn.example/")).toMatchObject({ action: "redirect" });
   });
 
   it("lets the deploy smoke tests through with the right key only (noindex)", () => {
-    const host = "https://origins-ai-learn-production.acme.workers.dev/";
+    const host = "https://tokenstoscale-production.acme.workers.dev/";
     expect(at(host, { presentedKey: KEY })).toEqual({ action: "pass-noindex" });
     expect(at(host, { presentedKey: `${KEY}x` })).toMatchObject({ action: "redirect" });
     expect(at(host, { presentedKey: "" })).toMatchObject({ action: "redirect" });

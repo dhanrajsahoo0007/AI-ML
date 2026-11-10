@@ -20,7 +20,7 @@ import {
 // The user's own data: the account page overview, the JSON export (GDPR art. 15/20, India DPDP) and account
 // deletion. Every query is filtered by the signed-in user's id; nothing else is ever selected.
 
-const EXPORT_FORMAT = "origins-ai-learn/account-export@1";
+const EXPORT_FORMAT = "tokenstoscale/account-export@1";
 
 export async function exportUserData(db: Db, userId: string, now = new Date()) {
   const [profile] = await db

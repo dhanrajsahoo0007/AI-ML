@@ -7,7 +7,7 @@ const live = { paywall: true, billingConfigured: true };
 
 describe("pricing variant (live × tier)", () => {
   it("names the cookie and header middleware reads", () => {
-    expect(REGION_COOKIE).toBe("oa_region");
+    expect(REGION_COOKIE).toBe("tts_region");
     expect(COUNTRY_HEADER).toBe("cf-ipcountry");
   });
 

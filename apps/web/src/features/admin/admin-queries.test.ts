@@ -39,7 +39,7 @@ describe.skipIf(!available)("admin queries (integration)", () => {
     // A subscription whose renewal failed after on_hold: involuntary churn.
     const [lapsed] = await db
       .insert(t.user)
-      .values({ name: "Lapsed card", email: "lapsed-card@users.origins.test", emailVerified: true })
+      .values({ name: "Lapsed card", email: "lapsed-card@users.tokenstoscale.test", emailVerified: true })
       .returning({ id: t.user.id });
     await db.insert(t.subscription).values({
       userId: lapsed!.id,
@@ -95,11 +95,11 @@ describe.skipIf(!available)("admin queries (integration)", () => {
     ]);
 
     await db.insert(t.newsletterSubscriber).values([
-      { email: "a@list.origins.test", status: "active" },
-      { email: "b@list.origins.test", status: "active" },
-      { email: "c@list.origins.test", status: "pending" },
-      { email: "d@list.origins.test", status: "unsubscribed" },
-      { email: "e@list.origins.test", status: "bounced" },
+      { email: "a@list.tokenstoscale.test", status: "active" },
+      { email: "b@list.tokenstoscale.test", status: "active" },
+      { email: "c@list.tokenstoscale.test", status: "pending" },
+      { email: "d@list.tokenstoscale.test", status: "unsubscribed" },
+      { email: "e@list.tokenstoscale.test", status: "bounced" },
     ]);
 
     await db.insert(t.webhookEvent).values([
@@ -237,7 +237,7 @@ describe.skipIf(!available)("admin queries (integration)", () => {
     const rows = await recentAudit(tdb.db, 10);
     expect(rows.map((r) => [r.action, r.actorEmail])).toEqual([
       ["billing.reconcile", null],
-      ["admin.view", "admin@users.origins.test"],
+      ["admin.view", "admin@users.tokenstoscale.test"],
     ]);
     expect(rows[1]).toMatchObject({ target: "/admin", meta: { session: "s" } });
   });

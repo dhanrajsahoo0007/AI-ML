@@ -23,7 +23,7 @@ export async function seedTestUsers(
   const ids = {} as Record<TestUserKey, string>;
   await db.transaction(async (tx) => {
     // Concurrent seeds (parallel test workers) take turns instead of racing on the unique emails.
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('origins:seed-test-users'))`);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('tts:seed-test-users'))`);
     for (const key of keys) {
       const spec = TEST_USERS[key];
       const [row] = await tx
@@ -88,7 +88,7 @@ export async function seedTestUsers(
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const url = process.env.DATABASE_URL;
   if (!url) {
-    console.error("db:seed:test: set DATABASE_URL (local: postgres://origins:origins@127.0.0.1:54329/origins_dev)");
+    console.error("db:seed:test: set DATABASE_URL (local: postgres://tts:tts@127.0.0.1:54329/tts_dev)");
     process.exit(1);
   }
   assertLocalDatabase(url, "seed test users");

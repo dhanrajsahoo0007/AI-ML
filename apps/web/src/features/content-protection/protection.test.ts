@@ -16,7 +16,7 @@ const COPY_OK = { kind: "copy-ok" } as unknown as EventTarget;
 
 function env(over: Partial<ProtectionEnv> = {}): ProtectionEnv {
   return {
-    brand: "Origins AI Learn",
+    brand: "TokensToScale",
     isProtected: (t) => t === ARTICLE,
     isEditable: (t) => t === INPUT,
     selectionProtected: () => false,
@@ -47,8 +47,8 @@ function clipboardEvent(target: EventTarget) {
 
 describe("copyNotice", () => {
   it("names the brand and the page URL", () => {
-    expect(copyNotice("Origins AI Learn", "https://x.test/a")).toBe(
-      "Content © Origins AI Learn. Read it at https://x.test/a"
+    expect(copyNotice("TokensToScale", "https://x.test/a")).toBe(
+      "Content © TokensToScale. Read it at https://x.test/a"
     );
   });
 });
@@ -117,7 +117,7 @@ describe("createHandlers", () => {
     expect(ev.preventDefault).toHaveBeenCalled();
     expect(ev.setData).toHaveBeenCalledWith(
       "text/plain",
-      "Content © Origins AI Learn. Read it at https://example.test/system-design/caching"
+      "Content © TokensToScale. Read it at https://example.test/system-design/caching"
     );
     expect(e.toast).toHaveBeenCalled();
   });

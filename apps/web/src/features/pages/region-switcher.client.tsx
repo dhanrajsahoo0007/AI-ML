@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { REGION_COOKIE, normalizeCountry } from "@/config/pricing-tiers";
 
 // The pricing page's region switcher (plan §9.5). The page is prerendered per price tier and middleware picks the
-// variant (server/edge/pricing-variant.ts); this island only stores the visitor's choice in the `oa_region` cookie
+// variant (server/edge/pricing-variant.ts); this island only stores the visitor's choice in the `tts_region` cookie
 // and reloads /pricing. "Your location" clears the cookie. A form with a button rather than a change handler on the
 // select, so moving through the list with the keyboard never reloads the page (WCAG 3.2.2).
 

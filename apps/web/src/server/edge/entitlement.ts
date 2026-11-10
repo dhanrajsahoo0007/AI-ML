@@ -1,13 +1,13 @@
 import { SignJWT, jwtVerify, type JWTHeaderParameters } from "jose";
 import { z } from "zod";
 
-// The `oa_ent` entitlement cookie (plan §9.2, §11.3): an HS256 JWT signed with ENTITLEMENT_SECRET.
+// The `tts_ent` entitlement cookie (plan §9.2, §11.3): an HS256 JWT signed with ENTITLEMENT_SECRET.
 // Verified in middleware with no database. Two keys are accepted at once (current and previous),
 // selected by the `kid` header, so the secret can be rotated without signing anyone out.
 //
 // Edge-safe: Web Crypto only (jose), no Node APIs.
 
-export const ENTITLEMENT_COOKIE = "oa_ent";
+export const ENTITLEMENT_COOKIE = "tts_ent";
 
 /** Clock skew accepted on `exp`/`iat` (plan §11.3: ±2 minutes). */
 export const CLOCK_TOLERANCE_SEC = 120;
@@ -65,7 +65,7 @@ export function keyringFromEnv(current: string | undefined, previous: string | u
 }
 
 /**
- * Verifies an `oa_ent` token. Returns its claims, or null for anything wrong: no keyring, unknown
+ * Verifies an `tts_ent` token. Returns its claims, or null for anything wrong: no keyring, unknown
  * `kid`, bad signature, another algorithm, expired, or claims that don't match the schema.
  */
 export async function verifyEntitlement(
@@ -104,7 +104,7 @@ export function isAdmin(claims: EntitlementClaims | null): boolean {
 }
 
 /**
- * Signs an `oa_ent` token with the current key. Used by `POST /api/entitlements/refresh` (Phase 5)
+ * Signs an `tts_ent` token with the current key. Used by `POST /api/entitlements/refresh` (Phase 5)
  * and by tests; middleware never signs.
  */
 export async function signEntitlement(

@@ -25,7 +25,7 @@ class FakeMessage implements Message<unknown> {
 
 function batchOf(...messages: FakeMessage[]): MessageBatch<unknown> {
   return {
-    queue: "origins-ai-learn-email-test",
+    queue: "tokenstoscale-email-test",
     messages,
     ackAll: () => messages.forEach((m) => m.ack()),
     retryAll: () => messages.forEach((m) => m.retry()),

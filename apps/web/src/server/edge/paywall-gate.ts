@@ -3,7 +3,7 @@ import { normalizePath } from "./sections-gate";
 
 // The premium gate run by middleware (plan §9.2). Pure: no Next.js, no env, no I/O. Input is the build
 // manifest src/generated/premium-routes.json (written by next.config.ts from the access model in
-// features/paywall/access.ts) and the verified `oa_ent` claims.
+// features/paywall/access.ts) and the verified `tts_ent` claims.
 //
 //   paywall off, or a free page          → pass (cacheable as before)
 //   premium page, valid cookie, tier=pro → pass, never stored by shared caches (private, no-store, Vary)
@@ -39,7 +39,7 @@ export function isPremiumPath(pathname: string, premium: ReadonlySet<string>): b
 export function decidePaywall(input: {
   pathname: string;
   premium: ReadonlySet<string>;
-  /** Verified `oa_ent` claims, or null (no cookie, forged, expired, unknown kid). */
+  /** Verified `tts_ent` claims, or null (no cookie, forged, expired, unknown kid). */
   tier: "free" | "pro" | null;
 }): PaywallDecision {
   const { pathname, premium, tier } = input;

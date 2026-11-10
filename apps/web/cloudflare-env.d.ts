@@ -10,7 +10,7 @@ interface CloudflareEnv {
   APP_ENV?: "local" | "preview" | "staging" | "production";
   /** Secret: comma-separated section keys served as a 503 maintenance page (plan §5.1.1). */
   SECTIONS_KILL?: string;
-  /** Secrets: `<kid>:<base64url key>` for the `oa_ent` cookie (plan §11.3). */
+  /** Secrets: `<kid>:<base64url key>` for the `tts_ent` cookie (plan §11.3). */
   ENTITLEMENT_SECRET?: string;
   ENTITLEMENT_SECRET_PREVIOUS?: string;
   /** Billing (plan §9.3, §9.6): secrets DODO_API_KEY, DODO_WEBHOOK_SECRET; vars BILLING_PRIMARY,

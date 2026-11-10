@@ -38,7 +38,7 @@ export interface DbHandle {
 // is also appended to that file, which the e2e crawl reads from outside the server process.
 
 type QueryListener = (query: string) => void;
-const LISTENERS_KEY = Symbol.for("origins.db.queryListeners");
+const LISTENERS_KEY = Symbol.for("tts.db.queryListeners");
 const globalStore = globalThis as typeof globalThis & { [LISTENERS_KEY]?: Set<QueryListener> };
 const listeners = (globalStore[LISTENERS_KEY] ??= new Set());
 
@@ -73,7 +73,7 @@ export function createDb(options: CreateDbOptions = {}): DbHandle {
     max: 1,
     connectionTimeoutMillis: 5_000,
     idleTimeoutMillis: 1_000,
-    application_name: "origins-web",
+    application_name: "tts-web",
   });
   // An idle-client error (server restart, network drop) must not crash the process; the next query reconnects.
   pool.on("error", () => {});

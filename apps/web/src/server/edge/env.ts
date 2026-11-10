@@ -5,7 +5,7 @@ import { z } from "zod";
 // under `next start` they come from the shell.
 //
 // Names only (values are never committed):
-//   ENTITLEMENT_SECRET           secret  `<kid>:<base64url 256-bit key>`, signs and verifies `oa_ent`
+//   ENTITLEMENT_SECRET           secret  `<kid>:<base64url 256-bit key>`, signs and verifies `tts_ent`
 //   ENTITLEMENT_SECRET_PREVIOUS  secret  the previous key, verify-only during rotation (plan §11.3)
 //   SECTIONS_KILL                secret  comma-separated section keys → 503 maintenance (plan §5.1.1);
 //                                        `wrangler secret put SECTIONS_KILL --env production` takes

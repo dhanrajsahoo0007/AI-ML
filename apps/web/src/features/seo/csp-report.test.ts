@@ -7,7 +7,7 @@ import { CSP_REPORT_MAX_BYTES, parseCspReports, scrubUrl } from "./csp-report";
 
 const legacy = {
   "csp-report": {
-    "document-uri": "https://origins.example/newsletter/confirm?token=secret-token",
+    "document-uri": "https://tokenstoscale.example/newsletter/confirm?token=secret-token",
     "blocked-uri": "https://evil.example/x.js?a=1",
     "effective-directive": "script-src-elem",
     disposition: "report",
@@ -18,7 +18,7 @@ const modern = [
   {
     type: "csp-violation",
     body: {
-      documentURL: "https://origins.example/dsa#x",
+      documentURL: "https://tokenstoscale.example/dsa#x",
       blockedURL: "eval",
       effectiveDirective: "script-src",
       sample: "x".repeat(99),
@@ -31,7 +31,7 @@ describe("parseCspReports", () => {
   it("reads both report formats into the same fields, without query strings", () => {
     expect(parseCspReports(legacy)).toEqual([
       expect.objectContaining({
-        document: "https://origins.example/newsletter/confirm",
+        document: "https://tokenstoscale.example/newsletter/confirm",
         blocked: "https://evil.example/x.js",
         directive: "script-src-elem",
         line: 3,
@@ -39,7 +39,11 @@ describe("parseCspReports", () => {
     ]);
     const [v, ...rest] = parseCspReports(modern);
     expect(rest).toEqual([]);
-    expect(v).toMatchObject({ document: "https://origins.example/dsa", blocked: "eval", directive: "script-src" });
+    expect(v).toMatchObject({
+      document: "https://tokenstoscale.example/dsa",
+      blocked: "eval",
+      directive: "script-src",
+    });
     expect(v!.sample).toHaveLength(40);
     expect(parseCspReports({ hello: 1 })).toEqual([]);
     expect(scrubUrl("data:text/html,hi")).toBe("data:");
@@ -57,7 +61,7 @@ describe("POST /api/csp-report", () => {
 
   const post = (body: string, type = "application/csp-report", ip = "203.0.113.20") =>
     POST(
-      new Request("https://origins.example/api/csp-report", {
+      new Request("https://tokenstoscale.example/api/csp-report", {
         method: "POST",
         body,
         headers: { "content-type": type, "cf-connecting-ip": ip },

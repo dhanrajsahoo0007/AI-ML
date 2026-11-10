@@ -8,7 +8,7 @@ describe("redact", () => {
       userEmail: "a@b.co",
       token: "t",
       access_token: "t",
-      cookie: "oa_ent=1",
+      cookie: "tts_ent=1",
       headers: { Cookie: "s=1", "Set-Cookie": "s=1", authorization: "Bearer abc", "user-agent": "UA" },
       password: "p",
       api_key: "k",
