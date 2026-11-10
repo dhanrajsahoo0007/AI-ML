@@ -11,7 +11,7 @@ import { getIconComponent } from "@/lib/icons";
 import { siteConfig } from "@/config/site";
 import { ThemeToggle } from "@/components/theme";
 import { SearchButton } from "@/features/search/search-dialog.client";
-import { SUBSCRIBE_KIND } from "@/features/sections/public";
+import { GROUPS_ONLY_KINDS, SUBSCRIBE_KIND } from "@/features/sections/public";
 import type { HeaderNavItems, HeaderNavSection } from "@/features/sections/public";
 
 // Header: every visible section from content/sections.yaml is its own item in the top bar (in registry order),
@@ -361,6 +361,8 @@ function SectionPanel({
   }
 
   const unit = section.kind === "directory" ? "listed" : "pages";
+  // Interview Practice lists its topics only; every other section shows a group's articles beside it.
+  const groupsOnly = GROUPS_ONLY_KINDS.includes(section.kind);
   const active = section.groups.find((g) => g.slug === activeSlug);
   const blocks = active && items ? (items[section.key]?.[active.slug] ?? []) : [];
 
@@ -372,7 +374,44 @@ function SectionPanel({
           View all <ArrowRight aria-hidden className="size-3.5" />
         </Link>
       </div>
-      {section.groups.length > 0 && (
+      {section.groups.length > 0 && groupsOnly && (
+        <ul className="grid grid-cols-2 gap-2 overflow-y-auto p-4 lg:grid-cols-3">
+          {section.groups.map((group) => {
+            const Icon = group.icon ? getIconComponent(group.icon) : undefined;
+            return (
+              <li key={group.slug}>
+                <Link
+                  href={group.href}
+                  aria-current={isUnder(pathname, group.href) ? "true" : undefined}
+                  className={cn(
+                    "group/card flex h-full items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors hover:border-tint/60 hover:bg-paper-2/60",
+                    isUnder(pathname, group.href) ? "border-ink/30 bg-paper-2" : "border-hairline"
+                  )}
+                >
+                  {Icon && (
+                    <Icon
+                      aria-hidden
+                      className={cn(
+                        "size-4 shrink-0 group-hover/card:text-tint",
+                        isUnder(pathname, group.href) ? "text-tint" : "text-muted-foreground"
+                      )}
+                    />
+                  )}
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-ink">{group.title}</span>
+                    {group.count > 0 && (
+                      <span className="block text-xs text-muted-foreground">
+                        {group.count} {unit}
+                      </span>
+                    )}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {section.groups.length > 0 && !groupsOnly && (
         <div className="flex h-[30rem] max-h-full min-h-0">
           <ul className="w-64 shrink-0 overflow-y-auto border-r border-hairline p-2">
             {section.groups.map((group) => {

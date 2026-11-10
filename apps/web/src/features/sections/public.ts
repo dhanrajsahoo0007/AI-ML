@@ -23,6 +23,12 @@ export interface PublicNavLink {
 /** Sections of this kind get a "Subscribe" call to action in the header once they have pages. */
 export const SUBSCRIBE_KIND: SectionKindName = "newsletter";
 
+/**
+ * Kinds whose header menu lists only the first-level groups (Interview Practice: its topics), with no article
+ * pane beside them. Their articles are left out of nav-items.json.
+ */
+export const GROUPS_ONLY_KINDS: readonly SectionKindName[] = ["question-bank"];
+
 export const NAV_GROUP_LABELS: Record<NavGroupName, string> = {
   learn: "Learn",
   practice: "Practice",
@@ -107,23 +113,25 @@ export type HeaderNavItems = Record<string, Record<string, HeaderNavBlock[]>>;
 export function headerNavItems(navs: FullNavSection[]): HeaderNavItems {
   type Item = { title: string; href: string; slug: string };
   return Object.fromEntries(
-    navs.map((nav) => {
-      const withSlug = nav.kind === "directory";
-      const pick = (items: unknown[]) =>
-        (items as Item[]).map(({ title, href, slug }) => ({ title, href, ...(withSlug ? { slug } : {}) }));
-      return [
-        nav.key,
-        Object.fromEntries(
-          nav.groups.map((g) => {
-            const blocks: HeaderNavBlock[] = [];
-            if (g.items?.length) blocks.push({ items: pick(g.items) });
-            for (const c of g.categories ?? [])
-              if (c.items.length)
-                blocks.push({ title: c.title, ...(c.icon ? { icon: c.icon } : {}), items: pick(c.items) });
-            return [g.slug, blocks];
-          })
-        ),
-      ];
-    })
+    navs
+      .filter((nav) => !GROUPS_ONLY_KINDS.includes(nav.kind))
+      .map((nav) => {
+        const withSlug = nav.kind === "directory";
+        const pick = (items: unknown[]) =>
+          (items as Item[]).map(({ title, href, slug }) => ({ title, href, ...(withSlug ? { slug } : {}) }));
+        return [
+          nav.key,
+          Object.fromEntries(
+            nav.groups.map((g) => {
+              const blocks: HeaderNavBlock[] = [];
+              if (g.items?.length) blocks.push({ items: pick(g.items) });
+              for (const c of g.categories ?? [])
+                if (c.items.length)
+                  blocks.push({ title: c.title, ...(c.icon ? { icon: c.icon } : {}), items: pick(c.items) });
+              return [g.slug, blocks];
+            })
+          ),
+        ];
+      })
   );
 }
