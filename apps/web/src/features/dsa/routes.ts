@@ -8,10 +8,19 @@ import { CONTENT_DIR, isPathVisible, sectionOfKind, routeSection } from "../sect
 import type { SectionDef } from "../sections";
 import { problemListHref, problemsForTopic, problemsKind } from "./kind";
 import { buildProblemIndex } from "./problem-index";
-import { loadDsaItems, loadPatterns, readPublicTests, validProblems, validTopics, type ValidProblem } from "./source";
+import {
+  loadDsaItems,
+  loadPatterns,
+  readPublicTests,
+  validProblems,
+  validTopics,
+  withoutDrafts,
+  type ValidProblem,
+} from "./source";
 
 // Helpers for the app/<section> routes of the problems kind. Every page is prerendered: these run at build
-// time only. A section that is `off` builds no topic or problem pages, and its static pages render 404.
+// time only. A section that is `off` builds no topic or problem pages, and its static pages render 404. Drafts
+// get no page at all.
 
 export type TopicParams = Promise<{ topic: string }>;
 export type ProblemParams = Promise<{ slug: string }>;
@@ -31,17 +40,18 @@ function items(section: SectionDef) {
   return all;
 }
 
+/** The section's items, and its topics and problems that have pages (drafts left out). */
 export function dsaContent(section: SectionDef = dsaSection()) {
   const all = items(section);
-  return { section, items: all, topics: validTopics(all), problems: validProblems(all) };
+  return { section, items: all, topics: withoutDrafts(validTopics(all)), problems: withoutDrafts(validProblems(all)) };
 }
 
 export function topicParams() {
-  return isBuilt() ? validTopics(items(sectionOfKind("problems"))).map((t) => ({ topic: t.slug })) : [];
+  return isBuilt() ? dsaContent(sectionOfKind("problems")).topics.map((t) => ({ topic: t.slug })) : [];
 }
 
 export function problemParams() {
-  return isBuilt() ? validProblems(items(sectionOfKind("problems"))).map((p) => ({ slug: p.slug })) : [];
+  return isBuilt() ? dsaContent(sectionOfKind("problems")).problems.map((p) => ({ slug: p.slug })) : [];
 }
 
 export function getTopic(slug: string) {

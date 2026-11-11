@@ -1,8 +1,17 @@
+import fs from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sectionOfKind, type SectionDef } from "../sections/registry";
 import { kindOf } from "../sections/kinds";
 import { problemListHref, problemsKind } from "./kind";
-import { loadDsaItems, problemsOf, topicsOf, validProblems, type DsaItem, type ValidProblem } from "./source";
+import {
+  loadDsaItems,
+  problemsOf,
+  referenceSolutionPath,
+  topicsOf,
+  validProblems,
+  type DsaItem,
+  type ValidProblem,
+} from "./source";
 
 // The `problems` kind against the real DSA content and registry entry (plan §15.1). The section is picked by
 // kind, never by key (plan §5.1).
@@ -57,6 +66,37 @@ describe("problems kind: contract", () => {
   });
   it("counts published problems as written", () => {
     expect(problemsKind.counts(items)).toEqual({ written: problems.length, outline: 0 });
+  });
+});
+
+describe("problems kind: drafts", () => {
+  const draftProblem = { ...byTitle("LRU Cache"), fm: { ...byTitle("LRU Cache").fm, status: "draft" as const } };
+  const topic = topicsOf(items)[1];
+  const draftTopic = { ...topic, fm: { ...topic.fm!, status: "draft" as const } };
+  const withDrafts = items.map((i) => (i.slug === draftProblem.slug ? draftProblem : i === topic ? draftTopic : i));
+
+  it("are not built: no route params for a draft topic or problem", () => {
+    const params = problemsKind.staticParams(section, withDrafts);
+    expect(params).toHaveLength(items.length - 2);
+    expect(params).not.toContainEqual({ slug: draftProblem.slug });
+    expect(params).not.toContainEqual({ topic: topic.slug });
+  });
+  it("are left out of the sitemap, search and the sidebar", () => {
+    const urls = problemsKind.sitemap(section, withDrafts).map((e) => e.url);
+    expect(urls).not.toContain(draftProblem.href);
+    expect(urls).not.toContain(topic.href);
+    const hrefs = problemsKind.search(section, withDrafts).map((d) => d.href);
+    expect(hrefs).not.toContain(draftProblem.href);
+    expect(hrefs).not.toContain(topic.href);
+    expect(JSON.stringify(problemsKind.nav(section, withDrafts))).not.toContain(topic.href);
+  });
+  it("are still validated, and a related link to a draft is reported", async () => {
+    const twoSum = byTitle("Two Sum");
+    const list = withDrafts.map((i) =>
+      i === twoSum ? { ...twoSum, fm: { ...twoSum.fm, related: [draftProblem.href] } } : i
+    );
+    const errors = (await problemsKind.validate(section, list)).map((e) => e.message);
+    expect(errors).toContain(`related page ${draftProblem.href} does not exist`);
   });
 });
 
@@ -141,6 +181,46 @@ describe("problems kind: validate", () => {
       "missing <PremiumBreak/> between the statement and the editorial",
       "related page /system-design/patterns/no-such-page does not exist",
     ]);
+  });
+  it("requires hidden case names of the form hidden/<slug>/NN <label>", async () => {
+    // Pointing Two Sum at another problem's hidden file: every name carries the wrong slug.
+    const wrongSlug = await messages(
+      broken("Two Sum", { tests: { public: "tests/two-sum.public.json", hidden: "tests/lru-cache.hidden.json" } })
+    );
+    expect(wrongSlug).toContain('case 1: hidden case names must be "hidden/two-sum/NN <label>"');
+  });
+  it("requires a Python reference solution that defines the entry and has no __main__ block", async () => {
+    const p = byTitle("Two Sum");
+    const file = referenceSolutionPath(section, p.slug);
+    const real = { exists: fs.existsSync, read: fs.readFileSync };
+    const text = real.read(file, "utf8");
+
+    vi.spyOn(fs, "existsSync").mockImplementation((f) => f !== file && real.exists(f));
+    expect(await messages(items)).toEqual(["no Python reference solution (solutions/two-sum.py)"]);
+    vi.restoreAllMocks();
+
+    const bad = `${text.replace("def two_sum", "def solve")}\nif __name__ == "__main__":\n    print(solve([1, 2], 3))\n`;
+    vi.spyOn(fs, "readFileSync").mockImplementation(((f: fs.PathOrFileDescriptor, o?: BufferEncoding) =>
+      f === file ? bad : real.read(f, o)) as typeof fs.readFileSync);
+    expect(await messages(items)).toEqual([
+      "the reference solution does not define two_sum at the top level",
+      'remove the `if __name__ == "__main__":` block',
+    ]);
+    vi.restoreAllMocks();
+
+    const starter = `${p.fm.starter.python}\nif __name__ == "__main__":\n    pass\n`;
+    expect(await messages(broken("Two Sum", { starter: { ...p.fm.starter, python: starter } }))).toEqual([
+      'the python starter has an `if __name__ == "__main__":` block',
+    ]);
+  });
+  it("needs no Python reference for a problem without Python", async () => {
+    const p = byTitle("Two Sum");
+    const jsOnly = broken("Two Sum", {
+      languages: ["javascript"],
+      starter: { javascript: p.fm.starter.javascript },
+      entry: { javascript: p.fm.entry.javascript },
+    });
+    expect(await messages(jsOnly)).toEqual([]);
   });
   it("reserves the problem-list segment for the list", async () => {
     const t = topicsOf(items)[0];

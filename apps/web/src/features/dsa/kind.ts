@@ -3,7 +3,15 @@ import path from "node:path";
 import { navSection, type CompanyRef, type ContentError, type SectionKind } from "../sections/kind";
 import { CONTENT_DIR } from "../sections/registry";
 import { DESCRIPTION_MAX, type SectionDef } from "../sections/schema";
-import { classCaseSchema, LANGUAGES, MIN_HIDDEN_TESTS, PREMIUM_BREAK } from "./schema";
+import {
+  classCaseSchema,
+  hiddenNamePattern,
+  LANGUAGES,
+  MIN_HIDDEN_TESTS,
+  PREMIUM_BREAK,
+  PY_MAIN_GUARD,
+  type TestCase,
+} from "./schema";
 import { DIFFICULTIES, DIFFICULTY_LABELS } from "./constants";
 import {
   dsaDir,
@@ -14,9 +22,13 @@ import {
   problemsOf,
   readHiddenTestsForValidation,
   readPublicTests,
+  readReferenceSolutionForValidation,
+  referenceSolutionPath,
+  SOLUTIONS_DIR,
   testFilePath,
   topicsOf,
   validProblems,
+  withoutDrafts,
   type DsaItem,
   type ValidProblem,
 } from "./source";
@@ -31,6 +43,7 @@ import {
 //
 // Access: a problem's statement and public tests are free; `access` (or the section's rules: topics and
 // easy problems are always free) decides whether the editorial is shown or replaced by a Pro placeholder.
+// Drafts (`status: draft`, topic or problem) are validated but not built, listed, indexed or in the sitemap.
 
 /** The problem list's path for a section. */
 export const problemListHref = (section: Pick<SectionDef, "href">) => `${section.href}/${PROBLEMS_SEGMENT}`;
@@ -54,7 +67,9 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** True when a site path in `related` names a page that exists in the content tree. */
 function relatedExists(section: SectionDef, items: DsaItem[], href: string): boolean {
   if (href === section.href || href.startsWith(`${section.href}/`)) {
-    return href === section.href || href === problemListHref(section) || items.some((i) => i.href === href);
+    return (
+      href === section.href || href === problemListHref(section) || withoutDrafts(items).some((i) => i.href === href)
+    );
   }
   return fs.existsSync(path.join(CONTENT_DIR, `${href.slice(1)}.mdx`));
 }
@@ -67,7 +82,8 @@ export const problemsKind: SectionKind<DsaItem> = {
   },
 
   staticParams(_section, items) {
-    return [...topicsOf(items).map((t) => ({ topic: t.slug })), ...problemsOf(items).map((p) => ({ slug: p.slug }))];
+    const built = withoutDrafts(items);
+    return [...topicsOf(built).map((t) => ({ topic: t.slug })), ...problemsOf(built).map((p) => ({ slug: p.slug }))];
   },
 
   // Two groups: the topics, and the problems by difficulty.
@@ -78,7 +94,7 @@ export const problemsKind: SectionKind<DsaItem> = {
         slug: "topics",
         title: "Topics",
         href: section.href,
-        items: topicsOf(items).map((t) => ({ slug: t.slug, title: t.title, href: t.href })),
+        items: topicsOf(withoutDrafts(items)).map((t) => ({ slug: t.slug, title: t.title, href: t.href })),
       },
       {
         slug: PROBLEMS_SEGMENT,
@@ -95,12 +111,21 @@ export const problemsKind: SectionKind<DsaItem> = {
   },
 
   sitemap(section, items) {
-    return [{ url: section.href }, { url: problemListHref(section) }, ...items.map((i) => ({ url: i.href }))];
+    return [
+      { url: section.href },
+      { url: problemListHref(section) },
+      ...withoutDrafts(items).map((i) => ({ url: i.href })),
+    ];
   },
 
   // Titles and one-line summaries only: no statement, editorial or tests.
   search(section, items) {
-    return items.map((i) => ({ href: i.href, title: i.title, description: i.description, section: section.key }));
+    return withoutDrafts(items).map((i) => ({
+      href: i.href,
+      title: i.title,
+      description: i.description,
+      section: section.key,
+    }));
   },
 
   access,
@@ -237,6 +262,14 @@ function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProbl
       c.push(target, (e as Error).message.replace(`${target}: `, ""));
     }
   }
+  if (loaded.hidden) {
+    const pattern = hiddenNamePattern(problem.slug);
+    const target = testFilePath(section, fm.tests.hidden);
+    (loaded.hidden as TestCase[]).forEach((tc, i) => {
+      if (!tc.name || !pattern.test(tc.name))
+        c.push(target, `case ${i + 1}: hidden case names must be "hidden/${problem.slug}/NN <label>"`);
+    });
+  }
   if (loaded.hidden && loaded.hidden.length < MIN_HIDDEN_TESTS) {
     c.push(
       file,
@@ -250,6 +283,21 @@ function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProbl
     const pub = new Set(loaded.public.map(key));
     if (loaded.hidden.some((tc) => pub.has(key(tc))))
       c.push(file, "a hidden test repeats a public one", c.fieldLine(file, "tests"), "warning");
+  }
+
+  // Python: a reference solution in solutions/<slug>.py that defines the entry, and no __main__ block anywhere.
+  if (fm.languages.includes("python")) {
+    const entry = fm.entry.python;
+    const reference = readReferenceSolutionForValidation(section, problem.slug);
+    const refFile = referenceSolutionPath(section, problem.slug);
+    if (reference === null) c.push(file, `no Python reference solution (${SOLUTIONS_DIR}/${problem.slug}.py)`);
+    else {
+      if (entry && !new RegExp(`^(?:def|class)\\s+${escape(entry)}\\b`, "m").test(reference))
+        c.push(refFile, `the reference solution does not define ${entry} at the top level`);
+      if (PY_MAIN_GUARD.test(reference)) c.push(refFile, 'remove the `if __name__ == "__main__":` block');
+    }
+    if (fm.starter.python && PY_MAIN_GUARD.test(fm.starter.python))
+      c.push(file, 'the python starter has an `if __name__ == "__main__":` block', c.fieldLine(file, "starter"));
   }
 
   for (const href of fm.related) {

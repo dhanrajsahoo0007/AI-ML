@@ -21,7 +21,9 @@ import {
 //
 // Hidden tests: only their path is kept on the item. The one reader of their contents is
 // readHiddenTestsForValidation(), used by content-check; no page imports it, so hidden cases never reach a
-// page, its RSC payload or a client bundle (tested in src/features/dsa/leak.test.ts).
+// page, its RSC payload or a client bundle (tested in src/features/dsa/leak.test.ts). Reference solutions
+// (content/<section>/solutions/<slug>.py) follow the same rule: readReferenceSolutionForValidation() is their one
+// reader, for content-check and the tests.
 
 type Section = Pick<SectionDef, "key" | "href">;
 
@@ -58,6 +60,7 @@ export type ValidTopic = DsaTopic & { fm: TopicFrontmatter };
 
 export const TOPICS_DIR = "topics";
 const PROBLEMS_DIR = "problems";
+export const SOLUTIONS_DIR = "solutions";
 export const PATTERNS_FILE = "patterns.yaml";
 /** Path segment of the problem list and problem pages, below the section href. */
 export const PROBLEMS_SEGMENT = "problems";
@@ -144,6 +147,9 @@ export function validTopics(items: DsaItem[]): ValidTopic[] {
   return topicsOf(items).filter((t): t is ValidTopic => t.fm !== null);
 }
 
+/** `status: draft` topics and problems are not built, listed, indexed or put in the sitemap. */
+export const withoutDrafts = <T extends DsaItem>(items: T[]) => items.filter((i) => i.fm?.status !== "draft");
+
 /** The section's pattern list; empty when the file is missing or invalid (content-check reports that). */
 export function loadPatterns(section: Pick<SectionDef, "key">): Pattern[] {
   const file = path.join(dsaDir(section), PATTERNS_FILE);
@@ -180,6 +186,20 @@ export function readPublicTests(section: Pick<SectionDef, "key">, problem: Valid
  */
 export function readHiddenTestsForValidation(section: Pick<SectionDef, "key">, problem: ValidProblem): TestCase[] {
   return readTestFile(testFilePath(section, problem.fm.tests.hidden));
+}
+
+/** Where a problem's Python reference solution lives (whether or not it exists). */
+export function referenceSolutionPath(section: Pick<SectionDef, "key">, slug: string) {
+  return path.join(dsaDir(section), SOLUTIONS_DIR, `${slug}.py`);
+}
+
+/**
+ * A problem's Python reference solution, or null when there is none. For content-check and the tests only:
+ * like hidden tests, it must never reach a page, its RSC payload or a client bundle.
+ */
+export function readReferenceSolutionForValidation(section: Pick<SectionDef, "key">, slug: string): string | null {
+  const file = referenceSolutionPath(section, slug);
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
 }
 
 /** Splits a problem's MDX body at <PremiumBreak/>: the statement (free) and the editorial. */

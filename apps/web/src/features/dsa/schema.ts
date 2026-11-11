@@ -15,6 +15,17 @@ export { LANGUAGES } from "./constants";
 /** Minimum hidden cases a published problem should have (fewer is a content-check warning). */
 export const MIN_HIDDEN_TESTS = 5;
 
+/**
+ * Every hidden case is named `hidden/<slug>/NN <label>` (NN = two digits). The prefix is a sentinel: the leak test
+ * fails if it shows up in any client bundle or prerendered page, whichever problem it belongs to.
+ */
+export const hiddenNamePattern = (slug: string) => new RegExp(`^hidden/${slug}/\\d{2} \\S.*$`);
+/** Any hidden case name, of any problem, as it would appear in shipped text. */
+export const HIDDEN_NAME_SENTINEL = /hidden\/[a-z0-9]+(?:-[a-z0-9]+)*\/\d{2} /;
+
+/** A Python `if __name__ == "__main__":` block. The harness runs code as __main__, so the block would run too. */
+export const PY_MAIN_GUARD = /^\s*if\s+__name__\s*==/m;
+
 /** The marker between the free statement and the editorial in a problem's MDX body. */
 export const PREMIUM_BREAK = /^[ \t]*<PremiumBreak\s*\/>[ \t]*$/m;
 
