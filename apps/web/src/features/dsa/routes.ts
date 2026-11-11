@@ -6,12 +6,13 @@ import { notFound } from "next/navigation";
 import { getCompanies } from "@/lib/question-bank";
 import { CONTENT_DIR, isPathVisible, sectionOfKind, routeSection } from "../sections";
 import type { SectionDef } from "../sections";
-import { problemListHref, problemsForTopic, problemsKind } from "./kind";
+import { outlinesForTopic, problemListHref, problemsForTopic, problemsKind } from "./kind";
 import { buildProblemIndex } from "./problem-index";
 import {
   loadDsaItems,
   loadPatterns,
   readPublicTests,
+  validOutlines,
   validProblems,
   validTopics,
   withoutDrafts,
@@ -43,7 +44,13 @@ function items(section: SectionDef) {
 /** The section's items, and its topics and problems that have pages (drafts left out). */
 export function dsaContent(section: SectionDef = dsaSection()) {
   const all = items(section);
-  return { section, items: all, topics: withoutDrafts(validTopics(all)), problems: withoutDrafts(validProblems(all)) };
+  return {
+    section,
+    items: all,
+    topics: withoutDrafts(validTopics(all)),
+    problems: withoutDrafts(validProblems(all)),
+    outlines: validOutlines(all),
+  };
 }
 
 export function topicParams() {
@@ -51,14 +58,28 @@ export function topicParams() {
 }
 
 export function problemParams() {
-  return isBuilt() ? dsaContent(sectionOfKind("problems")).problems.map((p) => ({ slug: p.slug })) : [];
+  if (!isBuilt()) return [];
+  const { problems, outlines } = dsaContent(sectionOfKind("problems"));
+  return [...problems, ...outlines].map((p) => ({ slug: p.slug }));
 }
 
 export function getTopic(slug: string) {
   const content = dsaContent();
   const topic = content.topics.find((t) => t.slug === slug);
   if (!topic) notFound();
-  return { ...content, topic, problems: problemsForTopic(content.items, slug) };
+  return {
+    ...content,
+    topic,
+    problems: problemsForTopic(content.items, slug),
+    topicOutlines: outlinesForTopic(content.items, slug),
+  };
+}
+
+/** The statement-only outline at this slug, or undefined (then it is a written problem or a 404). */
+export function findOutline(slug: string) {
+  const content = dsaContent();
+  const outline = content.outlines.find((o) => o.slug === slug);
+  return outline ? { ...content, outline } : undefined;
 }
 
 export function getProblem(slug: string) {

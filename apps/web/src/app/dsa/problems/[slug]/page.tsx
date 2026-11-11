@@ -6,6 +6,8 @@ import {
   ProEditorial,
   Tags,
   problemListHref,
+  findOutline,
+  outlineStatement,
   problemEditorial,
   problemStatement,
   getProblem,
@@ -29,6 +31,11 @@ export function generateStaticParams() {
 }
 
 export async function generateMetadata({ params }: { params: ProblemParams }, parent: ResolvingMetadata) {
+  const found = findOutline((await params).slug);
+  if (found) {
+    const { title, description } = found.outline.fm;
+    return withParentImages({ title, description, alternates: { canonical: found.outline.href } }, parent);
+  }
   const { section, problem, access } = getProblem((await params).slug);
   return withParentImages((await problemSeo(section, problem, access)).metadata, parent);
 }
@@ -37,6 +44,8 @@ export async function generateMetadata({ params }: { params: ProblemParams }, pa
 // a premium problem replaces with a Pro placeholder (its MDX is never compiled for this page). The one exception
 // is the owner's local review on `next dev` (features/dsa/local-view.ts), which no other build can reach.
 export default async function ProblemPage({ params }: { params: ProblemParams }) {
+  const found = findOutline((await params).slug);
+  if (found) return <OutlinePage section={found.section} outline={found.outline} />;
   const { section, problem, access } = getProblem((await params).slug);
   const { fm } = problem;
   const seo = await problemSeo(section, problem, access);
@@ -109,6 +118,36 @@ export default async function ProblemPage({ params }: { params: ProblemParams })
           </ul>
         </section>
       )}
+    </div>
+  );
+}
+
+// A statement-only outline: the problem as written in the owner's notes, before its starter code, tests and
+// editorial exist. Same URL as the full problem will have.
+async function OutlinePage({
+  section,
+  outline,
+}: Pick<NonNullable<ReturnType<typeof findOutline>>, "section" | "outline">) {
+  return (
+    <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
+      <Breadcrumb
+        items={[
+          ...hubCrumbs(section),
+          { label: "Problems", href: problemListHref(section) },
+          { label: outline.fm.title },
+        ]}
+      />
+      <header className="mt-10 mb-8 space-y-4 border-b border-hairline pb-8">
+        <h1 className="font-display text-4xl leading-[1.05] tracking-tight text-balance sm:text-5xl">
+          {outline.fm.title}
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Outline{outline.fm.group ? ` · ${outline.fm.group}` : ""} · the editor, tests and editorial are still to come
+        </p>
+      </header>
+      <article className="prose-editorial" data-dsa-statement>
+        {await outlineStatement(outline.file)}
+      </article>
     </div>
   );
 }

@@ -5,11 +5,13 @@ import yaml from "js-yaml";
 import { CONTENT_DIR } from "../sections/registry";
 import type { SectionDef } from "../sections";
 import {
+  outlineFrontmatterSchema,
   patternsSchema,
   PREMIUM_BREAK,
   problemFrontmatterSchema,
   testFileSchema,
   topicFrontmatterSchema,
+  type OutlineFrontmatter,
   type Pattern,
   type ProblemFrontmatter,
   type TestCase,
@@ -52,7 +54,13 @@ export interface DsaProblem extends Base {
   hasBreak: boolean;
 }
 
-export type DsaItem = DsaTopic | DsaProblem;
+/** A statement-only page for a problem that has no starter, tests or editorial yet. */
+export interface DsaOutline extends Base {
+  type: "outline";
+  fm: OutlineFrontmatter | null;
+}
+
+export type DsaItem = DsaTopic | DsaProblem | DsaOutline;
 
 /** A problem whose frontmatter passed validation. */
 export type ValidProblem = DsaProblem & { fm: ProblemFrontmatter };
@@ -60,6 +68,7 @@ export type ValidTopic = DsaTopic & { fm: TopicFrontmatter };
 
 export const TOPICS_DIR = "topics";
 const PROBLEMS_DIR = "problems";
+const OUTLINES_DIR = "outlines";
 export const SOLUTIONS_DIR = "solutions";
 export const PATTERNS_FILE = "patterns.yaml";
 /** Path segment of the problem list and problem pages, below the section href. */
@@ -130,13 +139,38 @@ export function loadDsaItems(section: Section): DsaItem[] {
     };
   });
 
-  const items = [...topics.sort(byOrder), ...problems.sort(byOrder)];
+  // An outline shares its URL with the full problem it will become; once problems/<slug>.mdx exists it wins.
+  const written = new Set(problems.map((p) => p.slug));
+  const outlines = mdxFiles(path.join(dir, OUTLINES_DIR))
+    .filter((name) => !written.has(name.slice(0, -4)))
+    .map((name): DsaOutline => {
+      const file = path.join(dir, OUTLINES_DIR, name);
+      const slug = name.slice(0, -4);
+      const { data } = matter(fs.readFileSync(file, "utf8"));
+      const parsed = outlineFrontmatterSchema.safeParse(data);
+      return {
+        type: "outline",
+        slug,
+        href: `${section.href}/${PROBLEMS_SEGMENT}/${slug}`,
+        file,
+        data,
+        issues: parsed.success ? [] : issuesOf(parsed.error),
+        fm: parsed.success ? parsed.data : null,
+        title: typeof data.title === "string" ? data.title : slug,
+        description: typeof data.description === "string" ? data.description : undefined,
+      };
+    });
+
+  const items = [...topics.sort(byOrder), ...problems.sort(byOrder), ...outlines.sort(byOrder)];
   cache.set(section.key, items);
   return items;
 }
 
 export const topicsOf = (items: DsaItem[]) => items.filter((i): i is DsaTopic => i.type === "topic");
 export const problemsOf = (items: DsaItem[]) => items.filter((i): i is DsaProblem => i.type === "problem");
+export type ValidOutline = DsaOutline & { fm: OutlineFrontmatter };
+export const validOutlines = (items: DsaItem[]) =>
+  items.filter((i): i is ValidOutline => i.type === "outline" && i.fm !== null);
 
 /** Valid items only; pages call this, and content-check has already failed the build on invalid ones. */
 export function validProblems(items: DsaItem[]): ValidProblem[] {

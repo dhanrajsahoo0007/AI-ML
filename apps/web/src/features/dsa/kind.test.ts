@@ -37,17 +37,22 @@ describe("problems kind: contract", () => {
     const params = problemsKind.staticParams(section, items);
     expect(params).toHaveLength(items.length);
     expect(params.filter((p) => "topic" in p).map((p) => p.topic)).toEqual(topicsOf(items).map((t) => t.slug));
-    expect(params.filter((p) => "slug" in p).map((p) => p.slug)).toEqual(problemsOf(items).map((p) => p.slug));
+    // Written problems first, then the statement-only outlines, which live at the same kind of URL.
+    const pages = items.filter((i) => i.type !== "topic");
+    expect(pages.length).toBeGreaterThan(problemsOf(items).length);
+    expect(params.filter((p) => "slug" in p).map((p) => p.slug)).toEqual(pages.map((p) => p.slug));
   });
-  it("builds a nav with the topics and one link to the problem list (no problem one by one)", () => {
+  it("builds a nav with one group per topic holding its problems, then a link to the problem list", () => {
     const nav = problemsKind.nav(section, items);
     expect(nav.href).toBe(section.href);
     expect(nav.comingSoon).toBeUndefined();
-    expect(nav.groups.map((g) => g.title)).toEqual(["Topics", "Problems"]);
-    expect(nav.groups[0].items!.map((i) => i.href)).toEqual(topicsOf(items).map((t) => t.href));
-    expect(nav.groups[1]).toEqual({ slug: "problems", title: "Problems", href: problemListHref(section) });
+    const topics = topicsOf(items);
+    expect(nav.groups.map((g) => g.title)).toEqual([...topics.map((t) => t.title), "Problems"]);
+    expect(nav.groups.slice(0, -1).map((g) => g.href)).toEqual(topics.map((t) => t.href));
+    expect(nav.groups.at(-1)).toEqual({ slug: "problems", title: "Problems", href: problemListHref(section) });
+    // Every published problem is listed under each of its topics.
     const json = JSON.stringify(nav);
-    for (const p of problems) expect(json).not.toContain(p.href);
+    for (const p of problems.filter((p) => p.fm?.status === "published")) expect(json).toContain(p.href);
   });
   it("lists every page in the sitemap", () => {
     const urls = problemsKind.sitemap(section, items).map((e) => e.url);
@@ -56,13 +61,16 @@ describe("problems kind: contract", () => {
   it("indexes titles and summaries only for search", () => {
     const docs = problemsKind.search(section, items);
     expect(docs).toHaveLength(items.length);
-    const text = JSON.stringify(docs);
+    // An outline's summary is the first sentence of its statement, so this check is for written problems.
+    const outlineHrefs = new Set(items.filter((i) => i.type === "outline").map((i) => i.href));
+    const text = JSON.stringify(docs.filter((d) => !outlineHrefs.has(d.href)));
     // Words that occur only in statements and editorials.
     for (const phrase of ["PremiumBreak", "Brute force", "doubly linked list", "Constraints"])
       expect(text).not.toContain(phrase);
   });
   it("counts published problems as written", () => {
-    expect(problemsKind.counts(items)).toEqual({ written: problems.length, outline: 0 });
+    const outlines = items.filter((i) => i.type === "outline").length;
+    expect(problemsKind.counts(items)).toEqual({ written: problems.length, outline: outlines });
   });
 });
 

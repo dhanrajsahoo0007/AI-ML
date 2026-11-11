@@ -31,7 +31,7 @@ export async function generateMetadata({ params }: { params: TopicParams }, pare
 // A topic article, compiled with the same MDX pipeline as docs articles, then the problems that use it, grouped
 // by pattern.
 export default async function TopicPage({ params }: { params: TopicParams }) {
-  const { section, topic, problems } = getTopic((await params).topic);
+  const { section, topic, problems, topicOutlines } = getTopic((await params).topic);
   const doc = await loadMdxDoc(section.key, [TOPICS_DIR, topic.slug]);
   const seo = await topicSeo(section, topic);
   return (
@@ -70,7 +70,33 @@ export default async function TopicPage({ params }: { params: TopicParams }) {
             ))}
           </>
         )}
+        {topicOutlines.length > 0 && (
+          <>
+            <h2 id="outlines">More problems in this topic</h2>
+            {outlineGroups(topicOutlines).map(([group, list]) => (
+              <section key={group} aria-label={group}>
+                <h3>{group}</h3>
+                <ul>
+                  {list.map((o) => (
+                    <li key={o.slug}>
+                      <Link href={o.href} prefetch={false}>
+                        {o.fm.title}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </>
+        )}
       </ArticleLayout>
     </div>
   );
+}
+
+/** Outlines under their `group` heading, groups in the order their first outline appears. */
+function outlineGroups<T extends { fm: { group?: string } }>(outlines: T[]): [string, T[]][] {
+  const groups = new Map<string, T[]>();
+  for (const o of outlines) groups.set(o.fm.group ?? "Other", [...(groups.get(o.fm.group ?? "Other") ?? []), o]);
+  return [...groups];
 }

@@ -117,3 +117,21 @@ export const patternsSchema = z
   });
 
 export type Pattern = z.infer<typeof patternsSchema>[number];
+
+/**
+ * A statement-only page (content/<section>/outlines/<slug>.mdx) for a problem whose starter, tests and editorial
+ * are not written yet. It has the URL the full problem will have; once problems/<slug>.mdx exists, that wins.
+ */
+export const outlineFrontmatterSchema = z
+  .object({
+    title: z.string().min(1),
+    description: z.string().min(1),
+    topics: z.array(kebab).min(1),
+    /** The heading the problem is listed under in the sidebar and on its topic page. */
+    group: z.string().min(1).optional(),
+    order: z.number().optional(),
+    status: z.literal("outline"),
+  })
+  .strict();
+
+export type OutlineFrontmatter = z.infer<typeof outlineFrontmatterSchema>;

@@ -4,6 +4,7 @@ import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/ui/editorial";
 import {
   problemListHref,
+  outlinesForTopic,
   problemsForTopic,
   dsaContent,
   dsaSection,
@@ -42,7 +43,9 @@ export default function DsaHubPage() {
               {t.fm.title}
             </Link>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{t.fm.description}</p>
-            <p className="mt-3 text-xs text-muted-foreground">{problemsForTopic(items, t.slug).length} problems</p>
+            <p className="mt-3 text-xs text-muted-foreground">
+              {problemsForTopic(items, t.slug).length + outlinesForTopic(items, t.slug).length} problems
+            </p>
           </li>
         ))}
       </ul>

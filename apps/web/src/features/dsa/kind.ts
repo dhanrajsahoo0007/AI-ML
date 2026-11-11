@@ -26,6 +26,7 @@ import {
   SOLUTIONS_DIR,
   testFilePath,
   topicsOf,
+  validOutlines,
   validProblems,
   withoutDrafts,
   type DsaItem,
@@ -48,6 +49,7 @@ import {
 export const problemListHref = (section: Pick<SectionDef, "href">) => `${section.href}/${PROBLEMS_SEGMENT}`;
 
 function access(section: SectionDef, item: DsaItem): "free" | "premium" {
+  if (item.type === "outline") return "free"; // a statement only
   const alwaysFree = section.access?.alwaysFree ?? [];
   if (item.type === "topic") return alwaysFree.includes("topics") ? "free" : (section.access?.default ?? "free");
   if (item.fm?.access) return item.fm.access;
@@ -82,19 +84,32 @@ export const problemsKind: SectionKind<DsaItem> = {
 
   staticParams(_section, items) {
     const built = withoutDrafts(items);
-    return [...topicsOf(built).map((t) => ({ topic: t.slug })), ...problemsOf(built).map((p) => ({ slug: p.slug }))];
+    return [
+      ...topicsOf(built).map((t) => ({ topic: t.slug })),
+      ...problemsOf(built).map((p) => ({ slug: p.slug })),
+      ...validOutlines(built).map((o) => ({ slug: o.slug })),
+    ];
   },
 
-  // Two groups: the topics, and one link to the problem list. Problems are not listed one by one: there are
-  // hundreds, and the sidebar and the header menu's nav-items.json would carry every one of them.
+  // One group per topic, holding its problems under their headings (written problems first, then the
+  // statement-only outlines by `group`), then one link to the filterable list. TODO before release: this puts
+  // every problem in the sidebar and in nav-items.json; trim it to the current topic (import plan, release list).
   nav(section, items) {
+    const built = withoutDrafts(items);
+    const link = (i: DsaItem) => ({ slug: i.slug, title: i.title, href: i.href });
     return navSection(section, [
-      {
-        slug: "topics",
-        title: "Topics",
-        href: section.href,
-        items: topicsOf(withoutDrafts(items)).map((t) => ({ slug: t.slug, title: t.title, href: t.href })),
-      },
+      ...topicsOf(built).map((t) => {
+        const groups = new Map<string, DsaItem[]>();
+        const add = (title: string, item: DsaItem) => groups.set(title, [...(groups.get(title) ?? []), item]);
+        for (const p of problemsForTopic(built, t.slug)) add(WRITTEN_GROUP, p);
+        for (const o of outlinesForTopic(built, t.slug)) add(o.fm.group ?? OUTLINE_GROUP, o);
+        return {
+          slug: t.slug,
+          title: t.title,
+          href: t.href,
+          categories: [...groups].map(([title, list]) => ({ title, items: list.map(link) })),
+        };
+      }),
       { slug: PROBLEMS_SEGMENT, title: "Problems", href: problemListHref(section) },
     ]);
   },
@@ -127,7 +142,7 @@ export const problemsKind: SectionKind<DsaItem> = {
   counts(items) {
     const problems = problemsOf(items);
     const drafts = problems.filter((p) => p.fm?.status === "draft").length;
-    return { written: problems.length - drafts, outline: drafts };
+    return { written: problems.length - drafts, outline: drafts + validOutlines(items).length };
   },
 
   async validate(section, items) {
@@ -137,6 +152,12 @@ export const problemsKind: SectionKind<DsaItem> = {
     const rel = (file: string) => path.relative(process.cwd(), file);
     const push = (file: string, message: string, line?: number, level: ContentError["level"] = "error") =>
       errors.push({ file: rel(file), line, message, level });
+
+    const topicPages = new Set(topicsOf(items).map((t) => t.slug));
+    for (const o of items.filter((i) => i.type === "outline")) {
+      for (const issue of o.issues) push(o.file, issue);
+      for (const t of o.fm?.topics ?? []) if (!topicPages.has(t)) push(o.file, `topics: no topic page "${t}"`);
+    }
     const fieldLine = (file: string, key: string) => lineOf(file, new RegExp(`^${escape(key)}:`)) ?? 1;
 
     const patternsFile = path.join(dsaDir(section), PATTERNS_FILE);
@@ -296,6 +317,15 @@ function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProbl
 }
 
 /** Problems tagged with a topic, in content order. */
+/** Sidebar heading for a topic's written problems, and for outlines that name no `group`. */
+const WRITTEN_GROUP = "Ready to solve";
+const OUTLINE_GROUP = "More problems";
+
+/** A topic's statement-only outlines, in content order. */
+export function outlinesForTopic(items: DsaItem[], topic: string) {
+  return validOutlines(items).filter((o) => o.fm.topics.includes(topic));
+}
+
 export function problemsForTopic(items: DsaItem[], topic: string): ValidProblem[] {
   return validProblems(items).filter((p) => p.fm.status === "published" && p.fm.topics.includes(topic));
 }
