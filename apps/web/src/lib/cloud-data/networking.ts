@@ -47,6 +47,7 @@ export const services: CloudService[] = [
       "NLB passes the client's IP through to targets; ALB adds it in X-Forwarded-For.",
     ],
     docs: "https://aws.amazon.com/elasticloadbalancing/",
+    concept: "/cloud/networking/load-balancing",
     main: "l7-lb",
   },
   {
@@ -63,6 +64,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Two or three VPCs: VPC peering is cheaper and has no per-GB processing charge."],
     gotchas: ["Every GB through the hub is billed; chatty cross-VPC traffic can cost more than expected."],
     docs: "https://aws.amazon.com/transit-gateway/",
+    concept: "/cloud/networking/connecting-networks",
   },
   {
     id: "aws-privatelink",
@@ -81,6 +83,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Full two-way connectivity between networks: use peering or Transit Gateway."],
     gotchas: ["Traffic is one-way: consumers start connections to the provider, never the reverse."],
     docs: "https://aws.amazon.com/privatelink/",
+    concept: "/cloud/networking/private-endpoints",
   },
   {
     id: "aws-vpc-lattice",
@@ -99,6 +102,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Services inside one ECS cluster: ECS Service Connect is simpler."],
     gotchas: ["Works across EC2, ECS, EKS and Lambda targets, so it suits mixed estates."],
     docs: "https://aws.amazon.com/vpc/lattice/",
+    concept: "/cloud/networking/service-to-service",
   },
   {
     id: "aws-direct-connect",
@@ -114,6 +118,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Small or occasional traffic: Site-to-Site VPN over the internet is cheaper and quick to set up."],
     gotchas: ["Provisioning takes weeks; run a VPN as a backup path."],
     docs: "https://aws.amazon.com/directconnect/",
+    concept: "/cloud/networking/hybrid-connectivity",
   },
   {
     id: "gcp-vpc",
@@ -154,6 +159,7 @@ export const services: CloudService[] = [
       "The global load balancer replaces what AWS needs CloudFront or Global Accelerator plus Regional load balancers for.",
     ],
     docs: "https://cloud.google.com/load-balancing",
+    concept: "/cloud/networking/load-balancing",
     main: "l7-lb",
   },
   {
@@ -170,6 +176,7 @@ export const services: CloudService[] = [
     avoidWhen: [],
     gotchas: [],
     docs: "https://cloud.google.com/vpc/docs/private-service-connect",
+    concept: "/cloud/networking/private-endpoints",
     main: "private-endpoints",
   },
   {
@@ -186,6 +193,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Small or occasional traffic: Cloud VPN is cheaper."],
     gotchas: [],
     docs: "https://cloud.google.com/network-connectivity/docs/interconnect",
+    concept: "/cloud/networking/hybrid-connectivity",
     main: "dedicated-link",
   },
   {
@@ -221,6 +229,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Global entry across Regions: use Front Door."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/application-gateway",
+    concept: "/cloud/networking/load-balancing",
     main: "l7-lb",
   },
   {
@@ -237,6 +246,7 @@ export const services: CloudService[] = [
     avoidWhen: [],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/load-balancer",
+    concept: "/cloud/networking/load-balancing",
     main: "l4-lb",
   },
   {
@@ -253,6 +263,7 @@ export const services: CloudService[] = [
     avoidWhen: [],
     gotchas: ["Private DNS zones are needed so service hostnames resolve to the private IP."],
     docs: "https://azure.microsoft.com/en-us/products/private-link",
+    concept: "/cloud/networking/private-endpoints",
     main: "private-endpoints",
   },
   {
@@ -269,6 +280,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Small traffic: VPN Gateway is cheaper."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/expressroute",
+    concept: "/cloud/networking/hybrid-connectivity",
     main: "dedicated-link",
   },
 ];

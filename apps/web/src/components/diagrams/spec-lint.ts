@@ -1,9 +1,10 @@
 // Static checks for diagram specs, run by tests/unit/diagrams/specs.test.ts over every spec in
 // assets/diagrams/animated. Returns plain problem strings; an empty array means the spec is fine.
 
+import { SERVICE_BY_ID } from "@/lib/cloud-catalog";
 import { NODE_H, NODE_W, boundsOverlap, nodeBounds, shapeBounds, type Bounds } from "./geometry";
 import { SEQ, sequenceWidth } from "./sequence-layout";
-import type { AnySpec, DiagramSpec, DiagramStep, LayoutSpec, SequenceSpec } from "./types";
+import type { AnySpec, DiagramNode, DiagramSpec, DiagramStep, LayoutSpec, SequenceSpec } from "./types";
 
 /** Estimated label width per character at the engine's 13.5px label size. */
 const CHAR_W = 6.2;
@@ -56,6 +57,27 @@ function lintSteps(used: { step: number; what: string }[], steps: DiagramStep[] 
   return out;
 }
 
+/**
+ * A node's `cloud` refs must point at the catalog: the string form is a catalog id, and the `{ label, id? }` form
+ * may leave the id out (a plain name) but an id that is given must exist. The id must also belong to the cloud it
+ * is listed under, or the Services toggle would show another provider's service.
+ */
+function lintCloudRefs(node: DiagramNode): string[] {
+  const out: string[] = [];
+  for (const [provider, ref] of Object.entries(node.cloud ?? {})) {
+    const id = typeof ref === "string" ? ref : ref.id;
+    if (id === undefined) continue;
+    const service = SERVICE_BY_ID[id];
+    if (!service) {
+      const hint = typeof ref === "string" ? ` (for a plain name use { label: "${id}" })` : "";
+      out.push(`node "${node.id}": cloud.${provider} "${id}" is not a cloud catalog id${hint}`);
+    } else if (service.provider !== provider) {
+      out.push(`node "${node.id}": cloud.${provider} "${id}" is a ${service.provider} service`);
+    }
+  }
+  return out;
+}
+
 function lintArchitecture(spec: DiagramSpec): string[] {
   const out: string[] = [];
   const nodes = new Map(spec.nodes.map((n) => [n.id, n]));
@@ -86,6 +108,7 @@ function lintArchitecture(spec: DiagramSpec): string[] {
         out.push(`node "${n.id}": sub "${n.sub}" is wider than its ${n.w ?? NODE_W}px box`);
       if ((n.h ?? NODE_H) < 36) out.push(`node "${n.id}": height ${n.h} is too small for a label`);
     }
+    out.push(...lintCloudRefs(n));
   }
   for (let i = 0; i < spec.nodes.length; i++) {
     for (let j = i + 1; j < spec.nodes.length; j++) {
