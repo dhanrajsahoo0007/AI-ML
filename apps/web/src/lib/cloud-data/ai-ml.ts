@@ -110,6 +110,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Code tied to CUDA-only libraries."],
     gotchas: [],
     docs: "https://cloud.google.com/tpu",
+    concept: "/cloud/compute/batch-hpc-gpus",
     main: "ai-chips",
   },
   {
@@ -147,6 +148,35 @@ export const services: CloudService[] = [
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/machine-learning",
     main: "ml-platform",
+  },
+  {
+    id: "gcp-model-armor",
+    provider: "gcp",
+    name: "Model Armor",
+    short: "Model Armor",
+    group: "ai-ml",
+    tagline:
+      "Screens prompts going into a language model and responses coming out for injection attempts, harmful content, sensitive data and malicious links.",
+    youManage:
+      "Templates that set which filters run and how strict they are, where the checks are called from, and what happens on a match.",
+    scaling: "A managed API; it works with models on any platform.",
+    pricing: "By the volume of text screened.",
+    useWhen: [
+      "A safety check that sits outside the model, so it is the same for every model you use.",
+      "Blocking prompt injection carried in user input or in retrieved documents.",
+      "Stopping personal data from leaving in a model's answer.",
+    ],
+    avoidWhen: [
+      "As the only defence: also limit what the model's tools can do and require approval for risky actions.",
+    ],
+    gotchas: [
+      "Every check adds latency to each request and response; measure it.",
+      "Filters are probabilistic: decide what the application does on a block, and log blocked items for review.",
+      "A young service whose filters and integrations are still expanding.",
+    ],
+    docs: "https://docs.cloud.google.com/model-armor/overview",
+    concept: "/cloud/resilience/ai-security",
+    main: "ai-guardrails",
   },
 ];
 
@@ -211,6 +241,23 @@ export const capabilities: Capability[] = [
       services: ["azure-foundry"],
       fit: "direct",
       note: "Formerly Azure AI Services: Vision, Speech, Document Intelligence, Translator.",
+    },
+  },
+  {
+    id: "ai-guardrails",
+    group: "ai-ml",
+    title: "AI guardrails",
+    summary: "Screen prompts and model responses for injection, harmful content and sensitive data.",
+    aws: {
+      services: ["Amazon Bedrock Guardrails"],
+      fit: "direct",
+      note: "A feature of Bedrock that also works with outside models.",
+    },
+    gcp: { services: ["gcp-model-armor"], fit: "direct" },
+    azure: {
+      services: ["Azure AI Content Safety"],
+      fit: "direct",
+      note: "Includes Prompt Shields for injection attempts.",
     },
   },
 ];

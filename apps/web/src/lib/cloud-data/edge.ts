@@ -23,6 +23,7 @@ export const services: CloudService[] = [
       "Failover speed is bounded by TTLs and client caching; keep TTLs short on records that may fail over.",
     ],
     docs: "https://aws.amazon.com/route53/",
+    concept: "/cloud/networking/dns",
     main: "dns",
   },
   {
@@ -69,6 +70,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Cacheable web content: CloudFront does that and is cheaper."],
     gotchas: [],
     docs: "https://aws.amazon.com/global-accelerator/",
+    concept: "/cloud/networking/load-balancing",
   },
   {
     id: "gcp-cloud-dns",
@@ -84,6 +86,7 @@ export const services: CloudService[] = [
     avoidWhen: [],
     gotchas: [],
     docs: "https://cloud.google.com/dns",
+    concept: "/cloud/networking/dns",
     main: "dns",
   },
   {
@@ -134,6 +137,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Latency or geographic steering: add Traffic Manager or Front Door."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/dns",
+    concept: "/cloud/networking/dns",
     main: "dns",
   },
   {
@@ -150,6 +154,7 @@ export const services: CloudService[] = [
     avoidWhen: ["HTTP apps: Front Door fails over faster and adds caching and WAF."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/traffic-manager",
+    concept: "/cloud/networking/dns",
     main: "dns-steering",
   },
 ];

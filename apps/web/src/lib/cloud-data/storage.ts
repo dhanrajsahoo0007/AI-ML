@@ -48,6 +48,7 @@ export const services: CloudService[] = [
       "gp3 lets you set IOPS and throughput separately from size; it is the default for most workloads.",
     ],
     docs: "https://aws.amazon.com/ebs/",
+    concept: "/cloud/data/block-storage",
   },
   {
     id: "aws-efs",
@@ -65,6 +66,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Latency-sensitive databases (use EBS) or very high-throughput HPC (use FSx for Lustre)."],
     gotchas: ["Regional by default: survives the loss of a zone."],
     docs: "https://aws.amazon.com/efs/",
+    concept: "/cloud/data/file-hybrid-and-transfer",
   },
   {
     id: "aws-fsx",
@@ -84,6 +86,7 @@ export const services: CloudService[] = [
     avoidWhen: ["General shared NFS for apps: EFS is simpler."],
     gotchas: [],
     docs: "https://aws.amazon.com/fsx/",
+    concept: "/cloud/data/file-hybrid-and-transfer",
   },
   {
     id: "gcp-cloud-storage",
@@ -118,6 +121,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Data shared by many machines: use Filestore or Cloud Storage."],
     gotchas: ["Regional persistent disks replicate synchronously across two zones, which EBS does not offer."],
     docs: "https://cloud.google.com/persistent-disk",
+    concept: "/cloud/data/block-storage",
     main: "block-storage",
   },
   {
@@ -134,6 +138,7 @@ export const services: CloudService[] = [
     avoidWhen: ["HPC-scale throughput: use Managed Lustre."],
     gotchas: [],
     docs: "https://cloud.google.com/filestore",
+    concept: "/cloud/data/file-hybrid-and-transfer",
     main: "shared-files",
   },
   {
@@ -169,6 +174,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Files shared across many VMs: use Azure Files."],
     gotchas: ["Zone-redundant disks (ZRS) replicate synchronously across zones."],
     docs: "https://azure.microsoft.com/en-us/products/storage/disks",
+    concept: "/cloud/data/block-storage",
     main: "block-storage",
   },
   {
@@ -185,7 +191,385 @@ export const services: CloudService[] = [
     avoidWhen: ["HPC throughput: use Azure Managed Lustre or Azure NetApp Files."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/storage/files",
+    concept: "/cloud/data/file-hybrid-and-transfer",
     main: "shared-files",
+  },
+  {
+    id: "aws-datasync",
+    provider: "aws",
+    name: "AWS DataSync",
+    short: "DataSync",
+    group: "storage",
+    tagline:
+      "Managed online copy between on-premises file or object storage and AWS storage, with scheduling, integrity checks and bandwidth limits.",
+    youManage:
+      "An agent near the source storage (for on-premises sources), tasks, schedules, filters and the network path.",
+    scaling:
+      "Each task copies in parallel; add agents or split a large tree into several tasks to go faster. The link is usually the limit.",
+    pricing: "Per gigabyte copied; the destination storage and its requests are billed as usual.",
+    useWhen: [
+      "Moving a file server or NAS into S3, EFS or FSx over the network.",
+      "Recurring one-way sync, for example nightly copies of on-premises data for analytics or backup.",
+      "Copying between AWS storage services or Regions with every file verified.",
+    ],
+    avoidWhen: [
+      "The link is too slow for the volume: work out the transfer time first, then ship a device or raise the bandwidth.",
+      "Applications must keep reading and writing files on-premises while a copy lives in the cloud: that is a gateway or sync job.",
+    ],
+    gotchas: [
+      "A first full copy can saturate the office link; set a bandwidth limit for working hours.",
+      "Later runs copy only what changed, but scanning millions of small files still takes time.",
+      "File permissions and metadata survive only between compatible systems; check before cutover.",
+    ],
+    docs: "https://aws.amazon.com/datasync/",
+    concept: "/cloud/data/file-hybrid-and-transfer",
+    main: "bulk-transfer",
+  },
+  {
+    id: "aws-storage-gateway",
+    provider: "aws",
+    name: "AWS Storage Gateway",
+    short: "Storage Gateway",
+    group: "storage",
+    tagline:
+      "An on-premises appliance that presents cloud storage as local file shares, volumes or virtual tapes, with a local cache.",
+    youManage: "The gateway VM or hardware appliance, its cache disks, shares or volumes, and the link to AWS.",
+    scaling: "Per gateway, bounded by its cache size and the upstream link; add gateways for more sites or shares.",
+    pricing:
+      "Per gigabyte stored in the backing service, plus requests and data written through the gateway; the appliance runs on your hardware.",
+    useWhen: [
+      "An office or plant must keep using NFS or SMB shares while the data itself lands in S3.",
+      "Replacing a physical tape library: backup software writes to virtual tapes kept in S3 and its archive classes.",
+      "Extra block volumes on-premises that are backed by cloud snapshots.",
+    ],
+    avoidWhen: [
+      "A one-time migration: use DataSync.",
+      "The workload already runs in the cloud: mount cloud file or object storage directly.",
+    ],
+    gotchas: [
+      "Reads of files that are not in the local cache wait on the link, so size the cache for the working set.",
+      "A file share stores each file as an object; objects changed directly in the bucket are invisible to the gateway until its cache is refreshed.",
+      "The gateway is a server you patch and monitor like any other.",
+    ],
+    docs: "https://aws.amazon.com/storagegateway/",
+    concept: "/cloud/data/file-hybrid-and-transfer",
+    main: "hybrid-files",
+  },
+  {
+    id: "aws-snow-family",
+    provider: "aws",
+    name: "AWS Snowball (Snow Family)",
+    short: "Snowball",
+    group: "storage",
+    tagline:
+      "Rugged storage devices that AWS ships to you: fill them on site, send them back, and the data is loaded into S3.",
+    youManage: "Ordering, the local copy onto the device, shipping, and checking the import.",
+    scaling: "By the number of devices; several can be filled in parallel.",
+    pricing: "A fee per device job, a daily fee beyond the included days, and shipping.",
+    useWhen: ["Volumes so large that the available link would take months.", "Sites with poor or no connectivity."],
+    avoidWhen: [
+      "A link that can finish the copy in days or a few weeks: an online transfer is simpler and can run again for the changes.",
+      "Data that keeps changing during the weeks a device is in transit, unless a later online sync covers the difference.",
+    ],
+    gotchas: [
+      "Count the whole round trip: delivery, copying on site, return shipping and the import each take days.",
+      "Data on the device is encrypted, and the key never travels with it.",
+      "The range of devices has been cut back over the years; check what can still be ordered in your Region before planning around one.",
+    ],
+    docs: "https://docs.aws.amazon.com/snowball/",
+    status:
+      "Snowball Edge closed to new customers on November 7, 2025. New projects use DataSync over the network or an AWS Data Transfer Terminal site.",
+    concept: "/cloud/data/file-hybrid-and-transfer",
+    main: "offline-transfer",
+  },
+  {
+    id: "aws-transfer-family",
+    provider: "aws",
+    name: "AWS Transfer Family",
+    short: "Transfer Family",
+    group: "storage",
+    tagline: "Managed SFTP, FTPS, FTP and AS2 endpoints that read and write straight to S3 or EFS.",
+    youManage:
+      "Servers (endpoints), users and their home directories, the identity source, and any workflow that runs after an upload.",
+    scaling: "The endpoint scales on its own and runs across zones; there are no file-transfer servers to patch.",
+    pricing: "Per hour for each enabled protocol endpoint plus per gigabyte transferred; storage is billed separately.",
+    useWhen: [
+      "Partners or legacy systems that can only deliver files over SFTP or FTPS.",
+      "Retiring a self-run SFTP server while keeping its host name and user accounts.",
+      "Landing files in S3 so that an event can start processing them.",
+    ],
+    avoidWhen: [
+      "Clients you control: have them upload to object storage directly with signed URLs.",
+      "Bulk migration of existing storage: use DataSync.",
+    ],
+    gotchas: [
+      "The endpoint bills for every hour it exists, even when nobody connects.",
+      "Plain FTP is unencrypted and is only offered inside a private network.",
+      "Each user is confined by a role and a home-directory mapping; a loose mapping exposes other partners' files.",
+    ],
+    docs: "https://aws.amazon.com/aws-transfer-family/",
+    concept: "/cloud/data/file-hybrid-and-transfer",
+    main: "managed-sftp",
+  },
+  {
+    id: "aws-backup",
+    provider: "aws",
+    name: "AWS Backup",
+    short: "AWS Backup",
+    group: "storage",
+    tagline:
+      "One place to schedule, store and restore backups of volumes, databases, file systems and buckets across accounts and Regions.",
+    youManage:
+      "Backup plans (schedule, retention, copies), which resources they cover (usually by tag), vaults and their access policies, and restore tests.",
+    scaling: "Policy-driven across every account in an organisation.",
+    pricing: "Per gigabyte-month of backup storage by resource type and tier, plus restores and cross-Region copies.",
+    useWhen: [
+      "Proving that every production resource is backed up to the same policy.",
+      "Copies in a second Region or a separate account that an attacker in the first cannot delete.",
+      "Retention that must not be shortened, using a locked vault.",
+    ],
+    avoidWhen: [
+      "A recovery point of seconds: backups are periodic, so pair them with replication.",
+      "A single database where the service's own automated backups are enough.",
+    ],
+    gotchas: [
+      "Resources are picked up by tag, so an untagged database is silently unprotected; report on coverage.",
+      "A vault lock in compliance mode cannot be undone, even by the account owner.",
+      "A backup that has never been restored is a hope, not a backup: schedule restore tests.",
+    ],
+    docs: "https://aws.amazon.com/backup/",
+    concept: "/cloud/resilience/backups-and-vaults",
+    main: "backup",
+  },
+  {
+    id: "aws-elastic-disaster-recovery",
+    provider: "aws",
+    name: "AWS Elastic Disaster Recovery",
+    short: "Elastic Disaster Recovery",
+    group: "storage",
+    tagline:
+      "Continuously copies the disks of on-premises or cloud servers to a low-cost staging area in AWS and launches full recovery servers on demand.",
+    youManage:
+      "The replication agent on each source server, launch settings for the recovery servers, drills, failover and failback.",
+    scaling: "Per source server; recovery servers start only for drills or a real failover.",
+    pricing:
+      "Per source server per hour while it replicates, plus the staging storage and small replication servers; recovery servers are billed only while they run.",
+    useWhen: [
+      "Disaster recovery for servers you cannot rebuild quickly from code: legacy and packaged applications.",
+      "Recovery points seconds old without paying for a second running environment.",
+      "Recovering a workload from one Region or zone into another.",
+    ],
+    avoidWhen: [
+      "Stateless services defined as code: redeploy them in the second Region instead.",
+      "Managed databases: use the database's own cross-Region replica.",
+    ],
+    gotchas: [
+      "Replication copies everything, corruption and ransomware included; keep older recovery points and separate backups.",
+      "Recovery servers need capacity, addresses and DNS in the target Region; rehearse the launch.",
+      "Failing back is a second migration and needs its own plan.",
+    ],
+    docs: "https://aws.amazon.com/disaster-recovery/",
+    concept: "/cloud/resilience/dr-strategies",
+    main: "dr-replication",
+  },
+  {
+    id: "gcp-storage-transfer",
+    provider: "gcp",
+    name: "Storage Transfer Service",
+    short: "Storage Transfer Service",
+    group: "storage",
+    tagline:
+      "Managed transfers into Cloud Storage from other clouds, on-premises file systems or other buckets, once or on a schedule.",
+    youManage: "Transfer jobs, schedules, filters, and agents on your own machines for on-premises sources.",
+    scaling:
+      "Cloud-to-cloud jobs scale on Google's side; on-premises jobs go faster with more agents, up to what the link can carry.",
+    pricing:
+      "Agent-based transfers are charged per gigabyte; in every case the source provider's egress and the destination storage are billed as usual.",
+    useWhen: [
+      "Moving buckets from another cloud's object store into Cloud Storage.",
+      "Copying an on-premises file system into Cloud Storage over the network.",
+      "Scheduled copies between buckets, for example into a backup bucket in another location.",
+    ],
+    avoidWhen: [
+      "A handful of files: the command-line tools are enough.",
+      "Volumes too large for the link in the time you have: ship a Transfer Appliance.",
+    ],
+    gotchas: [
+      "Leaving another cloud means paying that cloud's egress charge, often the largest cost of the move.",
+      "A job can be set to delete objects at the destination or at the source; read those options twice.",
+    ],
+    docs: "https://cloud.google.com/storage-transfer-service",
+    concept: "/cloud/data/file-hybrid-and-transfer",
+    main: "bulk-transfer",
+  },
+  {
+    id: "gcp-transfer-appliance",
+    provider: "gcp",
+    name: "Transfer Appliance",
+    short: "Transfer Appliance",
+    group: "storage",
+    tagline:
+      "A high-capacity storage server that Google ships to your site; you fill it and send it back to be loaded into Cloud Storage.",
+    youManage: "Ordering, rack space, power and network on site, the copy onto the appliance, and return shipping.",
+    scaling: "By appliance size and count.",
+    pricing: "A fee per appliance for an included period, a daily fee after that, and shipping.",
+    useWhen: [
+      "Hundreds of terabytes or more, where an online transfer would take too long.",
+      "Sites where the link cannot be given up for weeks.",
+    ],
+    avoidWhen: [
+      "Data that fits through the link in a reasonable time: use Storage Transfer Service.",
+      "Countries where the appliance is not offered.",
+    ],
+    gotchas: [
+      "Data is encrypted on the appliance and becomes readable only after it reaches Google and you release the key.",
+      "Plan an online sync afterwards for whatever changed while the appliance travelled.",
+    ],
+    docs: "https://cloud.google.com/transfer-appliance",
+    concept: "/cloud/data/file-hybrid-and-transfer",
+    main: "offline-transfer",
+  },
+  {
+    id: "gcp-backup-dr",
+    provider: "gcp",
+    name: "Backup and DR Service",
+    short: "Backup and DR",
+    group: "storage",
+    tagline:
+      "Central, policy-based backups for Compute Engine, databases and other workloads, kept in vaults that resist deletion.",
+    youManage: "Backup plans, which resources they attach to, vaults and their minimum retention, and restore tests.",
+    scaling: "Managed; plans apply across projects.",
+    pricing: "Per gigabyte of protected data and of backup storage, varying by workload type.",
+    useWhen: [
+      "One backup policy and one report across many projects.",
+      "Backups that project owners cannot delete before their retention ends.",
+      "Restoring whole VMs or databases into another zone or Region after a failure.",
+    ],
+    avoidWhen: [
+      "A database whose own scheduled backups in the same project are all you need.",
+      "Near-zero data loss: use replication for that and backups for history.",
+    ],
+    gotchas: [
+      "A vault's enforced retention blocks early deletion by design, including your own clean-up.",
+      "The list of covered workload types has grown over time; check that yours is on it.",
+    ],
+    docs: "https://cloud.google.com/backup-disaster-recovery",
+    concept: "/cloud/resilience/backups-and-vaults",
+    main: "backup",
+  },
+  {
+    id: "azure-data-box",
+    provider: "azure",
+    name: "Azure Data Box",
+    short: "Data Box",
+    group: "storage",
+    tagline:
+      "Microsoft-supplied storage devices in several sizes for moving data to or from Azure by courier instead of over the network.",
+    youManage:
+      "The order, the local copy to the device over SMB, NFS or the blob interface, shipping, and checking the upload.",
+    scaling: "By device size and number of devices.",
+    pricing: "A service fee per order, a daily fee beyond the included days, and shipping.",
+    useWhen: [
+      "A first bulk load of tens of terabytes or more into Blob Storage or Azure Files over a slow link.",
+      "Exporting a large dataset out of Azure to a site with limited connectivity.",
+    ],
+    avoidWhen: ["Ongoing sync or small volumes: use a network copy tool or Azure File Sync."],
+    gotchas: [
+      "The device is wiped after the upload; keep the source until you have verified the copy in Azure.",
+      "Lead time, copying and return shipping together usually take weeks, and the source keeps changing meanwhile.",
+    ],
+    docs: "https://azure.microsoft.com/en-us/products/databox",
+    concept: "/cloud/data/file-hybrid-and-transfer",
+    main: "offline-transfer",
+  },
+  {
+    id: "azure-file-sync",
+    provider: "azure",
+    name: "Azure File Sync",
+    short: "File Sync",
+    group: "storage",
+    tagline:
+      "Keeps Windows file servers in step with an Azure file share, and can leave rarely used files in the cloud only.",
+    youManage:
+      "The sync agent on each Windows Server, sync groups, the tiering policy and the Azure file share behind them.",
+    scaling: "Many servers can sync with one share; limits apply per share and per sync group.",
+    pricing: "A monthly fee per synced server, plus the Azure Files storage and transactions behind it.",
+    useWhen: [
+      "Branch offices keep a fast local file server while the full data set lives in Azure.",
+      "Freeing space on file servers by tiering cold files to the cloud.",
+      "Replacing server-to-server file replication between sites.",
+    ],
+    avoidWhen: [
+      "Linux or NAS sources: the agent runs on Windows Server only.",
+      "A one-time migration with no need for a local copy afterwards.",
+    ],
+    gotchas: [
+      "A tiered file is a placeholder: opening it downloads it, and tools that read every file (antivirus, backup) can pull everything back.",
+      "Changes made directly in the Azure file share reach the servers only after a periodic scan, not at once.",
+    ],
+    docs: "https://learn.microsoft.com/azure/storage/file-sync/file-sync-introduction",
+    concept: "/cloud/data/file-hybrid-and-transfer",
+    main: "hybrid-files",
+  },
+  {
+    id: "azure-backup",
+    provider: "azure",
+    name: "Azure Backup",
+    short: "Azure Backup",
+    group: "storage",
+    tagline:
+      "Managed backups for VMs, disks, file shares, databases and on-premises servers, stored in vaults with soft delete and immutability.",
+    youManage: "Vaults and their redundancy, backup policies, which items are protected, and restore tests.",
+    scaling: "Managed; policies can be assigned at scale with Azure Policy.",
+    pricing: "Per protected instance by size, plus the backup storage consumed, by redundancy level.",
+    useWhen: [
+      "Standard backups for Azure VMs, databases running in VMs, Azure Files and managed disks.",
+      "Protection against ransomware: soft delete, immutable vaults and a second approval for destructive actions.",
+      "Restoring into another Region from a geo-redundant vault.",
+    ],
+    avoidWhen: [
+      "Fast failover of running servers to another Region: that is Site Recovery.",
+      "Platform databases that already include point-in-time restore, unless you need long-term retention.",
+    ],
+    gotchas: [
+      "Vault redundancy is hard to change once items are protected; choose it first.",
+      "Soft-deleted backups are kept, and may be billed, until their hold period ends.",
+      "Restores of large VMs take time; measure it against your recovery-time target.",
+    ],
+    docs: "https://azure.microsoft.com/en-us/products/backup",
+    concept: "/cloud/resilience/backups-and-vaults",
+    main: "backup",
+  },
+  {
+    id: "azure-site-recovery",
+    provider: "azure",
+    name: "Azure Site Recovery",
+    short: "Site Recovery",
+    group: "storage",
+    tagline:
+      "Replicates running VMs and physical servers to another Azure Region, or from on-premises into Azure, and orchestrates failover and failback.",
+    youManage:
+      "Which machines replicate, the target network and sizes, recovery plans (ordering and scripts), and failover drills.",
+    scaling: "Per protected machine; recovery plans group machines into ordered steps.",
+    pricing:
+      "Per protected instance per month, plus the replica storage; compute in the target is billed only after failover.",
+    useWhen: [
+      "Region-to-Region disaster recovery for Azure VMs.",
+      "Using Azure as the recovery site for VMware, Hyper-V or physical servers.",
+      "Rehearsing a failover in an isolated network without touching production.",
+    ],
+    avoidWhen: [
+      "Applications that already replicate themselves, such as database clusters with their own failover.",
+      "Long-term retention: recovery points are kept for a short window, so keep backups too.",
+    ],
+    gotchas: [
+      "Order matters: a recovery plan must start databases before the applications that need them.",
+      "Addresses change after failover unless the target network is planned to match.",
+      "Capacity in the target Region is not held for you unless you reserve it.",
+    ],
+    docs: "https://azure.microsoft.com/en-us/products/site-recovery",
+    concept: "/cloud/resilience/dr-strategies",
+    main: "dr-replication",
   },
 ];
 
@@ -243,22 +627,66 @@ export const capabilities: Capability[] = [
     id: "backup",
     group: "storage",
     title: "Centralised backup",
-    summary: "Policy-based backups across databases, volumes and file systems.",
-    aws: { services: ["AWS Backup"], fit: "direct" },
-    gcp: { services: ["Backup and DR Service"], fit: "direct" },
-    azure: { services: ["Azure Backup"], fit: "direct" },
+    summary: "Policy-based backups across databases, volumes and file systems, kept in protected vaults.",
+    aws: { services: ["aws-backup"], fit: "direct" },
+    gcp: { services: ["gcp-backup-dr"], fit: "direct" },
+    azure: { services: ["azure-backup"], fit: "direct" },
+  },
+  {
+    id: "dr-replication",
+    group: "storage",
+    title: "Disaster-recovery replication for servers",
+    summary: "Keep an up-to-date copy of running servers in another location and start them there on demand.",
+    aws: { services: ["aws-elastic-disaster-recovery"], fit: "direct" },
+    gcp: {
+      services: ["gcp-backup-dr", "Persistent Disk Asynchronous Replication"],
+      fit: "partial",
+      note: "Assembled from disk replication and backups; no single service orchestrates the failover.",
+    },
+    azure: { services: ["azure-site-recovery"], fit: "direct" },
   },
   {
     id: "bulk-transfer",
     group: "storage",
-    title: "Bulk data transfer",
-    summary: "Move terabytes to petabytes into the cloud online or on physical devices.",
-    aws: {
-      services: ["AWS DataSync", "Data Transfer Terminal"],
+    title: "Bulk online transfer",
+    summary: "Copy terabytes into cloud storage over the network, with scheduling and verification.",
+    aws: { services: ["aws-datasync"], fit: "direct" },
+    gcp: { services: ["gcp-storage-transfer"], fit: "direct" },
+    azure: {
+      services: ["Azure Storage Mover", "AzCopy"],
       fit: "close",
+      note: "Storage Mover runs managed migrations; AzCopy is a command-line tool you run yourself.",
+    },
+  },
+  {
+    id: "offline-transfer",
+    group: "storage",
+    title: "Offline transfer appliance",
+    summary: "Ship data on a physical device when the network would take too long.",
+    aws: {
+      services: ["aws-snow-family", "Data Transfer Terminal"],
+      fit: "partial",
       note: "Snowball Edge closed to new customers on November 7, 2025.",
     },
-    gcp: { services: ["Storage Transfer Service", "Transfer Appliance"], fit: "direct" },
-    azure: { services: ["Azure Data Box", "AzCopy"], fit: "direct" },
+    gcp: { services: ["gcp-transfer-appliance"], fit: "direct" },
+    azure: { services: ["azure-data-box"], fit: "direct" },
+  },
+  {
+    id: "hybrid-files",
+    group: "storage",
+    title: "Hybrid file gateway and sync",
+    summary: "Local file shares at a site that are backed by, or kept in step with, cloud storage.",
+    aws: { services: ["aws-storage-gateway"], fit: "direct" },
+    gcp: { services: [], fit: "none", note: "No first-party gateway; partner products fill the gap." },
+    azure: { services: ["azure-file-sync"], fit: "direct", note: "For Windows file servers." },
+  },
+  {
+    id: "managed-sftp",
+    group: "storage",
+    title: "Managed SFTP endpoints",
+    summary: "File-transfer endpoints for partners and legacy systems that write straight to cloud storage.",
+    aws: { services: ["aws-transfer-family"], fit: "direct" },
+    gcp: { services: [], fit: "none", note: "Run an SFTP server on a VM or use a partner product." },
+    azure: { services: ["azure-blob"], fit: "close", note: "SFTP can be switched on for a Blob Storage account." },
   },
 ];

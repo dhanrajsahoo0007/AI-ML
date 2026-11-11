@@ -56,6 +56,7 @@ export const services: CloudService[] = [
       "Pods on Fargate cannot run DaemonSets or privileged containers.",
     ],
     docs: "https://aws.amazon.com/eks/",
+    concept: "/cloud/compute/kubernetes-concepts",
   },
   {
     id: "aws-fargate",
@@ -84,6 +85,7 @@ export const services: CloudService[] = [
       "Task start takes tens of seconds (image pull), so scale out ahead of spikes.",
     ],
     docs: "https://aws.amazon.com/fargate/",
+    concept: "/cloud/compute/serverless-containers-and-paas",
   },
   {
     id: "aws-app-runner",
@@ -99,6 +101,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Any new project: new customers cannot sign up."],
     gotchas: ["AWS points new projects and migrations to ECS Express Mode."],
     docs: "https://aws.amazon.com/apprunner/",
+    concept: "/cloud/compute/serverless-containers-and-paas",
     status:
       "Closed to new customers since April 30, 2026. Existing customers keep using it; no new features are planned.",
   },
@@ -142,6 +145,7 @@ export const services: CloudService[] = [
       "Autopilot rejects privileged pods and some host-level settings, as Fargate does on AWS.",
     ],
     docs: "https://cloud.google.com/kubernetes-engine",
+    concept: "/cloud/compute/kubernetes-concepts",
   },
   {
     id: "gcp-cloud-run",
@@ -168,6 +172,7 @@ export const services: CloudService[] = [
       "With request-based billing, background work after the response gets little CPU; use instance-based billing for that.",
     ],
     docs: "https://cloud.google.com/run",
+    concept: "/cloud/compute/serverless-containers-and-paas",
     main: "serverless-containers",
   },
   {
@@ -204,6 +209,7 @@ export const services: CloudService[] = [
     avoidWhen: ["A few services and a small team: Container Apps hides Kubernetes entirely."],
     gotchas: ["Use the Free tier only for dev and test; production needs Standard for the SLA."],
     docs: "https://azure.microsoft.com/en-us/products/kubernetes-service",
+    concept: "/cloud/compute/kubernetes-concepts",
   },
   {
     id: "azure-container-apps",
@@ -223,6 +229,7 @@ export const services: CloudService[] = [
     avoidWhen: ["You need direct Kubernetes API access, CRDs or operators: use AKS."],
     gotchas: ["It covers what ECS + Fargate + Express Mode do on AWS, and what Cloud Run does on GCP."],
     docs: "https://azure.microsoft.com/en-us/products/container-apps",
+    concept: "/cloud/compute/serverless-containers-and-paas",
     main: "serverless-containers",
   },
   {
@@ -239,6 +246,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Long-running services that need scaling, rollouts and service discovery: use Container Apps."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/container-instances",
+    concept: "/cloud/compute/serverless-containers-and-paas",
   },
   {
     id: "azure-acr",

@@ -1,9 +1,11 @@
-import { AlertTriangle, ArrowUpRight, Check, Info, X } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ArrowRight, ArrowUpRight, Check, Info, X } from "lucide-react";
 import { SERVICE_BY_ID, capabilitiesOfService, type ProviderId } from "@/lib/cloud-catalog";
 import { FitMark, PROVIDER_TONE, ProviderTag, ServiceChip, providerOrder } from "./shared";
 
 // Profile card for one service: what it is, what you still manage, how it scales and bills, when to use it, and
-// the matching service on the other two clouds. The card's id is the service id, so tables can link to it.
+// the matching service on the other two clouds. The card's id is the service id, so tables can link to it. When the
+// catalog names a concept page for the service, the header links to it ("Learn the idea") next to the vendor docs.
 // Usage in MDX: <CloudServiceProfile id="aws-fargate" />
 export function CloudServiceProfile({ id }: { id: string }) {
   const s = SERVICE_BY_ID[id];
@@ -23,14 +25,24 @@ export function CloudServiceProfile({ id }: { id: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <ProviderTag id={s.provider} className="bg-paper" />
           <span className="font-display text-xl font-semibold leading-tight text-ink">{s.name}</span>
-          <a
-            href={s.docs}
-            target="_blank"
-            rel="noreferrer"
-            className="ml-auto inline-flex items-center gap-0.5 text-xs text-muted-foreground no-underline! hover:text-ink"
-          >
-            Docs <ArrowUpRight className="size-3" />
-          </a>
+          <span className="ml-auto inline-flex items-center gap-3">
+            {s.concept && (
+              <Link
+                href={s.concept}
+                className="inline-flex items-center gap-0.5 text-xs text-muted-foreground no-underline! hover:text-ink"
+              >
+                Learn the idea <ArrowRight className="size-3" />
+              </Link>
+            )}
+            <a
+              href={s.docs}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-0.5 text-xs text-muted-foreground no-underline! hover:text-ink"
+            >
+              Docs <ArrowUpRight className="size-3" />
+            </a>
+          </span>
         </div>
         <div className="mt-1.5 text-[15px] leading-snug text-ink-2">{s.tagline}</div>
         {s.status && (

@@ -21,6 +21,7 @@ export const services: CloudService[] = [
       "RDS Proxy pools connections, which protects the database from bursts of Lambda functions.",
     ],
     docs: "https://aws.amazon.com/rds/",
+    concept: "/cloud/data/managed-relational",
     main: "managed-sql",
   },
   {
@@ -47,6 +48,7 @@ export const services: CloudService[] = [
       "Writes still go to one writer per cluster (Global Database included); use Aurora DSQL or Limitless for more.",
     ],
     docs: "https://aws.amazon.com/rds/aurora/",
+    concept: "/cloud/data/managed-relational",
     main: "cloud-native-sql",
   },
   {
@@ -72,6 +74,7 @@ export const services: CloudService[] = [
       "Generally available since May 2025; multi-Region clusters pair Regions within one Region set (not across continents).",
     ],
     docs: "https://aws.amazon.com/rds/aurora/dsql/",
+    concept: "/cloud/data/managed-relational",
   },
   {
     id: "aws-dynamodb",
@@ -99,6 +102,7 @@ export const services: CloudService[] = [
       "Global tables default to eventual consistency; multi-Region strong consistency is generally available since June 2025 and is chosen at creation.",
     ],
     docs: "https://aws.amazon.com/dynamodb/",
+    concept: "/cloud/data/managed-nosql",
     main: "serverless-nosql",
   },
   {
@@ -115,6 +119,7 @@ export const services: CloudService[] = [
     avoidWhen: ["You need full MongoDB feature parity; consider MongoDB Atlas on AWS."],
     gotchas: ["It implements the MongoDB API; it is not MongoDB, so test drivers and operators you rely on."],
     docs: "https://aws.amazon.com/documentdb/",
+    concept: "/cloud/data/managed-nosql",
   },
   {
     id: "aws-neptune",
@@ -130,6 +135,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Relationships one or two joins deep: a relational database handles those."],
     gotchas: [],
     docs: "https://aws.amazon.com/neptune/",
+    concept: "/cloud/data/managed-nosql",
   },
   {
     id: "aws-opensearch",
@@ -167,6 +173,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Writes beyond one primary, or global strong consistency: use AlloyDB or Spanner."],
     gotchas: [],
     docs: "https://cloud.google.com/sql",
+    concept: "/cloud/data/managed-relational",
     main: "managed-sql",
   },
   {
@@ -183,6 +190,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Small databases where Cloud SQL costs less."],
     gotchas: ["Includes vector search (ScaNN index) next to relational data."],
     docs: "https://cloud.google.com/alloydb",
+    concept: "/cloud/data/managed-relational",
     main: "cloud-native-sql",
   },
   {
@@ -205,6 +213,7 @@ export const services: CloudService[] = [
       "Supports GoogleSQL and a PostgreSQL interface, plus graph (Spanner Graph), full-text and vector search.",
     ],
     docs: "https://cloud.google.com/spanner",
+    concept: "/cloud/data/managed-relational",
     main: "distributed-sql",
   },
   {
@@ -224,6 +233,7 @@ export const services: CloudService[] = [
       "A MongoDB-compatible API lets MongoDB drivers and tools work against Firestore.",
     ],
     docs: "https://cloud.google.com/firestore",
+    concept: "/cloud/data/managed-nosql",
     main: "serverless-nosql",
   },
   {
@@ -240,6 +250,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Ad-hoc queries or transactions across rows."],
     gotchas: ["Row key design is everything: reads are by key or key range, and sequential keys create hotspots."],
     docs: "https://cloud.google.com/bigtable",
+    concept: "/cloud/data/managed-nosql",
     main: "wide-column",
   },
   {
@@ -257,6 +268,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Teams standardised on PostgreSQL: use Azure Database for PostgreSQL."],
     gotchas: ["SQL Managed Instance gives near-full SQL Server compatibility for lift-and-shift."],
     docs: "https://azure.microsoft.com/en-us/products/azure-sql/database",
+    concept: "/cloud/data/managed-relational",
     main: "managed-sql",
   },
   {
@@ -273,6 +285,7 @@ export const services: CloudService[] = [
     avoidWhen: [],
     gotchas: ["HorizonDB, a new scale-out PostgreSQL service, was announced in November 2025 and is in preview."],
     docs: "https://azure.microsoft.com/en-us/products/postgresql",
+    concept: "/cloud/data/managed-relational",
     main: "managed-sql",
   },
   {
@@ -297,6 +310,7 @@ export const services: CloudService[] = [
       "APIs for NoSQL, MongoDB (RU), Cassandra, Gremlin and Table share the same engine.",
     ],
     docs: "https://azure.microsoft.com/en-us/products/cosmos-db",
+    concept: "/cloud/data/managed-nosql",
     main: "serverless-nosql",
   },
   {
@@ -314,6 +328,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Global multi-Region writes with RU billing: use Cosmos DB for MongoDB (RU)."],
     gotchas: ["Generally available under this name since November 2025."],
     docs: "https://azure.microsoft.com/en-us/products/documentdb",
+    concept: "/cloud/data/managed-nosql",
     main: "document-db",
   },
   {
@@ -331,6 +346,119 @@ export const services: CloudService[] = [
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/ai-services/ai-search",
     main: "search",
+  },
+  {
+    id: "aws-dms",
+    provider: "aws",
+    name: "AWS Database Migration Service",
+    short: "DMS",
+    group: "databases",
+    tagline:
+      "Copies a database into AWS while the source stays in use: a full load first, then continuous replication of changes until you cut over.",
+    youManage:
+      "Source and target endpoints, replication tasks and table mappings, the replication capacity, and the cutover.",
+    scaling: "By replication capacity; large tables load in parallel and several tasks can split one database.",
+    pricing: "Per hour of replication capacity plus its storage; the source and target databases are billed as usual.",
+    useWhen: [
+      "Moving a production database with only minutes of downtime.",
+      "Changing engine as part of the move, once the schema has been converted.",
+      "Feeding ongoing changes from a database into a warehouse, a stream or object storage.",
+    ],
+    avoidWhen: [
+      "Same-engine moves where the engine's own replication or a dump and restore is simpler and more faithful.",
+      "Small databases that can be offline for an export and import.",
+    ],
+    gotchas: [
+      "It moves data, not everything around it: secondary indexes, triggers, stored procedures and users come from the schema-conversion step.",
+      "Change capture reads the source's transaction log, which must be kept long enough and adds load to the source.",
+      "Compare row counts and data before cutover, and keep a way back to the source.",
+    ],
+    docs: "https://aws.amazon.com/dms/",
+    concept: "/cloud/data/database-migration",
+    main: "db-migration",
+  },
+  {
+    id: "aws-sct",
+    provider: "aws",
+    name: "AWS DMS Schema Conversion and Schema Conversion Tool",
+    short: "Schema Conversion",
+    group: "databases",
+    tagline:
+      "Translates a database schema and its code objects from one engine to another, and reports what it could not convert.",
+    youManage:
+      "The conversion project, a review of every item flagged for manual work, and testing of the converted code.",
+    scaling: "Per conversion project; it is design-time tooling and not part of the data path.",
+    pricing:
+      "Little or no charge for the tooling; the real cost is the engineering time for whatever must be rewritten by hand.",
+    useWhen: [
+      "Moving from a commercial engine to an open-source one, for example Oracle or SQL Server to PostgreSQL.",
+      "Estimating the effort of an engine change before committing: the assessment lists what converts automatically.",
+      "Converting warehouse schemas on the way to a cloud warehouse.",
+    ],
+    avoidWhen: ["Same-engine migrations: there is nothing to convert."],
+    gotchas: [
+      "Tables and simple views convert well; stored procedures, proprietary functions and vendor-specific SQL inside application code are where the weeks go.",
+      "The managed conversion inside DMS covers fewer engine pairs than the downloadable tool.",
+      "Converted code that compiles is not proven correct: run the application's tests against the target.",
+    ],
+    docs: "https://docs.aws.amazon.com/dms/latest/userguide/CHAP_SchemaConversion.html",
+    concept: "/cloud/data/database-migration",
+    main: "schema-conversion",
+  },
+  {
+    id: "gcp-database-migration-service",
+    provider: "gcp",
+    name: "Database Migration Service",
+    short: "Database Migration Service",
+    group: "databases",
+    tagline:
+      "Guided, low-downtime migrations into Cloud SQL and AlloyDB, with continuous replication from the source until cutover.",
+    youManage:
+      "Connection profiles, migration jobs, network connectivity to the source, review of converted code for engine changes, and the promotion step.",
+    scaling: "Serverless; there are no replication servers to size.",
+    pricing:
+      "Same-engine migrations have no separate service charge; migrations that change engine are billed by the volume of data moved. The destination database is billed as usual.",
+    useWhen: [
+      "Moving MySQL, PostgreSQL or SQL Server into Cloud SQL or AlloyDB with a short cutover.",
+      "Moving from Oracle or SQL Server to PostgreSQL with schema and code conversion built in.",
+    ],
+    avoidWhen: ["Targets it does not cover, such as Spanner or Bigtable: those have their own migration tools."],
+    gotchas: [
+      "Same-engine jobs use the engine's own replication, so the source needs the right settings and a reachable network path.",
+      "The destination is read-only until you promote it; promotion is the cutover and it is one-way.",
+    ],
+    docs: "https://cloud.google.com/database-migration",
+    concept: "/cloud/data/database-migration",
+    main: "db-migration",
+  },
+  {
+    id: "azure-dms",
+    provider: "azure",
+    name: "Azure Database Migration Service",
+    short: "Database Migration Service",
+    group: "databases",
+    tagline:
+      "Managed migrations of SQL Server and open-source databases into Azure's database services, offline or with ongoing sync until cutover.",
+    youManage:
+      "The migration project, source and target connections, a self-hosted runtime for sources behind a firewall, and the cutover.",
+    scaling: "Per migration service; several databases can move in parallel.",
+    pricing:
+      "The service itself costs little or nothing on common paths; the target database and the network link are the real cost.",
+    useWhen: [
+      "Moving SQL Server to Azure SQL Database or Azure SQL Managed Instance.",
+      "Moving open-source databases to their managed Azure services with a short cutover.",
+    ],
+    avoidWhen: [
+      "Engine changes that need schema conversion first: assess and convert with the migration assistants before moving data.",
+    ],
+    gotchas: [
+      "Online migrations need log or change-tracking access on the source and a steady network path.",
+      "Assess before migrating: an unsupported feature is far cheaper to find in a report than at cutover.",
+      "Server-level objects such as logins and scheduled jobs move separately from the data.",
+    ],
+    docs: "https://azure.microsoft.com/en-us/products/database-migration",
+    concept: "/cloud/data/database-migration",
+    main: "db-migration",
   },
 ];
 
@@ -459,5 +587,31 @@ export const capabilities: Capability[] = [
     aws: { services: ["aws-opensearch", "Aurora pgvector", "S3 Vectors"], fit: "direct" },
     gcp: { services: ["Vertex AI Vector Search", "gcp-alloydb"], fit: "direct" },
     azure: { services: ["azure-ai-search", "azure-cosmos-db"], fit: "direct" },
+  },
+  {
+    id: "db-migration",
+    group: "databases",
+    title: "Database migration",
+    summary: "Copy a live database into the cloud and keep it in sync until the cutover.",
+    aws: { services: ["aws-dms"], fit: "direct" },
+    gcp: { services: ["gcp-database-migration-service"], fit: "direct", note: "Targets Cloud SQL and AlloyDB." },
+    azure: { services: ["azure-dms"], fit: "direct" },
+  },
+  {
+    id: "schema-conversion",
+    group: "databases",
+    title: "Schema and code conversion",
+    summary: "Translate tables, views and stored code when the move also changes the database engine.",
+    aws: { services: ["aws-sct"], fit: "direct" },
+    gcp: {
+      services: ["gcp-database-migration-service"],
+      fit: "close",
+      note: "Conversion workspaces inside Database Migration Service, for a shorter list of engine pairs.",
+    },
+    azure: {
+      services: ["SQL Server Migration Assistant"],
+      fit: "close",
+      note: "A downloadable tool rather than a managed service, aimed at moves into SQL Server and Azure SQL.",
+    },
   },
 ];
