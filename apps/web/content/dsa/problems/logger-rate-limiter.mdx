@@ -1,0 +1,122 @@
+---
+title: Logger Rate Limiter
+description: Design a logger that prints each message at most once every 10 seconds, deciding in constant time per call.
+difficulty: medium
+patterns: [design, hash-map]
+topics: [hash-maps]
+companies: []
+languages: [python]
+mode: class
+entry: { python: Logger }
+starter:
+  python: |
+    class Logger:
+        def __init__(self) -> None:
+            pass
+
+        def shouldPrintMessage(self, timestamp: int, message: str) -> bool:
+            # Return True if the message may be printed now
+            pass
+tests: { public: tests/logger-rate-limiter.public.json, hidden: tests/logger-rate-limiter.hidden.json }
+complexity: { time: "O(1) per call", space: "O(unique messages)" }
+related: []
+order: 17
+---
+
+A service writes log lines, and the same line can arrive many times in a burst. To keep the output readable, each
+distinct message may be printed at most once every 10 seconds. Implement the class `Logger`:
+
+- `Logger()` creates an empty logger.
+- `shouldPrintMessage(timestamp, message)` is called for every incoming line. Return `True` if the message should be
+  printed now, and `False` if it must be dropped.
+
+A message that was printed at time `t` is blocked for times `t + 1` up to `t + 9`. At time `t + 10` it may be printed
+again. Only a call that returns `True` counts as a print: a dropped call does not change when the message may next
+be printed.
+
+Calls arrive in time order, and several calls can share the same timestamp.
+
+## Example
+
+```text
+logger = Logger()
+logger.shouldPrintMessage(1, "foo")     → True    (first time)
+logger.shouldPrintMessage(2, "foo")     → False   (printed at 1, blocked until 10)
+logger.shouldPrintMessage(10, "foo")    → False   (1 + 10 = 11 is the first allowed time)
+logger.shouldPrintMessage(11, "foo")    → True
+logger.shouldPrintMessage(11, "bar")    → True    (a different message)
+```
+
+The tests describe a run as a list of operations and their arguments, and compare the list of results (`null` for
+the constructor).
+
+## Constraints
+
+- `0 ≤ timestamp ≤ 10⁹`, and timestamps never decrease from one call to the next.
+- `1 ≤ message.length ≤ 30`
+- At most `10⁵` calls.
+
+**Follow-up:** the log may run for months. Can the memory use stay bounded when most messages never repeat?
+
+<PremiumBreak />
+
+## What has to be remembered
+
+To answer a call you need one fact about the message: when it was last *printed*. Nothing else about the past
+matters. That points to a dictionary from message to last print time.
+
+On each call:
+
+1. Look up the stored time for `message`. If there is none, treat it as "never printed".
+2. If the message was printed less than 10 seconds ago, that is `timestamp < last + 10`, return `False` and change
+   nothing.
+3. Otherwise store `timestamp` as the new last print time and return `True`.
+
+```python
+class Logger:
+    def __init__(self):
+        self._last = {}  # message -> time it was last printed
+
+    def shouldPrintMessage(self, timestamp, message):
+        prev = self._last.get(message, -10_000_000)
+        if timestamp < prev + 10:
+            return False
+        self._last[message] = timestamp
+        return True
+```
+
+The default of `-10_000_000` stands for "never printed": it is far enough in the past that any real timestamp
+passes the check. That removes a separate "is it in the dictionary?" branch.
+
+## Why it works
+
+Because calls arrive in time order, the stored print time of a message is always the most recent one. Comparing the
+current time with that single value gives the right answer, and no earlier print can matter. Each call does one
+lookup and at most one write, so it is O(1) on average.
+
+## A short trace
+
+```text
+call                 stored before      check                 result   stored after
+(1, "foo")           {}                 1 < -9999990 + 10?    True     {foo: 1}
+(2, "foo")           {foo: 1}           2 < 11?               False    {foo: 1}
+(10, "foo")          {foo: 1}           10 < 11?              False    {foo: 1}
+(11, "foo")          {foo: 1}           11 < 11?              True     {foo: 11}
+```
+
+## Common mistakes
+
+- Updating the stored time on a dropped call. After a drop at time 5, the message would then be blocked until 15
+  instead of 11. Write to the dictionary only when you return `True`.
+- Off-by-one at the boundary: a message printed at `t` is allowed again at exactly `t + 10`, so the test is
+  `timestamp < prev + 10`, not `<=`.
+- Using `if self._last.get(message):` as "seen before". A print at time `0` is stored as `0`, which is falsy.
+
+## Variations and the follow-up
+
+- **Bounded memory:** the dictionary grows with the number of distinct messages. Keep a queue of
+  `(time, message)` in print order; before each call, pop entries older than 10 seconds from the front and remove
+  them from the dictionary too. Memory then depends on how many messages were printed in the last 10 seconds.
+- **Different limits per message:** store the allowed gap next to each message, or look it up from a second table.
+- **Out-of-order timestamps:** the "last print" idea breaks, because an older call could arrive after a newer one.
+  You would need to keep every recent print time per message.

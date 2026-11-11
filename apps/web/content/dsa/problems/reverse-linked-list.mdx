@@ -1,0 +1,156 @@
+---
+title: Reverse Linked List
+description: Reverse a singly linked list by rewiring its links, using constant extra space.
+difficulty: easy
+patterns: [linked-list, in-place-reversal]
+topics: [linked-lists]
+companies: []
+languages: [python]
+entry: { python: reverse_list }
+starter:
+  python: |
+    # --- Glue: converts the test arrays to nodes and back. Leave as is. ---
+    class ListNode:
+        def __init__(self, val=0, next=None):
+            self.val = val
+            self.next = next
+
+
+    def _to_list(values):
+        if not values:
+            return None
+        dummy = ListNode()
+        tail = dummy
+        for v in values:
+            tail.next = ListNode(v)
+            tail = tail.next
+        return dummy.next
+
+
+    def _from_list(head):
+        out = []
+        while head:
+            out.append(head.val)
+            head = head.next
+        return out
+
+
+    def reverse_list(values: list[int]) -> list[int]:  # the entry the tests call
+        return _from_list(reverse_nodes(_to_list(values)))
+
+
+    # --- Your code ---
+    def reverse_nodes(head: ListNode | None) -> ListNode | None:
+        # Return the new head of the reversed list
+        pass
+tests: { public: tests/reverse-linked-list.public.json, hidden: tests/reverse-linked-list.hidden.json }
+complexity: { time: "O(n)", space: "O(1)" }
+related: []
+order: 1
+---
+
+A singly linked list is a chain of nodes. Each node has a value `val` and a pointer `next` to the following node,
+and the last node's `next` is `None`. You are given the first node, called the head.
+
+Reverse the list and return the new head. Do it by changing the `next` pointers of the existing nodes, not by
+building a new list.
+
+**How the tests describe lists.** The tests write a list as an array of its values, head first, and expect the
+reversed list as an array too. The editor already contains the `ListNode` class and two small helpers that turn
+the arrays into nodes and back, so you only write the function `reverse_nodes(head)`. It receives the head node (or
+`None` for an empty list) and returns the new head.
+
+## Examples
+
+```text
+[1, 2, 3, 4, 5]   →  [5, 4, 3, 2, 1]
+[]                →  []
+[42]              →  [42]
+[1, 2]            →  [2, 1]
+```
+
+## Constraints
+
+- `0 ≤ n ≤ 5000`, where `n` is the number of nodes.
+- `-5000 ≤ val ≤ 5000`
+
+**Follow-up:** write it once with a loop and once with recursion. Which one can run out of stack on 5000 nodes?
+
+<PremiumBreak />
+
+## The idea: turn each arrow around
+
+Draw the list as `1 → 2 → 3 → None`. Reversing it means each arrow must point backward: `None ← 1 ← 2 ← 3`, with 3
+as the new head. You do not need to move any values. You only need to flip each `next` pointer, one node at a
+time, while walking forward.
+
+The trouble is that flipping a pointer cuts the link to the rest of the list. If you set `cur.next = prev`, you
+lose your only reference to the node that used to come after `cur`. So save it first.
+
+## Three pointers
+
+Keep three names while you walk:
+
+- `cur`: the node you are about to reverse. It starts at `head`.
+- `prev`: the node `cur` should now point to. It starts as `None`, because the old head becomes the tail.
+- `nxt`: a saved copy of `cur.next`, so the rest of the list is not lost.
+
+Each step does four things, in this order:
+
+1. `nxt = cur.next` (remember what comes next)
+2. `cur.next = prev` (flip the arrow)
+3. `prev = cur` (the reversed part now starts at `cur`)
+4. `cur = nxt` (step forward)
+
+When `cur` becomes `None`, every node has been flipped and `prev` is the last node you handled, which is the new head.
+
+```python
+def reverse_nodes(head):
+    prev = None
+    cur = head
+    while cur:
+        nxt = cur.next
+        cur.next = prev
+        prev = cur
+        cur = nxt
+    return prev
+```
+
+The `ListNode` class, `_to_list`, `_from_list` and the `reverse_list` wrapper in the editor are the glue that connects
+this function to the tests. You do not change them.
+
+## Why it works
+
+Look at the list as two parts: the part you have already reversed, which starts at `prev`, and the part you
+have not touched yet, which starts at `cur`. At the start the reversed part is empty (`prev` is `None`). Each
+step moves the front node of the untouched part onto the front of the reversed part. This keeps both parts
+correct, and when the untouched part is empty, everything is reversed.
+
+## A short trace
+
+For `[1, 2, 3]`:
+
+| step | cur | prev before | action | list state |
+| ---- | --- | ----------- | ------ | ---------- |
+| 1 | 1 | `None` | `1.next = None` | `None ← 1`, rest: `2 → 3` |
+| 2 | 2 | 1 | `2.next = 1` | `None ← 1 ← 2`, rest: `3` |
+| 3 | 3 | 2 | `3.next = 2` | `None ← 1 ← 2 ← 3`, rest: empty |
+
+After step 3, `cur` is `None`, and `prev` points to the node with value 3, so that is the answer.
+
+## Common mistakes
+
+- Flipping `cur.next` before saving it. The rest of the list is then lost, and the loop stops after one node.
+- Returning `cur` instead of `prev`. At the end `cur` is `None`.
+- Starting `prev` at `head` instead of `None`. The old head would then point to itself and create a cycle.
+- Not handling the empty list. The loop condition already does: with `head = None` nothing runs and `prev` (which
+  is `None`) is returned.
+
+## Variations
+
+- **Recursion:** reverse everything after the head, then make the second node point back at the head and set
+  `head.next = None`. It is short, but it nests as deep as the list is long.
+- **Reverse only a range of positions:** walk to the start of the range, run the same loop for the given number
+  of nodes, then reconnect the two ends.
+- **Reverse in groups of k:** run the loop on each block of `k` nodes and join the blocks.
+- **Check a palindrome list:** reverse the second half in place, compare it with the first half, then reverse it back.

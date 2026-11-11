@@ -27,6 +27,11 @@ export async function problemStatement(problem: ValidProblem) {
   return compile(splitProblemBody(content).statement);
 }
 
+/** The whole body of a statement-only outline. */
+export async function outlineStatement(file: string) {
+  return compile(matter(await fs.readFile(file, "utf8")).content);
+}
+
 /** Only call for an editorial the visitor may read (free problems until Phase 5's entitlement check). */
 export async function problemEditorial(problem: ValidProblem) {
   const { content } = matter(await fs.readFile(problem.file, "utf8"));

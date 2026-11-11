@@ -3,8 +3,9 @@ import type { ResolvingMetadata } from "next";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { PageHeader } from "@/components/ui/editorial";
 import {
-  DifficultyLabel,
   problemListHref,
+  outlinesForTopic,
+  topicLabel,
   problemsForTopic,
   dsaContent,
   dsaSection,
@@ -19,6 +20,8 @@ export function generateMetadata(_props: unknown, parent: ResolvingMetadata) {
   return withParentImages(hubSeo(dsaSection()).metadata, parent);
 }
 
+// The hub: the topics with their problem counts and one link to the full, filterable list. Problems are not
+// listed here; there are hundreds.
 export default function DsaHubPage() {
   const { section, items, topics, problems } = dsaContent();
   const published = problems.filter((p) => p.fm.status === "published");
@@ -28,32 +31,22 @@ export default function DsaHubPage() {
       <Breadcrumb items={[{ label: "Home", href: "/" }, { label: section.label }]} />
       <PageHeader className="mt-10 mb-12 border-b border-hairline pb-10" title={HUB_TITLE} lead={HUB_DESCRIPTION} />
 
-      <h2 className="font-display text-2xl font-semibold text-ink">Topics</h2>
-      <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-        {topics.map((t) => (
-          <li key={t.slug} className="rounded-xl border border-hairline bg-paper p-5">
-            <Link href={t.href} className="font-semibold text-ink underline-offset-4 hover:underline">
-              {t.fm.title}
-            </Link>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{t.fm.description}</p>
-            <p className="mt-3 text-xs text-muted-foreground">{problemsForTopic(items, t.slug).length} problems</p>
-          </li>
-        ))}
-      </ul>
-
-      <div className="mt-14 flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="font-display text-2xl font-semibold text-ink">Problems</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="font-display text-2xl font-semibold text-ink">Topics</h2>
         <Link href={problemListHref(section)} className="text-sm font-semibold text-ink underline underline-offset-4">
           All {published.length} problems, with filters
         </Link>
       </div>
-      <ul className="mt-4 divide-y divide-hairline border-y border-hairline">
-        {published.map((p) => (
-          <li key={p.slug} className="flex items-center justify-between gap-4 py-3">
-            <Link href={p.href} className="text-ink underline-offset-4 hover:underline">
-              {p.fm.title}
+      <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+        {topics.map((t) => (
+          <li key={t.slug} className="rounded-xl border border-hairline bg-paper p-5">
+            <Link href={t.href} className="font-semibold text-ink underline-offset-4 hover:underline">
+              {topicLabel(t)}
             </Link>
-            <DifficultyLabel difficulty={p.fm.difficulty} />
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{t.fm.description}</p>
+            <p className="mt-3 text-xs text-muted-foreground">
+              {problemsForTopic(items, t.slug).length + outlinesForTopic(items, t.slug).length} problems
+            </p>
           </li>
         ))}
       </ul>

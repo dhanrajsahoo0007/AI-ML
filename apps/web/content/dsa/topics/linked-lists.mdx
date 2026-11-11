@@ -1,0 +1,68 @@
+---
+title: Linked Lists
+description: Nodes joined by pointers, what they cost compared with arrays, and the few pointer moves that solve most list problems.
+icon: link2
+order: 13
+---
+
+A linked list stores a sequence as separate nodes. Each node holds a value and a pointer to the next node, and
+the last node points to nothing (`None`). You keep a reference to the first node, the *head*, and reach
+everything else by following pointers from there.
+
+An array keeps its items side by side in memory, so it can jump straight to position `i`. A linked list cannot:
+to reach the fifth node you walk through the first four. What you get in return is cheap editing. Adding or
+removing a node only changes one or two pointers, wherever the node sits, and nothing has to be shifted.
+
+## What it costs
+
+| Operation | Array | Linked list |
+| --- | --- | --- |
+| Read the item at position `i` | O(1) | O(i) |
+| Insert or delete at the front | O(n) | O(1) |
+| Insert or delete after a node you already hold | O(n) | O(1) |
+| Insert or delete at the end | O(1) | O(n), or O(1) if you keep a tail pointer |
+| Search for a value | O(n) | O(n) |
+
+A *doubly* linked list also stores a pointer to the previous node. That costs one more pointer per node and
+lets you remove a node you hold in O(1) without knowing what came before it.
+
+## In Python
+
+Python has no built-in linked list type, so problems define a small node class:
+
+```python
+class ListNode:
+    def __init__(self, val=0, next=None):
+        self.val = val
+        self.next = next
+```
+
+On this site the tests write a list as an array of its values, head first, such as `[1, 2, 3]`. The starter code
+turns that array into nodes before calling your function and turns your answer back into an array afterwards, so
+you work with real nodes and real pointers.
+
+## Patterns worth recognising
+
+1. **Walk with a saved pointer.** Before you change `node.next`, save the old value in another variable. This is
+   the whole of *Reverse Linked List*: save, flip, step forward.
+2. **Dummy head.** Create a throwaway node in front of the real head and build the answer after it. Every node,
+   including the first, is then handled the same way, and the answer is `dummy.next`. Merging lists and
+   removing nodes both become simpler.
+3. **Fast and slow pointers.** Move one pointer one step at a time and another two steps. When the fast one
+   reaches the end, the slow one is at the middle. If the list has a cycle, the two eventually meet.
+4. **Gap of k.** Move one pointer `k` nodes ahead, then move both together. When the leader reaches the end, the
+   follower is `k` nodes from the end. This finds the node to remove in one pass.
+5. **A list plus another structure.** A heap picks the smallest head among many lists (*Merge K Sorted Lists*).
+   A hash map from key to node gives O(1) access to any node, which is how an LRU cache works.
+
+## Pitfalls
+
+- **Losing the rest of the list.** Overwriting `node.next` before saving it leaves the remaining nodes
+  unreachable.
+- **Forgetting the empty list and the single node.** Check what your loop does when `head` is `None` and when
+  `head.next` is `None`.
+- **Reading `.next` of `None`.** In a loop that steps two nodes at a time, test both `fast` and `fast.next`.
+- **Leaving a stale pointer.** After moving a node, make sure the old tail's `next` is `None`, or the list can
+  end in a cycle.
+- **Returning the wrong end.** After a reversal the node you finished on is `None`; the new head is the one
+  before it.

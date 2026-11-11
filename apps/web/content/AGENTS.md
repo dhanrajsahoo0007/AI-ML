@@ -16,7 +16,7 @@ tables and prose tidy by hand.
 | `question-bank/<category>.yaml`            | Interview questions; `question-bank/taxonomy.yaml` lists the categories    |
 | `question-bank/articles.yaml`              | Article path → category/subsection for articles with interview questions  |
 | `companies/companies.yaml`                 | Company records behind company tags and `/companies`                       |
-| `dsa/`                                     | `dsa/topics/`, `dsa/problems/`, `dsa/tests/` (public + hidden), `dsa/patterns.yaml` |
+| `dsa/`                                     | `dsa/topics/`, `dsa/problems/`, `dsa/tests/` (public + hidden), `dsa/solutions/` (Python references), `dsa/patterns.yaml` |
 | `newsletter/<yyyy>/<slug>.mdx`             | Newsletter issues                                                          |
 | `pages/`                                   | Legal, contact, security and pricing FAQ, with `{{KEY}}` placeholders      |
 

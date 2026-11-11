@@ -1,8 +1,17 @@
+import fs from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sectionOfKind, type SectionDef } from "../sections/registry";
 import { kindOf } from "../sections/kinds";
-import { problemListHref, problemsKind } from "./kind";
-import { loadDsaItems, problemsOf, topicsOf, validProblems, type DsaItem, type ValidProblem } from "./source";
+import { problemListHref, problemsKind, topicLabel } from "./kind";
+import {
+  loadDsaItems,
+  problemsOf,
+  referenceSolutionPath,
+  topicsOf,
+  validProblems,
+  type DsaItem,
+  type ValidProblem,
+} from "./source";
 
 // The `problems` kind against the real DSA content and registry entry (plan §15.1). The section is picked by
 // kind, never by key (plan §5.1).
@@ -28,20 +37,23 @@ describe("problems kind: contract", () => {
     const params = problemsKind.staticParams(section, items);
     expect(params).toHaveLength(items.length);
     expect(params.filter((p) => "topic" in p).map((p) => p.topic)).toEqual(topicsOf(items).map((t) => t.slug));
-    expect(params.filter((p) => "slug" in p).map((p) => p.slug)).toEqual(problemsOf(items).map((p) => p.slug));
+    // Written problems first, then the statement-only outlines, which live at the same kind of URL.
+    const pages = items.filter((i) => i.type !== "topic");
+    expect(pages.length).toBeGreaterThan(problemsOf(items).length);
+    expect(params.filter((p) => "slug" in p).map((p) => p.slug)).toEqual(pages.map((p) => p.slug));
   });
-  it("builds a nav with topics and problems grouped by difficulty", () => {
+  it("builds a nav with one group per topic holding its problems, then a link to the problem list", () => {
     const nav = problemsKind.nav(section, items);
     expect(nav.href).toBe(section.href);
     expect(nav.comingSoon).toBeUndefined();
-    expect(nav.groups.map((g) => g.title)).toEqual(["Topics", "Problems"]);
-    expect(nav.groups[0].items!.map((i) => i.href)).toEqual(topicsOf(items).map((t) => t.href));
-    const problemGroup = nav.groups[1];
-    expect(problemGroup.href).toBe(problemListHref(section));
-    expect(problemGroup.categories!.map((c) => c.title)).toEqual(["Easy", "Medium"]);
-    expect(problemGroup.categories!.flatMap((c) => c.items.map((i) => i.href)).sort()).toEqual(
-      problems.map((p) => p.href).sort()
-    );
+    const topics = topicsOf(items);
+    expect(nav.groups.map((g) => g.title)).toEqual([...topics.map((t) => topicLabel(t)), "Problems"]);
+    expect(nav.groups[0].title).toMatch(/^\d{2}\. /); // topics carry the numbering of the owner's notes
+    expect(nav.groups.slice(0, -1).map((g) => g.href)).toEqual(topics.map((t) => t.href));
+    expect(nav.groups.at(-1)).toEqual({ slug: "problems", title: "Problems", href: problemListHref(section) });
+    // Every published problem is listed under each of its topics.
+    const json = JSON.stringify(nav);
+    for (const p of problems.filter((p) => p.fm?.status === "published")) expect(json).toContain(p.href);
   });
   it("lists every page in the sitemap", () => {
     const urls = problemsKind.sitemap(section, items).map((e) => e.url);
@@ -50,13 +62,47 @@ describe("problems kind: contract", () => {
   it("indexes titles and summaries only for search", () => {
     const docs = problemsKind.search(section, items);
     expect(docs).toHaveLength(items.length);
-    const text = JSON.stringify(docs);
+    // An outline's summary is the first sentence of its statement, so this check is for written problems.
+    const outlineHrefs = new Set(items.filter((i) => i.type === "outline").map((i) => i.href));
+    const text = JSON.stringify(docs.filter((d) => !outlineHrefs.has(d.href)));
     // Words that occur only in statements and editorials.
     for (const phrase of ["PremiumBreak", "Brute force", "doubly linked list", "Constraints"])
       expect(text).not.toContain(phrase);
   });
   it("counts published problems as written", () => {
-    expect(problemsKind.counts(items)).toEqual({ written: problems.length, outline: 0 });
+    const outlines = items.filter((i) => i.type === "outline").length;
+    expect(problemsKind.counts(items)).toEqual({ written: problems.length, outline: outlines });
+  });
+});
+
+describe("problems kind: drafts", () => {
+  const draftProblem = { ...byTitle("LRU Cache"), fm: { ...byTitle("LRU Cache").fm, status: "draft" as const } };
+  const topic = topicsOf(items)[1];
+  const draftTopic = { ...topic, fm: { ...topic.fm!, status: "draft" as const } };
+  const withDrafts = items.map((i) => (i.slug === draftProblem.slug ? draftProblem : i === topic ? draftTopic : i));
+
+  it("are not built: no route params for a draft topic or problem", () => {
+    const params = problemsKind.staticParams(section, withDrafts);
+    expect(params).toHaveLength(items.length - 2);
+    expect(params).not.toContainEqual({ slug: draftProblem.slug });
+    expect(params).not.toContainEqual({ topic: topic.slug });
+  });
+  it("are left out of the sitemap, search and the sidebar", () => {
+    const urls = problemsKind.sitemap(section, withDrafts).map((e) => e.url);
+    expect(urls).not.toContain(draftProblem.href);
+    expect(urls).not.toContain(topic.href);
+    const hrefs = problemsKind.search(section, withDrafts).map((d) => d.href);
+    expect(hrefs).not.toContain(draftProblem.href);
+    expect(hrefs).not.toContain(topic.href);
+    expect(JSON.stringify(problemsKind.nav(section, withDrafts))).not.toContain(topic.href);
+  });
+  it("are still validated, and a related link to a draft is reported", async () => {
+    const twoSum = byTitle("Two Sum");
+    const list = withDrafts.map((i) =>
+      i === twoSum ? { ...twoSum, fm: { ...twoSum.fm, related: [draftProblem.href] } } : i
+    );
+    const errors = (await problemsKind.validate(section, list)).map((e) => e.message);
+    expect(errors).toContain(`related page ${draftProblem.href} does not exist`);
   });
 });
 
@@ -141,6 +187,46 @@ describe("problems kind: validate", () => {
       "missing <PremiumBreak/> between the statement and the editorial",
       "related page /system-design/patterns/no-such-page does not exist",
     ]);
+  });
+  it("requires hidden case names of the form hidden/<slug>/NN <label>", async () => {
+    // Pointing Two Sum at another problem's hidden file: every name carries the wrong slug.
+    const wrongSlug = await messages(
+      broken("Two Sum", { tests: { public: "tests/two-sum.public.json", hidden: "tests/lru-cache.hidden.json" } })
+    );
+    expect(wrongSlug).toContain('case 1: hidden case names must be "hidden/two-sum/NN <label>"');
+  });
+  it("requires a Python reference solution that defines the entry and has no __main__ block", async () => {
+    const p = byTitle("Two Sum");
+    const file = referenceSolutionPath(section, p.slug);
+    const real = { exists: fs.existsSync, read: fs.readFileSync };
+    const text = real.read(file, "utf8");
+
+    vi.spyOn(fs, "existsSync").mockImplementation((f) => f !== file && real.exists(f));
+    expect(await messages(items)).toEqual(["no Python reference solution (solutions/two-sum.py)"]);
+    vi.restoreAllMocks();
+
+    const bad = `${text.replace("def two_sum", "def solve")}\nif __name__ == "__main__":\n    print(solve([1, 2], 3))\n`;
+    vi.spyOn(fs, "readFileSync").mockImplementation(((f: fs.PathOrFileDescriptor, o?: BufferEncoding) =>
+      f === file ? bad : real.read(f, o)) as typeof fs.readFileSync);
+    expect(await messages(items)).toEqual([
+      "the reference solution does not define two_sum at the top level",
+      'remove the `if __name__ == "__main__":` block',
+    ]);
+    vi.restoreAllMocks();
+
+    const starter = `${p.fm.starter.python}\nif __name__ == "__main__":\n    pass\n`;
+    expect(await messages(broken("Two Sum", { starter: { ...p.fm.starter, python: starter } }))).toEqual([
+      'the python starter has an `if __name__ == "__main__":` block',
+    ]);
+  });
+  it("needs no Python reference for a problem without Python", async () => {
+    const p = byTitle("Two Sum");
+    const jsOnly = broken("Two Sum", {
+      languages: ["javascript"],
+      starter: { javascript: p.fm.starter.javascript },
+      entry: { javascript: p.fm.entry.javascript },
+    });
+    expect(await messages(jsOnly)).toEqual([]);
   });
   it("reserves the problem-list segment for the list", async () => {
     const t = topicsOf(items)[0];

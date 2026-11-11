@@ -5,11 +5,13 @@ import yaml from "js-yaml";
 import { CONTENT_DIR } from "../sections/registry";
 import type { SectionDef } from "../sections";
 import {
+  outlineFrontmatterSchema,
   patternsSchema,
   PREMIUM_BREAK,
   problemFrontmatterSchema,
   testFileSchema,
   topicFrontmatterSchema,
+  type OutlineFrontmatter,
   type Pattern,
   type ProblemFrontmatter,
   type TestCase,
@@ -21,7 +23,9 @@ import {
 //
 // Hidden tests: only their path is kept on the item. The one reader of their contents is
 // readHiddenTestsForValidation(), used by content-check; no page imports it, so hidden cases never reach a
-// page, its RSC payload or a client bundle (tested in src/features/dsa/leak.test.ts).
+// page, its RSC payload or a client bundle (tested in src/features/dsa/leak.test.ts). Reference solutions
+// (content/<section>/solutions/<slug>.py) follow the same rule: readReferenceSolutionForValidation() is their one
+// reader, for content-check and the tests.
 
 type Section = Pick<SectionDef, "key" | "href">;
 
@@ -50,7 +54,13 @@ export interface DsaProblem extends Base {
   hasBreak: boolean;
 }
 
-export type DsaItem = DsaTopic | DsaProblem;
+/** A statement-only page for a problem that has no starter, tests or editorial yet. */
+export interface DsaOutline extends Base {
+  type: "outline";
+  fm: OutlineFrontmatter | null;
+}
+
+export type DsaItem = DsaTopic | DsaProblem | DsaOutline;
 
 /** A problem whose frontmatter passed validation. */
 export type ValidProblem = DsaProblem & { fm: ProblemFrontmatter };
@@ -58,6 +68,8 @@ export type ValidTopic = DsaTopic & { fm: TopicFrontmatter };
 
 export const TOPICS_DIR = "topics";
 const PROBLEMS_DIR = "problems";
+const OUTLINES_DIR = "outlines";
+export const SOLUTIONS_DIR = "solutions";
 export const PATTERNS_FILE = "patterns.yaml";
 /** Path segment of the problem list and problem pages, below the section href. */
 export const PROBLEMS_SEGMENT = "problems";
@@ -127,13 +139,38 @@ export function loadDsaItems(section: Section): DsaItem[] {
     };
   });
 
-  const items = [...topics.sort(byOrder), ...problems.sort(byOrder)];
+  // An outline shares its URL with the full problem it will become; once problems/<slug>.mdx exists it wins.
+  const written = new Set(problems.map((p) => p.slug));
+  const outlines = mdxFiles(path.join(dir, OUTLINES_DIR))
+    .filter((name) => !written.has(name.slice(0, -4)))
+    .map((name): DsaOutline => {
+      const file = path.join(dir, OUTLINES_DIR, name);
+      const slug = name.slice(0, -4);
+      const { data } = matter(fs.readFileSync(file, "utf8"));
+      const parsed = outlineFrontmatterSchema.safeParse(data);
+      return {
+        type: "outline",
+        slug,
+        href: `${section.href}/${PROBLEMS_SEGMENT}/${slug}`,
+        file,
+        data,
+        issues: parsed.success ? [] : issuesOf(parsed.error),
+        fm: parsed.success ? parsed.data : null,
+        title: typeof data.title === "string" ? data.title : slug,
+        description: typeof data.description === "string" ? data.description : undefined,
+      };
+    });
+
+  const items = [...topics.sort(byOrder), ...problems.sort(byOrder), ...outlines.sort(byOrder)];
   cache.set(section.key, items);
   return items;
 }
 
 export const topicsOf = (items: DsaItem[]) => items.filter((i): i is DsaTopic => i.type === "topic");
 export const problemsOf = (items: DsaItem[]) => items.filter((i): i is DsaProblem => i.type === "problem");
+type ValidOutline = DsaOutline & { fm: OutlineFrontmatter };
+export const validOutlines = (items: DsaItem[]) =>
+  items.filter((i): i is ValidOutline => i.type === "outline" && i.fm !== null);
 
 /** Valid items only; pages call this, and content-check has already failed the build on invalid ones. */
 export function validProblems(items: DsaItem[]): ValidProblem[] {
@@ -143,6 +180,9 @@ export function validProblems(items: DsaItem[]): ValidProblem[] {
 export function validTopics(items: DsaItem[]): ValidTopic[] {
   return topicsOf(items).filter((t): t is ValidTopic => t.fm !== null);
 }
+
+/** `status: draft` topics and problems are not built, listed, indexed or put in the sitemap. */
+export const withoutDrafts = <T extends DsaItem>(items: T[]) => items.filter((i) => i.fm?.status !== "draft");
 
 /** The section's pattern list; empty when the file is missing or invalid (content-check reports that). */
 export function loadPatterns(section: Pick<SectionDef, "key">): Pattern[] {
@@ -180,6 +220,20 @@ export function readPublicTests(section: Pick<SectionDef, "key">, problem: Valid
  */
 export function readHiddenTestsForValidation(section: Pick<SectionDef, "key">, problem: ValidProblem): TestCase[] {
   return readTestFile(testFilePath(section, problem.fm.tests.hidden));
+}
+
+/** Where a problem's Python reference solution lives (whether or not it exists). */
+export function referenceSolutionPath(section: Pick<SectionDef, "key">, slug: string) {
+  return path.join(dsaDir(section), SOLUTIONS_DIR, `${slug}.py`);
+}
+
+/**
+ * A problem's Python reference solution, or null when there is none. For content-check and the tests only:
+ * like hidden tests, it must never reach a page, its RSC payload or a client bundle.
+ */
+export function readReferenceSolutionForValidation(section: Pick<SectionDef, "key">, slug: string): string | null {
+  const file = referenceSolutionPath(section, slug);
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
 }
 
 /** Splits a problem's MDX body at <PremiumBreak/>: the statement (free) and the editorial. */

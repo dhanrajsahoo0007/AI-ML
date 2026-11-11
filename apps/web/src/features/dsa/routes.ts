@@ -6,12 +6,22 @@ import { notFound } from "next/navigation";
 import { getCompanies } from "@/lib/question-bank";
 import { CONTENT_DIR, isPathVisible, sectionOfKind, routeSection } from "../sections";
 import type { SectionDef } from "../sections";
-import { problemListHref, problemsForTopic, problemsKind } from "./kind";
+import { outlinesForTopic, problemListHref, problemsForTopic, problemsKind } from "./kind";
 import { buildProblemIndex } from "./problem-index";
-import { loadDsaItems, loadPatterns, readPublicTests, validProblems, validTopics, type ValidProblem } from "./source";
+import {
+  loadDsaItems,
+  loadPatterns,
+  readPublicTests,
+  validOutlines,
+  validProblems,
+  validTopics,
+  withoutDrafts,
+  type ValidProblem,
+} from "./source";
 
 // Helpers for the app/<section> routes of the problems kind. Every page is prerendered: these run at build
-// time only. A section that is `off` builds no topic or problem pages, and its static pages render 404.
+// time only. A section that is `off` builds no topic or problem pages, and its static pages render 404. Drafts
+// get no page at all.
 
 export type TopicParams = Promise<{ topic: string }>;
 export type ProblemParams = Promise<{ slug: string }>;
@@ -31,24 +41,45 @@ function items(section: SectionDef) {
   return all;
 }
 
+/** The section's items, and its topics and problems that have pages (drafts left out). */
 export function dsaContent(section: SectionDef = dsaSection()) {
   const all = items(section);
-  return { section, items: all, topics: validTopics(all), problems: validProblems(all) };
+  return {
+    section,
+    items: all,
+    topics: withoutDrafts(validTopics(all)),
+    problems: withoutDrafts(validProblems(all)),
+    outlines: validOutlines(all),
+  };
 }
 
 export function topicParams() {
-  return isBuilt() ? validTopics(items(sectionOfKind("problems"))).map((t) => ({ topic: t.slug })) : [];
+  return isBuilt() ? dsaContent(sectionOfKind("problems")).topics.map((t) => ({ topic: t.slug })) : [];
 }
 
 export function problemParams() {
-  return isBuilt() ? validProblems(items(sectionOfKind("problems"))).map((p) => ({ slug: p.slug })) : [];
+  if (!isBuilt()) return [];
+  const { problems, outlines } = dsaContent(sectionOfKind("problems"));
+  return [...problems, ...outlines].map((p) => ({ slug: p.slug }));
 }
 
 export function getTopic(slug: string) {
   const content = dsaContent();
   const topic = content.topics.find((t) => t.slug === slug);
   if (!topic) notFound();
-  return { ...content, topic, problems: problemsForTopic(content.items, slug) };
+  return {
+    ...content,
+    topic,
+    problems: problemsForTopic(content.items, slug),
+    topicOutlines: outlinesForTopic(content.items, slug),
+  };
+}
+
+/** The statement-only outline at this slug, or undefined (then it is a written problem or a 404). */
+export function findOutline(slug: string) {
+  const content = dsaContent();
+  const outline = content.outlines.find((o) => o.slug === slug);
+  return outline ? { ...content, outline } : undefined;
 }
 
 export function getProblem(slug: string) {
@@ -60,11 +91,28 @@ export function getProblem(slug: string) {
 
 export function problemIndex(section: SectionDef, problems: ValidProblem[]) {
   return buildProblemIndex({
+    base: problemListHref(section),
     problems,
     access: (p) => problemsKind.access(section, p),
+    topicLabels: new Map(validTopics(items(section)).map((t) => [t.slug, t.fm.title])),
     patternLabels: new Map(loadPatterns(section).map((p) => [p.slug, p.label])),
     companyLabels: new Map(getCompanies().map((c) => [c.slug, c.name])),
   });
+}
+
+/**
+ * A topic's practice problems grouped by pattern, for the topic page: each problem under its first pattern,
+ * groups in the order their first problem appears, problems in content order (`order`, then title).
+ */
+export function practiceGroups(section: SectionDef, problems: ValidProblem[]) {
+  const labels = new Map(loadPatterns(section).map((p) => [p.slug, p.label]));
+  const groups = new Map<string, { slug: string; label: string; problems: ValidProblem[] }>();
+  for (const p of problems) {
+    const slug = p.fm.patterns[0];
+    if (!groups.has(slug)) groups.set(slug, { slug, label: labels.get(slug) ?? slug, problems: [] });
+    groups.get(slug)!.problems.push(p);
+  }
+  return [...groups.values()];
 }
 
 /** Labels for a problem's patterns and companies, in the order the frontmatter lists them. */

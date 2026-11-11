@@ -64,27 +64,58 @@ test.describe(`DSA, APP_ENV=${env} @core`, () => {
 
   test("the problem list filters by difficulty, pattern and company", async ({ page }) => {
     await open(page, LIST);
-    const titles = () => page.getByRole("list", { name: "Problems" }).getByRole("link").allInnerTexts();
+    const list = page.getByRole("list", { name: "Problems" });
+    const titles = () => list.getByRole("link").allInnerTexts();
+    const rowTexts = () => list.getByRole("listitem").allInnerTexts();
     const filters = page.getByRole("form", { name: "Filter problems" });
-    expect(await titles()).toEqual(["Two Sum", "Number of Islands", "LRU Cache"]);
+    const count = page.locator("[data-problem-count]");
+    // The content grows: assert on what the filters do, not on a fixed list of problems.
+    const total = Number(/^(\d+) problems$/.exec(await count.innerText())?.[1]);
+    expect(total).toBeGreaterThanOrEqual(3);
 
     await filters.getByLabel("Difficulty").selectOption("medium");
-    await expect(page.locator("[data-problem-count]")).toHaveText("2 of 3 problems");
-    expect(await titles()).toEqual(["Number of Islands", "LRU Cache"]);
+    await expect(count).toHaveText(new RegExp(`^\\d+ of ${total} problems$`));
+    for (const row of await rowTexts()) expect(row).toContain("Medium");
 
     await filters.getByLabel("Pattern").selectOption("depth-first-search");
-    expect(await titles()).toEqual(["Number of Islands"]);
+    for (const row of await rowTexts()) expect(row).toMatch(/Medium[\s\S]*Depth-first search/);
 
     await page.getByRole("button", { name: "Clear filters" }).click();
+    await expect(count).toHaveText(`${total} problems`);
     await filters.getByLabel("Company").selectOption("apple");
-    expect(await titles()).toEqual(["Two Sum", "LRU Cache"]);
+    expect(await titles()).toEqual(expect.arrayContaining(["Two Sum", "LRU Cache"]));
 
     await filters.getByLabel("Difficulty").selectOption("easy");
-    expect(await titles()).toEqual(["Two Sum"]);
+    expect(await titles()).toContain("Two Sum");
+    for (const row of await rowTexts()) expect(row).toContain("Easy");
 
-    await filters.getByLabel("Difficulty").selectOption("");
-    await filters.getByLabel("Pattern").selectOption("depth-first-search");
+    await page.getByRole("button", { name: "Clear filters" }).click();
+    await filters.getByLabel("Title").fill("islands");
+    expect(await titles()).toContain("Number of Islands");
+    for (const title of await titles()) expect(title.toLowerCase()).toContain("islands");
+    await filters.getByLabel("Title").fill("no such problem title");
     await expect(page.getByText("No problems match these filters yet.")).toBeVisible();
+
+    await page.getByRole("button", { name: "Clear filters" }).click();
+    await filters.getByLabel("Topic").selectOption("hash-maps");
+    expect(await titles()).toEqual(expect.arrayContaining(["Two Sum", "LRU Cache"]));
+  });
+
+  test("the problem list shows at most 50 rows per page", async ({ page }) => {
+    await open(page, LIST);
+    const list = page.getByRole("list", { name: "Problems" });
+    const total = Number(/^(\d+) problems$/.exec(await page.locator("[data-problem-count]").innerText())?.[1]);
+    await expect(list.getByRole("listitem")).toHaveCount(Math.min(total, 50));
+    const pages = page.getByRole("navigation", { name: "Problem list pages" });
+    if (total <= 50) {
+      await expect(pages).toHaveCount(0);
+      return;
+    }
+    await expect(pages.locator("[data-problem-page]")).toHaveText(`Page 1 of ${Math.ceil(total / 50)}`);
+    const first = await list.getByRole("link").first().innerText();
+    await pages.getByRole("button", { name: "Next" }).click();
+    await expect(pages.locator("[data-problem-page]")).toHaveText(`Page 2 of ${Math.ceil(total / 50)}`);
+    expect(await list.getByRole("link").first().innerText()).not.toBe(first);
   });
 
   test("the editor loads on interaction, not with the page", async ({ page }) => {
@@ -203,9 +234,17 @@ test.describe(`DSA, APP_ENV=${env} @core`, () => {
   });
 
   test("hidden tests are never served", async ({ request }) => {
-    const problems = fs.readdirSync(path.join(contentDir, "problems")).map((f) => f.replace(/\.mdx$/, ""));
+    const problems = fs
+      .readdirSync(path.join(contentDir, "problems"))
+      .map((f) => f.replace(/\.mdx$/, ""))
+      .sort();
     expect(problems.length).toBeGreaterThanOrEqual(3);
-    for (const slug of problems) {
+    // Every problem is checked offline by src/features/dsa/leak.test.ts; here a bounded, evenly spread sample
+    // is fetched from the running server (HTML and RSC), so the suite stays fast with hundreds of problems.
+    const SAMPLE = 8;
+    const step = Math.max(1, Math.ceil(problems.length / SAMPLE));
+    const sample = problems.filter((_, i) => i % step === 0);
+    for (const slug of sample) {
       const hidden = JSON.parse(fs.readFileSync(path.join(contentDir, "tests", `${slug}.hidden.json`), "utf8")) as {
         name: string;
       }[];
@@ -216,6 +255,9 @@ test.describe(`DSA, APP_ENV=${env} @core`, () => {
         expect(rsc, `${slug}: hidden case "${tc.name}" in the RSC payload`).not.toContain(tc.name);
       }
       expect(html).not.toContain(".hidden.json");
+      // Hidden case names all start with hidden/<slug>/NN: none of any problem may be served.
+      expect(html).not.toMatch(/hidden\/[a-z0-9-]+\/\d{2} /);
+      expect(rsc).not.toMatch(/hidden\/[a-z0-9-]+\/\d{2} /);
     }
   });
 });

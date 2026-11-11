@@ -3,8 +3,15 @@ import path from "node:path";
 import { navSection, type CompanyRef, type ContentError, type SectionKind } from "../sections/kind";
 import { CONTENT_DIR } from "../sections/registry";
 import { DESCRIPTION_MAX, type SectionDef } from "../sections/schema";
-import { classCaseSchema, LANGUAGES, MIN_HIDDEN_TESTS, PREMIUM_BREAK } from "./schema";
-import { DIFFICULTIES, DIFFICULTY_LABELS } from "./constants";
+import {
+  classCaseSchema,
+  hiddenNamePattern,
+  LANGUAGES,
+  MIN_HIDDEN_TESTS,
+  PREMIUM_BREAK,
+  PY_MAIN_GUARD,
+  type TestCase,
+} from "./schema";
 import {
   dsaDir,
   loadDsaItems,
@@ -14,9 +21,14 @@ import {
   problemsOf,
   readHiddenTestsForValidation,
   readPublicTests,
+  readReferenceSolutionForValidation,
+  referenceSolutionPath,
+  SOLUTIONS_DIR,
   testFilePath,
   topicsOf,
+  validOutlines,
   validProblems,
+  withoutDrafts,
   type DsaItem,
   type ValidProblem,
 } from "./source";
@@ -31,11 +43,13 @@ import {
 //
 // Access: a problem's statement and public tests are free; `access` (or the section's rules: topics and
 // easy problems are always free) decides whether the editorial is shown or replaced by a Pro placeholder.
+// Drafts (`status: draft`, topic or problem) are validated but not built, listed, indexed or in the sitemap.
 
 /** The problem list's path for a section. */
 export const problemListHref = (section: Pick<SectionDef, "href">) => `${section.href}/${PROBLEMS_SEGMENT}`;
 
 function access(section: SectionDef, item: DsaItem): "free" | "premium" {
+  if (item.type === "outline") return "free"; // a statement only
   const alwaysFree = section.access?.alwaysFree ?? [];
   if (item.type === "topic") return alwaysFree.includes("topics") ? "free" : (section.access?.default ?? "free");
   if (item.fm?.access) return item.fm.access;
@@ -54,7 +68,9 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** True when a site path in `related` names a page that exists in the content tree. */
 function relatedExists(section: SectionDef, items: DsaItem[], href: string): boolean {
   if (href === section.href || href.startsWith(`${section.href}/`)) {
-    return href === section.href || href === problemListHref(section) || items.some((i) => i.href === href);
+    return (
+      href === section.href || href === problemListHref(section) || withoutDrafts(items).some((i) => i.href === href)
+    );
   }
   return fs.existsSync(path.join(CONTENT_DIR, `${href.slice(1)}.mdx`));
 }
@@ -67,40 +83,53 @@ export const problemsKind: SectionKind<DsaItem> = {
   },
 
   staticParams(_section, items) {
-    return [...topicsOf(items).map((t) => ({ topic: t.slug })), ...problemsOf(items).map((p) => ({ slug: p.slug }))];
+    const built = withoutDrafts(items);
+    return [
+      ...topicsOf(built).map((t) => ({ topic: t.slug })),
+      ...problemsOf(built).map((p) => ({ slug: p.slug })),
+      ...validOutlines(built).map((o) => ({ slug: o.slug })),
+    ];
   },
 
-  // Two groups: the topics, and the problems by difficulty.
+  // One group per topic, holding its problems under their headings (written problems first, then the
+  // statement-only outlines by `group`), then one link to the filterable list. TODO before release: this puts
+  // every problem in the sidebar and in nav-items.json; trim it to the current topic (import plan, release list).
   nav(section, items) {
-    const problems = validProblems(items).filter((p) => p.fm.status === "published");
+    const built = withoutDrafts(items);
+    const link = (i: DsaItem) => ({ slug: i.slug, title: numberedTitle(i), href: i.href });
     return navSection(section, [
-      {
-        slug: "topics",
-        title: "Topics",
-        href: section.href,
-        items: topicsOf(items).map((t) => ({ slug: t.slug, title: t.title, href: t.href })),
-      },
-      {
-        slug: PROBLEMS_SEGMENT,
-        title: "Problems",
-        href: problemListHref(section),
-        categories: DIFFICULTIES.map((d) => ({
-          title: DIFFICULTY_LABELS[d],
-          items: problems
-            .filter((p) => p.fm.difficulty === d)
-            .map((p) => ({ slug: p.slug, title: p.title, href: p.href })),
-        })).filter((c) => c.items.length > 0),
-      },
+      ...topicsOf(built).map((t) => {
+        const groups = new Map<string, DsaItem[]>();
+        const add = (title: string, item: DsaItem) => groups.set(title, [...(groups.get(title) ?? []), item]);
+        for (const p of problemsForTopic(built, t.slug)) add(WRITTEN_GROUP, p);
+        for (const o of outlinesForTopic(built, t.slug)) add(o.fm.group ?? OUTLINE_GROUP, o);
+        return {
+          slug: t.slug,
+          title: topicLabel(t),
+          href: t.href,
+          categories: [...groups].map(([title, list]) => ({ title, items: list.map(link) })),
+        };
+      }),
+      { slug: PROBLEMS_SEGMENT, title: "Problems", href: problemListHref(section) },
     ]);
   },
 
   sitemap(section, items) {
-    return [{ url: section.href }, { url: problemListHref(section) }, ...items.map((i) => ({ url: i.href }))];
+    return [
+      { url: section.href },
+      { url: problemListHref(section) },
+      ...withoutDrafts(items).map((i) => ({ url: i.href })),
+    ];
   },
 
   // Titles and one-line summaries only: no statement, editorial or tests.
   search(section, items) {
-    return items.map((i) => ({ href: i.href, title: i.title, description: i.description, section: section.key }));
+    return withoutDrafts(items).map((i) => ({
+      href: i.href,
+      title: i.title,
+      description: i.description,
+      section: section.key,
+    }));
   },
 
   access,
@@ -113,7 +142,7 @@ export const problemsKind: SectionKind<DsaItem> = {
   counts(items) {
     const problems = problemsOf(items);
     const drafts = problems.filter((p) => p.fm?.status === "draft").length;
-    return { written: problems.length - drafts, outline: drafts };
+    return { written: problems.length - drafts, outline: drafts + validOutlines(items).length };
   },
 
   async validate(section, items) {
@@ -123,6 +152,12 @@ export const problemsKind: SectionKind<DsaItem> = {
     const rel = (file: string) => path.relative(process.cwd(), file);
     const push = (file: string, message: string, line?: number, level: ContentError["level"] = "error") =>
       errors.push({ file: rel(file), line, message, level });
+
+    const topicPages = new Set(topicsOf(items).map((t) => t.slug));
+    for (const o of items.filter((i) => i.type === "outline")) {
+      for (const issue of o.issues) push(o.file, issue);
+      for (const t of o.fm?.topics ?? []) if (!topicPages.has(t)) push(o.file, `topics: no topic page "${t}"`);
+    }
     const fieldLine = (file: string, key: string) => lineOf(file, new RegExp(`^${escape(key)}:`)) ?? 1;
 
     const patternsFile = path.join(dsaDir(section), PATTERNS_FILE);
@@ -237,6 +272,14 @@ function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProbl
       c.push(target, (e as Error).message.replace(`${target}: `, ""));
     }
   }
+  if (loaded.hidden) {
+    const pattern = hiddenNamePattern(problem.slug);
+    const target = testFilePath(section, fm.tests.hidden);
+    (loaded.hidden as TestCase[]).forEach((tc, i) => {
+      if (!tc.name || !pattern.test(tc.name))
+        c.push(target, `case ${i + 1}: hidden case names must be "hidden/${problem.slug}/NN <label>"`);
+    });
+  }
   if (loaded.hidden && loaded.hidden.length < MIN_HIDDEN_TESTS) {
     c.push(
       file,
@@ -252,6 +295,21 @@ function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProbl
       c.push(file, "a hidden test repeats a public one", c.fieldLine(file, "tests"), "warning");
   }
 
+  // Python: a reference solution in solutions/<slug>.py that defines the entry, and no __main__ block anywhere.
+  if (fm.languages.includes("python")) {
+    const entry = fm.entry.python;
+    const reference = readReferenceSolutionForValidation(section, problem.slug);
+    const refFile = referenceSolutionPath(section, problem.slug);
+    if (reference === null) c.push(file, `no Python reference solution (${SOLUTIONS_DIR}/${problem.slug}.py)`);
+    else {
+      if (entry && !new RegExp(`^(?:def|class)\\s+${escape(entry)}\\b`, "m").test(reference))
+        c.push(refFile, `the reference solution does not define ${entry} at the top level`);
+      if (PY_MAIN_GUARD.test(reference)) c.push(refFile, 'remove the `if __name__ == "__main__":` block');
+    }
+    if (fm.starter.python && PY_MAIN_GUARD.test(fm.starter.python))
+      c.push(file, 'the python starter has an `if __name__ == "__main__":` block', c.fieldLine(file, "starter"));
+  }
+
   for (const href of fm.related) {
     if (!relatedExists(section, items, href))
       c.push(file, `related page ${href} does not exist`, valueLine(href, "related"));
@@ -259,6 +317,26 @@ function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProbl
 }
 
 /** Problems tagged with a topic, in content order. */
+/** Sidebar heading for a topic's written problems, and for outlines that name no `group`. */
+const WRITTEN_GROUP = "Ready to solve";
+const OUTLINE_GROUP = "More problems";
+
+/** A topic's title with its number in the owner's notes: "10. Heaps and Priority Queues" (`order` is that number). */
+export function topicLabel(topic: { title: string; fm: { order?: number } | null }): string {
+  const n = topic.fm?.order;
+  return n === undefined ? topic.title : `${String(Math.floor(n)).padStart(2, "0")}. ${topic.title}`;
+}
+
+/** An outline's title with its number inside its group ("01. Kth Largest Element"); other items as they are. */
+export function numberedTitle(item: DsaItem): string {
+  return item.type === "outline" && item.fm?.number ? `${item.fm.number}. ${item.title}` : item.title;
+}
+
+/** A topic's statement-only outlines, in content order. */
+export function outlinesForTopic(items: DsaItem[], topic: string) {
+  return validOutlines(items).filter((o) => o.fm.topics.includes(topic));
+}
+
 export function problemsForTopic(items: DsaItem[], topic: string): ValidProblem[] {
   return validProblems(items).filter((p) => p.fm.status === "published" && p.fm.topics.includes(topic));
 }

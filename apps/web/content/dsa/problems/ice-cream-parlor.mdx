@@ -1,0 +1,112 @@
+---
+title: Ice Cream Parlor
+description: Pick two different flavors whose prices add up to exactly your budget and return their 1-based positions.
+difficulty: easy
+patterns: [hash-map, complement-lookup]
+topics: [hash-maps]
+companies: []
+languages: [python]
+entry: { python: icecream_parlor }
+starter:
+  python: |
+    def icecream_parlor(m: int, cost: list[int]) -> list[int]:
+        # Return [i, j] with i < j (1-based positions)
+        pass
+tests: { public: tests/ice-cream-parlor.public.json, hidden: tests/ice-cream-parlor.hidden.json }
+complexity: { time: "O(n)", space: "O(n)" }
+related: []
+order: 4
+---
+
+A shop lists the price of each flavor in the array `cost`, in shelf order. You have exactly `m` coins to
+spend and want to buy two different flavors that use up the whole amount. Return the shelf positions of the
+two flavors as `[i, j]` with `i < j`.
+
+Positions are counted from 1, not from 0. You cannot buy the same flavor twice, but two flavors may have the
+same price.
+
+## Examples
+
+```text
+m = 4,  cost = [1, 4, 5, 3, 2]   →  [1, 4]     (1 + 3 = 4)
+m = 4,  cost = [2, 2, 4, 3]      →  [1, 2]     (2 + 2 = 4)
+m = 10, cost = [7, 3]            →  [1, 2]
+m = 9,  cost = [5, 2, 7, 11]     →  [2, 3]     (2 + 7 = 9)
+```
+
+## Constraints
+
+- `2 ≤ cost.length ≤ 10⁴`
+- `1 ≤ cost[i], m ≤ 10⁴`
+- Exactly one pair of flavors costs `m` in total.
+
+**Follow-up:** trying every pair takes O(n²) steps. Can you find the pair after looking at each price once?
+
+<PremiumBreak />
+
+## Start with the slow answer
+
+Take each flavor `i` and scan the flavors after it for one that costs `m − cost[i]`. This is correct and uses no
+extra memory, but with 10⁴ flavors it makes about 5 × 10⁷ checks. Say it first, then look for the repeated work.
+
+## The idea: ask "have I already seen my partner?"
+
+When you stand at flavor `i` with price `c`, the only partner that can finish the pair is a flavor priced
+`m − c`. You do not need to look ahead. If that partner sits earlier on the shelf, you can find it by looking
+back, and if it sits later, you will find *this* flavor when you reach the partner.
+
+So keep a dictionary from price to the position where you saw it. Walking left to right:
+
+1. Compute `need = m − c` for the current price.
+2. If `need` is already in the dictionary, the stored position and the current one are your answer.
+3. Otherwise store `c → i` and move on.
+
+Looking up before storing is what keeps you from pairing a flavor with itself. With `m = 8` and
+`cost = [4, 1, 7, 5]`, the first flavor costs 4 and its partner would also cost 4. The dictionary is still
+empty at that moment, so nothing matches.
+
+```python
+def icecream_parlor(m, cost):
+    index_by_price = {}
+    for i, c in enumerate(cost):
+        need = m - c
+        if need in index_by_price:
+            a, b = index_by_price[need] + 1, i + 1
+            return [a, b] if a < b else [b, a]
+        index_by_price[c] = i
+    return []
+```
+
+The `+ 1` converts the 0-based loop index to the 1-based position the answer uses. The stored position is always
+earlier than `i`, so `a < b` already holds; the final ordering check is a safety net that costs nothing.
+
+## Why it works
+
+Every valid pair `(p, q)` with `p < q` is found exactly when the loop reaches `q`, because by then the price at
+`p` has been stored. The loop cannot return a wrong pair, since it returns only when the stored price plus the
+current price equals `m`, and the stored position belongs to a different, earlier flavor.
+
+## A short trace
+
+For `m = 4` and `cost = [2, 2, 4, 3]`:
+
+| i | price | need | dictionary before | action |
+| - | ----- | ---- | ----------------- | ------ |
+| 0 | 2 | 2 | `{}` | store `2 → 0` |
+| 1 | 2 | 2 | `{2: 0}` | found: return `[1, 2]` |
+
+Two equal prices work because the lookup happens before the second `2` is stored.
+
+## Common mistakes
+
+- Storing the price before the lookup. With `m = 8` and a single flavor priced 4, the flavor then pairs with itself.
+- Forgetting the 1-based positions and returning `[0, 3]` instead of `[1, 4]`.
+- Using `if index_by_price.get(need):` as the test. Position `0` is falsy, so a partner on the first shelf slot is
+  missed. Test membership with `in`.
+- Returning the pair in the wrong order. The answer needs the smaller position first.
+
+## Variations
+
+- **Return the prices or count the pairs:** the same dictionary works; keep a count per price and add to the total.
+- **Sorted shelf:** two pointers, one at each end, find the pair in O(1) extra memory.
+- **Three flavors:** fix one flavor, then run this search on the rest for O(n²) overall.

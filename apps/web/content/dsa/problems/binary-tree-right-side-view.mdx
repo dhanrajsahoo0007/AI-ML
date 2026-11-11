@@ -1,0 +1,178 @@
+---
+title: Binary Tree Right Side View
+description: List the values you would see from the right side of a binary tree, top to bottom, one per level.
+difficulty: easy
+patterns: [breadth-first-search, binary-tree]
+topics: [trees]
+companies: []
+languages: [python]
+entry: { python: right_side_view }
+starter:
+  python: |
+    from collections import deque
+
+
+    # --- Glue: converts the test array to nodes. Leave as is. ---
+    class TreeNode:
+        def __init__(self, val=0, left=None, right=None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _to_tree(values):
+        if not values or values[0] is None:
+            return None
+        root = TreeNode(values[0])
+        q = deque([root])
+        i = 1
+        while q and i < len(values):
+            node = q.popleft()
+            if i < len(values) and values[i] is not None:
+                node.left = TreeNode(values[i])
+                q.append(node.left)
+            i += 1
+            if i < len(values) and values[i] is not None:
+                node.right = TreeNode(values[i])
+                q.append(node.right)
+            i += 1
+        return root
+
+
+    def right_side_view(values: list[int | None]) -> list[int]:  # the entry the tests call
+        return right_view_of(_to_tree(values))
+
+
+    # --- Your code ---
+    def right_view_of(root: TreeNode | None) -> list[int]:
+        # `root` is the root node (or None for an empty tree).
+        # Return the values you see from the right side, top to bottom.
+        pass
+tests: { public: tests/binary-tree-right-side-view.public.json, hidden: tests/binary-tree-right-side-view.hidden.json }
+complexity: { time: "O(n)", space: "O(w)" }
+related: []
+order: 2
+---
+
+Imagine standing to the right of a binary tree and looking at it. At each depth you can see only the node
+farthest to the right; the others at that depth are hidden behind it. Return the values of the visible nodes,
+from the top level down to the bottom.
+
+A node on the left side is visible when nothing at its depth lies to its right. That can happen when the right
+branch is shorter than the left one.
+
+**How the tests describe trees.** A tree is written as an array in level order: first the root, then the root's
+left and right children, then the children of those nodes from left to right, and so on. `None` marks a missing
+child, and a missing node has no children listed under it. The editor already contains the `TreeNode` class and a
+helper that builds nodes from this array, so you only write `right_view_of(root)`. It receives the root node (or
+`None` for an empty tree) and returns the list of visible values.
+
+## Examples
+
+```text
+[1, 2, 3, None, 5, None, 4]   →  [1, 3, 4]
+
+      1            you see 1 at the top,
+     / \           3 on the second level (it hides 2),
+    2   3          4 on the third level (it hides 5)
+     \   \
+      5   4
+
+[1, None, 3]   →  [1, 3]
+[]             →  []
+[1]            →  [1]
+```
+
+## Constraints
+
+- The number of nodes is between `0` and `100`.
+- Each value fits in a signed 32-bit integer.
+
+**Follow-up:** solve it with a depth-first search instead of a queue.
+
+<PremiumBreak />
+
+## The idea: one answer per level
+
+The answer has exactly one value per depth, and that value is the last node of the level when you read the level
+from left to right. So the task becomes: visit the tree level by level, and keep the last node of each level.
+
+A queue does this naturally. This is a breadth-first search (BFS): you take nodes from the front of the queue and add
+their children at the back, so all nodes of one depth are processed before any node of the next depth.
+
+## Walking one level at a time
+
+The only extra trick is knowing where one level ends. At the start of each round, the queue holds exactly the
+nodes of the current level, so read its length once and process exactly that many nodes. Children added during the
+round belong to the next level and wait.
+
+1. If the tree is empty, return an empty list.
+2. Start with the root in the queue.
+3. While the queue is not empty: note `level_size = len(queue)`, then pop that many nodes. After each pop, remember
+   its value, then push its left and right children if they exist.
+4. After the loop over the level, the remembered value belongs to the last node popped. Append it to the answer.
+
+```python
+from collections import deque
+
+
+def right_view_of(root):
+    if not root:
+        return []
+    result = []
+    queue = deque([root])
+    while queue:
+        level_size = len(queue)
+        right_val = 0
+        for _ in range(level_size):
+            node = queue.popleft()
+            right_val = node.val
+            if node.left:
+                queue.append(node.left)
+            if node.right:
+                queue.append(node.right)
+        result.append(right_val)
+    return result
+```
+
+Children are pushed left first, then right, so the last node popped in a level is its rightmost node. The
+`TreeNode` class, the `_to_tree` helper and the `right_side_view` wrapper in the editor are glue, and you do not
+change them.
+
+## Why it works
+
+Because the queue is first-in, first-out and children are added left to right, each level is processed in
+left-to-right order. The loop over `level_size` nodes cleanly separates the levels. The last node popped from a
+level is the rightmost one, and the rightmost node is the one that is visible. A node on the left side is picked
+automatically when it is the last node of its level, so you do not need to treat that case separately. Each node is
+pushed and popped once, so the time is O(n); the queue holds at most one level, so the space is O(w), where w is the
+widest level.
+
+## A short trace
+
+For `[1, 2, 3, None, 5, None, 4]`:
+
+| level | queue at start | last node popped | answer so far |
+| ----- | -------------- | ---------------- | ------------- |
+| 1 | `1` | 1 | `[1]` |
+| 2 | `2, 3` | 3 | `[1, 3]` |
+| 3 | `5, 4` | 4 | `[1, 3, 4]` |
+
+Node 2 contributes the child 5 first, then node 3 contributes 4, so 4 is the last to leave the queue.
+
+## Common mistakes
+
+- Following only right children. When the right branch ends early, the answer must continue into the left
+  branch: for `[1, 2, 3, 4]` the answer is `[1, 3, 4]`, and 4 is a left child.
+- Not fixing `level_size` before the inner loop. `len(queue)` changes as children are added, so the levels blur
+  together.
+- Forgetting the empty tree. Popping from an empty queue, or reading `root.val`, raises an error.
+- Adding the first node of each level instead of the last, which gives the left view.
+
+## Variations
+
+- **Depth-first search:** visit the right child before the left child, and record a node's value the first time you
+  reach a new depth. It uses O(h) space, where h is the height.
+- **Left view:** keep the first node of each level.
+- **Level averages or sums:** the same level loop, but accumulate over the whole level instead of keeping one node.
+- **Zigzag order:** the same level loop, reversing every other level's output.
