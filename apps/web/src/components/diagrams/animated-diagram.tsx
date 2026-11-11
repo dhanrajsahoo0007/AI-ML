@@ -26,7 +26,15 @@ import { markerUrl, phaseOpacity, soft, stroke } from "./diagram-style";
 import { GLYPH_SIZE, NODE_H, NODE_W, edgePoints, nodeBounds, pathD, pointAt } from "./geometry";
 import { Glyph, isGlyph } from "./glyphs";
 import { getIconComponent } from "@/lib/icons";
-import type { CloudProvider, CloudRef, DiagramEdge, DiagramNode, DiagramSpec, Tone } from "./types";
+import {
+  isCloudProvider,
+  type CloudProvider,
+  type CloudRef,
+  type DiagramEdge,
+  type DiagramNode,
+  type DiagramSpec,
+  type Tone,
+} from "./types";
 
 // Cloud toggle: "generic" shows the role names; a provider shows the managed service that plays each role.
 type CloudView = "generic" | CloudProvider;
@@ -54,6 +62,13 @@ export interface AnimatedDiagramProps {
   highlight?: string[];
   /** Node ids joined by ">" ("client>lb>cache"): those nodes and the edges between them stay bright. */
   path?: string;
+  /**
+   * Provider the Services toggle starts on (default: Generic), for specs whose nodes carry `cloud` refs. It is the
+   * initial state, so the server render already shows that provider's names; the reader can still switch. With
+   * `step` alone there is no toggle and the figure stays on this provider. The wrapper (./diagram.tsx) rejects
+   * other values; used directly, anything else falls back to Generic.
+   */
+  cloud?: CloudProvider;
   /** Short service names for the catalog ids used in node.cloud, resolved on the server (see ./diagram.tsx). */
   cloudNames?: Record<string, string>;
   /** Id prefix for SVG defs from the server wrapper (./diagram.tsx). Behind next/dynamic a client-side useId does
@@ -74,12 +89,13 @@ export function AnimatedDiagram({
   minWidth,
   highlight,
   path,
+  cloud: initialCloud,
   cloudNames = {},
   idBase,
 }: AnimatedDiagramProps) {
   const playback = usePlayback(step, idBase);
   const { current, uid } = playback;
-  const [cloud, setCloud] = useState<CloudView>("generic");
+  const [cloud, setCloud] = useState<CloudView>(isCloudProvider(initialCloud) ? initialCloud : "generic");
 
   const view = buildView(spec, current);
   const emphasis = parseEmphasis(highlight, path);

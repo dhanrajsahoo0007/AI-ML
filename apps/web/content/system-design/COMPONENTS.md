@@ -20,7 +20,7 @@ Contents:
    DecisionTree, RequirementsTable, EstimateTable, Numbers, PatternUses, LearningPath
 2. [Interactive widgets](#2-interactive-widgets): eleven lazy islands, at most two per page
 3. [Diagrams](#3-diagrams): the `<AnimatedDiagram>` tag, sidecars, the three spec kinds, `composeSpecs`, lint rules
-4. [Glyphs](#4-glyphs): the 48 drawn icons for diagram nodes and lanes
+4. [Glyphs](#4-glyphs): the 77 drawn icons for diagram nodes and lanes
 5. [Interview questions](#5-interview-questions): article blocks, library YAML, what an answer may contain
 6. [Other components used on these pages](#6-other-components-used-on-these-pages): PremiumBreak, CloudOnly,
    CloudMapping, Callout
@@ -549,6 +549,7 @@ examples of each kind, not files that exist yet; `messenger/architecture` and `d
 | `minWidth`  | number     | all               | Minimum width in px before the figure scrolls sideways on phones. Default: 560 for every kind.                                                                                                  |
 | `highlight` | string[]   | architecture only | Node ids that stay bright; every other node and edge fades to about 0.25 opacity and the highlighted nodes get a soft pulsing ring. An edge stays bright when both its nodes are highlighted; a zone when it holds one.          |
 | `path`      | string     | architecture only | Node ids joined by `>`, such as `"client>lb>cache"`. Those nodes stay bright with a ring; only the edges between consecutive ids (either direction) stay bright, drawn heavier. Combines with `highlight`, `step` and `stepper`. |
+| `cloud`     | string     | architecture only | Provider the Services toggle starts on: `"aws"`, `"gcp"` or `"azure"` (default: Generic). Nodes with `cloud` refs show that provider's service from the first render; the reader can still switch. See the notes below.          |
 
 ```mdx
 <AnimatedDiagram spec="animated/messenger/architecture" />
@@ -557,7 +558,13 @@ examples of each kind, not files that exist yet; `messenger/architecture` and `d
 <AnimatedDiagram spec="animated/messenger/architecture" highlight={["chat", "session"]} />
 <AnimatedDiagram spec="animated/messenger/architecture" path="sender>lb>chat>session" caption="A message's route" />
 <AnimatedDiagram name="databases/read-scaling" step={3} path="client>lb>app>cache" />
+<AnimatedDiagram spec="animated/messenger/architecture" cloud="aws" caption="The chat path on AWS" />
 ```
+
+`cloud` sets where the Services toggle (Generic / AWS / Google Cloud / Azure) starts, for provider pages that embed a
+concept spec. Each node with a `cloud` ref for that provider shows the service name with the generic name underneath,
+already in the server-rendered HTML. It combines with `step`, `stepper`, `highlight` and `path`; with `step` alone the
+figure has no toggle and stays on that provider. `<CloudMapping>` is not affected.
 
 How errors show up:
 
@@ -566,6 +573,9 @@ How errors show up:
   unknown node ids in &lt;id&gt;: ...". Use node ids, not labels.
 - `highlight` and `path` do nothing on sequence and layout specs. In a layout spec use the shape-level
   `highlight: true` instead.
+- `cloud` with any value but `"aws"`, `"gcp"` or `"azure"` (lower case), on any kind of spec: production throws; dev
+  shows a red note naming the value. A valid `cloud` does nothing on sequence and layout specs and on architecture
+  specs whose nodes have no `cloud` refs.
 - `highlight` and `path` work only on `<AnimatedDiagram>`, not on `<Figure>` or `<Diagram id>`.
 - A premium sidecar (`access: premium`) renders the Pro placeholder.
 
@@ -604,8 +614,8 @@ name from `src/lib/icons.ts`.
 
 Node fields: `id`, `label`, `sub?` (second line), `icon?`, `tone?`, `accent?` (solid fill, for the component the
 diagram is about), `variant?: "card" | "glyph"`, `step?` (default 1), `cloud?: { aws?, gcp?, azure? }` (a catalog id
-from `src/lib/cloud-catalog.ts` or `{ label, id? }`; adds the Generic/AWS/Google Cloud/Azure toggle and feeds
-`<CloudMapping>`), `x`, `y`, `w?`, `h?`.
+from `src/lib/cloud-catalog.ts` or `{ label, id? }`; adds the Generic/AWS/Google Cloud/Azure toggle, which the tag's
+`cloud` prop can start on a provider, and feeds `<CloudMapping>`), `x`, `y`, `w?`, `h?`.
 
 Edge fields: `from`, `to`, `label?`, `tone?`, `dashed?`, `flow?` (marching dashes), `packet?` (a dot travels along the
 edge), `delay?` (seconds before the packet starts; tells a story across edges), `duration?` (seconds per trip, default
@@ -908,6 +918,35 @@ label underneath (data stores, logs), or the default `"card"` for a boxed node w
 | `trie`          | Branching tree of small circles; filled circles mark terminal nodes                   |
 | `hash`          | Bold `#` in a rounded square                                                          |
 | `ring`          | Consistent-hashing ring: five nodes on a circle (one filled) and a dashed arrow       |
+| `firewall`      | Brick wall with a flame on top                                                        |
+| `router`        | Rounded box with a centre dot and four arrows pointing out                            |
+| `nat`           | Three source dots merging through a tall box into one outgoing arrow (many to one)    |
+| `tunnel`        | Pipe with an open end between two endpoint dots, a dashed line running through it     |
+| `building`      | Office block with windows, a door and a lower annex (on-premises data centre)         |
+| `webhook`       | Line leaving a hollow dot, looping round and arriving back at a filled dot            |
+| `image`         | Three outlined stacked layers with a filled tag (container image)                     |
+| `container`     | Shipping container: wide box with filled top and bottom rails, five ribs, two feet    |
+| `pod`           | Wide capsule holding two small boxes, one filled                                      |
+| `node`          | Machine case with an LED strip, holding three upright capsules (two filled)           |
+| `function`      | Lightning bolt in a rounded square                                                    |
+| `controller`    | Two loop arrows circling a dial with a centre dot (reconcile loop)                    |
+| `folder-share`  | Folder on a network line: a stem down to a filled node between two end dots           |
+| `appliance`     | Rugged case with a carry handle, corner guards, two latches and a status LED          |
+| `proxy`         | Tall box with a filled core between an incoming and an outgoing arrow                 |
+| `partition`     | Bar cut into three slices by two dashed lines, the middle slice filled                |
+| `topic`         | One input dot into a filled upright bar, three arrows out                             |
+| `snapshot`      | Disk platter inside four camera-frame corner marks                                    |
+| `vault`         | Safe: door with a spoked dial, a handle bar, two hinges and two feet                  |
+| `certificate`   | Landscape document with three text lines and a round seal with ribbon tails           |
+| `radar`         | Round scope with two range rings, a swept wedge and a blip                            |
+| `signal`        | Rising metric line over a soft area and a baseline, ending in a dot                   |
+| `trace`         | Three staggered span bars joined by elbow lines (trace waterfall), the first filled   |
+| `flag`          | Filled swallow-tail flag on a pole with a base                                        |
+| `meter`         | Half-dial gauge with tick marks, a needle and a readout bar underneath                |
+| `coin`          | Coin at an angle: face with an inner ring and a diamond mark, filled edge behind      |
+| `model`         | Small neural net: two, three and two dots in layers, each layer joined to the next    |
+| `policy`        | Page with three check-list rows and a filled shield over the bottom corner            |
+| `pipeline`      | Three stage boxes in a row joined by small arrows, the first filled with a check      |
 
 ---
 
