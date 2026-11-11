@@ -2,12 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AnimatedDiagram } from "@/components/diagrams/animated-diagram";
 import { Diagram } from "@/components/diagrams/diagram";
 import { LayoutDiagram } from "@/components/diagrams/layout-diagram.client";
 import { SequenceDiagram } from "@/components/diagrams/sequence-diagram.client";
 import { renderHtml } from "../render-html";
+import type { DiagramSpec } from "@/components/diagrams/types";
 import { arch, layout, seq } from "./fixtures";
 
 // Server render of each renderer. Effects do not run here, so this is also the first paint a reader sees before
@@ -139,6 +140,152 @@ describe("Diagram wrapper errors", () => {
     const html = renderToStaticMarkup(createElement(Diagram, { name: "messenger/architecture", path: "chat>nope" }));
     expect(html).toContain("unknown node ids in diagrams/animated/messenger/architecture: nope");
     expect(html).not.toContain("<svg");
+  });
+});
+
+// The `cloud` prop is the Services toggle's initial state, so the server render (no effects, no clicks) must
+// already show the provider's names. `text` reads the labels of one node; `pressed` the toggle button that is on.
+const cloudArch: DiagramSpec = {
+  ...arch,
+  nodes: arch.nodes.map((n) =>
+    n.id === "db" ? { ...n, cloud: { aws: "aws-dynamodb", gcp: { label: "Bigtable" }, azure: "azure-cosmos-db" } } : n
+  ),
+};
+const cloudNames = { "aws-dynamodb": "DynamoDB", "azure-cosmos-db": "Cosmos DB" };
+const text = (html: string, node: string) =>
+  [
+    ...(html.match(new RegExp(`data-node="${node}"[\\s\\S]*?</g></g>`))?.[0] ?? "").matchAll(/<text[^>]*>([^<]*)</g),
+  ].map((m) => m[1]);
+const pressed = (html: string) =>
+  [...html.matchAll(/<button type="button" aria-pressed="true"[^>]*>([^<]*)</g)].map((m) => m[1]);
+
+describe("AnimatedDiagram cloud prop", () => {
+  it("shows the generic labels and starts the toggle on Generic when cloud is omitted", () => {
+    const html = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: cloudArch, cloudNames }));
+    expect(text(html, "db")).toEqual(["Database"]);
+    expect(pressed(html)).toEqual(["Generic"]);
+    expect(html).not.toContain("DynamoDB");
+  });
+
+  it("starts on the provider's short names in the first render when cloud is set", () => {
+    const aws = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: cloudArch, cloudNames, cloud: "aws" }));
+    expect(text(aws, "db")).toEqual(["DynamoDB", "Database"]);
+    expect(pressed(aws)).toEqual(["AWS"]);
+    // A node without a ref for that provider keeps its generic label.
+    expect(text(aws, "cache")).toEqual(["Cache"]);
+
+    const gcp = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: cloudArch, cloudNames, cloud: "gcp" }));
+    expect(text(gcp, "db")).toEqual(["Bigtable", "Database"]);
+    expect(pressed(gcp)).toEqual(["Google Cloud"]);
+
+    const azure = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: cloudArch, cloudNames, cloud: "azure" }));
+    expect(text(azure, "db")).toEqual(["Cosmos DB", "Database"]);
+    expect(pressed(azure)).toEqual(["Azure"]);
+  });
+
+  it("works with step, stepper, highlight and path", () => {
+    // A single-step figure has no toggle; it still draws the provider's names.
+    const stepped = renderToStaticMarkup(
+      createElement(AnimatedDiagram, { spec: cloudArch, cloudNames, cloud: "aws", step: 2 })
+    );
+    expect(stepped).toContain("Step 2 of 2");
+    // "NEW" is the marker on what step 2 added.
+    expect(text(stepped, "db")).toEqual(["NEW", "DynamoDB", "Database"]);
+    expect(pressed(stepped)).toEqual([]);
+
+    const stepper = renderToStaticMarkup(
+      createElement(AnimatedDiagram, { spec: cloudArch, cloudNames, cloud: "aws", step: 2, stepper: true })
+    );
+    expect(text(stepper, "db")).toEqual(["NEW", "DynamoDB", "Database"]);
+    expect(pressed(stepper)).toContain("AWS");
+
+    const lit = renderToStaticMarkup(
+      createElement(AnimatedDiagram, { spec: cloudArch, cloudNames, cloud: "aws", highlight: ["db"] })
+    );
+    expect(dimmed(lit, "node")).toEqual(["client", "lb", "cache"]);
+    expect(lit).toContain('data-node="db" data-hl="true"');
+    expect(text(lit, "db")).toEqual(["DynamoDB", "Database"]);
+
+    const routed = renderToStaticMarkup(
+      createElement(AnimatedDiagram, { spec: cloudArch, cloudNames, cloud: "aws", path: "lb>cache>db" })
+    );
+    expect(dimmed(routed, "node")).toEqual(["client"]);
+    expect(routed).toContain('data-edge="cache&gt;db" data-hl="true"');
+    expect(text(routed, "db")).toEqual(["DynamoDB", "Database"]);
+  });
+
+  it("is ignored on an architecture spec without cloud refs", () => {
+    const plain = renderToStaticMarkup(createElement(AnimatedDiagram, { spec: arch }));
+    expect(renderToStaticMarkup(createElement(AnimatedDiagram, { spec: arch, cloud: "aws" }))).toBe(plain);
+    expect(pressed(plain)).toEqual([]);
+  });
+
+  it("falls back to Generic for a value that is not a provider when used without the wrapper", () => {
+    const html = renderToStaticMarkup(
+      createElement(AnimatedDiagram, { spec: cloudArch, cloudNames, cloud: "oracle" as never })
+    );
+    expect(text(html, "db")).toEqual(["Database"]);
+    expect(pressed(html)).toEqual(["Generic"]);
+  });
+});
+
+describe("Diagram wrapper cloud prop", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("server-renders a real spec with the provider's names, catalog short names included", async () => {
+    const generic = await renderHtml(createElement(Diagram, { spec: "animated/messenger/architecture" }));
+    expect(text(generic, "store")).toEqual(["Message store", "by conversation"]);
+    expect(pressed(generic)).toEqual(["Generic"]);
+
+    const aws = await renderHtml(createElement(Diagram, { spec: "animated/messenger/architecture", cloud: "aws" }));
+    // "aws-dynamodb" is a catalog id (short name from the catalog); the load balancer carries its own label.
+    expect(text(aws, "store")).toEqual(["DynamoDB", "Message store"]);
+    expect(text(aws, "lb")).toEqual(["NLB", "Load balancer"]);
+    expect(pressed(aws)).toEqual(["AWS"]);
+  });
+
+  it("combines with step and path on a real spec", async () => {
+    const html = await renderHtml(
+      createElement(Diagram, { name: "messenger/architecture", cloud: "azure", stepper: true, path: "lb>chat" })
+    );
+    expect(text(html, "lb")).toEqual(["Load Balancer", "Load balancer"]);
+    expect(pressed(html)).toContain("Azure");
+    expect(html).toContain('data-edge="lb&gt;chat" data-hl="true"');
+  });
+
+  it("is ignored on sequence and layout specs and on architecture specs without cloud refs", async () => {
+    for (const name of ["fundamentals/server-sent-events", "fundamentals/serialization", "databases/inverted-index"]) {
+      const plain = await renderHtml(createElement(Diagram, { name }));
+      const withCloud = await renderHtml(createElement(Diagram, { name, cloud: "gcp" }));
+      expect(plain, name).toContain("<svg");
+      expect(withCloud, name).toBe(plain);
+    }
+  });
+
+  it("shows a red note for an invalid value outside production, whatever the spec kind", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const name of ["messenger/architecture", "fundamentals/server-sent-events"]) {
+      const html = renderToStaticMarkup(createElement(Diagram, { name, cloud: "amazon" as never }));
+      expect(html, name).toContain("border-red-500/40");
+      expect(html, name).toContain("cloud must be one of &quot;aws&quot;, &quot;gcp&quot;, &quot;azure&quot;");
+      expect(html, name).toContain("got &quot;amazon&quot;");
+      expect(html, name).not.toContain("<svg");
+    }
+    expect(error).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails a production render (and so the build) on an invalid value", async () => {
+    // InvalidProps reads NODE_ENV once at import, so load a fresh copy of the wrapper under the stubbed value.
+    vi.stubEnv("NODE_ENV", "production");
+    vi.resetModules();
+    const { Diagram: ProdDiagram } = await import("@/components/diagrams/diagram");
+    expect(() =>
+      renderToStaticMarkup(createElement(ProdDiagram, { name: "messenger/architecture", cloud: "AWS" as never }))
+    ).toThrow('<AnimatedDiagram>: cloud must be one of "aws", "gcp", "azure"');
+    vi.resetModules();
   });
 });
 

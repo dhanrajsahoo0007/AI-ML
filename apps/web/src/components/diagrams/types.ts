@@ -7,7 +7,13 @@
 
 export type Tone = "blue" | "green" | "orange" | "red" | "violet" | "teal" | "neutral";
 
-export type CloudProvider = "aws" | "gcp" | "azure";
+export const CLOUD_PROVIDERS = ["aws", "gcp", "azure"] as const;
+export type CloudProvider = (typeof CLOUD_PROVIDERS)[number];
+
+/** True for "aws", "gcp" or "azure": the values of <AnimatedDiagram cloud>. */
+export function isCloudProvider(value: unknown): value is CloudProvider {
+  return (CLOUD_PROVIDERS as readonly unknown[]).includes(value);
+}
 
 /** A service on one cloud: a catalog id from src/lib/cloud-catalog (such as "aws-msk"), or a label with an optional id. */
 export type CloudRef = string | { id?: string; label: string };

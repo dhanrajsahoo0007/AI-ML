@@ -53,7 +53,36 @@ export type GlyphName =
   | "coordinator"
   | "trie"
   | "hash"
-  | "ring";
+  | "ring"
+  | "firewall"
+  | "router"
+  | "nat"
+  | "tunnel"
+  | "building"
+  | "webhook"
+  | "image"
+  | "container"
+  | "pod"
+  | "node"
+  | "function"
+  | "controller"
+  | "folder-share"
+  | "appliance"
+  | "proxy"
+  | "partition"
+  | "topic"
+  | "snapshot"
+  | "vault"
+  | "certificate"
+  | "radar"
+  | "signal"
+  | "trace"
+  | "flag"
+  | "meter"
+  | "coin"
+  | "model"
+  | "policy"
+  | "pipeline";
 
 const ink = (t: Tone) => `var(--dg-${t})`;
 const soft = (t: Tone) => `var(--dg-${t}-soft)`;
@@ -727,6 +756,441 @@ const GLYPHS: Record<GlyphName, (t: Tone) => ReactNode> = {
       <circle cx={34} cy={37.8} r={4} style={{ fill: soft(t), stroke: ink(t) }} />
       <circle cx={14} cy={37.8} r={4} style={{ fill: soft(t), stroke: ink(t) }} />
       <circle cx={7.8} cy={18.8} r={4} style={{ fill: soft(t), stroke: ink(t) }} />
+    </>
+  ),
+  // Third batch, for the cloud curriculum: networking, containers, security and operations. Same rules: soft
+  // fill with a tone stroke, a filled part for the thing the glyph is about, no letters, nothing vendor-shaped.
+  firewall: (t) => (
+    <>
+      <rect x={5} y={19} width={38} height={24} rx={2} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path d="M5 27 H43 M5 35 H43" style={{ stroke: ink(t) }} />
+      <path
+        d="M14 19 V27 M34 19 V27 M19 27 V35 M29 27 V35 M14 35 V43 M24 35 V43 M34 35 V43"
+        style={{ stroke: ink(t) }}
+        strokeOpacity={0.7}
+      />
+      <path
+        d="M25 4 C25 8.5 32 10.5 32 16 A8 8 0 0 1 16 16 C16 13 17.5 11 19 9.5 C19.5 12 21 13 22 13 C21 9.5 23 6 25 4 Z"
+        style={{ fill: ink(t), stroke: PAPER }}
+        strokeLinejoin="round"
+      />
+      <path
+        d="M24 15 C25.5 17 26.5 18 26.5 19.3 A2.5 2.5 0 0 1 21.5 19.3 C21.5 18 22.5 17 24 15 Z"
+        style={{ fill: soft(t) }}
+      />
+    </>
+  ),
+  router: (t) => (
+    <>
+      <path
+        d="M24 15 V6 M33 24 H42 M24 33 V42 M15 24 H6"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      <path
+        d="M20.5 9.5 L24 6 L27.5 9.5 M38.5 20.5 L42 24 L38.5 27.5 M27.5 38.5 L24 42 L20.5 38.5 M9.5 27.5 L6 24 L9.5 20.5"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect x={15} y={15} width={18} height={18} rx={4} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={24} cy={24} r={3} style={{ fill: ink(t) }} />
+    </>
+  ),
+  nat: (t) => (
+    <>
+      <path d="M7 14 H17 M7 24 H17 M7 34 H17" style={{ stroke: ink(t) }} strokeLinecap="round" />
+      {[14, 24, 34].map((y) => (
+        <circle key={y} cx={6.5} cy={y} r={2.4} style={{ fill: ink(t) }} />
+      ))}
+      <rect x={17} y={9} width={14} height={30} rx={3} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path d="M17 14 L31 24 M17 24 H31 M17 34 L31 24" style={{ stroke: ink(t) }} strokeOpacity={0.7} />
+      <path d="M31 24 H42" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinecap="round" />
+      <path
+        d="M38.5 20.5 L42 24 L38.5 27.5"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </>
+  ),
+  tunnel: (t) => (
+    <>
+      <path d="M7 24 H12" style={{ stroke: ink(t) }} strokeLinecap="round" />
+      <path d="M14 14 H34 A3 10 0 0 1 34 34 H14 A3 10 0 0 1 14 14 Z" style={{ fill: soft(t), stroke: ink(t) }} />
+      <ellipse cx={34} cy={24} rx={3} ry={10} style={{ fill: PAPER, stroke: ink(t) }} />
+      <path d="M14 24 H30" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinecap="round" strokeDasharray="3 3.5" />
+      <path d="M34 24 H41" style={{ stroke: ink(t) }} strokeLinecap="round" />
+      <circle cx={7} cy={24} r={3} style={{ fill: ink(t) }} />
+      <circle cx={41} cy={24} r={3} style={{ fill: ink(t) }} />
+    </>
+  ),
+  building: (t) => (
+    <>
+      <path
+        d="M11 6 H28 A2 2 0 0 1 30 8 V43 H9 V8 A2 2 0 0 1 11 6 Z"
+        style={{ fill: soft(t), stroke: ink(t) }}
+        strokeLinejoin="round"
+      />
+      <path d="M30 20 H38 A2 2 0 0 1 40 22 V43 H30 Z" style={{ fill: PAPER, stroke: ink(t) }} strokeLinejoin="round" />
+      {[11, 19, 27].map((y) => (
+        <g key={y}>
+          <rect x={13} y={y} width={4.5} height={4.5} rx={0.8} style={{ fill: ink(t) }} />
+          <rect x={21.5} y={y} width={4.5} height={4.5} rx={0.8} style={{ fill: ink(t) }} />
+        </g>
+      ))}
+      <rect x={16.5} y={35} width={6} height={8} style={{ fill: ink(t) }} />
+      <rect x={33} y={25} width={4} height={4} rx={0.8} style={{ fill: ink(t) }} fillOpacity={0.6} />
+      <rect x={33} y={33} width={4} height={4} rx={0.8} style={{ fill: ink(t) }} fillOpacity={0.6} />
+      <path d="M4 43 H44" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinecap="round" />
+    </>
+  ),
+  webhook: (t) => (
+    <>
+      <path
+        d="M11 12 H29 A12 12 0 0 1 29 36 H18"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.4}
+        strokeLinecap="round"
+      />
+      <path
+        d="M22.5 31.5 L18 36 L22.5 40.5"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx={8} cy={12} r={3.5} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={10} cy={36} r={4} style={{ fill: ink(t) }} />
+    </>
+  ),
+  image: (t) => (
+    <>
+      {[30, 22, 14].map((y) => (
+        <path
+          key={y}
+          d={`M21 ${y - 7} L38 ${y} L21 ${y + 7} L4 ${y} Z`}
+          style={{ fill: soft(t), stroke: ink(t) }}
+          strokeLinejoin="round"
+        />
+      ))}
+      <path
+        d="M28 36 L33.5 30 H42 A2 2 0 0 1 44 32 V40 A2 2 0 0 1 42 42 H33.5 Z"
+        style={{ fill: ink(t), stroke: PAPER }}
+        strokeLinejoin="round"
+      />
+      <circle cx={34.5} cy={36} r={1.7} style={{ fill: PAPER }} />
+    </>
+  ),
+  container: (t) => (
+    <>
+      <rect x={5} y={10} width={38} height={25} rx={2} style={{ fill: soft(t), stroke: ink(t) }} />
+      <rect x={5} y={10} width={38} height={5} rx={2} style={{ fill: ink(t) }} />
+      <rect x={5} y={30} width={38} height={5} rx={2} style={{ fill: ink(t) }} />
+      <path
+        d="M11 19 V26 M17.5 19 V26 M24 19 V26 M30.5 19 V26 M37 19 V26"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      />
+      <rect x={8} y={35} width={5} height={3} style={{ fill: ink(t) }} />
+      <rect x={35} y={35} width={5} height={3} style={{ fill: ink(t) }} />
+    </>
+  ),
+  pod: (t) => (
+    <>
+      <rect x={4} y={11} width={40} height={26} rx={13} style={{ fill: soft(t), stroke: ink(t) }} />
+      <rect x={11} y={18} width={11} height={12} rx={2} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={26} y={18} width={11} height={12} rx={2} style={{ fill: PAPER, stroke: ink(t) }} />
+    </>
+  ),
+  node: (t) => (
+    <>
+      <rect x={5} y={6} width={38} height={36} rx={4} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path d="M5 33 H43" style={{ stroke: ink(t) }} />
+      <circle cx={11} cy={37.5} r={1.7} style={{ fill: ink(t) }} />
+      <path d="M30 37.5 H38" style={{ stroke: ink(t) }} strokeLinecap="round" strokeOpacity={0.7} />
+      <rect x={10.5} y={11} width={7} height={17} rx={3.5} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={20.5} y={11} width={7} height={17} rx={3.5} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={30.5} y={11} width={7} height={17} rx={3.5} style={{ fill: PAPER, stroke: ink(t) }} />
+    </>
+  ),
+  function: (t) => (
+    <>
+      <rect x={5} y={5} width={38} height={38} rx={7} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path d="M27 10 L15 26 H23 L21 38 L33 22 H25 Z" style={{ fill: ink(t), stroke: ink(t) }} strokeLinejoin="round" />
+    </>
+  ),
+  controller: (t) => (
+    <>
+      <path
+        d="M9.2 21.4 A15 15 0 0 1 38.1 18.9 M38.8 26.6 A15 15 0 0 1 9.9 29.1"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      />
+      <path
+        d="M39.4 13.6 L38.1 18.9 L33.2 16.4 M8.6 34.4 L9.9 29.1 L14.8 31.6"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx={24} cy={24} r={7} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={24} cy={24} r={2.6} style={{ fill: ink(t) }} />
+    </>
+  ),
+  "folder-share": (t) => (
+    <>
+      <path
+        d="M7 9 A3 3 0 0 1 10 6 H18 L21.5 10.5 H38 A3 3 0 0 1 41 13.5 V26 A3 3 0 0 1 38 29 H10 A3 3 0 0 1 7 26 Z"
+        style={{ fill: ink(t), stroke: ink(t) }}
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7 16 H41 V26 A3 3 0 0 1 38 29 H10 A3 3 0 0 1 7 26 Z"
+        style={{ fill: soft(t), stroke: ink(t) }}
+        strokeLinejoin="round"
+      />
+      <path d="M24 29 V39 M7 39 H41" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinecap="round" />
+      <circle cx={24} cy={39} r={4} style={{ fill: ink(t), stroke: PAPER }} />
+      <circle cx={7} cy={39} r={2.4} style={{ fill: ink(t) }} />
+      <circle cx={41} cy={39} r={2.4} style={{ fill: ink(t) }} />
+    </>
+  ),
+  appliance: (t) => (
+    <>
+      <path
+        d="M16 15 V10.5 A2.5 2.5 0 0 1 18.5 8 H29.5 A2.5 2.5 0 0 1 32 10.5 V15"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      />
+      <rect x={4} y={15} width={40} height={27} rx={3} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path
+        d="M4 22 V18 A3 3 0 0 1 7 15 H11 Z M44 22 V18 A3 3 0 0 0 41 15 H37 Z M4 35 V39 A3 3 0 0 0 7 42 H11 Z M44 35 V39 A3 3 0 0 1 41 42 H37 Z"
+        style={{ fill: ink(t), stroke: ink(t) }}
+        strokeLinejoin="round"
+      />
+      <path d="M4 27 H44" style={{ stroke: ink(t) }} />
+      <rect x={12} y={24.5} width={5} height={5} rx={1} style={{ fill: ink(t) }} />
+      <rect x={31} y={24.5} width={5} height={5} rx={1} style={{ fill: ink(t) }} />
+      <path d="M17 35.5 H25" style={{ stroke: ink(t) }} strokeLinecap="round" strokeOpacity={0.7} />
+      <circle cx={30} cy={35.5} r={1.7} style={{ fill: ink(t) }} />
+    </>
+  ),
+  proxy: (t) => (
+    <>
+      <path d="M4 24 H12 M36 24 H43" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinecap="round" />
+      <path
+        d="M9 20.5 L12.5 24 L9 27.5 M40 20.5 L43.5 24 L40 27.5"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect x={16} y={11} width={16} height={26} rx={3} style={{ fill: soft(t), stroke: ink(t) }} />
+      <rect x={20.5} y={17} width={7} height={14} rx={2} style={{ fill: ink(t) }} />
+    </>
+  ),
+  partition: (t) => (
+    <>
+      <rect x={4} y={12} width={40} height={24} rx={3} style={{ fill: soft(t), stroke: ink(t) }} />
+      <rect x={17.5} y={12} width={13} height={24} style={{ fill: ink(t) }} fillOpacity={0.85} />
+      <path d="M8 20 H13.5 M8 28 H13.5 M34.5 20 H40 M34.5 28 H40" style={{ stroke: ink(t) }} strokeLinecap="round" />
+      <path d="M21.5 20 H26.5 M21.5 28 H26.5" style={{ stroke: PAPER }} strokeLinecap="round" />
+      <path d="M17.5 6 V42 M30.5 6 V42" style={{ stroke: ink(t) }} strokeLinecap="round" strokeDasharray="2.5 2.5" />
+    </>
+  ),
+  topic: (t) => (
+    <>
+      <path d="M7 24 H18" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinecap="round" />
+      <circle cx={6.5} cy={24} r={2.6} style={{ fill: ink(t) }} />
+      <path d="M25 12 H42 M25 24 H42 M25 36 H42" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinecap="round" />
+      <path
+        d="M39 8.5 L42.5 12 L39 15.5 M39 20.5 L42.5 24 L39 27.5 M39 32.5 L42.5 36 L39 39.5"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect x={18} y={6} width={7} height={36} rx={3.5} style={{ fill: ink(t), stroke: ink(t) }} />
+    </>
+  ),
+  snapshot: (t) => (
+    <>
+      <path
+        d="M5 14 V9 A4 4 0 0 1 9 5 H14 M34 5 H39 A4 4 0 0 1 43 9 V14 M43 34 V39 A4 4 0 0 1 39 43 H34 M14 43 H9 A4 4 0 0 1 5 39 V34"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+      />
+      <circle cx={24} cy={24} r={12.5} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={24} cy={24} r={8} style={{ fill: ink(t) }} />
+      <circle cx={24} cy={24} r={2.4} style={{ fill: PAPER }} />
+    </>
+  ),
+  vault: (t) => (
+    <>
+      <path d="M12 40 V43.5 M36 40 V43.5" style={{ stroke: ink(t) }} strokeWidth={2.4} strokeLinecap="round" />
+      <rect x={5} y={5} width={38} height={35} rx={4} style={{ fill: soft(t), stroke: ink(t) }} />
+      <rect x={10} y={10} width={28} height={25} rx={2} style={{ fill: PAPER, stroke: ink(t) }} />
+      <rect x={8.5} y={13} width={3} height={5} rx={1} style={{ fill: ink(t) }} />
+      <rect x={8.5} y={27} width={3} height={5} rx={1} style={{ fill: ink(t) }} />
+      <circle cx={22} cy={22.5} r={7.5} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path d="M22 15 V30 M14.5 22.5 H29.5" style={{ stroke: ink(t) }} strokeLinecap="round" />
+      <circle cx={22} cy={22.5} r={2.8} style={{ fill: ink(t) }} />
+      <path d="M34 17 V28" style={{ stroke: ink(t) }} strokeWidth={2.2} strokeLinecap="round" />
+    </>
+  ),
+  certificate: (t) => (
+    <>
+      <rect x={5} y={6} width={38} height={28} rx={3} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path d="M11 14 H31 M11 20 H22 M11 26 H19" style={{ stroke: ink(t) }} strokeLinecap="round" strokeOpacity={0.7} />
+      <path
+        d="M28.5 32 L27 44 L33 40.5 L39 44 L37.5 32 Z"
+        style={{ fill: ink(t), stroke: PAPER }}
+        strokeLinejoin="round"
+      />
+      <circle cx={33} cy={27} r={7.5} style={{ fill: ink(t), stroke: PAPER }} />
+      <circle cx={33} cy={27} r={3.6} fill="none" style={{ stroke: PAPER }} strokeOpacity={0.8} />
+    </>
+  ),
+  radar: (t) => (
+    <>
+      <circle cx={24} cy={24} r={18} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={24} cy={24} r={11.5} fill="none" style={{ stroke: ink(t) }} strokeOpacity={0.6} />
+      <circle cx={24} cy={24} r={5.5} fill="none" style={{ stroke: ink(t) }} strokeOpacity={0.6} />
+      <path d="M24 24 L24 6 A18 18 0 0 1 39.6 15 Z" style={{ fill: ink(t) }} fillOpacity={0.45} />
+      <path d="M24 24 L39.6 15" style={{ stroke: ink(t) }} strokeWidth={2} strokeLinecap="round" />
+      <circle cx={24} cy={24} r={1.8} style={{ fill: ink(t) }} />
+      <circle cx={14.5} cy={30.5} r={3} style={{ fill: ink(t), stroke: PAPER }} />
+    </>
+  ),
+  signal: (t) => (
+    <>
+      <path d="M5 33 L13 25 L20 30 L29 16 L34 21 L40 11 V41 H5 Z" style={{ fill: soft(t) }} />
+      <path d="M5 41 H43" style={{ stroke: ink(t) }} strokeLinecap="round" />
+      <path
+        d="M5 33 L13 25 L20 30 L29 16 L34 21 L40 11"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx={40} cy={11} r={4} style={{ fill: ink(t), stroke: PAPER }} />
+    </>
+  ),
+  trace: (t) => (
+    <>
+      <path d="M9 15 V24 H13 M18 27.5 V36.5 H24" fill="none" style={{ stroke: ink(t) }} strokeLinejoin="round" />
+      <rect x={5} y={8} width={24} height={7} rx={3.5} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={13} y={20.5} width={20} height={7} rx={3.5} style={{ fill: soft(t), stroke: ink(t) }} />
+      <rect x={24} y={33} width={19} height={7} rx={3.5} style={{ fill: soft(t), stroke: ink(t) }} />
+    </>
+  ),
+  flag: (t) => (
+    <>
+      <path d="M12 6 V43 M6 43 H18" style={{ stroke: ink(t) }} strokeWidth={2.4} strokeLinecap="round" />
+      <path d="M12 9 H40 L34 17.5 L40 26 H12 Z" style={{ fill: ink(t), stroke: ink(t) }} strokeLinejoin="round" />
+    </>
+  ),
+  meter: (t) => (
+    <>
+      <path d="M5 29 A19 19 0 0 1 43 29 Z" style={{ fill: soft(t), stroke: ink(t) }} strokeLinejoin="round" />
+      <path
+        d="M9 29 H12 M12.7 17.7 L14.8 19.8 M24 13 V16 M35.3 17.7 L33.2 19.8 M39 29 H36"
+        style={{ stroke: ink(t) }}
+        strokeLinecap="round"
+        strokeOpacity={0.7}
+      />
+      <path d="M24 29 L31.5 18.3" style={{ stroke: ink(t) }} strokeWidth={2.2} strokeLinecap="round" />
+      <circle cx={24} cy={29} r={3.2} style={{ fill: ink(t), stroke: PAPER }} />
+      <rect x={15} y={34} width={18} height={6} rx={3} style={{ fill: ink(t) }} fillOpacity={0.6} />
+    </>
+  ),
+  coin: (t) => (
+    <>
+      <circle cx={26.5} cy={26.5} r={16} style={{ fill: ink(t), stroke: ink(t) }} />
+      <circle cx={21.5} cy={21.5} r={16} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={21.5} cy={21.5} r={11} fill="none" style={{ stroke: ink(t) }} strokeOpacity={0.6} />
+      <path d="M21.5 15.5 L26.5 21.5 L21.5 27.5 L16.5 21.5 Z" style={{ fill: ink(t) }} />
+    </>
+  ),
+  model: (t) => (
+    <>
+      <path
+        d="M9 16 L24 10 M9 16 L24 24 M9 16 L24 38 M9 32 L24 10 M9 32 L24 24 M9 32 L24 38 M24 10 L39 16 M24 24 L39 16 M24 38 L39 16 M24 10 L39 32 M24 24 L39 32 M24 38 L39 32"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeOpacity={0.55}
+      />
+      <circle cx={9} cy={16} r={4} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={9} cy={32} r={4} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={24} cy={10} r={4} style={{ fill: ink(t), stroke: ink(t) }} />
+      <circle cx={24} cy={24} r={4} style={{ fill: ink(t), stroke: ink(t) }} />
+      <circle cx={24} cy={38} r={4} style={{ fill: ink(t), stroke: ink(t) }} />
+      <circle cx={39} cy={16} r={4} style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={39} cy={32} r={4} style={{ fill: soft(t), stroke: ink(t) }} />
+    </>
+  ),
+  policy: (t) => (
+    <>
+      <rect x={6} y={5} width={29} height={38} rx={3} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path
+        d="M11 13 L13 15 L16.5 11 M11 21 L13 23 L16.5 19 M11 29 L13 31 L16.5 27"
+        fill="none"
+        style={{ stroke: ink(t) }}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M20.5 13 H30 M20.5 21 H30 M20.5 29 H23"
+        style={{ stroke: ink(t) }}
+        strokeLinecap="round"
+        strokeOpacity={0.7}
+      />
+      <path
+        d="M34 25 L42.5 28 V33.5 C42.5 38.5 38.5 42 34 44 C29.5 42 25.5 38.5 25.5 33.5 V28 Z"
+        style={{ fill: ink(t), stroke: PAPER }}
+        strokeLinejoin="round"
+      />
+      <path d="M34 29.5 V39.5" style={{ stroke: PAPER }} strokeLinecap="round" strokeOpacity={0.7} />
+    </>
+  ),
+  pipeline: (t) => (
+    <>
+      <path d="M14 24 H34" style={{ stroke: ink(t) }} />
+      <rect x={4} y={14} width={10} height={20} rx={2.5} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={19} y={14} width={10} height={20} rx={2.5} style={{ fill: soft(t), stroke: ink(t) }} />
+      <rect x={34} y={14} width={10} height={20} rx={2.5} style={{ fill: PAPER, stroke: ink(t) }} />
+      <path
+        d="M15 21 L18.5 24 L15 27 Z M30 21 L33.5 24 L30 27 Z"
+        style={{ fill: ink(t), stroke: ink(t) }}
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.8 24 L8.5 25.8 L11.3 22.3"
+        fill="none"
+        style={{ stroke: PAPER }}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </>
   ),
 };

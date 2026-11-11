@@ -3,12 +3,13 @@ import { SERVICE_BY_ID } from "@/lib/cloud-catalog";
 import { resolveAssetRef } from "@/lib/asset-schema";
 import { findAsset } from "@/lib/assets";
 import { ProPlaceholder } from "@/components/mdx/pro-placeholder";
+import { InvalidProps } from "@/components/teach/props";
 import type { AnimatedDiagramProps } from "./animated-diagram";
 // The renderers load lazily, only on pages that render one (see ./lazy.client.tsx). They are still server-rendered.
 import { AnimatedDiagram, LayoutDiagram, SequenceDiagram } from "./lazy.client";
 import { unknownEmphasisIds } from "./build-view";
 import { ANIMATED_SPECS } from "./animated-specs";
-import type { DiagramSpec } from "./types";
+import { CLOUD_PROVIDERS, isCloudProvider, type DiagramSpec } from "./types";
 
 type DiagramProps = Omit<AnimatedDiagramProps, "spec" | "alt" | "cloudNames" | "idBase"> & {
   /** Asset ID, with or without the diagrams/animated prefix: "animated/messenger/aws". */
@@ -23,8 +24,13 @@ type DiagramProps = Omit<AnimatedDiagramProps, "spec" | "alt" | "cloudNames" | "
  * specs go to AnimatedDiagram (with the short names of the cloud services its nodes refer to, instead of the
  * whole cloud catalog), sequence and layout specs to their lazily loaded renderers. All kinds get the sidecar's
  * alt text; premium assets render a Pro placeholder.
+ *
+ * `cloud` ("aws", "gcp" or "azure") is the provider the Services toggle starts on. It goes to the client renderer
+ * as a prop and becomes the toggle's initial state, so this server render already draws that provider's names.
+ * Sequence and layout specs have no toggle and never receive it; any other value is an authoring mistake and
+ * fails like an unknown highlight id (production throws, dev shows a note), whatever the spec's kind.
  */
-export function Diagram({ name, spec: specRef, highlight, path, ...props }: DiagramProps) {
+export function Diagram({ name, spec: specRef, highlight, path, cloud, ...props }: DiagramProps) {
   // SVG def ids come from this server render and travel in the RSC payload, so they match on hydration (a useId
   // inside the lazily loaded renderer would not).
   const idBase = useId();
@@ -42,6 +48,14 @@ export function Diagram({ name, spec: specRef, highlight, path, ...props }: Diag
     // Premium assets are never sent until the gated asset route exists (plan §5.6 step 6).
     return <ProPlaceholder label={asset.title ?? spec.title} />;
   }
+  if (cloud !== undefined && !isCloudProvider(cloud)) {
+    const allowed = CLOUD_PROVIDERS.map((p) => `"${p}"`).join(", ");
+    return (
+      <InvalidProps
+        message={`<AnimatedDiagram>: cloud must be one of ${allowed} in ${id}, got ${JSON.stringify(cloud)}`}
+      />
+    );
+  }
   const alt = asset?.alt;
   if (spec.kind === "sequence") return <SequenceDiagram {...props} spec={spec} alt={alt} idBase={idBase} />;
   if (spec.kind === "layout") return <LayoutDiagram {...props} spec={spec} alt={alt} idBase={idBase} />;
@@ -58,6 +72,7 @@ export function Diagram({ name, spec: specRef, highlight, path, ...props }: Diag
       alt={alt}
       highlight={highlight}
       path={path}
+      cloud={cloud}
       cloudNames={cloudNamesFor(spec)}
       idBase={idBase}
     />
