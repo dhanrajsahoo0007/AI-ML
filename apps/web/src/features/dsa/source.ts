@@ -168,7 +168,7 @@ export function loadDsaItems(section: Section): DsaItem[] {
 
 export const topicsOf = (items: DsaItem[]) => items.filter((i): i is DsaTopic => i.type === "topic");
 export const problemsOf = (items: DsaItem[]) => items.filter((i): i is DsaProblem => i.type === "problem");
-export type ValidOutline = DsaOutline & { fm: OutlineFrontmatter };
+type ValidOutline = DsaOutline & { fm: OutlineFrontmatter };
 export const validOutlines = (items: DsaItem[]) =>
   items.filter((i): i is ValidOutline => i.type === "outline" && i.fm !== null);
 
