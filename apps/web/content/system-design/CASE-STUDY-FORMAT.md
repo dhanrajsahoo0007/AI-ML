@@ -36,6 +36,12 @@ In MDX, `<AnimatedDiagram name="<group>/<name>" step={n} />` shows build step `n
 `<AnimatedDiagram name="<group>/<name>" stepper caption="..." />` shows the full picture with replay buttons.
 `spec="animated/<group>/<name>"` is the newer spelling of the same reference; both work.
 
+Cloud concept specs live in the `cloud` group (`assets/diagrams/animated/cloud/<name>.ts`), for example
+`vpc-three-tier`, `dr-tiers`, `iam-role-chain` and `encryption-states`. A case study can embed one instead of redrawing
+it: `<AnimatedDiagram name="cloud/vpc-three-tier" step={n} />` for the picture and
+`<CloudMapping diagram="cloud/vpc-three-tier" />` for its service table. The reserved ids and their owner pages are
+listed in `content/cloud/_plan/ASSETS.md`; a spec exists once its owner page is written.
+
 ## Architecture diagram groups
 
 Use these zones (dotted borders) and tones so every case study reads the same:
