@@ -1,0 +1,75 @@
+---
+title: Binary Trees
+description: Nodes with a left and a right child, the two ways to visit them, and how to pick the right one for a problem.
+icon: git-fork
+order: 4
+---
+
+A tree is a set of nodes that starts at one node, the *root*, and branches downward. In a *binary* tree every
+node has at most two children, called left and right. A node with no children is a *leaf*. There is exactly one
+path from the root to any node, so a tree has no cycles and you never need a "visited" set to walk it.
+
+Two measurements come up constantly. The *depth* of a node is how many steps it is below the root. The *height*
+of the tree is the depth of its deepest leaf. A balanced tree with `n` nodes has height about `log n`. A tree
+where every node has one child is really a linked list, with height `n`.
+
+## In Python
+
+```python
+class TreeNode:
+    def __init__(self, val=0, left=None, right=None):
+        self.val = val
+        self.left = left
+        self.right = right
+```
+
+On this site the tests write a tree as an array in level order: the root, then its two children, then their
+children from left to right, with `None` for a missing child. So `[1, 2, 3, None, 5]` is a root `1` with children
+`2` and `3`, where `2` has only a right child, `5`. The starter code builds the nodes from that array before
+calling your function.
+
+## Two ways to visit every node
+
+**Depth-first** goes as far down one branch as it can before backing up. It is usually written as a short
+recursive function, and the order in which you handle a node relative to its children gives three variants:
+
+- *preorder*: the node, then left, then right. Good for copying a tree or recording its shape.
+- *inorder*: left, the node, then right. On a binary search tree this visits values in sorted order.
+- *postorder*: left, right, then the node. Use it when a node's answer depends on its children's answers, such
+  as height or subtree sums.
+
+**Breadth-first** visits the tree level by level using a queue. Take the current queue length at the start of a
+round, and that many nodes form one complete level. Use it whenever the question talks about levels, rows,
+depth from the top, or what is visible from one side.
+
+## What it costs
+
+Either traversal touches each node once, so the time is O(n). The extra memory differs:
+
+| Traversal | Extra memory | Worst case |
+| --- | --- | --- |
+| Depth-first (recursive) | O(height) for the call stack | O(n) on a one-sided tree |
+| Breadth-first | O(widest level) for the queue | O(n) on a full bottom level |
+
+## Patterns worth recognising
+
+1. **Answer from the children.** Solve the problem for the left and right subtrees, then combine: height is one
+   more than the taller child, a tree is balanced if both subtrees are and their heights differ by at most one.
+2. **Carry information down.** Pass the path so far, the running sum or the allowed range as extra arguments.
+   Checking that a tree is a valid search tree works this way.
+3. **Level by level.** Process the queue one whole level at a time. The last node of each level is what you see
+   from the right, which is *Binary Tree Right Side View*.
+4. **Two answers per node.** Return one value for the parent to use and update a second, global best on the way.
+   Diameter and maximum path sum both need this.
+5. **Lowest common ancestor.** Search both sides for the two targets. The first node that finds one on each side
+   is the answer.
+
+## Pitfalls
+
+- **Forgetting the empty tree.** Almost every function should start with `if not root`.
+- **Confusing depth with height.** Depth counts from the root down, height from the leaves up.
+- **Recursion limits.** Python stops at about 1,000 nested calls by default. A very deep, one-sided tree needs
+  an explicit stack or a queue.
+- **Testing a leaf wrongly.** A leaf has no left child *and* no right child. A node with one child is not a leaf,
+  which matters for "minimum depth" and "path to a leaf" questions.
+- **Using `list.pop(0)` as a queue.** It is O(n) per pop. Use `collections.deque` and `popleft()`.

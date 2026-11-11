@@ -1,0 +1,167 @@
+---
+title: Merge K Sorted Lists
+description: Combine several ascending linked lists into one ascending list, picking the next node efficiently as k grows.
+difficulty: medium
+patterns: [linked-list, heap]
+topics: [linked-lists]
+companies: []
+languages: [python]
+entry: { python: merge_k_lists }
+starter:
+  python: |
+    # --- Glue: converts the test arrays to nodes and back. Leave as is. ---
+    class ListNode:
+        def __init__(self, val=0, next=None):
+            self.val = val
+            self.next = next
+
+
+    def _to_list(values):
+        if not values:
+            return None
+        dummy = ListNode()
+        tail = dummy
+        for v in values:
+            tail.next = ListNode(v)
+            tail = tail.next
+        return dummy.next
+
+
+    def _from_list(head):
+        out = []
+        while head:
+            out.append(head.val)
+            head = head.next
+        return out
+
+
+    def merge_k_lists(lists: list[list[int]]) -> list[int]:  # the entry the tests call
+        return _from_list(merge_nodes([_to_list(values) for values in lists]))
+
+
+    # --- Your code ---
+    def merge_nodes(lists: list[ListNode | None]) -> ListNode | None:
+        # `lists` holds the head node of each sorted list (None for an empty list).
+        # Return the head of one merged sorted list.
+        pass
+tests: { public: tests/merge-k-sorted-lists.public.json, hidden: tests/merge-k-sorted-lists.hidden.json }
+complexity: { time: "O(N log k)", space: "O(k)" }
+related: []
+order: 5
+---
+
+You are given `k` singly linked lists. Each one is already sorted in ascending order. Join all their nodes into one
+sorted linked list and return its head. A list may be empty, and `k` may be zero.
+
+Reuse the existing nodes: relink them instead of copying values into new ones.
+
+**How the tests describe lists.** The tests write each list as an array of values, head first, and write the
+input as an array of those arrays. The expected result is one array. The editor already contains the `ListNode`
+class and small helpers that convert between arrays and nodes, so you only write `merge_nodes(lists)`. It receives
+a list holding the head node of each input list (`None` for an empty one) and returns the head of the merged list.
+
+## Examples
+
+```text
+[[1, 4, 5], [1, 3, 4], [2, 6]]   →  [1, 1, 2, 3, 4, 4, 5, 6]
+[[], []]                         →  []
+[]                               →  []
+[[0]]                            →  [0]
+```
+
+## Constraints
+
+- `0 ≤ k ≤ 10⁴`
+- `0 ≤ length of each list ≤ 500`, and the total number of nodes `N` is at most `10⁴`.
+- `-10⁴ ≤ value ≤ 10⁴`
+- Each list is sorted in ascending order.
+
+**Follow-up:** merging the lists one after another costs O(N·k) in the worst case. Can you get to O(N log k)?
+
+<PremiumBreak />
+
+## Start with a simpler merge
+
+Merging two sorted lists is easy: compare the two front nodes, take the smaller, repeat. You could fold `k` lists
+into one by merging them one after another. But the result list keeps growing, and you re-walk it on every merge,
+which can cost O(N·k) in total.
+
+## The idea: only the fronts matter
+
+At any moment the next node of the answer must be the smallest of the `k` current front nodes, because every list
+is sorted and everything behind a front is at least as large. Scanning all `k` fronts each time costs O(k) per
+node. A **min-heap** gives the smallest front in O(log k) and lets you replace it just as fast.
+
+1. Put the head of every non-empty list into a min-heap.
+2. Pop the smallest node and append it to the result.
+3. If the popped node has a successor, push that successor into the heap.
+4. Repeat until the heap is empty.
+
+The heap never holds more than one node per list, so it has at most `k` entries.
+
+## The tie-breaker
+
+Entries are tuples `(value, list_index, node)`. Python compares tuples element by element. When two nodes share
+a value, it moves on to compare `list_index`, which is always different, so it never reaches the nodes
+themselves. Without that middle field, a tie would make Python try to compare two `ListNode` objects, and that
+raises a `TypeError`.
+
+```python
+import heapq
+
+
+def merge_nodes(lists):
+    heap = []
+    for i, h in enumerate(lists):
+        if h:
+            heapq.heappush(heap, (h.val, i, h))
+
+    dummy = ListNode(0)
+    tail = dummy
+    while heap:
+        _, i, node = heapq.heappop(heap)
+        tail.next = node
+        tail = tail.next
+        if node.next:
+            heapq.heappush(heap, (node.next.val, i, node.next))
+
+    tail.next = None
+    return dummy.next
+```
+
+`dummy` is a throwaway node placed before the result, so appending the first node needs no special case, and the final `tail.next = None` makes sure the merged list ends
+cleanly. The `ListNode` class, the converters and the `merge_k_lists` wrapper in the editor are glue; you do not change them.
+
+## Why it works
+
+Each pop removes the smallest remaining node of the whole input. Because every list is sorted, the smallest
+remaining node is always one of the current fronts, so the heap always contains it. Appending the pops in order
+therefore produces a sorted list. Every node is pushed once and popped once, each in O(log k), so the total cost
+is O(N log k).
+
+## A short trace
+
+For `[[1, 4], [1, 3], [2]]`:
+
+| heap before pop | popped | pushed | result so far |
+| --------------- | ------ | ------ | ------------- |
+| `(1,0) (1,1) (2,2)` | `(1,0)` | `(4,0)` | 1 |
+| `(1,1) (2,2) (4,0)` | `(1,1)` | `(3,1)` | 1, 1 |
+| `(2,2) (3,1) (4,0)` | `(2,2)` | nothing | 1, 1, 2 |
+| `(3,1) (4,0)` | `(3,1)` | nothing | 1, 1, 2, 3 |
+| `(4,0)` | `(4,0)` | nothing | 1, 1, 2, 3, 4 |
+
+Each heap entry is shown as `(value, list_index)`.
+
+## Common mistakes
+
+- Pushing `(value, node)` with no index. It works until two values tie, then crashes.
+- Pushing empty lists. Check `if h` before the first push.
+- Returning `dummy` instead of `dummy.next`.
+
+## Variations
+
+- **Divide and conquer:** merge the lists in pairs, then merge the results in pairs, and so on. It makes about
+  `log k` rounds that each touch all `N` nodes, so it is also O(N log k), and it needs no heap.
+- **Merge sorted arrays:** the same heap works, with `(value, array_index, position)` as the entry.
+- **Smallest range covering one value from each list:** keep the heap and also track the largest value pushed so far.
