@@ -1,7 +1,7 @@
-import { formatValue, sameValue } from "./compare";
 import { lockdown } from "./lockdown";
 import { PY_HARNESS } from "./py-harness";
-import { PYODIDE_BASE_URL, type CaseResult, type RunRequest, type WorkerMessage } from "./protocol";
+import { pyCaseResult } from "./py-result";
+import { PYODIDE_BASE_URL, type RunRequest, type WorkerMessage } from "./protocol";
 import type { WorkerScope } from "./worker-scope";
 
 // The Python runner (plan §15.1 stage B): Pyodide (CPython compiled to WebAssembly) in a dedicated Web
@@ -42,14 +42,8 @@ scope.onmessage = async (event: MessageEvent) => {
   for (let i = 0; i < req.cases.length; i++) {
     const tc = req.cases[i];
     const start = performance.now();
-    const raw = JSON.parse(String(runCase(req.code, req.entry, req.mode, JSON.stringify(tc)))) as
-      { ok: true; actual: unknown; logs: string } | { ok: false; error: string; logs: string };
-    const logs = raw.logs ? raw.logs.replace(/\n$/, "").split("\n") : [];
-    const ms = Math.round(performance.now() - start);
-    const result: CaseResult = raw.ok
-      ? { status: sameValue(raw.actual, tc.expected) ? "pass" : "fail", actual: formatValue(raw.actual), logs, ms }
-      : { status: "error", error: raw.error, logs, ms };
-    post({ type: "case", index: i, result });
+    const raw = String(runCase(req.code, req.entry, req.mode, JSON.stringify(tc)));
+    post({ type: "case", index: i, result: pyCaseResult(raw, tc.expected, Math.round(performance.now() - start)) });
   }
   post({ type: "done" });
 };
