@@ -260,3 +260,407 @@
   short: A single entry point in front of many services that handles routing, authentication, rate limits and logging.
   long: The gateway keeps cross-cutting concerns out of each service. It can become a bottleneck or a single point of failure, so it is run as a replicated, stateless tier.
   related: [load-balancer, rate-limit]
+
+# Cloud terms, used by pages under /cloud (the site has one glossary). Cloud-neutral: no provider product names.
+
+- id: region
+  term: Region
+  short: A geographic area where a cloud provider runs a group of data centres, such as one country or one part of a continent.
+  long: You choose a region for each resource. The choice sets how close you are to users, which laws apply to the data and what the service costs. Regions are built to fail independently of each other.
+  related: [availability-zone, edge-location, latency]
+
+- id: availability-zone
+  term: Availability zone
+  short: One or more data centres inside a region with their own power, cooling and network, so a fault in one zone should not reach another.
+  long: Zones in a region are close enough for fast links and far enough apart to fail separately. Running copies in two or three zones is the usual way to survive the loss of a building.
+  related: [region, multi-az, failover]
+
+- id: edge-location
+  term: Edge location
+  short: A small provider site close to users that caches content and accepts traffic, so requests do not travel all the way to a region.
+  long: There are many more edge locations than regions. CDNs, DNS and some firewalls run there. They hold copies and make first contact, while your main systems still live in a region.
+  related: [cdn, region, latency]
+
+- id: tenant
+  term: Tenant
+  short: One customer of a shared system, whose data and work the provider keeps apart from every other customer's.
+  long: Public clouds are multi-tenant. Your virtual machine may share a physical host with strangers, and keeping you apart is the provider's job. The word is also used for one customer of a SaaS product, and one cloud uses it for a company's identity directory.
+  related: [shared-responsibility, saas]
+
+- id: iaas
+  term: IaaS
+  short: Infrastructure as a service, where you rent virtual machines, disks and networks and run everything above them yourself.
+  long: IaaS gives the most control and the most work. You patch the operating system, install the runtime and plan for failure. The provider looks after the buildings, the hardware and the virtualisation layer.
+  related: [paas, saas, serverless]
+
+- id: paas
+  term: PaaS
+  short: Platform as a service, where you hand over your code or container and the provider runs the servers, operating system and scaling.
+  long: PaaS trades control for less work. You no longer patch machines, but you accept the platform's limits on runtimes, request length and networking.
+  related: [iaas, saas, serverless]
+
+- id: saas
+  term: SaaS
+  short: Software as a service, a finished application you use over the internet, such as email, with nothing to install or run.
+  long: With SaaS the provider runs everything. Your jobs are deciding who may sign in, what data goes in and how the product is configured.
+  related: [iaas, paas, tenant]
+
+- id: serverless
+  term: Serverless
+  short: A way of running code or data services where you never manage servers, capacity follows demand and you pay only for what you use.
+  long: Servers still exist, but the provider owns them. Many serverless services scale to zero when idle. The trade is less control, a cost per request and effects such as cold starts.
+  related: [cold-start, paas, autoscaling]
+
+- id: shared-responsibility
+  term: Shared responsibility
+  short: The split of security work in a cloud, where the provider secures the platform and you secure what you put on it.
+  long: The line moves with the service. On a virtual machine you patch the operating system. On a managed database the provider does. Your data, your access rules and your configuration are always yours.
+  related: [iaas, paas, iam]
+
+- id: vpc
+  term: VPC
+  short: Virtual private cloud, your own private network inside a cloud, where nothing gets in or out unless you allow it.
+  long: A VPC, called a virtual network on one cloud, is the boundary most resources live in. You give it an address range, split it into subnets, steer traffic with route tables and filter it with firewall rules.
+  related: [subnet, cidr, route-table, security-group]
+
+- id: subnet
+  term: Subnet
+  short: A slice of a private network's address range, usually in one zone, whose resources share the same routing rules.
+  long: A subnet is called public when it has a route to the internet and private when it does not. A common layout has public, application and data subnets in each zone.
+  related: [vpc, cidr, route-table]
+
+- id: cidr
+  term: CIDR
+  short: A compact way to write a range of IP addresses, such as 10.0.0.0/16, where the number after the slash sets the size of the range.
+  long: A smaller number after the slash means a bigger range. A /16 holds about 65,000 addresses and a /24 holds 256. The ranges of networks you plan to connect must not overlap.
+  related: [vpc, subnet]
+
+- id: route-table
+  term: Route table
+  short: A list of rules that tells a network where to send traffic for each destination address range.
+  long: Each subnet uses one route table. A route to an internet gateway makes the subnet public. A route to a NAT gateway lets private servers start connections outward.
+  related: [subnet, nat-gateway, vpc]
+
+- id: security-group
+  term: Security group
+  short: A stateful firewall attached to a resource, which lists what may connect and lets replies to allowed traffic back automatically.
+  long: A rule can name another group instead of an address range, for example to let only the app servers reach the database. Clouds use different names for this kind of rule.
+  related: [network-acl, vpc, least-privilege]
+
+- id: network-acl
+  term: Network ACL
+  short: A stateless filter at the edge of a subnet that checks traffic in each direction separately, so replies need their own rule.
+  long: A network access control list is a coarse second layer, often used to block a known bad address range. Most day-to-day rules belong on the resource-level firewall instead.
+  related: [security-group, subnet]
+
+- id: nat-gateway
+  term: NAT gateway
+  short: A managed device that lets servers without public addresses start connections to the internet, while blocking connections coming in.
+  long: NAT means network address translation. The gateway swaps the private source address for its own public one. You usually pay for each hour it runs and for each gigabyte that passes through.
+  related: [route-table, subnet, egress, private-endpoint]
+
+- id: private-endpoint
+  term: Private endpoint
+  short: A private address inside your network that leads to a managed service, so traffic to it never crosses the public internet.
+  long: Private endpoints keep traffic to storage, databases or another team's service on the provider's network. They often replace a NAT gateway for traffic to the provider's own services.
+  related: [vpc, nat-gateway, peering]
+
+- id: peering
+  term: Network peering
+  short: A direct private link between two networks, so that resources in each can reach the other by private address.
+  long: Peering does not chain. If A peers with B and B peers with C, A still cannot reach C through B. With many networks a transit hub is simpler.
+  related: [vpc, transit-hub]
+
+- id: transit-hub
+  term: Transit hub
+  short: A central router that many networks attach to, so each one connects once to the hub and not to every other network.
+  long: This is the hub-and-spoke layout. The hub also carries the links to offices and data centres, and gives one place to inspect and control traffic between networks.
+  related: [peering, vpn, dedicated-connection]
+
+- id: vpn
+  term: VPN
+  short: Virtual private network, an encrypted tunnel over the internet that joins an office or data centre to a cloud network.
+  long: A VPN is quick to set up and cheap, but its speed and latency vary with the internet. Teams often keep one as the backup for a dedicated connection.
+  related: [dedicated-connection, transit-hub, tls]
+
+- id: dedicated-connection
+  term: Dedicated connection
+  short: A private physical line between your data centre and a cloud provider, with steadier speed and latency than the internet.
+  long: A dedicated line takes weeks to install and is not encrypted by default. It suits large, steady data flows. A VPN is the usual backup path.
+  related: [vpn, transit-hub, latency]
+
+- id: iam
+  term: IAM
+  short: Identity and access management, the cloud service that decides who is calling and whether that caller may do what it asks.
+  long: Every request to a cloud API is checked by IAM. It answers two questions, who are you (authentication) and are you allowed (authorization), using principals, roles and policies.
+  related: [principal, role, policy, least-privilege]
+
+- id: principal
+  term: Principal
+  short: Anything that can make a request to a cloud and be given permissions, such as a person, a group or a running workload.
+  long: Policies are written about principals. A human user, a service account and a virtual machine acting under a role are all principals.
+  related: [iam, role, service-account]
+
+- id: role
+  term: Role
+  short: A named set of permissions that a person or workload takes on for a while, receiving short-lived credentials instead of a stored key.
+  long: Roles separate what may be done from who is doing it. A server can use a role to read one bucket with no password stored on it. The exact meaning differs a little between clouds.
+  related: [iam, policy, principal, least-privilege]
+
+- id: policy
+  term: Policy
+  short: A written rule that says which actions are allowed or denied on which resources, and for whom.
+  long: Policies attach to principals, to resources or to a whole part of an organization. In most systems an explicit deny wins over an allow.
+  related: [iam, role, least-privilege]
+
+- id: least-privilege
+  term: Least privilege
+  short: Giving each person or workload only the permissions it needs for its job, and nothing more.
+  long: If a key leaks or a server is taken over, least privilege limits what the attacker can reach. Start with no access and add what is needed, not the other way round.
+  related: [iam, policy, zero-trust]
+
+- id: service-account
+  term: Service account
+  short: An identity made for a program, not a person, so a workload can call cloud services with its own permissions.
+  long: Clouds name this differently (service account, managed identity, instance role), but the safe pattern is the same. The platform hands the workload short-lived credentials, so no long-lived key sits in code.
+  related: [principal, role, secret]
+
+- id: federation
+  term: Identity federation
+  short: Letting people or workloads sign in with an identity from another trusted system, so no separate cloud password or key is needed.
+  long: With federation, staff sign in through the company directory, and a build system swaps its own token for short-lived cloud credentials. Accounts are created and removed in one place.
+  related: [iam, mfa, role]
+
+- id: mfa
+  term: MFA
+  short: Multi-factor authentication, signing in with a password plus a second proof such as a code from a phone or a hardware key.
+  long: With MFA a stolen password alone is not enough. It matters most on the accounts that can change everything, such as administrators and the account owner.
+  related: [iam, federation, zero-trust]
+
+- id: landing-zone
+  term: Landing zone
+  short: A ready-made layout of accounts, networks, logging and guardrails that teams build inside, so every workload starts from a safe base.
+  long: A landing zone keeps production apart from test, sends audit logs to a place nobody can edit and applies rules from the top of the organization. Each provider offers a blueprint for one.
+  related: [organization, policy, tag]
+
+- id: organization
+  term: Organization
+  short: The top of a company's cloud estate, a tree that groups its accounts, projects or subscriptions so rules can be set once.
+  long: Rules set high in the tree apply to everything beneath them. The levels have different names on each cloud, but the idea is the same. Group by environment or team, then attach guardrails to the groups.
+  related: [landing-zone, policy, quota]
+
+- id: quota
+  term: Quota
+  short: A limit the provider sets on how much of something one account may use, such as the number of virtual machines in a region.
+  long: Quotas protect the provider, and protect you from runaway cost. Many can be raised on request. Check them before a launch, because hitting one looks like an outage.
+  related: [rate-limit, organization]
+
+- id: tag
+  term: Tag
+  short: A label, written as a key and a value, that you attach to a cloud resource to record things like its owner, team or environment.
+  long: Tags, called labels on one cloud, make cost reports and automation possible. A resource with no tags has no owner on the bill.
+  related: [finops, organization]
+
+- id: object-storage
+  term: Object storage
+  short: Storage for whole files, each saved and fetched by a key over HTTP in a flat container called a bucket, with near-limitless room.
+  long: Object storage is cheap, durable and reachable from anywhere, which suits images, backups and data lakes. You replace an object as a whole, so it does not suit the live files of a database.
+  related: [blob, block-storage, file-storage, storage-class]
+
+- id: block-storage
+  term: Block storage
+  short: A virtual disk attached to a server over the network, which the server formats and uses like a local drive.
+  long: Block volumes hold operating systems and databases. A volume normally lives in one zone and attaches to one server at a time. You choose a type by how many operations per second it must handle.
+  related: [object-storage, file-storage, snapshot]
+
+- id: file-storage
+  term: File storage
+  short: A shared folder that many servers can mount at once and use with normal file paths and permissions.
+  long: Managed file shares suit software that expects a file system shared between machines. They cost more per gigabyte than object storage.
+  related: [object-storage, block-storage]
+
+- id: storage-class
+  term: Storage class
+  short: A price and speed level for stored objects, where colder classes cost less to keep but more, or longer, to read back.
+  long: Classes run from hot, for data read every day, to archive, for data kept for years. Colder classes often have a minimum storage time and a fee for reading data back.
+  related: [object-storage, lifecycle-rule]
+
+- id: lifecycle-rule
+  term: Lifecycle rule
+  short: An automatic rule that moves objects to a cheaper storage class, or deletes them, once they reach a set age.
+  long: A typical rule moves logs to a cooler class after a month and removes them after a year. It saves money without anyone having to remember.
+  related: [storage-class, object-storage, ttl]
+
+- id: snapshot
+  term: Snapshot
+  short: A saved copy of a disk or database at one moment in time, usually storing only the blocks that changed since the last one.
+  long: Snapshots are the base of most cloud backups. You can restore one to a new disk, copy it to another region or use it to make a new server. A snapshot kept in the same account as the data can be deleted by the same mistake.
+  related: [block-storage, rpo, replication]
+
+- id: read-replica
+  term: Read replica
+  short: A copy of a database that follows the primary and answers read queries, which takes load off the primary.
+  long: Most read replicas are updated asynchronously, so they can be a little behind. They add read capacity, and one can be promoted if the primary is lost.
+  related: [replication, stale-read, failover, leader]
+
+- id: rpo
+  term: RPO
+  short: Recovery point objective, the most data, measured in time, that you accept losing in a disaster, such as the last five minutes.
+  long: RPO is set by how often data is copied somewhere safe. Nightly backups give an RPO of up to a day. Continuous replication brings it down to seconds.
+  related: [rto, snapshot, replication]
+
+- id: rto
+  term: RTO
+  short: Recovery time objective, the longest you accept being down after a disaster before the service works again.
+  long: RTO is set by how much is already running at the recovery site. Restoring from backups takes hours. A warm standby takes minutes. A lower RTO costs more.
+  related: [rpo, failover, availability]
+
+- id: multi-az
+  term: Multi-AZ
+  short: Running copies of a system in two or more availability zones of one region, so losing a zone does not stop the service.
+  long: The usual pattern is app servers in each zone behind a load balancer, and a database with a standby in another zone. It guards against a zone failure, not against a region failure.
+  related: [availability-zone, failover, load-balancer]
+
+- id: autoscaling
+  term: Autoscaling
+  short: Adding and removing servers or containers automatically so that capacity follows the load.
+  long: An autoscaler watches a metric such as processor use or requests per server, compares it with a target and changes the count. New capacity takes time to start, so sudden spikes still need headroom.
+  related: [load-balancer, serverless, cold-start]
+
+- id: container
+  term: Container
+  short: A package holding an application and everything it needs to run, started as an isolated process that shares the host's operating system.
+  long: Containers start in seconds and run the same on a laptop and in production. They are lighter than virtual machines because they do not each carry a full operating system.
+  related: [image-registry, kubernetes, pod]
+
+- id: image-registry
+  term: Image registry
+  short: A store for container images, where build systems push new versions and servers pull them to run.
+  long: A registry keeps every version by tag and by content digest. Managed registries can also scan images for known flaws and copy them between regions.
+  related: [container, kubernetes]
+
+- id: kubernetes
+  term: Kubernetes
+  short: An open-source system that runs containers across a group of machines and keeps the number of running copies you asked for.
+  long: You declare the state you want and controllers work to make it true by restarting, moving and scaling containers. Every large cloud sells a managed version that runs the control plane for you.
+  related: [container, pod, node-pool]
+
+- id: pod
+  term: Pod
+  short: The smallest unit Kubernetes runs, one or more containers that share a network address and are started and stopped together.
+  long: Pods are disposable. Kubernetes replaces them when they fail or when a machine goes away, so anything that must last is kept outside the pod.
+  related: [kubernetes, container, node-pool]
+
+- id: node-pool
+  term: Node pool
+  short: A group of same-sized machines inside a Kubernetes cluster that pods are placed on.
+  long: A cluster can have several pools, for example one for general work and one with GPUs. Each pool can scale up and down on its own.
+  related: [kubernetes, pod, autoscaling]
+
+- id: cold-start
+  term: Cold start
+  short: The extra delay when a serverless platform must start a fresh instance of your code before it can handle a request.
+  long: The platform has to fetch the code, start the runtime and run your start-up logic. Later requests reuse the warm instance. Keeping instances warm removes the delay but costs money.
+  related: [serverless, latency, p99]
+
+- id: kms
+  term: KMS
+  short: Key management service, a managed vault that creates and guards encryption keys and uses them on request without handing them out.
+  long: Other services call the key service to encrypt and decrypt. Every use is checked against a policy and logged. Disabling a key makes the data under it unreadable.
+  related: [envelope-encryption, secret, tls]
+
+- id: envelope-encryption
+  term: Envelope encryption
+  short: Encrypting data with a data key, then encrypting that small key with a master key held in a key service.
+  long: Only the small data key travels to the key service, so large files are encrypted locally and fast. The wrapped data key is stored beside the data.
+  related: [kms, secret]
+
+- id: secret
+  term: Secret
+  short: A sensitive value such as a password, API key or token that a program needs and that must not sit in code or plain config files.
+  long: A secrets service stores the value encrypted, hands it only to identities allowed to read it and can rotate it on a schedule. Better still is to avoid the secret by using a workload identity.
+  related: [kms, service-account, least-privilege]
+
+- id: zero-trust
+  term: Zero trust
+  short: A security approach where no request is trusted because of where it comes from, so each one must prove identity and permission.
+  long: Being inside the company network grants nothing. Each request is checked for who is calling, from what device and for which resource. It replaces the old model of a hard shell around a soft inside.
+  related: [least-privilege, mfa, iam]
+
+- id: waf
+  term: WAF
+  short: Web application firewall, a filter in front of a site that inspects HTTP requests and blocks known attack patterns.
+  long: A WAF usually runs at the edge or on the load balancer. It stops common attacks such as injection and can limit request rates from one address. It does not replace safe code.
+  related: [ddos, cdn, rate-limit]
+
+- id: ddos
+  term: DDoS
+  short: Distributed denial of service, an attack that floods a system with traffic from many machines so that real users cannot get through.
+  long: Providers absorb most floods at their edge, where there is far more capacity than at any one site. Caching, autoscaling and rate limits reduce what reaches your servers.
+  related: [waf, cdn, rate-limit]
+
+- id: error-budget
+  term: Error budget
+  short: The amount of failure an SLO allows over a period, such as the 0.1% of requests a 99.9% target leaves free to fail.
+  long: While budget remains, the team can ship changes quickly. When it is spent, work shifts to reliability. Alerts fire on how fast the budget is burning.
+  related: [slo, sli, availability]
+
+- id: blue-green
+  term: Blue-green deployment
+  short: Running a new version beside the old one and switching all traffic over at once, keeping the old one ready for a quick rollback.
+  long: Blue-green gives the fastest rollback, because the old version is still running. The cost is double capacity during the switch.
+  related: [canary, load-balancer]
+
+- id: canary
+  term: Canary release
+  short: Sending a small share of traffic to a new version first, and widening it only if errors and latency stay healthy.
+  long: A canary limits the harm of a bad release to a few users. It needs good metrics and an automatic way to stop and roll back.
+  related: [blue-green, error-budget]
+
+- id: infrastructure-as-code
+  term: Infrastructure as code
+  short: Describing servers, networks and other cloud resources in text files that a tool applies, so setups are repeatable and reviewed.
+  long: The files live in version control like any other code. The tool compares them with what exists and shows a plan before it changes anything. The same files build test and production alike.
+  related: [drift, landing-zone]
+
+- id: drift
+  term: Configuration drift
+  short: The gap that opens when real cloud resources no longer match the files that describe them, often after a manual change.
+  long: Drift makes environments differ in ways nobody recorded. Tools detect it by comparing the live state with the description. The fix is to change the files, not the console.
+  related: [infrastructure-as-code]
+
+- id: reserved-capacity
+  term: Reserved capacity
+  short: A promise to use a set amount of compute for one or three years in return for a lower rate than paying on demand.
+  long: Commitments suit the steady base of a workload. Each cloud has its own name and rules for them. A commitment you do not use is still paid for.
+  related: [spot-capacity, rightsizing, finops]
+
+- id: spot-capacity
+  term: Spot capacity
+  short: Spare provider capacity sold at a large discount that can be taken back at short notice.
+  long: Spot suits work that can stop and resume, such as batch jobs and stateless workers. It does not suit a single database server.
+  related: [reserved-capacity, autoscaling]
+
+- id: egress
+  term: Egress
+  short: Data leaving a cloud network, for example to the internet or another region, which providers usually charge for by the gigabyte.
+  long: Data coming in is usually free and data going out is not. Egress fees shape designs. They are a reason to serve large files through a CDN and to keep chatty services in the same zone.
+  related: [nat-gateway, cdn, finops]
+
+- id: finops
+  term: FinOps
+  short: The practice of engineering and finance teams working together so that cloud spending is visible, owned and worth it.
+  long: FinOps is a loop. See the cost by team and service, decide what to change, act, then look again. Tags, budgets and regular reviews are its basic tools.
+  related: [tag, rightsizing, reserved-capacity]
+
+- id: rightsizing
+  term: Rightsizing
+  short: Changing a resource to the size its real usage needs, usually shrinking servers that sit mostly idle.
+  long: Rightsizing comes before buying commitments. There is no point in committing to capacity that is twice what the workload uses.
+  related: [finops, autoscaling, reserved-capacity]
+
+- id: lift-and-shift
+  term: Lift and shift
+  short: Moving an application to the cloud as it is, on virtual machines, without redesigning it.
+  long: Also called rehosting. It is the fastest way to leave a data centre, but the application gains little from the cloud until it is changed later.
+  related: [iaas]
