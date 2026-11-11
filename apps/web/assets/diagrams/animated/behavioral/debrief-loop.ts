@@ -1,0 +1,42 @@
+import type { DiagramSpec } from "@/components/diagrams/types";
+
+const spec: DiagramSpec = {
+  title: "How behavioral evidence flows through the debrief loop",
+  width: 920,
+  height: 360,
+  steps: [
+    { title: "1. Live story & follow-up probes", covers: "Candidate delivery" },
+    { title: "2. Independent rubric & verbatim notes", covers: "Written evidence" },
+    { title: "3. Bar Raiser & packet audit", covers: "Cross-round synthesis" },
+    { title: "4. Leveling & hiring decision", covers: "Offer calibration" },
+  ],
+  zones: [
+    { id: "interview", title: "1. Live Interview (45 min)", tone: "blue", x: 16, y: 24, w: 210, h: 312 },
+    { id: "evidence", title: "2. Written Packet (24h)", tone: "teal", x: 246, y: 24, w: 220, h: 312 },
+    { id: "calibration", title: "3. Debrief / Committee", tone: "orange", x: 486, y: 24, w: 210, h: 312 },
+    { id: "outcome", title: "4. Final Calibration", tone: "green", x: 716, y: 24, w: 188, h: 312 },
+  ],
+  nodes: [
+    { id: "candidate", label: "Candidate Story", sub: "STAR+L + metrics", icon: "user", tone: "blue", x: 121, y: 115, w: 180, h: 56, step: 1 },
+    { id: "probes", label: "Depth Probes", sub: "Why X? What broke?", icon: "search", tone: "blue", x: 121, y: 235, w: 180, h: 56, step: 1 },
+    { id: "notes", label: "Verbatim Notes", sub: "Quotes & artifacts", icon: "file-text", tone: "teal", x: 356, y: 115, w: 186, h: 56, step: 2 },
+    { id: "rubric", label: "Rubric Mapping", sub: "Scope, conflict, bar", icon: "check-circle", tone: "teal", x: 356, y: 235, w: 186, h: 56, step: 2 },
+    { id: "bar-raiser", label: "Bar Raiser Audit", sub: "Tests red flags", icon: "scale", tone: "orange", accent: true, x: 591, y: 115, w: 180, h: 56, step: 3 },
+    { id: "hm", label: "Hiring Manager", sub: "Team & role fit", icon: "users", tone: "orange", x: 591, y: 235, w: 180, h: 56, step: 3 },
+    { id: "leveling", label: "Level Calibration", sub: "L4 vs L5 vs L6 bar", icon: "trending-up", tone: "green", x: 810, y: 115, w: 164, h: 56, step: 4 },
+    { id: "decision", label: "Hire / Down-level", sub: "Evidence-backed call", icon: "award", tone: "green", accent: true, x: 810, y: 235, w: 164, h: 56, step: 4 },
+  ],
+  edges: [
+    { from: "candidate", to: "probes", label: "triggers", packet: true, step: 1 },
+    { from: "candidate", to: "notes", label: "quotes", packet: true, step: 2 },
+    { from: "probes", to: "rubric", label: "signals", packet: true, step: 2 },
+    { from: "notes", to: "bar-raiser", label: "packet", packet: true, step: 3 },
+    { from: "rubric", to: "hm", label: "scores", packet: true, step: 3 },
+    { from: "bar-raiser", to: "hm", bidirectional: true, dashed: true, step: 3 },
+    { from: "bar-raiser", to: "leveling", label: "scope check", packet: true, step: 4 },
+    { from: "hm", to: "decision", label: "consensus", packet: true, step: 4 },
+    { from: "leveling", to: "decision", step: 4 },
+  ],
+};
+
+export default spec;

@@ -1,0 +1,42 @@
+import type { DiagramSpec } from "@/components/diagrams/types";
+
+const spec: DiagramSpec = {
+  title: "How 4 core project anchors pivot across multiple interview prompts",
+  width: 920,
+  height: 380,
+  steps: [
+    { title: "1. Anchor real projects", covers: "4-8 career episodes" },
+    { title: "2. Extract core tensions", covers: "Technical & human friction" },
+    { title: "3. Pivot the camera angle", covers: "Primary vs secondary lens" },
+    { title: "4. Answer 50+ prompts", covers: "Any company rubric" },
+  ],
+  zones: [
+    { id: "anchors", title: "Real Career Episodes", tone: "blue", x: 16, y: 24, w: 240, h: 332 },
+    { id: "lenses", title: "Camera Angle (Signal Pivot)", tone: "orange", x: 340, y: 24, w: 240, h: 332 },
+    { id: "prompts", title: "Interview Prompts Covered", tone: "green", x: 664, y: 24, w: 240, h: 332 },
+  ],
+  nodes: [
+    { id: "proj-a", label: "Payment Ledger Migration", sub: "Zero-downtime cutover", icon: "database", tone: "blue", x: 136, y: 100, w: 204, h: 54, step: 1 },
+    { id: "proj-b", label: "SEV-1 Cache Stampede", sub: "Outage & guardrail", icon: "flame", tone: "blue", x: 136, y: 195, w: 204, h: 54, step: 1 },
+    { id: "proj-c", label: "Cross-Org Auth RFC", sub: "3 teams, no authority", icon: "users", tone: "blue", x: 136, y: 290, w: 204, h: 54, step: 1 },
+    { id: "lens-conflict", label: "Conflict & Trade-off Lens", sub: "Why Option A beat B", icon: "git-branch", tone: "orange", x: 460, y: 100, w: 204, h: 54, step: 2 },
+    { id: "lens-dive", label: "Dive Deep & Failure Lens", sub: "Metrics, logs & fix", icon: "search", tone: "orange", accent: true, x: 460, y: 195, w: 204, h: 54, step: 3 },
+    { id: "lens-influence", label: "Influence & Scope Lens", sub: "Coalition & codemods", icon: "trending-up", tone: "orange", x: 460, y: 290, w: 204, h: 54, step: 3 },
+    { id: "q-disagree", label: "Disagree & Commit", sub: "Amazon LP / Meta Jedi", icon: "check-circle", tone: "green", x: 784, y: 100, w: 204, h: 54, step: 4 },
+    { id: "q-outage", label: "Mistake / Deadline", sub: "Ownership & High Bar", icon: "shield", tone: "green", x: 784, y: 195, w: 204, h: 54, step: 4 },
+    { id: "q-staff", label: "Ambiguity & Direction", sub: "Google G&L / Leveling", icon: "award", tone: "green", x: 784, y: 290, w: 204, h: 54, step: 4 },
+  ],
+  edges: [
+    { from: "proj-a", to: "lens-conflict", packet: true, step: 2 },
+    { from: "proj-a", to: "lens-dive", dashed: true, step: 3 },
+    { from: "proj-b", to: "lens-dive", packet: true, step: 3 },
+    { from: "proj-b", to: "lens-conflict", dashed: true, step: 2 },
+    { from: "proj-c", to: "lens-influence", packet: true, step: 3 },
+    { from: "proj-c", to: "lens-conflict", dashed: true, step: 2 },
+    { from: "lens-conflict", to: "q-disagree", packet: true, step: 4 },
+    { from: "lens-dive", to: "q-outage", packet: true, step: 4 },
+    { from: "lens-influence", to: "q-staff", packet: true, step: 4 },
+  ],
+};
+
+export default spec;
