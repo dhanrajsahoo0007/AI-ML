@@ -5,7 +5,7 @@
 /** Cookie set by the switch: `real`, `paid` or `unpaid`. */
 export const LOCAL_VIEW_COOKIE = "tts_local_view";
 
-export type LocalView = "paid" | "unpaid";
+type LocalView = "paid" | "unpaid";
 
 /**
  * The view the switch asks for: the cookie, else LOCAL_VIEW_AS from .env.local. Always null unless the build's
