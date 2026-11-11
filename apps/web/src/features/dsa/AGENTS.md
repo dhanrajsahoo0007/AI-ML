@@ -73,6 +73,15 @@ which spawns a Web Worker per run and compares results with `runner/compare.ts`.
 - Values compare as JSON (`1` equals `1.0`, object key order ignored, `undefined` = `null`).
 - Supported languages: JavaScript and Python only (`LANGUAGES` in `constants.ts`).
 
+## Outlines (statement-only pages)
+
+`apps/web/content/dsa/outlines/<slug>.mdx` (`status: outline`, schema `outlineFrontmatterSchema` in `schema.ts`) is a
+problem that has only its statement: no starter, tests, reference or editorial. It is served at the problem URL
+(`findOutline()` in `routes.ts`, rendered by the problem page) and listed in the sidebar, the hub counts and its
+topic page, but not in the filterable problem list. `group` and `number` keep the numbering of the owner's notes;
+a topic's `order` is its number (`topicLabel()` in `kind.ts`). Once `problems/<slug>.mdx` exists the outline with
+the same slug is ignored: delete it in the same change. Every outline is compiled in `mdx.test.tsx`.
+
 ## Extend it
 
 - New problem: `.claude/skills/add-dsa-problem/SKILL.md`. New topic: an MDX file in `content/dsa/topics/`.
