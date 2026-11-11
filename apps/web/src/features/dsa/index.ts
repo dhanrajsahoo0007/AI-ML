@@ -4,6 +4,7 @@
 // (problem-list.client.tsx, problem-workspace.client.tsx) are imported by path.
 export { DifficultyLabel, ProEditorial, Tags } from "./components";
 export { problemListHref, problemsForTopic } from "./kind";
+export { showsPremiumEditorialLocally } from "./local-view";
 export { problemEditorial, problemStatement } from "./mdx";
 export {
   dsaContent,

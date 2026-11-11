@@ -14,6 +14,9 @@ and zod only. Middleware runs on every content request before the page cache, wi
   `CLOCK_TOLERANCE_SEC`.
 - `env.ts`: `readEdgeEnv()`, `edgeEnvSchema` (`APP_ENV`, `NEXT_PUBLIC_GIT_SHA`, `SECTIONS_KILL`,
   `ENTITLEMENT_SECRET`, `ENTITLEMENT_SECRET_PREVIOUS`), `appVersion()`.
+- `local-view.ts`: `localView(appEnv, cookie, envDefault)` and `LOCAL_VIEW_COOKIE` (`tts_local_view`): the local
+  view switch's choice (`paid` / `unpaid` / null), always null unless APP_ENV is `local`. Used by middleware and the
+  DSA problem page (`apps/web/src/features/dsa/local-view.ts`).
 - `maintenance.ts`: `maintenanceResponse()` (503, `Retry-After: 300`, `noindex`, self-contained HTML).
 - `health.ts`: `healthHandler()` behind `GET /api/health` → `{status, version, env, region}`.
 - `pricing-variant.ts`: `decidePricing({ pathname, paywall, billingConfigured, regionCookie, country })` → which

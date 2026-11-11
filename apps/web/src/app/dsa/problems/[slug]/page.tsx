@@ -16,6 +16,7 @@ import {
   type ProblemParams,
   hubCrumbs,
   problemSeo,
+  showsPremiumEditorialLocally,
 } from "@/features/dsa";
 import { ProblemWorkspace } from "@/features/dsa/problem-workspace.client";
 import { withParentImages } from "@/features/seo/public";
@@ -33,13 +34,15 @@ export async function generateMetadata({ params }: { params: ProblemParams }, pa
 }
 
 // A problem: the statement (free), the in-browser workspace with the public tests, then the editorial, which
-// a premium problem replaces with a Pro placeholder (its MDX is never compiled for this page).
+// a premium problem replaces with a Pro placeholder (its MDX is never compiled for this page). The one exception
+// is the owner's local review on `next dev` (features/dsa/local-view.ts), which no other build can reach.
 export default async function ProblemPage({ params }: { params: ProblemParams }) {
   const { section, problem, access } = getProblem((await params).slug);
   const { fm } = problem;
   const seo = await problemSeo(section, problem, access);
   const labels = problemLabels(section, problem);
-  const editorial = access === "free" ? await problemEditorial(problem) : null;
+  const editorial =
+    access === "free" || (await showsPremiumEditorialLocally()) ? await problemEditorial(problem) : null;
   const related = relatedLinks(section, problem);
 
   return (
