@@ -240,7 +240,8 @@ export const services: CloudService[] = [
       "Set a spending or usage limit for an account, team or tag and get alerted when actual or forecast spend crosses it.",
     youManage: "Budgets, thresholds, who is notified, and any automatic actions.",
     scaling: "Budgets can be set per account, per tag or for the whole organisation.",
-    pricing: "A small number of budgets are free; further budgets and automated actions carry a small fee.",
+    pricing:
+      "Budgets that only track and alert cost little or nothing; budgets that take automatic actions and scheduled reports carry a small fee.",
     useWhen: [
       "A monthly budget per team or environment, with alerts well before the limit.",
       "Catching a runaway cost early with alerts on forecast spend.",

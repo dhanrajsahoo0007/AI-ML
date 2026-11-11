@@ -35,12 +35,7 @@ export type {
   Owner,
   ProviderAnswer,
   ProviderId,
-  ResponsibilityLayer,
-  ResponsibilityOption,
-  ResponsibilitySet,
   TreeOption,
-  TreeQuestion,
-  TreeResult,
 } from "./cloud-data/types";
 export { RESPONSIBILITY_SETS } from "./cloud-data/responsibility-sets";
 
@@ -137,7 +132,8 @@ export const GROUPS: CloudGroup[] = [
     id: "databases",
     title: "Databases",
     icon: "database",
-    blurb: "Relational, key-value, document, wide-column, graph, time-series and distributed SQL, plus migration tools.",
+    blurb:
+      "Relational, key-value, document, wide-column, graph, time-series and distributed SQL, plus migration tools.",
     headline: {
       aws: "RDS, Aurora, Aurora DSQL, DynamoDB, Keyspaces, DocumentDB, Neptune",
       gcp: "Cloud SQL, AlloyDB, Spanner, Firestore, Bigtable",

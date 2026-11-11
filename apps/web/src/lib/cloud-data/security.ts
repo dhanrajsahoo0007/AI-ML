@@ -393,9 +393,7 @@ export const services: CloudService[] = [
       "Malware scanning of volumes or uploaded objects, as an add-on.",
       "Runtime monitoring of containers and instances.",
     ],
-    avoidWhen: [
-      "As a replacement for prevention: it reports after something suspicious has already happened.",
-    ],
+    avoidWhen: ["As a replacement for prevention: it reports after something suspicious has already happened."],
     gotchas: [
       "A finding is only useful if it reaches a person or an automation; route findings to alerts and tickets.",
       "It detects; it does not block. Containment is yours.",
@@ -610,9 +608,7 @@ export const services: CloudService[] = [
       "Policies that must hold for every subscription, present and future.",
       "Giving a platform team access across a whole branch.",
     ],
-    avoidWhen: [
-      "Mirroring the org chart many levels deep: keep the tree shallow and shaped by where policy differs.",
-    ],
+    avoidWhen: ["Mirroring the org chart many levels deep: keep the tree shallow and shaped by where policy differs."],
     gotchas: [
       "Assignments at the root reach every subscription in the tenant; keep them few and try them lower down first.",
       "Moving a subscription changes the policies and access it inherits at once.",
