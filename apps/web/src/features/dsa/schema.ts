@@ -129,6 +129,11 @@ export const outlineFrontmatterSchema = z
     topics: z.array(kebab).min(1),
     /** The heading the problem is listed under in the sidebar and on its topic page. */
     group: z.string().min(1).optional(),
+    /** The problem's number inside its group, as in the owner's notes ("01"); shown before the title in lists. */
+    number: z
+      .string()
+      .regex(/^\d{2,3}$/)
+      .optional(),
     order: z.number().optional(),
     status: z.literal("outline"),
   })

@@ -96,7 +96,7 @@ export const problemsKind: SectionKind<DsaItem> = {
   // every problem in the sidebar and in nav-items.json; trim it to the current topic (import plan, release list).
   nav(section, items) {
     const built = withoutDrafts(items);
-    const link = (i: DsaItem) => ({ slug: i.slug, title: i.title, href: i.href });
+    const link = (i: DsaItem) => ({ slug: i.slug, title: numberedTitle(i), href: i.href });
     return navSection(section, [
       ...topicsOf(built).map((t) => {
         const groups = new Map<string, DsaItem[]>();
@@ -105,7 +105,7 @@ export const problemsKind: SectionKind<DsaItem> = {
         for (const o of outlinesForTopic(built, t.slug)) add(o.fm.group ?? OUTLINE_GROUP, o);
         return {
           slug: t.slug,
-          title: t.title,
+          title: topicLabel(t),
           href: t.href,
           categories: [...groups].map(([title, list]) => ({ title, items: list.map(link) })),
         };
@@ -320,6 +320,17 @@ function checkProblem(section: SectionDef, items: DsaItem[], problem: ValidProbl
 /** Sidebar heading for a topic's written problems, and for outlines that name no `group`. */
 const WRITTEN_GROUP = "Ready to solve";
 const OUTLINE_GROUP = "More problems";
+
+/** A topic's title with its number in the owner's notes: "10. Heaps and Priority Queues" (`order` is that number). */
+export function topicLabel(topic: { title: string; fm: { order?: number } | null }): string {
+  const n = topic.fm?.order;
+  return n === undefined ? topic.title : `${String(Math.floor(n)).padStart(2, "0")}. ${topic.title}`;
+}
+
+/** An outline's title with its number inside its group ("01. Kth Largest Element"); other items as they are. */
+export function numberedTitle(item: DsaItem): string {
+  return item.type === "outline" && item.fm?.number ? `${item.fm.number}. ${item.title}` : item.title;
+}
 
 /** A topic's statement-only outlines, in content order. */
 export function outlinesForTopic(items: DsaItem[], topic: string) {

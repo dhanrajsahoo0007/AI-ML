@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/ui/editorial";
 import {
   problemListHref,
   outlinesForTopic,
+  topicLabel,
   problemsForTopic,
   dsaContent,
   dsaSection,
@@ -40,7 +41,7 @@ export default function DsaHubPage() {
         {topics.map((t) => (
           <li key={t.slug} className="rounded-xl border border-hairline bg-paper p-5">
             <Link href={t.href} className="font-semibold text-ink underline-offset-4 hover:underline">
-              {t.fm.title}
+              {topicLabel(t)}
             </Link>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{t.fm.description}</p>
             <p className="mt-3 text-xs text-muted-foreground">

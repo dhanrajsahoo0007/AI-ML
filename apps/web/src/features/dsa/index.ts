@@ -3,7 +3,7 @@
 // sections/kinds.ts (loaded by plain Node) imports kind.ts by path for the same reason, and the client islands
 // (problem-list.client.tsx, problem-workspace.client.tsx) are imported by path.
 export { DifficultyLabel, ProEditorial, Tags } from "./components";
-export { outlinesForTopic, problemListHref, problemsForTopic } from "./kind";
+export { numberedTitle, outlinesForTopic, problemListHref, problemsForTopic, topicLabel } from "./kind";
 export { showsPremiumEditorialLocally } from "./local-view";
 export { outlineStatement, problemEditorial, problemStatement } from "./mdx";
 export {

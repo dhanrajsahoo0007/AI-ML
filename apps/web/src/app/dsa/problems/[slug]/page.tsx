@@ -142,7 +142,9 @@ async function OutlinePage({
           {outline.fm.title}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Outline{outline.fm.group ? ` · ${outline.fm.group}` : ""} · the editor, tests and editorial are still to come
+          Outline{outline.fm.group ? ` · ${outline.fm.group}` : ""}
+          {outline.fm.number ? ` · problem ${outline.fm.number}` : ""} · the editor, tests and editorial are still to
+          come
         </p>
       </header>
       <article className="prose-editorial" data-dsa-statement>

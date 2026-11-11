@@ -7,6 +7,7 @@ import { loadMdxDoc } from "@/lib/mdx-doc";
 import {
   DifficultyLabel,
   getTopic,
+  numberedTitle,
   practiceGroups,
   topicParams,
   type TopicParams,
@@ -80,7 +81,7 @@ export default async function TopicPage({ params }: { params: TopicParams }) {
                   {list.map((o) => (
                     <li key={o.slug}>
                       <Link href={o.href} prefetch={false}>
-                        {o.fm.title}
+                        {numberedTitle(o)}
                       </Link>
                     </li>
                   ))}

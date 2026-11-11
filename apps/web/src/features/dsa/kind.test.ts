@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { sectionOfKind, type SectionDef } from "../sections/registry";
 import { kindOf } from "../sections/kinds";
-import { problemListHref, problemsKind } from "./kind";
+import { problemListHref, problemsKind, topicLabel } from "./kind";
 import {
   loadDsaItems,
   problemsOf,
@@ -47,7 +47,8 @@ describe("problems kind: contract", () => {
     expect(nav.href).toBe(section.href);
     expect(nav.comingSoon).toBeUndefined();
     const topics = topicsOf(items);
-    expect(nav.groups.map((g) => g.title)).toEqual([...topics.map((t) => t.title), "Problems"]);
+    expect(nav.groups.map((g) => g.title)).toEqual([...topics.map((t) => topicLabel(t)), "Problems"]);
+    expect(nav.groups[0].title).toMatch(/^\d{2}\. /); // topics carry the numbering of the owner's notes
     expect(nav.groups.slice(0, -1).map((g) => g.href)).toEqual(topics.map((t) => t.href));
     expect(nav.groups.at(-1)).toEqual({ slug: "problems", title: "Problems", href: problemListHref(section) });
     // Every published problem is listed under each of its topics.
