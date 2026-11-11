@@ -70,11 +70,28 @@ export function getProblem(slug: string) {
 
 export function problemIndex(section: SectionDef, problems: ValidProblem[]) {
   return buildProblemIndex({
+    base: problemListHref(section),
     problems,
     access: (p) => problemsKind.access(section, p),
+    topicLabels: new Map(validTopics(items(section)).map((t) => [t.slug, t.fm.title])),
     patternLabels: new Map(loadPatterns(section).map((p) => [p.slug, p.label])),
     companyLabels: new Map(getCompanies().map((c) => [c.slug, c.name])),
   });
+}
+
+/**
+ * A topic's practice problems grouped by pattern, for the topic page: each problem under its first pattern,
+ * groups in the order their first problem appears, problems in content order (`order`, then title).
+ */
+export function practiceGroups(section: SectionDef, problems: ValidProblem[]) {
+  const labels = new Map(loadPatterns(section).map((p) => [p.slug, p.label]));
+  const groups = new Map<string, { slug: string; label: string; problems: ValidProblem[] }>();
+  for (const p of problems) {
+    const slug = p.fm.patterns[0];
+    if (!groups.has(slug)) groups.set(slug, { slug, label: labels.get(slug) ?? slug, problems: [] });
+    groups.get(slug)!.problems.push(p);
+  }
+  return [...groups.values()];
 }
 
 /** Labels for a problem's patterns and companies, in the order the frontmatter lists them. */

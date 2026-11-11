@@ -12,7 +12,6 @@ import {
   PY_MAIN_GUARD,
   type TestCase,
 } from "./schema";
-import { DIFFICULTIES, DIFFICULTY_LABELS } from "./constants";
 import {
   dsaDir,
   loadDsaItems,
@@ -86,9 +85,9 @@ export const problemsKind: SectionKind<DsaItem> = {
     return [...topicsOf(built).map((t) => ({ topic: t.slug })), ...problemsOf(built).map((p) => ({ slug: p.slug }))];
   },
 
-  // Two groups: the topics, and the problems by difficulty.
+  // Two groups: the topics, and one link to the problem list. Problems are not listed one by one: there are
+  // hundreds, and the sidebar and the header menu's nav-items.json would carry every one of them.
   nav(section, items) {
-    const problems = validProblems(items).filter((p) => p.fm.status === "published");
     return navSection(section, [
       {
         slug: "topics",
@@ -96,17 +95,7 @@ export const problemsKind: SectionKind<DsaItem> = {
         href: section.href,
         items: topicsOf(withoutDrafts(items)).map((t) => ({ slug: t.slug, title: t.title, href: t.href })),
       },
-      {
-        slug: PROBLEMS_SEGMENT,
-        title: "Problems",
-        href: problemListHref(section),
-        categories: DIFFICULTIES.map((d) => ({
-          title: DIFFICULTY_LABELS[d],
-          items: problems
-            .filter((p) => p.fm.difficulty === d)
-            .map((p) => ({ slug: p.slug, title: p.title, href: p.href })),
-        })).filter((c) => c.items.length > 0),
-      },
+      { slug: PROBLEMS_SEGMENT, title: "Problems", href: problemListHref(section) },
     ]);
   },
 

@@ -10,6 +10,7 @@ export {
   dsaSection,
   getProblem,
   getTopic,
+  practiceGroups,
   problemIndex,
   problemLabels,
   problemParams,

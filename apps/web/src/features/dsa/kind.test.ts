@@ -39,18 +39,15 @@ describe("problems kind: contract", () => {
     expect(params.filter((p) => "topic" in p).map((p) => p.topic)).toEqual(topicsOf(items).map((t) => t.slug));
     expect(params.filter((p) => "slug" in p).map((p) => p.slug)).toEqual(problemsOf(items).map((p) => p.slug));
   });
-  it("builds a nav with topics and problems grouped by difficulty", () => {
+  it("builds a nav with the topics and one link to the problem list (no problem one by one)", () => {
     const nav = problemsKind.nav(section, items);
     expect(nav.href).toBe(section.href);
     expect(nav.comingSoon).toBeUndefined();
     expect(nav.groups.map((g) => g.title)).toEqual(["Topics", "Problems"]);
     expect(nav.groups[0].items!.map((i) => i.href)).toEqual(topicsOf(items).map((t) => t.href));
-    const problemGroup = nav.groups[1];
-    expect(problemGroup.href).toBe(problemListHref(section));
-    expect(problemGroup.categories!.map((c) => c.title)).toEqual(["Easy", "Medium"]);
-    expect(problemGroup.categories!.flatMap((c) => c.items.map((i) => i.href)).sort()).toEqual(
-      problems.map((p) => p.href).sort()
-    );
+    expect(nav.groups[1]).toEqual({ slug: "problems", title: "Problems", href: problemListHref(section) });
+    const json = JSON.stringify(nav);
+    for (const p of problems) expect(json).not.toContain(p.href);
   });
   it("lists every page in the sitemap", () => {
     const urls = problemsKind.sitemap(section, items).map((e) => e.url);

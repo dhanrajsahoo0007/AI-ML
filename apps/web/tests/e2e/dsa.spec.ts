@@ -89,9 +89,33 @@ test.describe(`DSA, APP_ENV=${env} @core`, () => {
     expect(await titles()).toContain("Two Sum");
     for (const row of await rowTexts()) expect(row).toContain("Easy");
 
-    await filters.getByLabel("Difficulty").selectOption("");
-    await filters.getByLabel("Pattern").selectOption("depth-first-search");
+    await page.getByRole("button", { name: "Clear filters" }).click();
+    await filters.getByLabel("Title").fill("islands");
+    expect(await titles()).toContain("Number of Islands");
+    for (const title of await titles()) expect(title.toLowerCase()).toContain("islands");
+    await filters.getByLabel("Title").fill("no such problem title");
     await expect(page.getByText("No problems match these filters yet.")).toBeVisible();
+
+    await page.getByRole("button", { name: "Clear filters" }).click();
+    await filters.getByLabel("Topic").selectOption("hash-maps");
+    expect(await titles()).toEqual(expect.arrayContaining(["Two Sum", "LRU Cache"]));
+  });
+
+  test("the problem list shows at most 50 rows per page", async ({ page }) => {
+    await open(page, LIST);
+    const list = page.getByRole("list", { name: "Problems" });
+    const total = Number(/^(\d+) problems$/.exec(await page.locator("[data-problem-count]").innerText())?.[1]);
+    await expect(list.getByRole("listitem")).toHaveCount(Math.min(total, 50));
+    const pages = page.getByRole("navigation", { name: "Problem list pages" });
+    if (total <= 50) {
+      await expect(pages).toHaveCount(0);
+      return;
+    }
+    await expect(pages.locator("[data-problem-page]")).toHaveText(`Page 1 of ${Math.ceil(total / 50)}`);
+    const first = await list.getByRole("link").first().innerText();
+    await pages.getByRole("button", { name: "Next" }).click();
+    await expect(pages.locator("[data-problem-page]")).toHaveText(`Page 2 of ${Math.ceil(total / 50)}`);
+    expect(await list.getByRole("link").first().innerText()).not.toBe(first);
   });
 
   test("the editor loads on interaction, not with the page", async ({ page }) => {
