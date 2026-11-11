@@ -56,6 +56,7 @@ export const services: CloudService[] = [
       "Direct service integrations (DynamoDB, SQS, ECS, Bedrock and many more) avoid writing a Lambda just to call an API.",
     ],
     docs: "https://aws.amazon.com/step-functions/",
+    concept: "/cloud/data/streaming-and-messaging-services",
   },
   {
     id: "aws-eventbridge",
@@ -82,6 +83,7 @@ export const services: CloudService[] = [
       "Archive and replay let you re-send past events to a new consumer.",
     ],
     docs: "https://aws.amazon.com/eventbridge/",
+    concept: "/cloud/data/streaming-and-messaging-services",
   },
   {
     id: "aws-api-gateway",
@@ -109,6 +111,7 @@ export const services: CloudService[] = [
       "HTTP APIs are cheaper and faster but lack REST API features such as usage plans, request validation and caching.",
     ],
     docs: "https://aws.amazon.com/api-gateway/",
+    concept: "/cloud/networking/api-gateways",
   },
   {
     id: "aws-appsync",
@@ -127,6 +130,7 @@ export const services: CloudService[] = [
     avoidWhen: ["A simple REST API, or teams with no GraphQL experience."],
     gotchas: ["Resolvers run in a restricted JavaScript runtime; heavy logic belongs in a Lambda data source."],
     docs: "https://aws.amazon.com/appsync/",
+    concept: "/cloud/networking/hosting-apis",
   },
   {
     id: "gcp-cloud-run-functions",
@@ -158,6 +162,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Very high-volume event processing per message: use Pub/Sub with Cloud Run."],
     gotchas: [],
     docs: "https://cloud.google.com/workflows",
+    concept: "/cloud/data/streaming-and-messaging-services",
     main: "workflows",
   },
   {
@@ -174,6 +179,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Ordered streams with replay: use Pub/Sub or Managed Kafka directly."],
     gotchas: [],
     docs: "https://cloud.google.com/eventarc",
+    concept: "/cloud/data/streaming-and-messaging-services",
     main: "event-bus",
   },
   {
@@ -190,6 +196,7 @@ export const services: CloudService[] = [
     avoidWhen: ["A simple front door for a few Cloud Run services: API Gateway or the load balancer is enough."],
     gotchas: ["Google Cloud API Gateway is the lighter, cheaper option for serverless backends."],
     docs: "https://cloud.google.com/apigee",
+    concept: "/cloud/networking/api-gateways",
     main: "api-front-door",
   },
   {
@@ -226,6 +233,7 @@ export const services: CloudService[] = [
     avoidWhen: ["High-volume, low-latency processing: use Functions or Container Apps."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/logic-apps",
+    concept: "/cloud/data/streaming-and-messaging-services",
     main: "workflows",
   },
   {
@@ -242,6 +250,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Ordered, replayable streams: use Event Hubs."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/event-grid",
+    concept: "/cloud/data/streaming-and-messaging-services",
     main: "event-bus",
   },
   {
@@ -258,6 +267,7 @@ export const services: CloudService[] = [
     avoidWhen: [],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/api-management",
+    concept: "/cloud/networking/api-gateways",
     main: "api-front-door",
   },
   {
@@ -274,6 +284,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Very large always-on connection counts where your own servers are cheaper."],
     gotchas: ["Azure SignalR Service does the same for apps built on ASP.NET SignalR."],
     docs: "https://azure.microsoft.com/en-us/products/web-pubsub",
+    concept: "/cloud/networking/realtime-on-the-cloud",
     main: "managed-websockets",
   },
 ];

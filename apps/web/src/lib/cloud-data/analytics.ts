@@ -151,7 +151,7 @@ export const services: CloudService[] = [
     useWhen: ["A unified Microsoft analytics stack from ingestion to Power BI."],
     avoidWhen: ["Teams that want separate best-of-breed tools for each layer."],
     gotchas: ["Microsoft positions Fabric as the successor to many Synapse scenarios."],
-    docs: "https://www.microsoft.com/en-us/microsoft-fabric",
+    docs: "https://learn.microsoft.com/fabric/",
     main: "warehouse",
   },
   {
@@ -185,6 +185,84 @@ export const services: CloudService[] = [
     gotchas: ["Fabric includes Data Factory pipelines for teams on Fabric."],
     docs: "https://azure.microsoft.com/en-us/products/data-factory",
     main: "etl-catalog",
+  },
+  {
+    id: "aws-lake-formation",
+    provider: "aws",
+    name: "AWS Lake Formation",
+    short: "Lake Formation",
+    group: "analytics",
+    tagline:
+      "Central permissions for data-lake tables: grant access to databases, tables, columns and rows once, and every integrated query engine enforces it.",
+    youManage:
+      "Registered storage locations, permissions on the data catalog, the tags used in access rules, and sharing across accounts.",
+    scaling: "Managed; one permission model across accounts.",
+    pricing: "No charge for the permissions; the storage, catalog and query engines underneath are billed.",
+    useWhen: [
+      "Column- or row-level access to lake data for different teams.",
+      "Sharing tables with other accounts without copying the data.",
+      "Replacing a sprawl of bucket policies with grants on tables.",
+    ],
+    avoidWhen: ["A small lake used by one team, where bucket-level access is enough."],
+    gotchas: [
+      "Two permission systems apply while you adopt it; a table stays open to anyone with access to the bucket until that older path is closed.",
+      "Only integrated engines enforce the grants; anything that reads the files directly bypasses them.",
+      "Rules based on tags scale better than naming individual tables.",
+    ],
+    docs: "https://aws.amazon.com/lake-formation/",
+    main: "lake-governance",
+  },
+  {
+    id: "gcp-dataplex",
+    provider: "gcp",
+    name: "Knowledge Catalog (formerly Dataplex)",
+    short: "Knowledge Catalog",
+    group: "analytics",
+    tagline:
+      "A catalog and governance layer over data in BigQuery and Cloud Storage: search, lineage, data-quality checks and policies in one place.",
+    youManage:
+      "Catalog entries and their metadata, quality rules and profiling scans, and how data is grouped into domains.",
+    scaling: "Managed; spans projects.",
+    pricing: "By the processing used for scans and by the metadata stored.",
+    useWhen: [
+      "Finding out what data exists and who owns it across many projects.",
+      "Automated data-quality checks on the tables that feed reports.",
+      "Tracing where a number in a report came from.",
+    ],
+    avoidWhen: ["One team with a few datasets: BigQuery's own metadata is enough."],
+    gotchas: [
+      "A catalog is only as good as its ownership: without named owners, entries go stale.",
+      "Quality scans cost processing time; aim them at the tables people rely on.",
+      "The product has been renamed more than once (Data Catalog, Dataplex, Dataplex Universal Catalog), so older guides use other names.",
+    ],
+    docs: "https://cloud.google.com/products/knowledge-catalog",
+    main: "lake-governance",
+  },
+  {
+    id: "azure-purview",
+    provider: "azure",
+    name: "Microsoft Purview",
+    short: "Purview",
+    group: "analytics",
+    tagline:
+      "Data governance across Azure, other clouds and on-premises: a catalog of data assets, classification of sensitive data, lineage and policies.",
+    youManage: "Registered sources and scans, classification rules, the glossary and ownership, and access policies.",
+    scaling: "Managed; scans many kinds of source.",
+    pricing: "By the assets governed and by the scanning and processing consumed.",
+    useWhen: [
+      "A single catalog over data lakes, warehouses and databases in several places.",
+      "Finding and labelling personal data across the estate.",
+      "Lineage from source system to report, for audits.",
+    ],
+    avoidWhen: ["Small estates where the warehouse's own catalog is enough."],
+    gotchas: [
+      "Scans need network access and credentials to every source; plan those before promising coverage.",
+      "The name also covers Microsoft's compliance and information-protection products; check which part a document means.",
+      "Classification is pattern-based and needs tuning to cut false matches.",
+    ],
+    docs: "https://learn.microsoft.com/purview/purview",
+    concept: "/cloud/resilience/compliance-and-residency",
+    main: "lake-governance",
   },
 ];
 
@@ -222,8 +300,8 @@ export const capabilities: Capability[] = [
     title: "ETL and data catalog",
     summary: "Move and transform data, and keep a catalog of tables.",
     aws: { services: ["aws-glue"], fit: "direct", note: "ETL jobs plus the Glue Data Catalog." },
-    gcp: { services: ["gcp-dataflow", "Dataplex", "Cloud Data Fusion"], fit: "close" },
-    azure: { services: ["azure-data-factory", "Microsoft Purview"], fit: "close" },
+    gcp: { services: ["gcp-dataflow", "gcp-dataplex", "Cloud Data Fusion"], fit: "close" },
+    azure: { services: ["azure-data-factory", "azure-purview"], fit: "close" },
   },
   {
     id: "stream-processing",
@@ -239,7 +317,7 @@ export const capabilities: Capability[] = [
     group: "analytics",
     title: "Open table formats on object storage",
     summary: "Apache Iceberg or Delta tables that many engines share.",
-    aws: { services: ["S3 Tables", "Lake Formation"], fit: "direct" },
+    aws: { services: ["S3 Tables", "aws-lake-formation"], fit: "direct" },
     gcp: { services: ["BigLake Iceberg tables"], fit: "direct" },
     azure: { services: ["azure-fabric"], fit: "direct", note: "Delta by default, with Iceberg interoperability." },
   },
@@ -255,5 +333,18 @@ export const capabilities: Capability[] = [
     },
     gcp: { services: ["Looker", "Looker Studio"], fit: "direct" },
     azure: { services: ["Power BI"], fit: "direct" },
+  },
+  {
+    id: "lake-governance",
+    group: "analytics",
+    title: "Data governance for lakes",
+    summary: "A catalog of what data exists, who owns it and who may read which tables, columns and rows.",
+    aws: {
+      services: ["aws-lake-formation", "aws-glue"],
+      fit: "direct",
+      note: "Lake Formation holds the permissions; the Glue Data Catalog holds the table definitions.",
+    },
+    gcp: { services: ["gcp-dataplex"], fit: "direct", note: "Renamed from Dataplex." },
+    azure: { services: ["azure-purview"], fit: "direct" },
   },
 ];

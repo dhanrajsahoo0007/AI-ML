@@ -46,6 +46,7 @@ export const services: CloudService[] = [
     ],
     gotchas: ["Platform versions retire on a schedule; plan upgrades like any runtime."],
     docs: "https://aws.amazon.com/elasticbeanstalk/",
+    concept: "/cloud/compute/serverless-containers-and-paas",
   },
   {
     id: "aws-batch",
@@ -61,6 +62,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Request/response traffic, which needs a service, not a queue of jobs."],
     gotchas: ["On Spot, make jobs idempotent and checkpoint progress so a reclaimed instance only loses minutes."],
     docs: "https://aws.amazon.com/batch/",
+    concept: "/cloud/compute/batch-hpc-gpus",
   },
   {
     id: "gcp-compute-engine",
@@ -108,6 +110,7 @@ export const services: CloudService[] = [
     avoidWhen: ["New container-based services: Cloud Run is Google's recommended default."],
     gotchas: ["Google steers new workloads to Cloud Run, which runs any container."],
     docs: "https://cloud.google.com/appengine",
+    concept: "/cloud/compute/serverless-containers-and-paas",
     main: "vm-paas",
   },
   {
@@ -124,6 +127,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Spark or Beam pipelines: Dataproc and Dataflow fit better."],
     gotchas: [],
     docs: "https://cloud.google.com/batch",
+    concept: "/cloud/compute/batch-hpc-gpus",
     main: "batch",
   },
   {
@@ -140,6 +144,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Event-driven microservices that should scale to zero: use Container Apps or Functions."],
     gotchas: ["Deployment slots let you warm up a release and swap it into production with no downtime."],
     docs: "https://azure.microsoft.com/en-us/products/app-service",
+    concept: "/cloud/compute/serverless-containers-and-paas",
     main: "vm-paas",
   },
   {
@@ -156,6 +161,7 @@ export const services: CloudService[] = [
     avoidWhen: ["Spark jobs: use Databricks or Fabric."],
     gotchas: [],
     docs: "https://azure.microsoft.com/en-us/products/batch",
+    concept: "/cloud/compute/batch-hpc-gpus",
     main: "batch",
   },
 ];

@@ -9,7 +9,8 @@
 // Facts were checked against provider docs and announcements in November 2026 (`VERIFIED`). Prices are list prices
 // in US regions and only appear where they change a design decision.
 
-import type { Capability, CloudService, Fit, GroupId, ProviderId } from "./cloud-data/types";
+import type { Capability, CloudService, DecisionTree, Fit, GroupId, Owner, ProviderId } from "./cloud-data/types";
+import { TREES } from "./cloud-data/decision-trees";
 import * as compute from "./cloud-data/compute";
 import * as containers from "./cloud-data/containers";
 import * as serverless from "./cloud-data/serverless";
@@ -25,7 +26,23 @@ import * as observability from "./cloud-data/observability";
 import * as devops from "./cloud-data/devops";
 import * as aiml from "./cloud-data/ai-ml";
 
-export type { Capability, CloudService, Fit, GroupId, ProviderAnswer, ProviderId } from "./cloud-data/types";
+export type {
+  Capability,
+  CloudService,
+  DecisionTree,
+  Fit,
+  GroupId,
+  Owner,
+  ProviderAnswer,
+  ProviderId,
+  ResponsibilityLayer,
+  ResponsibilityOption,
+  ResponsibilitySet,
+  TreeOption,
+  TreeQuestion,
+  TreeResult,
+} from "./cloud-data/types";
+export { RESPONSIBILITY_SETS } from "./cloud-data/responsibility-sets";
 
 export const VERIFIED = "November 2026";
 
@@ -109,10 +126,10 @@ export const GROUPS: CloudGroup[] = [
     id: "storage",
     title: "Storage",
     icon: "hard-drive",
-    blurb: "Object, block, file and archive storage, plus backup.",
+    blurb: "Object, block, file and archive storage, plus backup, bulk transfer and disaster-recovery replication.",
     headline: {
-      aws: "S3, EBS, EFS, FSx, S3 Glacier, AWS Backup",
-      gcp: "Cloud Storage, Persistent Disk / Hyperdisk, Filestore, NetApp Volumes",
+      aws: "S3, EBS, EFS, FSx, S3 Glacier, AWS Backup, DataSync",
+      gcp: "Cloud Storage, Persistent Disk / Hyperdisk, Filestore, NetApp Volumes, Backup and DR",
       azure: "Blob Storage, Managed Disks, Azure Files, Azure NetApp Files, Azure Backup",
     },
   },
@@ -120,7 +137,7 @@ export const GROUPS: CloudGroup[] = [
     id: "databases",
     title: "Databases",
     icon: "database",
-    blurb: "Relational, key-value, document, wide-column, graph, time-series and distributed SQL.",
+    blurb: "Relational, key-value, document, wide-column, graph, time-series and distributed SQL, plus migration tools.",
     headline: {
       aws: "RDS, Aurora, Aurora DSQL, DynamoDB, Keyspaces, DocumentDB, Neptune",
       gcp: "Cloud SQL, AlloyDB, Spanner, Firestore, Bigtable",
@@ -153,10 +170,10 @@ export const GROUPS: CloudGroup[] = [
     id: "analytics",
     title: "Analytics & Data",
     icon: "bar-chart",
-    blurb: "Warehouses, query engines, Spark, ETL, stream processing and BI.",
+    blurb: "Warehouses, query engines, Spark, ETL, stream processing, BI and data governance.",
     headline: {
       aws: "Redshift, Athena, EMR, Glue, Managed Flink, QuickSight",
-      gcp: "BigQuery, Dataproc, Dataflow, Dataplex, Looker",
+      gcp: "BigQuery, Dataproc, Dataflow, Knowledge Catalog, Looker",
       azure: "Fabric, Synapse, Databricks, Data Factory, Stream Analytics, Power BI",
     },
   },
@@ -164,7 +181,7 @@ export const GROUPS: CloudGroup[] = [
     id: "security",
     title: "Identity & Security",
     icon: "shield",
-    blurb: "Identity, keys and secrets, web application firewalls and threat detection.",
+    blurb: "Identity, keys and secrets, web application firewalls, threat detection and organisation guardrails.",
     headline: {
       aws: "IAM, Cognito, KMS, Secrets Manager, WAF, Shield, GuardDuty",
       gcp: "Cloud IAM, Identity Platform, Cloud KMS, Secret Manager, Cloud Armor",
@@ -186,7 +203,7 @@ export const GROUPS: CloudGroup[] = [
     id: "devops",
     title: "DevOps & IaC",
     icon: "git-branch",
-    blurb: "Infrastructure as code, build and deploy pipelines.",
+    blurb: "Infrastructure as code, build and deploy pipelines, migration planning and cost tools.",
     headline: {
       aws: "CloudFormation, CDK, CodePipeline, CodeBuild",
       gcp: "Infrastructure Manager, Cloud Build, Cloud Deploy",
@@ -197,7 +214,7 @@ export const GROUPS: CloudGroup[] = [
     id: "ai-ml",
     title: "AI & ML",
     icon: "sparkles",
-    blurb: "Foundation-model platforms, ML training and serving.",
+    blurb: "Foundation-model platforms, ML training and serving, and AI guardrails.",
     headline: {
       aws: "Bedrock, SageMaker AI",
       gcp: "Vertex AI",
@@ -237,7 +254,39 @@ export const FIT_LABEL: Record<Fit, string> = {
 // Services
 // ---------------------------------------------------------------------------------------------------------------
 
-export const SERVICES: CloudService[] = Object.values(DATA).flatMap((d) => d.services);
+/**
+ * The concept page that teaches the idea behind a group's services, used when a service does not name its own
+ * `concept`. Groups whose services split across several pages (databases, security) have no default.
+ */
+const GROUP_CONCEPT: Partial<Record<GroupId, string>> = {
+  compute: "/cloud/compute/virtual-machines",
+  containers: "/cloud/compute/containers-and-registries",
+  serverless: "/cloud/compute/serverless-functions",
+  networking: "/cloud/networking/vpc-and-subnets",
+  edge: "/cloud/networking/cdn-edge-and-waf",
+  storage: "/cloud/data/object-storage",
+  caching: "/cloud/data/managed-caches",
+  messaging: "/cloud/data/streaming-and-messaging-services",
+  analytics: "/cloud/data/warehouses-lakes-and-query-engines",
+  observability: "/cloud/operations/observability-on-the-cloud",
+  devops: "/cloud/operations/ci-cd-and-deployment-strategies",
+  "ai-ml": "/cloud/operations/ai-ml-platforms-on-the-cloud",
+};
+
+/** A concept link is a page inside this section: /cloud/<hub>/<page>. */
+const CONCEPT_PATH = /^\/cloud\/[a-z0-9-]+\/[a-z0-9-]+$/;
+
+/** Fills in the group's default concept page and rejects a path that cannot be a cloud concept page. */
+function withConcept(service: CloudService): CloudService {
+  const concept = service.concept ?? GROUP_CONCEPT[service.group];
+  if (concept === undefined) return service;
+  if (!CONCEPT_PATH.test(concept)) {
+    throw new Error(`cloud catalog: ${service.id} has concept "${concept}", expected /cloud/<hub>/<page>`);
+  }
+  return { ...service, concept };
+}
+
+export const SERVICES: CloudService[] = Object.values(DATA).flatMap((d) => d.services.map(withConcept));
 
 export const SERVICE_BY_ID = Object.fromEntries(SERVICES.map((s) => [s.id, s])) as Record<string, CloudService>;
 
@@ -260,10 +309,8 @@ export function capabilitiesOfService(id: string) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Who manages what: compute options from "you run everything" to "you run only code"
+// Who manages what: the sets behind <ResponsibilityGrid> live in ./cloud-data/responsibility-sets
 // ---------------------------------------------------------------------------------------------------------------
-
-export type Owner = "you" | "shared" | "provider";
 
 export const OWNER_LABEL: Record<Owner, string> = {
   you: "You",
@@ -271,127 +318,11 @@ export const OWNER_LABEL: Record<Owner, string> = {
   provider: "Cloud provider",
 };
 
-export const LAYERS: { id: string; label: string }[] = [
-  { id: "code", label: "Your code and image" },
-  { id: "scaling", label: "Scaling rules" },
-  { id: "upgrades", label: "Runtime / version upgrades" },
-  { id: "orchestrator", label: "Scheduler / control plane" },
-  { id: "capacity", label: "Servers and capacity" },
-  { id: "os", label: "OS patching and images" },
-];
-
-export interface ResponsibilityOption {
-  id: string;
-  label: string;
-  sub: string;
-  owners: Record<string, Owner>;
-}
-
-export const AWS_COMPUTE_OPTIONS: ResponsibilityOption[] = [
-  {
-    id: "ec2",
-    label: "EC2",
-    sub: "+ Auto Scaling",
-    owners: { code: "you", scaling: "you", upgrades: "you", orchestrator: "you", capacity: "shared", os: "you" },
-  },
-  {
-    id: "ecs-ec2",
-    label: "ECS on EC2",
-    sub: "your instances",
-    owners: {
-      code: "you",
-      scaling: "shared",
-      upgrades: "shared",
-      orchestrator: "provider",
-      capacity: "shared",
-      os: "you",
-    },
-  },
-  {
-    id: "eks",
-    label: "EKS",
-    sub: "managed node groups",
-    owners: {
-      code: "you",
-      scaling: "you",
-      upgrades: "you",
-      orchestrator: "provider",
-      capacity: "shared",
-      os: "shared",
-    },
-  },
-  {
-    id: "eks-auto",
-    label: "EKS Auto Mode",
-    sub: "AWS runs nodes",
-    owners: {
-      code: "you",
-      scaling: "shared",
-      upgrades: "shared",
-      orchestrator: "provider",
-      capacity: "provider",
-      os: "provider",
-    },
-  },
-  {
-    id: "fargate",
-    label: "ECS on Fargate",
-    sub: "no hosts",
-    owners: {
-      code: "you",
-      scaling: "shared",
-      upgrades: "provider",
-      orchestrator: "provider",
-      capacity: "provider",
-      os: "provider",
-    },
-  },
-  {
-    id: "lambda",
-    label: "Lambda",
-    sub: "functions",
-    owners: {
-      code: "you",
-      scaling: "provider",
-      upgrades: "shared",
-      orchestrator: "provider",
-      capacity: "provider",
-      os: "provider",
-    },
-  },
-];
-
 // ---------------------------------------------------------------------------------------------------------------
-// Decision trees
+// Decision trees. The two below were written for the AWS pages and name AWS services in their headlines; the
+// cloud-neutral ones (database, storage, connectivity, load-balancer, dr-strategy) live in
+// ./cloud-data/decision-trees.
 // ---------------------------------------------------------------------------------------------------------------
-
-export interface TreeOption {
-  label: string;
-  hint?: string;
-  next: string;
-}
-
-export interface TreeQuestion {
-  id: string;
-  prompt: string;
-  options: TreeOption[];
-}
-
-export interface TreeResult {
-  id: string;
-  headline: string;
-  /** Services or plain names per cloud. */
-  answer: Record<ProviderId, string[]>;
-  why: string;
-  tradeoff: string;
-}
-
-export interface DecisionTree {
-  title: string;
-  start: string;
-  questions: TreeQuestion[];
-  results: TreeResult[];
-}
 
 export const DECISION_TREES: Record<string, DecisionTree> = {
   messaging: {
@@ -634,4 +565,5 @@ export const DECISION_TREES: Record<string, DecisionTree> = {
       },
     ],
   },
+  ...TREES,
 };

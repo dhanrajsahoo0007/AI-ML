@@ -1,11 +1,9 @@
 import { cn } from "@/lib/utils";
-import { AWS_COMPUTE_OPTIONS, LAYERS, OWNER_LABEL, type Owner, type ResponsibilityOption } from "@/lib/cloud-catalog";
+import { OWNER_LABEL, RESPONSIBILITY_SETS, type Owner } from "@/lib/cloud-catalog";
 
-// Who runs each layer for a set of compute options, from "you run everything" (left) to "you run only code"
-// (right). Usage in MDX: <ResponsibilityGrid set="aws-compute" />
-const SETS: Record<string, ResponsibilityOption[]> = {
-  "aws-compute": AWS_COMPUTE_OPTIONS,
-};
+// Who runs each layer for a set of options, from "you run everything" (left) to "the cloud runs most of it"
+// (right). Each set in RESPONSIBILITY_SETS brings its own layers, options, heading and caption.
+// Usage in MDX: <ResponsibilityGrid set="aws-compute" />
 
 const OWNER_STYLE: Record<Owner, { bg: string; fg: string }> = {
   you: { bg: "var(--dg-orange-soft)", fg: "var(--dg-orange)" },
@@ -14,13 +12,14 @@ const OWNER_STYLE: Record<Owner, { bg: string; fg: string }> = {
 };
 
 export function ResponsibilityGrid({ set }: { set: string }) {
-  const options = SETS[set];
-  if (!options) return <p className="text-sm text-muted-foreground">Unknown option set: {set}</p>;
+  const data = RESPONSIBILITY_SETS[set];
+  if (!data) return <p className="text-sm text-muted-foreground">Unknown option set: {set}</p>;
+  const { layers, options } = data;
 
   return (
     <figure className="my-8 rounded-xl border border-hairline bg-paper p-4 sm:p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Who runs what</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">{data.title}</div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           {(Object.keys(OWNER_LABEL) as Owner[]).map((o) => (
             <span key={o} className="inline-flex items-center gap-1.5">
@@ -34,11 +33,11 @@ export function ResponsibilityGrid({ set }: { set: string }) {
         </div>
       </div>
 
-      {/* Scrolls sideways on phones rather than squeezing six columns into the page width. */}
+      {/* Scrolls sideways on phones rather than squeezing up to six columns into the page width. */}
       <div className="mt-4 overflow-x-auto">
         <div
           role="table"
-          aria-label="Who runs each layer for each compute option"
+          aria-label={data.ariaLabel}
           className="grid min-w-[640px] gap-1 text-sm"
           style={{ gridTemplateColumns: `9.5rem repeat(${options.length}, minmax(0, 1fr))` }}
         >
@@ -51,7 +50,7 @@ export function ResponsibilityGrid({ set }: { set: string }) {
               </div>
             ))}
           </div>
-          {LAYERS.map((l) => (
+          {layers.map((l) => (
             <div key={l.id} role="row" className="contents">
               <div role="rowheader" className="self-center pr-2 text-[13px] font-medium leading-tight text-ink-2">
                 {l.label}
@@ -75,9 +74,7 @@ export function ResponsibilityGrid({ set }: { set: string }) {
           ))}
         </div>
       </div>
-      <figcaption className="mt-3 text-xs text-muted-foreground">
-        Moving right trades control for less operational work. Your code is always yours.
-      </figcaption>
+      <figcaption className="mt-3 text-xs text-muted-foreground">{data.caption}</figcaption>
     </figure>
   );
 }
