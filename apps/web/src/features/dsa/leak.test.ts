@@ -37,12 +37,16 @@ function hiddenNeedles(p: ValidProblem): string[] {
   });
 }
 
-/** The longest line of `source` that is plain enough to survive HTML and RSC escaping unchanged, and not in `except`. */
-function distinctiveLine(source: string, except = ""): string | undefined {
+/** Code and prose lines made only of characters that HTML and RSC escaping (and, for prose, Markdown) leave as is. */
+const CODE_LINE = /^[\w\s.,:;()[\]=+\-*/%]+$/;
+const PROSE_LINE = /^[A-Za-z0-9 .,:;()-]+$/;
+
+/** The longest line of `source` of that kind, at least 20 characters, that is not in `except`. */
+function distinctiveLine(source: string, plain: RegExp, except = ""): string | undefined {
   return source
     .split("\n")
     .map((l) => l.trim())
-    .filter((l) => l.length >= 20 && /^[\w\s.,:;()[\]=+\-*/%]+$/.test(l) && !except.includes(l))
+    .filter((l) => l.length >= 20 && plain.test(l) && !except.includes(l))
     .sort((a, b) => b.length - a.length)[0];
 }
 
@@ -114,7 +118,9 @@ describe("premium problems keep their solution and editorial out of the page", (
   it("reference solutions and editorials are not in any client bundle", () => {
     const lines = premium.flatMap((p) => {
       const ref = readReferenceSolutionForValidation(section, p.slug);
-      return [ref && distinctiveLine(ref, p.fm.starter.python), editorialLine(p)].filter((l): l is string => !!l);
+      return [ref && distinctiveLine(ref, CODE_LINE, p.fm.starter.python), editorialLine(p)].filter(
+        (l): l is string => !!l
+      );
     });
     const hits: string[] = [];
     for (const file of bundles) {
@@ -128,9 +134,10 @@ describe("premium problems keep their solution and editorial out of the page", (
     const hits: string[] = [];
     for (const p of premium) {
       const ref = readReferenceSolutionForValidation(section, p.slug);
-      const lines = [ref && distinctiveLine(ref, p.fm.starter.python), editorialLine(p)].filter(
+      const lines = [ref && distinctiveLine(ref, CODE_LINE, p.fm.starter.python), editorialLine(p)].filter(
         (l): l is string => !!l
       );
+      if (lines.length === 0) hits.push(`${p.slug}: no plain line in its reference or editorial to look for`);
       for (const file of pageFiles(p)) {
         const text = fs.readFileSync(file, "utf8");
         for (const l of lines) if (text.includes(l)) hits.push(`${rel(file)}: ${l}`);
@@ -143,7 +150,7 @@ describe("premium problems keep their solution and editorial out of the page", (
 /** A line of the editorial's prose that only the editorial has (not the statement). */
 function editorialLine(p: ValidProblem): string | undefined {
   const { statement, editorial } = splitProblemBody(fs.readFileSync(p.file, "utf8"));
-  return editorial ? distinctiveLine(editorial, statement) : undefined;
+  return editorial ? distinctiveLine(editorial, PROSE_LINE, statement) : undefined;
 }
 
 describe("only build-time readers touch hidden tests and reference solutions", () => {
