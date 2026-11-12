@@ -228,7 +228,7 @@ const spec: DiagramSpec = {
       cloud: {
         aws: "aws-cloudtrail",
         gcp: { id: "gcp-cloud-logging", label: "Cloud Audit Logs" },
-        azure: { id: "azure-monitor", label: "Activity log" },
+        azure: "azure-monitor",
       },
     },
   ],
