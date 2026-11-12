@@ -29,3 +29,58 @@ Example 2:
 - 1 <= len(nums1), len(nums2) <= 1000
 - -1000 <= nums1[i], nums2[i] <= 1000
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Set difference
+Distinct values are obtained by casting to sets, then subtract.
+
+1. Build sets s1 and s2 from nums1 and nums2.
+2. Return \[list(s1 - s2), list(s2 - s1)\] (order within lists may vary).
+
+## Complexity
+
+**Time:** O(n + m) - Linear scans to build sets.
+
+**Space:** O(n + m) - Two sets of distinct integers.
+
+## Solution
+
+````python
+from typing import List, Set, Tuple
+
+
+class Solution:
+    def findDifference(self, nums1: List[int], nums2: List[int]) -> List[List[int]]:
+        s1, s2 = set(nums1), set(nums2)
+        return [list(s1 - s2), list(s2 - s1)]
+
+
+def _normalize_pair(res: List[List[int]]) -> Tuple[Set[int], Set[int]]:
+    return set(res[0]), set(res[1])
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r1 = sol.findDifference([1, 2, 3], [2, 4, 6])
+    assert _normalize_pair(r1) == ({1, 3}, {4, 6}), "Test 1 Failed"
+    print("Test 1 Passed: disjoint parts")
+    r2 = sol.findDifference([1, 2, 3, 3], [1, 1, 2, 2])
+    assert _normalize_pair(r2) == ({3}, set()), "Test 2 Failed"
+    print("Test 2 Passed: one side empty")
+    r3 = sol.findDifference([1], [1])
+    assert _normalize_pair(r3) == (set(), set()), "Test 3 Failed"
+    print("Test 3 Passed: identical sets")
+    r4 = sol.findDifference([10, 20], [30])
+    assert _normalize_pair(r4) == ({10, 20}, {30}), "Test 4 Failed"
+    print("Test 4 Passed: no overlap")
+    r5 = sol.findDifference([0], [1, 0, 2])
+    assert _normalize_pair(r5) == (set(), {1, 2}), "Test 5 Failed"
+    print("Test 5 Passed: subset relationship")
+    print("\nAll test cases passed!")
+````

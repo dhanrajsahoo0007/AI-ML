@@ -27,9 +27,18 @@ export async function problemStatement(problem: ValidProblem) {
   return compile(splitProblemBody(content).statement);
 }
 
-/** The whole body of a statement-only outline. */
+/** An outline's statement: its body up to <PremiumBreak/> (the whole body when there is no marker). */
 export async function outlineStatement(file: string) {
-  return compile(matter(await fs.readFile(file, "utf8")).content);
+  return compile(splitProblemBody(matter(await fs.readFile(file, "utf8")).content).statement);
+}
+
+/**
+ * An outline's notes after <PremiumBreak/> (approach, complexity, the owner's solution and tests), or null.
+ * Like a premium editorial: only call it for a reader who may see it, so it never reaches a public page.
+ */
+export async function outlineNotes(file: string) {
+  const { editorial } = splitProblemBody(matter(await fs.readFile(file, "utf8")).content);
+  return editorial === null ? null : compile(editorial);
 }
 
 /** Only call for an editorial the visitor may read (free problems until Phase 5's entitlement check). */

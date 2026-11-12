@@ -28,3 +28,53 @@ Example 2:
 ````text
 - 0 <= len(word1), len(word2) <= 500
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** LCS distance
+Keep LCS unchanged; delete extras from A and insert missing to match B.
+
+1. l = LCS length; answer = len(word1)+len(word2)-2\*l.
+
+## Complexity
+
+**Time:** O(m \* n).
+
+**Space:** O(m \* n).
+
+## Solution
+
+````python
+class Solution:
+    def minDistance(self, word1: str, word2: str) -> int:
+        m, n = len(word1), len(word2)
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if word1[i - 1] == word2[j - 1]:
+                    dp[i][j] = 1 + dp[i - 1][j - 1]
+                else:
+                    dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+        lcs = dp[m][n]
+        return m + n - 2 * lcs
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minDistance("sea", "eat") == 2, "Test 1 Failed"
+    print("Test 1 Passed: sea to eat")
+    assert sol.minDistance("", "") == 0, "Test 2 Failed"
+    print("Test 2 Passed: empty to empty")
+    assert sol.minDistance("a", "b") == 2, "Test 3 Failed"
+    print("Test 3 Passed: replace via delete+insert")
+    assert sol.minDistance("abcd", "anc") == 3, "Test 4 Failed"
+    print("Test 4 Passed: delete b and d, insert n")
+    assert sol.minDistance("leetcode", "etco") == 4, "Test 5 Failed"
+    print("Test 5 Passed: trim leet prefix")
+    print("\nAll test cases passed!")
+````

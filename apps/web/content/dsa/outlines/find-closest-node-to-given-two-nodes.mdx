@@ -33,3 +33,66 @@ Example 2:
 - edges[i] != i
 - 0 <= node1, node2 < n
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Linear walk / hashing distances
+Because out-degree is at most one, walks from node1 and node2 are simple chains; intersect chains and score.
+
+1. From node1, follow edges recording distance until stop; repeat from node2.
+2. Every index appearing in both maps is a meeting node; pick minimal max(distance1, distance2), tie-break index.
+
+## Complexity
+
+**Time:** O(n) — each chain length bounded by n.
+
+**Space:** O(n) — distance maps.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def closestMeetingNode(self, edges: List[int], node1: int, node2: int) -> int:
+
+        def distances(start: int) -> dict[int, int]:
+            dist: dict[int, int] = {}
+            cur, step = start, 0
+            while cur != -1 and cur not in dist:
+                dist[cur] = step
+                step += 1
+                cur = edges[cur]
+            return dist
+
+        d1 = distances(node1)
+        d2 = distances(node2)
+        best = -1
+        best_score = 10**9
+        for i in range(len(edges)):
+            if i in d1 and i in d2:
+                score = max(d1[i], d2[i])
+                if score < best_score or (score == best_score and i < best):
+                    best_score = score
+                    best = i
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.closestMeetingNode([2, 2, 3, -1], 0, 1) == 2, "Test 1 Failed"
+    print("Test 1 Passed: chains meet at 2")
+    assert sol.closestMeetingNode([1, 2, -1], 0, 2) == 2, "Test 2 Failed"
+    print("Test 2 Passed: simple line")
+    assert sol.closestMeetingNode([1, 2, 3, -1], 0, 3) == 3, "Test 3 Failed"
+    print("Test 3 Passed: meet at chain end")
+    assert sol.closestMeetingNode([1, -1], 0, 1) == 1, "Test 4 Failed"
+    print("Test 4 Passed: two-node line")
+    print("All tests passed!")
+````

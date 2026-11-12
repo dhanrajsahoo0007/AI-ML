@@ -25,3 +25,112 @@ Output: 6 (pairs (5,1) and (4,2))
 - 2 <= n <= 10^5, n is even
 - 1 <= Node.val <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Middle + reverse second half
+Align first half with reversed tail to evaluate twin sums in one scan.
+
+1. Advance slow/fast to split at middle of even list.
+2. Reverse nodes from slow onward.
+3. Walk head and reversed half together tracking max sum.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1).
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given the head of a linked list with even length, return the maximum twin sum of the linked list.
+The twin sum is defined as the sum of a node and its twin.
+In a linked list of size n, where n is even, the ith node (0-indexed) of the linked list is known as the twin of the (n-1-i)th node, if 0 &lt;= i &lt;= (n / 2) - 1.
+
+Example:
+if n = 4, then node 0 is the twin of node 3, and node 1 is the twin of node 2. These are the only nodes with twins for n = 4.
+
+Explanation:
+The solution follows these steps:
+1. Find the middle of the linked list using slow and fast pointers.
+2. Reverse the second half of the list.
+3. Traverse both halves simultaneously, calculating twin sums and keeping track of the maximum.
+
+Time Complexity: O(n), where n is the number of nodes in the list.
+- Finding the middle: O(n/2)
+- Reversing the second half: O(n/2)
+- Calculating max twin sum: O(n/2)
+Overall, these operations sum up to O(n).
+
+Space Complexity: O(1)
+- We only use a constant amount of extra space for pointers and variables.
+- The reversal is done in-place, without using any extra data structures that grow with input size.
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+class Solution:
+    def pairSum(self, head: Optional[ListNode]) -> int:
+        if not head:
+            return 0
+        slow = fast = head
+        while fast and fast.next:
+            slow = slow.next
+            fast = fast.next.next
+
+        prev: Optional[ListNode] = None
+        cur = slow
+        while cur:
+            nxt = cur.next
+            cur.next = prev
+            prev = cur
+            cur = nxt
+
+        max_sum = 0
+        first, second = head, prev
+        while second:
+            max_sum = max(max_sum, first.val + second.val)
+            first = first.next
+            second = second.next
+        return max_sum
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    assert sol.pairSum(list_to_linked_list([5, 4, 2, 1])) == 6
+
+    assert sol.pairSum(list_to_linked_list([4, 2, 2, 3])) == 7
+
+    assert sol.pairSum(list_to_linked_list([1, 100_000])) == 100_001
+
+    assert sol.pairSum(list_to_linked_list([10, 20, 30, 40])) == 50
+
+    assert sol.pairSum(list_to_linked_list([0, 0, 0, 0])) == 0
+
+    print("\nAll test cases passed!")
+````

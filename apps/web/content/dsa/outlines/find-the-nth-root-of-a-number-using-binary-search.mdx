@@ -24,3 +24,99 @@ Output: 3
 - 1 <= n <= 30
 - 1 <= m <= 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search with Safe Power Compare
+Monotone r^n; compare without overflowing using early break or bounded multiplication.
+
+1. Binary search r in \[1, m\].
+2. Compare r^n to m with loop multiplying and stopping when exceeding m.
+
+## Complexity
+
+**Time:** O(log m \* n) - Each power uses O(n) multiplies.
+
+**Space:** O(1) - Scalar arithmetic only.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given two integers N and M, find the Nth root of M.
+The Nth root of a number M is a number R such that R^N equals M.
+If the Nth root is not an integer, return -1.
+
+Example:
+Input: n = 3, m = 27
+Output: 3
+Explanation: 3 is the cube root of 27 (3^3 = 27)
+
+Input: n = 3, m = 9
+Output: -1
+Explanation: The cube root of 9 is not an integer (2.08...)
+
+Algorithm (Binary Search):
+1. Define a helper function 'func' to calculate mid^n and compare with m:
+- Return 1 if mid^n == m (exact root found)
+- Return 2 if mid^n &gt; m (current mid is too large)
+- Return 0 if mid^n &lt; m (current mid is too small)
+2. In the main NthRoot function:
+- Initialize the search range: low = 1, high = m
+- While low &lt;= high:
+a. Calculate mid = (low + high) // 2
+b. Call func(mid, n, m) to compare mid^n with m
+c. If func returns 1, we've found the exact root, return mid
+d. If func returns 0, search in the upper half: low = mid + 1
+e. If func returns 2, search in the lower half: high = mid - 1
+3. If no integer Nth root is found, return -1
+
+Time Complexity: O(log(M) \* N), where M is the number and N is the root we're finding
+Space Complexity: O(1), as we only use a constant amount of extra space
+
+Note: This algorithm finds the integer Nth root. If no integer Nth root exists, it returns -1.
+
+## Solution
+
+````python
+class Solution:
+    def nthRoot(self, n: int, m: int) -> int:
+        def cmp_pow(base: int) -> int:
+            acc = 1
+            for _ in range(n):
+                acc *= base
+                if acc > m:
+                    return 1
+            if acc == m:
+                return 0
+            return -1
+
+        lo, hi = 1, m
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            t = cmp_pow(mid)
+            if t == 0:
+                return mid
+            if t < 0:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return -1
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.nthRoot(3, 27) == 3, "Test 1 Failed"
+    print("Test 1 Passed: cube root of 27")
+    assert sol.nthRoot(2, 9) == 3, "Test 2 Failed"
+    print("Test 2 Passed: square root of nine")
+    assert sol.nthRoot(3, 9) == -1, "Test 3 Failed"
+    print("Test 3 Passed: no integer cube root")
+    assert sol.nthRoot(4, 256) == 4, "Test 4 Failed"
+    print("Test 4 Passed: fourth root")
+    assert sol.nthRoot(10, 1024) == 2, "Test 5 Failed"
+    print("Test 5 Passed: tenth root of 1024")
+    print("\nAll test cases passed!")
+````

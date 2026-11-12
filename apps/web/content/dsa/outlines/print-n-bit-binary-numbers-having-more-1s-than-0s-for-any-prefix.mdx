@@ -28,3 +28,61 @@ Example 2:
 ````text
 - 1 <= n <= 10 in tests
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Controlled recursion / pruning
+Append '1' whenever room remains; append '0' only if ones would still dominate zeros
+after the addition.
+
+1. DFS with parameters ones, zeros, and current bitstring.
+2. When length hits n, record the string.
+3. Always try adding '1' if under length n; try '0' only if ones &gt; zeros.
+
+## Complexity
+
+**Time:** O(2^n) strings in the worst theoretical bound, heavily pruned in practice
+
+**Space:** O(n) recursion depth plus output storage
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def n_bit_prefix_valid(self, n: int) -> List[str]:
+        result: List[str] = []
+
+        def dfs(ones: int, zeros: int, path: str) -> None:
+            if len(path) == n:
+                result.append(path)
+                return
+            dfs(ones + 1, zeros, path + "1")
+            if ones > zeros:
+                dfs(ones, zeros + 1, path + "0")
+
+        dfs(0, 0, "")
+        return sorted(result)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.n_bit_prefix_valid(1) == ["1"], "Test 1 Failed"
+    assert sol.n_bit_prefix_valid(2) == ["10", "11"], "Test 2 Failed"
+    assert sol.n_bit_prefix_valid(3) == ["101", "110", "111"], "Test 3 Failed"
+    assert all(len(x) == 4 for x in sol.n_bit_prefix_valid(4)), "Test 4 Failed"
+    assert "1100" in sol.n_bit_prefix_valid(4), "Test 5 Failed"
+    print("Test 1 Passed: single bit")
+    print("Test 2 Passed: two bits")
+    print("Test 3 Passed: three-bit enumeration")
+    print("Test 4 Passed: length check")
+    print("Test 5 Passed: sample member for n=4")
+    print("\nAll test cases passed!")
+````

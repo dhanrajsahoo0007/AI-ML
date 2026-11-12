@@ -28,3 +28,62 @@ Example 2:
 - 0 <= nums[i] < 1
 - len(nums) <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Bucket sort
+Map each value to floor(x \* n) bucket, sort buckets individually, concatenate.
+
+1. Create n buckets (or n empty lists).
+2. Place each number into bucket index min(n-1, int(x \* n)).
+3. Sort each bucket and extend the answer.
+
+## Complexity
+
+**Time:** O(n) average when distribution is uniform
+
+**Space:** O(n) for buckets
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def bucketSort(self, nums: List[float]) -> List[float]:
+        n = len(nums)
+        if n <= 1:
+            return list(nums)
+        buckets: List[List[float]] = [[] for _ in range(n)]
+        for x in nums:
+            idx = min(n - 1, int(x * n))
+            buckets[idx].append(x)
+        for b in buckets:
+            b.sort()
+        out: List[float] = []
+        for b in buckets:
+            out.extend(b)
+        return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    a = [0.78, 0.17, 0.39, 0.26, 0.72, 0.94, 0.21, 0.12, 0.23, 0.68]
+    assert sol.bucketSort(a) == sorted(a), "Test 1 Failed"
+    print("Test 1 Passed: random floats in [0,1)")
+    assert sol.bucketSort([0.5, 0.1, 0.9]) == [0.1, 0.5, 0.9], "Test 2 Failed"
+    print("Test 2 Passed: tiny list")
+    assert sol.bucketSort([]) == [], "Test 3 Failed"
+    print("Test 3 Passed: empty")
+    assert sol.bucketSort([0.0]) == [0.0], "Test 4 Failed"
+    print("Test 4 Passed: single zero")
+    assert sol.bucketSort([0.99, 0.01, 0.5]) == [0.01, 0.5, 0.99], "Test 5 Failed"
+    print("Test 5 Passed: three-spread floats")
+    print("\nAll test cases passed!")
+````

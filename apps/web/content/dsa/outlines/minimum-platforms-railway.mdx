@@ -34,3 +34,63 @@ Example 3:
 - 0 <= arr[i], dep[i] <= 2359
 - dep[i] > arr[i] for each train in typical formulations
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Two-Pointer Sweep
+Sort arrivals and departures; increase platforms when the next event is an arrival before the earliest pending departure.
+
+1. Sort both arrays ascending.
+2. Use pointers i, j and counters for current and maximum platforms.
+3. If arr\[i\] &lt;= dep\[j\], a train needs a platform before any departure; else release a platform.
+
+## Complexity
+
+**Time:** O(n log n) - Sorting dominates.
+
+**Space:** O(1) extra beyond input sorting buffers.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findPlatform(self, arr: List[int], dep: List[int]) -> int:
+        arr.sort()
+        dep.sort()
+        i = j = 0
+        need = 0
+        best = 0
+        n = len(arr)
+        while i < n:
+            if arr[i] <= dep[j]:
+                need += 1
+                best = max(best, need)
+                i += 1
+            else:
+                need -= 1
+                j += 1
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findPlatform([900, 940, 950, 1100, 1500, 1800], [910, 1200, 1120, 1130, 1900, 2000]) == 3, "Test 1 Failed"
+    print("Test 1 Passed: three overlaps at peak")
+    assert sol.findPlatform([10, 200], [50, 250]) == 1, "Test 2 Failed"
+    print("Test 2 Passed: staggered no overlap")
+    assert sol.findPlatform([10, 12], [20, 25]) == 2, "Test 3 Failed"
+    print("Test 3 Passed: overlapping intervals")
+    assert sol.findPlatform([1], [2]) == 1, "Test 4 Failed"
+    print("Test 4 Passed: single train")
+    assert sol.findPlatform([10, 10, 10], [15, 15, 15]) == 3, "Test 5 Failed"
+    print("Test 5 Passed: simultaneous arrivals")
+    print("\nAll test cases passed!")
+````

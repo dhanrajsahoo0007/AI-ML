@@ -35,3 +35,50 @@ Example 3:
 - number consists of digits from '0' to '9'
 - digit is a digit occurring in number
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Leftmost Lift
+Remove the leftmost chosen digit where the next digit is larger; if none, remove the rightmost occurrence.
+
+1. Scan indices except the last; when number\[i\] == digit and number\[i\] &lt; number\[i+1\], return slice removing i.
+2. If no such index, remove the last occurrence of digit with rfind.
+
+## Complexity
+
+**Time:** O(n) - Linear scan and string concatenation cost O(n) in Python.
+
+**Space:** O(n) - New string for the result.
+
+## Solution
+
+````python
+class Solution:
+    def removeDigit(self, number: str, digit: str) -> str:
+        n = len(number)
+        for i in range(n - 1):
+            if number[i] == digit and number[i] < number[i + 1]:
+                return number[:i] + number[i + 1 :]
+        j = number.rfind(digit)
+        return number[:j] + number[j + 1 :]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.removeDigit("5511", "5") == "511", "Test 1 Failed"
+    print("Test 1 Passed: remove earlier five")
+    assert sol.removeDigit("133235", "3") == "13325", "Test 2 Failed"
+    print("Test 2 Passed: remove middle three before five")
+    assert sol.removeDigit("10", "1") == "0", "Test 3 Failed"
+    print("Test 3 Passed: remove leading one")
+    assert sol.removeDigit("99", "9") == "9", "Test 4 Failed"
+    print("Test 4 Passed: remove one of equal digits")
+    assert sol.removeDigit("4321", "3") == "421", "Test 5 Failed"
+    print("Test 5 Passed: monotone decreasing removes last match")
+    print("\nAll test cases passed!")
+````

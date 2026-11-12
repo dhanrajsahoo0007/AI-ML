@@ -1,0 +1,80 @@
+---
+title: "Ice Cream Parlor"
+description: "Given a budget m and a list of ice cream flavor prices, return the 1-indexed positions of two distinct flavors whose costs sum to exactly m."
+topics: [hash-maps]
+number: "01"
+order: 4001000000000
+status: outline
+---
+
+Given a budget m and a list of ice cream flavor prices, return the 1-indexed
+positions of two distinct flavors whose costs sum to exactly m.
+
+## Examples
+
+````text
+Example 1:
+    Input: m = 4, cost = [1, 4, 5, 3, 2]
+    Output: [1, 4]
+Example 2:
+    Input: m = 4, cost = [2, 2, 4, 3]
+    Output: [1, 2]
+````
+
+## Constraints
+
+````text
+- 2 <= len(cost) <= 10^4
+- 1 <= cost[i], m <= 10^4
+- Exactly one valid pair exists
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hash map (two-sum)
+Store each price with its index; for each price, check if the complement was seen.
+
+1. Build a map from price to index while iterating.
+2. For each index i and price c, if m - c is in the map with index j != i, return \[j+1, i+1\] in sorted order.
+
+## Complexity
+
+**Time:** O(n) - single pass with O(1) hash lookups per element
+
+**Space:** O(n) - hash map of at most n prices
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def icecreamParlor(self, m: int, cost: List[int]) -> List[int]:
+        index_by_price: dict[int, int] = {}
+        for i, c in enumerate(cost):
+            need = m - c
+            if need in index_by_price:
+                a, b = index_by_price[need] + 1, i + 1
+                return [a, b] if a < b else [b, a]
+            index_by_price[c] = i
+        return []
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.icecreamParlor(4, [1, 4, 5, 3, 2]) == [1, 4], "Test 1 Failed"
+    print("Test 1 Passed: classic pair (1,3) -> indices 1 and 4")
+    assert sol.icecreamParlor(4, [2, 2, 4, 3]) == [1, 2], "Test 2 Failed"
+    print("Test 2 Passed: equal prices at start")
+    assert sol.icecreamParlor(6, [1, 3, 2, 4, 5]) == [3, 4], "Test 3 Failed"
+    print("Test 3 Passed: first valid pair is 2 + 4 at indices 3 and 4")
+    assert sol.icecreamParlor(8, [1, 2, 3, 4, 5, 6]) == [3, 5], "Test 4 Failed"
+    print("Test 4 Passed: first pair found is 3 + 5 = 8")
+    print("\nAll test cases passed!")
+````

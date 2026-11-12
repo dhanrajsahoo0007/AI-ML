@@ -29,3 +29,84 @@ Example 2:
 - 1 <= s.length <= 500
 - s consists of lowercase English letters.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap with Other DS (Heap + Greedy)
+Use a max-heap of character frequencies. Always place the most frequent
+character, keeping the previously placed character on hold.
+
+1. Count character frequencies. If any &gt; (n+1)/2, return "".
+2. Push (-freq, char) into a max-heap.
+3. Pop the most frequent char, append to result.
+4. Push back the previously used char (if any remaining count).
+5. Repeat until heap is empty.
+
+## Complexity
+
+**Time:** O(n log k) where k is number of unique chars (at most 26)
+
+**Space:** O(n)
+
+## Solution
+
+````python
+import heapq
+from collections import Counter
+
+
+class Solution:
+    def reorganizeString(self, s: str) -> str:
+        freq = Counter(s)
+        heap = []
+
+        for char, count in freq.items():
+            if count > (len(s) + 1) // 2:
+                return ""
+            heapq.heappush(heap, (-count, char))
+
+        result = []
+        prev = ()
+
+        while heap:
+            count, char = heapq.heappop(heap)
+            result.append(char)
+            if prev:
+                # Return the blocked character only after placing a different one.
+                heapq.heappush(heap, prev)
+            if count < -1:
+                # Still occurrences left — defer same letter using `prev`.
+                prev = (count + 1, char)
+            else:
+                prev = ()
+
+        return "".join(result) if len(result) == len(s) else ""
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Possible rearrangement
+    result = sol.reorganizeString("aab")
+    assert len(result) == 3 and all(result[i] != result[i+1] for i in range(len(result)-1)), "Test 1 Failed"
+    print(f"Test 1 Passed: 'aab' -> '{result}'")
+
+    # Test Case 2: Impossible
+    assert sol.reorganizeString("aaab") == "", "Test 2 Failed"
+    print("Test 2 Passed: 'aaab' -> ''")
+
+    # Test Case 3: Single character
+    assert sol.reorganizeString("a") == "a", "Test 3 Failed"
+    print("Test 3 Passed: 'a' -> 'a'")
+
+    # Test Case 4: All same
+    assert sol.reorganizeString("aaa") == "", "Test 4 Failed"
+    print("Test 4 Passed: 'aaa' -> ''")
+
+    print("\nAll test cases passed!")
+````

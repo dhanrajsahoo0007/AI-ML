@@ -5,7 +5,7 @@
 export { DifficultyLabel, ProEditorial, Tags } from "./components";
 export { numberedTitle, outlinesForTopic, problemListHref, problemsForTopic, topicLabel } from "./kind";
 export { showsPremiumEditorialLocally } from "./local-view";
-export { outlineStatement, problemEditorial, problemStatement } from "./mdx";
+export { outlineNotes, outlineStatement, problemEditorial, problemStatement } from "./mdx";
 export {
   dsaContent,
   dsaSection,

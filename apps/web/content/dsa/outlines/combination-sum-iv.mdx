@@ -29,3 +29,57 @@ Example 2:
 - nums elements are unique positive integers.
 - 1 <= target <= 1000 for the DP implementation below.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Ordered composition counting (DP)
+Let dp\[s\] be ways to form sum s; transition tries every coin as the last step.
+
+1. dp\[0\] = 1.
+2. For s from 1 to target, dp\[s\] += dp\[s - x\] for each x in nums if s &gt;= x.
+3. Return dp\[target\].
+
+## Complexity
+
+**Time:** O(target \* len(nums)).
+
+**Space:** O(target).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def combinationSum4(self, nums: List[int], target: int) -> int:
+        dp = [0] * (target + 1)
+        dp[0] = 1
+        for s in range(1, target + 1):
+            for x in nums:
+                if x <= s:
+                    dp[s] += dp[s - x]
+        return dp[target]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.combinationSum4([1, 2, 3], 4) == 7, "Test 1 Failed"
+    print("Test 1 Passed: nums [1,2,3] target 4")
+
+    assert sol.combinationSum4([9], 3) == 0, "Test 2 Failed"
+    print("Test 2 Passed: impossible")
+
+    assert sol.combinationSum4([1, 2], 3) == 3, "Test 3 Failed"
+    print("Test 3 Passed: three orderings for sum 3")
+
+    assert sol.combinationSum4([3], 6) == 1, "Test 4 Failed"
+    print("Test 4 Passed: single coin repetition")
+
+    print("\nAll test cases passed!")
+````

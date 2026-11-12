@@ -29,3 +29,93 @@ Example 2:
 - 2 <= len(letters) <= 10^4
 - letters contains only lowercase English letters and is sorted
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Sorted Letters
+Find the leftmost index where letters\[i\] &gt; target; wrap with modulo if the search walks off the end.
+
+1. Binary search on letters with condition letters\[mid\] &lt;= target -&gt; go right.
+2. When the loop ends, lo is the first index with letters\[lo\] &gt; target, or len(letters).
+3. Return letters\[lo % len(letters)\].
+
+## Complexity
+
+**Time:** O(log n) - Binary search over letters.
+
+**Space:** O(1) - Constant extra variables.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement: Find the Next Alphabetical Element
+
+Given a sorted array of lowercase letters and a target letter, find the smallest element in the array that is larger than the target.
+The letters wrap around, so if there's no letter larger than the target, return the first element in the array.
+
+Examples:
+
+1. Input: letters = \['a', 'c', 'f', 'h'\], target = 'f'
+Output: 'h'
+Explanation: The smallest letter greater than 'f' is 'h'.
+
+2. Input: letters = \['a', 'c', 'f', 'h'\], target = 'b'
+Output: 'c'
+Explanation: The smallest letter greater than 'b' is 'c'.
+
+3. Input: letters = \['a', 'c', 'f', 'h'\], target = 'h'
+Output: 'a'
+Explanation: There's no letter greater than 'h', so we wrap around and return 'a'.
+
+Explanation of the approach:
+
+1. Reusing the Ceiling Function:
+- We use the provided find\_ceiling function as the core of our solution.
+- This function finds the smallest element in the array that is greater than or equal to the target.
+
+2. ASCII Conversion:
+- To use the ceiling function with characters, we convert the letters to their ASCII values.
+- This allows us to perform numerical comparisons while maintaining alphabetical order.
+
+3. Handling Wrapping Around:
+- If find\_ceiling returns -1 (no ceiling found), we return the first element of the array.
+- This handles the case where the target is greater than all elements in the array.
+
+4. Result Conversion:
+- We convert the ceiling ASCII value back to a character before returning.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def nextGreatestLetter(self, letters: List[str], target: str) -> str:
+        n = len(letters)
+        lo, hi = 0, n
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if letters[mid] <= target:
+                lo = mid + 1
+            else:
+                hi = mid
+        return letters[lo % n]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.nextGreatestLetter(["a", "c", "f", "h"], "f") == "h", "Test 1 Failed"
+    print("Test 1 Passed: after f comes h")
+    assert sol.nextGreatestLetter(["a", "c", "f", "h"], "b") == "c", "Test 2 Failed"
+    print("Test 2 Passed: after b")
+    assert sol.nextGreatestLetter(["a", "c", "f", "h"], "h") == "a", "Test 3 Failed"
+    print("Test 3 Passed: wrap from h")
+    assert sol.nextGreatestLetter(["a", "c", "f", "h"], "m") == "a", "Test 4 Failed"
+    print("Test 4 Passed: target beyond all")
+    assert sol.nextGreatestLetter(["c"], "a") == "c", "Test 5 Failed"
+    print("Test 5 Passed: single letter wrap rule")
+    print("\nAll test cases passed!")
+````

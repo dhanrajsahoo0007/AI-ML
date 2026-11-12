@@ -28,3 +28,164 @@ Example 2:
 ````text
 - Maze dimensions up to 100; start and destination on empty cells; not the same initially.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph BFS on roll-to-stop states
+
+1. BFS from the start stopping cell; mark visited stops.
+2. From each cell, roll in four directions until one step before a wall; enqueue that stop if unvisited.
+3. Return whether the destination is reached as a stop.
+
+## Complexity
+
+**Time:** O(m \* n) — each cell is a stop at most once per typical analysis.
+
+**Space:** O(m \* n) — visited array and queue.
+
+## Solution
+
+````python
+from typing import List
+from collections import deque
+
+
+class Solution:
+    def hasPath(self, maze: List[List[int]], start: List[int], destination: List[int]) -> bool:
+        # self.visited = [[False for  in range(len(maze[0]))] for  in range(len(maze))]
+        directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        end_x, end_y = destination[0], destination[1]
+        rows = len(maze)
+        cols = len(maze[0])
+        visited = [[False for _ in range(cols)] for _ in range(rows)]
+
+        queue: deque[tuple[int, int]] = deque([(start[0], start[1])])
+        visited[start[0]][start[1]] = True
+
+        while queue:
+            curr_x, curr_y = queue.popleft()
+
+            if curr_x == end_x and curr_y == end_y:
+                return True
+
+            for dx, dy in directions:
+                x_, y_ = curr_x + dx, curr_y + dy
+
+                # Continue moving in the same direction until hitting a wall
+                while 0 <= x_ < len(maze) and 0 <= y_ < len(maze[0]) and maze[x_][y_] == 0:
+                    x_ += dx
+                    y_ += dy
+
+                # Move back one step as we've hit a wall
+                x_ -= dx
+                y_ -= dy
+
+                if not visited[x_][y_]:
+                    queue.append((x_, y_))
+                    visited[x_][y_] = True
+
+        return False
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    maze1 = [
+        [0, 0, 1, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0],
+        [1, 1, 0, 1, 1],
+        [0, 0, 0, 0, 0],
+    ]
+    assert sol.hasPath([row[:] for row in maze1], [0, 4], [3, 2]) is False, "Test 1 Failed"
+    maze2 = [row[:] for row in maze1]
+    assert sol.hasPath(maze2, [0, 4], [4, 4]) is True, "Test 2 Failed"
+    assert sol.hasPath([[0]], [0, 0], [0, 0]) is True, "Test 3 Failed"
+    print("All tests passed!")
+````
+
+## Another version
+
+From 17. Graphs/03. DFS Story Based/06. String and Grid-based DFS.
+
+### Approach
+
+**Pattern:** DFS / graph on "roll stop" states
+Each cell-direction stop is a state; from a stop cell DFS to neighboring stop cells reached by rolling.
+
+1. DFS from the start cell marking visited stop positions.
+2. From (x,y), roll in four directions until one step before a wall; that cell is the next stop.
+3. Return True when a stop equals the destination.
+
+### Complexity
+
+**Time:** O(mn) — each empty cell is entered as a stop a constant number of times in practice.
+
+**Space:** O(mn) for the visited grid and recursion stack.
+
+### Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def hasPath(self, maze: List[List[int]], start: List[int], destination: List[int]) -> bool:
+        rows, cols = len(maze), len(maze[0])
+        dest = (destination[0], destination[1])
+        visited = [[False] * cols for _ in range(rows)]
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+        def dfs(x: int, y: int) -> bool:
+            if visited[x][y]:
+                return False
+            visited[x][y] = True
+            if (x, y) == dest:
+                return True
+            for dx, dy in dirs:
+                nx, ny = x, y
+                while 0 <= nx + dx < rows and 0 <= ny + dy < cols and maze[nx + dx][ny + dy] == 0:
+                    nx += dx
+                    ny += dy
+                if dfs(nx, ny):
+                    return True
+            return False
+
+        return dfs(start[0], start[1])
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    maze = [
+        [0, 0, 1, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0],
+        [1, 1, 0, 1, 1],
+        [0, 0, 0, 0, 0],
+    ]
+    assert sol.hasPath(maze, [0, 4], [4, 4]) is True, "Test 1 Failed"
+    print("Test 1 Passed: reachable corner")
+    maze2 = [
+        [0, 0, 1, 0, 0],
+        [0, 0, 0, 0, 0],
+        [0, 0, 0, 1, 0],
+        [1, 1, 0, 1, 1],
+        [0, 0, 0, 0, 0],
+    ]
+    assert sol.hasPath(maze2, [0, 4], [3, 2]) is False, "Test 2 Failed"
+    print("Test 2 Passed: unreachable stop")
+    assert sol.hasPath([[0]], [0, 0], [0, 0]) is True, "Test 3 Failed"
+    print("Test 3 Passed: single cell")
+    assert sol.hasPath([[0, 0], [0, 0]], [0, 0], [1, 1]) is True, "Test 4 Failed"
+    print("Test 4 Passed: open 2x2")
+    assert sol.hasPath([[0, 1], [1, 0]], [0, 0], [1, 1]) is False, "Test 5 Failed"
+    print("Test 5 Passed: diagonal blocked")
+    print("All tests passed!")
+````

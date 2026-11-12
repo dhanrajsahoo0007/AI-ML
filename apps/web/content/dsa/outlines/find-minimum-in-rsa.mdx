@@ -29,3 +29,65 @@ Example 2:
 - -5000 <= nums[i] <= 5000
 - All integers unique (typical rotated-sorted setting)
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search for Pivot / Minimum
+The minimum lies at the rotation index; compare mid to ends to decide which half contains the pivot.
+
+1. If nums\[0\] &lt;= nums\[-1\], return nums\[0\] (already sorted).
+2. Otherwise binary search for index k where nums\[k\] is the pivot minimum (same logic as rotation count).
+3. Return nums\[k\].
+
+## Complexity
+
+**Time:** O(log n) - Binary search on indices.
+
+**Space:** O(1) - Only index variables.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findMin(self, nums: List[int]) -> int:
+        n = len(nums)
+        if n == 1 or nums[0] <= nums[-1]:
+            return nums[0]
+        left, right = 0, n - 1
+        while left <= right:
+            if nums[left] <= nums[right]:
+                return nums[left]
+            mid = (left + right) // 2
+            nxt = (mid + 1) % n
+            prev = (mid - 1 + n) % n
+            if nums[mid] <= nums[nxt] and nums[mid] <= nums[prev]:
+                return nums[mid]
+            if nums[mid] <= nums[right]:
+                right = mid - 1
+            elif nums[left] <= nums[mid]:
+                left = mid + 1
+        return nums[0]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findMin([4, 5, 6, 7, 0, 1, 2]) == 0, "Test 1 Failed"
+    print("Test 1 Passed: minimum after rotation")
+    assert sol.findMin([11, 13, 15, 17]) == 11, "Test 2 Failed"
+    print("Test 2 Passed: no rotation")
+    assert sol.findMin([2, 1]) == 1, "Test 3 Failed"
+    print("Test 3 Passed: two elements")
+    assert sol.findMin([1]) == 1, "Test 4 Failed"
+    print("Test 4 Passed: singleton")
+    assert sol.findMin([3, 1, 2]) == 1, "Test 5 Failed"
+    print("Test 5 Passed: small rotated array")
+    print("\nAll test cases passed!")
+````

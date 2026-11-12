@@ -169,3 +169,13 @@ describe("only build-time readers touch hidden tests and reference solutions", (
     expect(offenders).toEqual([]);
   });
 });
+
+// Outline notes (the owner's approach and solution) follow the editorial rule: only the local review compiles
+// them. The page marks them with data-dsa-outline-notes, so no built page may carry that attribute.
+describe("outline notes stay out of built pages", () => {
+  it("no prerendered DSA page contains outline notes", () => {
+    const pages = walk(pagesDir, (f) => /\.(html|rsc)$/.test(f));
+    if (pages.length === 0) return; // no build in this checkout
+    expect(pages.filter((f) => fs.readFileSync(f, "utf8").includes("data-dsa-outline-notes"))).toEqual([]);
+  });
+});

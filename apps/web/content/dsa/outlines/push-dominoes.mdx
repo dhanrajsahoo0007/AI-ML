@@ -30,3 +30,67 @@ Example 2:
 - 1 <= n <= 10^5
 - dominoes[i] is either 'L', 'R', or '.'.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two-pass force accumulation
+Propagate rightward forces from 'R' and leftward forces from 'L', then compare net force at each dot.
+
+1. Create an array of net forces initialized to zero.
+2. Sweep left to right carrying a decaying right-bias that resets on 'L' and strengthens on 'R'.
+3. Sweep right to left subtracting left-bias symmetrically.
+4. Emit 'R', 'L', or '.' depending on whether the net force is positive, negative, or zero.
+
+## Complexity
+
+**Time:** O(n) - Two linear passes over the dominoes.
+
+**Space:** O(n) - Stores per-index force totals separate from the output string builder.
+
+## Solution
+
+````python
+class Solution:
+    def pushDominoes(self, dominoes: str) -> str:
+        n = len(dominoes)
+        forces = [0] * n
+        strength = 0
+        for i in range(n):
+            if dominoes[i] == "R":
+                strength = n
+            elif dominoes[i] == "L":
+                strength = 0
+            else:
+                strength = max(strength - 1, 0)
+            forces[i] += strength
+        strength = 0
+        for i in range(n - 1, -1, -1):
+            if dominoes[i] == "L":
+                strength = n
+            elif dominoes[i] == "R":
+                strength = 0
+            else:
+                strength = max(strength - 1, 0)
+            forces[i] -= strength
+        return "".join("." if f == 0 else "R" if f > 0 else "L" for f in forces)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.pushDominoes("RR.L") == "RR.L", "Test 1 Failed"
+    print("Test 1 Passed: balanced middle stays upright")
+    assert sol.pushDominoes(".L.R...LR..L..") == "LL.RR.LLRRLL..", "Test 2 Failed"
+    print("Test 2 Passed: long mixed propagation")
+    assert sol.pushDominoes("R.R.L") == "RRR.L", "Test 3 Failed"
+    print("Test 3 Passed: opposing forces meet")
+    assert sol.pushDominoes("..R..") == "..RRR", "Test 4 Failed"
+    print("Test 4 Passed: lone right tip")
+    assert sol.pushDominoes("L.R...") == "L.RRRR", "Test 5 Failed"
+    print("Test 5 Passed: left wall blocks early dots")
+    print("\nAll test cases passed!")
+````

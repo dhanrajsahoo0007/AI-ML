@@ -28,3 +28,90 @@ Example 2:
 - 0 <= n <= 10^5
 - 0 <= Node.val <= 9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Find middle + reverse second half
+Compare first half with reversed tail; list may be structurally altered unless restored.
+
+1. Use slow/fast to find middle (slow ends before second middle for even length).
+2. Reverse nodes after slow.
+3. Compare head with reversed half.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1).
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+class Solution:
+    def isPalindrome(self, head: Optional[ListNode]) -> bool:
+        if not head or not head.next:
+            return True
+
+        slow = fast = head
+        while fast.next and fast.next.next:
+            slow = slow.next
+            fast = fast.next.next
+
+        def reverse(h: Optional[ListNode]) -> Optional[ListNode]:
+            prev, cur = None, h
+            while cur:
+                nxt = cur.next
+                cur.next = prev
+                prev, cur = cur, nxt
+            return prev
+
+        second = reverse(slow.next)
+        first = head
+        while second:
+            if first.val != second.val:
+                return False
+            first = first.next
+            second = second.next
+        return True
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    assert sol.isPalindrome(list_to_linked_list([1, 2, 2, 1])) is True
+
+    assert sol.isPalindrome(list_to_linked_list([1, 2])) is False
+
+    assert sol.isPalindrome(list_to_linked_list([1])) is True
+
+    assert sol.isPalindrome(list_to_linked_list([1, 2, 3, 2, 1])) is True
+
+    assert sol.isPalindrome(list_to_linked_list([])) is True
+
+    print("\nAll test cases passed!")
+````

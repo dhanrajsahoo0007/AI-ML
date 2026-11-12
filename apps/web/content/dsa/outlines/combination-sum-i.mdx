@@ -29,3 +29,72 @@ Example 2:
 - All elements of candidates are distinct.
 - 2 <= len(candidates) <= 40
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Unbounded combination backtracking
+Sort for pruning; recurse with the same start index to allow reuse of the last pick.
+
+1. DFS(start, remaining): if remaining == 0 store path; if &lt; 0 return.
+2. For i from start to end, append candidates\[i\], recurse with i (reuse allowed), pop.
+
+## Complexity
+
+**Time:** O(n^(target / min)) in worst case.
+
+**Space:** O(target / min) recursion depth.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def combinationSum(self, candidates: List[int], target: int) -> List[List[int]]:
+        candidates.sort()
+        result: List[List[int]] = []
+
+        def dfs(start: int, remaining: int, path: List[int]) -> None:
+            if remaining == 0:
+                result.append(path[:])
+                return
+            if remaining < 0:
+                return
+            for i in range(start, len(candidates)):
+                val = candidates[i]
+                if val > remaining:
+                    break
+                path.append(val)
+                dfs(i, remaining - val, path)
+                path.pop()
+
+        dfs(0, target, [])
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def norm(rows: List[List[int]]) -> List[tuple]:
+        return sorted(tuple(sorted(t)) for t in rows)
+
+    assert norm(sol.combinationSum([2, 3, 6, 7], 7)) == norm([[2, 2, 3], [7]]), "Test 1 Failed"
+    print("Test 1 Passed: classic example")
+
+    assert sol.combinationSum([2], 1) == [], "Test 2 Failed"
+    print("Test 2 Passed: impossible target")
+
+    assert norm(sol.combinationSum([2, 3, 5], 8)) == norm([[3, 5], [2, 3, 3], [2, 2, 2, 2]]), "Test 3 Failed"
+    print("Test 3 Passed: multiple representations")
+
+    assert sol.combinationSum([8], 8) == [[8]], "Test 4 Failed"
+    print("Test 4 Passed: single exact match")
+
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,131 @@
+---
+title: "Merge K Sorted Lists"
+description: "You are given an array of k linked lists, each sorted in ascending order."
+topics: [linked-lists]
+group: "05. Sorting and Merging"
+number: "04"
+order: 13005004000000
+status: outline
+---
+
+You are given an array of k linked lists, each sorted in ascending order.
+Merge all the linked lists into one sorted linked list and return it.
+
+## Examples
+
+````text
+Example 1:
+    Input: lists = [[1,4,5],[1,3,4],[2,6]]
+    Output: [1,1,2,3,4,4,5,6]
+
+Example 2:
+    Input: lists = [[],[]]
+    Output: []
+````
+
+## Constraints
+
+````text
+- k == len(lists)
+- 0 <= k <= 10^4
+- 0 <= lists[i].length <= 500
+- -10^4 <= lists[i][j] <= 10^4
+- lists[i] is sorted in ascending order.
+- The sum of lists[i].length will not exceed 10^4.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap (min-heap) / divide-and-conquer
+Track the smallest head among lists using a min-heap keyed by node value, or merge pairs recursively.
+
+1. Push (node.val, list\_index, node) for each non-empty list head into a min-heap (tie-break by index for stability).
+2. Pop the smallest, append to result tail, push the next node from that list if it exists.
+3. Return dummy.next.
+
+## Complexity
+
+**Time:** O(N log k) where N is total nodes and k is number of lists — each heap push/pop is O(log k).
+
+**Space:** O(k) for the heap plus O(1) excluding the output list.
+
+## Solution
+
+````python
+from __future__ import annotations
+
+import heapq
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+def linked_list_to_list(head: Optional[ListNode]) -> List[int]:
+    out: List[int] = []
+    while head:
+        out.append(head.val)
+        head = head.next
+    return out
+
+
+class Solution:
+    def mergeKLists(self, lists: List[Optional[ListNode]]) -> Optional[ListNode]:
+        heap: List[tuple[int, int, ListNode]] = []
+        for i, h in enumerate(lists):
+            if h:
+                heapq.heappush(heap, (h.val, i, h))
+
+        dummy = ListNode(0)
+        tail = dummy
+        while heap:
+            _, i, node = heapq.heappop(heap)
+            tail.next = node
+            tail = tail.next
+            if node.next:
+                heapq.heappush(heap, (node.next.val, i, node.next))
+
+        tail.next = None
+        return dummy.next
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    lists = [
+        list_to_linked_list([1, 4, 5]),
+        list_to_linked_list([1, 3, 4]),
+        list_to_linked_list([2, 6]),
+    ]
+    assert linked_list_to_list(sol.mergeKLists(lists)) == [1, 1, 2, 3, 4, 4, 5, 6]
+
+    assert linked_list_to_list(sol.mergeKLists([None, None])) == []
+
+    assert linked_list_to_list(sol.mergeKLists([])) == []
+
+    single = [list_to_linked_list([0])]
+    assert linked_list_to_list(sol.mergeKLists(single)) == [0]
+
+    assert linked_list_to_list(
+        sol.mergeKLists([list_to_linked_list([1, 2]), list_to_linked_list([3, 4])])
+    ) == [1, 2, 3, 4]
+
+    print("\nAll test cases passed!")
+````

@@ -25,3 +25,66 @@ Output: [6.0,0.5,-1.0,1.0,-1.0]
 - 1 <= len(equations) == len(values) <= 20
 - 1 <= len(queries) <= 20
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Weighted DFS / product on paths
+
+1. Build a bidirected graph with weights A-&gt;(B, v) and B-&gt;(A, 1/v).
+2. For each query, DFS multiply edge weights along a path; use a visited set per query.
+
+## Complexity
+
+**Time:** O(Q \* (V + E)) for small graphs.
+
+**Space:** O(V + E).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def calcEquation(self, equations: List[List[str]], values: List[float], queries: List[List[str]]) -> List[float]:
+        g = defaultdict(list)
+        for (a, b), val in zip(equations, values):
+            g[a].append((b, val))
+            g[b].append((a, 1.0 / val))
+
+        def dfs(src: str, dst: str, seen: set):
+            if src not in g or dst not in g:
+                return None
+            if src == dst:
+                return 1.0
+            seen.add(src)
+            for nxt, w in g[src]:
+                if nxt in seen:
+                    continue
+                sub = dfs(nxt, dst, seen)
+                if sub is not None:
+                    return w * sub
+            return None
+
+        out: List[float] = []
+        for c, d in queries:
+            val = dfs(c, d, set())
+            out.append(-1.0 if val is None else val)
+        return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    eq = [["a", "b"], ["b", "c"]]
+    val = [2.0, 3.0]
+    qr = [["a", "c"], ["b", "a"], ["a", "e"], ["a", "a"], ["x", "x"]]
+    assert sol.calcEquation(eq, val, qr) == [6.0, 0.5, -1.0, 1.0, -1.0], "Test 1 Failed"
+    assert sol.calcEquation([["a", "b"], ["b", "c"], ["bc", "cd"]], [1.5, 2.5, 5.0], [["a", "c"], ["c", "b"], ["bc", "cd"], ["cd", "bc"]]) == [3.75, 0.4, 5.0, 0.2], "Test 2 Failed"
+    print("All tests passed!")
+````

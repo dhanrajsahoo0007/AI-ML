@@ -26,3 +26,55 @@ Example 2:
 ````text
 - 1 <= len(s) <= 1000
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Same as minimum deletions
+Insertions to palindrome equal deletions to palindrome: n - LPS(s).
+
+1. Compute LPS length.
+2. Return n - LPS.
+
+## Complexity
+
+**Time:** O(n^2).
+
+**Space:** O(n^2).
+
+## Solution
+
+````python
+class Solution:
+    def minInsertions(self, s: str) -> int:
+        n = len(s)
+        dp = [[0] * n for _ in range(n)]
+        for i in range(n - 1, -1, -1):
+            dp[i][i] = 1
+            for j in range(i + 1, n):
+                if s[i] == s[j]:
+                    inner = dp[i + 1][j - 1] if i + 1 <= j - 1 else 0
+                    dp[i][j] = 2 + inner
+                else:
+                    dp[i][j] = max(dp[i + 1][j], dp[i][j - 1])
+        return n - dp[0][n - 1]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minInsertions("zzazz") == 0, "Test 1 Failed"
+    print("Test 1 Passed: already palindrome")
+    assert sol.minInsertions("mbadm") == 2, "Test 2 Failed"
+    print("Test 2 Passed: mbadm sample")
+    assert sol.minInsertions("a") == 0, "Test 3 Failed"
+    print("Test 3 Passed: single letter")
+    assert sol.minInsertions("ab") == 1, "Test 4 Failed"
+    print("Test 4 Passed: insert one to pair")
+    assert sol.minInsertions("leetcode") == 5, "Test 5 Failed"
+    print("Test 5 Passed: mirror non-palindrome parts")
+    print("\nAll test cases passed!")
+````

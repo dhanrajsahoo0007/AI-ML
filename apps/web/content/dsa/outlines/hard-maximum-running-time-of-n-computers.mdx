@@ -25,3 +25,83 @@ Output: 4
 - 1 <= n <= len(batteries) <= 10^5
 - 1 <= batteries[i] <= 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer
+Feasible at T if sum\_i min(batteries\[i\], T) &gt;= n \* T.
+
+1. Upper bound: sum(batteries) // n.
+2. Binary search with mid biased up to avoid stuck loop; shrink if infeasible.
+
+## Complexity
+
+**Time:** O(m log(S/n)) - m = len(batteries), S = sum.
+
+**Space:** O(1) - Only running totals.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement: Maximum Running Time of N Computers
+
+You have n computers. You are given the integer n and a 0-indexed integer array batteries where the ith battery can run a computer for batteries\[i\] minutes.
+You are interested in running all n computers simultaneously using the given batteries.
+Initially, you can insert at most one battery into each computer. After that and at any integer time moment,
+you can remove a battery from a computer and insert another battery any number of times.
+The inserted battery can be a totally new battery or a battery from another computer.
+You may assume that the removing and inserting processes take no time.
+
+Note that the batteries cannot be recharged.
+
+Return the maximum number of minutes you can run all the n computers simultaneously.
+
+Time Complexity: O(n log(sum(batteries))), where n is the length of the batteries array.
+- The binary search takes O(log(sum(batteries))) iterations.
+- In each iteration, we iterate through the batteries array once, which takes O(n) time.
+
+Space Complexity: O(1), as we only use a constant amount of extra space.
+
+This solution uses a binary search approach combined with a greedy algorithm to efficiently find the maximum running time.
+
+Constraints:
+\* 1 &lt;= n &lt;= batteries.length &lt;= 10^5
+\* 1 &lt;= batteries\[i\] &lt;= 10^9
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxRunTime(self, n: int, batteries: List[int]) -> int:
+        def ok(t: int) -> bool:
+            return sum(min(b, t) for b in batteries) >= n * t
+
+        lo, hi = 0, sum(batteries) // n
+        while lo < hi:
+            mid = lo + (hi - lo + 1) // 2
+            if ok(mid):
+                lo = mid
+            else:
+                hi = mid - 1
+        return lo
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.maxRunTime(2, [3, 3, 3]) == 4, "Test 1 Failed"
+    print("Test 1 Passed: three threes two slots")
+    assert sol.maxRunTime(2, [1, 1, 1, 1]) == 2, "Test 2 Failed"
+    print("Test 2 Passed: four ones")
+    assert sol.maxRunTime(3, [10, 10, 3, 5]) == 8, "Test 3 Failed"
+    print("Test 3 Passed: mixed capacities")
+    assert sol.maxRunTime(1, [5]) == 5, "Test 4 Failed"
+    print("Test 4 Passed: one machine")
+    assert sol.maxRunTime(4, [3, 3, 3]) == 0, "Test 5 Failed"
+    print("Test 5 Passed: cannot run four machines long")
+    print("\nAll test cases passed!")
+````

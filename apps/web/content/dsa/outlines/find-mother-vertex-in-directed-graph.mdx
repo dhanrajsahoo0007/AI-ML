@@ -28,3 +28,70 @@ Example 2:
 - 1 <= n <= 10^4
 - 0 <= len(edges) <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Two-pass DFS (Kosaraju idea / finish time)
+
+1. Run DFS on the original graph over all nodes; remember the last vertex finished in DFS.
+2. Run DFS from that vertex on the original graph; if all nodes are visited, it is a mother
+vertex; otherwise return -1.
+
+## Complexity
+
+**Time:** O(V + E).
+
+**Space:** O(V + E).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def findMotherVertex(self, n: int, edges: List[List[int]]) -> int:
+        g = defaultdict(list)
+        for u, v in edges:
+            g[u].append(v)
+
+        seen = [False] * n
+        last = 0
+
+        def dfs(u: int) -> None:
+            nonlocal last
+            seen[u] = True
+            for v in g[u]:
+                if not seen[v]:
+                    dfs(v)
+            last = u
+
+        for i in range(n):
+            if not seen[i]:
+                dfs(i)
+
+        seen2 = [False] * n
+
+        def dfs2(u: int) -> None:
+            seen2[u] = True
+            for v in g[u]:
+                if not seen2[v]:
+                    dfs2(v)
+
+        dfs2(last)
+        return last if all(seen2) else -1
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findMotherVertex(5, [[0, 1], [1, 2], [2, 0], [2, 3], [3, 4]]) in {0, 2}, "Test 1 Failed"
+    assert sol.findMotherVertex(3, [[0, 1], [1, 2]]) == 0, "Test 2 Failed"
+    assert sol.findMotherVertex(2, [[1, 0]]) == 1, "Test 3 Failed"
+    print("All tests passed!")
+````

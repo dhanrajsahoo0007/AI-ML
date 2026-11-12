@@ -28,3 +28,79 @@ Example 2:
 - 1 <= len(s1), len(s2) <= 10^4 in typical statements
 - s1 and s2 consist of lowercase English letters.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Fixed-size sliding window with frequency equality
+Slide a window of length len(s1) over s2 and compare frequency signatures.
+
+1. Count characters in s1 and in the first window of s2.
+2. Slide the window across s2, updating counts in O(1) per step.
+3. Return True if any window matches the s1 counts.
+
+## Complexity
+
+**Time:** O(n) - Linear scan over s2 with constant-time updates per character.
+
+**Space:** O(1) - Twenty-six counters for lowercase English letters.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def checkInclusion(self, s1: str, s2: str) -> bool:
+        m, n = len(s1), len(s2)
+        if m > n:
+            return False
+
+        need: List[int] = [0] * 26
+        window: List[int] = [0] * 26
+
+        def ci(ch: str) -> int:
+            return ord(ch) - ord("a")
+
+        for ch in s1:
+            need[ci(ch)] += 1
+
+        for j in range(m):
+            window[ci(s2[j])] += 1
+
+        if window == need:
+            return True
+
+        for j in range(m, n):
+            window[ci(s2[j - m])] -= 1
+            window[ci(s2[j])] += 1
+            if window == need:
+                return True
+
+        return False
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.checkInclusion("ab", "eidbaooo") is True, "Test 1 Failed"
+    print("Test 1 Passed: permutation present")
+
+    assert sol.checkInclusion("ab", "eidboaoo") is False, "Test 2 Failed"
+    print("Test 2 Passed: permutation absent")
+
+    assert sol.checkInclusion("adc", "dcda") is True, "Test 3 Failed"
+    print("Test 3 Passed: rearranged substring")
+
+    assert sol.checkInclusion("hello", "ooolleoooleh") is False, "Test 4 Failed"
+    print("Test 4 Passed: longer haystack")
+
+    assert sol.checkInclusion("a", "a") is True, "Test 5 Failed"
+    print("Test 5 Passed: single-character strings")
+
+    print("\nAll test cases passed!")
+````

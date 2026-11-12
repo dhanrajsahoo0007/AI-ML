@@ -29,3 +29,158 @@ Example 2:
 ````text
 - Values are unique. Parent pointers are set for preorderSuccessor.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** BST structure cases
+Inorder successor uses right-subtree minimum or nearest ancestor where you came from the left.
+
+1. inorderSuccessor: walk from root with respect to target.val; when going left, remember candidate.
+2. preorderSuccessor: if left exists return left; else if right exists return right; else climb parents.
+
+## Complexity
+
+**Time:** O(h) - Height-bound walk for each query.
+
+**Space:** O(1) - Pointers only for iterative inorder successor; parent climbing is O(h).
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given a Binary Search Tree (BST) and a node in it, find the inorder successor and preorder successor of that node in the BST.
+
+1. Inorder Successor: The node that comes immediately after the given node in an inorder traversal.
+2. Preorder Successor: The node that comes immediately after the given node in a preorder traversal.
+
+Inorder traversal: Left, Root, Right
+Preorder traversal: Root, Left, Right
+Postorder traversal: Left, Right, Root
+
+Time Complexity:
+- Inorder Successor: O(h), where h is the height of the tree.
+- Preorder Successor: O(h), where h is the height of the tree.
+
+Space Complexity:
+- Inorder Successor: O(1), as we're using an iterative solution.
+- Preorder Successor: O(1), as we're using an iterative solution.
+
+Explanation:
+- Inorder Successor:
+- If the node has a right subtree, the successor is the leftmost node in the right subtree.
+- If it doesn't have a right subtree, we go up the tree until we find a node that is a left child of its parent.
+
+- Preorder Successor:
+- If the node has a left child, that's the preorder successor.
+- If it doesn't have a left child but has a right child, that's the preorder successor.
+- If it has neither, we go up the tree until we find a parent that has a right child we haven't visited yet.
+
+Examples:
+4
+/   2   6
+/ \\ / 1  3 5  7
+
+For node 2:
+- Inorder Successor: 3
+- Preorder Successor: 1
+
+For node 4:
+- Inorder Successor: 5
+- Preorder Successor: 2
+
+For node 7:
+- Inorder Successor: None
+- Preorder Successor: None
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(
+        self,
+        val: int = 0,
+        left: Optional["TreeNode"] = None,
+        right: Optional["TreeNode"] = None,
+        parent: Optional["TreeNode"] = None,
+    ):
+        self.val = val
+        self.left = left
+        self.right = right
+        self.parent = parent
+
+
+def build_bst_with_parents(values: list[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v, parent=cur)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v, parent=cur)
+                    break
+                cur = cur.right
+    return root
+
+
+def find_node(root: Optional[TreeNode], val: int) -> Optional[TreeNode]:
+    cur = root
+    while cur:
+        if cur.val == val:
+            return cur
+        cur = cur.left if val < cur.val else cur.right
+    return None
+
+
+class Solution:
+    def inorderSuccessor(self, root: Optional[TreeNode], target: TreeNode) -> Optional[TreeNode]:
+        successor: Optional[TreeNode] = None
+        cur = root
+        while cur:
+            if target.val >= cur.val:
+                cur = cur.right
+            else:
+                successor = cur
+                cur = cur.left
+        return successor
+
+    def preorderSuccessor(self, node: TreeNode) -> Optional[TreeNode]:
+        if node.left:
+            return node.left
+        if node.right:
+            return node.right
+        cur = node
+        while cur.parent:
+            if cur is cur.parent.left and cur.parent.right:
+                return cur.parent.right
+            cur = cur.parent
+        return None
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    root = build_bst_with_parents([4, 2, 6, 1, 3, 5, 7])
+    n2 = find_node(root, 2)
+    ins = sol.inorderSuccessor(root, n2)
+    assert ins is not None and ins.val == 3
+    assert sol.preorderSuccessor(n2).val == 1
+    ins_root = sol.inorderSuccessor(root, root)
+    assert ins_root is not None and ins_root.val == 5
+    assert sol.preorderSuccessor(root).val == 2
+    n7 = find_node(root, 7)
+    assert sol.inorderSuccessor(root, n7) is None
+    assert sol.preorderSuccessor(n7) is None
+    print("\nAll test cases passed!")
+````

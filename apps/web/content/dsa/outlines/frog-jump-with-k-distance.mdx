@@ -31,3 +31,55 @@ Example 2:
 - stones is strictly increasing, stones[0] == 0
 - 1 <= k <= 100
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 1D Dynamic Programming with bounded transitions
+dp\[i\] = minimum cost to stand on stone i using up to k-step jumps backward.
+
+1. dp\[0\]=0; for i&gt;=1, dp\[i\] = min over j in 1..min(i,k) of dp\[i-j\]+\|stones\[i\]-stones\[i-j\]\|.
+2. Return dp\[n-1\].
+
+## Complexity
+
+**Time:** O(n \* k).
+
+**Space:** O(n) for dp (can optimize with deque for special cases, not needed here).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def minJumpCost(self, stones: List[int], k: int) -> int:
+        n = len(stones)
+        dp = [float("inf")] * n
+        dp[0] = 0
+        for i in range(1, n):
+            for j in range(1, min(i, k) + 1):
+                dp[i] = min(dp[i], dp[i - j] + abs(stones[i] - stones[i - j]))
+        return int(dp[n - 1])
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minJumpCost([0, 2, 5], 2) == 5, "Test 1 Failed"
+    print("Test 1 Passed: [0,2,5], k=2 -> 5")
+    assert sol.minJumpCost([0, 1, 2], 2) == 2, "Test 2 Failed"
+    print("Test 2 Passed: three collinear stones -> 2")
+    assert sol.minJumpCost([0, 10], 5) == 10, "Test 3 Failed"
+    print("Test 3 Passed: single jump")
+    assert sol.minJumpCost([0, 1, 2, 4], 2) == 4, "Test 4 Failed"
+    print("Test 4 Passed: [0,1,2,4], k=2 -> 4")
+    stones = [0, 1, 3, 5, 6, 8, 12, 17]
+    assert sol.minJumpCost(stones, 5) == 17, "Test 5 Failed"
+    print("Test 5 Passed: longer sample k=5 -> 17")
+    print("\nAll test cases passed!")
+````

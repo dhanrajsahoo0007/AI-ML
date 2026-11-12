@@ -24,3 +24,59 @@ Output: [2, 2, -1, 8, -1]
 ````text
 - 1 <= len(arr) <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Monotonic Increasing Stack
+Traverse from the right while maintaining increasing values to expose the next smaller.
+
+1. Initialize result with -1 and an empty stack.
+2. Iterate from n-1 to 0, popping while stack top &gt;= arr\[i\].
+3. If stack remains, result\[i\] is stack\[-1\]; push arr\[i\].
+4. Return result.
+
+## Complexity
+
+**Time:** O(n) - Each element enters and leaves the stack once.
+
+**Space:** O(n) - Auxiliary stack and output.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def nearestSmallestToRight(self, arr: List[int]) -> List[int]:
+        n = len(arr)
+        result = [-1] * n
+        stack: List[int] = []
+        for i in range(n - 1, -1, -1):
+            while stack and stack[-1] >= arr[i]:
+                stack.pop()
+            if stack:
+                result[i] = stack[-1]
+            stack.append(arr[i])
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.nearestSmallestToRight([4, 5, 2, 10, 8]) == [2, 2, -1, 8, -1], "Test 1 Failed"
+    assert sol.nearestSmallestToRight([3, 2, 1]) == [2, 1, -1], "Test 2 Failed"
+    assert sol.nearestSmallestToRight([1, 2, 3]) == [-1, -1, -1], "Test 3 Failed"
+    assert sol.nearestSmallestToRight([5, 4, 3, 2, 1]) == [4, 3, 2, 1, -1], "Test 4 Failed"
+    assert sol.nearestSmallestToRight([7]) == [-1], "Test 5 Failed"
+    print("Test 1 Passed: sample")
+    print("Test 2 Passed: descending")
+    print("Test 3 Passed: ascending")
+    print("Test 4 Passed: strict decreasing chain")
+    print("Test 5 Passed: single element")
+    print("\nAll test cases passed!")
+````

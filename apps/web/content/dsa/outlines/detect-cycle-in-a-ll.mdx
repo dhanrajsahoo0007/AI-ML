@@ -29,3 +29,109 @@ Example 2:
 - 0 <= n <= 10^4
 - -10^5 <= Node.val <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Floyd cycle detection
+Detect meeting with slow/fast; reset one pointer to head and move both one step to find the entrance.
+
+1. Phase 1: if no meeting before fast ends, return None.
+2. Phase 2: slow = head; advance slow and fast until equal; return that node.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1).
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given the head of a linked list, return the node where the cycle begins.
+If there is no cycle, return None.
+
+Time Complexity: O(n), where n is the number of nodes in the linked list.
+- In the worst case, we traverse the list twice.
+
+Space Complexity: O(1)- We only use two pointers, regardless of the input size.
+
+Examples:
+1. Input: head = \[3,2,0,-4\], pos = 1 (cycle starts at index 1)
+Output: Node with value 2
+2. Input: head = \[1,2\], pos = 0 (cycle starts at index 0)
+Output: Node with value 1
+3. Input: head = \[1\], pos = -1 (no cycle)
+Output: None
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list_with_cycle(values: List[int], pos: int) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    nodes: List[ListNode] = []
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+        nodes.append(cur)
+    if pos >= 0 and nodes:
+        cur.next = nodes[pos]
+    return dummy.next
+
+
+class Solution:
+    def detectCycle(self, head: Optional[ListNode]) -> Optional[ListNode]:
+        if not head or not head.next:
+            return None
+        slow = fast = head
+        while fast and fast.next:
+            slow = slow.next
+            fast = fast.next.next
+            if slow == fast:
+                break
+        else:
+            return None
+        slow = head
+        while slow != fast:
+            slow = slow.next
+            fast = fast.next
+        return slow
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    c1 = list_to_linked_list_with_cycle([3, 2, 0, -4], 1)
+    r1 = sol.detectCycle(c1)
+    assert r1 is not None and r1.val == 2
+
+    c2 = list_to_linked_list_with_cycle([1, 2], 0)
+    r2 = sol.detectCycle(c2)
+    assert r2 is not None and r2.val == 1
+
+    c3 = list_to_linked_list_with_cycle([1], -1)
+    assert sol.detectCycle(c3) is None
+
+    c4 = list_to_linked_list_with_cycle([1, 2, 3], -1)
+    assert sol.detectCycle(c4) is None
+
+    c5 = list_to_linked_list_with_cycle([1, 2, 3, 4], 2)
+    r5 = sol.detectCycle(c5)
+    assert r5 is not None and r5.val == 3
+
+    print("\nAll test cases passed!")
+````

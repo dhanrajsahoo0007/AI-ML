@@ -33,3 +33,56 @@ Example 3:
 - 2 <= len(properties) <= 10^5
 - 1 <= attack[i], defense[i] <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Sorting Sweep
+Sort by attack descending and defense ascending so earlier characters dominate attack while minimizing defense traps.
+
+1. Sort properties by (-attack, defense).
+2. Track the maximum defense seen while scanning; a character is weak if its defense is less than that max.
+3. Update the running maximum defense after each step.
+
+## Complexity
+
+**Time:** O(n log n) - Sorting dominates.
+
+**Space:** O(1) extra beyond the sort buffer.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def numberOfWeakCharacters(self, properties: List[List[int]]) -> int:
+        properties.sort(key=lambda x: (-x[0], x[1]))
+        ans = 0
+        max_def = 0
+        for _, d in properties:
+            if d < max_def:
+                ans += 1
+            max_def = max(max_def, d)
+        return ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.numberOfWeakCharacters([[5, 5], [6, 3], [3, 6]]) == 0, "Test 1 Failed"
+    print("Test 1 Passed: no strict dominance pair")
+    assert sol.numberOfWeakCharacters([[2, 2], [3, 3]]) == 1, "Test 2 Failed"
+    print("Test 2 Passed: lower attack weaker")
+    assert sol.numberOfWeakCharacters([[1, 5], [10, 4], [4, 3]]) == 1, "Test 3 Failed"
+    print("Test 3 Passed: middle character weak")
+    assert sol.numberOfWeakCharacters([[1, 1], [2, 2], [3, 3]]) == 2, "Test 4 Failed"
+    print("Test 4 Passed: strict chain two weak")
+    assert sol.numberOfWeakCharacters([[7, 9], [10, 6], [8, 10]]) == 1, "Test 5 Failed"
+    print("Test 5 Passed: sample with one weak")
+    print("\nAll test cases passed!")
+````

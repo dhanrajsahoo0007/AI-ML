@@ -27,3 +27,85 @@ Example 2:
 ````text
 - 1 <= n <= 8
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Divide and conquer with memoization
+For each choice of root, combine any left subtree on smaller keys with any right on larger keys.
+
+1. Define helper build(lo, hi) returning all trees for keys in \[lo, hi\].
+2. If lo &gt; hi, return \[None\]; for each root r, combine subtrees from build(lo, r-1) and build(r+1, hi).
+3. Memoize build(lo, hi) to avoid recomputing the same intervals.
+
+## Complexity
+
+**Time:** Exponential in n (Catalan number of trees times work per tree).
+
+**Space:** O(n) recursion depth plus space for all generated trees.
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class TreeNode:
+    __slots__ = ("val", "left", "right")
+
+    def __init__(self, val: int = 0, left: Optional[TreeNode] = None, right: Optional[TreeNode] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+class Solution:
+    def generateTrees(self, n: int) -> List[Optional[TreeNode]]:
+        memo: dict[tuple[int, int], List[Optional[TreeNode]]] = {}
+
+        def build(lo: int, hi: int) -> List[Optional[TreeNode]]:
+            if lo > hi:
+                return [None]
+            key = (lo, hi)
+            if key in memo:
+                return memo[key]
+            out: List[Optional[TreeNode]] = []
+            for r in range(lo, hi + 1):
+                for left in build(lo, r - 1):
+                    for right in build(r + 1, hi):
+                        out.append(TreeNode(r, left, right))
+            memo[key] = out
+            return out
+
+        return build(1, n)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def catalan_count(nn: int) -> int:
+        dp = [0] * (nn + 1)
+        dp[0] = 1
+        for i in range(1, nn + 1):
+            dp[i] = sum(dp[j - 1] * dp[i - j] for j in range(1, i + 1))
+        return dp[nn]
+
+    assert len(sol.generateTrees(1)) == catalan_count(1), "Test 1 Failed"
+    print("Test 1 Passed: one tree for n=1")
+    assert len(sol.generateTrees(2)) == catalan_count(2), "Test 2 Failed"
+    print("Test 2 Passed: two trees for n=2")
+    assert len(sol.generateTrees(3)) == 5, "Test 3 Failed"
+    print("Test 3 Passed: five trees for n=3")
+    roots = sol.generateTrees(3)
+    assert any(t and t.val == 2 for t in roots), "Test 4 Failed"
+    print("Test 4 Passed: some root is 2 among n=3 trees")
+    assert len(sol.generateTrees(4)) == 14, "Test 5 Failed"
+    print("Test 5 Passed: fourteen trees for n=4")
+    print("\nAll test cases passed!")
+````

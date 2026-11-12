@@ -33,3 +33,67 @@ Example 2:
 - 1 <= nums[i] <= 10^9
 - 1 <= k <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy with Heap
+Always pick the largest element (greedy). A max-heap efficiently provides
+the largest element and allows replacing it with its reduced value.
+
+1. Build a max-heap (negated values).
+2. For k operations: pop the max, add to score, push ceil(max/3) back.
+3. Return total score.
+
+## Complexity
+
+**Time:** O(n + k log n)
+- O(n) for heapify, O(k log n) for k operations.
+
+**Space:** O(n) for the heap.
+
+## Solution
+
+````python
+import heapq
+import math
+from typing import List
+
+
+class Solution:
+    def maxKelements(self, nums: List[int], k: int) -> int:
+        max_heap = [-num for num in nums]
+        heapq.heapify(max_heap)
+
+        score = 0
+        for _ in range(k):
+            max_elem = -heapq.heappop(max_heap)
+            score += max_elem
+            # Element decays but stays eligible for future greedy picks.
+            heapq.heappush(max_heap, -math.ceil(max_elem / 3))
+
+        return score
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: All same values
+    assert sol.maxKelements([10, 10, 10, 10, 10], 5) == 50, "Test 1 Failed"
+    print("Test 1 Passed: [10,10,10,10,10], k=5 -> 50")
+
+    # Test Case 2: Mixed values
+    assert sol.maxKelements([1, 10, 3, 3, 3], 3) == 17, "Test 2 Failed"
+    print("Test 2 Passed: [1,10,3,3,3], k=3 -> 17")
+
+    # Test Case 3: Single element
+    result = sol.maxKelements([5], 2)
+    assert result == 5 + 2, "Test 3 Failed"
+    print(f"Test 3 Passed: [5], k=2 -> {result}")
+
+    print("\nAll test cases passed!")
+````

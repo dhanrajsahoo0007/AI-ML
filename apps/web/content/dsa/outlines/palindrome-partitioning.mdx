@@ -28,3 +28,78 @@ Example 2:
 - 1 <= len(s) <= 16
 - s contains lowercase English letters.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Partition backtracking
+Extend the current palindrome prefix; when valid, recurse on the suffix.
+
+1. From index \`start\`, try every end so that s\[start:end+1\] is a palindrome.
+2. Push that substring, recurse from end + 1, then pop.
+3. When start == len(s), record the path.
+
+## Complexity
+
+**Time:** O(n \* 2^n) - palindrome checks per substring choice.
+
+**Space:** O(n) - recursion depth and path.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def partition(self, s: str) -> List[List[str]]:
+        result: List[List[str]] = []
+
+        def is_palindrome(left: int, right: int) -> bool:
+            while left < right:
+                if s[left] != s[right]:
+                    return False
+                left += 1
+                right -= 1
+            return True
+
+        def backtrack(start: int, path: List[str]) -> None:
+            if start == len(s):
+                result.append(path[:])
+                return
+            for end in range(start, len(s)):
+                if is_palindrome(start, end):
+                    path.append(s[start : end + 1])
+                    backtrack(end + 1, path)
+                    path.pop()
+
+        backtrack(0, [])
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def norm(parts: List[List[str]]) -> List[tuple]:
+        return sorted(tuple(p) for p in parts)
+
+    assert norm(sol.partition("aab")) == norm([["a", "a", "b"], ["aa", "b"]]), "Test 1 Failed"
+    print("Test 1 Passed: aab")
+
+    assert sol.partition("a") == [["a"]], "Test 2 Failed"
+    print("Test 2 Passed: single letter")
+
+    assert ["a", "b", "b", "a"] in sol.partition("abba"), "Test 3 Failed"
+    print("Test 3 Passed: abba contains char partition")
+
+    assert norm(sol.partition("aaa")) == norm(
+        [["a", "a", "a"], ["a", "aa"], ["aa", "a"], ["aaa"]]
+    ), "Test 4 Failed"
+    print("Test 4 Passed: aaa palindrome splits")
+
+    print("\nAll test cases passed!")
+````

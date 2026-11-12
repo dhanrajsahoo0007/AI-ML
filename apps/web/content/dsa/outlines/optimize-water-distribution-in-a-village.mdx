@@ -30,3 +30,66 @@ Example 2:
 - wells.length == n
 - 1 <= len(pipes) <= 10^4
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - MST (Kruskal) with virtual well node
+
+1. Add node 0 connected to each house i with edge weight wells\[i-1\].
+2. Run Kruskal MST on all edges (virtual well edges + pipes); sum chosen weights.
+
+## Complexity
+
+**Time:** O(E log E) sorting edges.
+
+**Space:** O(n + E) for DSU and edges.
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def minCostToSupplyWater(self, n: int, wells: List[int], pipes: List[List[int]]) -> int:
+        edges = []
+        for i, w in enumerate(wells, start=1):
+            edges.append((w, 0, i))
+        for a, b, c in pipes:
+            edges.append((c, a, b))
+        edges.sort()
+        parent = list(range(n + 1))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> bool:
+            ra, rb = find(a), find(b)
+            if ra == rb:
+                return False
+            parent[rb] = ra
+            return True
+
+        total = 0
+        for w, a, b in edges:
+            if union(a, b):
+                total += w
+        return total
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minCostToSupplyWater(3, [1, 2, 2], [[1, 2, 1], [2, 3, 1]]) == 3, "Test 1 Failed"
+    assert sol.minCostToSupplyWater(2, [1, 1], [[1, 2, 1], [1, 2, 2]]) == 2, "Test 2 Failed"
+    assert sol.minCostToSupplyWater(1, [1], []) == 1, "Test 3 Failed"
+    print("All tests passed!")
+````

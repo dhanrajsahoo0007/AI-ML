@@ -24,3 +24,60 @@ Output: [14, 10]
 ````text
 - 1 <= len(nums), len(queries) <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sort + Prefix Sum + Binary Search
+Sort nums; for query q, split into elements &lt; q and &gt; q; costs use prefix sums and index counts.
+
+1. Sort nums and build prefix sums.
+2. For each q, bisect\_left for split index; left cost = q \* i - pref\[i\], right cost = (pref\[n\]-pref\[i\]) - q \* (n-i).
+
+## Complexity
+
+**Time:** O((n + m) log n) - Sort once, each query O(log n).
+
+**Space:** O(n) - Prefix array.
+
+## Solution
+
+````python
+from bisect import bisect_left
+from typing import List
+
+
+class Solution:
+    def minOperations(self, nums: List[int], queries: List[int]) -> List[int]:
+        nums.sort()
+        n = len(nums)
+        pref = [0] * (n + 1)
+        for i in range(n):
+            pref[i + 1] = pref[i] + nums[i]
+        out: List[int] = []
+        for q in queries:
+            i = bisect_left(nums, q)
+            left_ops = q * i - pref[i]
+            right_ops = (pref[n] - pref[i]) - q * (n - i)
+            out.append(left_ops + right_ops)
+        return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minOperations([3, 1, 6, 8], [1, 5]) == [14, 10], "Test 1 Failed"
+    print("Test 1 Passed: two queries")
+    assert sol.minOperations([2, 9, 6, 3], [10]) == [20], "Test 2 Failed"
+    print("Test 2 Passed: pull all up to ten")
+    assert sol.minOperations([1, 2, 3], [2]) == [2], "Test 3 Failed"
+    print("Test 3 Passed: median query")
+    assert sol.minOperations([5], [5]) == [0], "Test 4 Failed"
+    print("Test 4 Passed: singleton zero cost")
+    assert sol.minOperations([1, 1, 1, 10], [1]) == [9], "Test 5 Failed"
+    print("Test 5 Passed: one heavy outlier")
+    print("\nAll test cases passed!")
+````

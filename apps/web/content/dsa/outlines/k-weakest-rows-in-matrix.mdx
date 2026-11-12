@@ -32,3 +32,80 @@ Example 2:
 - 1 <= k <= m
 - matrix[i][j] is either 0 or 1.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap with Other DS (Heap + Binary Search)
+Binary search counts soldiers per row in O(log n). A max-heap of size k
+keeps the k weakest rows efficiently.
+
+1. For each row, count soldiers using binary search or sum.
+2. Push (-count, -index) to a max-heap. If size &gt; k, pop the strongest.
+3. Extract and return indices in weakest-to-strongest order.
+
+## Complexity
+
+**Time:** O(m log k) using sum, O(m log n + m log k) using binary search
+
+**Space:** O(k) for the heap
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def kWeakestRows(self, mat: List[List[int]], k: int) -> List[int]:
+        heap = []
+        for idx, row in enumerate(mat):
+            soldiers = sum(row)
+            heapq.heappush(heap, (-soldiers, -idx))
+            if len(heap) > k:
+                # Drop the strongest row seen so far (largest soldier count, then largest index).
+                heapq.heappop(heap)
+
+        return [-idx for _, idx in sorted(heap, reverse=True)]
+
+    def kWeakestRowsBinarySearch(self, mat: List[List[int]], k: int) -> List[int]:
+        def count_soldiers(row):
+            lo, hi = 0, len(row) - 1
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                if row[mid] == 1:
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+            return lo
+
+        queue = [(count_soldiers(row), idx) for idx, row in enumerate(mat)]
+        heapq.heapify(queue)
+        return [idx for _, idx in heapq.nsmallest(k, queue)]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    mat1 = [[1,1,0,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,1,0,0,0],[1,1,1,1,1]]
+
+    # Test Case 1: Heap approach
+    assert sol.kWeakestRows(mat1, 3) == [2, 0, 3], "Test 1 Failed"
+    print("Test 1 Passed: heap approach -> [2,0,3]")
+
+    # Test Case 2: Binary search approach
+    assert sol.kWeakestRowsBinarySearch(mat1, 3) == [2, 0, 3], "Test 2 Failed"
+    print("Test 2 Passed: binary search approach -> [2,0,3]")
+
+    # Test Case 3: Different matrix
+    mat2 = [[1,0,0,0],[1,1,1,1],[1,0,0,0],[1,0,0,0]]
+    assert sol.kWeakestRows(mat2, 2) == [0, 2], "Test 3 Failed"
+    print("Test 3 Passed: -> [0,2]")
+
+    print("\nAll test cases passed!")
+````

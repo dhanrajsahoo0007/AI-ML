@@ -26,3 +26,57 @@ Output: 7
 - -10^4 <= nums[i] <= 10^4
 - 2 <= k <= 10^4
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum + Modulo Counting
+Subarray sum divisible by k iff prefix remainders match after normalizing mods.
+
+1. Track cumulative sum mod k, normalized to \[0, k-1\].
+2. Add freq\[cur\] to answer, then increment freq\[cur\].
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(k) for the remainder frequency array or dict.
+
+## Solution
+
+````python
+from collections import defaultdict
+from typing import List
+
+
+class Solution:
+    def subarraysDivByK(self, nums: List[int], k: int) -> int:
+        freq: defaultdict[int, int] = defaultdict(int)
+        freq[0] = 1
+        cur = 0
+        ans = 0
+        for x in nums:
+            cur = (cur + x) % k
+            ans += freq[cur]
+            freq[cur] += 1
+        return ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.subarraysDivByK([4, 5, 0, -2, -3, 1], 5) == 7, "Test 1 Failed"
+    print("Test 1 Passed: sample")
+    assert sol.subarraysDivByK([5], 9) == 0, "Test 2 Failed"
+    print("Test 2 Passed: no divisible subarray")
+    assert sol.subarraysDivByK([1, 2, 3, 4, 5], 5) == 4, "Test 3 Failed"
+    print("Test 3 Passed: positives")
+    assert sol.subarraysDivByK([0, 0], 5) == 3, "Test 4 Failed"
+    print("Test 4 Passed: zeros")
+    assert sol.subarraysDivByK([-1, 2, -3, 4, -5], 2) == 6, "Test 5 Failed"
+    print("Test 5 Passed: negatives")
+    print("\nAll test cases passed!")
+````

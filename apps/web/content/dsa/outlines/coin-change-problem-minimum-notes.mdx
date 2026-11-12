@@ -34,3 +34,65 @@ Example 3:
 - Denominations are positive integers
 - amount >= 0
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Change Making
+Process denominations from largest to smallest, taking as many of each as fits.
+
+1. Sort denominations descending without mutating the caller's list.
+2. For each denomination, take floor(amount / d) pieces and reduce the remainder.
+3. If remainder is zero, return a dict of denomination to count; otherwise return an empty dict meaning impossible under this greedy.
+
+## Complexity
+
+**Time:** O(m log m + m) for m denominations (sort + scan).
+
+**Space:** O(m) for the sorted copy and result mapping.
+
+## Solution
+
+````python
+from typing import Dict, List
+
+
+class Solution:
+    def getUsedNotes(self, amount: int, denominations: List[int]) -> Dict[int, int]:
+        if amount == 0:
+            return {}
+        used: Dict[int, int] = {}
+        remaining = amount
+        # Always grab the largest note that still fits — classic cashier's algorithm.
+        for note in sorted(denominations, reverse=True):
+            if remaining >= note:
+                count = remaining // note
+                used[note] = count
+                remaining -= count * note
+        if remaining != 0:
+            # Under arbitrary denominations greedy can leave a positive remainder; signal failure.
+            return {}
+        return used
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r1 = sol.getUsedNotes(655, [5, 10, 20, 100, 200])
+    assert r1 == {200: 3, 20: 2, 10: 1, 5: 1}, "Test 1 Failed"
+    print("Test 1 Passed: 655 breakdown")
+    r2 = sol.getUsedNotes(30, [5, 10, 25])
+    assert r2 == {25: 1, 5: 1}, "Test 2 Failed"
+    print("Test 2 Passed: 30 with mixed denom")
+    assert sol.getUsedNotes(7, [2, 4]) == {}, "Test 3 Failed"
+    print("Test 3 Passed: impossible amount")
+    assert sol.getUsedNotes(0, [1, 5]) == {}, "Test 4 Failed"
+    print("Test 4 Passed: zero amount edge")
+    r5 = sol.getUsedNotes(100, [1, 50, 100])
+    assert sum(r5.values()) == 1 and r5.get(100) == 1, "Test 5 Failed"
+    print("Test 5 Passed: single large note")
+    print("\nAll test cases passed!")
+````

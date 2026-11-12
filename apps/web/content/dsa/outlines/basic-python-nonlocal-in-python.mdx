@@ -1,0 +1,100 @@
+---
+title: "nonlocal in python"
+description: "In Python, assigning to a name inside a nested function makes that name local to the inner function unless declared otherwise."
+topics: [basic-python]
+number: "02"
+order: 2000000000
+status: outline
+---
+
+In Python, assigning to a name inside a nested function makes that name local
+to the inner function unless declared otherwise. Incrementing an outer
+variable from an inner function therefore requires the \`nonlocal\` keyword;
+without it, reading then assigning the same name raises UnboundLocalError.
+
+## Examples
+
+````text
+Example 1:
+    With nonlocal: outer `count` starts at 0, inner increments it once →
+    outer returns 1.
+
+Example 2:
+    Without nonlocal: `count += 1` in inner treats `count` as local but it is
+    read before assignment → UnboundLocalError when inner runs.
+````
+
+## Constraints
+
+````text
+- Illustration only; no input size constraints.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Closure and lexical scoping
+Nested functions close over outer bindings; \`nonlocal\` opts an enclosing
+name into the assignment scope so updates affect the outer frame.
+
+1. Define an outer counter initialized to zero.
+2. Define an inner function that increments that counter.
+3. Declare \`nonlocal count\` before incrementing so the outer binding updates.
+4. Call inner from outer and return the updated counter.
+
+## Complexity
+
+**Time:** O(1) — fixed number of operations.
+
+**Space:** O(1) — only integer state and nested function objects.
+
+## Solution
+
+````python
+class Solution:
+    def count_after_nested_increment(self) -> int:
+        count = 0
+
+        def inner() -> None:
+            nonlocal count
+            count += 1
+
+        inner()
+        return count
+
+    def attempt_increment_without_nonlocal(self) -> None:
+        count = 0
+
+        def inner() -> None:
+            count += 1
+
+        inner()
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.count_after_nested_increment() == 1, "Test 1 Failed"
+    print("Test 1 Passed: nonlocal allows nested increment")
+
+    raised = False
+    try:
+        sol.attempt_increment_without_nonlocal()
+    except UnboundLocalError:
+        raised = True
+    assert raised, "Test 2 Failed: expected UnboundLocalError without nonlocal"
+    print("Test 2 Passed: missing nonlocal raises UnboundLocalError")
+
+    assert Solution().count_after_nested_increment() == 1, "Test 3 Failed"
+    print("Test 3 Passed: fresh instance returns 1")
+
+    s = Solution()
+    assert s.count_after_nested_increment() == 1, "Test 4 Failed"
+    assert s.count_after_nested_increment() == 1, "Test 4 Failed: second call"
+    print("Test 4 Passed: each call uses fresh local count in method scope")
+
+    print("\nAll test cases passed!")
+````

@@ -29,3 +29,88 @@ Example 2:
 - -10^4 <= nums[i] <= 10^4
 - nums is sorted in non-decreasing order.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two pointers from ends
+The largest squared magnitude always comes from one of the ends because negatives become large positives.
+
+1. Allocate a result array of the same length filled with zeros.
+2. Set left to 0 and right to n - 1; fill the result from index n - 1 down to 0.
+3. Compare nums\[left\]^2 and nums\[right\]^2; place the larger at the current result index and move that pointer.
+4. Continue until the result is fully populated.
+
+Restored notes (archived workbook):
+
+Squares of a Sorted Array
+
+Given an integer array nums sorted in non-decreasing order, return an array
+of the squares of each number sorted in non-decreasing order.
+
+Time Complexity: O(n), where n is the length of the input array.
+Space Complexity: O(n) for the result array.
+
+Explanation:
+- The input array is sorted, but may contain negative numbers.
+- The largest squares will be from either the leftmost (most negative)
+or rightmost (most positive) elements.
+- We use two pointers, one at each end of the array, to compare squares
+and fill the result array from the end.
+
+Examples:
+1. Input: nums = \[-4,-1,0,3,10\]
+Output: \[0,1,9,16,100\]
+Explanation: After squaring, the array becomes \[16,1,0,9,100\].
+After sorting, it becomes \[0,1,9,16,100\].
+
+2. Input: nums = \[-7,-3,2,3,11\]
+Output: \[4,9,9,49,121\]
+
+## Complexity
+
+**Time:** O(n) - Each element is considered once when moving pointers.
+
+**Space:** O(n) - The output array is separate from the input.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def sortedSquares(self, nums: List[int]) -> List[int]:
+        n = len(nums)
+        result = [0] * n
+        left, right = 0, n - 1
+        for pos in range(n - 1, -1, -1):
+            left_sq = nums[left] * nums[left]
+            right_sq = nums[right] * nums[right]
+            if left_sq > right_sq:
+                result[pos] = left_sq
+                left += 1
+            else:
+                result[pos] = right_sq
+                right -= 1
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.sortedSquares([-4, -1, 0, 3, 10]) == [0, 1, 9, 16, 100], "Test 1 Failed"
+    print("Test 1 Passed: mixed negatives and positives")
+    assert sol.sortedSquares([-7, -3, 2, 3, 11]) == [4, 9, 9, 49, 121], "Test 2 Failed"
+    print("Test 2 Passed: another mixed case")
+    assert sol.sortedSquares([1, 2, 3]) == [1, 4, 9], "Test 3 Failed"
+    print("Test 3 Passed: all non-negative")
+    assert sol.sortedSquares([-3, -2, -1]) == [1, 4, 9], "Test 4 Failed"
+    print("Test 4 Passed: all negative")
+    assert sol.sortedSquares([0]) == [0], "Test 5 Failed"
+    print("Test 5 Passed: single zero")
+    print("\nAll test cases passed!")
+````

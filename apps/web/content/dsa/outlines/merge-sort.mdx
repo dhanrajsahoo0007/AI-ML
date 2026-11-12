@@ -24,3 +24,81 @@ Output: [11, 12, 22, 25, 34, 64, 90]
 ````text
 - Length can be zero or more; elements fit in typical integer comparisons
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Divide and conquer
+Split the problem into two independent halves of roughly equal size, solve each
+recursively, and combine sorted results with a linear merge.
+
+1. If length &lt;= 1, return a copy of the array.
+2. Split at mid, recursively merge\_sort left and right slices.
+3. Merge two sorted lists with two pointers, appending the smaller each step.
+
+Restored notes (archived workbook):
+
+The main function merge\_sort:
+Base case: If the array has 1 or fewer elements, it's already sorted, so we return it.
+Recursive case:
+We divide the array into two halves.
+We recursively call merge\_sort on both halves.
+We merge the sorted halves using the merge function.
+
+Time complexity: O(n log n) in all cases
+Space complexity: O(n) for the temporary arrays in the merge step
+
+## Complexity
+
+**Time:** O(n log n) - standard merge sort recurrence
+
+**Space:** O(n) - auxiliary merged arrays and O(log n) stack
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def merge_sort(self, arr: List[int]) -> List[int]:
+        if len(arr) <= 1:
+            return list(arr)
+        mid = len(arr) // 2
+        left = self.merge_sort(arr[:mid])
+        right = self.merge_sort(arr[mid:])
+        return self._merge(left, right)
+
+    def _merge(self, left: List[int], right: List[int]) -> List[int]:
+        result: List[int] = []
+        i = j = 0
+        while i < len(left) and j < len(right):
+            if left[i] <= right[j]:
+                result.append(left[i])
+                i += 1
+            else:
+                result.append(right[j])
+                j += 1
+        result.extend(left[i:])
+        result.extend(right[j:])
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.merge_sort([]) == [], "Test 1 Failed"
+    assert sol.merge_sort([5]) == [5], "Test 2 Failed"
+    assert sol.merge_sort([3, 1, 2]) == [1, 2, 3], "Test 3 Failed"
+    assert sol.merge_sort([64, 34, 25, 12, 22, 11, 90]) == [11, 12, 22, 25, 34, 64, 90], "Test 4 Failed"
+    assert sol.merge_sort([2, 2, 1]) == [1, 2, 2], "Test 5 Failed"
+    print("Test 1 Passed: empty")
+    print("Test 2 Passed: single")
+    print("Test 3 Passed: small perm")
+    print("Test 4 Passed: classic example")
+    print("Test 5 Passed: duplicates")
+    print("\nAll test cases passed!")
+````

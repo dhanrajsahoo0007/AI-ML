@@ -30,3 +30,64 @@ Example 2:
 - 1 <= len(nums) <= 1000
 - Values are unique and form a valid BST insertion sequence.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Multinomial recursion on left/right insertion subsequences
+Split elements into left and right sets relative to the root; interleave them while preserving internal relative order using binomial coefficients.
+
+1. Choose root as first element of the current subarray.
+2. Partition remaining elements into smaller and larger lists.
+3. Multiply C(nL+nR, nL) by recursive counts for each side.
+4. Subtract one at the end to exclude the original ordering.
+
+## Complexity
+
+**Time:** O(n^2) in worst case due to list partitions (small n per problem limits).
+
+**Space:** O(n) - Recursion stack and temporary lists.
+
+## Solution
+
+````python
+import math
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+class Solution:
+    MOD = 10**9 + 7
+
+    def numOfWays(self, nums: List[int]) -> int:
+        def count(arr: List[int]) -> int:
+            if len(arr) <= 2:
+                return 1
+            root_val = arr[0]
+            left = [x for x in arr[1:] if x < root_val]
+            right = [x for x in arr[1:] if x > root_val]
+            ways = math.comb(len(left) + len(right), len(left))
+            return ways * count(left) % self.MOD * count(right) % self.MOD
+
+        return (count(nums) - 1) % self.MOD
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.numOfWays([2, 1, 3]) == 1
+    assert sol.numOfWays([3, 4, 5, 1, 2]) == 5
+    assert sol.numOfWays([1, 2, 3]) == 0
+    assert sol.numOfWays([3, 1, 2, 4, 5]) == 5
+    assert sol.numOfWays([8, 4, 12, 2, 6, 10, 14]) >= 0
+    print("\nAll test cases passed!")
+````

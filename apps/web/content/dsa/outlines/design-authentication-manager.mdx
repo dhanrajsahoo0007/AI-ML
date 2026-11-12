@@ -26,3 +26,65 @@ Example 2:
 - 1 <= timeToLive, currentTime <= 10^8
 - tokenId are non-empty strings; at most 10^4 calls total
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hash map (lazy expiry)
+Map each token to its expiry timestamp; count by scanning values (or periodic cleanup).
+
+1. Store tokenId -&gt; expiryTime in a dictionary.
+2. generate overwrites expiry to currentTime + TTL.
+3. renew extends only if expiry &gt; currentTime.
+4. countUnexpiredTokens returns the number of entries with expiry &gt; currentTime.
+
+## Complexity
+
+**Time:** O(1) amortized per generate/renew; O(n) per count where n is live tokens
+
+**Space:** O(n) - one entry per generated token
+
+## Solution
+
+````python
+from typing import Dict
+
+
+class Solution:
+    def __init__(self, timeToLive: int) -> None:
+        self._ttl = timeToLive
+        self._expiry: Dict[str, int] = {}
+
+    def generate(self, tokenId: str, currentTime: int) -> None:
+        self._expiry[tokenId] = currentTime + self._ttl
+
+    def renew(self, tokenId: str, currentTime: int) -> None:
+        if tokenId in self._expiry and self._expiry[tokenId] > currentTime:
+            self._expiry[tokenId] = currentTime + self._ttl
+
+    def countUnexpiredTokens(self, currentTime: int) -> int:
+        return sum(1 for t in self._expiry.values() if t > currentTime)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution(10)
+    sol.generate("a", 1)
+    assert sol.countUnexpiredTokens(2) == 1, "Test 1 Failed"
+    print("Test 1 Passed: one live token")
+    sol.generate("b", 5)
+    assert sol.countUnexpiredTokens(6) == 2, "Test 2 Failed"
+    print("Test 2 Passed: two tokens")
+    sol.renew("a", 8)
+    assert sol._expiry["a"] == 18, "Test 3 Failed"
+    print("Test 3 Passed: renew extends expiry")
+    sol.renew("b", 20)
+    assert sol._expiry["b"] == 15, "Test 3b Failed"
+    print("Test 4 Passed: expired token not renewed")
+    assert sol.countUnexpiredTokens(17) == 1, "Test 5 Failed"
+    print("Test 5 Passed: only renewed token a is still live at t=17")
+    print("\nAll test cases passed!")
+````

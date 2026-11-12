@@ -29,3 +29,162 @@ Example 2:
 - The number of nodes is in the range [0, 10^4].
 - Each node has a distinct value in typical formulations; here deletion follows standard BST rules.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** BST deletion with restructuring
+Locate the node, then replace it with None, a single child, or attach the right subtree under the
+rightmost node of the left subtree (or symmetric inorder-successor variant).
+
+1. If root is None, return None.
+2. If root.val equals key, return a helper that merges left and right subtrees per chosen policy.
+3. Otherwise walk left or right until the parent of the target is found and rewire its pointer.
+4. Return the original root reference held before the walk.
+
+## Complexity
+
+**Time:** O(h) - Search plus pointer updates along one path; helper may walk a subtree edge.
+
+**Space:** O(h) - Recursion depth for findLastRight; O(1) for the iterative outer search.
+
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Implement a function to delete a node with a given key from a Binary Search Tree (BST).
+
+Explanation:
+This implementation uses a two-step approach to delete a node from a BST:
+
+1. Finding the node:
+- The deleteNode method iteratively traverses the tree to find the node to be deleted.
+- It keeps track of the parent node to adjust its left or right pointer after deletion.
+
+2. Deleting the node:
+- The actual deletion is handled by the helper method.
+- There are three cases to consider:
+a) Node has no left child: Replace the node with its right child.
+b) Node has no right child: Replace the node with its left child.
+c) Node has both children:
+- Find the rightmost node in the left subtree (lastRight).
+- Attach the right subtree to this lastRight node.
+- Replace the node to be deleted with its left child.
+
+This approach differs from the traditional BST deletion method:
+- Instead of finding the in-order successor (leftmost node in the right subtree),
+it finds the rightmost node in the left subtree.
+- This method potentially reduces the number of pointer adjustments in some cases.
+
+The findLastRight method recursively finds the rightmost node in a given subtree.
+
+This implementation maintains the BST property by ensuring that all nodes in the
+left subtree remain less than the nodes in the right subtree after deletion.
+
+Time Complexity: O(h), where h is the height of the tree.
+- In a balanced BST, h = log(n), where n is the number of nodes.
+- In the worst case (skewed tree), h = n.
+
+Space Complexity:
+- O(1) for the iterative part in deleteNode.
+- O(h) for the recursive findLastRight method due to the call stack.
+
+Note: While this method works correctly, it may lead to an unbalanced tree over multiple deletions.
+In practice, self-balancing BSTs like AVL or Red-Black trees are often preferred for maintaining balance after insertions and deletions.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: list[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    ins = Solution()
+    for v in values:
+        root = ins.insertIntoBST(root, v)
+    return root
+
+
+def inorder_values(root: Optional[TreeNode]) -> list[int]:
+    if not root:
+        return []
+    return inorder_values(root.left) + [root.val] + inorder_values(root.right)
+
+
+class Solution:
+    def insertIntoBST(self, root: Optional[TreeNode], val: int) -> TreeNode:
+        if root is None:
+            return TreeNode(val)
+        if val < root.val:
+            root.left = self.insertIntoBST(root.left, val)
+        elif val > root.val:
+            root.right = self.insertIntoBST(root.right, val)
+        return root
+
+    def deleteNode(self, root: Optional[TreeNode], key: int) -> Optional[TreeNode]:
+        # Empty tree — nothing to delete
+        if root is None:
+            return None
+        # Root is the target — rewire using the merge helper
+        if root.val == key:
+            return self._merge_delete(root)
+        dummy = root  # Preserve original root while we walk down to the parent of `key`
+        while root:
+            if root.val > key:
+                # Target (if present) lives in the left subtree
+                if root.left and root.left.val == key:
+                    root.left = self._merge_delete(root.left)
+                    break
+                root = root.left
+            else:
+                # Target (if present) lives in the right subtree
+                if root.right and root.right.val == key:
+                    root.right = self._merge_delete(root.right)
+                    break
+                root = root.right
+        return dummy
+
+    def _merge_delete(self, root: TreeNode) -> Optional[TreeNode]:
+        # Case 1: no left child — promote the right subtree
+        if root.left is None:
+            return root.right
+        # Case 2: no right child — promote the left subtree
+        if root.right is None:
+            return root.left
+        # Case 3: two children — hang the entire right subtree off the rightmost node of the left subtree
+        right_child = root.right
+        last_right = self._find_last_right(root.left)
+        last_right.right = right_child
+        return root.left
+
+    def _find_last_right(self, root: TreeNode) -> TreeNode:
+        # Deepest node along the right spine of this subtree
+        if root.right is None:
+            return root
+        return self._find_last_right(root.right)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r = build_bst_insert([5, 3, 7, 1, 4, 6, 8])
+    r = sol.deleteNode(r, 1)
+    assert inorder_values(r) == [3, 4, 5, 6, 7, 8]
+    r = sol.deleteNode(r, 7)
+    assert inorder_values(r) == [3, 4, 5, 6, 8]
+    r = sol.deleteNode(r, 3)
+    assert inorder_values(r) == [4, 5, 6, 8]
+    r = sol.deleteNode(r, 99)
+    assert inorder_values(r) == [4, 5, 6, 8]
+    assert sol.deleteNode(None, 1) is None
+    print("\nAll test cases passed!")
+````

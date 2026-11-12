@@ -25,3 +25,107 @@ Output: 3
 - n == len(position) == len(speed)
 - 1 <= n <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sort by Position + Monotone Stack of Arrival Times
+Process cars nearest the target first; each slower arrival time starts a new fleet.
+
+1. Pair positions with speeds and sort descending by position.
+2. For each car compute time to target; push time if it exceeds the last fleet time.
+3. Return stack length.
+
+Restored notes (archived workbook):
+
+Car Fleet Problem
+
+There are n cars traveling to a target destination. Each car has a starting position and speed.
+A car can catch up to another car but cannot pass it. When cars catch up, they form a fleet
+moving at the speed of the slowest car in the fleet.
+
+Task: Determine the number of car fleets that will arrive at the destination.
+
+Input:
+- target: int, the destination mile
+- position: List\[int\], starting positions of cars
+- speed: List\[int\], speeds of cars
+
+Output:
+- int: Number of car fleets arriving at the destination
+
+Time Complexity: O(n log n), where n is the number of cars
+Space Complexity: O(n) for storing the cars and the stack
+
+Approach:
+1. Sort cars by position in descending order
+2. Calculate time to reach target for each car
+3. Use a stack to keep track of fleets
+4. Compare each car's time with the fleet in front
+5. Count the number of fleets in the stack
+
+Detailed Explanation:
+1. Sorting:
+- We sort the cars by their positions in descending order.
+- This allows us to process cars from right to left (closest to the target first).
+
+2. Time Calculation:
+- For each car, we calculate the time it will take to reach the target.
+- Time = (target - position) / speed
+
+3. Stack Usage:
+- We use a stack to keep track of the time each car or fleet will take to reach the target.
+- The stack represents separate fleets.
+
+4. Fleet Formation:
+- If a car takes longer to reach the target than the car/fleet in front (top of stack),
+it forms a new fleet (push to stack).
+- If it takes less or equal time, it will catch up and join the fleet in front (don't push).
+
+5. Result:
+- The number of elements in the stack at the end represents the number of separate fleets.
+
+This approach efficiently solves the problem without needing to simulate the actual movement of cars.
+It works because we only need to know if cars will form fleets, not the exact positions where they meet.
+
+## Complexity
+
+**Time:** O(n log n) - Sorting dominates.
+
+**Space:** O(n) - Stores merged car tuples and stack.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def carFleet(self, target: int, position: List[int], speed: List[int]) -> int:
+        cars = sorted(zip(position, speed), reverse=True)
+        stack: List[float] = []
+        for pos, spd in cars:
+            time = (target - pos) / spd
+            if not stack or time > stack[-1]:
+                stack.append(time)
+        return len(stack)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.carFleet(12, [10, 8, 0, 5, 3], [2, 4, 1, 1, 3]) == 3, "Test 1 Failed"
+    assert sol.carFleet(10, [3], [3]) == 1, "Test 2 Failed"
+    assert sol.carFleet(100, [0, 2, 4], [4, 2, 1]) == 1, "Test 3 Failed"
+    assert sol.carFleet(10, [0, 4, 2], [2, 1, 3]) == 1, "Test 4 Failed"
+    assert sol.carFleet(10, [6, 8], [3, 2]) == 2, "Test 5 Failed"
+    print("Test 1 Passed: multi fleet merge")
+    print("Test 2 Passed: single car")
+    print("Test 3 Passed: nested catch-up")
+    print("Test 4 Passed: nested catch-up to one fleet")
+    print("Test 5 Passed: independent lanes")
+    print("\nAll test cases passed!")
+````

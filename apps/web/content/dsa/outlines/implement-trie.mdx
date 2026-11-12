@@ -26,3 +26,139 @@ Output: True, False, True, True
 - word and prefix consist of lowercase English letters
 - At most 3 * 10^4 calls in total to insert, search, and startsWith
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Trie (Prefix Tree)
+Each node maps characters to children; a flag marks complete words for exact search.
+
+1. Maintain a root TrieNode with a map of children and is\_end.
+2. insert: walk/create nodes per character; mark the last node as end of word.
+3. search: walk the trie; return True only if the path exists and ends at a word boundary.
+4. startsWith: walk the trie for the prefix; return True if the path exists.
+
+## Complexity
+
+**Time:** O(m) per insert, search, and startsWith — m is word or prefix length.
+
+**Space:** O(N \* M) — N words of average length M in the worst case (no shared prefixes).
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Implement a Trie (Prefix Tree) data structure that supports the following operations:
+1. Initialize the Trie object.
+2. Insert a word into the Trie.
+3. Search for a word in the Trie.
+4. Check if any word in the Trie starts with a given prefix.
+
+Space Complexity:
+- O(N \* M), where N is the number of words inserted, and M is the average length of the words.
+- In the worst case, when there are no common prefixes, the space complexity can be O(N \* M).
+- Each node in the Trie contains a dictionary of children and a boolean flag, which takes constant space.
+
+Time Complexity:
+- Insert: O(M), where M is the length of the word being inserted.
+- Search: O(M), where M is the length of the word being searched.
+- StartsWith: O(M), where M is the length of the prefix.
+
+Explanation:
+1. The Trie is implemented using a tree-like structure where each node represents a character.
+2. Each TrieNode contains a dictionary 'children' to store its child nodes and a boolean 'is\_end\_of\_word' to mark the end of a word.
+3. The Trie class has a root node initialized in the constructor.
+4. The insert method adds a word to the Trie by creating new nodes for each character if they don't exist.
+5. The search method checks if a word exists in the Trie by traversing the nodes and checking if the last node is marked as the end of a word.
+6. The startsWith method checks if any word in the Trie starts with the given prefix by traversing the nodes for the prefix characters.
+
+Examples:
+1. Inserting "apple":
+- Create nodes for 'a', 'p', 'p', 'l', 'e'
+- Mark the last 'e' node as the end of a word
+
+2. Searching for "app":
+- Traverse nodes for 'a', 'p', 'p'
+- Return False because the last 'p' node is not marked as the end of a word
+
+3. Checking startsWith "app":
+- Traverse nodes for 'a', 'p', 'p'
+- Return True because all prefix characters exist in the Trie
+
+## Solution
+
+````python
+from __future__ import annotations
+
+
+class TrieNode:
+    def __init__(self) -> None:
+        self.children: dict[str, TrieNode] = {}
+        self.is_end_of_word: bool = False
+
+
+class Trie:
+    def __init__(self) -> None:
+        self.root = TrieNode()
+
+    def insert(self, word: str) -> None:
+        node = self.root
+        for char in word:
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            node = node.children[char]
+        node.is_end_of_word = True
+
+    def search(self, word: str) -> bool:
+        node = self.root
+        for char in word:
+            if char not in node.children:
+                return False
+            node = node.children[char]
+        return node.is_end_of_word
+
+    def starts_with(self, prefix: str) -> bool:
+        node = self.root
+        for char in prefix:
+            if char not in node.children:
+                return False
+            node = node.children[char]
+        return True
+
+
+class Solution:
+    def __init__(self) -> None:
+        self._trie = Trie()
+
+    def insert(self, word: str) -> None:
+        self._trie.insert(word)
+
+    def search(self, word: str) -> bool:
+        return self._trie.search(word)
+
+    def starts_with(self, prefix: str) -> bool:
+        return self._trie.starts_with(prefix)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    sol.insert("apple")
+    assert sol.search("apple") is True, "Test 1 Failed"
+    print("Test 1 Passed: search finds inserted word")
+
+    assert sol.search("app") is False, "Test 2 Failed"
+    print("Test 2 Passed: prefix alone is not a stored word")
+
+    assert sol.starts_with("app") is True, "Test 3 Failed"
+    print("Test 3 Passed: startsWith matches prefix")
+
+    sol.insert("app")
+    assert sol.search("app") is True, "Test 4 Failed"
+    print("Test 4 Passed: after insert, shorter word is found")
+
+    assert sol.starts_with("appl") is True, "Test 5 Failed"
+    print("Test 5 Passed: startsWith for longer prefix")
+
+    print("\nAll test cases passed!")
+````

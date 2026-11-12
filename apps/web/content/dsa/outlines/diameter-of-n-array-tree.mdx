@@ -9,3 +9,64 @@ status: outline
 ---
 
 N-ary tree diameter: longest path edges between any two nodes.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two longest child depths per node similar to binary case.
+
+## Complexity
+
+**Time:** O(n).
+
+## Solution
+
+````python
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+
+@dataclass
+class Node:
+    val: int = 0
+    children: List['Node'] = field(default_factory=list)
+
+
+class Solution:
+    def diameter(self, root: Optional[Node]) -> int:
+        self.ans = 0
+
+        def dfs(node: Optional[Node]) -> int:
+            if not node:
+                return 0
+            first = second = 0
+            for ch in node.children:
+                h = dfs(ch)
+                if h > first:
+                    first, second = h, first
+                elif h > second:
+                    second = h
+            self.ans = max(self.ans, first + second)
+            return first + 1
+
+        dfs(root)
+        return self.ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == '__main__':
+    sol = Solution()
+    n1 = Node(1, [Node(2, [Node(5), Node(6)]), Node(3), Node(4)])
+    assert sol.diameter(n1) == 3
+    assert sol.diameter(Node(1)) == 0
+    n2 = Node(1, [Node(2), Node(3, [Node(4)])])
+    assert sol.diameter(n2) == 3
+    n3 = Node(1, [Node(2, [Node(3)])])
+    assert sol.diameter(n3) == 2
+    n4 = Node(1, [Node(2), Node(3)])
+    assert sol.diameter(n4) == 2
+    print('\nAll test cases passed!')
+````

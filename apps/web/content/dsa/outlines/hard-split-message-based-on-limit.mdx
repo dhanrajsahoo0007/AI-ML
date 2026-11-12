@@ -25,3 +25,116 @@ Output: ["short mess<1/2>", "age<2/2>"]
 - 1 <= len(message) <= 10^4
 - 1 <= limit <= 10^4
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Brute-Force Parts Count + Greedy Packing
+Try increasing part count b; greedily consume exactly (limit - suffix\_len) characters on non-final parts.
+
+1. For b from 1 to len(message), simulate building parts with required widths.
+2. Return first successful partition.
+
+## Complexity
+
+**Time:** O(n^2) in worst case - n tries each O(n) simulate.
+
+**Space:** O(n) - Output list of strings.
+Restored (original notes, diagrams, and walkthrough):
+2468. Split Message Based on Limit
+Hard
+Topics
+Companies
+Hint
+You are given a string, message, and a positive integer, limit.
+
+You must split message into one or more parts based on limit. Each resulting part should have the suffix "&lt;a/b&gt;", where "b" is to be replaced with the total number of parts and "a" is to be replaced with the index of the part, starting from 1 and going up to b. Additionally, the length of each resulting part (including its suffix) should be equal to limit, except for the last part whose length can be at most limit.
+
+The resulting parts should be formed such that when their suffixes are removed and they are all concatenated in order, they should be equal to message. Also, the result should contain as few parts as possible.
+
+Return the parts message would be split into as an array of strings. If it is impossible to split message as required, return an empty array.
+
+Example 1:
+
+Input: message = "this is really a very awesome message", limit = 9
+Output: \["thi&lt;1/14&gt;","s i&lt;2/14&gt;","s r&lt;3/14&gt;","eal&lt;4/14&gt;","ly &lt;5/14&gt;","a v&lt;6/14&gt;","ery&lt;7/14&gt;"," aw&lt;8/14&gt;","eso&lt;9/14&gt;","me&lt;10/14&gt;"," m&lt;11/14&gt;","es&lt;12/14&gt;","sa&lt;13/14&gt;","ge&lt;14/14&gt;"\]
+Explanation:
+The first 9 parts take 3 characters each from the beginning of message.
+The next 5 parts take 2 characters each to finish splitting message.
+In this example, each part, including the last, has length 9.
+It can be shown it is not possible to split message into less than 14 parts.
+Example 2:
+
+Input: message = "short message", limit = 15
+Output: \["short mess&lt;1/2&gt;","age&lt;2/2&gt;"\]
+Explanation:
+Under the given constraints, the string can be split into two parts:
+- The first part comprises of the first 10 characters, and has a length 15.
+- The next part comprises of the last 3 characters, and has a length 8.
+
+Constraints:
+
+1 &lt;= message.length &lt;= 104
+message consists only of lowercase English letters and ' '.
+1 &lt;= limit &lt;= 104
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def splitMessage(self, message: str, limit: int) -> List[str]:
+        n = len(message)
+        for b in range(1, n + 1):
+            w = len(str(b))
+            idx = 0
+            out: List[str] = []
+            ok = True
+            for a in range(1, b + 1):
+                suf = f"<{a}/{b}>"
+                room = limit - len(suf)
+                if room < 1:
+                    ok = False
+                    break
+                if a < b:
+                    if idx + room > n:
+                        ok = False
+                        break
+                    chunk = message[idx : idx + room]
+                    out.append(chunk + suf)
+                    idx += room
+                else:
+                    chunk = message[idx:]
+                    if len(chunk) > room:
+                        ok = False
+                        break
+                    out.append(chunk + suf)
+                    idx += len(chunk)
+            if ok and idx == n:
+                return out
+        return []
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    exp1 = sol.splitMessage("this is really a very awesome message", 9)
+    assert len(exp1) == 14 and all(len(p) == 9 for p in exp1), "Test 1 Failed"
+    print("Test 1 Passed: long sentence tight limit")
+    exp2 = sol.splitMessage("short message", 15)
+    assert exp2 == ["short mess<1/2>", "age<2/2>"], "Test 2 Failed"
+    print("Test 2 Passed: two-part sample")
+    assert len(sol.splitMessage("abcdefghij", 12)) >= 1, "Test 3 Failed"
+    print("Test 3 Passed: dec-length message splits")
+    assert sol.splitMessage("a", 6) == ["a<1/1>"], "Test 4 Failed"
+    print("Test 4 Passed: single character single part")
+    sm = sol.splitMessage("x" * 20, 12)
+    assert sm and all(len(p) <= 12 for p in sm), "Test 5 Failed"
+    print("Test 5 Passed: uniform letters respect width")
+    print("\nAll test cases passed!")
+````

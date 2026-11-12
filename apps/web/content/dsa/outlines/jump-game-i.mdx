@@ -33,3 +33,54 @@ Example 3:
 - 1 <= nums.length <= 10^4
 - 0 <= nums[i] <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Reachability
+Work backwards: shrink the required goal index whenever the current index can reach the goal.
+
+1. Set goal to the last index.
+2. Scan indices from right to left; if i + nums\[i\] &gt;= goal, move goal to i.
+3. Return whether goal equals 0.
+
+## Complexity
+
+**Time:** O(n) - One reverse pass.
+
+**Space:** O(1) - Goal index only.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def canJump(self, nums: List[int]) -> bool:
+        goal = len(nums) - 1
+        for i in range(len(nums) - 1, -1, -1):
+            # nums[i] is the maximum forward jump length from position i.
+            if i + nums[i] >= goal:
+                goal = i
+        return goal == 0
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.canJump([2, 3, 1, 1, 4]) is True, "Test 1 Failed"
+    print("Test 1 Passed: reachable end")
+    assert sol.canJump([3, 2, 1, 0, 4]) is False, "Test 2 Failed"
+    print("Test 2 Passed: stuck at zero")
+    assert sol.canJump([0]) is True, "Test 3 Failed"
+    print("Test 3 Passed: single index")
+    assert sol.canJump([2, 0, 0]) is True, "Test 4 Failed"
+    print("Test 4 Passed: minimal jumps")
+    assert sol.canJump([1, 1, 0, 1]) is False, "Test 5 Failed"
+    print("Test 5 Passed: cannot cross gap")
+    print("\nAll test cases passed!")
+````

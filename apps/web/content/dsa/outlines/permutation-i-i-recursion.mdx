@@ -29,3 +29,82 @@ Example 2:
 - 1 <= len(s) <= 7
 - s contains lowercase English letters.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Permutation by swap with duplicate pruning
+Sort so equal letters group; at each position skip swapping the same value twice.
+
+1. Work on a list of chars; at index \`start\`, try swapping s\[start\] with s\[i\] for i &gt;= start.
+2. Use a set of characters already tried at this \`start\` to avoid duplicate permutations.
+3. After recursing, swap back to restore the array.
+
+## Complexity
+
+**Time:** O(n \* n!) worst case for distinct letters; fewer when duplicates exist.
+
+**Space:** O(n) - recursion depth and swap buffer excluding output.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def generatePermutations(self, s: str) -> List[str]:
+        chars = list(s)
+        chars.sort()
+        result: List[str] = []
+
+        def swap(i: int, j: int) -> None:
+            """Swap two positions in the mutable char list (swap-based permutation)."""
+            chars[i], chars[j] = chars[j], chars[i]
+
+        def backtrack(start: int) -> None:
+            # Base case: fixed every position — snapshot the current ordering.
+            if start == len(chars):
+                result.append("".join(chars))
+                return
+            # At depth `start`, never place the same digit twice (handles duplicates like "aab").
+            used_at_pos: set[str] = set()
+            for i in range(start, len(chars)):
+                if chars[i] in used_at_pos:
+                    continue
+                used_at_pos.add(chars[i])
+                swap(start, i)
+                backtrack(start + 1)
+                swap(start, i)  # undo swap: classic backtrack unwind
+
+        backtrack(0)
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert set(sol.generatePermutations("abc")) == {
+        "abc",
+        "acb",
+        "bac",
+        "bca",
+        "cab",
+        "cba",
+    }, "Test 1 Failed"
+    print("Test 1 Passed: permutations of abc")
+
+    assert set(sol.generatePermutations("aab")) == {"aab", "aba", "baa"}, "Test 2 Failed"
+    print("Test 2 Passed: duplicates handled")
+
+    assert sol.generatePermutations("a") == ["a"], "Test 3 Failed"
+    print("Test 3 Passed: single character")
+
+    assert len(sol.generatePermutations("abcd")) == 24, "Test 4 Failed"
+    print("Test 4 Passed: 4! permutations")
+
+    print("\nAll test cases passed!")
+````

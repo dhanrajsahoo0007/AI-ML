@@ -35,3 +35,60 @@ Example 3:
 - s[i] is '0' or '1'
 - 1 <= k <= 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Extension
+Extend the current substring while the next binary value stays &lt;= k; otherwise start a new substring at the current bit.
+
+1. Initialize partition count to 1 and current value to 0.
+2. For each bit, if value\*2+bit &gt; k, increment partitions and reset current value to this bit.
+3. Otherwise extend current value; if a single bit already exceeds k, return -1 (impossible).
+
+## Complexity
+
+**Time:** O(n) - One pass.
+
+**Space:** O(1) - Scalar trackers.
+
+## Solution
+
+````python
+class Solution:
+    def minimumPartition(self, s: str, k: int) -> int:
+        parts = 1
+        val = 0
+        for ch in s:
+            d = int(ch)
+            if d > k:
+                return -1
+            nxt = val * 2 + d
+            if nxt > k:
+                parts += 1
+                val = d
+                if val > k:
+                    return -1
+            else:
+                val = nxt
+        return parts
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minimumPartition("101110001", 5) == 3, "Test 1 Failed"
+    print("Test 1 Passed: k equals five")
+    assert sol.minimumPartition("101110001", 10) == 3, "Test 2 Failed"
+    print("Test 2 Passed: k equals ten")
+    assert sol.minimumPartition("101110001", 10**9) == 1, "Test 3 Failed"
+    print("Test 3 Passed: whole string fits")
+    assert sol.minimumPartition("0", 1) == 1, "Test 4 Failed"
+    print("Test 4 Passed: single zero")
+    assert sol.minimumPartition("111", 3) == 2, "Test 5 Failed"
+    print("Test 5 Passed: need split for overflow")
+    print("\nAll test cases passed!")
+````

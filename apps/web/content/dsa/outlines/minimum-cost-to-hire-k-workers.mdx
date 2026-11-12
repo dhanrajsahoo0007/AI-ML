@@ -32,3 +32,73 @@ Example 2:
 - 1 <= k <= n <= 10^4
 - 1 <= quality[i], wage[i] <= 10^4
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Scheduling and Simulation
+The key insight is the wage/quality ratio. Sort by ratio; for each worker
+as the ratio-setter, maintain a max-heap of k smallest qualities.
+
+1. Calculate wage/quality ratio for each worker. Sort by ratio.
+2. Use a max-heap of qualities (size k). Track quality sum.
+3. For each worker: add quality, remove highest if &gt; k workers.
+4. When we have k workers, compute cost = ratio \* quality\_sum. Track minimum.
+
+## Complexity
+
+**Time:** O(n log n)
+
+**Space:** O(n)
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def mincostToHireWorkers(self, quality: List[int], wage: List[int], k: int) -> float:
+        workers = sorted((w / q, q) for w, q in zip(wage, quality))
+        qual_heap = []
+        qual_sum = 0
+        min_cost = float('inf')
+
+        for ratio, q in workers:
+            heapq.heappush(qual_heap, -q)
+            qual_sum += q
+
+            if len(qual_heap) > k:
+                qual_sum += heapq.heappop(qual_heap)
+
+            if len(qual_heap) == k:
+                min_cost = min(min_cost, ratio * qual_sum)
+
+        return min_cost
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Basic case
+    result = sol.mincostToHireWorkers([10, 20, 5], [70, 50, 30], 2)
+    assert abs(result - 105.0) < 0.001, "Test 1 Failed"
+    print(f"Test 1 Passed: k=2 -> {result:.5f}")
+
+    # Test Case 2: More workers
+    result = sol.mincostToHireWorkers([3, 1, 10, 10, 1], [4, 8, 2, 2, 7], 3)
+    assert abs(result - 30.66667) < 0.001, "Test 2 Failed"
+    print(f"Test 2 Passed: k=3 -> {result:.5f}")
+
+    # Test Case 3: k equals n
+    result = sol.mincostToHireWorkers([5, 5], [10, 10], 2)
+    assert abs(result - 20.0) < 0.001, "Test 3 Failed"
+    print(f"Test 3 Passed: k=n -> {result:.5f}")
+
+    print("\nAll test cases passed!")
+````

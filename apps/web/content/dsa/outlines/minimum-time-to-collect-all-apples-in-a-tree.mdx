@@ -31,3 +31,58 @@ Example 2:
 - len(edges) == n - 1
 - len(hasApple) == n
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Tree DFS (post-order aggregation)
+
+1. Build adjacency list for the tree.
+2. DFS from root; each subtree returns total time needed inside it (including return trips).
+3. Visit a child only if that subtree contains an apple; add 2 for each edge used down+up.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(n).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def minTime(self, n: int, edges: List[List[int]], hasApple: List[bool]) -> int:
+        g = defaultdict(list)
+        for u, v in edges:
+            g[u].append(v)
+            g[v].append(u)
+
+        def dfs(u: int, p: int) -> int:
+            t = 0
+            for v in g[u]:
+                if v == p:
+                    continue
+                sub = dfs(v, u)
+                if sub > 0 or hasApple[v]:
+                    t += sub + 2
+            return t
+
+        return dfs(0, -1)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    edges = [[0, 1], [0, 2], [1, 4], [1, 5], [2, 3], [2, 6]]
+    assert sol.minTime(7, edges, [False, False, True, False, True, True, False]) == 8, "Test 1 Failed"
+    assert sol.minTime(7, edges, [False, False, True, False, False, True, False]) == 6, "Test 2 Failed"
+    assert sol.minTime(7, edges, [False, False, False, False, False, False, False]) == 0, "Test 3 Failed"
+    print("All tests passed!")
+````

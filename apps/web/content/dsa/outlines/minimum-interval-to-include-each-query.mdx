@@ -31,3 +31,90 @@ Example 2:
 - 1 <= len(queries) <= 10^5
 - intervals[i].length == 2 and 1 <= left_i <= right_i <= 10^7
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sweep intervals with hash map per query
+Grouping queries by value and scanning sorted unique interval endpoints lets each query
+inherit the best active interval size in amortized linear time over all events.
+
+1. Build a map from each query value to its list of indices.
+2. Collect every distinct endpoint (interval starts, ends, query values) and sort.
+3. Sweep endpoints, activating intervals on their starts and deactivating on ends+1.
+4. Track the minimum width among active intervals covering the current coordinate and
+assign answers when reaching each query key.
+
+## Complexity
+
+**Time:** O((n + m + u) log u) for n intervals, m queries, u unique endpoints.
+
+**Space:** O(n + m) for bookkeeping structures.
+
+## Solution
+
+````python
+from collections import defaultdict
+from typing import List
+
+
+class Solution:
+    def minInterval(self, intervals: List[List[int]], queries: List[int]) -> List[int]:
+        index_map: dict[int, List[int]] = defaultdict(list)
+        for idx, value in enumerate(queries):
+            index_map[value].append(idx)
+
+        events: List[tuple[int, str, int, int]] = []
+        for left, right in intervals:
+            width = right - left + 1
+            events.append((left, "start", width, right))
+            events.append((right + 1, "end", width, right))
+
+        for value in index_map:
+            events.append((value, "query", 0, 0))
+
+        events.sort(key=lambda item: (item[0], 0 if item[1] == "start" else 1 if item[1] == "end" else 2))
+
+        active: dict[int, int] = {}
+        answers = [-1] * len(queries)
+
+        for pos, kind, width, right in events:
+            if kind == "start":
+                active[right] = width
+            elif kind == "end":
+                if active.get(right) == width:
+                    active.pop(right, None)
+            else:
+                if not active:
+                    best = -1
+                else:
+                    best = min(active.values())
+                for q_index in index_map[pos]:
+                    answers[q_index] = best
+
+        return answers
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minInterval([[1, 4], [2, 4], [3, 6], [4, 4]], [2, 3, 4, 5]) == [3, 3, 1, 4], "Test 1 Failed"
+    print("Test 1 Passed: overlapping windows pick the tightest cover")
+
+    assert sol.minInterval([[2, 3], [2, 5], [1, 8], [20, 25]], [2, 19, 25, 22, 30]) == [2, -1, 6, 6, -1], "Test 2 Failed"
+    print("Test 2 Passed: queries outside every interval yield -1")
+
+    assert sol.minInterval([[4, 5], [7, 9], [6, 8]], [4, 7, 8]) == [2, 3, 3], "Test 3 Failed"
+    print("Test 3 Passed: shared endpoints still pick minimum width")
+
+    assert sol.minInterval([[1, 1]], [1, 2]) == [1, -1], "Test 4 Failed"
+    print("Test 4 Passed: singleton interval and missing query")
+
+    assert sol.minInterval([[5, 10], [8, 12], [1, 20]], [4, 9, 15]) == [20, 5, 20], "Test 5 Failed"
+    print("Test 5 Passed: nested spans shrink width for interior queries")
+
+    print("\nAll test cases passed!")
+````

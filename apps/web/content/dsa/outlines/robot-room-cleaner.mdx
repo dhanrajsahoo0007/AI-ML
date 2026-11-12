@@ -24,3 +24,121 @@ Output: every open cell is cleaned exactly once
 ````text
 - The hidden grid is rectangular; the robot starts on an open cell.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS backtracking in robot-relative coordinates
+Track visited logical coordinates, clean, try all four headings with move, then use a
+standardized four-turn sequence to retreat like stack unwinding.
+
+1. Maintain visited set in absolute coordinates with heading-aware moves.
+2. clean(), then for each relative direction attempt move; on success recurse, then go\_back.
+3. After exploring each branch, turnRight to rotate through headings.
+
+## Complexity
+
+**Time:** O(N) for N reachable empty cells.
+
+**Space:** O(N) for visited set and recursion.
+
+## Solution
+
+````python
+class MockRobot:
+    def __init__(self, grid):
+        self.grid = grid
+        self.m = len(grid)
+        self.n = len(grid[0])
+        self.r = self.c = 0
+        self.d = 0
+        self.cleaned = set()
+        self.dirs = [(-1, 0), (0, 1), (1, 0), (0, -1)]
+
+    def move(self) -> bool:
+        dr, dc = self.dirs[self.d]
+        nr, nc = self.r + dr, self.c + dc
+        if 0 <= nr < self.m and 0 <= nc < self.n and self.grid[nr][nc] == 1:
+            self.r, self.c = nr, nc
+            return True
+        return False
+
+    def turnLeft(self) -> None:
+        self.d = (self.d - 1) % 4
+
+    def turnRight(self) -> None:
+        self.d = (self.d + 1) % 4
+
+    def clean(self) -> None:
+        self.cleaned.add((self.r, self.c))
+
+
+class Solution:
+    def cleanRoom(self, robot) -> None:
+        vectors = [(-1, 0), (0, 1), (1, 0), (0, -1)]
+        visited = set()
+
+        def go_back() -> None:
+            robot.turnRight()
+            robot.turnRight()
+            robot.move()
+            robot.turnRight()
+            robot.turnRight()
+
+        def dfs(x: int, y: int, direction: int) -> None:
+            visited.add((x, y))
+            robot.clean()
+            for i in range(4):
+                nd = (direction + i) % 4
+                nx = x + vectors[nd][0]
+                ny = y + vectors[nd][1]
+                if (nx, ny) not in visited and robot.move():
+                    dfs(nx, ny, nd)
+                    go_back()
+                robot.turnRight()
+
+        dfs(0, 0, 0)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def open_cells(grid):
+        return {(r, c) for r in range(len(grid)) for c in range(len(grid[0])) if grid[r][c] == 1}
+
+    room1 = [
+        [1, 1, 1, 1, 0],
+        [1, 1, 0, 1, 0],
+        [1, 1, 1, 1, 1],
+        [0, 1, 0, 0, 1],
+        [0, 1, 1, 1, 1],
+    ]
+    bot1 = MockRobot(room1)
+    sol.cleanRoom(bot1)
+    assert bot1.cleaned == open_cells(room1), "Test 1 Failed"
+    print("Test 1 Passed: cleans full reachable region")
+
+    room2 = [[1]]
+    bot2 = MockRobot(room2)
+    sol.cleanRoom(bot2)
+    assert bot2.cleaned == {(0, 0)}, "Test 2 Failed"
+    print("Test 2 Passed: single open cell")
+
+    room3 = [[1, 1, 0], [1, 0, 0], [1, 1, 1]]
+    bot3 = MockRobot(room3)
+    sol.cleanRoom(bot3)
+    assert bot3.cleaned == open_cells(room3), "Test 3 Failed"
+    print("Test 3 Passed: L-shaped room")
+
+    room4 = [[1, 1], [1, 1]]
+    bot4 = MockRobot(room4)
+    sol.cleanRoom(bot4)
+    assert len(bot4.cleaned) == 4, "Test 4 Failed"
+    print("Test 4 Passed: small square")
+
+    print("\nAll test cases passed!")
+````

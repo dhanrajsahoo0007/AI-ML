@@ -9,3 +9,53 @@ status: outline
 ---
 
 Same egg dropping with memoization (identical recurrence as file 09).
+
+<PremiumBreak />
+
+## Complexity
+
+**Time:** O(k \* n^2) states.
+
+**Space:** O(k \* n).
+
+## Solution
+
+````python
+from functools import lru_cache
+
+
+class Solution:
+    def superEggDrop(self, k: int, n: int) -> int:
+        @lru_cache(None)
+        def dp(e: int, f: int) -> int:
+            if f == 0:
+                return 0
+            if e == 1:
+                return f
+            lo, hi = 1, f
+            while lo + 1 < hi:
+                mid = (lo + hi) // 2
+                left = dp(e - 1, mid - 1)
+                right = dp(e, f - mid)
+                if left < right:
+                    lo = mid
+                else:
+                    hi = mid
+            x = hi
+            return 1 + max(dp(e - 1, x - 1), dp(e, f - x))
+
+        return dp(k, n)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.superEggDrop(1, 2) == 2
+    assert sol.superEggDrop(2, 6) == 3
+    assert sol.superEggDrop(3, 14) == 4
+    assert sol.superEggDrop(1, 1) == 1
+    assert sol.superEggDrop(2, 2) == 2
+    print("\nAll test cases passed!")
+````

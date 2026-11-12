@@ -28,3 +28,53 @@ Example 2:
 - 0 <= len(arr) <= 10^5
 - -10^9 <= arr[i] <= 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Coordinate compression / ranking
+Sort unique values to assign consecutive ranks, then map each original value to its rank.
+
+1. Build sorted list of distinct elements from arr.
+2. Map each distinct value to rank 1..k by position in sorted order.
+3. Build output by replacing each arr\[i\] with rank\_dict\[arr\[i\]\].
+
+## Complexity
+
+**Time:** O(n log n) - Sorting up to n distinct values dominates.
+
+**Space:** O(n) - Distinct list, rank map, and output each up to O(n).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def arrayRankTransform(self, arr: List[int]) -> List[int]:
+        if not arr:
+            return []
+        sorted_unique = sorted(set(arr))  # ordered distinct values define rank order
+        rank = {v: i + 1 for i, v in enumerate(sorted_unique)}  # value -> 1-based rank
+        return [rank[x] for x in arr]  # project original positions to ranks
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.arrayRankTransform([100, 2, 70, 2, 8, 70, 100]) == [4, 1, 3, 1, 2, 3, 4], "Test 1 Failed"
+    print("Test 1 Passed: duplicates and spread values")
+    assert sol.arrayRankTransform([5, 5, 5, 5]) == [1, 1, 1, 1], "Test 2 Failed"
+    print("Test 2 Passed: all equal")
+    assert sol.arrayRankTransform([10, 20, 30, 40, 50]) == [1, 2, 3, 4, 5], "Test 3 Failed"
+    print("Test 3 Passed: already sorted distinct")
+    assert sol.arrayRankTransform([40, 10, 20, 30]) == [4, 1, 2, 3], "Test 4 Failed"
+    print("Test 4 Passed: unsorted distinct")
+    assert sol.arrayRankTransform([]) == [], "Test 5 Failed"
+    print("Test 5 Passed: empty array")
+    print("\nAll test cases passed!")
+````

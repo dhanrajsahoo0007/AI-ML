@@ -37,3 +37,80 @@ Example 3:
 - lists[i] is sorted in ascending order.
 - The sum of lists[i].length will not exceed 10^4.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** K-Way Merge
+We use a min-heap to always pick the smallest element across all k lists.
+Each element in the heap is a tuple (value, list\_index, element\_index).
+
+1. Push the first element of each list into the min-heap.
+2. Pop the smallest element, add it to result.
+3. Push the next element from the same list (if available) into the heap.
+4. Repeat until the heap is empty.
+
+## Complexity
+
+**Time:** O(N log k), where N is total elements across all lists
+- Each push/pop is O(log k) since the heap has at most k elements.
+
+**Space:** O(k) for the heap
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def mergeKSortedArrays(self, lists: List[List[int]]) -> List[int]:
+        min_heap = []
+        result = []
+
+        for i, lst in enumerate(lists):
+            if lst:
+                heapq.heappush(min_heap, (lst[0], i, 0))
+
+        while min_heap:
+            val, list_idx, elem_idx = heapq.heappop(min_heap)
+            result.append(val)
+
+            # Push successor from the same list (if any) to keep one pointer per list in the heap.
+            if elem_idx + 1 < len(lists[list_idx]):
+                next_val = lists[list_idx][elem_idx + 1]
+                heapq.heappush(min_heap, (next_val, list_idx, elem_idx + 1))
+
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Basic merge
+    assert sol.mergeKSortedArrays([[1, 4, 5], [1, 3, 4], [2, 6]]) == [1, 1, 2, 3, 4, 4, 5, 6], "Test 1 Failed"
+    print("Test 1 Passed: [[1,4,5],[1,3,4],[2,6]] -> [1,1,2,3,4,4,5,6]")
+
+    # Test Case 2: Empty input
+    assert sol.mergeKSortedArrays([]) == [], "Test 2 Failed"
+    print("Test 2 Passed: [] -> []")
+
+    # Test Case 3: Single list
+    assert sol.mergeKSortedArrays([[1, 2, 3]]) == [1, 2, 3], "Test 3 Failed"
+    print("Test 3 Passed: [[1,2,3]] -> [1,2,3]")
+
+    # Test Case 4: Lists with empty sublists
+    assert sol.mergeKSortedArrays([[], [1], []]) == [1], "Test 4 Failed"
+    print("Test 4 Passed: [[],[1],[]] -> [1]")
+
+    # Test Case 5: Negative numbers
+    assert sol.mergeKSortedArrays([[-3, -1, 0], [-2, 1, 3]]) == [-3, -2, -1, 0, 1, 3], "Test 5 Failed"
+    print("Test 5 Passed: negative numbers merged correctly")
+
+    print("\nAll test cases passed!")
+````

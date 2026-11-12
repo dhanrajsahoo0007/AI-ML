@@ -38,3 +38,66 @@ Example 4:
 - 0 <= len(s) <= 200
 - s consists of English letters, digits, ' ', '+', '-', and '.'.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** State machine / parsing
+Walk the string in phases: skip spaces, read sign, accumulate digits with overflow check.
+
+1. Strip leading whitespace by advancing an index.
+2. Read optional '+' or '-' to set sign.
+3. While digits remain, update value as value \* 10 + digit with clamping against INT32 bounds.
+4. Return signed value clamped to 32-bit range.
+
+## Complexity
+
+**Time:** O(n) - Single pass over s.
+
+**Space:** O(1) - Only a few integer variables.
+
+## Solution
+
+````python
+class Solution:
+    def myAtoi(self, s: str) -> int:
+        INT_MAX = 2**31 - 1
+        INT_MIN = -2**31
+        n = len(s)
+        i = 0
+        while i < n and s[i] == " ":
+            i += 1
+        if i == n:
+            return 0
+        sign = 1
+        if s[i] in "+-":
+            sign = -1 if s[i] == "-" else 1
+            i += 1
+        result = 0
+        while i < n and s[i].isdigit():
+            digit = ord(s[i]) - ord("0")
+            if result > (INT_MAX - digit) // 10:
+                return INT_MAX if sign == 1 else INT_MIN
+            result = result * 10 + digit
+            i += 1
+        return sign * result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.myAtoi("42") == 42, "Test 1 Failed"
+    print("Test 1 Passed: positive number")
+    assert sol.myAtoi("   -042") == -42, "Test 2 Failed"
+    print("Test 2 Passed: leading spaces and sign")
+    assert sol.myAtoi("1337c0d3") == 1337, "Test 3 Failed"
+    print("Test 3 Passed: stop at non-digit")
+    assert sol.myAtoi("words and 987") == 0, "Test 4 Failed"
+    print("Test 4 Passed: no leading number")
+    assert sol.myAtoi("2147483648") == 2147483647, "Test 5 Failed"
+    print("Test 5 Passed: clamp to INT_MAX")
+    print("\nAll test cases passed!")
+````

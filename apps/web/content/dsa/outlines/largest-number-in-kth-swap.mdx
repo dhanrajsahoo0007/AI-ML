@@ -33,3 +33,77 @@ Example 3:
 - len(num_str) between 1 and 15 typically for backtracking
 - Digits are '0'..'9'
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Backtracking with greedy digit choice
+At each index, optionally swap a larger digit from the right into place, consuming one swap,
+or skip swapping and move on.
+
+1. Keep the best string seen in a mutable maximum.
+2. DFS on (index, remaining\_swaps): optionally swap index with each later position holding the max digit rightward.
+3. Always try advancing without swapping to cover cases where saving swaps helps later.
+
+## Complexity
+
+**Time:** Exponential in n and k in worst case; practical for small n.
+
+**Space:** O(n) - recursion depth and digit list copy path.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findMaximumNum(self, num_str: str, k: int) -> str:
+        digits: List[str] = list(num_str)
+        best = [num_str]
+
+        def swap(i: int, j: int) -> None:
+            digits[i], digits[j] = digits[j], digits[i]
+
+        def dfs(index: int, swaps: int) -> None:
+            cur = "".join(digits)
+            if cur > best[0]:
+                best[0] = cur
+            if swaps == 0 or index == len(digits):
+                return
+            max_digit = max(digits[index:])
+            if digits[index] != max_digit:
+                for j in range(index + 1, len(digits)):
+                    if digits[j] == max_digit:
+                        swap(index, j)
+                        dfs(index + 1, swaps - 1)
+                        swap(index, j)
+            dfs(index + 1, swaps)
+
+        dfs(0, k)
+        return best[0]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findMaximumNum("1234567", 4) == "7654321", "Test 1 Failed"
+    print("Test 1 Passed: reverse with four swaps")
+
+    assert sol.findMaximumNum("3435335", 3) == "5543333", "Test 2 Failed"
+    print("Test 2 Passed: sample with k=3")
+
+    assert sol.findMaximumNum("1234", 2) == "4321", "Test 3 Failed"
+    print("Test 3 Passed: k=2 on 1234")
+
+    assert sol.findMaximumNum("9", 5) == "9", "Test 4 Failed"
+    print("Test 4 Passed: single digit")
+
+    assert sol.findMaximumNum("22", 1) == "22", "Test 5 Failed"
+    print("Test 5 Passed: identical digits unchanged")
+
+    print("\nAll test cases passed!")
+````

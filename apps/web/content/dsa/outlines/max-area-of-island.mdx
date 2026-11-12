@@ -28,3 +28,175 @@ Output: 6
 ````text
 - m == len(grid), n == len(grid[0])
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Union-Find / Disjoint Set Union (union by size + path compression)
+
+1. DSU over all cells; union each land cell with land neighbors (four directions) without mutating the grid.
+2. After unions, the area of an island is the component size at any root in that component.
+3. Return the maximum size among roots that represent at least one land cell.
+
+## Complexity
+
+**Time:** O(m \* n \* α(m\*n)), where m and n are the dimensions of the grid,
+and α is the inverse Ackermann function (nearly constant in practice)
+
+**Space:** O(m \* n) for the DSU data structure
+
+Note: This solution uses a Disjoint Set Union (DSU) data structure with both
+path compression and union by size optimizations.
+
+## Solution
+
+````python
+from typing import List
+
+
+class DSU:
+    def __init__(self, n: int) -> None:
+        self.parent = list(range(n))
+        self.size = [1] * n
+
+    def find(self, x: int) -> int:
+        if self.parent[x] != x:
+            self.parent[x] = self.find(self.parent[x])
+        return self.parent[x]
+
+    def union(self, x: int, y: int) -> int:
+        x_parent = self.find(x)
+        y_parent = self.find(y)
+
+        if x_parent == y_parent:
+            return self.size[x_parent]
+
+        if self.size[x_parent] > self.size[y_parent]:
+            self.parent[y_parent] = x_parent
+            self.size[x_parent] += self.size[y_parent]
+            return self.size[x_parent]
+        self.parent[x_parent] = y_parent
+        self.size[y_parent] += self.size[x_parent]
+        return self.size[y_parent]
+
+
+class Solution:
+    def maxAreaOfIsland(self, grid: List[List[int]]) -> int:
+        m, n = len(grid), len(grid[0])
+        dsu = DSU(m * n)
+        directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+
+        for i in range(m):
+            for j in range(n):
+                if grid[i][j] == 0:
+                    continue
+                idx = i * n + j
+                for di, dj in directions:
+                    ni, nj = i + di, j + dj
+                    if 0 <= ni < m and 0 <= nj < n and grid[ni][nj] == 1:
+                        dsu.union(idx, ni * n + nj)
+
+        best = 0
+        seen_roots: set[int] = set()
+        for i in range(m):
+            for j in range(n):
+                if grid[i][j] == 1:
+                    r = dsu.find(i * n + j)
+                    if r not in seen_roots:
+                        seen_roots.add(r)
+                        best = max(best, dsu.size[r])
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    big = [
+        [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0],
+        [0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0],
+        [0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0],
+    ]
+    assert sol.maxAreaOfIsland(big) == 6, "Test 1 Failed"
+    print("Test 1 Passed: LeetCode sample grid")
+    assert sol.maxAreaOfIsland([[0, 0, 0, 0, 0, 0, 0, 0]]) == 0, "Test 2 Failed"
+    print("Test 2 Passed: no land")
+    assert sol.maxAreaOfIsland([[1]]) == 1, "Test 3 Failed"
+    print("Test 3 Passed: single land cell")
+    assert sol.maxAreaOfIsland([[1, 1], [1, 0]]) == 3, "Test 4 Failed"
+    print("Test 4 Passed: L-shape")
+    assert sol.maxAreaOfIsland([[1, 0], [0, 1]]) == 1, "Test 5 Failed"
+    print("Test 5 Passed: two single cells")
+    print("All tests passed!")
+````
+
+## Another version
+
+From 17. Graphs/13. Flood Fill.
+
+### Approach
+
+**Pattern:** DFS area on grid components
+For each unvisited land cell, DFS to count its component size and track the maximum.
+
+1. Scan grid; when encountering a 1, DFS to count reachable 1 cells while marking them 0.
+
+### Complexity
+
+**Time:** O(m \* n)
+
+**Space:** O(m \* n) recursion stack worst case.
+
+### Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxAreaOfIsland(self, grid: List[List[int]]) -> int:
+        m, n = len(grid), len(grid[0])
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+        def dfs(r: int, c: int) -> int:
+            if r < 0 or c < 0 or r >= m or c >= n or grid[r][c] == 0:
+                return 0
+            grid[r][c] = 0
+            return 1 + sum(dfs(r + dr, c + dc) for dr, dc in dirs)
+
+        best = 0
+        for i in range(m):
+            for j in range(n):
+                if grid[i][j] == 1:
+                    best = max(best, dfs(i, j))
+        return best
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def clone(g: List[List[int]]) -> List[List[int]]:
+        return [row[:] for row in g]
+
+    g1 = [[0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0], [0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0], [0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0]]
+    assert sol.maxAreaOfIsland(clone(g1)) == 6, "Test 1 Failed"
+    print("Test 1 Passed: LeetCode sample max area")
+    assert sol.maxAreaOfIsland(clone([[0, 0, 0], [0, 0, 0]])) == 0, "Test 2 Failed"
+    print("Test 2 Passed: no land")
+    assert sol.maxAreaOfIsland(clone([[1]])) == 1, "Test 3 Failed"
+    print("Test 3 Passed: single land")
+    g4 = [[1, 1], [1, 0]]
+    assert sol.maxAreaOfIsland(clone(g4)) == 3, "Test 4 Failed"
+    print("Test 4 Passed: L-shaped island")
+    print("\nAll test cases passed!")
+````

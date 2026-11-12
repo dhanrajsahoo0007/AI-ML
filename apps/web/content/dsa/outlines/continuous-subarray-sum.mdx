@@ -29,3 +29,121 @@ Example 2:
 - 0 <= nums[i] <= 10^9
 - 1 <= k <= 2^31 - 1
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix remainder map
+Equal prefix mod k at indices at least two apart yields a valid subarray sum divisible by k.
+
+1. Track running sum modulo k and first index where each remainder appeared.
+2. Initialize map &#123;0: -1&#125;.
+3. For each i, update pref = (pref + nums\[i\]) % k; if pref seen before with gap &gt; 1, return True;
+else if pref unseen, record pref -&gt; i.
+4. Return False.
+
+## Complexity
+
+**Time:** O(n) - Single pass.
+
+**Space:** O(min(n, k)) - At most k distinct remainders (bounded in practice by map size).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def checkSubarraySum(self, nums: List[int], k: int) -> bool:
+        pref = 0
+        seen: dict[int, int] = {0: -1}
+        for i, v in enumerate(nums):
+            pref = (pref + v) % k
+            if pref in seen:
+                if i - seen[pref] > 1:
+                    return True
+            else:
+                seen[pref] = i
+        return False
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.checkSubarraySum([23, 2, 4, 6, 7], 6) is True, "Test 1 Failed"
+    print("Test 1 Passed: middle subarray")
+    assert sol.checkSubarraySum([23, 2, 6, 4, 7], 6) is True, "Test 2 Failed"
+    print("Test 2 Passed: full array")
+    assert sol.checkSubarraySum([1, 2, 3], 7) is False, "Test 3 Failed"
+    print("Test 3 Passed: no valid subarray")
+    assert sol.checkSubarraySum([0, 0], 1) is True, "Test 4 Failed"
+    print("Test 4 Passed: zeros")
+    assert sol.checkSubarraySum([1, 2, 3], 5) is True, "Test 5 Failed"
+    print("Test 5 Passed: sum five divisible by five")
+    print("\nAll test cases passed!")
+````
+
+## Another version
+
+From 02. Prefix Sum/04. Subarray Sum Problems.
+
+### Approach
+
+**Pattern:** Prefix Sum + Modulo Map
+Equal remainders at indices at least two apart imply a divisible middle segment.
+
+1. Track running sum mod k (treat k==0 as special: need consecutive zero sum pair).
+2. Store first index per remainder; if same remainder seen with index gap &gt;= 2, True.
+3. For k==0, look for consecutive zeros or any valid length-2+ multiple pattern.
+
+### Complexity
+
+**Time:** O(n).
+
+**Space:** O(min(n, k)) for remainder map (bounded by k when k&gt;0).
+
+### Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def checkSubarraySum(self, nums: List[int], k: int) -> bool:
+        first_mod: dict[int, int] = {0: -1}
+        total = 0
+        for i, x in enumerate(nums):
+            total += x
+            if k != 0:
+                r = total % k
+            else:
+                r = total
+            if r in first_mod:
+                if i - first_mod[r] >= 2:
+                    return True
+            else:
+                first_mod[r] = i
+        return False
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.checkSubarraySum([23, 2, 4, 6, 7], 6) is True, "Test 1 Failed"
+    print("Test 1 Passed: divisible subarray exists")
+    assert sol.checkSubarraySum([23, 2, 6, 4, 7], 6) is True, "Test 2 Failed"
+    print("Test 2 Passed: full array multiple")
+    assert sol.checkSubarraySum([23, 2, 6, 4, 7], 13) is False, "Test 3 Failed"
+    print("Test 3 Passed: no valid subarray")
+    assert sol.checkSubarraySum([0, 0], 1) is True, "Test 4 Failed"
+    print("Test 4 Passed: zeros with k=1")
+    assert sol.checkSubarraySum([1, 0], 2) is False, "Test 5 Failed"
+    print("Test 5 Passed: length constraint")
+    print("\nAll test cases passed!")
+````

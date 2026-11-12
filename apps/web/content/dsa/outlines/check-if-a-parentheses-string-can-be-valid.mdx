@@ -35,3 +35,65 @@ Example 3:
 - s[i] is '(' or ')'
 - locked[i] is '0' or '1'
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Balance Bounds
+Forward pass treats unlocked slots as flexible opens; backward pass treats them as flexible closes.
+
+1. If length is odd, return False.
+2. Forward: track balance treating unlocked or '(' as +1 and locked ')' as -1; never let balance go negative.
+3. Backward symmetric with roles flipped; if both passes succeed, return True.
+
+## Complexity
+
+**Time:** O(n) - Two linear passes.
+
+**Space:** O(1) - Balance counters.
+
+## Solution
+
+````python
+class Solution:
+    def canBeValid(self, s: str, locked: str) -> bool:
+        n = len(s)
+        if n % 2:
+            return False
+        bal = 0
+        for i in range(n):
+            if locked[i] == "0" or s[i] == "(":
+                bal += 1
+            else:
+                bal -= 1
+            if bal < 0:
+                return False
+        bal = 0
+        for i in range(n - 1, -1, -1):
+            if locked[i] == "0" or s[i] == ")":
+                bal += 1
+            else:
+                bal -= 1
+            if bal < 0:
+                return False
+        return True
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.canBeValid("))()))", "010100") is True, "Test 1 Failed"
+    print("Test 1 Passed: rearrange unlocked closes")
+    assert sol.canBeValid("()()", "0000") is True, "Test 2 Failed"
+    print("Test 2 Passed: all flexible")
+    assert sol.canBeValid(")", "0") is False, "Test 3 Failed"
+    print("Test 3 Passed: odd length impossible")
+    assert sol.canBeValid("(", "0") is False, "Test 4 Failed"
+    print("Test 4 Passed: single open cannot close")
+    assert sol.canBeValid("(())", "0011") is True, "Test 5 Failed"
+    print("Test 5 Passed: mix locked and free")
+    print("\nAll test cases passed!")
+````

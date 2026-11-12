@@ -25,3 +25,70 @@ Output: 20
 ````text
 - 1 <= k <= len(boards) <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer (minimize maximum partition sum)
+Identical feasibility structure to book allocation and shipping capacity.
+
+1. Search max segment sum in \[max(boards), sum(boards)\].
+2. Greedy count painters needed for a trial cap; compare to k.
+
+## Complexity
+
+**Time:** O(n log S) - S = total board length.
+
+**Space:** O(1) - Greedy counting only.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def minTime(self, boards: List[int], k: int) -> int:
+        def painters_needed(cap: int) -> int:
+            p = 1
+            cur = 0
+            for b in boards:
+                if b > cap:
+                    return k + 1
+                if cur + b > cap:
+                    p += 1
+                    cur = b
+                else:
+                    cur += b
+                if p > k:
+                    return p
+            return p
+
+        lo, hi = max(boards), sum(boards)
+        while lo < hi:
+            mid = lo + (hi - lo) // 2
+            if painters_needed(mid) <= k:
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minTime([10, 10, 10, 10], 2) == 20, "Test 1 Failed"
+    print("Test 1 Passed: equal quarters two painters")
+    assert sol.minTime([10, 20, 30, 40], 2) == 60, "Test 2 Failed"
+    print("Test 2 Passed: skewed split")
+    assert sol.minTime([5, 5, 5, 5], 4) == 5, "Test 3 Failed"
+    print("Test 3 Passed: one board each")
+    assert sol.minTime([1, 2, 3, 4], 3) == 4, "Test 4 Failed"
+    print("Test 4 Passed: three painters")
+    assert sol.minTime([100], 1) == 100, "Test 5 Failed"
+    print("Test 5 Passed: single board")
+    print("\nAll test cases passed!")
+````

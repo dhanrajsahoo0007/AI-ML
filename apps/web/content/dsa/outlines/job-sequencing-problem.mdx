@@ -31,3 +31,76 @@ Example 2:
 - 1 <= len(jobs) <= 10^4
 - Each job is [deadline, profit] with 1 <= deadline <= len(jobs) and 1 <= profit
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy by profit with union-find for latest free slot
+Sorting jobs by descending profit and placing each job on the latest still-empty day
+before its deadline maximizes retained high-value work.
+
+1. Sort jobs by profit descending.
+2. Track parent pointers for union-find over day slots to find latest free day.
+3. For each job, locate the latest available day &lt;= deadline; if none, skip.
+4. Union that day with day-1 to mark it used and add profit.
+
+## Complexity
+
+**Time:** O(n \* alpha(n)) for n jobs with union-find path compression.
+
+**Space:** O(max\_deadline) for parent array.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def jobSequencing(self, jobs: List[List[int]]) -> int:
+        if not jobs:
+            return 0
+
+        jobs.sort(key=lambda job: job[1], reverse=True)
+        max_deadline = max(d for d, _ in jobs)
+        parent = list(range(max_deadline + 2))
+
+        def find(x: int) -> int:
+            if parent[x] != x:
+                parent[x] = find(parent[x])
+            return parent[x]
+
+        total = 0
+        for deadline, profit in jobs:
+            slot = find(deadline)
+            if slot == 0:
+                continue
+            total += profit
+            parent[slot] = find(slot - 1)
+
+        return total
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.jobSequencing([[2, 100], [1, 19], [2, 27], [1, 25], [3, 15]]) == 142, "Test 1 Failed"
+    print("Test 1 Passed: classic mixed deadlines maximize profit")
+
+    assert sol.jobSequencing([[1, 4], [2, 10], [3, 6], [4, 20]]) == 40, "Test 2 Failed"
+    print("Test 2 Passed: take every job when deadlines allow")
+
+    assert sol.jobSequencing([[1, 20], [1, 10]]) == 20, "Test 3 Failed"
+    print("Test 3 Passed: same deadline keeps the richer job")
+
+    assert sol.jobSequencing([[3, 50], [2, 60], [1, 40]]) == 150, "Test 4 Failed"
+    print("Test 4 Passed: descending profits all fit on unique days")
+
+    assert sol.jobSequencing([[1, 5]]) == 5, "Test 5 Failed"
+    print("Test 5 Passed: single job baseline")
+
+    print("\nAll test cases passed!")
+````

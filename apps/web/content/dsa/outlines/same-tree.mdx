@@ -27,3 +27,83 @@ Example 2:
 - The number of nodes in each tree is in the range [0, 200].
 - Node values fit in 32-bit signed integers.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Recursion on pairs of nodes
+Two trees match if roots match and left subtrees and right subtrees match recursively.
+
+1. If both roots are None, return True.
+2. If exactly one is None or values differ, return False.
+3. Return isSameTree(left, left) and isSameTree(right, right).
+
+## Complexity
+
+**Time:** O(min(n, m))
+
+**Space:** O(h) stack depth.
+Restored (original notes, diagrams, and walkthrough):
+Check if Both the Trees are same or not
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    from collections import deque
+
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def isSameTree(self, p: Optional[TreeNode], q: Optional[TreeNode]) -> bool:
+        if p is None and q is None:
+            return True
+        if p is None or q is None or p.val != q.val:
+            return False
+        return self.isSameTree(p.left, q.left) and self.isSameTree(p.right, q.right)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    a = build_tree_from_level_order([1, 2, 3])
+    b = build_tree_from_level_order([1, 2, 3])
+    assert sol.isSameTree(a, b) is True
+    c = build_tree_from_level_order([1, 2])
+    d = build_tree_from_level_order([1, None, 2])
+    assert sol.isSameTree(c, d) is False
+    assert sol.isSameTree(None, None) is True
+    e = build_tree_from_level_order([1])
+    f = build_tree_from_level_order([1, 2])
+    assert sol.isSameTree(e, f) is False
+    print("\nAll test cases passed!")
+````

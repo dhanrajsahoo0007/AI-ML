@@ -82,6 +82,10 @@ topic page, but not in the filterable problem list. `group` and `number` keep th
 a topic's `order` is its number (`topicLabel()` in `kind.ts`). Once `apps/web/content/dsa/problems/<slug>.mdx` exists the outline with
 the same slug is ignored: delete it in the same change. Every outline is compiled in `mdx.test.tsx`.
 
+An outline may carry notes after `<PremiumBreak/>` (approach, complexity, the owner's solution and tests). They follow
+the editorial rule: `outlineNotes()` in `mdx.tsx` is only called for the local Paid view, every other build shows the Pro
+placeholder, and `leak.test.ts` fails if a built page carries `data-dsa-outline-notes`.
+
 ## Extend it
 
 - New problem: `.claude/skills/add-dsa-problem/SKILL.md`. New topic: an MDX file in `content/dsa/topics/`.

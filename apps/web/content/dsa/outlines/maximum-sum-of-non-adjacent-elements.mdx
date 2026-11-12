@@ -28,3 +28,55 @@ Example 2:
 - 1 <= len(arr) <= 10^5
 - 0 <= arr[i] <= 10^4
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 1D Dynamic Programming
+At each index, either skip the element or take it and add best up to i-2.
+
+1. Track take/nottake or dp\[i\] = max(dp\[i-1\], dp\[i-2\]+arr\[i\]).
+2. Use O(1) space: (prev2, prev1) rolling maximum.
+
+## Complexity
+
+**Time:** O(n) - one pass.
+
+**Space:** O(1) - two accumulated values.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def robLinear(self, nums: List[int]) -> int:
+        if not nums:
+            return 0
+        if len(nums) == 1:
+            return nums[0]
+        prev2, prev1 = nums[0], max(nums[0], nums[1])
+        for i in range(2, len(nums)):
+            prev2, prev1 = prev1, max(prev1, prev2 + nums[i])
+        return prev1
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.robLinear([5, 5, 10, 100, 10, 5]) == 110, "Test 1 Failed"
+    print("Test 1 Passed: classic array -> 110")
+    assert sol.robLinear([3, 2, 7, 10]) == 13, "Test 2 Failed"
+    print("Test 2 Passed: [3,2,7,10] -> 13")
+    assert sol.robLinear([1]) == 1, "Test 3 Failed"
+    print("Test 3 Passed: single element")
+    assert sol.robLinear([1, 2]) == 2, "Test 4 Failed"
+    print("Test 4 Passed: two elements")
+    assert sol.robLinear([0, 0, 0]) == 0, "Test 5 Failed"
+    print("Test 5 Passed: zeros")
+    print("\nAll test cases passed!")
+````

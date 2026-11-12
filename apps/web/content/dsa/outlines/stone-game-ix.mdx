@@ -34,3 +34,54 @@ Example 3:
 - 1 <= len(stones) <= 10^5
 - 1 <= stones[i] <= 1000
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Modulo Counting
+Only residues modulo three matter; counts of zeros toggle parity of extra moves while ones and twos set the outcome.
+
+1. Count stones by value mod 3 into three buckets.
+2. If the number of multiples of three is even, Alice wins exactly when both residue classes 1 and 2 exist.
+3. If it is odd, Alice wins when the counts of residues 1 and 2 differ by more than two.
+
+## Complexity
+
+**Time:** O(n) - Counting pass.
+
+**Space:** O(1) - Three counters.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def stoneGameIX(self, stones: List[int]) -> bool:
+        c = [0, 0, 0]
+        for a in stones:
+            c[a % 3] += 1
+        if c[0] % 2 == 0:
+            return min(c[1], c[2]) > 0
+        return abs(c[1] - c[2]) > 2
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.stoneGameIX([5, 1, 2, 4, 3]) is False, "Test 1 Failed"
+    print("Test 1 Passed: sample false")
+    assert sol.stoneGameIX([2, 1]) is True, "Test 2 Failed"
+    print("Test 2 Passed: sample true")
+    assert sol.stoneGameIX([1, 1, 1]) is False, "Test 3 Failed"
+    print("Test 3 Passed: all ones modulo three")
+    assert sol.stoneGameIX([1, 2, 3]) is False, "Test 4 Failed"
+    print("Test 4 Passed: mixed residues edge")
+    assert sol.stoneGameIX([1, 2, 1, 2]) is True, "Test 5 Failed"
+    print("Test 5 Passed: balanced ones and twos")
+    print("\nAll test cases passed!")
+````

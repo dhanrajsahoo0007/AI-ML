@@ -34,3 +34,153 @@ Example 3 (impossible — more than two odd-degree vertices):
 - 0 <= len(edges) <= 5000
 - Graph may be disconnected; then no Euler trail covers all edges unless empty.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Euler path / Euler circuit — degree conditions + Hierholzer's algorithm
+
+1. Build adjacency with multiset (list) of neighbors; count degrees.
+2. Euler circuit (undirected): all vertices with nonzero degree have even degree; graph
+is connected in the sense of edges (ignore isolated vertices).
+3. Euler path: exactly two vertices have odd degree (the trail endpoints).
+4. Hierholzer: follow unused edges greedily, splice cycles into a circuit (stack-based).
+
+## Complexity
+
+**Time:** O(V + E) for checks and traversal.
+
+**Space:** O(V + E) for adjacency and the recursion/stack structure.
+
+## Solution
+
+````python
+from typing import List, Tuple
+from collections import defaultdict
+
+
+class Solution:
+    # --- Original teaching notes (Euler path vs circuit) ---
+    # Intuition: every time you enter and leave a vertex along a trail, you consume TWO edge
+    # ends at that vertex. Hence all middle vertices must have EVEN degree. A circuit starts
+    # and ends at the same vertex -> all degrees even. A path has two EXCEPTION vertices
+    # (the endpoints) with ODD degree.
+    #
+    # Hierholzer sketch on a figure-8 (two cycles sharing a vertex):
+    #   Walk until you return to start -> one loop recorded; continue on leftover edges.
+    #   Stack unwinding yields an edge-simple closed walk using each edge once.
+    # --- end notes ---
+
+    def _edge_connected_component(self, n: int, adj: defaultdict) -> bool:
+        """Non-isolated vertices must lie in one connected component (as an undirected graph)."""
+        verts = [i for i in range(n) if adj[i]]
+        if not verts:
+            return True
+        start = verts[0]
+        seen = set()
+        stack = [start]
+        while stack:
+            u = stack.pop()
+            if u in seen:
+                continue
+            seen.add(u)
+            for v in adj[u]:
+                if v not in seen:
+                    stack.append(v)
+        return all(i in seen for i in verts)
+
+    def euler_classification(
+        self, n: int, edges: List[List[int]]
+    ) -> Tuple[str, int]:
+        """
+        Returns (kind, suggested_start) where kind is 'circuit' | 'path' | 'none' | 'empty'.
+        suggested_start is a valid start vertex for Hierholzer (any if circuit; odd vertex if path).
+        """
+        if not edges:
+            return "empty", 0
+
+        deg = [0] * n
+        adj: defaultdict[int, List[int]] = defaultdict(list)
+        for u, v in edges:
+            deg[u] += 1
+            deg[v] += 1
+            adj[u].append(v)
+            adj[v].append(u)
+
+        if not self._edge_connected_component(n, adj):
+            return "none", 0
+
+        odds = [i for i in range(n) if deg[i] % 2 == 1]
+        if len(odds) == 0:
+            # start anywhere in the edge component
+            return "circuit", next(i for i in range(n) if deg[i] > 0)
+        if len(odds) == 2:
+            return "path", odds[0]
+        return "none", 0
+
+    def hierholzer_trail(self, n: int, edges: List[List[int]]) -> List[int]:
+        """Return vertex sequence using every undirected edge exactly once, or [] if impossible."""
+        kind, start = self.euler_classification(n, edges)
+        if kind in ("none", "empty"):
+            return [] if kind == "none" else [0] if n else []
+
+        adj: defaultdict[int, List[int]] = defaultdict(list)
+        for u, v in edges:
+            adj[u].append(v)
+            adj[v].append(u)
+
+        if kind == "empty":
+            return [0] if n else []
+
+        stack = [start]
+        circuit: List[int] = []
+
+        while stack:
+            u = stack[-1]
+            if adj[u]:
+                v = adj[u].pop()
+                # remove the matching half-edge from v's list (multiset removal)
+                for i, x in enumerate(adj[v]):
+                    if x == u:
+                        adj[v].pop(i)
+                        break
+                stack.append(v)
+            else:
+                circuit.append(stack.pop())
+
+        circuit.reverse()
+        return circuit
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    k0, _ = sol.euler_classification(3, [[0, 1], [1, 2], [2, 0]])
+    assert k0 == "circuit", "Test 1a Failed"
+    t0 = sol.hierholzer_trail(3, [[0, 1], [1, 2], [2, 0]])
+    assert t0[0] == t0[-1], "Test 1b Failed: circuit must close"
+    assert len(t0) == len([[0, 1], [1, 2], [2, 0]]) + 1, "Test 1c Failed: vertex count"
+    print("Test 1 Passed: triangle Euler circuit")
+
+    k1, _ = sol.euler_classification(4, [[0, 1], [1, 2], [2, 3]])
+    assert k1 == "path", "Test 2a Failed"
+    t1 = sol.hierholzer_trail(4, [[0, 1], [1, 2], [2, 3]])
+    assert t1 == [0, 1, 2, 3] or t1 == [3, 2, 1, 0], "Test 2b Failed"
+    print("Test 2 Passed: path graph Euler trail")
+
+    k2, _ = sol.euler_classification(5, [[0, 1], [0, 2], [0, 3], [0, 4]])
+    assert k2 == "none", "Test 3 Failed"
+    assert sol.hierholzer_trail(5, [[0, 1], [0, 2], [0, 3], [0, 4]]) == [], "Test 3b Failed"
+    print("Test 3 Passed: star with four odd leaves — impossible")
+
+    k3, _ = sol.euler_classification(1, [])
+    assert k3 == "empty", "Test 4a Failed"
+    assert sol.hierholzer_trail(1, []) == [0], "Test 4b Failed"
+    print("Test 4 Passed: no edges")
+
+    print("\nAll tests passed!")
+````

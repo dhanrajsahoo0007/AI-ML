@@ -28,3 +28,98 @@ Example 2:
 ````text
 - nums contains only 0 and 1, sorted (all zeros before ones)
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Exponential Search + First-Occurrence Binary Search
+Expand until we see a 1 in the window, then binary search for the leftmost 1.
+
+1. Exponentially grow \[left, right\] while right &lt; n and nums\[right\] == 0.
+2. Binary search on \[left, min(right, n-1)\] for first index where value is 1.
+
+## Complexity
+
+**Time:** O(log k) where k is the index of the first 1.
+
+**Space:** O(1) - Only indices stored.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement: Index of First 1 in a Binary Sorted Infinite Array
+
+Given an infinite sorted binary array (containing only 0s and 1s), find the index of the first 1 in the array.
+The array is infinite, which means you don't know the size of the array beforehand.
+
+Examples:
+
+1. Input: arr = \[0, 0, 0, 0, 0, 1, 1, 1, 1, ...\]
+Output: 5
+Explanation: The first 1 appears at index 5.
+
+2. Input: arr = \[0, 0, 1, 1, 1, 1, 1, 1, 1, ...\]
+Output: 2
+Explanation: The first 1 appears at index 2.
+
+3. Input: arr = \[1, 1, 1, 1, 1, 1, 1, 1, 1, ...\]
+Output: 0
+Explanation: The array starts with 1, so the first 1 is at index 0.
+
+The approach uses a combination of exponential search to find a range and then binary search to find the first 1 within that range.
+Explanation of the approach:
+
+1. Exponential Search:
+- We start with a small range and exponentially increase its size.
+- This allows us to quickly find a range that contains the first 1.
+
+2. Binary Search for First Occurrence:
+- Once we have a range, we perform a modified binary search to find the first occurrence of 1.
+- When we find a 1, we continue searching in the left half to find the first occurrence.
+
+3. Handling "Infinite" Array:
+- We use len(arr) in our implementation to avoid index out of range errors.
+- In a truly infinite array scenario, you would replace len(arr) checks with a method to test if an index is valid.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findFirstOne(self, nums: List[int]) -> int:
+        if not nums or nums[-1] == 0:
+            return -1
+        left, right = 0, 1
+        n = len(nums)
+        while right < n and nums[right] == 0:
+            left = right
+            right *= 2
+        lo, hi = left, min(right, n - 1)
+        ans = -1
+        while lo <= hi:
+            mid = lo + (hi - lo) // 2
+            if nums[mid] == 1:
+                ans = mid
+                hi = mid - 1
+            else:
+                lo = mid + 1
+        return ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findFirstOne([0] * 10000 + [1] * 10000) == 10000, "Test 1 Failed"
+    print("Test 1 Passed: late first one")
+    assert sol.findFirstOne([0] * 100 + [1] * 100000) == 100, "Test 2 Failed"
+    print("Test 2 Passed: medium offset")
+    assert sol.findFirstOne([1] * 100000) == 0, "Test 3 Failed"
+    print("Test 3 Passed: starts with one")
+    assert sol.findFirstOne([0] * 100000) == -1, "Test 4 Failed"
+    print("Test 4 Passed: no ones")
+    assert sol.findFirstOne([0] * 5 + [1] * 100000) == 5, "Test 5 Failed"
+    print("Test 5 Passed: small prefix zeros")
+    print("\nAll test cases passed!")
+````

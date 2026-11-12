@@ -29,3 +29,91 @@ Example 2:
 - The number of nodes is in the range [2, 10^5].
 - p and q exist and are distinct values in the tree.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Paths through LCA
+Record the path from root to each value; trim the common prefix; remaining lengths sum to the distance.
+
+1. Walk from root to p while recording visited nodes or their values.
+2. Walk from root to q similarly.
+3. Advance an index while both paths share the same node at that depth.
+4. Return (len(path\_p) - i) + (len(path\_q) - i).
+
+## Complexity
+
+**Time:** O(h) - Two root-to-node traversals plus O(h) scan.
+
+**Space:** O(h) - Path storage lists.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: List[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+class Solution:
+    def distanceBetweenValues(self, root: Optional[TreeNode], p: int, q: int) -> int:
+        def path_to(target: int) -> List[TreeNode]:
+            cur = root
+            out: List[TreeNode] = []
+            while cur:
+                out.append(cur)
+                if cur.val == target:
+                    return out
+                cur = cur.left if target < cur.val else cur.right
+            raise ValueError("value not in BST")
+
+        pa = path_to(p)
+        pb = path_to(q)
+        i = 0
+        while i < len(pa) and i < len(pb) and pa[i] is pb[i]:
+            i += 1
+        return len(pa) + len(pb) - 2 * i
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    root = build_bst_insert([6, 2, 8, 0, 4, 7, 9, 3, 5])
+    assert sol.distanceBetweenValues(root, 2, 8) == 2
+    assert sol.distanceBetweenValues(root, 2, 4) == 1
+    assert sol.distanceBetweenValues(root, 0, 9) == 4
+    r2 = build_bst_insert([10, 5, 15, 12, 20])
+    assert sol.distanceBetweenValues(r2, 12, 20) == 2
+    r3 = build_bst_insert([3, 1, 4])
+    assert sol.distanceBetweenValues(r3, 1, 4) == 2
+    print("\nAll test cases passed!")
+````

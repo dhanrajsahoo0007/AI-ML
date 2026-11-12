@@ -28,3 +28,125 @@ Example 2:
 - The number of nodes is in the range [1, 100].
 - Node values in [-100, 100].
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS height / peeling order
+Assign each node a height from the bottom; leaves are height 0; group values by height.
+
+1. Post-order DFS returns subtree height from deepest leaf.
+2. Append node.val to result\[height\].
+3. Return the list of rounds.
+
+## Complexity
+
+**Time:** O(n) - each node visited once.
+
+**Space:** O(n) for output and recursion stack O(h).
+Restored (original notes, diagrams, and walkthrough):
+Problem: Find Leaves of Binary Tree
+
+Given the root of a binary tree, collect the tree's nodes as if you were doing this:
+1. Collect all the leaf nodes.
+2. Remove all the leaf nodes.
+3. Repeat until the tree is empty.
+
+Examples:
+1. Input: root = \[1,2,3,4,5\]
+Output: \[\[4,5,3\],\[2\],\[1\]\]
+Explanation:
+
+1
+/      2   3
+/    4   5
+
+- First round: \[4,5,3\] (leaves of the tree)
+- Second round: \[2\] (new leaves after removing previous ones)
+- Third round: \[1\] (root becomes a leaf)
+
+2. Input: root = \[1\]
+Output: \[\[1\]\]
+Explanation: The tree only has one node, which is both the root and a leaf.
+
+Constraints:
+\* The number of nodes in the tree is in the range \[1, 100\].
+\* -100 &lt;= Node.val &lt;= 100
+
+Time Complexity: O(n), where n is the number of nodes in the tree.
+Space Complexity: O(n) for the result list and the recursion stack.
+
+Approach:
+We use a depth-first search (DFS) to traverse the tree and assign a "height" to each node.
+The height of a node is defined as its distance from the deepest leaf in its subtree.
+Leaf nodes have a height of 0, and the root will have the maximum height.
+We group nodes by their height, which corresponds to the order in which they would be removed.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    from collections import deque
+
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def findLeaves(self, root: Optional[TreeNode]) -> List[List[int]]:
+        result: List[List[int]] = []
+
+        def dfs(node: Optional[TreeNode]) -> int:
+            if not node:
+                return -1
+            lh = dfs(node.left)
+            rh = dfs(node.right)
+            height = max(lh, rh) + 1
+            while len(result) <= height:
+                result.append([])
+            result[height].append(node.val)
+            return height
+
+        dfs(root)
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r1 = build_tree_from_level_order([1, 2, 3, 4, 5])
+    assert sol.findLeaves(r1) == [[4, 5, 3], [2], [1]]
+    r2 = build_tree_from_level_order([1])
+    assert sol.findLeaves(r2) == [[1]]
+    r3 = build_tree_from_level_order([1, 2, 3, None, None, 4, 5])
+    assert sol.findLeaves(r3) == [[2, 4, 5], [3], [1]]
+    assert sol.findLeaves(None) == []
+    print("\nAll test cases passed!")
+````

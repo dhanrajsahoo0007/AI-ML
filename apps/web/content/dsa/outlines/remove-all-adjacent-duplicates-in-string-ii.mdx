@@ -31,3 +31,114 @@ Example 2:
 - 2 <= k <= 10^4
 - s consists of lowercase English letters.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Stack with run-length
+Store each character with its consecutive count; pop when count reaches k.
+
+1. Maintain a stack of \[character, run length\] for the current rightmost runs in the folded string.
+2. For each character, if it matches the stack top, increment that run length; otherwise push \[ch, 1\].
+3. When a run length reaches k, pop it so earlier neighbors can merge on future steps.
+4. Concatenate each stack entry as character repeated by its remaining count.
+
+## Complexity
+
+**Time:** O(n) - Each character is processed a constant number of times across passes.
+
+**Space:** O(n) - Stack size is bounded by the string length.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def removeDuplicates(self, s: str, k: int) -> str:
+        stack: List[list] = []
+        for ch in s:
+            if stack and stack[-1][0] == ch:
+                stack[-1][1] += 1
+                if stack[-1][1] == k:
+                    stack.pop()
+            else:
+                stack.append([ch, 1])
+        return "".join(ch * cnt for ch, cnt in stack)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.removeDuplicates("deeedbbcccbdaa", 3) == "aa", "Test 1 Failed"
+    print("Test 1 Passed: k=3 sample")
+    assert sol.removeDuplicates("pbbcggttciiippooaais", 2) == "ps", "Test 2 Failed"
+    print("Test 2 Passed: k=2 sample")
+    assert sol.removeDuplicates("abcd", 2) == "abcd", "Test 3 Failed"
+    print("Test 3 Passed: no k-run to remove")
+    assert sol.removeDuplicates("aa", 2) == "", "Test 4 Failed"
+    print("Test 4 Passed: entire string removed")
+    assert sol.removeDuplicates("aabbcc", 2) == "", "Test 5 Failed"
+    print("Test 5 Passed: repeated removals")
+    print("\nAll test cases passed!")
+````
+
+## Another version
+
+From 09. Stack and Queue/03. String Manipulation with Stack.
+
+### Approach
+
+**Pattern:** Run-Length Stack
+Track consecutive counts on the stack and pop when a run reaches length k.
+
+1. Maintain stack entries as \[character, count\].
+2. Increment the top run when characters match; otherwise push a fresh run.
+3. Pop when a run hits k; expand survivors into the final string.
+
+### Complexity
+
+**Time:** O(n) - Each character causes O(1) amortized work.
+
+**Space:** O(n) - Stack stores compressed runs.
+
+### Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def removeDuplicates(self, s: str, k: int) -> str:
+        stack: List[List] = []
+        for ch in s:
+            if stack and stack[-1][0] == ch:
+                stack[-1][1] += 1
+                if stack[-1][1] == k:
+                    stack.pop()
+            else:
+                stack.append([ch, 1])
+        return "".join(ch * cnt for ch, cnt in stack)
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.removeDuplicates("abcd", 2) == "abcd", "Test 1 Failed"
+    assert sol.removeDuplicates("deeedbbcccbdaa", 3) == "aa", "Test 2 Failed"
+    assert sol.removeDuplicates("pbbcggttciiippooaais", 2) == "ps", "Test 3 Failed"
+    assert sol.removeDuplicates("aaaaaa", 3) == "", "Test 4 Failed"
+    assert sol.removeDuplicates("aabbaabbaa", 2) == "", "Test 5 Failed"
+    print("Test 1 Passed: no removals")
+    print("Test 2 Passed: multi-round collapse")
+    print("Test 3 Passed: pair removals")
+    print("Test 4 Passed: entire wipe")
+    print("Test 5 Passed: staggered triples")
+    print("\nAll test cases passed!")
+````

@@ -24,3 +24,70 @@ Output: 3
 ````text
 - 2 <= m <= len(position) <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer (maximize minimum gap)
+Same greedy feasibility as aggressive cows after sorting positions.
+
+1. Sort positions.
+2. Binary search minimum force F; greedily place balls starting from the smallest index.
+
+## Complexity
+
+**Time:** O(n log W) - W = spread of positions.
+
+**Space:** O(1) - Greedy placement only.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxDistance(self, position: List[int], m: int) -> int:
+        position.sort()
+
+        def can(force: int) -> bool:
+            prev = position[0]
+            cnt = 1
+            for x in position[1:]:
+                if x - prev >= force:
+                    cnt += 1
+                    prev = x
+                if cnt == m:
+                    return True
+            return False
+
+        lo, hi = 1, position[-1] - position[0]
+        best = 0
+        while lo <= hi:
+            mid = lo + (hi - lo) // 2
+            if can(mid):
+                best = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.maxDistance([1, 2, 3, 4, 7], 3) == 3, "Test 1 Failed"
+    print("Test 1 Passed: three balls")
+    assert sol.maxDistance([5, 4, 3, 2, 1, 1000000000], 2) == 999999999, "Test 2 Failed"
+    print("Test 2 Passed: extreme endpoints")
+    assert sol.maxDistance([1, 10, 20, 30], 2) == 29, "Test 3 Failed"
+    print("Test 3 Passed: two balls only")
+    assert sol.maxDistance([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 4) == 3, "Test 4 Failed"
+    print("Test 4 Passed: evenly spaced")
+    assert sol.maxDistance([2, 4, 6, 8], 3) == 2, "Test 5 Failed"
+    print("Test 5 Passed: arithmetic progression three balls")
+    print("\nAll test cases passed!")
+````

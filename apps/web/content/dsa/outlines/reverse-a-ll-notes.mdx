@@ -1,0 +1,130 @@
+---
+title: "Reverse a LL"
+description: "Reverse a singly linked list and return the new head."
+topics: [linked-lists]
+group: "02. List Modifications"
+number: "01"
+order: 13002001000000
+status: outline
+---
+
+Reverse a singly linked list and return the new head.
+
+## Examples
+
+````text
+Example 1:
+    Input: head = [1,2,3,4,5]
+    Output: [5,4,3,2,1]
+
+Example 2:
+    Input: head = []
+    Output: []
+````
+
+## Constraints
+
+````text
+- 0 <= n <= 5000
+- -5000 <= Node.val <= 5000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** In-place reversal
+Rewire each node's next to the previous node while scanning forward.
+
+1. prev = None, cur = head.
+2. While cur: nxt = cur.next; cur.next = prev; prev = cur; cur = nxt.
+3. Return prev.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1).
+Restored (original notes, diagrams, and walkthrough):
+Reverses a singly linked list.
+
+Solution Steps:
+1. Initialize three pointers: prev as None, current as head, and next as None.
+2. Traverse the list:
+- Store the next node.
+- Reverse the current node's pointer.
+- Move prev and current one step forward.
+3. Return prev as the new head of the reversed list.
+
+Time Complexity: O(n), where n is the number of nodes in the linked list.
+Space Complexity: O(1), as we only use a constant amount of extra space.
+
+Examples:
+1. Input: 1 -&gt; 2 -&gt; 3 -&gt; 4 -&gt; 5 -&gt; NULL
+Output: 5 -&gt; 4 -&gt; 3 -&gt; 2 -&gt; 1 -&gt; NULL
+
+2. Input: 1 -&gt; 2 -&gt; NULL
+Output: 2 -&gt; 1 -&gt; NULL
+
+3. Input: NULL
+Output: NULL
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+def linked_list_to_list(head: Optional[ListNode]) -> List[int]:
+    out: List[int] = []
+    while head:
+        out.append(head.val)
+        head = head.next
+    return out
+
+
+class Solution:
+    def reverseList(self, head: Optional[ListNode]) -> Optional[ListNode]:
+        prev: Optional[ListNode] = None
+        cur = head
+        while cur:
+            nxt = cur.next
+            cur.next = prev
+            prev = cur
+            cur = nxt
+        return prev
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    assert linked_list_to_list(sol.reverseList(list_to_linked_list([1, 2, 3, 4, 5]))) == [5, 4, 3, 2, 1]
+
+    assert linked_list_to_list(sol.reverseList(list_to_linked_list([1, 2]))) == [2, 1]
+
+    assert sol.reverseList(None) is None
+
+    assert linked_list_to_list(sol.reverseList(list_to_linked_list([42]))) == [42]
+
+    print("\nAll test cases passed!")
+````

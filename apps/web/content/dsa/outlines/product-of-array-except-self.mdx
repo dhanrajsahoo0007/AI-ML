@@ -26,3 +26,58 @@ Output: [24, 12, 8, 6]
 - -30 <= nums[i] <= 30
 - Product of any prefix or suffix fits in 32-bit integer
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix-Suffix
+Left running products and right running products combine without division.
+
+1. Build prefix products in answer: answer\[i\] = product(nums\[0..i-1\]).
+2. Multiply by a right running product scanning from the end.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1) extra excluding the output array.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def productExceptSelf(self, nums: List[int]) -> List[int]:
+        n = len(nums)
+        out = [1] * n
+        p = 1
+        for i in range(n):
+            out[i] = p
+            p *= nums[i]
+        p = 1
+        for i in range(n - 1, -1, -1):
+            out[i] *= p
+            p *= nums[i]
+        return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.productExceptSelf([1, 2, 3, 4]) == [24, 12, 8, 6], "Test 1 Failed"
+    print("Test 1 Passed: positive ints")
+    assert sol.productExceptSelf([-1, 1, 0, -3, 3]) == [0, 0, 9, 0, 0], "Test 2 Failed"
+    print("Test 2 Passed: contains zero")
+    assert sol.productExceptSelf([2, 3]) == [3, 2], "Test 3 Failed"
+    print("Test 3 Passed: length two")
+    assert sol.productExceptSelf([1, -1]) == [-1, 1], "Test 4 Failed"
+    print("Test 4 Passed: signs")
+    assert sol.productExceptSelf([4, 3, 2, 1, 2]) == [12, 16, 24, 48, 24], "Test 5 Failed"
+    print("Test 5 Passed: mixed small values")
+    print("\nAll test cases passed!")
+````

@@ -28,3 +28,71 @@ Input: k=3, nums=[4,5,8,2], add(3)=4, add(5)=5, add(10)=5, add(9)=8
 - At most 10^4 calls to add.
 - At least k elements when add is called.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap with Lazy Deletion / Streaming
+Maintain a min-heap of exactly k elements. The root is always the kth largest.
+New elements only enter the heap if they're larger than the current kth largest.
+
+1. Initialize a min-heap. Add initial elements via the add method.
+2. On add: if heap size &lt; k, push val. Else if val &gt; root, replace root.
+3. Return the root (kth largest).
+
+## Complexity
+
+**Time:** O(n log k) for init, O(log k) per add
+
+**Space:** O(k) for the heap
+
+## Solution
+
+````python
+import heapq
+
+
+class KthLargest:
+    def __init__(self, k: int, nums: list[int]):
+        self.k = k
+        self.heap = []
+        for num in nums:
+            self.add(num)
+
+    def add(self, val: int) -> int:
+        if len(self.heap) < self.k:
+            heapq.heappush(self.heap, val)
+        elif val > self.heap[0]:
+            heapq.heapreplace(self.heap, val)
+        return self.heap[0]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    # Test Case 1: Standard usage
+    kl = KthLargest(3, [4, 5, 8, 2])
+    assert kl.add(3) == 4, "Test 1a Failed"
+    assert kl.add(5) == 5, "Test 1b Failed"
+    assert kl.add(10) == 5, "Test 1c Failed"
+    assert kl.add(9) == 8, "Test 1d Failed"
+    assert kl.add(4) == 8, "Test 1e Failed"
+    print("Test 1 Passed: k=3, stream operations correct")
+
+    # Test Case 2: k=1 (track maximum)
+    kl = KthLargest(1, [])
+    assert kl.add(3) == 3, "Test 2a Failed"
+    assert kl.add(5) == 5, "Test 2b Failed"
+    assert kl.add(2) == 5, "Test 2c Failed"
+    print("Test 2 Passed: k=1 tracks maximum")
+
+    # Test Case 3: Negative numbers
+    kl = KthLargest(2, [-4, -2])
+    assert kl.add(-3) == -3, "Test 3a Failed"
+    assert kl.add(0) == -2, "Test 3b Failed"
+    print("Test 3 Passed: negative numbers work correctly")
+
+    print("\nAll test cases passed!")
+````

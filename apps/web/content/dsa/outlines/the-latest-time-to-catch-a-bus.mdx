@@ -36,3 +36,67 @@ Example 3:
 - 2 <= capacity <= 10^9
 - 1 <= buses[i], passengers[i] <= 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Simulation + Backtrack
+Simulate boarding in time order while tracking the latest gap before a passenger arrival; if a bus has space after loading, its departure time may be feasible.
+
+1. Sort buses and passengers.
+2. For each bus, fill with passengers arriving by that departure until capacity.
+3. Track latest candidate time just before each boarded passenger when that slot is free.
+4. If a bus is not full after boarding and its departure is not already taken, you may arrive exactly then.
+
+## Complexity
+
+**Time:** O(n log n + m log m) for sorting plus linear scan.
+
+**Space:** O(1) extra beyond sorting buffers.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def latestTimeCatchTheBus(self, buses: List[int], passengers: List[int], capacity: int) -> int:
+        buses.sort()
+        passengers.sort()
+        p = 0
+        prev = -1  # last timestamp that is definitely occupied by an existing passenger
+        ans = 0
+        for dep in buses:
+            taken = 0
+            while p < len(passengers) and passengers[p] <= dep and taken < capacity:
+                # Try to slip in one second before this passenger if that second is still free.
+                if passengers[p] - 1 != prev:
+                    ans = passengers[p] - 1
+                prev = passengers[p]
+                p += 1
+                taken += 1
+            if taken < capacity and prev != dep:
+                # Bus not full → riding exactly at departure might still be possible.
+                ans = dep
+        return ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.latestTimeCatchTheBus([10, 20], [2, 17, 18, 19], 2) == 16, "Test 1 Failed"
+    print("Test 1 Passed: sample sixteen")
+    assert sol.latestTimeCatchTheBus([20, 30, 10], [19, 13, 26, 4, 25, 11, 21], 2) == 20, "Test 2 Failed"
+    print("Test 2 Passed: unsorted buses")
+    assert sol.latestTimeCatchTheBus([3], [2, 4], 2) == 3, "Test 3 Failed"
+    print("Test 3 Passed: ride at departure")
+    assert sol.latestTimeCatchTheBus([10], [3], 2) == 10, "Test 4 Failed"
+    print("Test 4 Passed: arrive at departure with spare seat")
+    assert sol.latestTimeCatchTheBus([5, 11], [7, 8, 10], 2) == 6, "Test 5 Failed"
+    print("Test 5 Passed: custom schedule")
+    print("\nAll test cases passed!")
+````

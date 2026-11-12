@@ -28,3 +28,58 @@ Example 2:
 - 1 <= n <= 9
 - 1 <= k <= n!
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Factorial number system / unranking
+At each step, (len-1)! fits into k determine which remaining digit to place next.
+
+1. Keep an ordered list of available digits as strings "1".."n".
+2. Convert k to zero-based.
+3. While digits remain, let fact = (len-1)!, choose index = k // fact, pop that digit, set k %= fact.
+4. Join popped digits.
+
+## Complexity
+
+**Time:** O(n^2) - Each pop is O(n); n &lt;= 9.
+
+**Space:** O(n) - Remaining digit list and output.
+
+## Solution
+
+````python
+import math
+from typing import List
+
+
+class Solution:
+    def getPermutation(self, n: int, k: int) -> str:
+        nums: List[str] = [str(i) for i in range(1, n + 1)]
+        k -= 1
+        result: List[str] = []
+        while nums:
+            fact = math.factorial(len(nums) - 1)
+            idx, k = divmod(k, fact)
+            result.append(nums.pop(idx))
+        return "".join(result)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.getPermutation(3, 3) == "213", "Test 1 Failed"
+    print("Test 1 Passed: n=3 k=3")
+    assert sol.getPermutation(4, 9) == "2314", "Test 2 Failed"
+    print("Test 2 Passed: n=4 k=9")
+    assert sol.getPermutation(3, 1) == "123", "Test 3 Failed"
+    print("Test 3 Passed: first permutation")
+    assert sol.getPermutation(3, 6) == "321", "Test 4 Failed"
+    print("Test 4 Passed: last permutation")
+    assert sol.getPermutation(2, 2) == "21", "Test 5 Failed"
+    print("Test 5 Passed: n=2")
+    print("\nAll test cases passed!")
+````
