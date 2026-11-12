@@ -1,11 +1,137 @@
 ---
 title: "Have Backbone (Disagree and Commit) & Earn Trust"
 description: "Challenge senior stakeholders with data, admit your own mistakes early, and commit wholeheartedly once a call is made."
-status: outline
+icon: message-square
+order: 6
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** how to pair candid technical pushback with humility, and how to prove you genuinely committed after being overruled.
+<KeyIdea>
+**Have Backbone; Disagree and Commit** requires challenging decisions you believe are flawed with hard evidence—and then owning the chosen path 100% without resentment if you are overruled—while **Earn Trust** comes from radical candor about your own mistakes and steelmanning your colleagues.
+</KeyIdea>
 
-**Related reading on this site:** [Resolving Technical Disagreements & Design Deadlocks](/behavioral/competencies/technical-conflict-and-alignment) · [Netflix: Freedom & Responsibility, Candor & Judgment](/behavioral/company-playbooks/netflix-culture-and-judgment)
+## The story
+
+Nothing sinks a Senior or Staff candidate faster than a one-sided conflict story.
+
+Asked about a disagreement, many candidates tell a story that sounds like a courtroom victory speech: *"My manager wanted to use a terrible architecture, I proved them wrong in a meeting, everyone clapped, and we used my design."*
+Wait for the Bar Raiser's next question: *"Now tell me about a time you disagreed strongly with a decision, **lost the argument**, and had to commit anyway."*
+
+Suddenly the candidate stumbles: *"Well, I committed, and three months later their design failed just like I said it would."*
+That single sentence—*"just like I said it would"*—is an instant red flag for both **Disagree and Commit** and **Earn Trust**. True commitment means that once the decision owner makes the call, you adopt the decision as **ours**, work actively to mitigate its risks so it succeeds, and never sit on the sidelines waiting to say *"I told you so."*
+
+## What interviewers are really testing
+
+<AnimatedDiagram spec="animated/behavioral/conflict-resolution" stepper caption="How principled disagreement works: steelman the competing view, separate facts from priorities, run an empirical spike, and commit to the shared decision." />
+
+Why Amazon pairs **Have Backbone; Disagree and Commit** with **Earn Trust**:
+- Backbone **without** Earn Trust turns you into an abrasive contrarian whom teammates avoid.
+- Earn Trust **without** Backbone turns you into a polite yes-person who stays silent while the team drives off a cliff.
+
+| Phase | What L5/L6 behavior looks like | What fails the rubric |
+| --- | --- | --- |
+| **1. Earn Trust (Before & During)** | Admitting your own blind spots first; steelmanning the other person's constraint in writing; keeping disagreements focused on system trade-offs, never personalities | Blaming teammates; hiding a mistake until a customer notices; ambushing a peer in front of executives |
+| **2. Have Backbone (Disagree)** | Speaking up when a technical or customer risk is being ignored, even when the room is senior; bringing a benchmark or 1-page trade-off matrix | Staying silent in the meeting and complaining in private Slack DMs afterward |
+| **3. And Commit** | Once the decision is made, aligning the team behind it and building the guardrails needed to make the chosen path work | Slow-rolling implementation or telling junior engineers *"Management forced us to do this"* |
+
+<PremiumBreak />
+
+## How the bar changes by level
+
+<Compare
+  columns={["Dimension", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
+  rows={[
+    ["Who you challenge", "Raises a technical concern with a peer or tech lead during PR/design review", "Pushes back on a PM, EM, or Principal Engineer with benchmark data when an SLA or invariant is at risk", "Challenges director/VP-level roadmap or architectural assumptions with a 6-page doc or prototype"],
+    ["How you Earn Trust", "Communicates blockers and mistakes immediately without defensiveness", "Owns team-level failures publicly in post-mortems and credits peers generously for wins", "Builds psychological safety across teams; repairs broken trust between engineering and product/partner orgs"],
+  ]}
+  caption="Prepare two stories for this pair: one where your data changed leadership's mind, and one where you were overruled and committed 100%."
+/>
+
+## Interactive diagnostic: test your story
+
+<DecisionTree
+  title="Audit your Disagree & Commit story"
+  tree={{
+    q: "Do you have BOTH versions ready: (A) when you convinced them with data, and (B) when you were overruled and committed?",
+    yes: {
+      q: "In your 'overruled' story, did you take concrete engineering action to help the chosen plan succeed (rather than watching it fail)?",
+      yes: {
+        q: "Can you articulate the valid business or engineering reason why the decision-maker overruled you?",
+        yes: {
+          answer: "Outstanding! That combination of backbone, empathy, and low-ego commitment is top 5% signal.",
+          href: "/behavioral/amazon-leadership-principles/invent-simplify-and-think-big",
+        },
+        no: "Frame their side fairly: e.g., 'My director optimized for time-to-market before a partner conference, whereas I was optimizing for 12-month maintenance cost.'",
+      },
+      no: "Show how you actively de-risked their chosen path (e.g., adding extra load tests, feature flags, or runbooks).",
+    },
+    no: "Bar Raisers explicitly ask for the 'overruled' version at least half the time—write down one real episode where you lost the vote and owned the execution.",
+  }}
+/>
+
+## Worked engineering example (STAR+L)
+
+<Tabs title="Both sides of Have Backbone & Earn Trust">
+  <Tab label="Story 1: Overruled — True Disagree & Commit">
+    **Prompt:** *"Tell me about a time you disagreed with your manager or a senior leader, lost the decision, and had to commit."*
+
+    - **Situation & Task:** *"During our checkout redesign, our Principal Architect decided to keep session state in our legacy memcached cluster rather than migrating to Redis Cluster so we could ship 3 weeks earlier for a partner launch. I disagreed because memcached lacked automatic replication and a node failure dropped 8% of active carts."*
+    - **Action:** *"I wrote a 1-page risk doc showing the expected cart-drop rate and proposed a 4-day dual-write bridge. In the review, the VP and Principal weighed the contractual partner penalty higher than the 3-week migration risk and decided to stay on memcached for launch. Once the call was made, I committed 100%: instead of complaining, I spent two days adding client-side encrypted cookie fallback for the critical cart IDs and pre-warmed standby memcached nodes so a node failure would recover in 15 seconds instead of 10 minutes."*
+    - **Result:** *"We hit the partner launch date on time. When a memcached node died during week two, the cookie fallback preserved 99.7% of active checkouts. In Q3, the Principal and I co-authored the Redis migration cleanly."*
+    - **Learning:** *"Disagreeing with data earned me the Principal's respect, and protecting their chosen path built the trust that let me lead the Q3 architecture."*
+  </Tab>
+  <Tab label="Story 2: Earn Trust — Owning a Mistake Candidly">
+    **Prompt:** *"Tell me about a time you lost the trust of a stakeholder or team and how you earned it back."*
+
+    - **Situation & Task:** *"As tech lead on an API gateway migration, I assured our mobile lead that our new rate-limiter config was 100% passive in shadow mode. However, a default envoy rule I copied had `enforce: true` on one authentication route, which throttled 4% of iOS login retries for 22 minutes."*
+    - **Action:** *"Within 3 minutes of spotting the spike, I rolled back the rule and posted a candid message in the shared mobile-backend channel stating clearly: 'My config error caused the iOS login 429s from 14:10–14:32; it is rolled back now.' I didn't blame Envoy docs or code review. That afternoon, I met with the mobile lead, walked through a schema validator I wrote that rejects any shadow config containing `enforce: true`, and gave the mobile team a real-time Grafana panel + kill-switch webhook they could trigger themselves."*
+    - **Result:** *"We completed the remaining 12 route migrations over the next two weeks with zero incidents, and the mobile lead later requested me as the backend partner on their next launch."*
+    - **Learning:** *"Fast, unvarnished ownership in the first 5 minutes plus giving the affected team control over the kill switch repairs trust faster than any apology."*
+  </Tab>
+</Tabs>
+
+## Introspect your own work
+
+<Quiz title="Self-reflection on Candor & Ego">
+  <QuizItem
+    question="1. Think about the last time you were overruled in a design meeting. How did you talk about that decision to your peers the next day?"
+    hint="Did you say 'We decided X because of the Q2 deadline' or 'Management is making us do X'?"
+  >
+    Using "we" when explaining a decision you originally opposed is the true test of senior leadership.
+  </QuizItem>
+  <QuizItem
+    question="2. When you make a mistake in code or estimation, how many minutes pass between discovering it and telling your team?"
+    hint="Bad news does not age well."
+  >
+    *Earn Trust* is built on a simple habit: **bad news takes the elevator; good news can take the stairs**.
+  </QuizItem>
+</Quiz>
+
+## Common red flags & how to recover
+
+- **"My biggest mistake was caring too much / working too hard":** Fake humility is an immediate *Earn Trust* failure. Pick a real technical or communication mistake with real consequences and a real systemic fix.
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What if I disagreed with a decision that I believed was unethical, illegal, or a severe security violation—should I still 'Disagree and Commit'?"
+    level="Senior"
+    companies={["Amazon"]}
+  >
+    **Never.** *Disagree and Commit* applies to engineering, product, and strategic trade-offs (architecture, scope, priority), **never** to safety, security vulnerabilities, privacy violations, or ethics. If a decision compromises customer security or legal compliance, *Customer Obsession*, *Highest Standards*, and *Broad Responsibility* require escalating through security/legal channels until the risk is remediated.
+  </InterviewQuestion>
+
+  <InterviewQuestion
+    question="How do I show 'Have Backbone' if I am naturally conflict-averse or introverted?"
+    level="Mid"
+    companies={["Amazon", "Google"]}
+  >
+    Backbone does not require being the loudest voice in a meeting! At Amazon (and across tech), writing a crisp **1-page narrative or benchmark PR** before or right after a meeting is often *more* effective than verbal debate. Showing how you used written data to surface a critical risk is top-tier *Have Backbone* signal.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Technical Conflict & Alignment](/behavioral/competencies/technical-conflict-and-alignment)
+- [Giving & Receiving Critical Feedback](/behavioral/competencies/feedback-and-difficult-conversations)
+- [Invent and Simplify & Think Big](/behavioral/amazon-leadership-principles/invent-simplify-and-think-big)

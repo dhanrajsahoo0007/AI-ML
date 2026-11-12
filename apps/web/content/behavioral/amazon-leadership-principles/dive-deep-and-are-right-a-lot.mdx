@@ -1,11 +1,134 @@
 ---
 title: "Dive Deep & Are Right, A Lot"
 description: "Drop down to logs, traces and query plans when metrics look wrong, and seek evidence that disproves your own hunch."
-status: outline
+icon: search-code
+order: 5
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** how to demonstrate root-cause debugging discipline and strong architectural judgment backed by disconfirming data.
+<KeyIdea>
+**Dive Deep** means refusing to trust high-level averages when anecdotes or tail metrics disagree—peeling the onion down to raw logs, query plans, and flamegraphs—while **Are Right, A Lot** means actively hunting for disconfirming data to break your own initial hypothesis.
+</KeyIdea>
 
-**Related reading on this site:** [Owning Production Outages, Bugs & Mistakes](/behavioral/competencies/production-incidents-and-mistakes) · [Quantifying Impact When You Have No Product Metric](/behavioral/foundations/quantifying-engineering-impact)
+## The story
+
+A checkout service's top-line Grafana dashboard is glowing bright green: **99.94% HTTP 200 OK**, average latency **48 ms**. Yet Customer Support reports three tweets from users in Brazil saying they can't complete purchases.
+
+An engineer who doesn't *Dive Deep* glances at the green dashboard, replies *"Metrics look fine on our end, probably a client network issue,"* and closes the ticket.
+An engineer who practices **Dive Deep + Are Right, A Lot** remembers Amazon's famous rule: **when the metrics and the anecdotes disagree, the anecdotes are usually right**. They slice the 200 OK metric by region and payment method, discovering that our API returns `HTTP 200 OK` with `{ "error": "PIX_TIMEOUT" }` inside the JSON body—so the top-line 5xx alert was completely blind! Within 30 minutes, they trace the timeout to an expired mTLS intermediate certificate on one regional proxy, fix the cert rotation, and replace the HTTP-status alert with a business-level checkout completion <Term id="sli" />.
+
+## What interviewers are really testing
+
+<AnimatedDiagram spec="animated/behavioral/probe-tree" stepper caption="In a Dive Deep interview, the Bar Raiser drills down 3 levels into your diagnostic chain to verify you actually touched the logs, traces, and metrics." />
+
+| Principle | What the Bar Raiser probes | Classic failure mode |
+| --- | --- | --- |
+| **Dive Deep** | Your exact forensic sequence: which metric you sliced, what false hypothesis you ruled out first, and the exact line of code/state where the bug lived | Delegating the investigation (*"I asked my junior engineer to look into the logs"*) or stopping at a superficial workaround (restarting pods) |
+| **Are Right, A Lot** | How you seek **disconfirming evidence** (*"work to disconfirm their beliefs"*) and synthesize conflicting data from diverse sources | Claiming *"I just had a gut feeling"* or refusing to pivot when a benchmark disproves your pet architecture |
+
+<PremiumBreak />
+
+## How the bar changes by level
+
+<Compare
+  columns={["Dimension", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
+  rows={[
+    ["Depth of Diagnosis", "Debugs a single-service stack trace or SQL `EXPLAIN ANALYZE` plan", "Traces distributed tail-latency or data corruption across queues, caches, and OS/network boundaries", "Audits org-wide metrics, spots flawed proxy KPIs (Goodhart's Law), and redesigns observability"],
+    ["Judgment & Disconfirmation", "Validates code assumptions with unit and staging tests", "Runs shadow benchmarks to test competing hypotheses before committing the team", "Synthesizes product, unit-economic, and technical signals to make high-leverage architectural bets"],
+  ]}
+  caption="Even Engineering Managers (SDMs) and Principal Engineers (L7) at Amazon are expected to Dive Deep into raw metrics and COE root causes."
+/>
+
+## Interactive diagnostic: test your story
+
+<DecisionTree
+  title="Will your Dive Deep story survive Bar Raiser forensics?"
+  tree={{
+    q: "In your story, was the root cause obvious from the first error log, or did you have to peel back at least 2–3 layers (including a false lead)?",
+    yes: {
+      q: "Can you name the exact diagnostic tool or query you used (e.g., `EXPLAIN (ANALYZE, BUFFERS)`, eBPF/flamegraph, histogram slicing by tenant, tcpdump, or token-level attention trace)?",
+      yes: {
+        q: "For 'Are Right, A Lot', can you show how you tested a hypothesis that could have proven you WRONG?",
+        yes: {
+          answer: "Rock-solid Dive Deep & Judgment story! Next: Have Backbone; Disagree and Commit.",
+          href: "/behavioral/amazon-leadership-principles/have-backbone-and-earn-trust",
+        },
+        no: "Add the moment where you tested two competing hypotheses (or changed your mind when disconfirming data arrived).",
+      },
+      no: "Refresh the specific technical details—Bar Raisers will ask 'How did you prove it was lock contention and not CPU saturation?'",
+    },
+    no: "A 1-layer bug ('the config URL had a typo') is too shallow for L5+. Choose an investigation where top-level metrics hid a deeper systemic interaction.",
+  }}
+/>
+
+## Worked engineering example (STAR+L)
+
+<Tabs title="Dive Deep vs. Are Right, A Lot">
+  <Tab label="Dive Deep (When Metrics & Anecdotes Disagree)">
+    **Prompt:** *"Tell me about a time when your high-level metrics looked fine, but you dug deeper and found a critical problem."*
+
+    - **Situation & Task:** *"After migrating our recommendation service to a new gRPC connection pool, overall <Term id="p99" /> latency improved from 95 ms to 62 ms and error rates sat at 0.01%. However, the Ads team mentioned a 1.8% dip in auction fill rate that started the same week."*
+    - **Action:** *"Our dashboard looked healthy, so it was tempting to blame Ads changes. Instead, I joined our request logs with downstream auction IDs and sliced latency by payload size. I found that while 99% of users had under 50 history items, our top 0.5% power users (who generated 19% of ad revenue!) had 2,000+ items. For that 0.5% cohort, protobuf deserialization was triggering Go GC pauses that pushed p99.9 past the 80 ms auction deadline—silently dropping them to empty fallback ads without logging a 5xx error."*
+    - **Result:** *"I capped history payloads to the 150 most recent high-signal events and pooled byte buffers, cutting p99.9 from 140 ms to 38 ms and recovering the full 1.8% auction fill rate (~\$1.4M/yr annualized)."*
+    - **Learning:** *"I replaced our flat request-count SLO with a **revenue-weighted and cohort-sliced SLO** so whale-cohort regressions page on-call immediately."*
+  </Tab>
+  <Tab label="Are Right, A Lot (Disconfirming Your Own Belief)">
+    **Prompt:** *"Tell me about a time you strongly believed in a technical direction, sought out disconfirming evidence, and changed your mind."*
+
+    - **Situation & Task:** *"When our Postgres events table hit 4 TB and write latency spiked, I was convinced we needed to migrate to Apache Cassandra, and I drafted an RFC for a 6-week migration."*
+    - **Action:** *"Before presenting the RFC for approval, I asked our sharpest DBA—who was skeptical of introducing Cassandra operational toil—to help me design a benchmark that could **disprove** my migration plan. Profiling `pg_stat_io` together, we discovered 82% of our write IOPS wasn't new event inserts at all—it was B-tree index page splits on four unused secondary indexes plus synchronous `fsync` on non-critical telemetry rows."*
+    - **Result:** *"I killed my own Cassandra RFC. Dropping the 4 unused indexes, partitioning by week, and setting `synchronous_commit = off` for telemetry transactions cut write IOPS by 76% and p99 write latency from 45 ms to 4 ms in 3 days—saving 6 weeks of migration work and \$90k/yr in new cluster costs."*
+    - **Learning:** *"I added an index-usage audit query to our monthly operational review before any team is allowed to propose a new datastore."*
+  </Tab>
+</Tabs>
+
+## Introspect your own work
+
+<Quiz title="Sharpen your diagnostic & epistemic habits">
+  <QuizItem
+    question="1. Think of the last bug where your FIRST hypothesis turned out to be wrong. How long did it take you to let go of that first hypothesis?"
+    hint="Confirmation bias is the #1 enemy of fast debugging."
+  >
+    Write down the rule: *"Before spending 2 days building a fix for Hypothesis A, what is the 15-minute query or log check that could prove Hypothesis A false?"*
+  </QuizItem>
+  <QuizItem
+    question="2. What is one dashboard metric your team reports every week that could look 100% green while users are actually having a terrible experience?"
+    hint="Think about averages, HTTP 200s with soft errors, or client-side crashes that never reach the server."
+  >
+    Fixing a blind dashboard metric is a textbook L5/L6 *Dive Deep* story waiting to happen.
+  </QuizItem>
+</Quiz>
+
+## Common red flags & how to recover
+
+- **Stopping at "We restarted the server and it went away":** Restarting pods without capturing a heap dump, thread dump, or core trace destroys the evidence and guarantees the outage will return at a worse time.
+- **Confusing *Are Right, A Lot* with stubbornness:** Claiming you are always right in every argument makes you look low-trust (*Earn Trust* failure). Showing how you actively try to falsify your own ideas proves true scientific rigor.
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="Walk me through the hardest bug you ever diagnosed in production. How did you isolate the root cause?"
+    level="Senior"
+    companies={["Amazon", "Google", "Datadog"]}
+  >
+    Structure a debugging story like a **binary search over the system state**:
+    1. **The symptom & blast radius:** Why it was non-obvious (e.g., intermittent 0.3% corrupted payloads only on Tuesday mornings).
+    2. **Eliminating half the search space:** How you proved whether the corruption happened at the client, load balancer, app worker, or storage engine.
+    3. **The smoking gun:** The exact packet capture, memory profile, or race-condition trace that reproduced the bug deterministically.
+    4. **The systemic prevention:** The test or invariant check that prevents the entire bug class.
+  </InterviewQuestion>
+
+  <InterviewQuestion
+    question="Tell me about a time you had to make a judgment call when two metrics pointed in opposite directions."
+    level="Senior"
+    companies={["Amazon", "Meta", "Netflix"]}
+  >
+    Classic example: an ML ranking or UX change increases short-term click-through rate (+3%) while slightly increasing latency (+60 ms) or session abandonment. Show how you dug into long-term cohort retention or downstream conversion to establish a **hierarchy of metrics** rather than picking whichever metric made your launch look good.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Have Backbone (Disagree and Commit) & Earn Trust](/behavioral/amazon-leadership-principles/have-backbone-and-earn-trust)
+- [Quantifying Engineering & ML Impact](/behavioral/foundations/quantifying-engineering-impact)
+- [Production Incidents & Mistakes](/behavioral/competencies/production-incidents-and-mistakes)
