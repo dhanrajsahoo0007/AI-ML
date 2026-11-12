@@ -1,0 +1,79 @@
+---
+title: "Rectangle Overlap"
+description: "Two axis-aligned rectangles rec1 and rec2 are given as [x1,y1,x2,y2] with bottom-left (x1,y1) and top-right (x2,y2)."
+topics: [math-and-geometry]
+group: "02. Leetcode and Alphabet 150"
+number: "08"
+order: 21002008000000
+status: outline
+---
+
+Two axis-aligned rectangles rec1 and rec2 are given as \[x1,y1,x2,y2\] with
+bottom-left (x1,y1) and top-right (x2,y2). Return True iff they overlap with
+positive area.
+
+## Examples
+
+````text
+Example 1:
+    Input: rec1 = [0,0,2,2], rec2 = [1,1,3,3]
+    Output: True
+Example 2:
+    Input: rec1 = [0,0,1,1], rec2 = [1,0,2,1]
+    Output: False
+````
+
+## Constraints
+
+````text
+- Rectangles are valid (x1 < x2, y1 < y2)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Interval intersection
+Rectangles overlap with positive area iff both x-intervals and y-intervals
+intersect with strictly positive width and height.
+
+1. Check horizontal gap: max(rec1\[0\], rec2\[0\]) &lt; min(rec1\[2\], rec2\[2\]).
+2. Check vertical gap similarly on y edges.
+
+## Complexity
+
+**Time:** O(1)
+
+**Space:** O(1)
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def isRectangleOverlap(self, rec1: List[int], rec2: List[int]) -> bool:
+        return not (
+            rec1[2] <= rec2[0]
+            or rec2[2] <= rec1[0]
+            or rec1[3] <= rec2[1]
+            or rec2[3] <= rec1[1]
+        )
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.isRectangleOverlap([0, 0, 2, 2], [1, 1, 3, 3]) is True, "Test 1 Failed"
+    print("Test 1 Passed: overlapping interiors")
+    assert sol.isRectangleOverlap([0, 0, 1, 1], [1, 0, 2, 1]) is False, "Test 2 Failed"
+    print("Test 2 Passed: edge-only touch is not positive overlap")
+    assert sol.isRectangleOverlap([0, 0, 3, 3], [1, 1, 2, 2]) is True, "Test 3 Failed"
+    print("Test 3 Passed: one rectangle inside another")
+    assert sol.isRectangleOverlap([5, 5, 6, 6], [0, 0, 1, 1]) is False, "Test 4 Failed"
+    print("Test 4 Passed: separated rectangles")
+    print("\nAll test cases passed!")
+````

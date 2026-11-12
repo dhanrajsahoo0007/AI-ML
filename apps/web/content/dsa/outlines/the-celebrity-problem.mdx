@@ -1,0 +1,148 @@
+---
+title: "The Celebrity Problem"
+description: "In a party of n people labeled 0..n-1, a celebrity is someone who is known by everyone but knows nobody (including themselves: mat[i][i] == 0)."
+topics: [matrix]
+group: "03. Stack | Matrix"
+number: "01"
+order: 3003001000000
+status: outline
+---
+
+In a party of n people labeled 0..n-1, a celebrity is someone who is known by everyone
+but knows nobody (including themselves: mat\[i\]\[i\] == 0). Given an n x n matrix mat where
+mat\[i\]\[j\] == 1 means person i knows person j, return the celebrity's index or -1 if none exists.
+
+## Examples
+
+````text
+Example 1:
+    Input: mat = [[0,1,0],[0,0,0],[0,1,0]]
+    Output: 1
+    Explanation: Person 1 is known by 0 and 2 and knows no one.
+
+Example 2:
+    Input: mat = [[0,1],[1,0]]
+    Output: -1
+    Explanation: Each person knows the other; there is no celebrity.
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 3000
+- mat[i][j] is 0 or 1
+- mat[i][i] == 0
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Candidate elimination (greedy)
+If i knows j, i cannot be the celebrity; otherwise j cannot be the celebrity. One pass narrows to one candidate, then verify.
+
+1. Let candidate be 0; for each i from 1 to n-1, if mat\[candidate\]\[i\] == 1 then candidate = i else keep candidate.
+2. Confirm: for all i != candidate, mat\[candidate\]\[i\] must be 0 and mat\[i\]\[candidate\] must be 1.
+3. If confirmation fails, return -1; else return candidate.
+
+## Complexity
+
+**Time:** O(n) - One elimination pass and one verification pass over n people (matrix lookups O(1)).
+
+**Space:** O(1) - Only the candidate index is stored.
+
+## Original notes
+
+````text
+Alternate viewpoint:
+You can also scan for an all-zero row (no outgoing "knows") and then validate that column,
+as in ``SolutionRowScan`` below. The main ``Solution`` uses the classic elimination pass.
+
+--- Restored notes (historical file) ---
+
+The Celebrity Problem
+
+    A celebrity is a person who is known to all but does not know anyone at a party.
+    Given a square matrix mat where mat[i][j] = 1 if person i knows person j, and 0 otherwise,
+    find the celebrity in the party. If there is no celebrity, return -1.
+
+Example 1:
+    Input: mat =    [[0, 1, 0],
+                    [0, 0, 0], 
+                    [0, 1, 0]]
+    Output: 1
+    Explanation: Person 1 is known by 0 and 2, but doesn't know anyone. Thus, 1 is the celebrity.
+
+Example 2:
+    Input: mat =    [[0, 1],
+                    [1, 0]]
+    Output: -1
+    Explanation: Both people know each other. There's no celebrity.
+
+Constraints:
+    1 <= mat.size() <= 3000
+    0 <= mat[i][j] <= 1
+
+Time Complexity: O(n), where n is the number of people
+Space Complexity: O(1)
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findCelebrity(self, mat: List[List[int]]) -> int:
+        n = len(mat)
+        candidate = 0
+        for i in range(1, n):
+            if mat[candidate][i] == 1:
+                candidate = i
+        for i in range(n):
+            if i == candidate:
+                continue
+            if mat[candidate][i] == 1 or mat[i][candidate] == 0:
+                return -1
+        return candidate
+
+
+class SolutionRowScan:
+    """
+    Alternate approach from original notes: a celebrity row is all zeros (knows nobody),
+    then verify everyone else has a ``1`` in that column (everyone knows them).
+    """
+
+    def findCelebrity(self, mat: List[List[int]]) -> int:
+        n = len(mat)
+        potential = -1
+        for person in range(n):
+            if sum(mat[person]) == 0:
+                potential = person
+                break
+        if potential == -1:
+            return -1
+        for person in range(n):
+            if person != potential and mat[person][potential] != 1:
+                return -1
+        return potential
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findCelebrity([[0, 1, 0], [0, 0, 0], [0, 1, 0]]) == 1, "Test 1 Failed"
+    print("Test 1 Passed: celebrity at index 1")
+    assert sol.findCelebrity([[0, 1], [1, 0]]) == -1, "Test 2 Failed"
+    print("Test 2 Passed: no celebrity")
+    assert sol.findCelebrity([[0]]) == 0, "Test 3 Failed"
+    print("Test 3 Passed: single person party")
+    assert sol.findCelebrity([[0, 0, 1], [1, 0, 1], [0, 0, 0]]) == 2, "Test 4 Failed"
+    print("Test 4 Passed: celebrity at last index")
+    assert sol.findCelebrity([[0, 1, 1], [0, 0, 1], [0, 0, 0]]) == 2, "Test 5 Failed"
+    print("Test 5 Passed: upper triangle knows celebrity")
+    print("\nAll test cases passed!")
+````

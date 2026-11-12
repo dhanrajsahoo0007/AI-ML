@@ -1,0 +1,90 @@
+---
+title: "Fibonacci"
+description: "Given n, return the n-th Fibonacci number F(n), where F(0)=0, F(1)=1, and F(n)=F(n-1)+F(n-2) for n>=2."
+topics: [dynamic-programming]
+group: "01. 1D DP"
+number: "01"
+order: 20001001000000
+status: outline
+---
+
+Given n, return the n-th Fibonacci number F(n), where F(0)=0, F(1)=1, and
+F(n)=F(n-1)+F(n-2) for n&gt;=2.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 4
+    Output: 3
+Example 2:
+    Input: n = 10
+    Output: 55
+````
+
+## Constraints
+
+````text
+- 0 <= n <= 45 (fits in 32-bit integer for typical bounds)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 1D Dynamic Programming
+Each F(i) depends only on the two previous values, so we fill a table or two scalars bottom-up.
+
+1. Handle base cases n &lt;= 1.
+2. Maintain prev2, prev1 and iterate i from 2 to n updating current = prev1 + prev2.
+3. Shift prev2, prev1 forward each step.
+
+## Complexity
+
+**Time:** O(n) - single pass from 2 to n.
+
+**Space:** O(1) - only two previous Fibonacci values stored.
+
+## Solution
+
+````python
+from typing import Dict, Optional
+
+
+class Solution:
+    def fib(self, n: int) -> int:
+        if n <= 1:
+            return n
+        prev2, prev1 = 0, 1
+        for _ in range(2, n + 1):
+            prev2, prev1 = prev1, prev1 + prev2
+        return prev1
+
+    def fib_memo(self, n: int, memo: Optional[Dict[int, int]] = None) -> int:
+        if memo is None:
+            memo = {}
+        if n in memo:
+            return memo[n]
+        if n <= 1:
+            return n
+        memo[n] = self.fib_memo(n - 1, memo) + self.fib_memo(n - 2, memo)
+        return memo[n]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.fib(0) == 0, "Test 1 Failed"
+    print("Test 1 Passed: fib(0) == 0")
+    assert sol.fib(1) == 1, "Test 2 Failed"
+    print("Test 2 Passed: fib(1) == 1")
+    assert sol.fib(10) == 55, "Test 3 Failed"
+    print("Test 3 Passed: fib(10) == 55")
+    assert sol.fib_memo(12) == 144, "Test 4 Failed"
+    print("Test 4 Passed: fib_memo(12) == 144")
+    assert sol.fib(20) == 6765, "Test 5 Failed"
+    print("Test 5 Passed: fib(20) == 6765")
+    print("\nAll test cases passed!")
+````

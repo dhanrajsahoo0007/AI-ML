@@ -1,11 +1,318 @@
 ---
 title: "Identity and Access"
 description: "How a cloud decides if a request is allowed: who is calling, what they may do, and why short-lived credentials beat keys in code."
-status: outline
+updated: 2026-11-12
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** how a cloud decides whether a request is allowed: who is calling (people and workloads), what they may do (roles and policies), and why short-lived, scoped credentials beat keys in code. It defines principal, authentication and authorization, role, policy, service identity, federation, MFA and least privilege before any product name.
+<KeyIdea>
+  Before a cloud does anything you ask, it checks two things: who is asking, and whether that caller is allowed to do exactly this.
+</KeyIdea>
 
-**Related reading on this site:** [Authentication and authorization for APIs](/system-design/fundamentals/api-auth) · [Security overview](/system-design/fundamentals/security) · [Identity & Security on AWS](/cloud/aws/security)
+## The story
+
+Brightpost is a small online shop that sells posters and greeting cards, about 400 orders a day. Every night it saves that day's orders as one file in a storage <Term id="object-storage">bucket</Term>, a container for files in the cloud. After two years the bucket holds 730 files with the names and home addresses of 90,000 customers. The shop's code must read those files. So Asha, the first developer, creates a storage key: a long secret string that works like a password for programs. She pastes it into the code. Fourteen months later the team makes the code repository public to share a small tool. A stranger's script finds the key within 4 hours, and by Monday all 730 files have been copied.
+
+Every step below repairs one part of that weekend.
+
+## How it works
+
+Three words first. A **request** is one call to the cloud, such as "read this file". A **credential** is what a caller shows to prove who it is: a password, a key or a token. The part of a cloud that checks every request is its identity service, usually called <Term id="iam">IAM</Term>, short for identity and access management.
+
+### Step 1: Two questions, in order
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" step={1} minWidth={620} caption="Brightpost's first setup: the app server shows a static key and the bucket hands over the file." />
+
+Every request passes two checks. **Authentication** asks: who is calling? The caller answers with a credential. **Authorization** asks: may this caller do this action on this thing? The cloud looks up its rules and decides. With no rule that says yes, the answer is no.
+
+In the picture, one key answers both questions. Holding it proves "I am the shop's storage user". The rule for that user says "may do anything in storage", because Asha chose a wide rule "for now". The same two questions guard your own API; [Authentication and authorization for APIs](/system-design/fundamentals/api-auth) covers that side.
+
+<PremiumBreak />
+
+### Step 2: Who can call: people and workloads
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" step={2} minWidth={620} caption="The failure: the bucket sees a valid key and cannot know that a stranger is holding it." />
+
+Anything a cloud can authenticate is called a <Term id="principal">principal</Term>. There are two families. **People**: Asha, a support agent, a contractor. **Workloads**: running programs, such as the shop's app server or a nightly job.
+
+A static key belongs to a principal, but it says nothing about who holds it. Anyone with a copy is that principal.
+
+<Callout tone="red" title="What breaks">
+  The stranger's script sends Brightpost's key from another continent. Authentication passes, because the key is valid. Authorization passes, because the key may do anything in storage. Every log line names the same key, so Brightpost cannot tell the stranger's reads from its own.
+</Callout>
+
+The leak had three causes. The key could be copied. It never expired. It allowed far more than the shop needed. The next steps remove each one.
+
+### Step 3: Roles and policies: what "allowed" means
+
+Authorization runs on written rules. A <Term id="policy">policy</Term> is a list of such rules, and each rule has four parts.
+
+<Compare
+  columns={["Part", "Question it answers", "Brightpost example"]}
+  rows={[
+    ["Principal", "Who is this rule about?", "The shop's app server"],
+    ["Action", "What may it do?", "Read a file"],
+    ["Resource", "On which thing?", "Files in the orders bucket"],
+    ["Effect", "Allow or deny?", "Allow"],
+  ]}
+  caption="One rule of a policy, in plain words."
+/>
+
+A <Term id="role">role</Term> is a named set of permissions, such as "orders reader". You write the permissions once, then give the role to each principal that needs it.
+
+When a request arrives, the identity service checks in this order:
+
+1. Does any rule **deny** it? Refuse. A deny beats every allow.
+2. Does a company-wide guardrail forbid it? Refuse. Step 8 explains guardrails.
+3. Does any rule **allow** it? Let it through.
+4. Otherwise refuse.
+
+### Step 4: A service identity instead of a key
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" step={3} minWidth={620} caption="The key is deleted. The server's attached identity gets a 1-hour token, and the stranger's copy of the old key is refused." />
+
+A workload should not hold a password at all. You create a **service identity**, an identity made for a program instead of a person. Some clouds call it a <Term id="service-account">service account</Term>. You attach it to the server. The cloud started that server, so it knows which machine is asking and can vouch for it.
+
+Brightpost deletes the old key, and the stranger's copy stops working that minute. The code now holds no secret, so the next leaked repository leaks nothing useful.
+
+### Step 5: Short-lived credentials
+
+<AnimatedDiagram spec="animated/cloud/sts-assume-role" stepper caption="The app asks for a credential, uses it, renews it, and an expired copy is refused." />
+
+The app asks a **local endpoint**, an address that only programs on that server can reach. It gets back a **token**: a signed credential with an expiry time written inside it. The app sends the token with every storage call. Storage checks the signature, the expiry and the policy before it reads anything.
+
+Brightpost's tokens last 1 hour. Real lifetimes run from minutes to about a day, depending on the cloud and the setting. The cloud's client library fetches a new token before the old one runs out, so nobody types, stores or rotates anything. The old key had worked for 14 months, about 10,000 hours. A stolen token works for 1 hour at most.
+
+### Step 6: Least privilege
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" step={4} minWidth={620} caption="The policy allows one action on one bucket. The server tries to write, and the request is refused." />
+
+<Term id="least-privilege">Least privilege</Term> means each principal gets only the permissions its job needs. The shop's server reads order files. So its policy allows *read* on *the orders bucket* and nothing else.
+
+Now suppose a bug, or an intruder on the server, tries to overwrite a file. The token is valid, so authentication passes. No rule allows a write, so authorization refuses it. The damage one stolen credential can do is its **blast radius**. The old key's blast radius was every bucket, forever. The new one is 730 files, read-only, for an hour.
+
+Give every workload its own identity, and start each one with no permissions.
+
+### Step 7: People: groups, single sign-on, federation and MFA
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" step={5} minWidth={620} caption="Developers sign in once, with a password and a second proof. Their group decides the role they get." />
+
+People get the same treatment as workloads: no long-lived keys, and only what the job needs.
+
+- **Groups.** Give permissions to a group such as "developers", then add people to it.
+- **Single sign-on (SSO).** One login for everything. Brightpost's 6 staff sign in to the company directory, the list of staff accounts. Remove someone there and every door closes at once.
+- **<Term id="federation">Federation</Term>.** The cloud trusts that directory and keeps no passwords of its own. The directory says "this is Asha, in developers", and the cloud gives her a short session with the matching role.
+- **<Term id="mfa">MFA</Term>**, multi-factor authentication. Signing in needs a password plus a second proof, such as a code from a phone. A stolen password alone opens nothing.
+
+### Step 8: Across accounts and projects
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" step={6} minWidth={620} caption="A role in the audit account trusts one outside identity, the shop app. A guardrail sits above both accounts." />
+
+An **account** is a walled container for cloud resources. Some clouds call it a project or a subscription. Brightpost now has two. The shop runs in one. Logs live in the other, the audit account, so a break-in at the shop cannot erase the evidence.
+
+Nothing crosses the wall by default. The account that owns a resource decides whom it trusts. The audit account creates a role that may only add log files, and names one outside principal that may use it: the shop's service identity. The shop app takes on that role and gets a short-lived token that works only there. The mechanics differ by cloud, as the tabs below show. The rule does not.
+
+Above both accounts sits the <Term id="organization">organization</Term>, the tree that holds all of a company's accounts. A **guardrail** is a rule set at the top of that tree, and no account below can override it. Brightpost sets one: nobody may make a bucket public.
+
+### Step 9: A record of every call
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" step={7} minWidth={620} caption="Each call to the bucket is written to the audit trail and kept in the log archive." />
+
+A cloud can write down every request: who called, what they asked for, when, and whether it was allowed. That record is the **audit trail**. Brightpost keeps it in the log archive.
+
+After the leak, nobody could say what the stranger took, because every log line named the same key. Now each line names one person or one workload. Check one default: clouds usually record changes to settings without being asked, but record reads of the files themselves only after you switch that on.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a principal, a policy, a short-lived credential, and "no" as the default answer.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **People:** IAM Identity Center: one sign-in, then short-lived access to each account.
+    - **Workloads:** an IAM role attached to the compute. The Security Token Service (STS) issues its temporary credentials.
+    - **Policies attach to:** identities (roles, users, groups) and, on some services, the resource, such as a bucket policy.
+    - **Guardrail:** service control policies (SCPs) in AWS Organizations.
+    - **Outside callers:** a role that trusts an outside token issuer, for build pipelines (CI). Amazon Cognito for your app's customers.
+
+    **The difference that changes a design.** AWS evaluates several policy types together. An explicit deny in any of them wins. SCPs never grant anything; they only cap. Across two accounts, both sides must say yes: the caller's own policy, and the resource's policy or the trust rule on the role being taken on.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **People:** Google accounts and groups, managed in Cloud Identity or Google Workspace.
+    - **Workloads:** a service account attached to the resource. It is also a resource itself: its own policy says who may act as it.
+    - **Policies attach to:** resources. An allow policy on an organization, folder, project or single resource lists which principals hold which roles there.
+    - **Guardrail:** organization policy constraints, plus deny policies.
+    - **Outside callers:** Workload Identity Federation for CI and other clouds. Identity Platform for your app's customers.
+
+    **The difference that changes a design.** Here "role" means only a bundle of permissions, and grants inherit down the tree: organization, folder, project, resource. A role granted on a folder reaches every project under it, and a lower level cannot remove it. So grant at the lowest level that works. Across projects, the owner grants the caller's service account a role on its own resource.
+  </Tab>
+  <Tab label="Azure">
+    - **People:** users and groups in Microsoft Entra ID, the directory behind every Azure sign-in.
+    - **Workloads:** a managed identity. A system-assigned one lives and dies with one resource. A user-assigned one stands alone and can serve several.
+    - **Policies attach to:** a scope. A role assignment joins a principal, a role and a scope. Scopes nest: management group, subscription, resource group, resource.
+    - **Guardrail:** Azure Policy, assigned at a management group.
+    - **Outside callers:** workload identity federation for CI. Microsoft Entra External ID for your app's customers.
+
+    **The difference that changes a design.** Identity and resources are two systems. Entra ID holds who you are. Azure role-based access control (RBAC) holds what you may do to resources. Each has its own roles, so a directory administrator cannot read a storage account through that role alone. Across subscriptions in one directory, the owner assigns the caller's identity a role at its own scope.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/iam-role-chain" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Who is calling?"
+  tree={{
+    q: "Is the caller a person?",
+    yes: {
+      q: "Is that person on your team, as staff or a contractor?",
+      yes: "Single sign-on from the company directory, permissions through groups, and MFA on every sign-in.",
+      no: {
+        answer: "A customer of your app: use a customer identity service. Customers never get cloud roles.",
+        href: "/system-design/fundamentals/api-auth",
+      },
+    },
+    no: {
+      q: "Does the workload run inside this cloud?",
+      yes: "Attach a service identity with its own least-privilege policy. No key anywhere.",
+      no: "Workload identity federation: a build pipeline, or a server in your own building, swaps its own signed token for a short-lived cloud credential. No stored key.",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="A thief copies one of Brightpost's 1-hour tokens 20 minutes after it was issued. How long can the copy work, and what can it do?" hint="Look at the expiry and at the policy.">
+    At most 40 minutes, until the expiry written inside the token. In that time it can only read the orders bucket, because that is all the policy allows.
+  </QuizItem>
+  <QuizItem question="A request carries a valid token, but no policy mentions the action it asks for. What happens, and which check refused it?" hint="What is the default answer?">
+    The request is refused by authorization. Authentication passed, because the token is valid. With no rule that says yes, the answer is no.
+  </QuizItem>
+  <QuizItem question="An administrator of the shop account tries to make the orders bucket public. Brightpost's guardrail forbids public buckets. Who wins?">
+    The guardrail. It is set at the top of the organization, and no account below can override it, whatever its own policies allow.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Long-lived key", "Attached service identity", "Federation from outside"]}
+  rows={[
+    ["Setup effort", "5 minutes: create, paste", "About 1 hour: identity, policy, attach", "About half a day: trust rule, identity, policy"],
+    ["Secrets you store", "1 per key", "0", "0"],
+    ["If a credential leaks, it works for", "14 months and counting", "1 hour at most", "1 hour at most"],
+    ["Rotation", "By hand, often never", "Automatic", "Automatic"],
+    ["Works outside this cloud", true, false, true],
+    ["Use it for", "Old tools that accept nothing else", "Every workload inside the cloud", "CI pipelines, your own servers, other clouds"],
+  ]}
+  caption="Brightpost's numbers. Setup times are what a small team should expect the first time."
+/>
+
+The key wins only on day one. Every later day, the other two cost nothing to keep and limit a leak to an hour.
+
+## Common pitfalls
+
+- **Wildcard permissions "for now".** A policy that allows everything is never narrowed later. Start with nothing and add each permission when a real request is refused.
+- **One shared admin user.** With 6 people on one login, the audit trail cannot say who did what. Give each person their own sign-in, with admin rights through a group.
+- **Keys in CI variables.** A long-lived key stored in a build pipeline leaks with the pipeline. Use federation: the pipeline swaps its own token for a short-lived credential.
+- **No MFA on the owner account.** The login that owns the cloud account can do everything, including closing it. Put MFA on it, give it no keys, and keep it for the few tasks that need it.
+- **Granting at the top of the tree.** A role given at the organization reaches every account below. Grant on one bucket, not on one account, whenever that works.
+
+## How to say it in an interview
+
+"Every call to a cloud passes two checks, and the default answer is deny. Authentication asks who is calling; authorization asks whether a policy allows this action on this resource. I avoid long-lived keys: a workload in the cloud gets an attached service identity and credentials that expire in about an hour. Each workload has its own identity with least privilege, for example read on one bucket and nothing else. People sign in through single sign-on with MFA and get roles through groups, and anything outside the cloud, such as a CI pipeline, uses federation. Across accounts, the account that owns the resource names whom it trusts, an organization guardrail caps everything, and an audit trail records every call."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between authentication and authorization in a cloud?" level="Junior" category="Cloud">
+    **Short answer.** Authentication proves who is calling. Authorization decides whether that caller may do this action on this resource. A cloud runs both on every request, and most design work goes into the second.
+
+    **Why.** Brightpost's leaked key shows the gap. The stranger passed authentication, because the key was valid, and passed authorization, because the key was allowed everything in storage. With a service identity, authentication is a 1-hour token from the platform, and authorization is a policy that allows one action on one bucket. If no rule allows a request, the answer is no.
+
+    <AnimatedDiagram spec="animated/cloud/iam-role-chain" step={3} highlight={["iam", "server", "bucket"]} caption="The identity service vouches for the server; the bucket then checks what that identity may do." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which of the two checks fails when a token has expired?
+    - Why is "deny" the default answer?
+
+    **Watch out for.** Saying "the request is authenticated, so it is safe". The stranger was authenticated too.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does a virtual machine read from a bucket without any key in its configuration?" level="Mid" category="Cloud">
+    **Short answer.** An identity is attached to the machine. The platform gives the machine short-lived credentials for that identity through a local endpoint, and a policy allows that identity to read the bucket.
+
+    **Why.** The cloud started the machine, so it knows which machine is asking. The cloud's client library calls an address that only that machine can reach. It gets a signed token with an expiry, 1 hour in Brightpost's setup, and sends it with each storage call. Storage checks the signature, the expiry and the policy. The library renews the token before it runs out, so nothing sits in code or config.
+
+    <AnimatedDiagram spec="animated/cloud/sts-assume-role" step={2} caption="The token comes from the local endpoint and travels with the storage call." />
+
+    **Follow-ups the interviewer may ask.**
+    - What can an attacker do who can run code on that machine?
+    - What is the attached identity called on each of the three clouds?
+
+    **Watch out for.** Moving the key into an environment variable or an encrypted file and calling it solved. It is still a long-lived key.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why are short-lived credentials safer than a long-lived key, if both can leak?" level="Mid" category="Cloud">
+    **Short answer.** A leaked token stops working by itself when it expires, and it carries only one identity's permissions. The time window and the blast radius are both small, and nobody has to notice the leak for it to end.
+
+    **Why.** Brightpost's key worked for 14 months, about 10,000 hours, and would have kept working until someone deleted it. A 1-hour token makes that window about 10,000 times shorter. Renewal is automatic, so there is no rotation day to skip. Short-lived is not harmless: for that hour the thief can do all the policy allows. Pair it with least privilege and an audit trail.
+
+    <AnimatedDiagram spec="animated/cloud/iam-role-chain" step={2} caption="A static key works for whoever holds it, for as long as it exists." />
+
+    **Follow-ups the interviewer may ask.**
+    - How short should a token be, and what does a shorter lifetime cost?
+    - How do you cut off a token before it expires?
+
+    **Watch out for.** Claiming that short-lived credentials cannot be stolen. They can; they stop being useful quickly.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design least privilege for Brightpost's image-resize worker." level="Mid" category="Cloud">
+    **Short answer.** Give the worker its own identity. Its policy allows read on the uploads bucket and write on the thumbnails bucket. Nothing else: no delete, no listing of other buckets, no access to orders.
+
+    **Why.** The worker opens files that strangers upload, so it is the workload most likely to be taken over. If that happens, the attacker can read product photos, which are public anyway, and add thumbnails. The 730 order files stay out of reach, because no rule mentions that bucket. Start from an empty policy, and every 90 days remove what the audit trail shows was never used.
+
+    <AnimatedDiagram spec="animated/cloud/iam-role-chain" step={4} highlight={["policy", "svcid", "bucket"]} caption="One identity, one policy, one bucket: anything the policy does not name is refused." />
+
+    **Follow-ups the interviewer may ask.**
+    - Thumbnails older than a year must be deleted. Who gets that permission?
+    - What stops a developer from attaching a wider policy later?
+
+    **Watch out for.** Reusing the shop server's identity "because it already has storage access". Then a bug in an image library can reach the order files.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A contractor's CI system outside the cloud must deploy to production. How does it authenticate?" level="Senior" category="Cloud">
+    **Short answer.** With workload identity federation. The CI system signs a short token that describes the job. The cloud trusts that issuer, checks the token, and swaps it for a short-lived credential for one deploy role. No cloud key is stored in the CI system.
+
+    **Why.** A stored deploy key is Brightpost's leak again, this time held by another company. With federation, trust is a rule in your own cloud: accept tokens from this issuer, only for this repository and this branch. The deploy role follows least privilege: it can update the shop's servers but cannot read the orders bucket. Each deploy lands in the audit trail. To end the contract you delete one trust rule, and there is no key to hunt for.
+
+    <AnimatedDiagram spec="animated/cloud/iam-role-chain" step={6} highlight={["server", "role2", "guardrail"]} caption="The same shape as the cross-account role: the resource's owner names one outside identity, under a guardrail." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you limit the trust to one branch or one environment?
+    - What if the CI provider itself is broken into?
+
+    **Watch out for.** Creating a user for the contractor and sending them its access key. That key will outlive the contract.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Shared Responsibility](/cloud/fundamentals/shared-responsibility)
+- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
+- [Secrets, Identity-Based Access and Rotation](/cloud/resilience/secrets-management)
+- [Zero Trust, Defence in Depth and Identity-Aware Access](/cloud/resilience/zero-trust)
+- [Identity & Security on AWS](/cloud/aws/security)
+- [Identity & Security on Google Cloud](/cloud/gcp/security)
+- [Identity & Security on Azure](/cloud/azure/security)
+- [Authentication and authorization for APIs](/system-design/fundamentals/api-auth)
+- [Security overview](/system-design/fundamentals/security)
+
+## Further reading
+
+- [AWS Identity and Access Management User Guide](https://docs.aws.amazon.com/IAM/latest/UserGuide/introduction.html): roles and policy evaluation.
+- [Google Cloud IAM overview](https://cloud.google.com/iam/docs/overview): principals, roles and allow policies.
+- [Azure role-based access control overview](https://learn.microsoft.com/azure/role-based-access-control/overview): role assignments and scopes.
+- [Microsoft Entra ID fundamentals](https://learn.microsoft.com/entra/fundamentals/whatis): the directory behind sign-in.

@@ -1,0 +1,104 @@
+---
+title: "Word Ladder"
+description: "A transformation sequence from beginWord to endWord uses wordList: each step changes exactly one letter, and every intermediate word (except possibly beginWo…"
+topics: [graphs]
+group: "04. BFS Story Based › 03. Shortest Path Problems"
+number: "03"
+order: 17004003003000
+status: outline
+---
+
+A transformation sequence from beginWord to endWord uses wordList: each step changes exactly one letter,
+and every intermediate word (except possibly beginWord) must be in wordList. endWord must be in wordList.
+Return the length of the shortest transformation sequence (number of words including begin and end), or 0.
+
+## Examples
+
+````text
+Example 1:
+    Input: beginWord = "hit", endWord = "cog",
+        wordList = ["hot","dot","dog","lot","log","cog"]
+    Output: 5
+Example 2:
+    Input: beginWord = "hit", endWord = "cog",
+        wordList = ["hot","dot","dog","lot","log"]
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 1 <= beginWord.length <= 10
+- endWord same length; beginWord != endWord
+- 1 <= len(wordList) <= 5000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph BFS on implicit word adjacency (one-letter mutations)
+
+1. BFS from beginWord with distance; use a set of remaining dictionary words.
+2. For each word, generate neighbors by changing one character to any letter a..z if present in the set.
+3. Remove neighbors from the set when enqueued to avoid revisiting shorter layers incorrectly.
+
+## Complexity
+
+**Time:** O(N \* L \* 26) with word length L and dictionary size N in practice.
+
+**Space:** O(N) for the set and queue.
+
+## Solution
+
+````python
+from typing import List
+from collections import deque
+import string
+
+
+class Solution:
+    def find_next_available_words(self, word: str, words_available: set[str]) -> List[str]:
+        available_words: List[str] = []
+        for pos in range(len(word)):
+            for char in string.ascii_lowercase:
+                if char == word[pos]:
+                    continue
+                new_word_list = list(word)
+                new_word_list[pos] = char
+                new_word = "".join(new_word_list)
+                if new_word not in words_available:
+                    continue
+                available_words.append(new_word)
+        return available_words
+
+    def ladderLength(self, beginWord: str, endWord: str, wordList: List[str]) -> int:
+        if len(beginWord) != len(endWord):
+            return 0
+
+        word_queue: deque[tuple[str, int]] = deque([(beginWord, 1)])
+        words_available = set(wordList)
+        # words_available.remove(beginWord)  # beginWord may be absent from wordList
+
+        while word_queue:
+            curr_word, step_count = word_queue.popleft()
+            if curr_word == endWord:
+                return step_count
+            next_words = self.find_next_available_words(curr_word, words_available)
+            for next_word in next_words:
+                word_queue.append((next_word, step_count + 1))
+                words_available.remove(next_word)
+        return 0
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    wl = ["hot", "dot", "dog", "lot", "log", "cog"]
+    assert sol.ladderLength("hit", "cog", wl) == 5, "Test 1 Failed"
+    assert sol.ladderLength("hit", "cog", ["hot", "dot", "dog", "lot", "log"]) == 0, "Test 2 Failed"
+    assert sol.ladderLength("a", "c", ["a", "b", "c"]) == 2, "Test 3 Failed"
+    print("All tests passed!")
+````

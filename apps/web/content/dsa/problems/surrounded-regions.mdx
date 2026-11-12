@@ -1,0 +1,147 @@
+---
+title: Surrounded Regions
+description: Flip every group of O cells that is fully enclosed by X cells, editing the grid in place; groups touching the edge stay.
+difficulty: medium
+patterns: [depth-first-search, matrix]
+topics: [graph-bfs-dfs]
+companies: []
+languages: [python]
+entry: { python: solve }
+starter:
+  python: |
+    def solve(board: list[list[str]]) -> list[list[str]]:
+        # Change `board` in place, then return it
+        pass
+tests: { public: tests/surrounded-regions.public.json, hidden: tests/surrounded-regions.hidden.json }
+complexity: { time: "O(m·n)", space: "O(m·n)" }
+related: []
+order: 5
+---
+
+You are given a grid `board` with `m` rows and `n` columns. Every cell holds the string `"X"` or `"O"`.
+
+Call a group of `"O"` cells **enclosed** when none of its cells lies on the first row, last row, first column or
+last column of the grid. Cells belong to the same group when they are neighbors up, down, left or right; diagonal
+neighbors do not count. Turn every `"O"` that belongs to an enclosed group into `"X"`, and leave every other cell
+unchanged.
+
+Edit `board` in place, then return it. The tests pass the grid as an array of rows and compare the grid you
+return.
+
+## Examples
+
+```text
+X X X X        X X X X
+X O O X        X X X X
+X X O X   →    X X X X      the three connected O cells are enclosed
+X O X X        X O X X      this O is on the last row, so it stays
+
+X O X          X O X
+O O O    →     O O O        every O is connected to the border; nothing changes
+X O X          X O X
+
+X X X          X X X
+X O X    →     X X X        a single enclosed O
+X X X          X X X
+
+O O            O O
+O O      →     O O          all cells are on the border
+```
+
+## Constraints
+
+- `1 ≤ m, n ≤ 20`
+- Each cell is `"X"` or `"O"`.
+
+**Follow-up:** the solution below calls itself once per cell. What would you change for a 200 × 200 grid?
+
+<PremiumBreak />
+
+## Flip the question
+
+Finding enclosed groups directly is awkward: for each group you would have to check whether any of its cells
+touches the edge. It is easier to ask the opposite question: which `"O"` cells are *connected to the border*? Those
+are exactly the cells that must survive. Every other `"O"` is enclosed.
+
+That gives three steps:
+
+1. Start a flood fill (a depth-first search that visits every connected cell) from each `"O"` on the border.
+2. While filling, rewrite the visited cells to a temporary marker such as `"T"`. This marks them as safe and also
+   stops the search from visiting a cell twice.
+3. Sweep the whole grid once. Any `"O"` still left was never reached, so it is enclosed: make it `"X"`. Any `"T"`
+   was safe: turn it back into `"O"`.
+
+The marker is what lets you work in place, with no separate "visited" grid.
+
+```python
+def solve(board):
+    if not board:
+        return board
+    m, n = len(board), len(board[0])
+    dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+    def dfs(r, c):
+        if r < 0 or c < 0 or r >= m or c >= n or board[r][c] != "O":
+            return
+        board[r][c] = "T"
+        for dr, dc in dirs:
+            dfs(r + dr, c + dc)
+
+    for r in range(m):
+        dfs(r, 0)
+        dfs(r, n - 1)
+    for c in range(n):
+        dfs(0, c)
+        dfs(m - 1, c)
+
+    for r in range(m):
+        for c in range(n):
+            if board[r][c] == "O":
+                board[r][c] = "X"
+            elif board[r][c] == "T":
+                board[r][c] = "O"
+    return board
+```
+
+The first line of `dfs` is a guard: it stops at the grid edge, at an `"X"`, and at a `"T"` that was already
+visited, so each cell is expanded at most once.
+
+## Why it works
+
+A group of `"O"` cells either contains a border cell or it does not. If it does, the loops over the four edges
+start a search inside it, and the search reaches every cell of the group through neighbor steps, so all of them
+become `"T"`. If it does not, no search ever enters it, so its cells are still `"O"` at the sweep and are turned into
+`"X"`. Cells that start as `"X"` are never touched.
+
+## A short trace
+
+For the first example, the border loops find no `"O"` on the first row, first column or last column, and one `"O"`
+at the bottom of column 1. The search from it marks only that cell:
+
+```text
+X X X X        X X X X
+X O O X        X O O X       (unchanged: no border O reaches these)
+X X O X   →    X X O X
+X O X X        X T X X       bottom-row O marked "T"
+```
+
+The sweep then turns the three remaining `"O"` into `"X"` and the `"T"` back into `"O"`.
+
+## Common mistakes
+
+- Running the search from the inside. You cannot tell a group is enclosed until the whole group has been explored.
+- Marking visited cells with `"O"` or `"X"`. The sweep could then no longer tell safe cells from enclosed ones, so the
+  marker must be a third value.
+- Forgetting the restore step, which leaves `"T"` characters in the answer.
+- Treating diagonal neighbors as connected. Only the four straight directions count.
+- Skipping the guard for `board[r][c] != "O"`; the search then loops forever on a cell it just marked.
+
+## Variations
+
+- **Deep grids:** each recursive call uses a stack frame, and a grid that is one long winding path of `"O"` cells
+  can nest as deep as the number of cells. For large grids, use an explicit stack (a list you push and pop) or a
+  queue, which gives the same result without recursion limits.
+- **Count the enclosed groups instead of flipping them:** run the same border search first, then count the
+  groups among the remaining `"O"` cells.
+- **Multi-source breadth-first search:** put all border `"O"` cells in a queue at once and expand outward; the
+  marking logic is identical.

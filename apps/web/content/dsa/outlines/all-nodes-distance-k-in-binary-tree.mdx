@@ -1,0 +1,157 @@
+---
+title: "All Nodes Distance K in Binary Tree"
+description: "Given the root of a binary tree, a target node (by reference), and an integer k, return values of all nodes at distance k from the target (edges)."
+topics: [trees]
+group: "01. Binary Tree › 05. Path and Sum Problems"
+number: "08"
+order: 14001005008000
+status: outline
+---
+
+Given the root of a binary tree, a target node (by reference), and an integer k, return values of all nodes
+at distance k from the target (edges). Answer order is arbitrary.
+
+## Examples
+
+````text
+Example 1:
+    Tree [3,5,1,6,2,0,8,None,None,7,4], target = node(5), k = 2
+    Output: contains {7,4,1} in any order
+Example 2:
+    Tree [1], target = node(1), k = 3
+    Output: []
+````
+
+## Constraints
+
+````text
+- Nodes in [1, 500], unique values, target exists, 0 <= k <= 1000.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph BFS after parent links
+Treat tree as undirected graph: add parent pointers, BFS k layers from target.
+
+1. DFS annotate parent for every node.
+2. BFS from target with visited set; when depth equals k, collect queue values.
+
+## Complexity
+
+**Time:** O(n)
+
+**Space:** O(n) for parent map, queue, and visited.
+Restored (original notes, diagrams, and walkthrough):
+863. All Nodes Distance K in Binary Tree
+Solved
+Medium
+Topics
+Companies
+Given the root of a binary tree, the value of a target node target, and an integer k, return an array of the values of all nodes that have a distance k from the target node.
+
+You can return the answer in any order.
+
+Example 1:
+
+Input: root = \[3,5,1,6,2,0,8,null,null,7,4\], target = 5, k = 2
+Output: \[7,4,1\]
+Explanation: The nodes that are a distance 2 from the target node (with value 5) have values 7, 4, and 1.
+Example 2:
+
+Input: root = \[1\], target = 1, k = 3
+Output: \[\]
+
+Constraints:
+
+The number of nodes in the tree is in the range \[1, 500\].
+0 &lt;= Node.val &lt;= 500
+All the values Node.val are unique.
+target is the value of one of the nodes in the tree.
+0 &lt;= k &lt;= 1000
+
+## Solution
+
+````python
+from collections import deque
+from typing import List, Optional, Set
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_and_find(values: List[Optional[int]], target_val: int) -> tuple[Optional[TreeNode], TreeNode]:
+    if not values or values[0] is None:
+        raise ValueError("empty tree")
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    target_node = root if values[0] == target_val else None
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            if values[i] == target_val:
+                target_node = node.left
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            if values[i] == target_val:
+                target_node = node.right
+            q.append(node.right)
+        i += 1
+    if target_node is None:
+        raise ValueError("target not in tree")
+    return root, target_node
+
+
+class Solution:
+    def distanceK(self, root: Optional[TreeNode], target: TreeNode, k: int) -> List[int]:
+        parent: dict[TreeNode, Optional[TreeNode]] = {}
+
+        def attach(node: Optional[TreeNode], par: Optional[TreeNode]) -> None:
+            if not node:
+                return
+            parent[node] = par
+            attach(node.left, node)
+            attach(node.right, node)
+
+        attach(root, None)
+        q: deque[TreeNode] = deque([target])
+        seen: Set[TreeNode] = {target}
+        dist = 0
+        while q:
+            if dist == k:
+                return [n.val for n in q]
+            for _ in range(len(q)):
+                cur = q.popleft()
+                for nb in (cur.left, cur.right, parent.get(cur)):
+                    if nb and nb not in seen:
+                        seen.add(nb)
+                        q.append(nb)
+            dist += 1
+        return []
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    root1, t1 = build_tree_and_find([3, 5, 1, 6, 2, 0, 8, None, None, 7, 4], 5)
+    out1 = sol.distanceK(root1, t1, 2)
+    assert set(out1) == {7, 4, 1}
+    root2, t2 = build_tree_and_find([1], 1)
+    assert sol.distanceK(root2, t2, 3) == []
+    root3, t3 = build_tree_and_find([0, 1, None, 3, 2], 3)
+    assert set(sol.distanceK(root3, t3, 2)) == {0, 2}
+    root4, t4 = build_tree_and_find([3, 5, 1, 6, 2, 0, 8, None, None, 7, 4], 5)
+    assert sol.distanceK(root4, t4, 0) == [5]
+    print("\nAll test cases passed!")
+````

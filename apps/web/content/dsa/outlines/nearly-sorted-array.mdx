@@ -1,0 +1,130 @@
+---
+title: "Nearly Sorted Array"
+description: "Each element in the array is at most k positions away from where it would appear in the fully sorted array."
+topics: [binary-search]
+group: "01. Basic"
+number: "06"
+order: 8001006000000
+status: outline
+---
+
+Each element in the array is at most k positions away from where it would appear in the fully
+sorted array. Search for a target and return its index, or -1.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [2, 3, 10, 4, 40], k = 2, target = 4
+Output: 3
+````
+
+## Constraints
+
+````text
+- k >= 0; typical use has small k relative to n
+- Array length can be zero
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search with Local Window
+After comparing mid, scan up to k neighbors, then skip k+1 when discarding a half.
+
+1. While left &lt;= right, set mid and return if nums\[mid\] == target.
+2. Scan indices from max(0, mid - k) through min(n - 1, mid + k) for target.
+3. If nums\[mid\] &gt; target, set right = mid - k - 1; else left = mid + k + 1.
+
+## Complexity
+
+**Time:** O(log(n/k)) in the ideal analysis for this variant; each step may scan O(k).
+
+**Space:** O(1) - Only index variables.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given an array of n elements, where each element is at most k positions away from its target position in the sorted array.
+The task is to search for an element in this nearly sorted array efficiently.
+
+A nearly sorted array is one where an element at index i in the sorted array may be present at index i-k, i-k+1, ..., i, i+1, ..., i+k in the given array.
+
+Example:
+Input: arr = \[2, 3, 10, 4, 40\], k = 2, target = 4
+Output: 3 (index of 4 in the array)
+
+Approach:
+1. We'll use a modified binary search algorithm.
+2. Instead of checking only the middle element, we'll check the range \[mid-k, mid+k\].
+3. If the target is not in this range, we'll decide which half to search based on the value at mid.
+
+Explanation of the algorithm:
+
+1. We start with two pointers, 'left' and 'right', initially pointing to the start and end of the array.
+
+2. In each iteration of the while loop:
+a. We calculate the middle index 'mid'.
+b. We first check if the middle element is the target.
+c. If not, we check k elements on both sides of mid (within array bounds).
+d. If the target is not found in this range:
+- If the target is smaller than arr\[mid\], we search the left half, but we can skip k+1 elements
+from mid as we've already checked them.
+- If the target is larger than arr\[mid\], we search the right half, again skipping k+1 elements.
+
+3. If we exit the while loop without finding the target, it means the target is not in the array,
+so we return -1.
+
+Key points:
+- This algorithm is more efficient than a simple linear search, which would be O(n).
+- It's less efficient than a standard binary search on a fully sorted array, but more efficient
+than binary search would be if applied directly to this nearly sorted array.
+- The time complexity is O(log(n/k)) because in each iteration, we eliminate k elements from
+consideration in addition to half of the remaining elements.
+- This algorithm is particularly useful when dealing with large datasets that are known to be
+nearly sorted, such as in real-time data processing where data arrives mostly in order.
+
+Time Complexity:    O(log(n/k)), where n is the number of elements in the array.
+Space Complexity:   O(1) as we're using constant extra space.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def search(self, nums: List[int], target: int, k: int) -> int:
+        left, right = 0, len(nums) - 1
+        while left <= right:
+            mid = left + (right - left) // 2
+            if nums[mid] == target:
+                return mid
+            start = max(mid - k, 0)
+            end = min(mid + k, len(nums) - 1)
+            for i in range(start, end + 1):
+                if nums[i] == target:
+                    return i
+            if nums[mid] > target:
+                right = mid - k - 1
+            else:
+                left = mid + k + 1
+        return -1
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.search([2, 3, 10, 4, 40], 4, 2) == 3, "Test 1 Failed"
+    print("Test 1 Passed: classic nearly-sorted example")
+    assert sol.search([10, 3, 40, 42, 43], 40, 2) == 2, "Test 2 Failed"
+    print("Test 2 Passed: another configuration")
+    assert sol.search([1, 2, 3, 4, 5], 3, 0) == 2, "Test 3 Failed"
+    print("Test 3 Passed: k=0 behaves like sorted BS neighborhood")
+    assert sol.search([1], 1, 1) == 0, "Test 4 Failed"
+    print("Test 4 Passed: single element")
+    assert sol.search([1, 2, 3], 9, 1) == -1, "Test 5 Failed"
+    print("Test 5 Passed: missing target")
+    print("\nAll test cases passed!")
+````

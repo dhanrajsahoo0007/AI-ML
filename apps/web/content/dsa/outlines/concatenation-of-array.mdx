@@ -1,0 +1,100 @@
+---
+title: "Concatenation of Array"
+description: "Given an integer array nums of length n, build an array ans of length 2n such that ans[i] == nums[i] and ans[i + n] == nums[i] for every index i in [0, n)."
+topics: [arrays]
+group: "01. Basic Array Manipulation"
+number: "01"
+order: 1001001000000
+status: outline
+---
+
+Given an integer array nums of length n, build an array ans of length 2n such that
+ans\[i\] == nums\[i\] and ans\[i + n\] == nums\[i\] for every index i in \[0, n). In other words,
+ans is nums concatenated with itself.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 2, 1]
+    Output: [1, 2, 1, 1, 2, 1]
+Example 2:
+    Input: nums = [1, 3, 2, 1]
+    Output: [1, 3, 2, 1, 1, 3, 2, 1]
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 1000
+- 1 <= nums[i] <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Array construction
+Build the answer by repeating the input sequence once more.
+
+1. Return a new list that is nums followed by nums (or equivalently nums repeated twice).
+2. Do not mutate the caller's list in place.
+
+## Complexity
+
+**Time:** O(n) - Each of the n elements is copied twice into the result.
+
+**Space:** O(n) - The output holds 2n integers; extra space beyond output is O(n) for the copy.
+
+## Original notes
+
+````text
+Additional approaches (from original notes):
+- ``nums + nums`` builds a new list (used below); clear and non-destructive.
+- ``nums.extend(nums)`` mutates the input in place, then returns it (same length 2n).
+- ``nums * 2`` also allocates a new list with the doubled sequence.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def getConcatenation(self, nums: List[int]) -> List[int]:
+        return nums + nums
+
+
+class SolutionWithExtend:
+    """Same answer by extending the list in place (mutates the caller's list)."""
+
+    def getConcatenation(self, nums: List[int]) -> List[int]:
+        nums.extend(nums)
+        return nums
+
+
+class SolutionWithRepeat:
+    """Same answer using sequence repetition (new list)."""
+
+    def getConcatenation(self, nums: List[int]) -> List[int]:
+        return nums * 2
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.getConcatenation([1, 2, 1]) == [1, 2, 1, 1, 2, 1], "Test 1 Failed"
+    print("Test 1 Passed: basic concatenation")
+    assert sol.getConcatenation([1, 3, 2, 1]) == [1, 3, 2, 1, 1, 3, 2, 1], "Test 2 Failed"
+    print("Test 2 Passed: longer array")
+    assert sol.getConcatenation([5]) == [5, 5], "Test 3 Failed"
+    print("Test 3 Passed: single element")
+    assert sol.getConcatenation([0, 0]) == [0, 0, 0, 0], "Test 4 Failed"
+    print("Test 4 Passed: zeros")
+    assert sol.getConcatenation(list(range(3))) == [0, 1, 2, 0, 1, 2], "Test 5 Failed"
+    print("Test 5 Passed: sequential")
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,224 @@
+---
+title: "Swim in rising water"
+description: "You are given an n x n integer matrix grid where each value grid[i][j] represents the elevation at that point (i, j)."
+topics: [graphs]
+group: "06. Disjoint Union Sets › 05. DSU with Additional Techniques"
+number: "03"
+order: 17006005003000
+status: outline
+---
+
+You are given an n x n integer matrix grid where each value grid\[i\]\[j\] represents the elevation at that point (i, j).
+The rain starts to fall. At time t, the depth of the water everywhere is t. You can swim from a square to another
+4-directionally adjacent square if and only if the elevation of both squares individually are at most t.
+
+Return the least time until you can reach the bottom right square (n - 1, n - 1) if you start at the top left square (0, 0).
+
+## Examples
+
+````text
+Example 1:
+    Input: grid = [[0,2],[1,3]]
+    Output: 3
+Example 2:
+    Input: grid = [[0,1,2,3,4],[24,23,22,21,5],[12,13,14,15,16],[11,17,18,19,20],[10,9,8,7,6]]
+    Output: 16
+````
+
+## Constraints
+
+````text
+- n == len(grid)
+- 1 <= n <= 50
+- Values are unique in many variants; solution works for given constraints.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary search on time + DSU connectivity check
+
+1. Binary search threshold t in \[max(start,end), n\*n-1\].
+2. For candidate t, build DSU over cells with elevation &lt;= t; union 4-neighbors also &lt;= t.
+3. Minimal t where (0,0) and (n-1,n-1) share a component.
+
+## Complexity
+
+**Time:** O(n^2 \* log(n^2)) for the binary search with DSU rebuilds.
+
+**Space:** O(n^2)
+
+This solution uses a Disjoint Set Union (DSU) data structure and binary search to efficiently find the minimum time.
+
+## Solution
+
+````python
+from typing import List
+
+
+class DSU:
+    def __init__(self, n: int) -> None:
+        self.parent = list(range(n))
+        self.size = [1] * n
+        self.number_of_components = n
+
+    def find(self, x: int) -> int:
+        if self.parent[x] != x:
+            self.parent[x] = self.find(self.parent[x])
+        return self.parent[x]
+
+    def union(self, x: int, y: int) -> None:
+        x_parent, y_parent = self.find(x), self.find(y)
+        if x_parent == y_parent:
+            return
+
+        if self.size[x_parent] > self.size[y_parent]:
+            self.parent[y_parent] = x_parent
+            self.size[x_parent] += self.size[y_parent]
+        else:
+            self.parent[x_parent] = y_parent
+            self.size[y_parent] += self.size[x_parent]
+
+        self.number_of_components -= 1
+
+
+class Solution:
+    def swimInWater(self, grid: List[List[int]]) -> int:
+        n = len(grid)
+        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+        def can_reach_bottom_right(t: int) -> bool:
+            dsu = DSU(n * n)
+            for i in range(n):
+                for j in range(n):
+                    if grid[i][j] <= t:
+                        for di, dj in directions:
+                            ni, nj = i + di, j + dj
+                            if 0 <= ni < n and 0 <= nj < n and grid[ni][nj] <= t:
+                                dsu.union(i * n + j, ni * n + nj)
+            return dsu.find(0) == dsu.find(n * n - 1)
+
+        left, right = max(grid[0][0], grid[-1][-1]), n * n - 1
+        while left < right:
+            mid = (left + right) // 2
+            if can_reach_bottom_right(mid):
+                right = mid
+            else:
+                left = mid + 1
+        return left
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.swimInWater([[0, 2], [1, 3]]) == 3, "Test 1 Failed"
+    print("Test 1 Passed: 2x2 sample")
+    big = [
+        [0, 1, 2, 3, 4],
+        [24, 23, 22, 21, 5],
+        [12, 13, 14, 15, 16],
+        [11, 17, 18, 19, 20],
+        [10, 9, 8, 7, 6],
+    ]
+    assert sol.swimInWater(big) == 16, "Test 2 Failed"
+    print("Test 2 Passed: 5x5 classic")
+    assert sol.swimInWater([[3]]) == 3, "Test 3 Failed"
+    print("Test 3 Passed: single cell")
+    assert sol.swimInWater([[0, 1], [2, 3]]) == 3, "Test 4 Failed"
+    print("Test 4 Passed: staircase threshold")
+    print("All tests passed!")
+````
+
+## Another version
+
+From 17. Graphs/07. Shortest Path Algorithm/01. Dijkstra's Algorithm/05. Dijkstra's Algorithm in 2-D Matrix.
+
+### Complexity
+
+**Time:** O(N^2 \* log(N^2))
+- In the worst case, we might visit all N^2 cells
+- Each heap operation (push or pop) takes log(N^2) time
+- Therefore, the overall time complexity is O(N^2 \* log(N^2))
+
+**Space:** O(N^2)
+- O(N^2) for the visited set in the worst case
+- O(N^2) for the priority queue in the worst case
+- Therefore, the overall space complexity is O(N^2)
+
+where N is the side length of the grid.
+
+### Solution
+
+````python
+"""
+The Problem is described as a modified version of Dijkstra's algorithm, or a combination of Dijkstra's algorithm and a Best-First Search. Here's why:
+
+Similarity to Dijkstra's:
+
+    It uses a priority queue to always explore the "cheapest" path first.
+    It maintains a set of visited nodes to avoid revisiting.
+
+Differences from classic Dijkstra's:
+
+    In Dijkstra's, we typically update distances to all nodes and potentially revisit nodes if we find a shorter path.
+    This algorithm doesn't maintain a distance array for all nodes and doesn't revisit nodes.
+    The "cost" in this problem (max height) doesn't accumulate like in typical Dijkstra's; instead, it takes the maximum value along the path.
+
+Similarity to Best-First Search:
+
+    It explores nodes based on a heuristic (in this case, the maximum height encountered).
+    It doesn't revisit nodes, which is more characteristic of best-first search algorithms.
+
+"""
+
+import heapq
+
+class Solution:
+    def swimInWater(self, grid: list[list[int]]) -> int:
+        n = len(grid)
+
+        # Priority queue to store cells to visit: (max_height, row, col)
+        # We use max_height as the priority to always explore the path with the lowest maximum height first
+        pq = [(grid[0][0], 0, 0)]  # (max_height, row, col)
+        # Set to keep track of visited cells
+        visited = set()
+        visited.add((0, 0))
+
+        # Possible directions to move: right, down, left, up
+        directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+        
+        while pq:
+            # Get the cell with the lowest maximum height so far
+            max_height, row, col = heapq.heappop(pq)
+            
+            # If we've reached the bottom-right cell, we're done
+            if row == n - 1 and col == n - 1:
+                return max_height
+            
+            # Explore all adjacent cells
+            for dr, dc in directions:
+                new_row, new_col = row + dr, col + dc
+                
+                # Check if the new cell is within the grid and not visited
+                if 0 <= new_row < n and 0 <= new_col < n and (new_row, new_col) not in visited:
+                    # Mark the new cell as visited
+                    visited.add((new_row, new_col))
+                    
+                    # Calculate the new maximum height
+                    # It's the max of the current max_height and the height of the new cell
+                    new_max_height = max(max_height, grid[new_row][new_col])
+                    
+                    # Add the new cell to the priority queue
+                    heapq.heappush(pq, (new_max_height, new_row, new_col))
+        
+        # We should never reach here given the problem constraints
+        return -1
+
+# Test the solution
+solution = Solution()
+print(solution.swimInWater([[0,2],[1,3]]))  # Output: 3
+print(solution.swimInWater([[0,1,2,3,4],[24,23,22,21,5],[12,13,14,15,16],[11,17,18,19,20],[10,9,8,7,6]]))  # Output: 16
+````

@@ -1,0 +1,159 @@
+---
+title: "Remove Invalid Parentheses"
+description: "Remove the minimum number of parentheses so the string becomes valid; return every possible resulting string (letters stay)."
+topics: [backtracking]
+group: "05. String Pattern"
+number: "03"
+order: 12005003000000
+status: outline
+---
+
+Remove the minimum number of parentheses so the string becomes valid; return every possible
+resulting string (letters stay). Parentheses are valid when balanced and properly nested.
+
+## Examples
+
+````text
+Example 1:
+Input: s = "()())()"
+Output: ["()()()", "(())()"] (order may vary)
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 25 in exhaustive tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Level-order search on removal states
+Repeatedly delete one parenthesis from frontier strings until some valid strings appear; that
+entire frontier is an optimal set.
+
+1. Start with &#123;s&#125;; if any member is valid, return all valid members in the set.
+2. Otherwise build the next frontier by removing one parenthesis from each string at each index.
+3. Deduplicate with a set and continue until valid strings exist.
+
+## Complexity
+
+**Time:** Exponential in worst case; fine for typical interview sizes.
+
+**Space:** Exponential frontier size in worst case.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem Statement:
+    Given a string s that contains parentheses and letters, remove the minimum number of invalid parentheses to make the input string valid.
+    Return all possible results in a list.
+
+    A string is valid if it has:
+        1. Equal number of opening and closing parentheses
+        2. Every closing parenthesis has a corresponding opening parenthesis that comes before it
+
+Time Complexity: O(2^N) where N is the length of the string
+    - In worst case, we might have to try all possible combinations of parentheses to remove
+
+Space Complexity: O(N) 
+    - The recursion stack can go up to the length of the string
+    - Additional space is used to store the results
+
+Example:
+    Input: s = "()())()"
+    Output: ["()()()", "(())()"]
+
+    Input: s = "(a)())()"
+    Output: ["(a)()()", "(a())()"]
+
+    Input: s = ")("
+    Output: [""]
+
+
+Detailed Explanation:
+
+1. The algorithm uses DFS (Depth-First Search) to explore all possible combinations of parentheses.
+
+2. For each character in the string:
+   - If it's a letter, we always include it
+   - If it's an opening parenthesis "(", we can either include or exclude it
+   - If it's a closing parenthesis ")", we can include it only if we have more opening parentheses,
+     or we can exclude it
+
+3. We keep track of:
+   - The longest valid string found so far
+   - A set of all valid strings with the maximum length
+   - Count of left and right parentheses in current combination
+
+4. Key Implementation Details:
+   - We use a set to avoid duplicate results
+   - We only store results that have the maximum possible length
+   - We maintain balance by tracking left and right parenthesis counts
+   - We use backtracking to try different combinations
+
+5. The solution ensures:
+   - Minimum number of removals (by keeping only max length results)
+   - All possible valid combinations are found
+   - No duplicate results
+   - Maintains original order of characters
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def removeInvalidParentheses(self, s: str) -> List[str]:
+        def is_valid(st: str) -> bool:
+            balance = 0
+            for ch in st:
+                if ch == "(":
+                    balance += 1
+                elif ch == ")":
+                    balance -= 1
+                    if balance < 0:
+                        return False
+            return balance == 0
+
+        frontier = {s}
+        while True:
+            valid = [x for x in frontier if is_valid(x)]
+            if valid:
+                return valid
+            nxt: set[str] = set()
+            for word in frontier:
+                for i, ch in enumerate(word):
+                    if ch not in "()":
+                        continue
+                    nxt.add(word[:i] + word[i + 1 :])
+            frontier = nxt
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def norm(vals: List[str]) -> List[str]:
+        return sorted(vals)
+
+    assert norm(sol.removeInvalidParentheses("()())()")) == norm(["()()()", "(())()"]), "Test 1 Failed"
+    print("Test 1 Passed: ()())()")
+
+    assert norm(sol.removeInvalidParentheses("(a)())()")) == norm(["(a)()()", "(a())()"]), "Test 2 Failed"
+    print("Test 2 Passed: letters preserved")
+
+    assert sol.removeInvalidParentheses(")(") == [""], "Test 3 Failed"
+    print("Test 3 Passed: only empty valid")
+
+    assert norm(sol.removeInvalidParentheses("((())")) == norm(["(())"]), "Test 4 Failed"
+    print("Test 4 Passed: one removal yields (())")
+
+    print("\nAll test cases passed!")
+````

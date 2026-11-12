@@ -1,0 +1,143 @@
+---
+title: "Lexicographically Smallest String After Substring Operation"
+description: "Given a lowercase string s, choose any non-empty substring and replace every letter in it with the previous letter in the alphabet ('b' -> 'a', 'a' -> 'z')."
+topics: [strings]
+group: "04. Lexicography"
+number: "02"
+order: 5004002000000
+status: outline
+---
+
+Given a lowercase string s, choose any non-empty substring and replace every letter
+in it with the previous letter in the alphabet ('b' -&gt; 'a', 'a' -&gt; 'z'). Return the
+lexicographically smallest string obtainable with one such operation.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "cbabc"
+    Output: "baabc"
+
+Example 2:
+    Input: s = "aa"
+    Output: "az"
+
+Example 3:
+    Input: s = "acbbc"
+    Output: "abaab"
+
+Example 4:
+    Input: s = "leetcode"
+    Output: "kddsbncd"
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 3 * 10^5
+- s consists of lowercase English letters.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy leftmost improvement
+Skip leading 'a' characters; decrement the first non-'a' run; if the string is all
+'a's, decrement only the last character to 'z'.
+
+1. Scan from the left while characters are 'a'.
+2. If the whole string is 'a', change the last character to 'z' and return.
+3. Otherwise decrement characters from the first non-'a' until the next 'a' or end.
+4. Return the joined list.
+
+## Complexity
+
+**Time:** O(n) - At most one full pass.
+
+**Space:** O(n) - Mutable list of characters.
+
+## Original notes
+
+````text
+Greedy detail (original examples):
+Leading ``a`` letters are already minimal; the first non-``a`` starts the substring you should
+decrement. Stop at the next ``a`` (further decrements would hurt lex order). If the string is
+all ``a``'s, the only valid one-step is to wrap the last character to ``z``.
+
+--- Restored notes (historical file) ---
+
+Lexicographically Smallest String After Substring Operation
+
+    Given a string s consisting of lowercase English letters. Perform the following operation:
+    
+    * Select any non-empty substring, then replace every letter of the substring with the preceding 
+    letter of the English alphabet. For example, 'b' is converted to 'a', and 'a' is converted to 'z'.
+    
+    Return the lexicographically smallest string after performing the operation.
+
+Example 1:
+    Input: s = "cbabc"
+    Output: "baabc"
+    Explanation: Perform the operation on the substring starting at index 0, and ending at index 1 inclusive.
+
+Example 2:
+    Input: s = "aa"
+    Output: "az"
+    Explanation: Perform the operation on the last letter.
+
+Example 3:
+    Input: s = "acbbc"
+    Output: "abaab"
+    Explanation: Perform the operation on the substring starting at index 1, and ending at index 4 inclusive.
+
+Example 4:
+    Input: s = "leetcode"
+    Output: "kddsbncd"
+    Explanation: Perform the operation on the entire string.
+
+Constraints:
+    * 1 <= s.length <= 3 * 10^5
+    * s consists of lowercase English letters
+
+Time Complexity: O(n), where n is the length of the string
+Space Complexity: O(n) to create a list from the string
+````
+
+## Solution
+
+````python
+class Solution:
+    def smallestString(self, s: str) -> str:
+        chars = list(s)
+        n = len(chars)
+        i = 0
+        while i < n and chars[i] == "a":
+            i += 1  # skip prefix already at smallest letter
+        if i == n:
+            chars[-1] = "z"  # e.g. "aa" -> "az"
+        else:
+            while i < n and chars[i] != "a":
+                chars[i] = chr(ord(chars[i]) - 1)  # apply the allowed -1 map once per char
+                i += 1
+        return "".join(chars)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.smallestString("cbabc") == "baabc", "Test 1 Failed"
+    print("Test 1 Passed: cbabc")
+    assert sol.smallestString("aa") == "az", "Test 2 Failed"
+    print("Test 2 Passed: aa -> az")
+    assert sol.smallestString("acbbc") == "abaab", "Test 3 Failed"
+    print("Test 3 Passed: acbbc")
+    assert sol.smallestString("leetcode") == "kddsbncd", "Test 4 Failed"
+    print("Test 4 Passed: leetcode")
+    assert sol.smallestString("a") == "z", "Test 5 Failed"
+    print("Test 5 Passed: single a -> z")
+    print("\nAll test cases passed!")
+````

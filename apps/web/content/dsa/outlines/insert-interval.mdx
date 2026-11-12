@@ -1,0 +1,120 @@
+---
+title: "Insert Interval"
+description: "Given a sorted list of non-overlapping intervals and a new interval, insert the new interval into the list and merge any overlaps so the result stays sorted…"
+topics: [intervals]
+group: "01. Basic Interval Operations"
+number: "01"
+order: 19001001000000
+status: outline
+---
+
+Given a sorted list of non-overlapping intervals and a new interval, insert the new
+interval into the list and merge any overlaps so the result stays sorted and
+non-overlapping.
+
+## Examples
+
+````text
+Example 1:
+    Input: intervals = [[1,3],[6,9]], newInterval = [2,5]
+    Output: [[1,5],[6,9]]
+
+Example 2:
+    Input: intervals = [[1,2],[3,5],[6,7],[8,10],[12,16]], newInterval = [4,8]
+    Output: [[1,2],[3,10],[12,16]]
+````
+
+## Constraints
+
+````text
+- 0 <= len(intervals) <= 10^5
+- intervals is sorted by start time and intervals do not overlap
+- newInterval.length == 2 and each interval has length 2
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Single pass interval merge
+Walk sorted intervals once, either appending unchanged intervals, merging into
+newInterval when there is overlap, or inserting newInterval before the rest.
+
+1. Iterate intervals in order.
+2. If newInterval ends before the current interval starts, append newInterval and
+return the result plus the remaining suffix.
+3. If newInterval starts after the current interval ends, append the current interval.
+4. Otherwise merge newInterval with the current interval by expanding its bounds.
+5. After the loop, append the final merged newInterval.
+
+## Complexity
+
+**Time:** O(n) - one pass over n intervals; suffix concat is O(n) in the worst case.
+
+**Space:** O(n) - the output list holds up to n + 1 intervals.
+
+## Original notes
+
+````text
+Case analysis (from original notes):
+Case 1 — `newInterval` ends before `intervals[i]` begins:
+    We found the insertion seam. Push `newInterval`, then append the untouched suffix
+    `intervals[i:]` and stop early.
+Case 2 — `newInterval` starts after `intervals[i]` ends:
+    No overlap yet; the current interval is finalized, so append it and continue.
+Case 3 — overlap:
+    Expand `newInterval` to `[min(starts), max(ends)]` but **do not** append yet,
+    because the merged interval might still collide with the next list entry.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def insert(self, intervals: List[List[int]], newInterval: List[int]) -> List[List[int]]:
+        res: List[List[int]] = []
+        for i in range(len(intervals)):
+            if newInterval[1] < intervals[i][0]:
+                res.append(newInterval)
+                return res + intervals[i:]
+            if newInterval[0] > intervals[i][1]:
+                res.append(intervals[i])
+            else:
+                # Still growing the mutable `newInterval` bubble until gaps appear.
+                newInterval = [
+                    min(newInterval[0], intervals[i][0]),
+                    max(newInterval[1], intervals[i][1]),
+                ]
+        res.append(newInterval)
+        return res
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.insert([[1, 3], [6, 9]], [2, 5]) == [[1, 5], [6, 9]], "Test 1 Failed"
+    print("Test 1 Passed: insert merges with first overlapping interval")
+
+    assert sol.insert([[1, 2], [3, 5], [6, 7], [8, 10], [12, 16]], [4, 8]) == [
+        [1, 2],
+        [3, 10],
+        [12, 16],
+    ], "Test 2 Failed"
+    print("Test 2 Passed: insert merges across multiple intervals")
+
+    assert sol.insert([[3, 5], [6, 9]], [1, 2]) == [[1, 2], [3, 5], [6, 9]], "Test 3 Failed"
+    print("Test 3 Passed: new interval strictly before all existing intervals")
+
+    assert sol.insert([[1, 2], [3, 5]], [6, 8]) == [[1, 2], [3, 5], [6, 8]], "Test 4 Failed"
+    print("Test 4 Passed: new interval after all existing intervals")
+
+    assert sol.insert([], [1, 2]) == [[1, 2]], "Test 5 Failed"
+    print("Test 5 Passed: empty intervals list")
+
+    print("\nAll test cases passed!")
+````

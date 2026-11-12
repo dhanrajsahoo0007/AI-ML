@@ -1,0 +1,104 @@
+---
+title: "Buying Chocolates"
+description: "Given integer array prices of chocolate costs and an integer money, buy exactly two distinct chocolates so the total cost does not exceed money and leftover…"
+topics: [greedy]
+group: "02. Basic Optimization Problems"
+number: "01"
+order: 18002001000000
+status: outline
+---
+
+Given integer array prices of chocolate costs and an integer money, buy exactly two distinct
+chocolates so the total cost does not exceed money and leftover money is minimized (or impossible).
+Return leftover money after buying the two cheapest valid pair; if no valid pair exists, return money.
+
+## Examples
+
+````text
+Example 1:
+    Input: prices = [1,2,2], money = 3
+    Output: 0
+
+Example 2:
+    Input: prices = [3,2,3], money = 3
+    Output: 3
+
+Example 3:
+    Input: prices = [1,1,2,3], money = 4
+    Output: 2
+````
+
+## Constraints
+
+````text
+- 2 <= prices.length <= 50
+- 1 <= prices[i] <= 100
+- 1 <= money <= 200
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Selection
+The optimal purchase uses the two smallest prices in the array.
+
+1. Scan prices once, tracking the smallest and second smallest values.
+2. If their sum is at most money, return money minus that sum.
+3. Otherwise return money unchanged.
+
+## Complexity
+
+**Time:** O(n) - One pass.
+
+**Space:** O(1) - Two trackers.
+
+## Original notes
+
+````text
+Step-by-step reasoning (from original notes):
+1. Maintain `smallest` and `second_smallest` while streaming `prices`.
+2. Whenever we see a new minimum, the old minimum becomes the new runner-up.
+3. After the scan, `smallest + second_smallest` is the cheapest valid pair sum.
+4. If that sum fits inside `money`, spend it; otherwise keep the full budget.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def buyChoco(self, prices: List[int], money: int) -> int:
+        smallest = second_smallest = float("inf")
+        for price in prices:
+            if price < smallest:
+                # Old smallest becomes second smallest.
+                second_smallest = smallest
+                smallest = price
+            elif price < second_smallest:
+                second_smallest = price
+        total_cost = smallest + second_smallest
+        if second_smallest is float("inf") or total_cost > money:
+            return money
+        return money - total_cost
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.buyChoco([1, 2, 2], 3) == 0, "Test 1 Failed"
+    print("Test 1 Passed: spend all money")
+    assert sol.buyChoco([3, 2, 3], 3) == 3, "Test 2 Failed"
+    print("Test 2 Passed: cannot afford pair")
+    assert sol.buyChoco([1, 1, 2, 3], 4) == 2, "Test 3 Failed"
+    print("Test 3 Passed: buy two ones")
+    assert sol.buyChoco([98, 54, 6, 40, 66], 58) == 12, "Test 4 Failed"
+    print("Test 4 Passed: buy 6 and 40")
+    assert sol.buyChoco([10, 20, 30], 45) == 15, "Test 5 Failed"
+    print("Test 5 Passed: 10+20 leaves fifteen")
+    print("\nAll test cases passed!")
+````

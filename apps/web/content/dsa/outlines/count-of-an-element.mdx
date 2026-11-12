@@ -1,0 +1,143 @@
+---
+title: "Count of an Element"
+description: "Given a sorted array and a target, return how many times target appears."
+topics: [binary-search]
+group: "01. Basic"
+number: "05"
+order: 8001005000000
+status: outline
+---
+
+Given a sorted array and a target, return how many times target appears.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 2, 3, 3, 3, 3, 5], target = 3
+    Output: 4
+
+Example 2:
+    Input: nums = [1, 2, 3, 4, 5], target = 6
+    Output: 0
+````
+
+## Constraints
+
+````text
+- nums is sorted in non-decreasing order
+- 0 <= len(nums) <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search for Boundary
+Count equals last\_index - first\_index + 1 after finding both boundaries.
+
+1. Binary search for the leftmost index of target.
+2. If not found, return 0; else binary search for the rightmost index.
+3. Return last - first + 1.
+
+## Complexity
+
+**Time:** O(log n) - Two passes of binary search.
+
+**Space:** O(1) - Constant extra space.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement: Count of an Element in a Sorted Array
+
+Examples:
+
+1. Input: arr = \[1, 2, 3, 3, 3, 3, 5\], target = 3
+Output: 4
+Explanation: The element 3 appears 4 times in the array.
+
+2. Input: arr = \[1, 2, 3, 4, 5\], target = 6
+Output: 0
+Explanation: The element 6 does not appear in the array.
+
+Explanation of the approach:
+
+1. Binary Search for Boundaries:
+- We use two binary search functions to find the first and last occurrences of the target element.
+- find\_first\_occurrence: Searches for the leftmost occurrence of the target.
+- find\_last\_occurrence: Searches for the rightmost occurrence of the target.
+
+2. Counting Occurrences:
+- Once we have the indices of the first and last occurrences, we can easily compute the count:
+count = last\_index - first\_index + 1
+- If the element is not found (first\_index is -1), we return 0.
+
+3. Efficiency:
+- Time Complexity: O(log n), where n is the number of elements in the array.
+\* We perform two binary searches, each taking O(log n) time.
+- Space Complexity: O(1), as we only use a constant amount of extra space.
+
+4. Edge Cases:
+- The algorithm correctly handles cases where:
+\* The element is not in the array
+\* The array is empty
+\* The array contains only one element
+\* All elements in the array are the same
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def count(self, nums: List[int], target: int) -> int:
+        def first() -> int:
+            left, right = 0, len(nums) - 1
+            res = -1
+            while left <= right:
+                mid = left + (right - left) // 2
+                if nums[mid] == target:
+                    res = mid
+                    right = mid - 1
+                elif nums[mid] < target:
+                    left = mid + 1
+                else:
+                    right = mid - 1
+            return res
+
+        def last() -> int:
+            left, right = 0, len(nums) - 1
+            res = -1
+            while left <= right:
+                mid = left + (right - left) // 2
+                if nums[mid] == target:
+                    res = mid
+                    left = mid + 1
+                elif nums[mid] < target:
+                    left = mid + 1
+                else:
+                    right = mid - 1
+            return res
+
+        lo = first()
+        if lo == -1:
+            return 0
+        return last() - lo + 1
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.count([1, 2, 3, 3, 3, 3, 5], 3) == 4, "Test 1 Failed"
+    print("Test 1 Passed: four threes")
+    assert sol.count([1, 2, 3, 4, 5], 6) == 0, "Test 2 Failed"
+    print("Test 2 Passed: zero count")
+    assert sol.count([1, 1, 1, 1, 1, 1], 1) == 6, "Test 3 Failed"
+    print("Test 3 Passed: uniform array")
+    assert sol.count([1, 2, 2, 2, 2, 3, 4, 5], 2) == 4, "Test 4 Failed"
+    print("Test 4 Passed: run of twos")
+    assert sol.count([], 1) == 0, "Test 5 Failed"
+    print("Test 5 Passed: empty array")
+    print("\nAll test cases passed!")
+````

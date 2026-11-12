@@ -1,0 +1,104 @@
+---
+title: "Minimum Deletions to Make String Balanced"
+description: "Given a binary string of 'a' and 'b', delete characters so no 'b' appears before an 'a'."
+topics: [stacks-and-queues]
+group: "04. Expression Evaluation"
+number: "04"
+order: 9004004000000
+status: outline
+---
+
+Given a binary string of 'a' and 'b', delete characters so no 'b' appears before an 'a'. Return the
+minimum deletions.
+
+## Examples
+
+````text
+Example 1:
+Input: "aababbab"
+Output: 2
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Stack for Forbidden "ba"
+Pop prior 'b' whenever 'a' creates a bad pair, counting each removal.
+
+1. Walk characters maintaining a stack.
+2. If top is 'b' and current is 'a', pop and increment deletions.
+3. Otherwise push the character.
+
+Restored notes (archived workbook):
+
+Problem Statement: Minimum Deletions to Make String Balanced
+
+You are given a string s consisting only of characters 'a' and 'b'.
+You can delete any number of characters in s to make s balanced.
+s is balanced if there is no pair of indices (i,j) such that i &lt; j and s\[i\] = 'b' and s\[j\] = 'a'.
+Return the minimum number of deletions needed to make s balanced.
+
+Example 1:
+Input: s = "aababbab"
+Output: 2
+Explanation: You can either delete the characters at 0-indexed positions 2 and 6 ("aababbab" -&gt; "aaabbb"), or
+delete the characters at 0-indexed positions 3 and 6 ("aababbab" -&gt; "aabbbb").
+
+Example 2:
+Input: s = "bbaaaaabb"
+Output: 2
+Explanation: The only solution is to delete the first two characters.
+
+Constraints:
+- 1 &lt;= s.length &lt;= 10^5
+- s\[i\] is 'a' or 'b'.
+
+All four approaches solve the problem correctly, but they trade off between time complexity, space complexity, and code simplicity.
+Approach-4 is the most optimized in terms of space , efficiency while maintaining a reasonable time complexity.
+
+## Complexity
+
+**Time:** O(n) - Each character is pushed and popped at most once.
+
+**Space:** O(n) - Stack size in worst case.
+
+## Solution
+
+````python
+class Solution:
+    def minimumDeletions(self, s: str) -> int:
+        stack: list[str] = []
+        removals = 0
+        for ch in s:
+            if stack and stack[-1] == "b" and ch == "a":
+                stack.pop()
+                removals += 1
+            else:
+                stack.append(ch)
+        return removals
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minimumDeletions("aababbab") == 2, "Test 1 Failed"
+    assert sol.minimumDeletions("bbaaaaabb") == 2, "Test 2 Failed"
+    assert sol.minimumDeletions("aabbab") == 1, "Test 3 Failed"
+    assert sol.minimumDeletions("bababaa") == 3, "Test 4 Failed"
+    assert sol.minimumDeletions("abababa") == 3, "Test 5 Failed"
+    print("Test 1 Passed: sample")
+    print("Test 2 Passed: leading b block")
+    print("Test 3 Passed: short mix")
+    print("Test 4 Passed: alternating tail")
+    print("Test 5 Passed: odd length")
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,120 @@
+---
+title: "First Negative in every window size k"
+description: "Given an array of integers and a positive integer k, for every contiguous subarray of length k, return the first negative number in that window, or 0 if ther…"
+topics: [sliding-window]
+group: "01. Fixed Size"
+number: "02"
+order: 7001002000000
+status: outline
+---
+
+Given an array of integers and a positive integer k, for every contiguous subarray
+of length k, return the first negative number in that window, or 0 if there is none.
+
+## Examples
+
+````text
+Example 1:
+    Input: arr = [12, -1, -7, 8, -15, 30, 16, 28], k = 3
+    Output: [-1, -1, -7, -15, -15, 0]
+Example 2:
+    Input: arr = [1, 2, 3], k = 2
+    Output: [0, 0]
+````
+
+## Constraints
+
+````text
+- Array length and k are positive; k <= len(arr).
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Fixed-size sliding window with queue of negatives
+Store indices of negative values in the window so the front always holds the first negative.
+
+1. Slide j from 0 to n-1, push j to a deque when arr\[j\] &lt; 0.
+2. When the window reaches size k, the deque front (if any) is the first negative.
+3. Before sliding, drop indices that leave the window from the deque front.
+
+Restored notes (archived workbook):
+
+Problem Statement:
+Given an array of integers and a positive integer K, find the first negative integer in every contiguous subarray of size K.
+If a subarray does not contain a negative integer, output 0 for that subarray.
+
+Explanation:
+We use the sliding window technique with two pointers, l and r:
+1. Initialize two pointers, l and r, both at the start of the array.
+2. Use temp\_store to keep track of negative numbers in the current window.
+3. Move r to the right, adding negative numbers to temp\_store.
+4. When the window size (r - l + 1) reaches K:
+- Add the first negative number (or 0) to final\_ans.
+- Move l to the right, removing the first negative number from temp\_store if necessary.
+5. Repeat steps 3-4 until r reaches the end of the array.
+
+Time Complexity: O(n), where n is the length of the input array.We traverse the array once with the two pointers.
+Space Complexity: O(k) in the worst case, where k is the window size.temp\_store might store up to k elements if all elements in a window are negative.
+
+## Complexity
+
+**Time:** O(n) - Each index is enqueued and dequeued at most once.
+
+**Space:** O(k) - The deque holds at most indices for negatives in one window.
+
+## Solution
+
+````python
+from collections import deque
+from typing import List
+
+
+class Solution:
+    def firstNegInEveryWindow(self, arr: List[int], k: int) -> List[int]:
+        dq: deque[int] = deque()
+        out: List[int] = []
+
+        for j in range(len(arr)):
+            if arr[j] < 0:
+                dq.append(j)
+
+            if dq and dq[0] <= j - k:
+                dq.popleft()
+
+            if j >= k - 1:
+                out.append(arr[dq[0]] if dq else 0)
+
+        return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.firstNegInEveryWindow([12, -1, -7, 8, -15, 30, 16, 28], 3) == [
+        -1,
+        -1,
+        -7,
+        -15,
+        -15,
+        0,
+    ], "Test 1 Failed"
+    print("Test 1 Passed: mixed positives and negatives")
+
+    assert sol.firstNegInEveryWindow([1, 2, 3], 2) == [0, 0], "Test 2 Failed"
+    print("Test 2 Passed: no negatives")
+
+    assert sol.firstNegInEveryWindow([-5, -2, -3], 2) == [-5, -2], "Test 3 Failed"
+    print("Test 3 Passed: all negative windows")
+
+    assert sol.firstNegInEveryWindow([0, -1, 2], 1) == [0, -1, 0], "Test 4 Failed"
+    print("Test 4 Passed: window size 1")
+
+    assert sol.firstNegInEveryWindow([10, -8, 3, -2, 4], 3) == [-8, -8, -2], "Test 5 Failed"
+    print("Test 5 Passed: edge negatives")
+
+    print("\nAll test cases passed!")
+````

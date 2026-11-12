@@ -1,0 +1,157 @@
+---
+title: "Book Allocation Problem"
+description: "Books have page counts in order."
+topics: [binary-search]
+group: "07. Maximum of Minimum | Minimum of Maximum"
+number: "03"
+order: 8007003000000
+status: outline
+---
+
+Books have page counts in order. Assign contiguous books to m students so each gets at least one
+book and the maximum total pages assigned to any student is minimized. Return that minimum, or -1
+if m &gt; number of books.
+
+## Examples
+
+````text
+Example 1:
+Input: arr = [12, 34, 67, 90], m = 2
+Output: 113
+````
+
+## Constraints
+
+````text
+- 1 <= m, len(arr) <= 10^3 (typical competitive bounds)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer (minimize maximum load)
+Feasible if m or fewer students suffice when each is capped at mid pages (greedy partition).
+
+1. If m &gt; n return -1. Search cap in \[max(arr), sum(arr)\].
+2. Count students needed with greedy linear scan; compare to m.
+
+## Complexity
+
+**Time:** O(n log S) - S = total pages.
+
+**Space:** O(1) - Greedy only.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Book Allocation Problem
+# similar to Capacity to ship package 
+
+Problem Statement:
+    Given an array 'arr' of integer numbers, 'arr[i]' represents the number of pages in the 'i-th' book.
+    There are 'm' number of students, and the task is to allocate all the books to the students.
+    Allocate books in such a way that:
+        1. Each student gets at least one book.
+        2. Each book should be allocated to only one student.
+        3. Book allocation should be in a contiguous manner.
+            You have to allocate the book to 'm' students such that the maximum number of pages assigned to a student is minimum.
+        If the allocation of books is not possible, return -1.
+
+Examples:
+    Example 1:
+        Input: n = 4, m = 2, arr = [12, 34, 67, 90]
+        Output: 113
+        Explanation: Allocation can be done in following ways:
+                    {12} and {34, 67, 90} Maximum pages = 191
+                    {12, 34} and {67, 90} Maximum pages = 157
+                    {12, 34, 67} and {90}  Maximum pages = 113
+                    Therefore, the minimum of these cases is 113, which is selected as the output.
+
+    Example 2:
+    Input: n = 5, m = 4, arr = [25, 46, 28, 49, 24]
+    Output: 71
+    Explanation: Allocation can be done in following ways:
+                {25} {46} {28} {49, 24} Maximum pages = 73
+                {25} {46} {28, 49} {24} Maximum pages = 77
+                {25} {46, 28} {49} {24} Maximum pages = 74
+                {25, 46} {28} {49} {24} Maximum pages = 71
+                Therefore, the minimum of these cases is 71, which is selected as the output.
+
+Constraints:
+    * 2 <= n <= 10^3
+    * 1 <= m <= 10^3
+    * 1 <= arr[i] <= 10^9
+    * Sum of all arr[i] does not exceed 10^9
+
+Solution Explanation:
+    The solution uses a binary search approach to find the minimum maximum number of pages:
+
+    1. We define a helper function 'is_valid_allocation' that checks if it's possible to allocate books to 'm' students with a given maximum page limit.
+    2. In the main function 'findPages', we perform a binary search on the possible range of maximum pages:
+       - The minimum possible value is the maximum number of pages in a single book.
+       - The maximum possible value is the sum of pages of all books.
+    3. We keep narrowing down our search range until we find the minimum valid allocation.
+
+Time Complexity: O(n * log(s)), where n is the number of books and s is the sum of all pages.
+    - The binary search takes O(log(s)) iterations.
+    - In each iteration, we call the 'is_valid_allocation' function which takes O(n) time.
+
+Space Complexity: O(1), as we only use a constant amount of extra space.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findPages(self, arr: List[int], n: int, m: int) -> int:
+        if m > n:
+            return -1
+
+        def students_needed(cap: int) -> int:
+            s = 1
+            load = 0
+            for pages in arr:
+                if pages > cap:
+                    return m + 1
+                if load + pages > cap:
+                    s += 1
+                    load = pages
+                else:
+                    load += pages
+                if s > m:
+                    return s
+            return s
+
+        lo, hi = max(arr), sum(arr)
+        while lo < hi:
+            mid = lo + (hi - lo) // 2
+            if students_needed(mid) <= m:
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findPages([12, 34, 67, 90], 4, 2) == 113, "Test 1 Failed"
+    print("Test 1 Passed: two students")
+    assert sol.findPages([25, 46, 28, 49, 24], 5, 4) == 71, "Test 2 Failed"
+    print("Test 2 Passed: four students")
+    assert sol.findPages([10, 20, 30], 3, 4) == -1, "Test 3 Failed"
+    print("Test 3 Passed: impossible split")
+    assert sol.findPages([7, 2, 5, 10, 8], 5, 2) == 18, "Test 4 Failed"
+    print("Test 4 Passed: minimize largest chunk")
+    assert sol.findPages([1, 1, 1], 3, 3) == 1, "Test 5 Failed"
+    print("Test 5 Passed: one page each")
+    print("\nAll test cases passed!")
+````

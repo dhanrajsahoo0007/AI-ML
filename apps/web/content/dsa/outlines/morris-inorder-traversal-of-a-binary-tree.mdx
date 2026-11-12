@@ -1,0 +1,151 @@
+---
+title: "Morris Inorder Traversal of a Binary Tree"
+description: "Return the inorder traversal of a binary tree using Morris traversal (O(1) extra space, tree temporarily threaded)."
+topics: [trees]
+group: "01. Binary Tree › 08. Advanced Tree Problems"
+number: "11"
+order: 14001008011000
+status: outline
+---
+
+Return the inorder traversal of a binary tree using Morris traversal (O(1) extra space, tree temporarily threaded).
+
+## Examples
+
+````text
+Example 1:
+Input: root = [1,2,3,4,5]
+Output: [4,2,5,1,3]
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 10^4].
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Morris threading
+Link inorder predecessor to current to climb back without a stack; remove links after visiting.
+
+1. Current starts at root.
+2. If no left child, visit current, go right.
+3. Else find predecessor; if its right is null, thread to current and go left; else unthread, visit current, go right.
+
+## Complexity
+
+**Time:** O(n) - each edge constant visits.
+
+**Space:** O(1) - only pointers.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Implement Morris Traversal algorithms for both pre-order and in-order traversal of a binary tree.
+These algorithms should traverse the tree without using extra space for recursion or an explicit stack.
+
+Explanation:
+Morris Traversal is a tree traversal algorithm that allows us to traverse a binary tree without using
+extra space for recursion or a stack.
+It achieves this by temporarily modifying the tree structure
+to create links back to the parent nodes, and then restoring the original structure.
+
+The key steps in Morris Traversal are:
+1. Start with the current node as the root.
+2. While the current node is not NULL:
+a. If the current node has no left child:
+- Process the current node (pre-order) or defer processing (in-order)
+- Move to the right child
+b. If the current node has a left child:
+- Find the rightmost node in the left subtree (predecessor)
+- If the predecessor's right child is NULL:
+\* Make it point to the current node
+\* Process the current node (pre-order) or defer processing (in-order)
+\* Move to the left child
+- If the predecessor's right child points to the current node:
+\* Set the right child to NULL (restore the tree structure)
+\* Process the current node (in-order) if not already processed
+\* Move to the right child
+
+Time Complexity: O(n), where n is the number of nodes in the binary tree.
+Space Complexity: O(1), as it uses only a constant amount of extra space.
+
+The time complexity is O(n) because each edge in the tree is traversed at most three times:
+1. When finding the predecessor
+2. When creating the temporary link
+3. When removing the temporary link
+
+The space complexity is O(1) because we're not using any extra data structures that grow with
+the size of the input. We're only using a few variables to keep track of the current node,
+predecessor, and result list.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    from collections import deque
+
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def morrisInorderTraversal(self, root: Optional[TreeNode]) -> List[int]:
+        result: List[int] = []
+        cur = root
+        while cur:
+            if not cur.left:
+                result.append(cur.val)
+                cur = cur.right
+            else:
+                pred = cur.left
+                while pred.right and pred.right is not cur:
+                    pred = pred.right
+                if not pred.right:
+                    pred.right = cur
+                    cur = cur.left
+                else:
+                    pred.right = None
+                    result.append(cur.val)
+                    cur = cur.right
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r = build_tree_from_level_order([1, 2, 3, 4, 5])
+    assert sol.morrisInorderTraversal(r) == [4, 2, 5, 1, 3]
+    assert sol.morrisInorderTraversal(None) == []
+    assert sol.morrisInorderTraversal(TreeNode(7)) == [7]
+    r2 = build_tree_from_level_order([1, None, 2, 3])
+    assert sol.morrisInorderTraversal(r2) == [1, 3, 2]
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,99 @@
+---
+title: "M Coloring Problem"
+description: "Given an undirected graph as an adjacency matrix and m colors, determine whether the vertices can be colored so no edge joins two vertices of the same color."
+topics: [backtracking]
+group: "05. String Pattern"
+number: "07"
+order: 12005007000000
+status: outline
+---
+
+Given an undirected graph as an adjacency matrix and m colors, determine whether the vertices
+can be colored so no edge joins two vertices of the same color.
+
+## Examples
+
+````text
+Example 1:
+Input: graph = [[0,1,1,1],[1,0,1,0],[1,1,0,1],[1,0,1,0]], m = 3
+Output: True
+````
+
+## Constraints
+
+````text
+- graph is n x n with entries 0 or 1
+- 1 <= m, n <= 8 in tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph coloring backtracking
+Assign colors 1..m to vertices in order; skip colors already used by neighbors.
+
+1. DFS vertex index with color array.
+2. For each color, if no neighbor shares it, assign and recurse.
+3. Return True if all vertices colored; otherwise backtrack.
+
+## Complexity
+
+**Time:** O(m^n) worst case.
+
+**Space:** O(n) for colors and recursion.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def graphColoring(self, graph: List[List[int]], m: int) -> bool:
+        n = len(graph)
+        colors = [0] * n
+
+        def safe(node: int, color: int) -> bool:
+            for nei in range(n):
+                if graph[node][nei] == 1 and colors[nei] == color:
+                    return False
+            return True
+
+        def dfs(node: int) -> bool:
+            if node == n:
+                return True
+            for c in range(1, m + 1):
+                if not safe(node, c):
+                    continue
+                colors[node] = c
+                if dfs(node + 1):
+                    return True
+                colors[node] = 0
+            return False
+
+        return dfs(0)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    g1 = [[0, 1, 1, 1], [1, 0, 1, 0], [1, 1, 0, 1], [1, 0, 1, 0]]
+    assert sol.graphColoring(g1, 3) is True, "Test 1 Failed"
+    print("Test 1 Passed: K4 needs three colors")
+
+    assert sol.graphColoring(g1, 2) is False, "Test 2 Failed"
+    print("Test 2 Passed: not two-colorable")
+
+    g2 = [[0, 1], [1, 0]]
+    assert sol.graphColoring(g2, 2) is True, "Test 3 Failed"
+    print("Test 3 Passed: edge is two-colorable")
+
+    g3 = [[0]]
+    assert sol.graphColoring(g3, 1) is True, "Test 4 Failed"
+    print("Test 4 Passed: single vertex")
+
+    print("\nAll test cases passed!")
+````

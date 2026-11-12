@@ -1,0 +1,101 @@
+---
+title: "Next Permutation"
+description: "Given an array of integers nums, reorder it to the lexicographically next greater permutation."
+topics: [arrays]
+group: "07. Sequence and Permutation Problems"
+number: "02"
+order: 1007002000000
+status: outline
+---
+
+Given an array of integers nums, reorder it to the lexicographically next greater permutation.
+If no such ordering exists, rearrange to the lowest possible order (sorted ascending). Must use
+O(1) extra memory besides modifying nums in place.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 2, 3]
+    Output: [1, 3, 2]
+Example 2:
+    Input: nums = [3, 2, 1]
+    Output: [1, 2, 3]
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 100
+- 0 <= nums[i] <= 100
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Lexicographic next permutation
+Find pivot where suffix drops, swap with next larger on the right, reverse suffix.
+
+1. From the right, find largest i with nums\[i\] &lt; nums\[i + 1\].
+2. If none, reverse whole array (last permutation).
+3. From the right, find j with nums\[j\] &gt; nums\[i\]; swap nums\[i\] and nums\[j\].
+4. Reverse nums\[i + 1:\].
+
+## Complexity
+
+**Time:** O(n) - Three linear scans or reverse passes.
+
+**Space:** O(1) - In-place.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def nextPermutation(self, nums: List[int]) -> None:
+        n = len(nums)
+        i = n - 2
+        while i >= 0 and nums[i] >= nums[i + 1]:
+            i -= 1
+        if i >= 0:
+            j = n - 1
+            while nums[j] <= nums[i]:
+                j -= 1
+            nums[i], nums[j] = nums[j], nums[i]
+        left, right = i + 1, n - 1
+        while left < right:
+            nums[left], nums[right] = nums[right], nums[left]
+            left += 1
+            right -= 1
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    a1 = [1, 2, 3]
+    sol.nextPermutation(a1)
+    assert a1 == [1, 3, 2], "Test 1 Failed"
+    print("Test 1 Passed: next of 1,2,3")
+    a2 = [3, 2, 1]
+    sol.nextPermutation(a2)
+    assert a2 == [1, 2, 3], "Test 2 Failed"
+    print("Test 2 Passed: wrap to smallest")
+    a3 = [1, 1, 5]
+    sol.nextPermutation(a3)
+    assert a3 == [1, 5, 1], "Test 3 Failed"
+    print("Test 3 Passed: duplicates")
+    a4 = [1]
+    sol.nextPermutation(a4)
+    assert a4 == [1], "Test 4 Failed"
+    print("Test 4 Passed: singleton")
+    a5 = [2, 3, 1]
+    sol.nextPermutation(a5)
+    assert a5 == [3, 1, 2], "Test 5 Failed"
+    print("Test 5 Passed: pivot in middle")
+    print("\nAll test cases passed!")
+````

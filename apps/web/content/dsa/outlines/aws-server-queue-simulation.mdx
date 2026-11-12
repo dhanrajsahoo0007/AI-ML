@@ -1,0 +1,118 @@
+---
+title: "AWS Server Queue Simulation"
+description: "AWS has a server processing requests in FIFO order."
+topics: [heaps]
+group: "08. Advanced Applications"
+number: "01"
+order: 10008001000000
+status: outline
+---
+
+AWS has a server processing requests in FIFO order. Each request has a maximum
+waiting time. If not served within that time, the request expires and is removed.
+At each second, the first request is processed. Find the queue size at every second.
+
+## Examples
+
+````text
+Example 1:
+    Input: wait = [2, 2, 3, 1]
+    Output: [4, 2, 1, 0]
+
+Example 2:
+    Input: wait = [3, 1, 2, 1]
+    Output: [4, 1, 0]
+
+Example 3:
+    Input: wait = [4, 4, 4]
+    Output: [3, 2, 1, 0]
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 10^5
+- 1 <= wait[i] <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Advanced Application (Simulation with Sorted Events)
+Sort expiration times and use a pointer to efficiently count expired requests
+at each time step.
+
+1. Create (expiration\_time, index) pairs and sort by expiration time.
+2. Simulate time steps: process one request per second, remove expired ones.
+3. Track queue size at each time step.
+
+## Complexity
+
+**Time:** O(n log n) for sorting
+
+**Space:** O(n) for the expirations array and result
+
+## Original notes
+
+````text
+Original notes (restored):
+FIFO server + per-request max wait `wait[i]`. A request served at time `t` still occupies the queue for
+that second and disappears starting `t+1`. Additional examples from the backup included `[4,3,1,2,1]`
+to illustrate overlapping expirations. Counting-sort variant mentioned there could shave sorting when waits
+are bounded small integers.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def simulateQueue(self, wait: List[int]) -> List[int]:
+        n = len(wait)
+        result = [n]
+        expirations = sorted((wait[i], i) for i in range(n))
+
+        time = 0
+        next_expire = 0
+        queue_size = n
+
+        while queue_size > 0:
+            time += 1
+            queue_size -= 1
+
+            while next_expire < n and expirations[next_expire][0] <= time:
+                if expirations[next_expire][1] > time - 1:
+                    queue_size = max(0, queue_size - 1)
+                next_expire += 1
+
+            result.append(max(0, queue_size))
+            if queue_size <= 0:
+                break
+
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1
+    result = sol.simulateQueue([2, 2, 3, 1])
+    print(f"Test 1: {result}")
+
+    # Test Case 2
+    result = sol.simulateQueue([3, 1, 2, 1])
+    print(f"Test 2: {result}")
+
+    # Test Case 3
+    result = sol.simulateQueue([4, 4, 4])
+    assert result == [3, 2, 1, 0], "Test 3 Failed"
+    print(f"Test 3 Passed: [4,4,4] -> {result}")
+
+    print("\nAll test cases completed!")
+````

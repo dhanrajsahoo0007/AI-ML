@@ -1,0 +1,118 @@
+---
+title: "Fruit Into Baskets"
+description: "You are picking fruit from trees in a row; each tree has a type label."
+topics: [sliding-window]
+group: "06. Story Problem"
+number: "02"
+order: 7006002000000
+status: outline
+---
+
+You are picking fruit from trees in a row; each tree has a type label. You have
+two baskets and may only collect at most two different types at a time. Return the
+maximum number of fruits you can collect in one contiguous stretch.
+
+## Examples
+
+````text
+Example 1:
+    Input: fruits = [1, 2, 1]
+    Output: 3
+Example 2:
+    Input: fruits = [0, 1, 2, 2]
+    Output: 3
+````
+
+## Constraints
+
+````text
+- 1 <= len(fruits) <= 10^5
+- 0 <= fruits[i] < len(fruits) in many statements (integer labels)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Longest substring with at most two distinct values
+Sliding window with a frequency map; shrink when more than two types appear.
+
+1. Expand the right pointer and increment the count for fruits\[right\].
+2. While more than two keys exist, shrink from the left, deleting zero counts.
+3. Track the maximum window length.
+
+## Complexity
+
+**Time:** O(n) - Each tree index enters and leaves the window at most once.
+
+**Space:** O(1) - At most three distinct keys while adjusting the window.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Question:
+    Given an array of integers representing different types of fruits, 
+    you are asked to pick fruits in baskets such that:
+    - You can only pick two different types of fruits at a time.
+    - You want to collect the maximum number of fruits in a row.
+
+Return the maximum number of fruits you can collect.
+
+Test Cases:
+Input: [1,2,1] → Output: 3
+Input: [0,1,2,2] → Output: 3
+Input: [1,2,3,2,2] → Output: 4
+Input: [3,3,3,1,2,1,1,2,3,3,4] → Output: 5
+````
+
+## Solution
+
+````python
+from collections import defaultdict
+from typing import Dict, List
+
+
+class Solution:
+    def totalFruit(self, fruits: List[int]) -> int:
+        freq: Dict[int, int] = defaultdict(int)
+        left = 0
+        best = 0
+
+        for right, label in enumerate(fruits):
+            freq[label] += 1
+
+            while len(freq) > 2:
+                freq[fruits[left]] -= 1
+                if freq[fruits[left]] == 0:
+                    del freq[fruits[left]]
+                left += 1
+
+            best = max(best, right - left + 1)
+
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.totalFruit([1, 2, 1]) == 3, "Test 1 Failed"
+    print("Test 1 Passed: alternating pair")
+
+    assert sol.totalFruit([0, 1, 2, 2]) == 3, "Test 2 Failed"
+    print("Test 2 Passed: third type ends streak")
+
+    assert sol.totalFruit([1, 2, 3, 2, 2]) == 4, "Test 3 Failed"
+    print("Test 3 Passed: two heavy types")
+
+    assert sol.totalFruit([3, 3, 3, 1, 2, 1, 1, 2, 3, 3, 4]) == 5, "Test 4 Failed"
+    print("Test 4 Passed: classic long case")
+
+    assert sol.totalFruit([1, 1, 1, 1]) == 4, "Test 5 Failed"
+    print("Test 5 Passed: single variety row")
+
+    print("\nAll test cases passed!")
+````

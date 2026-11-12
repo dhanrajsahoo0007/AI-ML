@@ -1,0 +1,134 @@
+---
+title: "Convert Binary Search Tree to Sorted Doubly Linked List"
+description: "Convert a binary search tree into a sorted circular doubly-linked list in place: left and right pointers represent predecessor and successor links, and the l…"
+topics: [binary-search-trees]
+group: "04. BST Construction and Modification"
+number: "05"
+order: 15004005000000
+status: outline
+---
+
+Convert a binary search tree into a sorted circular doubly-linked list in place: left and right
+pointers represent predecessor and successor links, and the list wraps head to tail.
+
+## Examples
+
+````text
+Example 1:
+    Input: BST [4,2,5,1,3]
+    Output: circular DLL ordered 1-2-3-4-5
+
+Example 2:
+    Input: single node
+    Output: node's left and right point to itself
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 1000].
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Inorder threading
+Track first and last visited nodes during inorder traversal and wire prev/next pointers, then close the circle.
+
+1. DFS inorder; maintain previous node pointer.
+2. Link previous.right to current and current.left to previous; update first/last.
+3. After traversal, connect last to first bidirectionally.
+
+## Complexity
+
+**Time:** O(n) - Visit each node once.
+
+**Space:** O(h) - Recursion stack depth.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: List[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+class Solution:
+    def treeToDoublyList(self, root: Optional[TreeNode]) -> Optional[TreeNode]:
+        if root is None:
+            return None
+        first: Optional[TreeNode] = None
+        last: Optional[TreeNode] = None
+
+        def dfs(node: Optional[TreeNode]) -> None:
+            nonlocal first, last
+            if node is None:
+                return
+            dfs(node.left)
+            if last:
+                last.right = node
+                node.left = last
+            else:
+                first = node
+            last = node
+            dfs(node.right)
+
+        dfs(root)
+        assert first is not None and last is not None
+        last.right = first
+        first.left = last
+        return first
+
+
+def dll_values(head: TreeNode, k: int) -> List[int]:
+    out: List[int] = []
+    cur = head
+    for _ in range(k):
+        out.append(cur.val)
+        cur = cur.right
+    return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r = build_bst_insert([4, 2, 5, 1, 3])
+    head = sol.treeToDoublyList(r)
+    assert dll_values(head, 5) == [1, 2, 3, 4, 5]
+    assert head.left.val == 5
+    h2 = sol.treeToDoublyList(TreeNode(10))
+    assert h2.val == 10 and h2.right is h2 and h2.left is h2
+    assert sol.treeToDoublyList(None) is None
+    h3 = sol.treeToDoublyList(build_bst_insert([2, 1]))
+    assert dll_values(h3, 2) == [1, 2]
+    print("\nAll test cases passed!")
+````

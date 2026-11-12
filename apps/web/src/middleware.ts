@@ -4,6 +4,7 @@ import { paywallPreviewPoint, writeAnalytics } from "@/server/edge/analytics";
 import { ENTITLEMENT_COOKIE, isAdmin, keyringFromEnv, verifyEntitlement } from "@/server/edge/entitlement";
 import { appVersion, readEdgeEnv } from "@/server/edge/env";
 import { decideHost, SMOKE_KEY_HEADER } from "@/server/edge/host-guard";
+import { LOCAL_VIEW_COOKIE, localView } from "@/server/edge/local-view";
 import { maintenanceResponse } from "@/server/edge/maintenance";
 import {
   EMPTY_PREMIUM_MANIFEST,
@@ -116,7 +117,7 @@ function viewerTier(
   tier: "free" | "pro" | null
 ): "free" | "pro" | null {
   if (process.env.APP_ENV !== "local") return tier;
-  const view = request.cookies.get("tts_local_view")?.value ?? env.LOCAL_VIEW_AS;
+  const view = localView(process.env.APP_ENV, request.cookies.get(LOCAL_VIEW_COOKIE)?.value, env.LOCAL_VIEW_AS);
   if (view === "paid") return "pro";
   if (view === "unpaid") return "free";
   return tier;

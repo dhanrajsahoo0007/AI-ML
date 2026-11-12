@@ -1,0 +1,139 @@
+---
+title: "Serialize and Deserialize BST"
+description: "Serialize a binary search tree to a string and deserialize that string back to the same BST structure (preorder with sentinels is a common approach)."
+topics: [binary-search-trees]
+group: "01. Basic BST Operations"
+number: "06"
+order: 15001006000000
+status: outline
+---
+
+Serialize a binary search tree to a string and deserialize that string back to the same
+BST structure (preorder with sentinels is a common approach).
+
+## Examples
+
+````text
+Example 1:
+    Input: root of a small BST
+    Output: deserialize(serialize(root)) produces an equivalent BST by structure and values
+
+Example 2:
+    Input: empty tree
+    Output: serialize returns empty token list representation; deserialize returns None
+````
+
+## Constraints
+
+````text
+- Node values fit in 32-bit signed integers.
+- The serialized form must be self-contained and parseable without external state.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Preorder encoding
+Record node values in preorder using a placeholder for None children so the shape is recoverable.
+
+1. Serialize: DFS preorder, emit "null" for missing children, comma-separate tokens.
+2. Deserialize: split tokens, use an index pointer, recursively read one subtree at a time.
+3. Return the reconstructed root.
+
+## Complexity
+
+**Time:** O(n) - Each node is written and read once.
+
+**Space:** O(n) - Recursion stack and token list proportional to tree size.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: List[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+def preorder_flat(root: Optional[TreeNode]) -> List[int]:
+    if not root:
+        return []
+    return [root.val] + preorder_flat(root.left) + preorder_flat(root.right)
+
+
+class Solution:
+    def serialize(self, root: Optional[TreeNode]) -> str:
+        parts: List[str] = []
+
+        def dfs(node: Optional[TreeNode]) -> None:
+            if node is None:
+                parts.append("#")
+                return
+            parts.append(str(node.val))
+            dfs(node.left)
+            dfs(node.right)
+
+        dfs(root)
+        return ",".join(parts)
+
+    def deserialize(self, data: str) -> Optional[TreeNode]:
+        if not data:
+            return None
+        tokens = data.split(",")
+        self._i = 0
+
+        def dfs() -> Optional[TreeNode]:
+            if self._i >= len(tokens) or tokens[self._i] == "#":
+                self._i += 1
+                return None
+            node = TreeNode(int(tokens[self._i]))
+            self._i += 1
+            node.left = dfs()
+            node.right = dfs()
+            return node
+
+        return dfs()
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r = build_bst_insert([5, 3, 7, 2, 4, 6, 8])
+    s = sol.serialize(r)
+    r2 = sol.deserialize(s)
+    assert preorder_flat(r) == preorder_flat(r2)
+    assert sol.deserialize(sol.serialize(None)) is None
+    single = TreeNode(1)
+    assert sol.deserialize(sol.serialize(single)).val == 1
+    r3 = build_bst_insert([10, 5, 15])
+    assert sol.deserialize(sol.serialize(r3)).val == 10
+    print("\nAll test cases passed!")
+````

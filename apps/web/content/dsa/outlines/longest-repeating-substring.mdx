@@ -1,0 +1,90 @@
+---
+title: "Longest Repeating Substring"
+description: "Given a string s, return the length of the longest substring that appears at least twice (the two occurrences may overlap)."
+topics: [sorting]
+order: 23999000000000
+status: outline
+---
+
+Given a string s, return the length of the longest substring that appears at
+least twice (the two occurrences may overlap).
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "abcd"
+    Output: 0
+Example 2:
+    Input: s = "aababa"
+    Output: 3
+````
+
+## Constraints
+
+````text
+- 2 <= len(s) <= 1500
+- s contains lowercase English letters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary search on length + rolling hash
+For candidate length L, slide a window and detect hash collisions.
+
+1. Binary search L from 0 to n.
+2. For each L, store hashes of substrings; return True on first collision.
+3. Return the largest feasible L.
+
+## Complexity
+
+**Time:** O(n log n) average with hashing
+
+**Space:** O(n) for the hash set per check
+
+## Solution
+
+````python
+class Solution:
+    def longestRepeatingSubstring(self, s: str) -> int:
+        n = len(s)
+
+        def has_repeat(L: int) -> bool:
+            if L == 0:
+                return True
+            seen = set()
+            for i in range(n - L + 1):
+                sub = s[i : i + L]
+                if sub in seen:
+                    return True
+                seen.add(sub)
+            return False
+
+        lo, hi = 0, n
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if has_repeat(mid):
+                lo = mid
+            else:
+                hi = mid - 1
+        return lo
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.longestRepeatingSubstring("abcd") == 0, "Test 1 Failed"
+    print("Test 1 Passed: all unique substrings of positive length")
+    assert sol.longestRepeatingSubstring("aababa") == 3, "Test 2 Failed"
+    print("Test 2 Passed: 'aba' repeats (LeetCode sample)")
+    assert sol.longestRepeatingSubstring("aa") == 1, "Test 3 Failed"
+    print("Test 3 Passed: single letter repeated")
+    assert sol.longestRepeatingSubstring("abcdefg") == 0, "Test 4 Failed"
+    print("Test 4 Passed: no repeats")
+    assert sol.longestRepeatingSubstring("aaaaa") == 4, "Test 5 Failed"
+    print("\nAll test cases passed!")
+````

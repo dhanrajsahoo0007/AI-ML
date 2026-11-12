@@ -1,0 +1,174 @@
+---
+title: "Asynchronous Word Count in Distributed Systems"
+description: "n machines each count words in one document via async futures countWords(machine_id, doc_id) returning CWFuture with Join() (blocking result) and IsDone()."
+topics: [design-questions]
+number: "09"
+order: 25009000000000
+status: outline
+---
+
+n machines each count words in one document via async futures countWords(machine\_id, doc\_id)
+returning CWFuture with Join() (blocking result) and IsDone(). Implement totalWordsCount to sum all counts.
+
+## Examples
+
+````text
+Example 1:
+n = 1 with document word count 500 -> total 500.
+````
+
+## Constraints
+
+````text
+- Handle partial failures with retries or propagate errors based on policy.
+- Utilize all machines concurrently where possible.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Thread pool / futures aggregation
+Launch one async job per (machine, document), wait with Join or poll IsDone, sum successes.
+
+1. For each machine i, create CWFuture for document i (mocked mapping).
+2. Use a thread pool to simulate async Join without blocking the main thread sequentially... or call Join in threads.
+3. Sum integer results; on failure after retries, re-raise or return partial per design.
+
+## Complexity
+
+**Time:** O(n) wall-clock with parallelism vs O(n) sequential Joins.
+
+**Space:** O(n) for futures and thread overhead.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+4. Asynchronous Word Count in Distributed Systems
+Imagine a system consisting of n machines and n documents. Each document can be accessed by all the machines simultaneously. You are provided with the following function:
+python
+def countWords(machine_id, doc_id):
+    return CWFuture
+Where CWFuture is a class representing a future object that handles asynchronous operations related to word counting in documents. The class definition is as follows:
+python
+class CWFuture:
+    def Join(self) -> int:
+        # Blocking call that returns the total word count of the document once available.
+    def IsDone(self) -> bool:
+        # Non-blocking call that returns True if the word counting is completed, otherwise False.
+Task: Create a function totalWordsCount(n: int) -> int that computes the total number of words across all documents using n machines.
+Considerations:
+How to efficiently manage asynchronous tasks using multiple machines.
+Handling potential exceptions or errors (e.g., network failures).
+Optimizing performance to avoid excessive waiting and ensure all machines are utilized effectively.
+Extended Scenario (Follow-up): If there are more documents than machines (m < n), how would you modify the totalWordsCount function to handle this case efficiently?
+Consider strategies for load balancing where each machine might process multiple documents and handle synchronization issues between different threads or processes.
+
+Example Test Cases:
+Test Case 1:
+Input: n = 1 (1 machine and 1 document)
+Expected Output: Assume the document contains 500 words, the function should return 500.
+Test Case 2:
+Input: n = 3 (3 machines and 3 documents)
+Assume each document contains 300, 500, and 200 words respectively. The function should return 1000.
+Test Case 3:
+Input: n = 2 but only 1 machine is functional (simulating machine failure or network issue)
+Assume documents contain 600 and 400 words. Depending on error handling strategies, the function might need to retry failed operations or return an error message.
+Handling Asynchronous Operations:
+It's crucial to consider how Join() and IsDone() methods are used to synchronize the word counting across multiple documents without causing excessive delays or deadlocks.
+````
+
+## Solution
+
+````python
+from __future__ import annotations
+
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Dict, List, Optional
+
+
+class CWFuture:
+    """Minimal future: async result becomes available after a short delay."""
+
+    def __init__(self, value: int, fail: bool = False, delay: float = 0.01) -> None:
+        self._value = value
+        self._fail = fail
+        self._delay = delay
+        self._done = threading.Event()
+        self._lock = threading.Lock()
+        threading.Thread(target=self._complete, daemon=True).start()
+
+    def _complete(self) -> None:
+        time.sleep(self._delay)
+        with self._lock:
+            self._done.set()
+
+    def IsDone(self) -> bool:
+        return self._done.is_set()
+
+    def Join(self) -> int:
+        self._done.wait()
+        if self._fail:
+            raise RuntimeError("simulated network failure")
+        return self._value
+
+
+# Global test hooks (hidden in real system)
+_DOC_COUNTS: Dict[int, int] = {}
+_MACHINE_FAIL: Dict[int, bool] = {}
+
+
+def countWords(machine_id: int, doc_id: int) -> CWFuture:
+    """Simulated remote call: machine_id processes doc_id."""
+    cnt = _DOC_COUNTS.get(doc_id, 0)
+    return CWFuture(cnt, fail=_MACHINE_FAIL.get(machine_id, False))
+
+
+def totalWordsCount(n: int, retries: int = 2) -> int:
+    """Sum word counts for documents 0..n-1 using machines 0..n-1."""
+
+    def work(mid: int) -> int:
+        last_err: Optional[BaseException] = None
+        for _ in range(retries + 1):
+            fut = countWords(mid, mid)
+            try:
+                return fut.Join()
+            except RuntimeError as e:
+                last_err = e
+                time.sleep(0.005)
+        assert last_err is not None
+        raise last_err
+
+    with ThreadPoolExecutor(max_workers=max(1, n)) as ex:
+        futures = [ex.submit(work, i) for i in range(n)]
+        return sum(f.result() for f in as_completed(futures))
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    _DOC_COUNTS.clear()
+    _MACHINE_FAIL.clear()
+    _DOC_COUNTS[0] = 500
+    assert totalWordsCount(1) == 500
+
+    _DOC_COUNTS.update({0: 300, 1: 500, 2: 200})
+    assert totalWordsCount(3) == 1000
+
+    _DOC_COUNTS.update({0: 600, 1: 400})
+    assert totalWordsCount(2) == 1000
+
+    try:
+        CWFuture(7, fail=True).Join()
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected failure")
+
+    print("\nAll test cases passed!")
+````

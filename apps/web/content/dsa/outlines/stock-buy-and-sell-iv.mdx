@@ -1,0 +1,56 @@
+---
+title: "Stock Buy and Sell IV"
+description: "At most k stock transactions."
+topics: [dynamic-programming]
+group: "09. DP on Stock"
+number: "04"
+order: 20009004000000
+status: outline
+---
+
+At most k stock transactions.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DP over transactions and days.
+
+## Complexity
+
+**Time:** O(k\*n).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxProfit(self, k: int, prices: List[int]) -> int:
+        if not prices:
+            return 0
+        n = len(prices)
+        if k >= n // 2:
+            return sum(max(0, prices[i] - prices[i - 1]) for i in range(1, n))
+        dp = [[0] * n for _ in range(k + 1)]
+        for t in range(1, k + 1):
+            maxdiff = -prices[0]
+            for i in range(1, n):
+                dp[t][i] = max(dp[t][i - 1], prices[i] + maxdiff)
+                maxdiff = max(maxdiff, dp[t - 1][i] - prices[i])
+        return dp[k][-1]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == '__main__':
+    sol = Solution()
+    assert sol.maxProfit(2, [2, 4, 1]) == 2
+    assert sol.maxProfit(2, [3, 2, 6, 5, 0, 3]) == 7
+    assert sol.maxProfit(1, [1, 2]) == 1
+    assert sol.maxProfit(3, [1, 2, 3, 4, 5]) == 4
+    assert sol.maxProfit(2, [1, 2, 4, 2, 5, 7, 2, 4, 9, 0]) == 13
+    print('\nAll test cases passed!')
+````

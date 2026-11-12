@@ -1,0 +1,241 @@
+---
+title: "Find Original Array from Doubled array"
+description: "An array original becomes changed by appending twice every element of original, then shuffling."
+topics: [arrays]
+group: "06. Array Transformation"
+number: "01"
+order: 1006001000000
+status: outline
+---
+
+An array original becomes changed by appending twice every element of original, then shuffling.
+Given changed, reconstruct any valid original, or return \[\] if none exists.
+
+## Examples
+
+````text
+Example 1:
+    Input: changed = [1, 3, 4, 2, 6, 8]
+    Output: [1, 3, 4] (or any permutation such as [4, 3, 1])
+Example 2:
+    Input: changed = [6, 3, 0, 1]
+    Output: []
+Example 3:
+    Input: changed = [1]
+    Output: []
+````
+
+## Constraints
+
+````text
+- 1 <= len(changed) <= 10^5
+- 0 <= changed[i] <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy with frequency map
+Process values in sorted order; each unused smallest x must pair with 2x before larger numbers consume doubles.
+
+1. If len(changed) is odd, return \[\] (doubled array has even length).
+2. Count frequencies with a multiset (Counter).
+3. For x in sorted unique keys, while count\[x\] &gt; 0, decrement x and 2x; if 2x missing, return \[\]; else append x to answer.
+4. Return answer when all elements are paired away.
+
+## Complexity
+
+**Time:** O(n log n) - Sorting distinct keys; processing each element a constant number of times.
+
+**Space:** O(n) - Frequency map and output list.
+
+## Original notes
+
+````text
+Reconstruction intuition (from original statement):
+If ``changed`` is a doubled array, every smallest unused value x must still have its partner 2x
+available; otherwise no valid ``original`` exists. Example: ``[1,3,4,2,6,8]`` can come from
+``[1,3,4]`` because 2, 6, and 8 are exactly twice those values (order after shuffle can vary).
+Odd length or impossible pairings (e.g. missing double) mean return ``[]``.
+````
+
+## Solution
+
+````python
+import collections
+from typing import List
+
+
+class Solution:
+    def findOriginalArray(self, changed: List[int]) -> List[int]:
+        if len(changed) % 2 == 1:
+            return []
+        freq = collections.Counter(changed)
+        result: List[int] = []
+        for x in sorted(freq.keys()):
+            while freq[x] > 0:
+                # Greedy: consume x with its double 2x while both counts allow it.
+                if freq[x * 2] <= 0:
+                    return []
+                freq[x] -= 1
+                freq[x * 2] -= 1
+                result.append(x)
+        return result
+
+
+def _multiset_equal(a: List[int], b: List[int]) -> bool:
+    return collections.Counter(a) == collections.Counter(b)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    out1 = sol.findOriginalArray([1, 3, 4, 2, 6, 8])
+    assert _multiset_equal(out1, [1, 3, 4]), "Test 1 Failed"
+    print("Test 1 Passed: reconstruct sample")
+    assert sol.findOriginalArray([6, 3, 0, 1]) == [], "Test 2 Failed"
+    print("Test 2 Passed: impossible multiset")
+    assert sol.findOriginalArray([1]) == [], "Test 3 Failed"
+    print("Test 3 Passed: odd length")
+    assert _multiset_equal(sol.findOriginalArray([0, 0]), [0]), "Test 4 Failed"
+    print("Test 4 Passed: zero pairs")
+    assert _multiset_equal(sol.findOriginalArray([2, 1, 2, 4]), [1, 2]), "Test 5 Failed"
+    print("Test 5 Passed: duplicate originals")
+    print("\nAll test cases passed!")
+````
+
+## Another version
+
+From 01. Array/06. Array Transformation.
+
+### Approach
+
+**Pattern:** Greedy with frequency map
+Process sorted distinct keys; repeatedly pair x with 2x using remaining counts.
+
+1. If len(changed) is odd, return \[\].
+2. Count values with a multiset.
+3. For x in sorted keys, repeatedly consume x with 2x while counts allow; otherwise return \[\].
+4. Return collected originals.
+
+### Complexity
+
+**Time:** O(n log n) - Sorting keys dominates.
+
+**Space:** O(n) - Counter and output list.
+
+### Solution
+
+````python
+import collections
+from typing import List
+
+
+class Solution:
+    def findOriginalArray(self, changed: List[int]) -> List[int]:
+        if len(changed) % 2 == 1:
+            return []
+        freq = collections.Counter(changed)
+        result: List[int] = []
+        for x in sorted(freq.keys()):
+            while freq[x] > 0:
+                if freq[x * 2] <= 0:
+                    return []
+                freq[x] -= 1
+                freq[x * 2] -= 1
+                result.append(x)
+        return result
+
+
+def _multiset_equal(a: List[int], b: List[int]) -> bool:
+    return collections.Counter(a) == collections.Counter(b)
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert _multiset_equal(sol.findOriginalArray([1, 3, 4, 2, 6, 8]), [1, 3, 4]), "Test 1 Failed"
+    print("Test 1 Passed: valid doubled multiset")
+    assert sol.findOriginalArray([6, 3, 0, 1]) == [], "Test 2 Failed"
+    print("Test 2 Passed: invalid multiset")
+    assert _multiset_equal(sol.findOriginalArray([0, 0]), [0]), "Test 3 Failed"
+    print("Test 3 Passed: paired zeros")
+    assert sol.findOriginalArray([1]) == [], "Test 4 Failed"
+    print("Test 4 Passed: odd length")
+    assert _multiset_equal(sol.findOriginalArray([2, 1, 2, 4]), [1, 2]), "Test 5 Failed"
+    print("Test 5 Passed: duplicate originals")
+    print("\nAll test cases passed!")
+````
+
+## Another version
+
+From 18. Greedy/08. Complex Problem Solving with Greedy Approach.
+
+### Approach
+
+**Pattern:** Greedy Frequency Matching
+Process values in ascending order and pair each count with its double before larger numbers consume it.
+
+1. Count frequencies; if length is odd, impossible.
+2. For sorted keys, handle zero separately using even count pairing.
+3. For x &gt; 0, require count\[2x\] &gt;= count\[x\]; emit x that many times and decrement doubles accordingly.
+
+### Complexity
+
+**Time:** O(n log n) for sorting keys.
+
+**Space:** O(n) for counter and output.
+
+### Solution
+
+````python
+from collections import Counter
+from typing import List
+
+
+class Solution:
+    def findOriginalArray(self, changed: List[int]) -> List[int]:
+        if len(changed) % 2:
+            return []
+        cnt = Counter(changed)
+        out: List[int] = []
+        for x in sorted(cnt):
+            if cnt[x] == 0:
+                continue
+            if x == 0:
+                if cnt[x] % 2:
+                    return []
+                out.extend([0] * (cnt[x] // 2))
+                cnt[x] = 0
+                continue
+            y = 2 * x
+            if cnt[y] < cnt[x]:
+                return []
+            out.extend([x] * cnt[x])
+            cnt[y] -= cnt[x]
+            cnt[x] = 0
+        return out if len(out) == len(changed) // 2 else []
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sorted(sol.findOriginalArray([1, 3, 4, 2, 6, 8])) == [1, 3, 4], "Test 1 Failed"
+    print("Test 1 Passed: reconstruct triple")
+    assert sol.findOriginalArray([6, 3, 0, 1]) == [], "Test 2 Failed"
+    print("Test 2 Passed: impossible pairing")
+    assert sol.findOriginalArray([0]) == [], "Test 3 Failed"
+    print("Test 3 Passed: odd length with zero")
+    assert sorted(sol.findOriginalArray([0, 0])) == [0], "Test 4 Failed"
+    print("Test 4 Passed: double zero")
+    assert sorted(sol.findOriginalArray([2, 1, 2, 4])) == [1, 2], "Test 5 Failed"
+    print("Test 5 Passed: small multiset")
+    print("\nAll test cases passed!")
+````

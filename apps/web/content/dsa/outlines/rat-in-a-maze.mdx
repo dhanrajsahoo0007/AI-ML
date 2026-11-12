@@ -1,0 +1,154 @@
+---
+title: "Rat in a Maze"
+description: "Given an N x N maze where 1 means open and 0 means blocked, list every path of coordinates from (0, 0) to (N - 1, N - 1) moving only right or down through op…"
+topics: [backtracking]
+group: "04. Grid Traversal"
+number: "02"
+order: 12004002000000
+status: outline
+---
+
+Given an N x N maze where 1 means open and 0 means blocked, list every path of coordinates
+from (0, 0) to (N - 1, N - 1) moving only right or down through open cells.
+
+## Examples
+
+````text
+Example 1:
+Input: maze = [[1,0,0,0],[1,1,0,1],[0,1,0,0],[1,1,1,1]]
+Output: two coordinate paths ending at (3,3)
+````
+
+## Constraints
+
+````text
+- 1 <= N <= 8 in tests below
+- maze[0][0] and maze[N-1][N-1] are 1 in valid inputs
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Grid backtracking with explicit visited flags
+Move only down/right; mark visited, append coordinate, recurse, then undo.
+
+1. If at destination, store path copy.
+2. For each allowed move to an open unvisited cell, mark visited, extend path, recurse, backtrack.
+
+## Complexity
+
+**Time:** O(2^(N^2)) worst case upper bound; smaller in practice.
+
+**Space:** O(N^2) for visited and recursion.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem Statement:
+    Given a maze of size N x N, find all possible paths that a rat can take to reach
+    from the source (0, 0) to the destination (N-1, N-1).
+    The rat can move only in two directions: forward and down. 
+    In the maze matrix, 0 means the cell is a dead and
+    end and 1 means the cell can be used in the path from source to destination.
+
+
+    Visualization of the maze (1 represents open path, 0 represents blocked)
+
+    [1, 0, 0, 0]
+    [1, 1, 0, 1]
+    [0, 1, 0, 0]
+    [1, 1, 1, 1]
+
+    Start: (0, 0)
+    End: (3, 3)
+
+Explanation:
+    1. We use a backtracking approach to explore all possible paths.
+    2. The rat can move only right or down, represented by the 'moves' list.
+    3. We keep track of visited cells to avoid loops and ensure we don't revisit cells.
+    4. When we reach the destination (bottom-right corner), we add the current path to our list of paths.
+    5. After exploring a path, we backtrack by marking the cell as unvisited and removing it from the current path.
+
+Time Complexity: O(2^(n^2))
+    In the worst case, we might have to explore every possible path in the maze.
+    Each cell has two choices (right or down), and there are n^2 cells.
+
+Space Complexity: O(n^2)
+    We use a visited array of size n x n, and the recursion stack can go up to n^2 in the worst case.
+
+Recursion Tree (simplified for a 2x2 maze):
+
+               (0,0)
+              /                (0,1)    (1,0)
+            |         |
+          (1,1)     (1,1)
+
+Note: The actual recursion tree for a 4x4 maze would be much larger.
+````
+
+## Solution
+
+````python
+from typing import List, Tuple
+
+
+class Solution:
+    def findPaths(self, maze: List[List[int]]) -> List[List[Tuple[int, int]]]:
+        n = len(maze)
+        paths: List[List[Tuple[int, int]]] = []
+        moves = ((0, 1), (1, 0))
+
+        def is_open(x: int, y: int) -> bool:
+            return 0 <= x < n and 0 <= y < n and maze[x][y] == 1
+
+        def backtrack(x: int, y: int, visited: List[List[bool]], path: List[Tuple[int, int]]) -> None:
+            if x == n - 1 and y == n - 1:
+                paths.append(path[:])
+                return
+            for dx, dy in moves:
+                nx, ny = x + dx, y + dy
+                if is_open(nx, ny) and not visited[nx][ny]:
+                    visited[nx][ny] = True
+                    path.append((nx, ny))
+                    backtrack(nx, ny, visited, path)
+                    path.pop()
+                    visited[nx][ny] = False
+
+        if maze[0][0] == 0:
+            return []
+        visited = [[False] * n for _ in range(n)]
+        visited[0][0] = True
+        backtrack(0, 0, visited, [(0, 0)])
+        return paths
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    maze = [
+        [1, 0, 0, 0],
+        [1, 1, 0, 1],
+        [0, 1, 0, 0],
+        [1, 1, 1, 1],
+    ]
+    paths = sol.findPaths(maze)
+    assert len(paths) == 1, "Test 1 Failed"
+    assert paths[0][-1] == (3, 3), "Test 1 Failed"
+    print("Test 1 Passed: classic maze has one monotone path")
+
+    assert sol.findPaths([[1]]) == [[(0, 0)]], "Test 2 Failed"
+    print("Test 2 Passed: 1x1 maze")
+
+    maze2 = [[1, 1], [1, 1]]
+    assert len(sol.findPaths(maze2)) == 2, "Test 3 Failed"
+    print("Test 3 Passed: 2x2 full ones")
+
+    assert sol.findPaths([[0]]) == [], "Test 4 Failed"
+    print("Test 4 Passed: blocked start")
+
+    print("\nAll test cases passed!")
+````

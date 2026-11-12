@@ -1,0 +1,163 @@
+---
+title: "Expression Add Operators"
+description: "Given a digit string num and integer target, insert +, -, or * between digits (no reordering) so the expression evaluates to target; return all such expressi…"
+topics: [backtracking]
+group: "05. String Pattern"
+number: "06"
+order: 12005006000000
+status: outline
+---
+
+Given a digit string num and integer target, insert +, -, or \* between digits (no reordering)
+so the expression evaluates to target; return all such expressions without leading zeros on
+multi-digit operands.
+
+## Examples
+
+````text
+Example 1:
+Input: num = "123", target = 6
+Output: ["1*2*3","1+2+3"]
+````
+
+## Constraints
+
+````text
+- 1 <= len(num) <= 10
+- Operands fit in 64-bit evaluation for tests below
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS with multiplication tail
+Track running sum and last operand so \* can replace the previous additive contribution.
+
+1. DFS chooses the next number span and operator (none for first number).
+2. For \* update sum as sum - last + last \* cur; set last to last \* cur.
+3. Prune leading-zero multi-digit spans.
+
+## Complexity
+
+**Time:** O(4^n \* n) branching across splits and operators.
+
+**Space:** O(n) recursion depth.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem: Expression Add Operators
+
+    Given a string num that contains only digits and an integer target, return all possibilities 
+    to insert the binary operators '+', '-', and/or '*' between the digits of num so that the 
+    resultant expression evaluates to the target value.
+
+    Note: Operands in the returned expressions should not contain leading zeros.
+
+Time Complexity: O(4^N * N) where N is the length of num string
+    - For each position between digits, we have 4 choices: no operator, +, -, *
+    - Each expression evaluation takes O(N)
+
+Space Complexity: O(N)
+    - Recursion stack can go up to depth N
+    - Space needed to store current expression being built
+
+
+Detailed Explanation:
+
+1. Algorithm Approach:
+   - Use DFS (Depth-First Search) to try all possible combinations
+   - At each step, try different length numbers and different operators
+   - Handle multiplication precedence carefully
+
+2. Key Implementation Details:
+   a) Base case: 
+      - When we've used all digits, check if sum equals target
+   
+   b) For each position:
+      - Try different length numbers (handle leading zeros)
+      - Try different operators (+, -, *)
+      - Special handling for first number (no operator)
+   
+   c) Multiplication handling:
+      - Need to maintain previous operand
+      - Adjust current sum by removing previous operation and adding new product
+
+3. Example Walkthrough for "123" target=6:
+   Start: cur_idx=0, cur_res=[], cur_sum=0, prev=0
+   - Take "1": 
+     cur_sum=1, prev=1
+     - Take "2": Try operators
+       "1+2": cur_sum=3, prev=2
+       "1-2": cur_sum=-1, prev=-2
+       "1*2": cur_sum=2, prev=2
+     - Continue with each branch...
+
+4. Important Edge Cases:
+   - Leading zeros not allowed in operands
+   - Single digit numbers
+   - No possible solutions
+   - Multiple valid solutions
+   - Operator precedence (especially for multiplication)
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def addOperators(self, num: str, target: int) -> List[str]:
+        result: List[str] = []
+
+        def dfs(index: int, path: List[str], total: int, last: int) -> None:
+            if index == len(num):
+                if total == target:
+                    result.append("".join(path))
+                return
+            for j in range(index, len(num)):
+                if j > index and num[index] == "0":
+                    break
+                cur_str = num[index : j + 1]
+                cur = int(cur_str)
+                if not path:
+                    dfs(j + 1, [cur_str], cur, cur)
+                else:
+                    dfs(j + 1, path + ["+", cur_str], total + cur, cur)
+                    dfs(j + 1, path + ["-", cur_str], total - cur, -cur)
+                    dfs(
+                        j + 1,
+                        path + ["*", cur_str],
+                        total - last + last * cur,
+                        last * cur,
+                    )
+
+        dfs(0, [], 0, 0)
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert set(sol.addOperators("123", 6)) == {"1*2*3", "1+2+3"}, "Test 1 Failed"
+    print("Test 1 Passed: 123 -> 6")
+
+    assert set(sol.addOperators("232", 8)) == {"2*3+2", "2+3*2"}, "Test 2 Failed"
+    print("Test 2 Passed: 232 -> 8")
+
+    assert set(sol.addOperators("105", 5)) == {"1*0+5", "10-5"}, "Test 3 Failed"
+    print("Test 3 Passed: 105 -> 5")
+
+    assert sol.addOperators("5", 5) == ["5"], "Test 4 Failed"
+    print("Test 4 Passed: single digit")
+
+    assert sol.addOperators("99", 100) == [], "Test 5 Failed"
+    print("Test 5 Passed: impossible target")
+
+    print("\nAll test cases passed!")
+````

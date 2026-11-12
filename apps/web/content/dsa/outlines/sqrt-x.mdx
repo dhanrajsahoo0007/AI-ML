@@ -1,0 +1,103 @@
+---
+title: "sqrt(x)"
+description: "Return floor(sqrt(x)) for non-negative integer x without using built-in sqrt or **0.5."
+topics: [binary-search]
+group: "10. Maths"
+number: "02"
+order: 8010002000000
+status: outline
+---
+
+Return floor(sqrt(x)) for non-negative integer x without using built-in sqrt or \*\*0.5.
+
+## Examples
+
+````text
+Example 1:
+Input: x = 8
+Output: 2
+````
+
+## Constraints
+
+````text
+- 0 <= x <= 2^31 - 1
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer
+Largest r with r\*r &lt;= x.
+
+1. Edge x &lt; 2 return x.
+2. Binary search on \[1, x\]; track last r with r\*r &lt;= x.
+
+## Complexity
+
+**Time:** O(log x) - Halving search space.
+
+**Space:** O(1) - Integer variables only.
+Restored (original notes, diagrams, and walkthrough):
+Problem: Sqrt(x)
+
+Given a non-negative integer x, return the square root of x rounded down to the nearest integer.
+The returned integer should be non-negative as well.
+You must not use any built-in exponent function or operator.
+
+Example 1:
+Input: x = 4
+Output: 2
+Explanation: The square root of 4 is 2, so we return 2.
+
+Example 2:
+Input: x = 8
+Output: 2
+Explanation: The square root of 8 is 2.82842..., and since we round it down to the nearest integer, 2 is returned.
+
+Constraints:
+0 &lt;= x &lt;= 2^31 - 1
+
+Time Complexity: O(log x)
+Space Complexity: O(1)
+
+## Solution
+
+````python
+class Solution:
+    def mySqrt(self, x: int) -> int:
+        if x < 2:
+            return x
+        lo, hi = 1, x
+        ans = 0
+        while lo <= hi:
+            mid = lo + (hi - lo) // 2
+            sq = mid * mid
+            if sq == x:
+                return mid
+            if sq < x:
+                ans = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.mySqrt(8) == 2, "Test 1 Failed"
+    print("Test 1 Passed: sqrt eight")
+    assert sol.mySqrt(2147395600) == 46340, "Test 2 Failed"
+    print("Test 2 Passed: large perfect square")
+    assert sol.mySqrt(0) == 0, "Test 3 Failed"
+    print("Test 3 Passed: zero")
+    assert sol.mySqrt(15) == 3, "Test 4 Failed"
+    print("Test 4 Passed: between squares")
+    assert sol.mySqrt(1) == 1, "Test 5 Failed"
+    print("Test 5 Passed: one")
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,60 @@
+---
+title: "Scrambled String Memoized"
+description: "Same scrambled string decision with memoization on (s1,s2) substrings."
+topics: [dynamic-programming]
+group: "07. Matrix Chain Multiplication"
+number: "08"
+order: 20007008000000
+status: outline
+---
+
+Same scrambled string decision with memoization on (s1,s2) substrings.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Top-down memo
+Cache false/true for unordered pair of substrings.
+
+## Complexity
+
+**Time:** O(n^3) substring pairs.
+
+## Solution
+
+````python
+from functools import lru_cache
+
+
+class Solution:
+    def isScramble(self, s1: str, s2: str) -> bool:
+        @lru_cache(None)
+        def dfs(a: str, b: str) -> bool:
+            if a == b:
+                return True
+            if sorted(a) != sorted(b):
+                return False
+            n = len(a)
+            for i in range(1, n):
+                if (dfs(a[:i], b[:i]) and dfs(a[i:], b[i:])) or (
+                    dfs(a[:i], b[n - i :]) and dfs(a[i:], b[: n - i])
+                ):
+                    return True
+            return False
+
+        return dfs(s1, s2)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.isScramble("great", "rgeat") is True
+    assert sol.isScramble("abcde", "caebd") is False
+    assert sol.isScramble("a", "a") is True
+    assert sol.isScramble("ab", "ba") is True
+    assert sol.isScramble("abc", "bca") is True
+    print("\nAll test cases passed!")
+````

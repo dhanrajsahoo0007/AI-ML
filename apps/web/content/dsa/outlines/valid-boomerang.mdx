@@ -1,0 +1,78 @@
+---
+title: "Valid Boomerang"
+description: "Given three points in the plane, return True iff they are all distinct and not collinear (they form a valid boomerang)."
+topics: [math-and-geometry]
+group: "02. Leetcode and Alphabet 150"
+number: "09"
+order: 21002009000000
+status: outline
+---
+
+Given three points in the plane, return True iff they are all distinct and
+not collinear (they form a valid boomerang).
+
+## Examples
+
+````text
+Example 1:
+    Input: p1 = [1,1], p2 = [2,3], p3 = [3,2]
+    Output: True
+Example 2:
+    Input: p1 = [1,1], p2 = [2,2], p3 = [3,3]
+    Output: False
+````
+
+## Constraints
+
+````text
+- Each coordinate is in [0, 100]
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Cross product (orientation test)
+Three points are collinear iff the signed area (cross product) is zero.
+
+1. Check the three points are pairwise distinct.
+2. Return whether (p2-p1) x (p3-p1) is non-zero.
+
+## Complexity
+
+**Time:** O(1)
+
+**Space:** O(1)
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def isBoomerang(self, p1: List[int], p2: List[int], p3: List[int]) -> bool:
+        if p1 == p2 or p2 == p3 or p1 == p3:
+            return False
+        x1, y1 = p1
+        x2, y2 = p2
+        x3, y3 = p3
+        cross = (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1)
+        return cross != 0
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.isBoomerang([1, 1], [2, 3], [3, 2]) is True, "Test 1 Failed"
+    print("Test 1 Passed: non-collinear triangle")
+    assert sol.isBoomerang([1, 1], [2, 2], [3, 3]) is False, "Test 2 Failed"
+    print("Test 2 Passed: collinear points")
+    assert sol.isBoomerang([0, 0], [0, 0], [1, 1]) is False, "Test 3 Failed"
+    print("Test 3 Passed: duplicate point rejected")
+    assert sol.isBoomerang([0, 0], [1, 0], [0, 1]) is True, "Test 4 Failed"
+    print("Test 4 Passed: right angle at origin")
+    print("\nAll test cases passed!")
+````

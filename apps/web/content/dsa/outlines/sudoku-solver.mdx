@@ -1,0 +1,180 @@
+---
+title: "Sudoku Solver"
+description: "Solve a 9 x 9 Sudoku board in-place; '.' denotes empty cells."
+topics: [backtracking]
+group: "04. Grid Traversal"
+number: "04"
+order: 12004004000000
+status: outline
+---
+
+Solve a 9 x 9 Sudoku board in-place; '.' denotes empty cells. Each row, column, and 3 x 3
+box must contain digits '1'..'9' exactly once.
+
+## Examples
+
+````text
+Example 1:
+Input: a partially filled valid board (see tests)
+Output: the completed board satisfying Sudoku rules
+````
+
+## Constraints
+
+````text
+- board is 9 x 9 with characters in {'1'..'9', '.'}
+- The puzzle is assumed solvable
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Constraint backtracking
+Fill empty cells left-to-right trying digits 1-9; undo when a digit fails deeper recursion.
+
+1. Scan for '.'; try each digit that passes row, column, and box checks.
+2. Recurse; on success propagate True; otherwise reset to '.' and try next digit.
+3. Return True when no empty cells remain.
+
+## Complexity
+
+**Time:** Exponential in worst case; fine for standard puzzles.
+
+**Space:** O(1) aside from recursion depth O(81).
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem Statement:
+Write a program to solve a Sudoku puzzle by filling the empty cells.
+
+A sudoku solution must satisfy all of the following rules:
+    1. Each of the digits 1-9 must occur exactly once in each row.
+    2. Each of the digits 1-9 must occur exactly once in each column.
+    3. Each of the digits 1-9 must occur exactly once in each of the 9 3x3 sub-boxes of the grid.
+    The '.' character indicates empty cells.
+
+Time Complexity: O(9^(n*n)), where n is the size of the Sudoku grid (typically 9x9).
+In the worst case, for each cell, we try all 9 digits, and we have n*n cells.
+
+Space Complexity: O(n*n) for the recursive call stack.
+The maximum depth of recursion can be n*n in the worst case when we need to fill all cells.
+
+Explanation:
+This solution uses a backtracking algorithm to solve the Sudoku puzzle:
+    1. Find an empty cell (marked with '.').
+    2. Try placing digits 1-9 in this cell.
+    3. Check if the digit is valid in the current position.
+    4. If valid, recursively try to fill the rest of the grid.
+    5. If the recursive call is successful, we've solved the puzzle.
+    6. If not, we undo the current cell and try the next digit.
+    7. If no digit works, we return false to trigger backtracking.
+
+The isValid function checks if a digit can be placed in a given cell by verifying the row, column, and 3x3 sub-box in a single pass.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def _is_valid(self, board: List[List[str]], row: int, col: int, ch: str) -> bool:
+        for i in range(9):
+            if board[i][col] == ch:
+                return False
+            if board[row][i] == ch:
+                return False
+            br = 3 * (row // 3) + i // 3
+            bc = 3 * (col // 3) + i % 3
+            if board[br][bc] == ch:
+                return False
+        return True
+
+    def solveSudoku(self, board: List[List[str]]) -> bool:
+        for r in range(9):
+            for c in range(9):
+                if board[r][c] != ".":
+                    continue
+                for d in map(str, range(1, 10)):
+                    if not self._is_valid(board, r, c, d):
+                        continue
+                    board[r][c] = d
+                    if self.solveSudoku(board):
+                        return True
+                    board[r][c] = "."
+                return False
+        return True
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    board = [
+        ["5", "3", ".", ".", "7", ".", ".", ".", "."],
+        ["6", ".", ".", "1", "9", "5", ".", ".", "."],
+        [".", "9", "8", ".", ".", ".", ".", "6", "."],
+        ["8", ".", ".", ".", "6", ".", ".", ".", "3"],
+        ["4", ".", ".", "8", ".", "3", ".", ".", "1"],
+        ["7", ".", ".", ".", "2", ".", ".", ".", "6"],
+        [".", "6", ".", ".", ".", ".", "2", "8", "."],
+        [".", ".", ".", "4", "1", "9", ".", ".", "5"],
+        [".", ".", ".", ".", "8", ".", ".", "7", "9"],
+    ]
+    expected_first_row = ["5", "3", "4", "6", "7", "8", "9", "1", "2"]
+    assert sol.solveSudoku(board) is True, "Test 1 Failed"
+    assert board[0] == expected_first_row, "Test 1 Failed"
+    print("Test 1 Passed: classic puzzle solved")
+
+    def rows_valid(b: List[List[str]]) -> bool:
+        for row in b:
+            if sorted(row) != [str(x) for x in range(1, 10)]:
+                return False
+        return True
+
+    assert rows_valid(board), "Test 2 Failed"
+    print("Test 2 Passed: every row uses digits 1-9 exactly once")
+
+    board2 = [
+        ["9", "5", "7", ".", "1", "3", ".", "8", "4"],
+        ["4", "8", "3", ".", "5", "7", "1", ".", "6"],
+        [".", "1", "2", ".", "4", "9", "5", "3", "7"],
+        ["1", "7", ".", "3", ".", "4", "9", ".", "2"],
+        ["5", ".", "4", "9", "7", ".", "3", "6", "."],
+        ["3", ".", "9", "5", ".", "8", "7", ".", "1"],
+        ["8", "4", "5", "7", "9", ".", "6", "1", "3"],
+        [".", "9", "1", ".", "3", "6", ".", "7", "5"],
+        ["7", ".", "6", "1", "8", "5", "4", ".", "9"],
+    ]
+    assert sol.solveSudoku(board2) is True, "Test 3 Failed"
+    assert all(ch != "." for row in board2 for ch in row), "Test 3 Failed"
+    print("Test 3 Passed: second sample fully filled")
+
+    def cols_valid(b: List[List[str]]) -> bool:
+        for c in range(9):
+            col = [b[r][c] for r in range(9)]
+            if sorted(col) != [str(x) for x in range(1, 10)]:
+                return False
+        return True
+
+    assert cols_valid(board2), "Test 4 Failed"
+    print("Test 4 Passed: columns are valid permutations")
+
+    def boxes_valid(b: List[List[str]]) -> bool:
+        for br in range(0, 9, 3):
+            for bc in range(0, 9, 3):
+                vals = [b[r][c] for r in range(br, br + 3) for c in range(bc, bc + 3)]
+                if sorted(vals) != [str(x) for x in range(1, 10)]:
+                    return False
+        return True
+
+    assert boxes_valid(board2), "Test 5 Failed"
+    print("Test 5 Passed: all 3x3 boxes valid")
+
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,164 @@
+---
+title: "Find All Possible Recipes from Given Supplies"
+description: "You have supplies of ingredients and recipes each requiring specific ingredients."
+topics: [arrays]
+group: "12. Advanced Problem Solving"
+number: "01"
+order: 1012001000000
+status: outline
+---
+
+You have supplies of ingredients and recipes each requiring specific ingredients. A recipe can
+be made only when all its ingredients are available (initial supplies or previously made recipes).
+Return all recipes that can eventually be made.
+
+## Examples
+
+````text
+Example 1:
+Input: recipes = ["bread"], ingredients = [["yeast", "flour"]], supplies = ["yeast", "flour", "corn"]
+Output: ["bread"]
+````
+
+## Constraints
+
+````text
+- 1 <= len(recipes) <= 100
+- ingredients[i] contains distinct strings, same length as recipes list.
+- 1 <= len(ingredients[i]), len(supplies) <= 100
+- Each string is lowercase English letters of length 1 to 10.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Topological sort / Kahn's algorithm
+Model each recipe as a node whose indegree counts missing prerequisite items; process items as they become available.
+
+1. Build indegree map for each recipe equal to its ingredient count.
+2. Build adjacency from each ingredient to recipes that list it.
+3. Initialize a queue with all supplies.
+4. Pop an item, for each dependent recipe decrement indegree; when zero, append recipe to answer and queue.
+
+## Complexity
+
+**Time:** O(V + E) over recipes and ingredient edges.
+
+**Space:** O(V + E) - Graph and counters.
+
+## Solution
+
+````python
+from collections import defaultdict, deque
+from typing import List
+
+
+class Solution:
+    def findAllRecipes(
+        self, recipes: List[str], ingredients: List[List[str]], supplies: List[str]
+    ) -> List[str]:
+        indegree: dict[str, int] = {}
+        graph: dict[str, List[str]] = defaultdict(list)
+        for r, ing in zip(recipes, ingredients):
+            indegree[r] = len(ing)
+            for x in ing:
+                graph[x].append(r)
+        q = deque(supplies)
+        result: List[str] = []
+        recipe_set = set(recipes)
+        while q:
+            cur = q.popleft()
+            for r in graph.get(cur, []):
+                indegree[r] -= 1
+                if indegree[r] == 0:
+                    result.append(r)
+                    if r in recipe_set:
+                        q.append(r)
+        return [r for r in result if r in recipe_set]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findAllRecipes(["bread"], [["yeast", "flour"]], ["yeast", "flour", "corn"]) == ["bread"], "Test 1 Failed"
+    print("Test 1 Passed: simple dependency")
+    r2 = sol.findAllRecipes(
+        ["bread", "sandwich"],
+        [["yeast", "flour"], ["bread", "meat"]],
+        ["yeast", "flour", "meat"],
+    )
+    assert set(r2) == {"bread", "sandwich"}, "Test 2 Failed"
+    print("Test 2 Passed: chained recipes")
+    assert sol.findAllRecipes(["bread"], [["salt", "water"]], ["yeast", "flour"]) == [], "Test 3 Failed"
+    print("Test 3 Passed: missing base ingredients")
+    r4 = sol.findAllRecipes(["x", "y"], [["a"], ["b"]], ["a", "b"])
+    assert set(r4) == {"x", "y"}, "Test 4 Failed"
+    print("Test 4 Passed: independent recipes")
+    r5 = sol.findAllRecipes(["a", "b"], [["b"], ["a"]], [])
+    assert r5 == [], "Test 5 Failed"
+    print("Test 5 Passed: cyclic need without supplies")
+    print("\nAll test cases passed!")
+````
+
+## Another version
+
+From 17. Graphs/12. Alphabet150.
+
+### Approach
+
+**Pattern:** Graph - Topological sort (Kahn) on recipe dependency DAG
+
+1. Map recipe name to index; count missing ingredients per recipe; build adjacency from
+ingredient to recipes waiting on it.
+2. Start queue with supplies; when an ingredient becomes available, decrement indegree of
+waiting recipes; output recipe when indegree hits 0.
+
+### Complexity
+
+**Time:** O(total string lengths + edges).
+
+**Space:** O(total sizes).
+
+### Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def findAllRecipes(self, recipes: List[str], ingredients: List[List[str]], supplies: List[str]) -> List[str]:
+        need = defaultdict(list)
+        indeg = {}
+        for r, ing in zip(recipes, ingredients):
+            indeg[r] = len(ing)
+            for x in ing:
+                need[x].append(r)
+
+        q = deque(supplies)
+        recipes_set = set(recipes)
+        made = []
+
+        while q:
+            x = q.popleft()
+            for r in need[x]:
+                indeg[r] -= 1
+                if indeg[r] == 0:
+                    made.append(r)
+                    q.append(r)
+        return made
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findAllRecipes(["bread"], [["yeast", "flour"]], ["yeast", "flour", "corn"]) == ["bread"], "Test 1 Failed"
+    assert sol.findAllRecipes(["bread", "sandwich"], [["yeast", "flour"], ["bread", "meat"]], ["yeast", "flour", "meat"]) == ["bread", "sandwich"], "Test 2 Failed"
+    assert sol.findAllRecipes(["x"], [["y"]], ["y"]) == ["x"], "Test 3 Failed"
+    print("All tests passed!")
+````

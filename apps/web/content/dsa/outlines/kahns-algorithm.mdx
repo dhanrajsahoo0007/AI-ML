@@ -1,0 +1,115 @@
+---
+title: "Kahn's Algorithm(Topological Sort using BFS)"
+description: "Given a directed graph with V vertices and directed edges [u, v], return a topological ordering using Kahn's algorithm."
+topics: [graphs]
+group: "05. Topological Sort"
+number: "02"
+order: 17005002000000
+status: outline
+---
+
+Given a directed graph with V vertices and directed edges \[u, v\], return a topological ordering using
+Kahn's algorithm. If the graph contains a directed cycle, return an empty list.
+
+## Examples
+
+````text
+Example 1:
+    Input: V = 6, edges = [[5,2],[5,0],[4,0],[4,1],[2,3],[3,1]]
+    Output: A permutation of 0..V-1 satisfying all edge directions (non-empty for a DAG).
+Example 2:
+    Input: V = 4, edges = [[0,1],[1,2],[2,3],[3,1]]
+    Output: [] (cycle present)
+````
+
+## Constraints
+
+````text
+- 1 <= V, E <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Kahn's algorithm (BFS by indegree)
+Repeatedly remove vertices with indegree zero; if fewer than V removals occur, a cycle exists.
+
+1. Compute indegrees and adjacency lists.
+2. Enqueue all zero-indegree vertices; repeatedly pop, append to order, decrement neighbors' indegrees.
+3. If order length equals V, return it; else return \[\].
+
+## Complexity
+
+**Time:** O(V + E)
+
+**Space:** O(V + E)
+
+## Original notes
+
+````text
+See also: DFS postorder stack version in `05. Topological Sort/01. Topological Sort using DFS.py`
+````
+
+## Solution
+
+````python
+from typing import List
+from collections import deque
+
+
+class Solution:
+    def create_graph(self, V: int, edges: List[List[int]]) -> List[List[int]]:
+        adj: List[List[int]] = [[] for _ in range(V)]
+        for u, v in edges:
+            adj[u].append(v)
+        return adj
+
+    def topological_sort_kahn(self, V: int, adj: List[List[int]]) -> List[int]:
+        in_degree = [0] * V
+        for u in range(V):
+            for v in adj[u]:
+                in_degree[v] += 1
+        q: deque[int] = deque(i for i in range(V) if in_degree[i] == 0)
+        order: List[int] = []
+        while q:
+            u = q.popleft()
+            order.append(u)
+            for v in adj[u]:
+                in_degree[v] -= 1
+                if in_degree[v] == 0:
+                    q.append(v)
+        return order if len(order) == V else []
+
+
+def _is_valid_order(order: List[int], V: int, edges: List[List[int]]) -> bool:
+    if len(order) != V:
+        return len(order) == 0
+    pos = {x: i for i, x in enumerate(order)}
+    return all(pos[u] < pos[v] for u, v in edges)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    V1, e1 = 6, [[5, 2], [5, 0], [4, 0], [4, 1], [2, 3], [3, 1]]
+    o1 = sol.topological_sort_kahn(V1, sol.create_graph(V1, e1))
+    assert _is_valid_order(o1, V1, e1), "Test 1 Failed"
+    print("Test 1 Passed: Kahn on six-node DAG")
+
+    V2, e2 = 4, [[0, 1], [1, 2], [2, 3], [3, 1]]
+    assert sol.topological_sort_kahn(V2, sol.create_graph(V2, e2)) == [], "Test 2 Failed"
+    print("Test 2 Passed: cycle yields empty order")
+
+    V3, e3 = 1, []
+    assert sol.topological_sort_kahn(V3, sol.create_graph(V3, e3)) == [0], "Test 3 Failed"
+    print("Test 3 Passed: singleton graph")
+
+    V4, e4 = 3, [[0, 1], [0, 2]]
+    o4 = sol.topological_sort_kahn(V4, sol.create_graph(V4, e4))
+    assert set(o4) == {0, 1, 2} and o4.index(0) < o4.index(1) and o4.index(0) < o4.index(2), "Test 4 Failed"
+    print("Test 4 Passed: parallel edges from source")
+    print("\nAll test cases passed!")
+````

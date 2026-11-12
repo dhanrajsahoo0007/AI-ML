@@ -1,0 +1,89 @@
+---
+title: "Maximum Path sum | From leaf node to leaf node"
+description: "Maximum path sum between any two leaves in a binary tree (at least two nodes)."
+topics: [dynamic-programming]
+group: "08. DP on Trees"
+number: "03"
+order: 20008003000000
+status: outline
+---
+
+Maximum path sum between any two leaves in a binary tree (at least two nodes).
+
+## Examples
+
+````text
+Example 1:
+Tree -10 / 9 \ 20 / 15 7 -> 42
+````
+
+## Constraints
+
+````text
+- The tree has at least two nodes.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Post-order DFS
+At nodes with two children, combine best sums from subtrees that reach leaves.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(h) recursion depth.
+
+## Solution
+
+````python
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass
+class TreeNode:
+    val: int = 0
+    left: Optional["TreeNode"] = None
+    right: Optional["TreeNode"] = None
+
+
+class Solution:
+    def maxPathSum(self, root: Optional[TreeNode]) -> int:
+        self.ans = -10**15
+
+        def dfs(node: Optional[TreeNode]) -> float:
+            if not node:
+                return float("-inf")
+            if not node.left and not node.right:
+                return float(node.val)
+            l = dfs(node.left) if node.left else float("-inf")
+            r = dfs(node.right) if node.right else float("-inf")
+            if node.left and node.right:
+                self.ans = max(self.ans, node.val + l + r)
+                return float(node.val) + max(l, r)
+            return float(node.val) + (l if l != float("-inf") else r)
+
+        dfs(root)
+        return int(self.ans)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    root = TreeNode(-10, TreeNode(9), TreeNode(20, TreeNode(15), TreeNode(7)))
+    assert sol.maxPathSum(root) == 42, "Test 1 Failed"
+    r = TreeNode(1, TreeNode(2), TreeNode(3))
+    assert sol.maxPathSum(r) == 6, "Test 2 Failed"
+    r2 = TreeNode(2, TreeNode(1), TreeNode(3))
+    assert sol.maxPathSum(r2) == 6, "Test 3 Failed"
+    r3 = TreeNode(1, TreeNode(2, TreeNode(4)), TreeNode(3))
+    assert sol.maxPathSum(r3) == 10, "Test 4 Failed"
+    r4 = TreeNode(5, TreeNode(4, TreeNode(1)), TreeNode(8, TreeNode(3), TreeNode(4)))
+    assert sol.maxPathSum(r4) == 22, "Test 5 Failed"
+    print("\nAll test cases passed!")
+````

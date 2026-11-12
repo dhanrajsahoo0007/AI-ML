@@ -1,0 +1,119 @@
+---
+title: "Total Cost to Hire K Workers"
+description: "Given costs array, integers k and candidates: hire k workers."
+topics: [heaps]
+group: "05. Scheduling and Simulation Pattern"
+number: "04"
+order: 10005004000000
+status: outline
+---
+
+Given costs array, integers k and candidates: hire k workers. In each session,
+pick the cheapest from the first or last 'candidates' workers. Break ties by index.
+
+## Examples
+
+````text
+Example 1:
+    Input: costs = [17,12,10,2,7,2,11,20,8], k = 3, candidates = 4
+    Output: 11
+
+Example 2:
+    Input: costs = [1,2,4,1], k = 3, candidates = 3
+    Output: 4
+````
+
+## Constraints
+
+````text
+- 1 <= costs.length <= 10^5
+- 1 <= costs[i] <= 10^5
+- 1 <= k, candidates <= costs.length
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Scheduling and Simulation
+Use two min-heaps: one for the front candidates and one for the back candidates.
+Always pick the cheapest available worker from either end.
+
+1. Initialize front heap with first 'candidates' workers.
+2. Initialize back heap with last 'candidates' workers (non-overlapping).
+3. For k rounds: pick the cheaper worker, refill from the appropriate end.
+
+## Complexity
+
+**Time:** O((k + candidates) \* log(candidates))
+
+**Space:** O(candidates)
+
+## Original notes
+
+````text
+Original notes (restored):
+LC 2462: two windows (`candidates` from left, `candidates` from right) feeding two min-heaps.
+Each hire pops the cheaper `(cost, index)` respecting tie-break on index; refill from the side
+that produced the hire until pointers cross. Mirrors the step-by-step narrative in the old file.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def totalCost(self, costs: List[int], k: int, candidates: int) -> int:
+        front_heap = []
+        back_heap = []
+        front_idx = 0
+        back_idx = len(costs) - 1
+
+        for _ in range(min(candidates, len(costs))):
+            heapq.heappush(front_heap, (costs[front_idx], front_idx))
+            front_idx += 1
+
+        for _ in range(min(candidates, len(costs) - front_idx)):
+            heapq.heappush(back_heap, (costs[back_idx], back_idx))
+            back_idx -= 1
+
+        total = 0
+        for _ in range(k):
+            if not front_heap:
+                cost, _ = heapq.heappop(back_heap)
+            elif not back_heap:
+                cost, _ = heapq.heappop(front_heap)
+            elif front_heap[0] <= back_heap[0]:
+                cost, _ = heapq.heappop(front_heap)
+                if front_idx <= back_idx:
+                    heapq.heappush(front_heap, (costs[front_idx], front_idx))
+                    front_idx += 1
+            else:
+                cost, _ = heapq.heappop(back_heap)
+                if front_idx <= back_idx:
+                    heapq.heappush(back_heap, (costs[back_idx], back_idx))
+                    back_idx -= 1
+            total += cost
+
+        return total
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Basic case
+    assert sol.totalCost([17, 12, 10, 2, 7, 2, 11, 20, 8], 3, 4) == 11, "Test 1 Failed"
+    print("Test 1 Passed: k=3, candidates=4 -> 11")
+
+    # Test Case 2: Overlapping candidates
+    assert sol.totalCost([1, 2, 4, 1], 3, 3) == 4, "Test 2 Failed"
+    print("Test 2 Passed: k=3, candidates=3 -> 4")
+
+    print("\nAll test cases passed!")
+````

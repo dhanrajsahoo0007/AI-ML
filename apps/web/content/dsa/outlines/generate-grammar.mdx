@@ -1,0 +1,110 @@
+---
+title: "Generate Grammar"
+description: "Row 1 of a grammar table is \"0\"."
+topics: [recursion]
+group: "03. Pattern Problems"
+number: "02"
+order: 11003002000000
+status: outline
+---
+
+Row 1 of a grammar table is "0". Each next row replaces every 0 with "01" and every
+1 with "10". Answer two tasks: (1) return the k-th symbol (1-indexed) in row n as 0
+or 1; (2) build row n as a string using the same replacement rule.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 4, k = 3
+    Output: 1 (row 4 is 01101001)
+
+Example 2:
+    Input: n = 3
+    Output: "0110" for the full third row
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 30 for row materialization tests; k fits grammar definitions (1-indexed)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Recursion / self-similarity
+Row n splits into halves mirroring row n-1; k in the first half matches row n-1,
+while the second half is the bitwise complement of the mirrored index.
+
+1. Base: n == 1 returns symbol 0.
+2. Let half = 2 \*\* (n - 2). If k &lt;= half, recurse on (n-1, k); else return 1 - recurse(n-1, k-half).
+3. For full row, iteratively expand the previous row string from row 1.
+
+## Complexity
+
+**Time:** O(n) for kth symbol; O(2^n) time and space for full row n
+
+**Space:** O(n) recursion stack for kth; O(2^n) for materialized row
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Table construction (historical walkthrough):
+    Row 1 is "0". Each next row replaces every 0 with "01" and every 1 with "10", so:
+    Row 1: 0
+    Row 2: 01
+    Row 3: 0110
+    Row 4: 01101001
+
+K-th symbol without materializing the row (historical steps):
+    1. Let mid = (1 << (n - 2)) i.e. 2^(n-2), which is half the length of row n.
+    2. If k <= mid, k lies in the first half; the answer equals the k-th symbol in row n - 1.
+    3. Otherwise k is in the second half; the answer is the complement of the (k - mid)-th symbol in row n - 1.
+    4. Implement the complement case as 1 - recurse(n - 1, k - mid).
+
+Materializing a row string (historical helper idea):
+    Start from "0" and repeatedly map each character: '0' -> "01", '1' -> "10" to build the next row.
+````
+
+## Solution
+
+````python
+class Solution:
+    def kth_symbol(self, n: int, k: int) -> int:
+        if n == 1:
+            return 0
+        half = 1 << (n - 2)
+        if k <= half:
+            return self.kth_symbol(n - 1, k)
+        return 1 - self.kth_symbol(n - 1, k - half)
+
+    def grammar_row(self, n: int) -> str:
+        row = "0"
+        if n < 1:
+            return ""
+        for _ in range(2, n + 1):
+            row = "".join("01" if ch == "0" else "10" for ch in row)
+        return row
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.kth_symbol(1, 1) == 0, "Test 1 Failed"
+    assert sol.kth_symbol(4, 3) == 1, "Test 2 Failed"
+    assert sol.grammar_row(1) == "0", "Test 3 Failed"
+    assert sol.grammar_row(3) == "0110", "Test 4 Failed"
+    assert sol.kth_symbol(3, 4) == int(sol.grammar_row(3)[3]), "Test 5 Failed"
+    print("Test 1 Passed: base row")
+    print("Test 2 Passed: kth symbol sample")
+    print("Test 3 Passed: first row string")
+    print("Test 4 Passed: row 3 string")
+    print("Test 5 Passed: kth matches row materialization")
+    print("\nAll test cases passed!")
+````

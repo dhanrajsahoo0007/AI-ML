@@ -1,0 +1,149 @@
+---
+title: "Flatten Binary Tree to LinkedList"
+description: "Flatten a binary tree to a linked list in-place using TreeNode: right pointer is next preorder node, left is always null."
+topics: [trees]
+group: "01. Binary Tree › 06. Tree Construction and Modification"
+number: "05"
+order: 14001006005000
+status: outline
+---
+
+Flatten a binary tree to a linked list in-place using TreeNode: right pointer is next preorder node, left is always null.
+
+## Examples
+
+````text
+Example 1:
+Input: root = [1,2,5,3,4,None,6]
+Output: preorder chain 1->2->3->4->5->6 with left pointers null.
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 2000].
+- Node values in [-100, 100].
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Morris / threaded predecessor
+For each node with a left child, splice the left subtree after predecessor of the right spine of left subtree.
+
+1. Walk current from root while current exists.
+2. If current.left exists, find rightmost on left subtree, link it to current.right, move left subtree to right, clear left.
+3. Advance current to current.right.
+
+## Complexity
+
+**Time:** O(n) - each edge visited constant times.
+
+**Space:** O(1) extra pointers.
+Restored (original notes, diagrams, and walkthrough):
+Problem: Flatten Binary Tree to Linked List
+
+Given the root of a binary tree, flatten the tree into a "linked list":
+- The "linked list" should use the same TreeNode class where the right child pointer points to the next node in the list and the left child pointer is always null.
+- The "linked list" should be in the same order as a pre-order traversal of the binary tree.
+
+Example:
+Input:
+1
+/ \\
+2   5
+/ \\   3   4   6
+
+Output:
+
+1 -&gt; 2 -&gt; 3 -&gt; 4 -&gt; 5 -&gt; 6
+
+Approaches:
+1. Iterative
+2. Recursive
+3. Morris Traversal
+4. Using Stack
+
+Time Complexity: O(n) for all approaches, where n is the number of nodes in the tree.
+Space Complexity:
+- O(1) for iterative and Morris traversal
+- O(n) for recursive (due to call stack) and stack-based approaches
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    from collections import deque
+
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+def preorder_chain(root: Optional[TreeNode]) -> List[int]:
+    out: List[int] = []
+    cur = root
+    while cur:
+        out.append(cur.val)
+        assert cur.left is None
+        cur = cur.right
+    return out
+
+
+class Solution:
+    def flatten(self, root: Optional[TreeNode]) -> None:
+        cur = root
+        while cur:
+            if cur.left:
+                pred = cur.left
+                while pred.right:
+                    pred = pred.right
+                pred.right = cur.right
+                cur.right = cur.left
+                cur.left = None
+            cur = cur.right
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r1 = build_tree_from_level_order([1, 2, 5, 3, 4, None, 6])
+    sol.flatten(r1)
+    assert preorder_chain(r1) == [1, 2, 3, 4, 5, 6]
+    r2 = TreeNode(0)
+    sol.flatten(r2)
+    assert preorder_chain(r2) == [0]
+    r3: Optional[TreeNode] = None
+    sol.flatten(r3)
+    assert r3 is None
+    r4 = build_tree_from_level_order([1, None, 2, 3])
+    sol.flatten(r4)
+    assert preorder_chain(r4) == [1, 2, 3]
+    print("\nAll test cases passed!")
+````

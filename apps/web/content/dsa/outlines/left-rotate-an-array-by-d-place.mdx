@@ -1,0 +1,88 @@
+---
+title: "Left Rotate an array by D place"
+description: "Rotate an integer array to the left by k positions in place."
+topics: [arrays]
+group: "01. Basic Array Manipulation"
+number: "04"
+order: 1001004000000
+status: outline
+---
+
+Rotate an integer array to the left by k positions in place. After a left rotation by k,
+the element that was at index k becomes the first element, preserving relative order of all parts.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 2, 3, 4, 5], k = 2
+    Output: [3, 4, 5, 1, 2]
+Example 2:
+    Input: nums = [1], k = 5
+    Output: [1]
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 10^5
+- -10^9 <= nums[i] <= 10^9
+- 0 <= k (effective rotation uses k mod len(nums))
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Array reversal / block swap
+Left-rotating by k is equivalent to moving the first k elements to the end in order.
+
+1. Let n = len(nums). If n == 0, return nums.
+2. Set k = k % n.
+3. Replace nums with nums\[k:\] concatenated with nums\[:k\] in place via slice assignment.
+4. Return nums.
+
+## Complexity
+
+**Time:** O(n) - Every element is moved once.
+
+**Space:** O(n) - Slice concatenation builds a temporary list of length n before assignment.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def rotateLeft(self, nums: List[int], k: int) -> List[int]:
+        n = len(nums)
+        if n == 0:
+            return nums
+        k %= n
+        nums[:] = nums[k:] + nums[:k]
+        return nums
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    a1 = [1, 2, 3, 4, 5]
+    assert sol.rotateLeft(a1, 2) == [3, 4, 5, 1, 2], "Test 1 Failed"
+    print("Test 1 Passed: rotate by two")
+    a2 = [1]
+    assert sol.rotateLeft(a2, 5) == [1], "Test 2 Failed"
+    print("Test 2 Passed: single element")
+    a3 = [10, 20, 30]
+    assert sol.rotateLeft(a3, 0) == [10, 20, 30], "Test 3 Failed"
+    print("Test 3 Passed: k multiple of length")
+    a4 = [1, 2, 3]
+    assert sol.rotateLeft(a4, 4) == [2, 3, 1], "Test 4 Failed"
+    print("Test 4 Passed: k larger than n")
+    a5 = [-1, -2, -3]
+    assert sol.rotateLeft(a5, 1) == [-2, -3, -1], "Test 5 Failed"
+    print("Test 5 Passed: negative values")
+    print("\nAll test cases passed!")
+````

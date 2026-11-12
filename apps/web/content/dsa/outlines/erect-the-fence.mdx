@@ -1,0 +1,104 @@
+---
+title: "Erect the Fence"
+description: "Given integer coordinate trees, return all trees that lie on the boundary of the convex hull (outer trees), including collinear points on edges."
+topics: [math-and-geometry]
+group: "02. Leetcode and Alphabet 150"
+number: "12"
+order: 21002012000000
+status: outline
+---
+
+Given integer coordinate trees, return all trees that lie on the boundary of
+the convex hull (outer trees), including collinear points on edges.
+
+## Examples
+
+````text
+Example 1:
+    Input: trees = [[1,1],[2,2],[2,0],[2,4],[3,3],[4,2]]
+    Output: includes all hull boundary trees (any order acceptable for set)
+Example 2:
+    Input: trees = [[1,2],[2,2],[4,2]]
+    Output: [[1,2],[2,2],[4,2]]
+````
+
+## Constraints
+
+````text
+- 1 <= len(trees) <= 1000
+- Coordinates fit in 32-bit signed integers
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Monotone chain convex hull
+Andrew's scan builds lower and upper hulls; use cross product to pop right turns.
+
+1. Sort points by (x, y).
+2. Build lower hull left-to-right removing clockwise turns.
+3. Build upper hull right-to-left similarly.
+4. Concatenate without duplicating the endpoints.
+
+## Complexity
+
+**Time:** O(n log n)
+
+**Space:** O(n)
+
+## Solution
+
+````python
+from typing import List, Set, Tuple
+
+
+class Solution:
+    def outerTrees(self, trees: List[List[int]]) -> List[List[int]]:
+        if len(trees) <= 2:
+            return trees
+        trees = sorted(trees, key=lambda p: (p[0], p[1]))
+
+        def orient(a: List[int], b: List[int], c: List[int]) -> int:
+            return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+        lower: List[List[int]] = []
+        for t in trees:
+            while len(lower) >= 2 and orient(lower[-2], lower[-1], t) < 0:
+                lower.pop()
+            lower.append(t)
+        upper: List[List[int]] = []
+        for t in reversed(trees):
+            while len(upper) >= 2 and orient(upper[-2], upper[-1], t) < 0:
+                upper.pop()
+            upper.append(t)
+        merged = lower[:-1] + upper[:-1]
+        seen: Set[Tuple[int, int]] = set()
+        out: List[List[int]] = []
+        for p in merged:
+            key = (p[0], p[1])
+            if key not in seen:
+                seen.add(key)
+                out.append(p)
+        return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    trees1 = [[1, 1], [2, 2], [2, 0], [2, 4], [3, 3], [4, 2]]
+    hull = sol.outerTrees(trees1)
+    assert {tuple(p) for p in hull} == {tuple(p) for p in trees1 if p != [2, 2]}, "Test 1 Failed"
+    print("Test 1 Passed: interior point excluded; five fence trees")
+    line = sol.outerTrees([[1, 2], [2, 2], [4, 2]])
+    assert sorted(line) == [[1, 2], [2, 2], [4, 2]], "Test 2 Failed"
+    print("Test 2 Passed: collinear hull is the whole segment")
+    assert sorted(sol.outerTrees([[0, 0], [1, 1]])) == [[0, 0], [1, 1]], "Test 3 Failed"
+    print("Test 3 Passed: two points")
+    single = sol.outerTrees([[5, 5]])
+    assert single == [[5, 5]], "Test 4 Failed"
+    print("Test 4 Passed: single tree")
+    print("\nAll test cases passed!")
+````

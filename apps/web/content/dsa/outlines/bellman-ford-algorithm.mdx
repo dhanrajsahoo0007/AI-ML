@@ -1,0 +1,98 @@
+---
+title: "Bellman-Ford Algorithm"
+description: "Given V vertices (0..V-1), a list of directed weighted edges [u, v, w], and a source S, compute shortest distances from S to every vertex."
+topics: [graphs]
+group: "07. Shortest Path Algorithm › 02. Bellman-Ford Algorithm"
+number: "01"
+order: 17007002001000
+status: outline
+---
+
+Given V vertices (0..V-1), a list of directed weighted edges \[u, v, w\], and a source S, compute shortest
+distances from S to every vertex. Negative edges are allowed; if a reachable negative cycle exists,
+return \[-1\]. Unreachable vertices are reported as -1 in the distance list.
+
+## Examples
+
+````text
+Example 1:
+    Input: V = 5, edges = [[0,1,5],[1,2,3],[2,3,1],[0,3,10],[1,3,2],[2,4,2],[3,4,6]], S = 0
+    Output: [0,5,8,7,10]
+Example 2:
+    Input: V = 3, edges = [[0,1,5],[1,2,-3],[2,0,-4]], S = 0
+    Output: [-1] (negative cycle)
+````
+
+## Constraints
+
+````text
+- 1 <= V <= 500
+- 1 <= len(edges) <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Bellman-Ford relaxation
+Relax all edges V-1 times; one more pass detecting further improvement reveals a negative cycle.
+
+1. Initialize distances to infinity except dist\[S\] = 0.
+2. Repeat V-1 relaxation rounds over all edges.
+3. If any edge still relaxes, return \[-1\]; otherwise normalize unreachable to -1.
+
+## Complexity
+
+**Time:** O(V \* E) — V-1 passes over all edges.
+
+**Space:** O(V) for the distance array.
+
+Notes: Dijkstra handles non-negative weights faster (typically O(E log V)); Bellman-Ford tolerates negatives
+and detects negative cycles that Dijkstra cannot.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def bellman_ford(self, V: int, edges: List[List[int]], S: int) -> List[int]:
+        INF = 10**18
+        dist = [INF] * V
+        dist[S] = 0
+        for _ in range(V - 1):
+            updated = False
+            for u, v, w in edges:
+                if dist[u] != INF and dist[u] + w < dist[v]:
+                    dist[v] = dist[u] + w
+                    updated = True
+            if not updated:
+                break
+        for u, v, w in edges:
+            if dist[u] != INF and dist[u] + w < dist[v]:
+                return [-1]
+        return [-1 if d == INF else d for d in dist]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    V1 = 5
+    e1 = [[0, 1, 5], [1, 2, 3], [2, 3, 1], [0, 3, 10], [1, 3, 2], [2, 4, 2], [3, 4, 6]]
+    assert sol.bellman_ford(V1, e1, 0) == [0, 5, 8, 7, 10], "Test 1 Failed"
+    print("Test 1 Passed: mixed-weight shortest paths")
+    V2, e2 = 3, [[0, 1, 5], [1, 2, -3], [2, 0, -4]]
+    assert sol.bellman_ford(V2, e2, 0) == [-1], "Test 2 Failed"
+    print("Test 2 Passed: negative cycle detection")
+    V3, e3 = 4, [[0, 1, 1], [1, 2, 2], [2, 3, 3]]
+    assert sol.bellman_ford(V3, e3, 0) == [0, 1, 3, 6], "Test 3 Failed"
+    print("Test 3 Passed: simple chain")
+    assert sol.bellman_ford(2, [[1, 0, 4]], 0) == [0, -1], "Test 4 Failed"
+    print("Test 4 Passed: unreachable vertex")
+    assert sol.bellman_ford(1, [], 0) == [0], "Test 5 Failed"
+    print("Test 5 Passed: singleton graph")
+    print("\nAll test cases passed!")
+````

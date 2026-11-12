@@ -1,0 +1,121 @@
+---
+title: "Strongest Row in Matrix"
+description: "Given an m x n binary matrix of 1's (soldiers) and 0's (civilians), find the index of the strongest row."
+topics: [heaps]
+group: "07. Heap with Other DS Pattern"
+number: "02"
+order: 10007002000000
+status: outline
+---
+
+Given an m x n binary matrix of 1's (soldiers) and 0's (civilians), find the
+index of the strongest row. A row is stronger if it has more soldiers, or has
+the same count but a smaller index.
+
+## Examples
+
+````text
+Example 1:
+    Input: mat = [[1,1,0,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,1,0,0,0],[1,1,1,1,1]]
+    Output: 4
+
+Example 2:
+    Input: mat = [[1,0,0,0],[1,1,1,1],[1,0,0,0],[1,0,0,0]]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 2 <= n, m <= 100
+- matrix[i][j] is either 0 or 1.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap with Other DS (Heap + Binary Search)
+Use a max-heap to find the row with the most soldiers.
+
+1. For each row, count soldiers.
+2. Push (-count, -index) to a max-heap (most soldiers, smallest index on top).
+3. The top of the heap gives the strongest row.
+
+## Complexity
+
+**Time:** O(m log m) for heap, O(m log n) with binary search
+
+**Space:** O(m)
+
+## Original notes
+
+````text
+Original notes (restored):
+Dual approaches mirrored the weakest-row write-up: heap version pushes `(-soldiers, idx)` and reads
+the top as strongest; BS version counts soldiers per row in `O(log n)` and tracks the best `(count, idx)`
+with explicit tie handling. Sample matrices from the backup:
+    mat1 → index 4; mat2 → index 1.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def strongestRow(self, mat: List[List[int]]) -> int:
+        heap = []
+        for idx, row in enumerate(mat):
+            soldiers = sum(row)
+            heapq.heappush(heap, (-soldiers, idx))
+        return heap[0][1]
+
+    def strongestRowBinarySearch(self, mat: List[List[int]]) -> int:
+        """Linear scan on counts with binary search per row — faster when rows are very wide."""
+
+        def count_soldiers(row):
+            lo, hi = 0, len(row) - 1
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                if row[mid] == 1:
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+            return lo
+
+        max_soldiers = -1
+        strongest = 0
+        for idx, row in enumerate(mat):
+            s = count_soldiers(row)
+            if s > max_soldiers:
+                max_soldiers = s
+                strongest = idx
+        return strongest
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    mat1 = [[1,1,0,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,1,0,0,0],[1,1,1,1,1]]
+
+    # Test Case 1: Heap approach
+    assert sol.strongestRow(mat1) == 4, "Test 1 Failed"
+    print("Test 1 Passed: heap -> 4")
+
+    # Test Case 2: Binary search
+    assert sol.strongestRowBinarySearch(mat1) == 4, "Test 2 Failed"
+    print("Test 2 Passed: binary search -> 4")
+
+    # Test Case 3: Tie-break by index
+    mat2 = [[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,0]]
+    assert sol.strongestRow(mat2) == 0, "Test 3 Failed"
+    print("Test 3 Passed: tie-break -> 0")
+
+    print("\nAll test cases passed!")
+````

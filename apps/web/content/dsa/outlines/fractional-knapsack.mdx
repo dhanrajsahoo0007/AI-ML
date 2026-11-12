@@ -1,0 +1,147 @@
+---
+title: "Fractional Knapsack"
+description: "Given item values and weights and a knapsack capacity W, choose fractions of items to maximize total value."
+topics: [greedy]
+group: "02. Basic Optimization Problems"
+number: "04"
+order: 18002004000000
+status: outline
+---
+
+Given item values and weights and a knapsack capacity W, choose fractions of items to maximize
+total value. You may take any fraction of an item; value scales linearly with the fraction taken.
+
+## Examples
+
+````text
+Example 1:
+    Input: W = 50, values = [100, 60, 120], weights = [20, 10, 30]
+    Output: 240.0
+
+Example 2:
+    Input: W = 10, values = [10], weights = [5]
+    Output: 10.0
+
+Example 3:
+    Input: W = 15, values = [5, 10], weights = [10, 30]
+    Output: 6.666... (take all of first, 5/30 of second)
+````
+
+## Constraints
+
+````text
+- weights[i] > 0 for all i
+- W >= 0
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy by Density
+Repeatedly consume as much as possible of the remaining highest value-per-weight item.
+
+1. Build tuples of (value/weight, value, weight) and sort descending by ratio.
+2. Greedily take whole items while capacity allows; then take a fractional tail of the next item.
+3. Return accumulated value as a float.
+
+## Complexity
+
+**Time:** O(n log n) - Sorting dominates.
+
+**Space:** O(n) - List of item tuples.
+
+## Original notes
+
+````text
+(preamble)
+Second formulation (from original file):
+
+ASCII sketch (density view):
+Items as (value, weight, ratio):
+    A: (100, 20, 5.0)
+    B: (60,  10, 6.0)  ← best density first after sorting
+    C: (120, 30, 4.0)
+
+Knapsack W = 50:
+    Take all of B (10 kg) → value 60,  room left 40
+    Take all of A (20 kg) → value 160, room left 20
+    Take 20/30 of C → extra (120/30)*20 = 80 → total 240
+
+The same greedy rule can be written with an `Item` class and an explicit object list.
+`SolutionWithItems` below mirrors the second implementation that lived in the notes.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def fractionalKnapsack(self, W: int, values: List[int], weights: List[int]) -> float:
+        # Tuple layout mirrors the teaching notes: (density, value, weight).
+        items = [(v / w, v, w) for v, w in zip(values, weights)]
+        items.sort(reverse=True)
+        total_value = 0.0
+        capacity = W
+        for ratio, value, weight in items:
+            if capacity >= weight:
+                capacity -= weight
+                total_value += value
+            else:
+                total_value += ratio * capacity
+                break
+        return total_value
+
+
+class Item:
+    """Lightweight container used in the alternate OOP version from the original notes."""
+
+    def __init__(self, value: int, weight: int) -> None:
+        self.value = value
+        self.weight = weight
+
+
+class SolutionWithItems:
+    """Same greedy policy, but operates on a list of `Item` objects (historical second solution)."""
+
+    def fractionalKnapsack(self, W: int, arr: List[Item]) -> float:
+        arr.sort(key=lambda x: x.value / x.weight, reverse=True)
+        cur_weight = 0
+        final_value = 0.0
+        for it in arr:
+            if cur_weight + it.weight <= W:
+                cur_weight += it.weight
+                final_value += it.value
+            else:
+                remain = W - cur_weight
+                final_value += it.value / it.weight * remain
+                break
+        return final_value
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert abs(sol.fractionalKnapsack(50, [100, 60, 120], [20, 10, 30]) - 240.0) < 1e-9, "Test 1 Failed"
+    print("Test 1 Passed: classic three items")
+    assert abs(sol.fractionalKnapsack(10, [10], [5]) - 10.0) < 1e-9, "Test 2 Failed"
+    print("Test 2 Passed: one item fills bag")
+    v3 = sol.fractionalKnapsack(15, [5, 10], [10, 30])
+    assert abs(v3 - (5.0 + 10.0 * (5.0 / 30.0))) < 1e-9, "Test 3 Failed"
+    print("Test 3 Passed: fractional tail")
+    assert sol.fractionalKnapsack(0, [1, 2], [1, 1]) == 0.0, "Test 4 Failed"
+    print("Test 4 Passed: zero capacity")
+    assert abs(sol.fractionalKnapsack(2, [12, 7], [3, 2]) - 8.0) < 1e-9, "Test 5 Failed"
+    print("Test 5 Passed: capacity two")
+
+    alt = SolutionWithItems()
+    demo_items = [Item(60, 10), Item(100, 20), Item(120, 30)]
+    assert abs(alt.fractionalKnapsack(50, demo_items) - 240.0) < 1e-9, "Alternate impl failed"
+    print("Extra check: Item-based formulation matches canonical example")
+
+    print("\nAll test cases passed!")
+````

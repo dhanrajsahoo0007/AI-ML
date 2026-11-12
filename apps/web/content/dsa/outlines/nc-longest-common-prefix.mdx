@@ -1,0 +1,81 @@
+---
+title: "NC -Longest Common Prefix"
+description: "Given an array of strings strs, return the longest common prefix shared by all strings."
+topics: [prefix-sum]
+group: "05. String Prefix Problems"
+number: "01"
+order: 2005001000000
+status: outline
+---
+
+Given an array of strings strs, return the longest common prefix shared by all
+strings. If none, return an empty string.
+
+## Examples
+
+````text
+Example 1:
+Input: strs = ["flower", "flow", "flight"]
+Output: "fl"
+````
+
+## Constraints
+
+````text
+- 1 <= len(strs) <= 200
+- 0 <= len(strs[i]) <= 200
+- strs[i] contains only lowercase English letters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Horizontal Scan / Prefix
+Compare characters column-wise until any string mismatches or ends.
+
+1. Use the first string as the candidate prefix.
+2. For each character index, compare across all strings.
+3. Stop at first mismatch or length limit; return the accepted slice.
+
+## Complexity
+
+**Time:** O(S) where S is the sum of lengths of all strings.
+
+**Space:** O(1) beyond the output slice reference.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def longestCommonPrefix(self, strs: List[str]) -> str:
+        if not strs:
+            return ""
+        base = strs[0]
+        for i, ch in enumerate(base):
+            for s in strs[1:]:
+                if i == len(s) or s[i] != ch:
+                    return base[:i]
+        return base
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.longestCommonPrefix(["flower", "flow", "flight"]) == "fl", "Test 1 Failed"
+    print("Test 1 Passed: common prefix fl")
+    assert sol.longestCommonPrefix(["dog", "racecar", "car"]) == "", "Test 2 Failed"
+    print("Test 2 Passed: no common prefix")
+    assert sol.longestCommonPrefix(["single"]) == "single", "Test 3 Failed"
+    print("Test 3 Passed: one string")
+    assert sol.longestCommonPrefix(["ab", "a"]) == "a", "Test 4 Failed"
+    print("Test 4 Passed: prefix shorter than first")
+    assert sol.longestCommonPrefix(["prefix", "preform", "prevent"]) == "pre", "Test 5 Failed"
+    print("Test 5 Passed: pre family")
+    print("\nAll test cases passed!")
+````

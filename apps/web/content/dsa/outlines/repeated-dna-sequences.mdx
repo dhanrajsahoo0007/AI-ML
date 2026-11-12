@@ -1,0 +1,97 @@
+---
+title: "Repeated DNA Sequences"
+description: "Given a DNA string s of length at least 10, return all distinct 10-letter-long sequences that appear more than once in s."
+topics: [strings]
+group: "07. Rabin-Karp | Rolling hash"
+number: "01"
+order: 5007001000000
+status: outline
+---
+
+Given a DNA string s of length at least 10, return all distinct 10-letter-long
+sequences that appear more than once in s.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "AAAAACCCCCAAAAACCCCCAAAAAGGGTTT"
+    Output: Six distinct decamers each occurring at least twice (see tests).
+
+Example 2:
+    Input: s = "AAAAAAAAAAAAA"
+    Output: ["AAAAAAAAAA"]
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 10^5
+- s contains only A, C, G, T.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Rolling hash or fixed-size hashing
+Slide a length-10 window and record hashes or substrings seen twice.
+
+1. Track seen once and output set (or use dict).
+2. For each starting index with room for 10 characters, take the decamer.
+3. If it was seen before, add to answers; otherwise mark seen.
+4. Return sorted list for deterministic tests or keep insertion order.
+
+## Complexity
+
+**Time:** O(n) - Linear scan with O(1) work per window when using hashing.
+
+**Space:** O(n) - Sets store up to O(n) distinct decamers.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findRepeatedDnaSequences(self, s: str) -> List[str]:
+        if len(s) <= 10:
+            return []
+        seen: set[str] = set()
+        out: set[str] = set()
+        for i in range(len(s) - 9):
+            sub = s[i : i + 10]
+            if sub in seen:
+                out.add(sub)
+            else:
+                seen.add(sub)
+        return list(out)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r1 = sol.findRepeatedDnaSequences("AAAAACCCCCAAAAACCCCCAAAAAGGGTTT")
+    assert set(r1) == {
+        "AAAAACCCCC",
+        "AAAACCCCCA",
+        "AAACCCCCAA",
+        "AACCCCCAAA",
+        "ACCCCCAAAA",
+        "CCCCCAAAAA",
+    }, "Test 1 Failed"
+    print("Test 1 Passed: AC block boundary repeats")
+    r2 = sol.findRepeatedDnaSequences("AAAAAAAAAAAAA")
+    assert r2 == ["AAAAAAAAAA"], "Test 2 Failed"
+    print("Test 2 Passed: all A run")
+    assert sol.findRepeatedDnaSequences("ACGTACGTAC") == [], "Test 3 Failed"
+    print("Test 3 Passed: length 10 unique")
+    assert sol.findRepeatedDnaSequences("AAAAAAAAAAA") == ["AAAAAAAAAA"], "Test 4 Failed"
+    print("Test 4 Passed: eleven A's")
+    assert sol.findRepeatedDnaSequences("A" * 20) == ["AAAAAAAAAA"], "Test 5 Failed"
+    print("Test 5 Passed: long uniform")
+    print("\nAll test cases passed!")
+````

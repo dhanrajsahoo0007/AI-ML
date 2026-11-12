@@ -1,0 +1,116 @@
+---
+title: "Longest Repeating Character Replacement"
+description: "Given a string s of uppercase English letters and an integer k, you may change at most k characters to any other uppercase letter."
+topics: [sliding-window]
+group: "04. Advanced String Problems"
+number: "04"
+order: 7004004000000
+status: outline
+---
+
+Given a string s of uppercase English letters and an integer k, you may change at
+most k characters to any other uppercase letter. Return the length of the longest
+substring you can obtain where all letters are identical after the changes.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "ABAB", k = 2
+    Output: 4
+Example 2:
+    Input: s = "AABABBA", k = 1
+    Output: 4
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 10^5
+- s contains only uppercase English letters.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Variable sliding window with frequency budgeting
+Keep the largest window where (window length - count of most frequent letter) &lt;= k, since those positions must be replaced.
+
+1. Expand the right pointer while tracking per-letter counts and the running maximum frequency.
+2. If the window needs more than k replacements, shrink from the left until it is feasible again.
+3. Track the maximum valid window size.
+
+Restored notes (archived workbook):
+
+You are given a string s and an integer k. You can choose any character of the string and change it to any other uppercase English character. You can perform this operation at most k times.
+
+Return the length of the longest substring containing the same letter you can get after performing the above operations.
+
+Example 1:
+
+Input: s = "ABAB", k = 2
+Output: 4
+Explanation: Replace the two 'A's with two 'B's or vice versa.
+
+Time complexity: O(n)
+The string is traversed once by the right pointer, and in the worst case, the left pointer also traverses the entire string. Dictionary operations like updating counts and finding the maximum frequency take constant time (since there are only 26 possible characters).
+
+Space complexity: O(1)
+The dictionary count can hold at most 26 characters (since there are only uppercase English letters), so its size does not grow with the length of the input string.
+
+## Complexity
+
+**Time:** O(n) - Each index is visited by left and right pointers at most once.
+
+**Space:** O(1) - At most twenty-six counters for uppercase English letters.
+
+## Solution
+
+````python
+from typing import Dict
+
+
+class Solution:
+    def characterReplacement(self, s: str, k: int) -> int:
+        freq: Dict[str, int] = {}
+        left = 0
+        best = 0
+        max_count = 0
+
+        for right in range(len(s)):
+            ch = s[right]
+            freq[ch] = freq.get(ch, 0) + 1
+            max_count = max(max_count, freq[ch])
+
+            if right - left + 1 - max_count > k:
+                freq[s[left]] -= 1
+                left += 1
+
+            best = max(best, right - left + 1)
+
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.characterReplacement("ABAB", 2) == 4, "Test 1 Failed"
+    print("Test 1 Passed: make ABAB uniform")
+
+    assert sol.characterReplacement("AABABBA", 1) == 4, "Test 2 Failed"
+    print("Test 2 Passed: single swap budget")
+
+    assert sol.characterReplacement("AAAA", 0) == 4, "Test 3 Failed"
+    print("Test 3 Passed: already uniform")
+
+    assert sol.characterReplacement("KRSCDCSONAJNEHLWYSFRQKYLYKORRQLHADJS", 4) == 6, "Test 4 Failed"
+    print("Test 4 Passed: longer random string")
+
+    assert sol.characterReplacement("ABAA", 0) == 2, "Test 5 Failed"
+    print("Test 5 Passed: no replacements available")
+
+    print("\nAll test cases passed!")
+````

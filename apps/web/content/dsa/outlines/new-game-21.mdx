@@ -1,0 +1,88 @@
+---
+title: "New Game 21"
+description: "Alice starts with 0 points in a game drawing integers uniformly from 1..W until her total is at least k."
+topics: [math-and-geometry]
+group: "02. Leetcode and Alphabet 150"
+number: "11"
+order: 21002011000000
+status: outline
+---
+
+Alice starts with 0 points in a game drawing integers uniformly from 1..W
+until her total is at least k. She wins if her final total is at most n.
+Return the probability of winning.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 10, k = 1, maxPts = 10
+    Output: 1.0
+Example 2:
+    Input: n = 6, k = 1, maxPts = 10
+    Output: 0.6
+````
+
+## Constraints
+
+````text
+- 0 <= k <= n <= 10^4
+- 1 <= maxPts <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Dynamic programming with sliding window
+dp\[i\] is probability of being at score i; transitions average the next W scores.
+
+1. Early return 1.0 if k == 0 or even worst-case draws cannot exceed n.
+2. Maintain dp\[i\] for i in \[0..n\] with sliding sum over the last W values
+contributing to the next positions.
+3. Return sum(dp\[i\]) for i in \[k..n\].
+
+## Complexity
+
+**Time:** O(n)
+
+**Space:** O(n)
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def new21Game(self, n: int, k: int, maxPts: int) -> float:
+        if k == 0 or n >= k + maxPts - 1:
+            return 1.0
+        dp: List[float] = [0.0] * (n + 1)
+        dp[0] = 1.0
+        s = 1.0
+        W = maxPts
+        for i in range(1, n + 1):
+            dp[i] = s / W
+            if i < k:
+                s += dp[i]
+            if i - W >= 0 and i - W < k:
+                s -= dp[i - W]
+        return sum(dp[k:])
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert abs(sol.new21Game(10, 1, 10) - 1.0) < 1e-9, "Test 1 Failed"
+    print("Test 1 Passed: always <= n after one draw when n large enough")
+    assert abs(sol.new21Game(6, 1, 10) - 0.6) < 1e-9, "Test 2 Failed"
+    print("Test 2 Passed: one draw uniform 1..10 capped at <=6")
+    assert abs(sol.new21Game(21, 17, 10) - 0.73278) < 1e-3, "Test 3 Failed"
+    print("Test 3 Passed: matches known reference probability")
+    assert sol.new21Game(0, 0, 1) == 1.0, "Test 4 Failed"
+    print("Test 4 Passed: k=0 edge case")
+    print("\nAll test cases passed!")
+````

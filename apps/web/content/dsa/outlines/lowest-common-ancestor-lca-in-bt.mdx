@@ -1,0 +1,161 @@
+---
+title: "Lowest Common Ancestor (LCA) in BT"
+description: "Given a binary tree and two nodes p and q, return their lowest common ancestor (LCA)."
+topics: [trees]
+group: "01. Binary Tree › 07. Lowest Common Ancestor Problems"
+number: "01"
+order: 14001007001000
+status: outline
+---
+
+Given a binary tree and two nodes p and q, return their lowest common ancestor (LCA).
+A node may be a descendant of itself.
+
+## Examples
+
+````text
+Example 1:
+    Tree [3,5,1,6,2,0,8,None,None,7,4], p=5, q=1 -> LCA 3
+Example 2:
+    Same tree, p=5, q=4 -> LCA 5
+````
+
+## Constraints
+
+````text
+- All values unique; p and q exist and differ.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Single DFS post-order
+If current is p or q or splits between subtrees, bubble up the answer.
+
+1. If root is None or root is p or q, return root.
+2. Recurse left and right.
+3. If both sides return non-null, root is LCA; else return the non-null side.
+
+## Complexity
+
+**Time:** O(n)
+
+**Space:** O(h) stack.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given a binary tree and two nodes in it, find the lowest common ancestor (LCA) of the two given nodes.
+The lowest common ancestor is defined between two nodes p and q as the lowest node in T that has both p and q as descendants
+(where we allow a node to be a descendant of itself).
+
+Constraints:
+1. All Node.val are unique.
+2. p and q are different and both values will exist in the binary tree.
+
+Example 1:
+3
+/      5   1
+/ \\ /    6  2 0  8
+/     7   4
+
+Input: root = \[3,5,1,6,2,0,8,null,null,7,4\], p = 5, q = 1
+Output: 3
+Explanation: The LCA of nodes 5 and 1 is 3.
+
+Example 2:
+3
+/      5   1
+/ \\ /    6  2 0  8
+/     7   4
+
+Input: root = \[3,5,1,6,2,0,8,null,null,7,4\], p = 5, q = 4
+Output: 5
+Explanation: The LCA of nodes 5 and 4 is 5, since a node can be a descendant of itself according to the LCA definition.
+
+Time Complexity: O(n), where n is the number of nodes in the tree.
+In the worst case, we might need to visit all nodes to find the LCA.
+
+Space Complexity: O(h), where h is the height of the tree.
+This is due to the recursion stack. In the worst case of a skewed tree, this could be O(n).
+
+Explanation of the approach:
+
+1. We use a recursive depth-first search (DFS) to traverse the tree.
+2. At each node, we check if it's one of the target nodes (p or q). If so, we return this node.
+3. We recursively search in the left and right subtrees.
+4. If we find both nodes in different subtrees (i.e., both left and right recursive calls return non-null),
+the current node is the LCA, so we return it.
+5. If we find one node, we return that node
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    from collections import deque
+
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+def find_node(root: Optional[TreeNode], val: int) -> Optional[TreeNode]:
+    if not root:
+        return None
+    if root.val == val:
+        return root
+    return find_node(root.left, val) or find_node(root.right, val)
+
+
+class Solution:
+    def lowestCommonAncestor(self, root: Optional[TreeNode], p: TreeNode, q: TreeNode) -> TreeNode:
+        if not root or root is p or root is q:
+            return root
+        left = self.lowestCommonAncestor(root.left, p, q)
+        right = self.lowestCommonAncestor(root.right, p, q)
+        if left and right:
+            return root
+        return left if left else right
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r = build_tree_from_level_order([3, 5, 1, 6, 2, 0, 8, None, None, 7, 4])
+    assert r is not None
+    p5 = find_node(r, 5)
+    p1 = find_node(r, 1)
+    p4 = find_node(r, 4)
+    assert p5 and p1 and p4
+    assert sol.lowestCommonAncestor(r, p5, p1).val == 3
+    assert sol.lowestCommonAncestor(r, p5, p4).val == 5
+    a = TreeNode(1)
+    b = TreeNode(2)
+    a.left = b
+    assert sol.lowestCommonAncestor(a, a, b).val == 1
+    print("\nAll test cases passed!")
+````

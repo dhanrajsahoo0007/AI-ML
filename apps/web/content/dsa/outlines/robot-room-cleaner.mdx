@@ -1,0 +1,193 @@
+---
+title: "Robot Room Cleaner"
+description: "A robot sits on an unknown empty cell in a hidden grid of 0 (wall) and 1 (open)."
+topics: [backtracking]
+group: "04. Grid Traversal"
+number: "07"
+order: 12004007000000
+status: outline
+---
+
+A robot sits on an unknown empty cell in a hidden grid of 0 (wall) and 1 (open). Using
+move, turnLeft, turnRight, and clean, visit and clean every reachable open cell.
+
+## Examples
+
+````text
+Example 1:
+Input: a mocked room grid (see tests)
+Output: every open cell is cleaned exactly once
+````
+
+## Constraints
+
+````text
+- The hidden grid is rectangular; the robot starts on an open cell.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS backtracking in robot-relative coordinates
+Track visited logical coordinates, clean, try all four headings with move, then use a
+standardized four-turn sequence to retreat like stack unwinding.
+
+1. Maintain visited set in absolute coordinates with heading-aware moves.
+2. clean(), then for each relative direction attempt move; on success recurse, then go\_back.
+3. After exploring each branch, turnRight to rotate through headings.
+
+## Complexity
+
+**Time:** O(N) for N reachable empty cells.
+
+**Space:** O(N) for visited set and recursion.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem: Robot Room Cleaner
+
+    You are controlling a robot that is located somewhere in a room. 
+    The room is modeled as an m x n binary grid where 0 represents a wall and 1 represents an empty slot.
+
+    The robot starts at an unknown location in the room that is guaranteed to be empty, 
+    and you do not have access to the grid, but you can move the robot using the given API Robot.
+
+You task is to clean the entire room (i.e., clean every empty cell in the room). 
+
+    The robot with the following API is given to you:
+        - move(): Returns true if the cell in front is open and robot moves into the cell; false otherwise.
+        - turnLeft(): Robot will stay in the same cell but rotate 90 degrees counterclockwise.
+        - turnRight(): Robot will stay in the same cell but rotate 90 degrees clockwise.
+        - clean(): Clean the current cell.
+
+Time Complexity: O(N - M), where N is the number of cells in the room and M is the number of obstacles.
+Space Complexity: O(N - M) for the visited set and recursion stack.
+
+Explanation:
+    This solution uses a backtracking approach with DFS (Depth-First Search) to explore and clean the room.
+    The robot moves in four directions (up, right, down, left) and uses a visited set to keep track of cleaned cells.
+    When the robot can't move forward, it backtracks and tries other directions.
+
+Example:
+Consider a 5x5 room with some obstacles:
+    1 1 1 1 0
+    1 1 0 1 0
+    1 1 1 1 1
+    0 1 0 0 1
+    0 1 1 1 1
+
+Where 1 represents an empty cell and 0 represents an obstacle.
+The robot starts at position (1, 3), facing up.
+
+Step-by-step cleaning process:
+    1. Clean (1, 3)
+    2. Move up to (0, 3), clean
+    3. Try to move up (blocked), turn right
+    4. Move right to (0, 4), clean
+    5. Try all directions (blocked), go back to (0, 3)
+    6. Move down to (1, 3), already cleaned
+    7. Move left to (1, 2), clean
+````
+
+## Solution
+
+````python
+class MockRobot:
+    def __init__(self, grid):
+        self.grid = grid
+        self.m = len(grid)
+        self.n = len(grid[0])
+        self.r = self.c = 0
+        self.d = 0
+        self.cleaned = set()
+        self.dirs = [(-1, 0), (0, 1), (1, 0), (0, -1)]
+
+    def move(self) -> bool:
+        dr, dc = self.dirs[self.d]
+        nr, nc = self.r + dr, self.c + dc
+        if 0 <= nr < self.m and 0 <= nc < self.n and self.grid[nr][nc] == 1:
+            self.r, self.c = nr, nc
+            return True
+        return False
+
+    def turnLeft(self) -> None:
+        self.d = (self.d - 1) % 4
+
+    def turnRight(self) -> None:
+        self.d = (self.d + 1) % 4
+
+    def clean(self) -> None:
+        self.cleaned.add((self.r, self.c))
+
+
+class Solution:
+    def cleanRoom(self, robot) -> None:
+        vectors = [(-1, 0), (0, 1), (1, 0), (0, -1)]
+        visited = set()
+
+        def go_back() -> None:
+            robot.turnRight()
+            robot.turnRight()
+            robot.move()
+            robot.turnRight()
+            robot.turnRight()
+
+        def dfs(x: int, y: int, direction: int) -> None:
+            visited.add((x, y))
+            robot.clean()
+            for i in range(4):
+                nd = (direction + i) % 4
+                nx = x + vectors[nd][0]
+                ny = y + vectors[nd][1]
+                if (nx, ny) not in visited and robot.move():
+                    dfs(nx, ny, nd)
+                    go_back()
+                robot.turnRight()
+
+        dfs(0, 0, 0)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def open_cells(grid):
+        return {(r, c) for r in range(len(grid)) for c in range(len(grid[0])) if grid[r][c] == 1}
+
+    room1 = [
+        [1, 1, 1, 1, 0],
+        [1, 1, 0, 1, 0],
+        [1, 1, 1, 1, 1],
+        [0, 1, 0, 0, 1],
+        [0, 1, 1, 1, 1],
+    ]
+    bot1 = MockRobot(room1)
+    sol.cleanRoom(bot1)
+    assert bot1.cleaned == open_cells(room1), "Test 1 Failed"
+    print("Test 1 Passed: cleans full reachable region")
+
+    room2 = [[1]]
+    bot2 = MockRobot(room2)
+    sol.cleanRoom(bot2)
+    assert bot2.cleaned == {(0, 0)}, "Test 2 Failed"
+    print("Test 2 Passed: single open cell")
+
+    room3 = [[1, 1, 0], [1, 0, 0], [1, 1, 1]]
+    bot3 = MockRobot(room3)
+    sol.cleanRoom(bot3)
+    assert bot3.cleaned == open_cells(room3), "Test 3 Failed"
+    print("Test 3 Passed: L-shaped room")
+
+    room4 = [[1, 1], [1, 1]]
+    bot4 = MockRobot(room4)
+    sol.cleanRoom(bot4)
+    assert len(bot4.cleaned) == 4, "Test 4 Failed"
+    print("Test 4 Passed: small square")
+
+    print("\nAll test cases passed!")
+````

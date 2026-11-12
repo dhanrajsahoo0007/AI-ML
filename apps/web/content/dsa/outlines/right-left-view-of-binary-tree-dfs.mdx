@@ -1,0 +1,128 @@
+---
+title: "Right-Left View of Binary Tree(DFS)"
+description: "Given the root of a binary tree, return the left boundary view and right boundary view using DFS."
+topics: [trees]
+group: "01. Binary Tree › 02. Tree Views and Projections"
+number: "03"
+order: 14001002003000
+status: outline
+---
+
+Given the root of a binary tree, return the left boundary view and right boundary view using DFS.
+At each depth, the left view records the first node encountered in preorder when visiting left before right;
+the right view records the first node when visiting right before left.
+
+## Examples
+
+````text
+Example 1:
+Tree:
+      1
+    /              2     3
+  / \   /          4  10 9  10
+             5
+                 6
+Output: right view [1,3,10,5,6], left view [1,2,4,5,6]
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 5000].
+- Node values fit in 32-bit signed integers.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS with level tracking
+Extend the result list when a new depth is first reached; order of child recursion controls which side wins.
+
+1. For left view, recurse left then right at each node; append when len(res) == level.
+2. For right view, recurse right then left with the same rule.
+
+## Complexity
+
+**Time:** O(n) - visit every node once per call set.
+
+**Space:** O(h) - recursion stack depth.
+Restored (original notes, diagrams, and walkthrough):
+The tree structure:
+1
+/            2     3
+/ \\   /        4  10 9  10
+5
+6
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_sample_tree() -> TreeNode:
+    root = TreeNode(1)
+    root.left = TreeNode(2)
+    root.right = TreeNode(3)
+    root.left.left = TreeNode(4)
+    root.left.right = TreeNode(10)
+    root.left.left.right = TreeNode(5)
+    root.left.left.right.right = TreeNode(6)
+    root.right.left = TreeNode(9)
+    root.right.right = TreeNode(10)
+    return root
+
+
+class Solution:
+    def leftSideView(self, root: Optional[TreeNode]) -> List[int]:
+        res: List[int] = []
+
+        def dfs(node: Optional[TreeNode], level: int) -> None:
+            if not node:
+                return
+            if len(res) == level:
+                res.append(node.val)
+            dfs(node.left, level + 1)
+            dfs(node.right, level + 1)
+
+        dfs(root, 0)
+        return res
+
+    def rightSideView(self, root: Optional[TreeNode]) -> List[int]:
+        res: List[int] = []
+
+        def dfs(node: Optional[TreeNode], level: int) -> None:
+            if not node:
+                return
+            if len(res) == level:
+                res.append(node.val)
+            dfs(node.right, level + 1)
+            dfs(node.left, level + 1)
+
+        dfs(root, 0)
+        return res
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    root = build_sample_tree()
+    assert sol.rightSideView(root) == [1, 3, 10, 5, 6]
+    assert sol.leftSideView(root) == [1, 2, 4, 5, 6]
+    assert sol.leftSideView(None) == []
+    assert sol.rightSideView(None) == []
+    single = TreeNode(7)
+    assert sol.leftSideView(single) == [7]
+    assert sol.rightSideView(single) == [7]
+    print("\nAll test cases passed!")
+````

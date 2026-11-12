@@ -1,0 +1,93 @@
+---
+title: "Longest Path With Different Adjacent Characters"
+description: "You are given a tree of n nodes labeled from 0 to n - 1, and an integer array parent of length n - 1 where parent[i] is the parent of node i + 1."
+topics: [graphs]
+group: "11. Others"
+order: 17011999000000
+status: outline
+---
+
+You are given a tree of n nodes labeled from 0 to n - 1, and an integer array parent of
+length n - 1 where parent\[i\] is the parent of node i + 1. You are also given a string s of
+length n where s\[i\] is the character assigned to node i. Return the length of the longest
+path in the tree such that no pair of adjacent nodes on the path have the same character.
+
+## Examples
+
+````text
+Example 1:
+    Input: parent = [-1,0,0,1,1,2], s = "abacbe"
+    Output: 3
+Example 2:
+    Input: parent = [-1,0,0,2], s = "aeeb"
+    Output: 4
+````
+
+## Constraints
+
+````text
+- n == len(parent) + 1 == len(s)
+- 0 <= parent[i] < n for all i >= 0 (parent[0] == -1 for the root)
+- s consists only of lowercase English letters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Tree DP / DFS on tree
+
+1. Build children adjacency from the rooted tree (parent pointers).
+2. DFS returns the longest downward chain from u to a descendant where every step respects
+different adjacent characters.
+3. At u, combine the two largest valid child chains for a path through u; update global max.
+
+## Complexity
+
+**Time:** O(n) - each node and edge processed once.
+
+**Space:** O(n) - adjacency list and recursion stack.
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def longestPath(self, parent: List[int], s: str) -> int:
+        n = len(s)
+        children = defaultdict(list)
+        for i in range(1, n):
+            children[parent[i]].append(i)
+
+        self.ans = 1
+
+        def dfs(u: int) -> int:
+            first = second = 0
+            for v in children[u]:
+                depth = dfs(v)
+                if s[v] == s[u]:
+                    continue
+                if depth > first:
+                    second, first = first, depth
+                elif depth > second:
+                    second = depth
+            self.ans = max(self.ans, first + second + 1)
+            return first + 1
+
+        dfs(0)
+        return self.ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.longestPath([-1, 0, 0, 1, 1, 2], "abacbe") == 3, "Test 1 Failed"
+    assert sol.longestPath([-1, 0, 0, 2], "aeeb") == 4, "Test 2 Failed"
+    assert sol.longestPath([-1], "z") == 1, "Test 3 Failed"
+    print("All tests passed!")
+````

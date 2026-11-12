@@ -1,0 +1,82 @@
+---
+title: "LCS SubString"
+description: "Given two strings, return the length of their longest common substring (contiguous in both strings)."
+topics: [dynamic-programming]
+group: "04. Longest Common Subsequence"
+number: "02"
+order: 20004002000000
+status: outline
+---
+
+Given two strings, return the length of their longest common substring
+(contiguous in both strings).
+
+## Examples
+
+````text
+Example 1:
+    Input: s1 = "abcdxyz", s2 = "xyzabcd"
+    Output: 4
+Example 2:
+    Input: s1 = "zxabcde", s2 = "yzabcdezx"
+    Output: 6
+````
+
+## Constraints
+
+````text
+- 1 <= len(s1), len(s2) <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 2D DP with reset on mismatch
+dp\[i\]\[j\] extends dp\[i-1\]\[j-1\]+1 when s1\[i-1\]==s2\[j-1\], else 0; track max.
+
+1. Fill dp table; on match dp\[i\]\[j\]=dp\[i-1\]\[j-1\]+1 else 0.
+2. Maintain global maximum over all cells.
+
+## Complexity
+
+**Time:** O(m \* n).
+
+**Space:** O(m \* n); can use O(n) rolling rows.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def longestCommonSubstring(self, s1: str, s2: str) -> int:
+        m, n = len(s1), len(s2)
+        dp: List[List[int]] = [[0] * (n + 1) for _ in range(m + 1)]
+        ans = 0
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if s1[i - 1] == s2[j - 1]:
+                    dp[i][j] = dp[i - 1][j - 1] + 1
+                    ans = max(ans, dp[i][j])
+        return ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.longestCommonSubstring("abcdxyz", "xyzabcd") == 4, "Test 1 Failed"
+    print("Test 1 Passed: abcd")
+    assert sol.longestCommonSubstring("abcde", "abfde") == 2, "Test 2 Failed"
+    print("Test 2 Passed: ab or de")
+    assert sol.longestCommonSubstring("a", "b") == 0, "Test 3 Failed"
+    print("Test 3 Passed: no match")
+    assert sol.longestCommonSubstring("GeeksforGeeks", "GeeksQuiz") == 5, "Test 4 Failed"
+    print("Test 4 Passed: Geeks")
+    assert sol.longestCommonSubstring("abcd", "abdc") == 2, "Test 5 Failed"
+    print("Test 5 Passed: ab or cd")
+    print("\nAll test cases passed!")
+````

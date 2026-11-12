@@ -1,0 +1,79 @@
+---
+title: "Kth Symbol in Grammer"
+description: "In row 1 the grammar string is \"0\"."
+topics: [recursion]
+group: "01. Basic Recursion Concepts"
+number: "05"
+order: 11001005000000
+status: outline
+---
+
+In row 1 the grammar string is "0". Each later row replaces 0 with "01" and 1 with
+"10". Return the k-th symbol (1-indexed) in row n as 0 or 1.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 1, k = 1
+    Output: 0
+
+Example 2:
+    Input: n = 4, k = 3
+    Output: 1 (row 4 begins 0110...)
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 30 for recursion depth in tests; k is valid for row n
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Halving recursion
+Row n splits into two mirrored halves of row n-1; the first half matches the
+previous row, the second half complements the mapped index.
+
+1. If n == 1, return 0.
+2. Let half = 2 \*\* (n - 2). If k &lt;= half, recurse on (n - 1, k).
+3. Otherwise return 1 - recurse(n - 1, k - half).
+
+## Complexity
+
+**Time:** O(n) - one recursive step per row
+
+**Space:** O(n) - call stack
+
+## Solution
+
+````python
+class Solution:
+    def kth_symbol(self, n: int, k: int) -> int:
+        if n == 1:
+            return 0
+        half = 1 << (n - 2)
+        if k <= half:
+            return self.kth_symbol(n - 1, k)
+        return 1 - self.kth_symbol(n - 1, k - half)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.kth_symbol(1, 1) == 0, "Test 1 Failed"
+    assert sol.kth_symbol(2, 1) == 0, "Test 2 Failed"
+    assert sol.kth_symbol(2, 2) == 1, "Test 3 Failed"
+    assert sol.kth_symbol(4, 5) == 1, "Test 4 Failed"
+    assert sol.kth_symbol(3, 4) == 0, "Test 5 Failed"
+    print("Test 1 Passed: first row")
+    print("Test 2 Passed: second row first bit")
+    print("Test 3 Passed: second row second bit")
+    print("Test 4 Passed: deeper row sample")
+    print("Test 5 Passed: row three tail")
+    print("\nAll test cases passed!")
+````

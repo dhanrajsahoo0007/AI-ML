@@ -1,0 +1,75 @@
+---
+title: "Remove All Occurrences of a Substring"
+description: "Repeatedly delete every occurrence of part from s until none remain, returning the final string."
+topics: [stacks-and-queues]
+group: "03. String Manipulation with Stack"
+number: "06"
+order: 9003006000000
+status: outline
+---
+
+Repeatedly delete every occurrence of part from s until none remain, returning the final string.
+
+## Examples
+
+````text
+Example 1:
+Input: s = "daabcbaabcbc", part = "abc"
+Output: "dab"
+````
+
+## Constraints
+
+````text
+- 1 <= len(s), len(part) <= 1000
+- Strings use lowercase English letters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Streaming Stack Match
+Append characters and slice the tail whenever it matches part.
+
+1. Maintain a list as a stack of characters.
+2. After each push, compare the tail window to part; pop m letters on a match.
+3. Join the survivors.
+
+## Complexity
+
+**Time:** O(n \* m) - Tail checks cost O(m) per character in worst case.
+
+**Space:** O(n) - Stack holds the current rebuilt string.
+
+## Solution
+
+````python
+class Solution:
+    def removeOccurrences(self, s: str, part: str) -> str:
+        m = len(part)
+        stack: list[str] = []
+        for ch in s:
+            stack.append(ch)
+            if len(stack) >= m and "".join(stack[-m:]) == part:
+                del stack[-m:]
+        return "".join(stack)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.removeOccurrences("daabcbaabcbc", "abc") == "dab", "Test 1 Failed"
+    assert sol.removeOccurrences("axxxxyyyyb", "xy") == "ab", "Test 2 Failed"
+    assert sol.removeOccurrences("aabababa", "aba") == "ba", "Test 3 Failed"
+    assert sol.removeOccurrences("aaa", "aa") == "a", "Test 4 Failed"
+    assert sol.removeOccurrences("ccccc", "cc") == "c", "Test 5 Failed"
+    print("Test 1 Passed: overlapping deletes")
+    print("Test 2 Passed: sparse hits")
+    print("Test 3 Passed: recursive collapse")
+    print("Test 4 Passed: greedy pairs")
+    print("Test 5 Passed: uniform stack")
+    print("\nAll test cases passed!")
+````

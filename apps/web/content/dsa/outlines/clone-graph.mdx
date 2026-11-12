@@ -1,0 +1,145 @@
+---
+title: "Clone Graph"
+description: "Given a reference node in a connected undirected graph, return a deep copy of the graph."
+topics: [graphs]
+group: "03. DFS Story Based › 01. Introduction to Graph Traversal"
+number: "03"
+order: 17003001003000
+status: outline
+---
+
+Given a reference node in a connected undirected graph, return a deep copy of the graph. Each node has
+an integer val and a list of Node neighbors. The graph is serialized with unique labels.
+
+## Examples
+
+````text
+Example 1:
+Input: adjList = [[2,4],[1,3],[2,4],[1,4],[1,2,3]]  (1-indexed LeetCode style)
+Output: structurally identical clone (new Node objects, same topology).
+````
+
+## Constraints
+
+````text
+- Number of nodes is at most 100
+- Node.val is unique for each node in the test data
+- No repeated edges and no self-loops
+- The graph is connected and undirected
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS / hash map cloning
+Map each original node to a new node; lazily create neighbors and wire edges while traversing.
+
+1. If input is None, return None.
+2. Maintain old\_to\_new mapping from original Node to clone.
+3. DFS: for each neighbor, recurse if unseen, then append clone neighbor to current clone's neighbors.
+
+## Complexity
+
+**Time:** O(V + E) — visit each node and edge once.
+
+**Space:** O(V + E) — clone storage and recursion stack O(V).
+
+## Original notes
+
+````text
+See also: BFS clone in `04. BFS Story Based/01. Introduction to Graph Traversal with BFS/10. Clone Graph.py`
+````
+
+## Solution
+
+````python
+from typing import Dict, List, Optional
+
+
+class Node:
+    def __init__(self, val: int = 0, neighbors: Optional[list["Node"]] = None):
+        self.val = val
+        self.neighbors = neighbors if neighbors is not None else []
+
+
+class Solution:
+    def cloneGraph(self, node: Optional[Node]) -> Optional[Node]:
+        if node is None:
+            return None
+        seen: Dict[Node, Node] = {}
+
+        def dfs(curr: Node) -> Node:
+            if curr in seen:
+                return seen[curr]
+            copy = Node(curr.val)
+            seen[curr] = copy
+            for nb in curr.neighbors:
+                copy.neighbors.append(dfs(nb))
+            return copy
+
+        return dfs(node)
+
+
+def build_undirected(adj_idx: List[List[int]]) -> Node:
+    """adj_idx[i] lists neighbor indices j (0-based) for node with val == i."""
+    n = len(adj_idx)
+    nodes = [Node(i) for i in range(n)]
+    for i, nbrs in enumerate(adj_idx):
+        nodes[i].neighbors = [nodes[j] for j in nbrs]
+    return nodes[0]
+
+
+def adj_from_root(root: Node, n: int) -> List[List[int]]:
+    out: List[List[int]] = [[] for _ in range(n)]
+    seen: set[int] = set()
+
+    def dfs(u: Node) -> None:
+        if u.val in seen:
+            return
+        seen.add(u.val)
+        for v in u.neighbors:
+            out[u.val].append(v.val)
+            dfs(v)
+
+    dfs(root)
+    return [sorted(row) for row in out]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    adj_a = [[1, 3], [0, 2], [1, 3], [0, 2]]
+    root_a = build_undirected(adj_a)
+    c_a = sol.cloneGraph(root_a)
+    assert c_a is not None and c_a is not root_a, "Test 1 Failed"
+    assert adj_from_root(c_a, 4) == [sorted(x) for x in adj_a], "Test 1 Failed structure"
+    print("Test 1 Passed: 4-cycle clone")
+
+    adj_b = [[]]
+    root_b = build_undirected(adj_b)
+    c_b = sol.cloneGraph(root_b)
+    assert c_b is not root_b and c_b.neighbors == [], "Test 2 Failed"
+    print("Test 2 Passed: single node")
+
+    adj_c = [[1], [0]]
+    root_c = build_undirected(adj_c)
+    c_c = sol.cloneGraph(root_c)
+    assert adj_from_root(c_c, 2) == [sorted(x) for x in adj_c], "Test 3 Failed"
+    print("Test 3 Passed: edge graph")
+
+    adj_d = [[1, 2], [0, 2], [0, 1]]
+    root_d = build_undirected(adj_d)
+    c_d = sol.cloneGraph(root_d)
+    assert adj_from_root(c_d, 3) == [sorted(x) for x in adj_d], "Test 4 Failed"
+    print("Test 4 Passed: triangle")
+
+    adj_e = [[1, 2, 3], [0, 2], [0, 1, 3], [0, 2]]
+    root_e = build_undirected(adj_e)
+    c_e = sol.cloneGraph(root_e)
+    assert adj_from_root(c_e, 4) == [sorted(x) for x in adj_e], "Test 5 Failed"
+    print("Test 5 Passed: denser graph")
+    print("All tests passed!")
+````

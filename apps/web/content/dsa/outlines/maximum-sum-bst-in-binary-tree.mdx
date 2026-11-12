@@ -1,0 +1,169 @@
+---
+title: "Maximum Sum BST in Binary Tree"
+description: "Given a binary tree, return the maximum sum of node values among any subtree that is a BST."
+topics: [binary-search-trees]
+group: "05. Advanced BST Problems"
+number: "02"
+order: 15005002000000
+status: outline
+---
+
+Given a binary tree, return the maximum sum of node values among any subtree that is a BST.
+If no positive-sum BST exists, return 0.
+
+## Examples
+
+````text
+Example 1:
+    Input: [1,4,3,2,4,2,5,null,null,null,null,null,null,4,6]
+    Output: 11 (maximum sum among valid BST subtrees for the modeled tree)
+
+Example 2:
+    Input: [4,3,null,1,2]
+    Output: 2
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [1, 4 * 10^4].
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Postorder with BST bounds and subtree sums
+Propagate min, max, and sum upward only when both children are BSTs and ordering holds at the current root.
+
+1. DFS returns (min\_val, max\_val, sum) for potential BST subtrees; empty uses (+inf, -inf, 0).
+2. If the current subtree is a BST, update the global answer with its sum.
+3. If not a BST, return sentinel bounds so parents cannot chain incorrectly.
+
+## Complexity
+
+**Time:** O(n) - Single postorder traversal.
+
+**Space:** O(h) - Recursion stack depth.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given a binary tree root, return the maximum sum of all keys of any sub-tree which is also a Binary Search Tree (BST).
+
+Time Complexity: O(n), where n is the number of nodes in the tree.
+Space Complexity: O(h), where h is the height of the tree (due to the recursive call stack).
+
+Detailed Explanation:
+We use a bottom-up approach to solve this problem efficiently:
+1. We perform a depth-first search (DFS) on the tree, starting from the leaf nodes and moving up to the root.
+2. For each node, we determine if its subtree is a valid BST and calculate its sum.
+3. We propagate information upwards: for each subtree, we return the minimum value, maximum value, and sum.
+4. At each node, we check if it forms a valid BST with its left and right subtrees.
+5. If a subtree is a valid BST, we update the global maximum sum if necessary.
+6. This approach allows us to check BST validity and calculate sums in a single pass through the tree.
+
+Key Idea: By returning min and max values from subtrees, we can efficiently check BST validity at each node.
+
+Examples:
+1. Input: root = \[1,4,3,2,4,2,5,null,null,null,null,null,null,4,6\]
+Output: 20
+Explanation: Maximum sum in a valid BST is obtained in root node with key equal to 3.
+Tree structure:
+1
+/         4     3
+/ \\   /     2   4 2   5
+\\               4   6
+
+2. Input: root = \[4,3,null,1,2\]
+Output: 2
+Explanation: Maximum sum in a valid BST is obtained in a single root node with key equal to 2.
+Tree structure:
+4
+/
+3
+/   1   2
+
+3. Input: root = \[-4,-2,-5\]
+Output: 0
+Explanation: All values are negative. Return an empty BST.
+Tree structure:
+-4
+/    -2   -5
+
+## Solution
+
+````python
+from typing import List, Optional, Tuple
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    root = TreeNode(values[0])
+    queue: List[TreeNode] = [root]
+    i = 1
+    while queue and i < len(values):
+        node = queue.pop(0)
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            queue.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            queue.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def maxSumBST(self, root: Optional[TreeNode]) -> int:
+        self.best = 0
+
+        def dfs(node: Optional[TreeNode]) -> Tuple[float, float, int]:
+            if node is None:
+                return float("inf"), float("-inf"), 0
+            left_min, left_max, left_sum = dfs(node.left)
+            right_min, right_max, right_sum = dfs(node.right)
+            if left_max < node.val < right_min:
+                total = left_sum + right_sum + node.val
+                self.best = max(self.best, total)
+                return min(left_min, node.val), max(right_max, node.val), total
+            return float("-inf"), float("inf"), 0
+
+        dfs(root)
+        return self.best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r1 = TreeNode(1)
+    r1.left = TreeNode(4)
+    r1.right = TreeNode(3)
+    r1.left.left = TreeNode(2)
+    r1.left.right = TreeNode(4)
+    r1.right.left = TreeNode(2)
+    r1.right.right = TreeNode(5)
+    r1.right.left.right = TreeNode(4)
+    r1.right.right.right = TreeNode(6)
+    assert sol.maxSumBST(r1) == 11
+    r2 = TreeNode(4)
+    r2.left = TreeNode(3)
+    r2.left.left = TreeNode(1)
+    r2.left.right = TreeNode(2)
+    assert sol.maxSumBST(r2) == 2
+    r3 = TreeNode(-4)
+    r3.left = TreeNode(-2)
+    r3.right = TreeNode(-5)
+    assert sol.maxSumBST(r3) == 0
+    assert sol.maxSumBST(TreeNode(5)) == 5
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,90 @@
+---
+title: "Climbing Stars"
+description: "You are climbing a staircase; it takes n steps to reach the top."
+topics: [dynamic-programming]
+group: "01. 1D DP"
+number: "02"
+order: 20001002000000
+status: outline
+---
+
+You are climbing a staircase; it takes n steps to reach the top. Each move you
+can climb 1 or 2 steps. Return the number of distinct ways to reach the top.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 3
+    Output: 3
+Example 2:
+    Input: n = 5
+    Output: 8
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 45
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 1D Dynamic Programming
+Ways to step i equals ways to i-1 plus ways to i-2 (Fibonacci-style recurrence).
+
+1. Base: for n &lt;= 2 answer is n.
+2. Iteratively compute dp\[i\] = dp\[i-1\] + dp\[i-2\] for i from 3 to n.
+3. Return dp\[n\] (or use O(1) space with two variables).
+
+## Complexity
+
+**Time:** O(n) - one pass.
+
+**Space:** O(1) - two rolling variables suffice.
+
+## Solution
+
+````python
+from typing import Dict, Optional
+
+
+class Solution:
+    def climbStairs(self, n: int) -> int:
+        if n <= 2:
+            return n
+        a, b = 1, 2
+        for _ in range(3, n + 1):
+            a, b = b, a + b
+        return b
+
+    def climbStairs_memo(self, n: int, memo: Optional[Dict[int, int]] = None) -> int:
+        if memo is None:
+            memo = {}
+        if n in memo:
+            return memo[n]
+        if n <= 2:
+            return n
+        memo[n] = self.climbStairs_memo(n - 1, memo) + self.climbStairs_memo(n - 2, memo)
+        return memo[n]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.climbStairs(1) == 1, "Test 1 Failed"
+    print("Test 1 Passed: climbStairs(1) == 1")
+    assert sol.climbStairs(2) == 2, "Test 2 Failed"
+    print("Test 2 Passed: climbStairs(2) == 2")
+    assert sol.climbStairs(5) == 8, "Test 3 Failed"
+    print("Test 3 Passed: climbStairs(5) == 8")
+    assert sol.climbStairs_memo(6) == 13, "Test 4 Failed"
+    print("Test 4 Passed: climbStairs_memo(6) == 13")
+    assert sol.climbStairs(10) == 89, "Test 5 Failed"
+    print("Test 5 Passed: climbStairs(10) == 89")
+    print("\nAll test cases passed!")
+````

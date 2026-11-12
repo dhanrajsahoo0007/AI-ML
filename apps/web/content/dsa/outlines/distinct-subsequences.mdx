@@ -1,0 +1,81 @@
+---
+title: "Distinct Subsequences"
+description: "Given strings s and t, count how many distinct subsequences of s equal t (modulo 10^9 + 7)."
+topics: [dynamic-programming]
+group: "04. Longest Common Subsequence"
+number: "07"
+order: 20004007000000
+status: outline
+---
+
+Given strings s and t, count how many distinct subsequences of s equal t
+(modulo 10^9 + 7).
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "rabbbit", t = "rabbit"
+    Output: 3
+Example 2:
+    Input: s = "babgbag", t = "bag"
+    Output: 5
+````
+
+## Constraints
+
+````text
+- 1 <= len(s), len(t) <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 2D counting DP
+dp\[i\]\[j\] = ways to form t\[:j\] as subsequence of s\[:i\].
+
+1. dp\[i\]\[0\]=1 for all i; dp\[0\]\[j&gt;0\]=0.
+2. If s\[i-1\]==t\[j-1\]: dp\[i\]\[j\]=dp\[i-1\]\[j-1\]+dp\[i-1\]\[j\]; else dp\[i\]\[j\]=dp\[i-1\]\[j\].
+
+## Complexity
+
+**Time:** O(m \* n).
+
+**Space:** O(m \* n); can compress to O(n).
+
+## Solution
+
+````python
+class Solution:
+    def numDistinct(self, s: str, t: str) -> int:
+        mod = 10**9 + 7
+        m, n = len(s), len(t)
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+        for i in range(m + 1):
+            dp[i][0] = 1
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                dp[i][j] = dp[i - 1][j]
+                if s[i - 1] == t[j - 1]:
+                    dp[i][j] = (dp[i][j] + dp[i - 1][j - 1]) % mod
+        return dp[m][n]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.numDistinct("rabbbit", "rabbit") == 3, "Test 1 Failed"
+    print("Test 1 Passed: rabbbit -> rabbit")
+    assert sol.numDistinct("babgbag", "bag") == 5, "Test 2 Failed"
+    print("Test 2 Passed: babgbag -> bag")
+    assert sol.numDistinct("a", "a") == 1, "Test 3 Failed"
+    print("Test 3 Passed: identical single")
+    assert sol.numDistinct("a", "b") == 0, "Test 4 Failed"
+    print("Test 4 Passed: impossible")
+    assert sol.numDistinct("aaa", "aa") == 3, "Test 5 Failed"
+    print("Test 5 Passed: three ways to pick two a's")
+    print("\nAll test cases passed!")
+````

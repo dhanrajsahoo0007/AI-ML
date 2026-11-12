@@ -1,0 +1,107 @@
+---
+title: "Detect Cycle in Directed Graph using DFS"
+description: "Given a directed graph with V vertices and a list of directed edges, determine whether the graph contains a cycle (including self-loops as cycles)."
+topics: [graphs]
+group: "01. DFS"
+number: "03"
+order: 17001003000000
+status: outline
+---
+
+Given a directed graph with V vertices and a list of directed edges, determine whether the graph
+contains a cycle (including self-loops as cycles).
+
+## Examples
+
+````text
+Example 1:
+    Input: V = 4, edges = [[0,1],[1,2],[2,3],[3,1]]
+    Output: True
+Example 2:
+    Input: V = 4, edges = [[0,1],[1,2],[2,3]]
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= V, edges <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS with recursion stack (three-color / path set)
+A back edge to a vertex still on the current DFS path indicates a directed cycle.
+
+1. Build directed adjacency lists.
+2. Track visited and in\_recursion; on DFS, if neighbor is in\_recursion, cycle found.
+3. Clear in\_recursion when unwinding from u.
+
+## Complexity
+
+**Time:** O(V + E)
+
+**Space:** O(V) for arrays and recursion depth.
+
+## Original notes
+
+````text
+See also: Kahn's (BFS) style detection in `02. BFS/03. Detect Cycle in Directed Graph using BFS.py`
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def create_graph(self, V: int, edges: List[List[int]]) -> List[List[int]]:
+        adj: List[List[int]] = [[] for _ in range(V)]
+        for u, v in edges:
+            adj[u].append(v)
+        return adj
+
+    def has_cycle(self, V: int, adj: List[List[int]]) -> bool:
+        visited = [False] * V
+        in_recursion = [False] * V
+
+        def dfs(u: int) -> bool:
+            visited[u] = True
+            in_recursion[u] = True
+            for v in adj[u]:
+                if not visited[v]:
+                    if dfs(v):
+                        return True
+                elif in_recursion[v]:
+                    return True
+            in_recursion[u] = False
+            return False
+
+        for i in range(V):
+            if not visited[i] and dfs(i):
+                return True
+        return False
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    V1, e1 = 4, [[0, 1], [1, 2], [2, 3], [3, 1]]
+    assert sol.has_cycle(V1, sol.create_graph(V1, e1)) is True, "Test 1 Failed"
+    print("Test 1 Passed: directed cycle")
+    V2, e2 = 4, [[0, 1], [1, 2], [2, 3]]
+    assert sol.has_cycle(V2, sol.create_graph(V2, e2)) is False, "Test 2 Failed"
+    print("Test 2 Passed: DAG path")
+    V3, e3 = 1, [[0, 0]]
+    assert sol.has_cycle(V3, sol.create_graph(V3, e3)) is True, "Test 3 Failed"
+    print("Test 3 Passed: self-loop")
+    V4, e4 = 3, [[0, 1], [0, 2], [2, 1]]
+    assert sol.has_cycle(V4, sol.create_graph(V4, e4)) is False, "Test 4 Failed"
+    print("Test 4 Passed: diamond without cycle")
+    print("All tests passed!")
+````

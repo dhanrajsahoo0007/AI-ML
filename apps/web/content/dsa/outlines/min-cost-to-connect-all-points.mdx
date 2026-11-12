@@ -1,0 +1,238 @@
+---
+title: "Min Cost to Connect All Points"
+description: "You are given an array of integer coordinates points where points[i] = [xi, yi] represents the location of the i-th point on a 2D plane."
+topics: [graphs]
+group: "08. Minimum Spanning Tree › 01. Prim's Algorithm"
+number: "02"
+order: 17008001002000
+status: outline
+---
+
+You are given an array of integer coordinates points where points\[i\] = \[xi, yi\] represents
+the location of the i-th point on a 2D plane. The cost of connecting two points is the
+Manhattan distance between them. Return the minimum total cost to connect all points so
+that there exists exactly one simple path between every pair of points (a Minimum Spanning
+Tree of the complete graph defined by Manhattan distances).
+
+## Examples
+
+````text
+Example 1:
+    Input: points = [[0,0],[2,2],[3,10],[5,2],[7,0]]
+    Output: 20
+Example 2:
+    Input: points = [[3,12],[-2,5],[-4,1]]
+    Output: 18
+````
+
+## Constraints
+
+````text
+- 1 <= len(points) <= 1000
+- -10^6 <= xi, yi <= 10^6
+- All pairs are distinct.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Minimum Spanning Tree — Prim on implicit complete graph (dense graph O(n^2) Prim)
+
+1. Treat each point as a node; edge weights are Manhattan distances (not stored explicitly).
+2. Run Prim: maintain min distance from the growing tree to each unvisited node.
+3. Each iteration pick the unvisited node with smallest connection cost to the tree;
+update other distances using the new node.
+4. Sum connection costs for n-1 expansions (first node costs 0).
+
+## Complexity
+
+**Time:** O(n^2) — no heap needed; each of n steps scans n vertices (better than
+O(n^2 log n) edge generation for dense complete graphs).
+
+**Space:** O(n) — visited flag and distance array.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    # --- Original teaching notes (why Prim here) ---
+    # Complete graph has Theta(n^2) edges; building + sorting for Kruskal is heavy.
+    # Prim only needs the cheapest edge from the frontier to OUTSIDE — computable on the fly
+    # by scanning all unvisited points when a new vertex joins the tree.
+    #
+    #   points:  A *--------* B
+    #              \        /
+    #               \      /
+    #                 * C
+    #
+    # Manhattan |Ax-Bx|+|Ay-By| is the edge weight between any two "cities".
+    # --- end notes ---
+
+    def minCostConnectPoints(self, points: List[List[int]]) -> int:
+        n = len(points)
+        if n <= 1:
+            return 0
+
+        visited = [False] * n
+        dist = [10**18] * n
+        dist[0] = 0
+        total = 0
+
+        for _ in range(n):
+            u = -1
+            best = 10**18
+            for i in range(n):
+                if not visited[i] and dist[i] < best:
+                    best = dist[i]
+                    u = i
+
+            visited[u] = True
+            total += dist[u]
+
+            ux, uy = points[u]
+            for v in range(n):
+                if not visited[v]:
+                    vx, vy = points[v]
+                    d = abs(ux - vx) + abs(uy - vy)
+                    if d < dist[v]:
+                        dist[v] = d
+
+        return total
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    p1 = [[0, 0], [2, 2], [3, 10], [5, 2], [7, 0]]
+    assert sol.minCostConnectPoints(p1) == 20, "Test 1 Failed"
+    print("Test 1 Passed: five-point example")
+
+    p2 = [[3, 12], [-2, 5], [-4, 1]]
+    assert sol.minCostConnectPoints(p2) == 18, "Test 2 Failed"
+    print("Test 2 Passed: three-point example")
+
+    p3 = [[0, 0]]
+    assert sol.minCostConnectPoints(p3) == 0, "Test 3 Failed"
+    print("Test 3 Passed: single point")
+
+    p4 = [[0, 0], [1, 1]]
+    assert sol.minCostConnectPoints(p4) == 2, "Test 4 Failed"
+    print("Test 4 Passed: two points")
+
+    print("\nAll tests passed!")
+````
+
+## Another version
+
+From 17. Graphs/08. Minimum Spanning Tree/02. Kruskal's Algorithm.
+
+### Approach
+
+**Pattern:** Minimum Spanning Tree — Kruskal with explicit O(n^2) edges + DSU
+
+1. Enumerate every pair (i, j), i &lt; j, with weight = Manhattan distance.
+2. Sort edges by weight ascending.
+3. Kruskal: union endpoints until n-1 edges are accepted.
+
+### Complexity
+
+**Time:** O(n^2 log(n^2)) = O(n^2 log n) for sorting Theta(n^2) edges.
+
+**Space:** O(n^2) edge list plus O(n) DSU.
+
+Note: For this dense problem, the O(n^2) Prim implementation in the sibling folder is
+asymptotically faster; Kruskal is kept here to mirror the filename and show both classics.
+
+### Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    # --- Original teaching notes ---
+    # Kruskal's global ordering vs Prim's local frontier — same MST weight on any connected
+    # undirected weighted graph (cut property / cycle property).
+    # --- end notes ---
+
+    class _DSU:
+        __slots__ = ("parent", "rank")
+
+        def __init__(self, n: int) -> None:
+            self.parent = list(range(n))
+            self.rank = [0] * n
+
+        def find(self, x: int) -> int:
+            while self.parent[x] != x:
+                self.parent[x] = self.parent[self.parent[x]]
+                x = self.parent[x]
+            return x
+
+        def union(self, a: int, b: int) -> bool:
+            ra, rb = self.find(a), self.find(b)
+            if ra == rb:
+                return False
+            if self.rank[ra] < self.rank[rb]:
+                ra, rb = rb, ra
+            self.parent[rb] = ra
+            if self.rank[ra] == self.rank[rb]:
+                self.rank[ra] += 1
+            return True
+
+    def minCostConnectPoints(self, points: List[List[int]]) -> int:
+        n = len(points)
+        if n <= 1:
+            return 0
+
+        edge_list: List[tuple] = []
+        for i in range(n):
+            xi, yi = points[i]
+            for j in range(i + 1, n):
+                xj, yj = points[j]
+                w = abs(xi - xj) + abs(yi - yj)
+                edge_list.append((w, i, j))
+
+        edge_list.sort(key=lambda t: t[0])
+        dsu = self._DSU(n)
+        total = 0
+        used = 0
+
+        for w, u, v in edge_list:
+            if dsu.union(u, v):
+                total += w
+                used += 1
+                if used == n - 1:
+                    break
+
+        return total
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    p1 = [[0, 0], [2, 2], [3, 10], [5, 2], [7, 0]]
+    assert sol.minCostConnectPoints(p1) == 20, "Test 1 Failed"
+    print("Test 1 Passed: Kruskal matches Prim total on sample 1")
+
+    p2 = [[3, 12], [-2, 5], [-4, 1]]
+    assert sol.minCostConnectPoints(p2) == 18, "Test 2 Failed"
+    print("Test 2 Passed: sample 2")
+
+    p3 = [[0, 0]]
+    assert sol.minCostConnectPoints(p3) == 0, "Test 3 Failed"
+    print("Test 3 Passed: single point")
+
+    p4 = [[0, 0], [1, 1]]
+    assert sol.minCostConnectPoints(p4) == 2, "Test 4 Failed"
+    print("Test 4 Passed: two points")
+
+    print("\nAll tests passed!")
+````

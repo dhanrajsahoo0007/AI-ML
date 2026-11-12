@@ -1,0 +1,128 @@
+---
+title: "Minimum Depth of BT"
+description: "Given a binary tree, find the minimum depth: the number of nodes along the shortest path from the root down to the nearest leaf (a node with no children)."
+topics: [trees]
+group: "01. Binary Tree › 03. Tree Properties and Characteristics"
+number: "02"
+order: 14001003002000
+status: outline
+---
+
+Given a binary tree, find the minimum depth: the number of nodes along the shortest path from the root
+down to the nearest leaf (a node with no children).
+
+## Examples
+
+````text
+Example 1:
+    Input: root = [3,9,20,None,None,15,7]
+    Output: 2
+Example 2:
+    Input: root = [2,None,3,None,4,None,5,None,6]
+    Output: 5
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 10^5].
+- Node values fit in 32-bit signed integers.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** BFS (shortest path) or DFS with one-child handling
+BFS stops at the first leaf; DFS must not treat a missing child as depth 0.
+
+1. BFS: expand by level; return depth when a node without children is popped.
+2. Recursive: if only one child exists, ignore the missing side; else 1 + min of subtree depths.
+
+## Complexity
+
+**Time:** O(n) worst case for both.
+
+**Space:** O(w) for BFS, O(h) for DFS stack.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given a binary tree, find its minimum depth. The minimum depth is the number of nodes along the shortest path from the root node down to the nearest leaf node.
+
+Note: A leaf is a node with no children.
+
+## Solution
+
+````python
+from collections import deque
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def minDepth(self, root: Optional[TreeNode]) -> int:
+        if not root:
+            return 0
+        q: deque[TreeNode] = deque([root])
+        depth = 1
+        while q:
+            for _ in range(len(q)):
+                node = q.popleft()
+                if node.left is None and node.right is None:
+                    return depth
+                if node.left:
+                    q.append(node.left)
+                if node.right:
+                    q.append(node.right)
+            depth += 1
+        return depth
+
+    def minDepthRecursive(self, root: Optional[TreeNode]) -> int:
+        if not root:
+            return 0
+        if root.left is None:
+            return 1 + self.minDepthRecursive(root.right)
+        if root.right is None:
+            return 1 + self.minDepthRecursive(root.left)
+        return 1 + min(self.minDepthRecursive(root.left), self.minDepthRecursive(root.right))
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    t1 = build_tree_from_level_order([3, 9, 20, None, None, 15, 7])
+    assert sol.minDepth(t1) == 2
+    assert sol.minDepthRecursive(t1) == 2
+    t2 = build_tree_from_level_order([2, None, 3, None, 4, None, 5, None, 6])
+    assert sol.minDepth(t2) == 5
+    assert sol.minDepthRecursive(t2) == 5
+    assert sol.minDepth(None) == 0
+    assert sol.minDepth(TreeNode(1)) == 1
+    print("\nAll test cases passed!")
+````

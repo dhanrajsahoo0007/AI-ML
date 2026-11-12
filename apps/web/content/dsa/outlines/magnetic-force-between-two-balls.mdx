@@ -1,0 +1,143 @@
+---
+title: "Magnetic Force Between Two Balls"
+description: "Basket positions are distinct integers."
+topics: [binary-search]
+group: "07. Maximum of Minimum | Minimum of Maximum"
+number: "02"
+order: 8007002000000
+status: outline
+---
+
+Basket positions are distinct integers. Place m balls into baskets to maximize the minimum absolute
+distance between any two balls.
+
+## Examples
+
+````text
+Example 1:
+Input: position = [1, 2, 3, 4, 7], m = 3
+Output: 3
+````
+
+## Constraints
+
+````text
+- 2 <= m <= len(position) <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer (maximize minimum gap)
+Same greedy feasibility as aggressive cows after sorting positions.
+
+1. Sort positions.
+2. Binary search minimum force F; greedily place balls starting from the smallest index.
+
+## Complexity
+
+**Time:** O(n log W) - W = spread of positions.
+
+**Space:** O(1) - Greedy placement only.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Problem Statement: Magnetic Force Between Two Balls
+
+    In the universe Earth C-137, Rick discovered a special form of magnetic force between two balls if they are put in his new invented basket. 
+    Rick has n empty baskets, the ith basket is at position[i], Morty has m balls and needs to distribute the balls into the baskets 
+    such that the minimum magnetic force between any two balls is maximum.
+    Rick stated that magnetic force between two different balls at positions x and y is |x - y|.
+    
+    Given the integer array position and the integer m, return the required force.
+
+Examples:
+    Example 1:
+    Input: position = [1,2,3,4,7], m = 3
+    Output: 3
+    Explanation: Distributing the 3 balls into baskets 1, 4 and 7 will make the magnetic force between ball pairs [3, 3, 6]. 
+                 The minimum magnetic force is 3. We cannot achieve a larger minimum magnetic force than 3.
+
+    Example 2:
+    Input: position = [5,4,3,2,1,1000000000], m = 2
+    Output: 999999999
+    Explanation: We can use baskets 1 and 1000000000.
+
+Constraints:
+    * n == position.length
+    * 2 <= n <= 10^5
+    * 1 <= position[i] <= 10^9
+    * All integers in position are distinct.
+    * 2 <= m <= position.length
+
+Solution Explanation:
+    The solution uses a binary search approach to find the maximum minimum force:
+
+    1. We define a helper function 'possible_to_place' that checks if it's possible to place m balls with a given minimum force.
+    2. In the main function 'maxDistance', we perform a binary search on the possible range of forces:
+       - The minimum possible force is 1.
+       - The maximum possible force is the difference between the largest and smallest positions.
+    3. We keep narrowing down our search range until we find the maximum valid force.
+
+Time Complexity: O(n * log(max_position)), where n is the number of positions.
+    - Sorting the positions takes O(n log n) time.
+    - The binary search takes O(log(max_position)) iterations.
+    - In each iteration, we call the 'possible_to_place' function which takes O(n) time.
+
+Space Complexity: O(1), as we only use a constant amount of extra space (not counting the input array).
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxDistance(self, position: List[int], m: int) -> int:
+        position.sort()
+
+        def can(force: int) -> bool:
+            prev = position[0]
+            cnt = 1
+            for x in position[1:]:
+                if x - prev >= force:
+                    cnt += 1
+                    prev = x
+                if cnt == m:
+                    return True
+            return False
+
+        lo, hi = 1, position[-1] - position[0]
+        best = 0
+        while lo <= hi:
+            mid = lo + (hi - lo) // 2
+            if can(mid):
+                best = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.maxDistance([1, 2, 3, 4, 7], 3) == 3, "Test 1 Failed"
+    print("Test 1 Passed: three balls")
+    assert sol.maxDistance([5, 4, 3, 2, 1, 1000000000], 2) == 999999999, "Test 2 Failed"
+    print("Test 2 Passed: extreme endpoints")
+    assert sol.maxDistance([1, 10, 20, 30], 2) == 29, "Test 3 Failed"
+    print("Test 3 Passed: two balls only")
+    assert sol.maxDistance([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 4) == 3, "Test 4 Failed"
+    print("Test 4 Passed: evenly spaced")
+    assert sol.maxDistance([2, 4, 6, 8], 3) == 2, "Test 5 Failed"
+    print("Test 5 Passed: arithmetic progression three balls")
+    print("\nAll test cases passed!")
+````

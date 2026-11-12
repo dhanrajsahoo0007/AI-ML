@@ -1,0 +1,141 @@
+---
+title: "Find Kth Largest Number in a Stream"
+description: "Process a stream via getNum() until None; maintain unique values and return the k-th largest unique number (1 = largest)."
+topics: [design-questions]
+number: "10"
+order: 25010000000000
+status: outline
+---
+
+Process a stream via getNum() until None; maintain unique values and return the k-th largest
+unique number (1 = largest). Duplicates are ignored for ranking.
+
+## Examples
+
+````text
+Example 1:
+Stream [5,1,5,2,3,2,4], k=3 -> third largest among uniques {1..5} is 3.
+````
+
+## Constraints
+
+````text
+- At least k distinct values appear in the stream.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Min-heap of size k on distinct largest values
+Track seen duplicates; min-heap holds the k largest distinct integers seen so far.
+
+1. Maintain a set of seen numbers and a min-heap of at most k distinct largest values.
+2. For each new unique x, push/replace in heap to keep k largest.
+3. After stream ends, heap\[0\] is the k-th largest unique.
+
+## Complexity
+
+**Time:** O(N log k) for N stream numbers.
+
+**Space:** O(U) for unique values in worst case plus O(k) heap.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Finding the k-th Largest Unique Number in a Large Stream
+Write a program that processes a stream of integers, which is too large to fit into memory all at once. The task is to find the k-th largest unique number in this stream. You can access the stream through the function getNum(), which retrieves the next number from the stream each time it's called. Additionally, you can use isNum(value) to check if a specific number exists in the data structure that you've used to store seen numbers.
+Details:
+Assume getNum() returns None when the stream has ended.
+The stream may contain duplicate numbers, 
+but the task is to find the k-th largest unique number.
+It is guaranteed that there are at least k unique numbers
+in the stream.
+Example Function Signatures:
+python
+def getNum() -> int:
+    # Implementation hidden; called to fetch the next number from the stream
+def isNum(value: int) -> bool:
+    # Implementation hidden; checks if the number exists in your data structure
+Example Test Cases:
+Input Stream: [5, 1, 5, 2, 3, 2, 4] , k=3
+Expected Output: 3
+Explanation: The unique numbers sorted are [1, 2, 3, 4, 5]. The 3rd largest is 3.
+Input Stream: [10, 20, 20, 10, 30] , k=2
+Expected Output: 20
+Explanation: The unique numbers sorted are [10, 20, 30]. The 2nd largest is 20.
+Input Stream: [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5] , k=4
+Expected Output: 3
+Explanation: The unique numbers sorted are [1, 2, 3, 4, 5, 6, 9]. The 4th largest is 3.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import Callable, Iterable, List, Optional, Set, Tuple
+
+
+class KthLargestUniqueStream:
+    def __init__(self, stream: Iterable[int], k: int) -> None:
+        self._it = iter(stream)
+        self._k = k
+        self._seen: Set[int] = set()
+        self._heap: List[int] = []
+
+    def _process_all(self) -> int:
+        while True:
+            x = next(self._it, None)
+            if x is None:
+                break
+            if x in self._seen:
+                continue
+            self._seen.add(x)
+            if len(self._heap) < self._k:
+                heapq.heappush(self._heap, x)
+            elif x > self._heap[0]:
+                heapq.heapreplace(self._heap, x)
+        if len(self._heap) < self._k:
+            raise ValueError("stream did not contain k unique values")
+        return self._heap[0]
+
+    @classmethod
+    def from_list(cls, values: List[int], k: int) -> int:
+        return cls(iter(values), k)._process_all()
+
+
+def make_stream_api(values: List[int]) -> Tuple[Callable[[], Optional[int]], Callable[[int], bool]]:
+    it = iter(values)
+    stored: Set[int] = set()
+
+    def getNum() -> Optional[int]:
+        try:
+            v = next(it)
+            stored.add(v)
+            return v
+        except StopIteration:
+            return None
+
+    def isNum(value: int) -> bool:
+        return value in stored
+
+    return getNum, isNum
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    assert KthLargestUniqueStream.from_list([5, 1, 5, 2, 3, 2, 4], 3) == 3
+    assert KthLargestUniqueStream.from_list([10, 20, 20, 10, 30], 2) == 20
+    assert KthLargestUniqueStream.from_list([3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5], 4) == 4
+
+    getNum, isNum = make_stream_api([7, 7, 8])
+    assert getNum() == 7 and isNum(7)
+    assert getNum() == 7 and getNum() == 8 and isNum(8)
+    assert getNum() is None
+
+    print("\nAll test cases passed!")
+````

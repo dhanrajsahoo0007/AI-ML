@@ -1,0 +1,109 @@
+---
+title: "Sort Characters by Frequency"
+description: "Given a string s, sort it in decreasing order based on character frequency."
+topics: [heaps]
+group: "07. Heap with Other DS Pattern"
+number: "04"
+order: 10007004000000
+status: outline
+---
+
+Given a string s, sort it in decreasing order based on character frequency.
+Return the sorted string.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "tree"
+    Output: "eert"
+
+Example 2:
+    Input: s = "cccaaa"
+    Output: "aaaccc" or "cccaaa"
+
+Example 3:
+    Input: s = "Aabb"
+    Output: "bbAa"
+````
+
+## Constraints
+
+````text
+- 1 <= s.length <= 5 * 10^5
+- s consists of uppercase/lowercase English letters and digits.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap with Other DS (Heap + Hash Map)
+Count frequencies with a hash map, then use a max-heap to extract
+characters in decreasing frequency order.
+
+1. Build a frequency map.
+2. Push (-freq, char) into a max-heap.
+3. Pop each entry and append char \* freq to result.
+
+## Complexity
+
+**Time:** O(n log k) where k is number of unique characters
+
+**Space:** O(n)
+
+## Original notes
+
+````text
+Original notes (restored):
+LC 451: max-heap on `(-freq, char)` then expand `char * freq` into the answer. The archived file also
+compared alternatives — `Counter` + `sorted` one-liner, bucket sort by frequency, and ASCII-array tricks —
+noting trade-offs (streaming vs bounded alphabet vs simplicity). This template keeps the canonical heap
+version for clarity.
+````
+
+## Solution
+
+````python
+import heapq
+from collections import Counter
+
+
+class Solution:
+    def frequencySort(self, s: str) -> str:
+        freq = Counter(s)
+        heap = [(-count, char) for char, count in freq.items()]
+        heapq.heapify(heap)
+
+        result = []
+        while heap:
+            count, char = heapq.heappop(heap)
+            result.append(char * (-count))
+
+        return "".join(result)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Basic case
+    result = sol.frequencySort("tree")
+    assert result.count('e') == 2 and result[:2] == "ee" or result[-2:] == "ee", "Test 1 check"
+    assert sorted(result) == sorted("tree"), "Test 1 Failed"
+    print(f"Test 1 Passed: 'tree' -> '{result}'")
+
+    # Test Case 2: Equal frequencies
+    result = sol.frequencySort("cccaaa")
+    assert result in ("cccaaa", "aaaccc"), "Test 2 Failed"
+    print(f"Test 2 Passed: 'cccaaa' -> '{result}'")
+
+    # Test Case 3: Case sensitive
+    result = sol.frequencySort("Aabb")
+    assert result[0:2] == "bb", "Test 3 Failed"
+    print(f"Test 3 Passed: 'Aabb' -> '{result}'")
+
+    print("\nAll test cases passed!")
+````

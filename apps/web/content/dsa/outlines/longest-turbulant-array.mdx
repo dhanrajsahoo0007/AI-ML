@@ -1,0 +1,95 @@
+---
+title: "Longest Turbulant Array"
+description: "Given an integer array arr, return the length of the longest turbulent subarray, where comparisons between adjacent elements strictly alternate between > and…"
+topics: [greedy]
+group: "05. Kadane's Algorithm"
+number: "03"
+order: 18005003000000
+status: outline
+---
+
+Given an integer array arr, return the length of the longest turbulent subarray, where comparisons
+between adjacent elements strictly alternate between &gt; and &lt; (equality breaks turbulence).
+
+## Examples
+
+````text
+Example 1:
+    Input: arr = [9,4,2,10,7,8,8,1,9]
+    Output: 5
+
+Example 2:
+    Input: arr = [4,8,12,16]
+    Output: 2
+
+Example 3:
+    Input: arr = [100]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= arr.length <= 4 * 10^4
+- 0 <= arr[i] <= 10^9
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy / Dynamic Subarray Lengths
+Track the length of the longest subarray ending at the prior step that ends going up or going down.
+
+1. Maintain inc (length ending with an increase) and dec (length ending with a decrease).
+2. For each adjacent pair, update inc/dec from the complementary chain or reset on ties.
+3. Answer is the maximum inc or dec encountered.
+
+## Complexity
+
+**Time:** O(n) - One pass.
+
+**Space:** O(1) - Constant counters.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxTurbulenceSize(self, arr: List[int]) -> int:
+        if len(arr) < 2:
+            return len(arr)
+        inc = dec = 1
+        best = 1
+        for i in range(1, len(arr)):
+            if arr[i] > arr[i - 1]:
+                inc = dec + 1
+                dec = 1
+            elif arr[i] < arr[i - 1]:
+                dec = inc + 1
+                inc = 1
+            else:
+                inc = dec = 1
+            best = max(best, inc, dec)
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.maxTurbulenceSize([9, 4, 2, 10, 7, 8, 8, 1, 9]) == 5, "Test 1 Failed"
+    print("Test 1 Passed: peak pattern")
+    assert sol.maxTurbulenceSize([4, 8, 12, 16]) == 2, "Test 2 Failed"
+    print("Test 2 Passed: monotone pairs")
+    assert sol.maxTurbulenceSize([100]) == 1, "Test 3 Failed"
+    print("Test 3 Passed: single element")
+    assert sol.maxTurbulenceSize([1, 1, 1, 1, 1]) == 1, "Test 4 Failed"
+    print("Test 4 Passed: all equal")
+    assert sol.maxTurbulenceSize([1, 2, 1, 2, 1, 2, 1]) == 7, "Test 5 Failed"
+    print("Test 5 Passed: perfect alternation")
+    print("\nAll test cases passed!")
+````

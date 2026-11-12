@@ -1,0 +1,89 @@
+---
+title: "Replace Element to the right"
+description: "Given an array arr, replace every element arr[i] with the greatest element among indices strictly to its right."
+topics: [arrays]
+group: "01. Basic Array Manipulation"
+number: "02"
+order: 1001002000000
+status: outline
+---
+
+Given an array arr, replace every element arr\[i\] with the greatest element among indices
+strictly to its right. Replace the last element with -1.
+
+## Examples
+
+````text
+Example 1:
+    Input: arr = [17, 18, 5, 4, 6, 1]
+    Output: [18, 6, 6, 6, 1, -1]
+Example 2:
+    Input: arr = [400]
+    Output: [-1]
+````
+
+## Constraints
+
+````text
+- 1 <= len(arr) <= 10^4
+- 1 <= arr[i] <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Right-to-left scan / suffix maximum
+Track the best value seen to the right while walking from the end of the array.
+
+1. Initialize max\_right to -1.
+2. Iterate indices from n - 1 down to 0.
+3. For each index, set arr\[i\] to max\_right, then update max\_right with max(max\_right, old arr\[i\]).
+4. Return arr (modified in place per problem convention).
+
+## Complexity
+
+**Time:** O(n) - One pass over the array.
+
+**Space:** O(1) - Only a few scalar variables besides the reused input array.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def replaceElements(self, arr: List[int]) -> List[int]:
+        n = len(arr)
+        max_right = -1
+        # Walk right to left: each position becomes the max seen strictly to its right.
+        for i in range(n - 1, -1, -1):
+            current = arr[i]  # keep old value before overwriting
+            arr[i] = max_right  # replace with best on the right (starts as -1 for last index)
+            max_right = max(max_right, current)  # suffix max moves left with us
+        return arr
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    a1 = [17, 18, 5, 4, 6, 1]
+    assert sol.replaceElements(a1) == [18, 6, 6, 6, 1, -1], "Test 1 Failed"
+    print("Test 1 Passed: sample from statement")
+    a2 = [400]
+    assert sol.replaceElements(a2) == [-1], "Test 2 Failed"
+    print("Test 2 Passed: single element")
+    a3 = [1, 2, 3, 4]
+    assert sol.replaceElements(a3) == [4, 4, 4, -1], "Test 3 Failed"
+    print("Test 3 Passed: strictly increasing")
+    a4 = [9, 8, 7]
+    assert sol.replaceElements(a4) == [8, 7, -1], "Test 4 Failed"
+    print("Test 4 Passed: decreasing")
+    a5 = [5, 5, 5]
+    assert sol.replaceElements(a5) == [5, 5, -1], "Test 5 Failed"
+    print("Test 5 Passed: ties")
+    print("\nAll test cases passed!")
+````

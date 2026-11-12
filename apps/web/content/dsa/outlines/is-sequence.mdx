@@ -1,0 +1,80 @@
+---
+title: "Is Sequence"
+description: "Given strings s and t, return True if s is a subsequence of t: you can delete zero or more characters from t without reordering the rest so the result equals…"
+topics: [arrays]
+group: "07. Sequence and Permutation Problems"
+number: "01"
+order: 1007001000000
+status: outline
+---
+
+Given strings s and t, return True if s is a subsequence of t: you can delete zero or more
+characters from t without reordering the rest so the result equals s.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "abc", t = "ahbgdc"
+    Output: True
+Example 2:
+    Input: s = "axc", t = "ahbgdc"
+    Output: False
+````
+
+## Constraints
+
+````text
+- 0 <= len(s) <= 100
+- 0 <= len(t) <= 10^4
+- s and t consist only of lowercase English letters.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two pointers on ordered scan
+Advance through t, matching characters of s in order.
+
+1. Set i = 0 for s and j = 0 for t.
+2. While i &lt; len(s) and j &lt; len(t), if s\[i\] == t\[j\], increment i; always increment j.
+3. Return True iff i reached len(s).
+
+## Complexity
+
+**Time:** O(len(t)) - j walks at most the whole t; i never moves backward.
+
+**Space:** O(1) - Two indices only.
+
+## Solution
+
+````python
+class Solution:
+    def isSubsequence(self, s: str, t: str) -> bool:
+        i = 0  # index in s (pattern we need in order)
+        j = 0  # index in t (text we scan forward only)
+        while i < len(s) and j < len(t):
+            if s[i] == t[j]:
+                i += 1  # matched next required character
+            j += 1  # always advance through t
+        return i == len(s)  # matched all of s
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.isSubsequence("abc", "ahbgdc") is True, "Test 1 Failed"
+    print("Test 1 Passed: interleaved match")
+    assert sol.isSubsequence("axc", "ahbgdc") is False, "Test 2 Failed"
+    print("Test 2 Passed: missing character order")
+    assert sol.isSubsequence("", "anything") is True, "Test 3 Failed"
+    print("Test 3 Passed: empty subsequence")
+    assert sol.isSubsequence("abc", "abc") is True, "Test 4 Failed"
+    print("Test 4 Passed: exact equality")
+    assert sol.isSubsequence("ace", "abcde") is True, "Test 5 Failed"
+    print("Test 5 Passed: non-contiguous subsequence")
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,86 @@
+---
+title: "Divide two integers without using mul,div,mod operator"
+description: "Divide two integers truncating toward zero without using *, /, or // on the operands (implement using bit shifts)."
+topics: [bit-manipulation]
+group: "02. Leetcode and Alphabet 150"
+number: "07"
+order: 22002007000000
+status: outline
+---
+
+Divide two integers truncating toward zero without using \*, /, or // on the
+operands (implement using bit shifts).
+
+## Examples
+
+````text
+Example 1:
+    Input: dividend = 10, divisor = 3
+    Output: 3
+Example 2:
+    Input: dividend = 7, divisor = -3
+    Output: -2
+````
+
+## Constraints
+
+````text
+- -2^31 <= dividend, divisor <= 2^31 - 1
+- divisor != 0
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary long division with bit shifts
+Repeatedly subtract the largest shifted divisor while preserving sign rules.
+
+1. Work with absolute values and track the result sign separately.
+2. Double divisor with shifts until it exceeds dividend, accumulate quotient bits.
+3. Clamp to 32-bit signed range.
+
+## Complexity
+
+**Time:** O(log^2 N) typical for this approach
+
+**Space:** O(1)
+
+## Solution
+
+````python
+INT_MAX = 2**31 - 1
+INT_MIN = -(2**31)
+
+
+class Solution:
+    def divide(self, dividend: int, divisor: int) -> int:
+        if dividend == INT_MIN and divisor == -1:
+            return INT_MAX
+        sign = -1 if (dividend < 0) ^ (divisor < 0) else 1
+        a, b = abs(dividend), abs(divisor)
+        ans = 0
+        while a >= b:
+            cur = b
+            mul = 1
+            while a >= (cur << 1):
+                cur <<= 1
+                mul <<= 1
+            a -= cur
+            ans += mul
+        ans *= sign
+        return min(max(ans, INT_MIN), INT_MAX)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.divide(10, 3) == 3, "Test 1 Failed"
+    assert sol.divide(7, -3) == -2, "Test 2 Failed"
+    assert sol.divide(1, 1) == 1, "Test 3 Failed"
+    assert sol.divide(-2147483648, -1) == 2147483647, "Test 4 Failed"
+    assert sol.divide(100, 7) == 14, "Test 5 Failed"
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,100 @@
+---
+title: "Count Occurrence of Anagram"
+description: "Given a text string and a pattern string, count how many contiguous substrings of text have the same length as pattern and are anagrams of pattern (same mult…"
+topics: [sliding-window]
+group: "01. Fixed Size"
+number: "05"
+order: 7001005000000
+status: outline
+---
+
+Given a text string and a pattern string, count how many contiguous substrings of
+text have the same length as pattern and are anagrams of pattern (same multiset of letters).
+
+## Examples
+
+````text
+Example 1:
+    Input: text = "forxxorfxdofr", pattern = "for"
+    Output: 3
+Example 2:
+    Input: text = "aabaabaa", pattern = "aaba"
+    Output: 4
+````
+
+## Constraints
+
+````text
+- pattern is non-empty and no longer than text when counting is meaningful.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Fixed-size sliding window with frequency matching
+Maintain letter counts for the current window and compare them to the pattern counts.
+
+1. Build Counter(pattern) and Counter of the first len(pattern) characters in text.
+2. If they match, increment the answer.
+3. Slide: update counts for the outgoing and incoming characters and compare again.
+
+## Complexity
+
+**Time:** O(n \* alphabet) - Sliding n windows; each Counter comparison is O(alphabet).
+
+**Space:** O(alphabet) - Counters store at most the distinct characters in the window.
+
+## Solution
+
+````python
+from collections import Counter
+
+
+class Solution:
+    def countAnagramOccurrences(self, text: str, pattern: str) -> int:
+        k = len(pattern)
+        n = len(text)
+        if k == 0 or n < k:
+            return 0
+
+        need = Counter(pattern)
+        window = Counter(text[:k])
+        ans = 1 if window == need else 0
+
+        for j in range(k, n):
+            left = text[j - k]
+            window[left] -= 1
+            if window[left] == 0:
+                del window[left]
+
+            window[text[j]] += 1
+
+            if window == need:
+                ans += 1
+
+        return ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.countAnagramOccurrences("forxxorfxdofr", "for") == 3, "Test 1 Failed"
+    print("Test 1 Passed: overlapping anagrams")
+
+    assert sol.countAnagramOccurrences("aabaabaa", "aaba") == 4, "Test 2 Failed"
+    print("Test 2 Passed: overlapping windows with same multiset")
+
+    assert sol.countAnagramOccurrences("cbaebabacd", "abc") == 2, "Test 3 Failed"
+    print("Test 3 Passed: permutations of abc")
+
+    assert sol.countAnagramOccurrences("aaaaaa", "aa") == 5, "Test 4 Failed"
+    print("Test 4 Passed: identical letters")
+
+    assert sol.countAnagramOccurrences("abc", "abcd") == 0, "Test 5 Failed"
+    print("Test 5 Passed: pattern longer than text")
+
+    print("\nAll test cases passed!")
+````

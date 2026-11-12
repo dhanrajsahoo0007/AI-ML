@@ -1,0 +1,80 @@
+---
+title: "Sum of All Odd Length Subarrays"
+description: "Return the sum of all subarrays of arr that have odd length."
+topics: [prefix-sum]
+group: "02. Advanced Prefix Sum Applications"
+number: "03"
+order: 2002003000000
+status: outline
+---
+
+Return the sum of all subarrays of arr that have odd length.
+
+## Examples
+
+````text
+Example 1:
+Input: arr = [1, 4, 2, 5, 3]
+Output: 58
+````
+
+## Constraints
+
+````text
+- 1 <= len(arr) <= 100
+- 1 <= arr[i] <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum
+Each arr\[i\] appears in one subarray of each odd center distance; count in O(1) per index.
+
+1. For each index i, count odd-length subarrays containing i using combinatorics on left/right sizes.
+2. Alternatively, prefix-sum all odd-start windows — O(n^2) is fine for n &lt;= 100.
+3. Here: for each start, extend by steps of 2 in length and add window sum via running sum.
+
+## Complexity
+
+**Time:** O(n^2) - acceptable for n &lt;= 100.
+
+**Space:** O(1) beyond input.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def sumOddLengthSubarrays(self, arr: List[int]) -> int:
+        n = len(arr)
+        total = 0
+        prefix = [0] * (n + 1)
+        for i in range(n):
+            prefix[i + 1] = prefix[i] + arr[i]
+        for i in range(n):
+            for j in range(i, n, 2):
+                total += prefix[j + 1] - prefix[i]
+        return total
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.sumOddLengthSubarrays([1, 4, 2, 5, 3]) == 58, "Test 1 Failed"
+    print("Test 1 Passed: sample")
+    assert sol.sumOddLengthSubarrays([1, 2]) == 3, "Test 2 Failed"
+    print("Test 2 Passed: length two")
+    assert sol.sumOddLengthSubarrays([10]) == 10, "Test 3 Failed"
+    print("Test 3 Passed: single element")
+    assert sol.sumOddLengthSubarrays([1, 2, 3, 4, 5, 6]) == 98, "Test 4 Failed"
+    print("Test 4 Passed: length six")
+    assert sol.sumOddLengthSubarrays([2, 2, 2]) == 12, "Test 5 Failed"
+    print("Test 5 Passed: equal small array")
+    print("\nAll test cases passed!")
+````

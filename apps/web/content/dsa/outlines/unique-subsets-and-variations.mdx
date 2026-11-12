@@ -1,0 +1,111 @@
+---
+title: "Unique subsets and Variations"
+description: "Generate all unique subsequences of a string (set of strings, empty subsequence included) using recursion with include/exclude branching."
+topics: [recursion]
+group: "04. Subset Generation Problems"
+number: "02"
+order: 11004002000000
+status: outline
+---
+
+Generate all unique subsequences of a string (set of strings, empty subsequence
+included) using recursion with include/exclude branching.
+
+## Examples
+
+````text
+Example 1:
+    Input: "abc"
+    Output sorted: ["", "a", "ab", "abc", "ac", "b", "bc", "c"]
+
+Example 2:
+    Input: "aa"
+    Output sorted: ["", "a", "aa"]
+````
+
+## Constraints
+
+````text
+- Characters are lowercase letters in tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Include / exclude with deduplication
+Same recursion as powerset generation, but store results in a set to collapse duplicates
+arising from repeated characters.
+
+1. DFS over indices extending or skipping the current character.
+2. At leaves insert the built string into a set.
+3. Return sorted list for deterministic tests.
+
+## Complexity
+
+**Time:** O(n \* 2^n) in worst case before dedup
+
+**Space:** O(2^n) distinct strings plus O(n) stack
+
+## Solution
+
+````python
+from typing import List, Set
+
+
+class Solution:
+    def unique_subsequences(self, s: str) -> List[str]:
+        found: Set[str] = set()
+
+        def dfs(index: int, built: str) -> None:
+            if index == len(s):
+                found.add(built)
+                return
+            dfs(index + 1, built + s[index])
+            dfs(index + 1, built)
+
+        dfs(0, "")
+        return sorted(found)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.unique_subsequences("abc") == [
+        "",
+        "a",
+        "ab",
+        "abc",
+        "ac",
+        "b",
+        "bc",
+        "c",
+    ], "Test 1 Failed"
+    assert sol.unique_subsequences("aa") == ["", "a", "aa"], "Test 2 Failed"
+    assert sol.unique_subsequences("aab") == [
+        "",
+        "a",
+        "aa",
+        "aab",
+        "ab",
+        "b",
+    ], "Test 3 Failed"
+    assert sol.unique_subsequences("") == [""], "Test 4 Failed"
+    assert sol.unique_subsequences("aba") == [
+        "",
+        "a",
+        "aa",
+        "ab",
+        "aba",
+        "b",
+        "ba",
+    ], "Test 5 Failed"
+    print("Test 1 Passed: abc full set")
+    print("Test 2 Passed: aa collapse")
+    print("Test 3 Passed: aab ordering")
+    print("Test 4 Passed: empty string")
+    print("Test 5 Passed: aba cross duplicates")
+    print("\nAll test cases passed!")
+````

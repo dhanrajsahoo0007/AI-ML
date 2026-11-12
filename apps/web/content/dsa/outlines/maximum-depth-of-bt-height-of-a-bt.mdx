@@ -1,0 +1,145 @@
+---
+title: "Maximum Depth of BT - Height of a BT"
+description: "Given the root of a binary tree, return its maximum depth (number of nodes along the longest root-to-leaf path)."
+topics: [trees]
+group: "01. Binary Tree › 03. Tree Properties and Characteristics"
+number: "01"
+order: 14001003001000
+status: outline
+---
+
+Given the root of a binary tree, return its maximum depth (number of nodes along the longest root-to-leaf path).
+
+## Examples
+
+````text
+Example 1:
+    Input: root = [3,9,20,None,None,15,7]
+    Output: 3
+Example 2:
+    Input: root = [1,None,2]
+    Output: 2
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 10^4].
+- Node values fit in 32-bit signed integers.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS / BFS
+Depth is 1 plus the max of subtree depths, or count levels in level-order traversal.
+
+1. Recursive: if node is None return 0; else return 1 + max(depth left, depth right).
+2. Iterative DFS: stack of (node, depth), track max depth.
+3. BFS: count levels while draining each frontier.
+
+## Complexity
+
+**Time:** O(n) for each variant.
+
+**Space:** O(h) recursion or stack, O(w) for BFS queue worst case.
+
+Restored (original notes, diagrams, and walkthrough):
+The archived scratch file demonstrated the same problem three different ways (separate \`Solution\`
+stubs in one file—handy for learning, not valid as a single importable module):
+
+Recursive DFS:
+If the subtree is empty return 0; otherwise return 1 + max(depth(left), depth(right)).
+
+Iterative DFS:
+Keep a stack of (node, depth). Pop, track the maximum depth seen, push children with depth+1.
+
+BFS / level order:
+Use a deque, drain the current frontier with an inner loop (\`for \_ in range(len(queue))\`),
+enqueue children, and count how many levels you complete—level count equals max depth for a
+non-empty tree.
+
+## Solution
+
+````python
+from collections import deque
+from typing import List, Optional, Tuple
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def maxDepth(self, root: Optional[TreeNode]) -> int:
+        if not root:
+            return 0
+        return 1 + max(self.maxDepth(root.left), self.maxDepth(root.right))
+
+    def maxDepthIterative(self, root: Optional[TreeNode]) -> int:
+        if not root:
+            return 0
+        stack: List[Tuple[Optional[TreeNode], int]] = [(root, 1)]
+        best = 0
+        while stack:
+            node, depth = stack.pop()
+            if node:
+                best = max(best, depth)
+                stack.append((node.left, depth + 1))
+                stack.append((node.right, depth + 1))
+        return best
+
+    def maxDepthBfs(self, root: Optional[TreeNode]) -> int:
+        if not root:
+            return 0
+        q: deque[TreeNode] = deque([root])
+        level = 0
+        while q:
+            for _ in range(len(q)):
+                node = q.popleft()
+                if node.left:
+                    q.append(node.left)
+                if node.right:
+                    q.append(node.right)
+            level += 1
+        return level
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    t1 = build_tree_from_level_order([3, 9, 20, None, None, 15, 7])
+    assert sol.maxDepth(t1) == 3
+    assert sol.maxDepthIterative(t1) == 3
+    assert sol.maxDepthBfs(t1) == 3
+    t2 = build_tree_from_level_order([1, None, 2])
+    assert sol.maxDepth(t2) == 2
+    assert sol.maxDepth(None) == 0
+    assert sol.maxDepth(TreeNode(1)) == 1
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,108 @@
+---
+title: "Longest Duplicate Substring"
+description: "Given a string s, return any longest substring that appears at least twice in s."
+topics: [strings]
+group: "07. Rabin-Karp | Rolling hash"
+number: "02"
+order: 5007002000000
+status: outline
+---
+
+Given a string s, return any longest substring that appears at least twice in s.
+If none exists, return the empty string.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "banana"
+    Output: "ana"
+
+Example 2:
+    Input: s = "abcd"
+    Output: ""
+````
+
+## Constraints
+
+````text
+- 2 <= len(s) <= 3 * 10^4
+- s contains only lowercase English letters.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary search on length plus rolling hash
+Monotonic feasibility: if a duplicate of length L exists, one exists for any shorter length.
+
+1. Map characters to integers and binary search the answer length L in \[0, n-1\].
+2. For a candidate L, slide a polynomial hash window; on hash collision verify with str slice.
+3. Keep the best starting index for the largest feasible L.
+
+## Complexity
+
+**Time:** O(n log n) - Binary search times O(n) rolling hash pass.
+
+**Space:** O(n) - Hash map for each candidate length.
+
+## Solution
+
+````python
+class Solution:
+    def longestDupSubstring(self, s: str) -> str:
+        n = len(s)
+        nums = [ord(c) - ord("a") for c in s]
+        base = 26
+        mod = 2**63 - 1
+
+        def find_start(length: int) -> int:
+            if length == 0:
+                return 0
+            h = 0
+            for i in range(length):
+                h = (h * base + nums[i]) % mod
+            seen: dict[int, int] = {h: 0}
+            mult = pow(base, length - 1, mod)
+            for start in range(1, n - length + 1):
+                h = (h - nums[start - 1] * mult) % mod
+                h = (h * base + nums[start + length - 1]) % mod
+                if h in seen:
+                    prev = seen[h]
+                    if s[prev : prev + length] == s[start : start + length]:
+                        return start
+                else:
+                    seen[h] = start
+            return -1
+
+        lo, hi = 0, n
+        best_start = 0
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            pos = find_start(mid)
+            if pos != -1:
+                lo = mid
+                best_start = pos
+            else:
+                hi = mid - 1
+        return s[best_start : best_start + lo] if lo else ""
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.longestDupSubstring("banana") == "ana", "Test 1 Failed"
+    print("Test 1 Passed: banana")
+    assert sol.longestDupSubstring("abcd") == "", "Test 2 Failed"
+    print("Test 2 Passed: unique")
+    assert sol.longestDupSubstring("aabaabaacca") == "aabaa", "Test 3 Failed"
+    print("Test 3 Passed: aabaabaacca")
+    assert sol.longestDupSubstring("aa") == "a", "Test 4 Failed"
+    print("Test 4 Passed: length two")
+    assert sol.longestDupSubstring("abcabc") == "abc", "Test 5 Failed"
+    print("Test 5 Passed: repeated block")
+    print("\nAll test cases passed!")
+````

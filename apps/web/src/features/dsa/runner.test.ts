@@ -7,8 +7,9 @@ import { PYODIDE_BASE_URL, PYODIDE_VERSION } from "./runner/protocol";
 import { loadDsaItems, readHiddenTestsForValidation, readPublicTests, validProblems } from "./source";
 
 // The in-browser runner's pure parts: value comparison, the JavaScript harness (run here in Node, in the
-// browser inside a Web Worker) and the network lockdown. Reference solutions are run against every public and
-// hidden case, which also proves the test data in content/ is consistent.
+// browser inside a Web Worker) and the network lockdown. JavaScript reference solutions are run against every
+// public and hidden case of the problems that offer JavaScript, which also proves the test data in content/ is
+// consistent. Python-only problems are covered by reference.test.ts (Python references, run in Pyodide).
 
 const REFERENCE: Record<string, string> = {
   "Two Sum": `function twoSum(nums, target) {
@@ -43,7 +44,7 @@ const REFERENCE: Record<string, string> = {
 };
 
 const section = sectionOfKind("problems");
-const problems = validProblems(loadDsaItems(section));
+const jsProblems = validProblems(loadDsaItems(section)).filter((p) => p.fm.languages.includes("javascript"));
 
 describe("sameValue", () => {
   it("compares JSON data structurally", () => {
@@ -121,8 +122,8 @@ describe("runJsCase", () => {
   });
 });
 
-describe("reference solutions against the content's test files", () => {
-  for (const p of problems) {
+describe("JavaScript reference solutions against the content's test files", () => {
+  for (const p of jsProblems) {
     it(`${p.fm.title}: passes every public and hidden case`, async () => {
       const code = REFERENCE[p.fm.title];
       expect(code, `reference solution for ${p.fm.title}`).toBeDefined();

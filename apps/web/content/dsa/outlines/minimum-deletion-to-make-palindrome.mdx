@@ -1,0 +1,80 @@
+---
+title: "Minimum Deletion to make Palindrome"
+description: "Given string s, return the minimum deletions needed so the result is a palindrome."
+topics: [dynamic-programming]
+group: "05. Longest Palindromic Subsequence"
+number: "02"
+order: 20005002000000
+status: outline
+---
+
+Given string s, return the minimum deletions needed so the result is a palindrome.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "aebcbda"
+    Output: 2
+Example 2:
+    Input: s = "a"
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Complement of LPS
+Keep longest palindromic subsequence; delete the rest: len(s) - LPS(s).
+
+1. Compute LPS length with interval DP.
+2. Return n - LPS.
+
+## Complexity
+
+**Time:** O(n^2).
+
+**Space:** O(n^2).
+
+## Solution
+
+````python
+class Solution:
+    def minDeletions(self, s: str) -> int:
+        n = len(s)
+        dp = [[0] * n for _ in range(n)]
+        for i in range(n - 1, -1, -1):
+            dp[i][i] = 1
+            for j in range(i + 1, n):
+                if s[i] == s[j]:
+                    inner = dp[i + 1][j - 1] if i + 1 <= j - 1 else 0
+                    dp[i][j] = 2 + inner
+                else:
+                    dp[i][j] = max(dp[i + 1][j], dp[i][j - 1])
+        return n - dp[0][n - 1]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minDeletions("aebcbda") == 2, "Test 1 Failed"
+    print("Test 1 Passed: remove e and d")
+    assert sol.minDeletions("a") == 0, "Test 2 Failed"
+    print("Test 2 Passed: already palindrome")
+    assert sol.minDeletions("ab") == 1, "Test 3 Failed"
+    print("Test 3 Passed: delete one char")
+    assert sol.minDeletions("zzazz") == 0, "Test 4 Failed"
+    print("Test 4 Passed: palindrome no deletes")
+    assert sol.minDeletions("leetcode") == 5, "Test 5 Failed"
+    print("Test 5 Passed: keep ete or similar")
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,61 @@
+---
+title: "Stone Game VII"
+description: "Remove ends accumulating score equal to sum of remaining stones; maximize score difference."
+topics: [dynamic-programming]
+group: "11. Game Strategy"
+number: "03"
+order: 20011003000000
+status: outline
+---
+
+Remove ends accumulating score equal to sum of remaining stones; maximize score difference.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Minimax interval DP on sums.
+
+## Complexity
+
+**Time:** O(n^2).
+
+## Solution
+
+````python
+from functools import lru_cache
+from typing import List
+
+
+class Solution:
+    def stoneGameVII(self, stones: List[int]) -> int:
+        pre = [0]
+        for x in stones:
+            pre.append(pre[-1] + x)
+
+        def seg(i: int, j: int) -> int:
+            return pre[j + 1] - pre[i]
+
+        @lru_cache(None)
+        def dfs(i: int, j: int) -> int:
+            if i == j:
+                return 0
+            left = seg(i + 1, j) - dfs(i + 1, j)
+            right = seg(i, j - 1) - dfs(i, j - 1)
+            return max(left, right)
+
+        return dfs(0, len(stones) - 1)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == '__main__':
+    sol = Solution()
+    assert sol.stoneGameVII([5, 3, 1, 4, 2]) == 6
+    assert sol.stoneGameVII([7, 90, 5, 1, 100, 10, 10]) == 101
+    assert sol.stoneGameVII([1, 2]) == 2
+    assert sol.stoneGameVII([1, 2, 3]) == 2
+    assert sol.stoneGameVII([10, 20, 30]) == 20
+    print('\nAll test cases passed!')
+````

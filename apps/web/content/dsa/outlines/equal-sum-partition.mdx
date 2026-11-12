@@ -1,0 +1,88 @@
+---
+title: "Equal sum partition"
+description: "Partition nums into two non-empty subsets with equal sum if possible."
+topics: [dynamic-programming]
+group: "02. 0-1 Knapsack"
+number: "05"
+order: 20002005000000
+status: outline
+---
+
+Partition nums into two non-empty subsets with equal sum if possible.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 5, 11, 5]
+    Output: True
+Example 2:
+    Input: nums = [1, 2, 3, 5]
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 200
+- 1 <= nums[i] <= 100
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Subset sum on half total
+Total must be even; find subset with sum total//2.
+
+1. If sum(nums) odd return False.
+2. Run subset-sum DP to target = sum//2 with correct base: dp\[i\]\[0\]=True.
+
+## Complexity
+
+**Time:** O(n \* sum).
+
+**Space:** O(n \* sum).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def canPartition(self, nums: List[int]) -> bool:
+        s = sum(nums)
+        if s % 2:
+            return False
+        target = s // 2
+        n = len(nums)
+        dp = [[False] * (target + 1) for _ in range(n + 1)]
+        for i in range(n + 1):
+            dp[i][0] = True
+        for i in range(1, n + 1):
+            for j in range(1, target + 1):
+                if nums[i - 1] <= j:
+                    dp[i][j] = dp[i - 1][j - nums[i - 1]] or dp[i - 1][j]
+                else:
+                    dp[i][j] = dp[i - 1][j]
+        return dp[n][target]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.canPartition([1, 5, 11, 5]) is True, "Test 1 Failed"
+    print("Test 1 Passed: equal partition exists")
+    assert sol.canPartition([1, 2, 3, 5]) is False, "Test 2 Failed"
+    print("Test 2 Passed: odd partition impossible")
+    assert sol.canPartition([2, 2, 2, 2]) is True, "Test 3 Failed"
+    print("Test 3 Passed: four twos")
+    assert sol.canPartition([1, 1]) is True, "Test 4 Failed"
+    print("Test 4 Passed: two ones")
+    assert sol.canPartition([1, 2, 5]) is False, "Test 5 Failed"
+    print("Test 5 Passed: total 8 cannot split into two fours")
+    print("\nAll test cases passed!")
+````

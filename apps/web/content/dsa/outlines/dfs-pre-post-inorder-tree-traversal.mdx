@@ -1,0 +1,138 @@
+---
+title: "DFS (pre,post,Inorder) tree_traversal"
+description: "Given the root of a binary tree, return preorder, inorder, and postorder traversals (depth-first traversals) as lists of node values."
+topics: [trees]
+group: "01. Binary Tree › 01. Basic Tree Traversals"
+number: "01"
+order: 14001001001000
+status: outline
+---
+
+Given the root of a binary tree, return preorder, inorder, and postorder traversals
+(depth-first traversals) as lists of node values.
+
+## Examples
+
+````text
+Example 1:
+Input: root = [1,2,3,4,5,None,None,8,9,None,10]
+Output: preorder [1,2,4,8,9,5,10,3], inorder [8,4,9,2,5,10,1,3],
+    postorder [8,9,4,10,5,2,3,1]
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 10^4].
+- Node values fit in 32-bit signed integers.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS / recursion
+Push the recursion stack along one branch until a base case, then unwind.
+
+1. Preorder: visit node, then left subtree, then right subtree.
+2. Inorder: left subtree, then node, then right subtree.
+3. Postorder: left subtree, right subtree, then node.
+
+## Complexity
+
+**Time:** O(n) - each node is visited a constant number of times per traversal.
+
+**Space:** O(h) - recursion stack depth h (O(n) skewed, O(log n) balanced).
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    root = TreeNode(values[0])
+    queue: List[TreeNode] = [root]
+    i = 1
+    while queue and i < len(values):
+        node = queue.pop(0)
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            queue.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            queue.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def preorderTraversal(self, root: Optional[TreeNode]) -> List[int]:
+        out: List[int] = []
+
+        def dfs(node: Optional[TreeNode]) -> None:
+            if not node:
+                return
+            out.append(node.val)
+            dfs(node.left)
+            dfs(node.right)
+
+        dfs(root)
+        return out
+
+    def inorderTraversal(self, root: Optional[TreeNode]) -> List[int]:
+        out: List[int] = []
+
+        def dfs(node: Optional[TreeNode]) -> None:
+            if not node:
+                return
+            dfs(node.left)
+            out.append(node.val)
+            dfs(node.right)
+
+        dfs(root)
+        return out
+
+    def postorderTraversal(self, root: Optional[TreeNode]) -> List[int]:
+        out: List[int] = []
+
+        def dfs(node: Optional[TreeNode]) -> None:
+            if not node:
+                return
+            dfs(node.left)
+            dfs(node.right)
+            out.append(node.val)
+
+        dfs(root)
+        return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    root = build_tree_from_level_order([1, 2, 3, 4, 5, None, None, 8, 9, None, 10])
+    assert root is not None
+    assert sol.preorderTraversal(root) == [1, 2, 4, 8, 9, 5, 10, 3]
+    assert sol.inorderTraversal(root) == [8, 4, 9, 2, 5, 10, 1, 3]
+    assert sol.postorderTraversal(root) == [8, 9, 4, 10, 5, 2, 3, 1]
+    assert sol.preorderTraversal(None) == []
+    assert sol.inorderTraversal(None) == []
+    assert sol.postorderTraversal(None) == []
+    single = TreeNode(42)
+    assert sol.preorderTraversal(single) == [42]
+    assert sol.inorderTraversal(single) == [42]
+    assert sol.postorderTraversal(single) == [42]
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,117 @@
+---
+title: "Course Schedule III"
+description: "There are n courses with [duration, lastDay]."
+topics: [heaps]
+group: "04. Greedy with Heap Pattern"
+number: "04"
+order: 10004004000000
+status: outline
+---
+
+There are n courses with \[duration, lastDay\]. You start on day 1 and cannot
+take two courses simultaneously. Return the maximum number of courses you can take.
+
+## Examples
+
+````text
+Example 1:
+    Input: courses = [[100,200],[200,1300],[1000,1250],[2000,3200]]
+    Output: 3
+
+Example 2:
+    Input: courses = [[1,2]]
+    Output: 1
+
+Example 3:
+    Input: courses = [[3,2],[4,3]]
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 1 <= courses.length <= 10^4
+- 1 <= duration_i, lastDay_i <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy with Heap
+Sort by deadline. Greedily take each course if possible. If adding a course
+exceeds its deadline, swap it with the longest course taken so far if beneficial.
+
+1. Sort courses by lastDay.
+2. Use a max-heap to track durations of taken courses.
+3. For each course: if it fits within deadline, take it.
+Otherwise, if its duration &lt; longest taken, swap them.
+4. Return heap size (number of courses taken).
+
+## Complexity
+
+**Time:** O(n log n)
+
+**Space:** O(n) for the heap
+
+## Original notes
+
+````text
+Original notes (restored):
+LC 630 style greedy + proof sketch: sort by `lastDay` so we always respect earliest deadlines first.
+Keep a max-heap of chosen durations; if a new course overflows its deadline, try evicting the
+longest course already taken (only helps if the new course is shorter). Step table from the
+old file walks `[[100,200],[200,1300],[1000,1250],[2000,3200]]` heap states until 3 courses fit.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def scheduleCourse(self, courses: List[List[int]]) -> int:
+        courses.sort(key=lambda x: x[1])
+
+        duration_heap = []
+        current_time = 0
+
+        for duration, last_day in courses:
+            if current_time + duration <= last_day:
+                current_time += duration
+                heapq.heappush(duration_heap, -duration)
+            elif duration_heap and -duration_heap[0] > duration:
+                # Swap out a longer earlier course for this shorter one to free timeline slack.
+                longest = -heapq.heappop(duration_heap)
+                current_time = current_time - longest + duration
+                heapq.heappush(duration_heap, -duration)
+
+        return len(duration_heap)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Basic case
+    assert sol.scheduleCourse([[100, 200], [200, 1300], [1000, 1250], [2000, 3200]]) == 3, "Test 1 Failed"
+    print("Test 1 Passed: -> 3 courses")
+
+    # Test Case 2: Single course
+    assert sol.scheduleCourse([[1, 2]]) == 1, "Test 2 Failed"
+    print("Test 2 Passed: single course -> 1")
+
+    # Test Case 3: Impossible courses
+    assert sol.scheduleCourse([[3, 2], [4, 3]]) == 0, "Test 3 Failed"
+    print("Test 3 Passed: impossible -> 0")
+
+    # Test Case 4: All can be taken
+    assert sol.scheduleCourse([[1, 2], [2, 5], [1, 7]]) == 3, "Test 4 Failed"
+    print("Test 4 Passed: all fit -> 3")
+
+    print("\nAll test cases passed!")
+````

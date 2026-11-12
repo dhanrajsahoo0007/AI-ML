@@ -1,0 +1,125 @@
+---
+title: "Koko Eating Bananas"
+description: "Koko eats from one pile per hour at speed k (bananas per hour)."
+topics: [binary-search]
+group: "06. Minimum | Maximum"
+number: "02"
+order: 8006002000000
+status: outline
+---
+
+Koko eats from one pile per hour at speed k (bananas per hour). Return the minimum integer k so
+that all piles are finished within h hours.
+
+## Examples
+
+````text
+Example 1:
+Input: piles = [3, 6, 7, 11], h = 8
+Output: 4
+````
+
+## Constraints
+
+````text
+- 1 <= len(piles) <= 10^4
+- len(piles) <= h <= 10^9
+- 1 <= piles[i] <= 10^9
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer
+Feasibility at speed k is monotone; minimize k with sum\_i ceil(piles\[i\]/k) &lt;= h.
+
+1. Binary search k in \[1, max(piles)\].
+2. Hours needed = sum of ceil(pile / k); compare to h.
+
+## Complexity
+
+**Time:** O(n log M) - M = max pile size.
+
+**Space:** O(1) - Iterative feasibility check.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement: Koko Eating Bananas
+\*  Find the Smallest Divisor Given a Threshold
+
+Koko loves to eat bananas. There are n piles of bananas, the ith pile has piles\[i\] bananas. The guards have gone and will come back in h hours.
+Koko can decide her bananas-per-hour eating speed of k. Each hour, she chooses some pile of bananas and eats k bananas from that pile. If the pile has less than k bananas, she eats all of them instead and will not eat any more bananas during this hour.
+Koko likes to eat slowly but still wants to finish eating all the bananas before the guards return.
+
+Return the minimum integer k such that she can eat all the bananas within h hours.
+
+Example 1:
+Input: piles = \[3,6,7,11\], h = 8
+Output: 4
+
+Example 2:
+Input: piles = \[30,11,23,4,20\], h = 5
+Output: 30
+
+Example 3:
+Input: piles = \[30,11,23,4,20\], h = 6
+Output: 23
+
+Constraints:
+\* 1 &lt;= piles.length &lt;= 10^4
+\* piles.length &lt;= h &lt;= 10^9
+\* 1 &lt;= piles\[i\] &lt;= 10^9
+
+Solution Explanation:
+The solution uses a binary search approach to find the minimum eating speed:
+
+1. We define a helper function 'can\_eat\_all' that checks if Koko can eat all bananas within h hours at a given eating speed.
+2. In the main function 'min\_eating\_speed', we perform a binary search on the possible eating speeds:
+- The minimum possible speed is 1.
+- The maximum possible speed is the maximum number of bananas in any pile.
+3. We keep narrowing down our search range until we find the minimum speed that allows Koko to eat all bananas within h hours.
+
+Time Complexity: O(n \* log(max(piles))), where n is the length of the piles array.
+- The binary search takes O(log(max(piles))) iterations.
+- In each iteration, we call the 'can\_eat\_all' function which takes O(n) time.
+
+Space Complexity: O(1), as we only use a constant amount of extra space.
+
+## Solution
+
+````python
+import math
+from typing import List
+
+
+class Solution:
+    def minEatingSpeed(self, piles: List[int], h: int) -> int:
+        def hours(speed: int) -> int:
+            return sum(math.ceil(p / speed) for p in piles)
+
+        lo, hi = 1, max(piles)
+        while lo < hi:
+            mid = lo + (hi - lo) // 2
+            if hours(mid) <= h:
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minEatingSpeed([3, 6, 7, 11], 8) == 4, "Test 1 Failed"
+    print("Test 1 Passed: classic piles")
+    assert sol.minEatingSpeed([30, 11, 23, 4, 20], 5) == 30, "Test 2 Failed"
+    print("Test 2 Passed: tight deadline")
+    assert sol.minEatingSpeed([30, 11, 23, 4, 20], 6) == 23, "Test 3 Failed"
+    print("Test 3 Passed: slightly more time")
+    assert sol.minEatingSpeed([312884470], 312884469) == 2, "Test 4 Failed"
+    print("Test 4 Passed: huge pile edge")
+    assert sol.minEatingSpeed([1], 1) == 1, "Test 5 Failed"
+    print("Test 5 Passed: single pile")
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,87 @@
+---
+title: "Minimize Max Distance to Gas Station"
+description: "Gas stations are at sorted positions on a line."
+topics: [binary-search]
+group: "07. Maximum of Minimum | Minimum of Maximum"
+number: "05"
+order: 8007005000000
+status: outline
+---
+
+Gas stations are at sorted positions on a line. Add k more stations anywhere on the line to minimize
+the largest distance between adjacent stations along the line. Return that minimized maximum distance
+(as a float with leetcode-style precision).
+
+## Examples
+
+````text
+Example 1:
+Input: stations = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], k = 9
+Output: 0.5
+````
+
+## Constraints
+
+````text
+- 10 <= len(stations) <= 1000
+- 0 <= stations[i] <= 10^6
+- 1 <= k <= 10^6
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Real Answer
+For trial distance d, stations needed on a gap g is ceil(g / d) - 1.
+
+1. Binary search d in (0, max\_gap\] with fixed iterations or epsilon.
+2. If total new stations for d is &lt;= k, d is feasible (try smaller).
+
+## Complexity
+
+**Time:** O(n \* ITER) - ITER \~ 50–60 for double precision.
+
+**Space:** O(1) - Only gap iteration state.
+
+## Solution
+
+````python
+import math
+from typing import List
+
+
+class Solution:
+    def minmaxGasDist(self, stations: List[int], k: int) -> float:
+        gaps = [stations[i + 1] - stations[i] for i in range(len(stations) - 1)]
+        lo, hi = 1e-9, max(gaps)
+
+        def need(d: float) -> int:
+            return sum(max(0, math.ceil(g / d) - 1) for g in gaps)
+
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            if need(mid) <= k:
+                hi = mid
+            else:
+                lo = mid
+        return hi
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert abs(sol.minmaxGasDist([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 9) - 0.5) < 1e-5, "Test 1 Failed"
+    print("Test 1 Passed: evenly split unit gaps")
+    assert abs(sol.minmaxGasDist([23, 24, 36, 39, 46, 56, 57, 65, 84, 98], 1) - 14.0) < 1e-5, "Test 2 Failed"
+    print("Test 2 Passed: single extra station")
+    assert sol.minmaxGasDist([10, 19, 25, 27, 56, 63, 70, 87, 96, 97], 3) < 20.0, "Test 3 Failed"
+    print("Test 3 Passed: small k sanity bound")
+    assert sol.minmaxGasDist([1, 10000000], 1000000) > 0, "Test 4 Failed"
+    print("Test 4 Passed: huge outer gap")
+    assert sol.minmaxGasDist(list(range(0, 101, 10)), 10) < 15.0, "Test 5 Failed"
+    print("Test 5 Passed: coarse stations")
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,209 @@
+---
+title: "Random Pick with Weight"
+description: "Given positive weights w[i], pick index i with probability w[i] / sum(w)."
+topics: [binary-search]
+group: "10. Maths"
+number: "05"
+order: 8010005000000
+status: outline
+---
+
+Given positive weights w\[i\], pick index i with probability w\[i\] / sum(w). pickIndex is called many times.
+
+## Examples
+
+````text
+Example 1:
+Input: w = [1, 3]
+Output: index 1 roughly three times as often as index 0
+````
+
+## Constraints
+
+````text
+- 1 <= len(w) <= 10^4
+- pickIndex at most 10^4 times
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum + Binary Search
+Build cumulative weights; draw uniform t in \[0, total) and find first cumulative strictly greater than t.
+
+1. \_\_init\_\_ builds cumulative list.
+2. pickIndex draws random uniform and binary searches cumulative array.
+
+## Complexity
+
+**Time:** O(n) init, O(log n) per pick.
+
+**Space:** O(n) - Prefix storage.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement: Random Pick with Weight
+
+You are given a 0-indexed array of positive integers w where w\[i\] describes the weight of the ith index.
+You need to implement the function pickIndex(), which randomly picks an index in the range \[0, w.length - 1\] (inclusive) and returns it.
+The probability of picking an index i is w\[i\] / sum(w).
+
+For example, if w = \[1, 3\], the probability of picking index 0 is 1 / (1 + 3) = 0.25 (i.e., 25%),
+and the probability of picking index 1 is 3 / (1 + 3) = 0.75 (i.e., 75%).
+
+Constraints:
+\* 1 &lt;= w.length &lt;= 10^4
+\* 1 &lt;= w\[i\] &lt;= 10^5
+\* pickIndex will be called at most 10^4 times
+
+Time Complexity:
+- \_\_init\_\_: O(n), where n is the length of the input array w.
+- pickIndex: O(log n) for each call, using binary search.
+
+Space Complexity: O(n) to store the cumulative sum array.
+
+\*\*\*This solution uses the concept of cumulative sum and binary search to efficiently implement the weighted random selection.
+
+Explanation with Example:
+Let's consider the input weights: w = \[1, 3, 2, 4\]
+
+1. Initialization (\_\_init\_\_):
+We create a cumulative sum array:
+cumulative\_sum = \[1, 4, 6, 10\]
+total\_sum = 10
+
+This array represents the cumulative weights at each index:
+- Up to index 0: 1
+- Up to index 1: 1 + 3 = 4
+- Up to index 2: 1 + 3 + 2 = 6
+- Up to index 3: 1 + 3 + 2 + 4 = 10
+
+2. Picking an Index (pickIndex):
+When we call pickIndex(), here's what happens:
+
+a. Generate a random number between 0 and total\_sum (10 in this case).
+Let's say we get 7.2.
+
+b. Use binary search to find where 7.2 would fit in the cumulative\_sum array:
+- It's greater than 6 (index 2)
+- It's less than or equal to 10 (index 3)
+Therefore, we return index 3.
+
+This process ensures that:
+- Index 0 is returned if the random number is &lt;= 1  (1/10 chance)
+- Index 1 is returned if the random number is &gt; 1 and &lt;= 4  (3/10 chance)
+- Index 2 is returned if the random number is &gt; 4 and &lt;= 6  (2/10 chance)
+- Index 3 is returned if the random number is &gt; 6 and &lt;= 10 (4/10 chance)
+
+These probabilities correspond to the weights in the original array.
+
+## Solution
+
+````python
+import random
+from typing import List
+
+
+class Solution:
+    def __init__(self, w: List[int]) -> None:
+        self.pref: List[int] = []
+        s = 0
+        for x in w:
+            s += x
+            self.pref.append(s)
+        self.total = s
+
+    def pickIndex(self) -> int:
+        target = self.total * random.random()
+        lo, hi = 0, len(self.pref) - 1
+        while lo < hi:
+            mid = lo + (hi - lo) // 2
+            if self.pref[mid] > target:
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution([1, 3, 2, 4])
+    picks = [sol.pickIndex() for _ in range(4000)]
+    assert picks.count(0) + picks.count(1) + picks.count(2) + picks.count(3) == 4000, "Test 1 Failed"
+    print("Test 1 Passed: mass preserved")
+    assert 500 < picks.count(3) < 2000, "Test 2 Failed"
+    print("Test 2 Passed: heaviest index frequent")
+    s2 = Solution([10])
+    assert s2.pickIndex() == 0, "Test 3 Failed"
+    print("Test 3 Passed: single weight")
+    s3 = Solution([1, 1])
+    assert set(s3.pickIndex() for _ in range(50)) == {0, 1}, "Test 4 Failed"
+    print("Test 4 Passed: fair coin over time")
+    s4 = Solution([100, 1])
+    assert s4.pickIndex() in (0, 1), "Test 5 Failed"
+    print("Test 5 Passed: skewed binary")
+    print("\nAll test cases passed!")
+````
+
+## Another version
+
+From 02. Prefix Sum/06. Binary Search and Prefix Sum.
+
+### Approach
+
+**Pattern:** Prefix Sum + Binary Search
+Build cumulative weights and map a uniform draw in \[1, total\] to the first bucket.
+
+1. Store prefix sums of w.
+2. Draw target uniformly from 1..total inclusive.
+3. Return bisect\_left(prefix, target).
+
+### Complexity
+
+**Time:** O(n) preprocessing, O(log n) per pick.
+
+**Space:** O(n) for prefix sums.
+
+### Solution
+
+````python
+import bisect
+import random
+from typing import List
+
+
+class Solution:
+    def __init__(self, w: List[int]) -> None:
+        self._prefix: List[int] = []
+        s = 0
+        for x in w:
+            s += x
+            self._prefix.append(s)
+
+    def index_for_target(self, target: int) -> int:
+        return bisect.bisect_left(self._prefix, target)
+
+    def pickIndex(self) -> int:
+        return self.index_for_target(random.randint(1, self._prefix[-1]))
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution([1, 3])
+    assert sol.index_for_target(1) == 0, "Test 1 Failed"
+    print("Test 1 Passed: low roll maps to first weight")
+    assert sol.index_for_target(2) == 1, "Test 2 Failed"
+    print("Test 2 Passed: boundary into second bucket")
+    assert sol.index_for_target(4) == 1, "Test 3 Failed"
+    print("Test 3 Passed: top of range")
+    sol2 = Solution([3])
+    assert sol2.index_for_target(1) == 0 and sol2.index_for_target(3) == 0, "Test 4 Failed"
+    print("Test 4 Passed: single bucket")
+    sol3 = Solution([2, 2, 2])
+    assert sol3.index_for_target(2) == 0 and sol3.index_for_target(3) == 1 and sol3.index_for_target(6) == 2, "Test 5 Failed"
+    print("Test 5 Passed: equal weights boundaries")
+    print("\nAll test cases passed!")
+````

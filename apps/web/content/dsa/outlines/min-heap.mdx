@@ -1,0 +1,177 @@
+---
+title: "min_heap"
+description: "Implement a Min Heap data structure from scratch that supports the following operations: - heapify: Convert an array into a valid min heap - insert: Add a ne…"
+topics: [heaps]
+group: "00. Heap Fundamentals"
+order: 10000999000000
+status: outline
+---
+
+Implement a Min Heap data structure from scratch that supports the following operations:
+- heapify: Convert an array into a valid min heap
+- insert: Add a new element to the heap
+- remove: Remove and return the minimum element
+- peek: Return the minimum element without removing it
+- sift\_down: Move an element down to its correct position
+- sift\_up: Move an element up to its correct position
+
+## Examples
+
+````text
+Example 1:
+    Input: array = [5, 3, 8, 1, 2]
+    After heapify: [1, 2, 8, 5, 3] (or any valid min heap arrangement)
+
+Example 2:
+    heap.insert(4) -> heap maintains min heap property
+    heap.remove() -> returns minimum element
+    heap.peek() -> returns minimum without removing
+````
+
+## Constraints
+
+````text
+- Elements must be comparable (support < operator)
+- Heap is stored as a contiguous array
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap Fundamentals
+This is the foundational data structure upon which all heap-based algorithms are built.
+Understanding sift\_up and sift\_down is critical for all heap operations.
+
+1. Store heap as an array where for element at index i:
+- Parent is at index (i - 1) // 2
+- Left child is at index 2 \* i + 1
+- Right child is at index 2 \* i + 2
+2. Heapify uses sift\_down from the last parent to root: O(n) by Taylor series convergence
+3. Insert appends and sifts up: O(log n)
+4. Remove swaps root with last, pops, and sifts down: O(log n)
+
+## Complexity
+
+**Time:** - Build Heap (heapify): O(n) using sift\_down approach
+- Insert: O(log n)
+- Remove: O(log n)
+- Peek: O(1)
+- Sift Down / Sift Up: O(log n)
+
+**Space:** O(n) for storing n elements
+
+## Original notes
+
+````text
+Original notes (restored):
+The backed-up `min_heap.py` used the same array indexing model (parent at (i-1)//2,
+children at 2i+1 / 2i+2) and the same sift-up / sift-down loop structure as this class.
+The standardized version adds edge cases (empty heap, optional constructor input) and tests.
+````
+
+## Solution
+
+````python
+class MinHeap:
+    def __init__(self, array=None):
+        self.heap = array[:] if array else []
+        if self.heap:
+            self.heapify()
+
+    def heapify(self):
+        # Bottom-up: sift down from last parent to root — O(n) build.
+        first_parent_idx = (len(self.heap) - 2) // 2
+        for current_idx in range(first_parent_idx, -1, -1):
+            self.sift_down(current_idx, len(self.heap) - 1)
+
+    def sift_down(self, current_idx, end_idx):
+        # Compare node with smaller child and swap until heap property holds.
+        left_child_idx = current_idx * 2 + 1
+        while left_child_idx <= end_idx:
+            right_child_idx = current_idx * 2 + 2 if current_idx * 2 + 2 <= end_idx else -1
+            if right_child_idx != -1 and self.heap[right_child_idx] < self.heap[left_child_idx]:
+                idx_to_swap = right_child_idx
+            else:
+                idx_to_swap = left_child_idx
+            if self.heap[idx_to_swap] < self.heap[current_idx]:
+                self.swap(current_idx, idx_to_swap)
+                current_idx = idx_to_swap
+                left_child_idx = current_idx * 2 + 1
+            else:
+                break
+
+    def sift_up(self, current_idx):
+        parent_idx = (current_idx - 1) // 2
+        while current_idx > 0 and self.heap[current_idx] < self.heap[parent_idx]:
+            self.swap(current_idx, parent_idx)
+            current_idx = parent_idx
+            parent_idx = (current_idx - 1) // 2
+
+    def peek(self):
+        if self.heap:
+            return self.heap[0]
+        return None
+
+    def insert(self, value):
+        self.heap.append(value)
+        self.sift_up(len(self.heap) - 1)
+
+    def remove(self):
+        if not self.heap:
+            return None
+        # Classic trick: move min to end, shrink heap, sift new root down.
+        self.swap(0, len(self.heap) - 1)
+        value_to_remove = self.heap.pop()
+        if self.heap:
+            self.sift_down(0, len(self.heap) - 1)
+        return value_to_remove
+
+    def swap(self, i, j):
+        self.heap[i], self.heap[j] = self.heap[j], self.heap[i]
+
+    def __len__(self):
+        return len(self.heap)
+
+    def __repr__(self):
+        return f"MinHeap({self.heap})"
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    # Test Case 1: Heapify
+    heap = MinHeap([5, 3, 8, 1, 2])
+    assert heap.peek() == 1, "Test 1 Failed: Heapify should place minimum at root"
+    print(f"Test 1 Passed: Heapify [5,3,8,1,2] -> peek = {heap.peek()}")
+
+    # Test Case 2: Insert and peek
+    heap = MinHeap()
+    for val in [4, 2, 7, 1, 5]:
+        heap.insert(val)
+    assert heap.peek() == 1, "Test 2 Failed: Minimum should be 1"
+    print(f"Test 2 Passed: Insert [4,2,7,1,5] -> peek = {heap.peek()}")
+
+    # Test Case 3: Remove returns elements in sorted order
+    heap = MinHeap([3, 1, 4, 1, 5, 9, 2, 6])
+    sorted_result = []
+    while len(heap) > 0:
+        sorted_result.append(heap.remove())
+    assert sorted_result == sorted(sorted_result), "Test 3 Failed: Remove should return elements in ascending order"
+    print(f"Test 3 Passed: Remove in order -> {sorted_result}")
+
+    # Test Case 4: Edge case - single element
+    heap = MinHeap([42])
+    assert heap.remove() == 42, "Test 4 Failed"
+    assert heap.peek() is None, "Test 4 Failed: Empty heap peek should be None"
+    print("Test 4 Passed: Single element heap works correctly")
+
+    # Test Case 5: Edge case - empty heap
+    heap = MinHeap()
+    assert heap.remove() is None, "Test 5 Failed: Remove from empty heap should return None"
+    assert heap.peek() is None, "Test 5 Failed: Peek empty heap should be None"
+    print("Test 5 Passed: Empty heap operations return None")
+
+    print("\nAll test cases passed!")
+````

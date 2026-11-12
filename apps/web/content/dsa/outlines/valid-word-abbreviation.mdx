@@ -1,0 +1,97 @@
+---
+title: "Valid Word Abbreviation"
+description: "Given a non-empty word and an abbreviation abbr, return True if abbr correctly abbreviates word."
+topics: [strings]
+group: "03. String Comparison and Validation"
+number: "02"
+order: 5003002000000
+status: outline
+---
+
+Given a non-empty word and an abbreviation abbr, return True if abbr correctly
+abbreviates word. Numbers in abbr represent skipped characters and may not have
+leading zeros; letters must match exactly.
+
+## Examples
+
+````text
+Example 1:
+    Input: word = "internationalization", abbr = "i12iz4n"
+    Output: True
+
+Example 2:
+    Input: word = "apple", abbr = "a2e"
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= len(word) <= 20
+- 1 <= len(abbr) <= 10
+- word contains only lowercase letters; abbr has lowercase letters and digits.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two pointers with number parsing
+Walk both strings, consuming runs of digits as skip counts on word.
+
+1. Use indices i on word and j on abbr.
+2. If abbr\[j\] is a digit, parse the full integer (reject leading zero unless the number is 0).
+3. Advance i by that many characters; if i exceeds len(word), return False.
+4. If abbr\[j\] is a letter, it must equal word\[i\]; advance both.
+5. Return True iff both strings are fully consumed together.
+
+## Complexity
+
+**Time:** O(len(word) + len(abbr)) - Linear scan.
+
+**Space:** O(1) - Only index and parsed integer variables.
+
+## Solution
+
+````python
+class Solution:
+    def validWordAbbreviation(self, word: str, abbr: str) -> bool:
+        i = 0
+        j = 0
+        n, m = len(word), len(abbr)
+        while j < m:
+            if abbr[j].isdigit():
+                if abbr[j] == "0":
+                    return False
+                val = 0
+                while j < m and abbr[j].isdigit():
+                    val = val * 10 + int(abbr[j])
+                    j += 1
+                i += val
+                if i > n:
+                    return False
+            else:
+                if i >= n or word[i] != abbr[j]:
+                    return False
+                i += 1
+                j += 1
+        return i == n
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.validWordAbbreviation("internationalization", "i12iz4n") is True, "Test 1 Failed"
+    print("Test 1 Passed: i12iz4n")
+    assert sol.validWordAbbreviation("apple", "a2e") is False, "Test 2 Failed"
+    print("Test 2 Passed: a2e false")
+    assert sol.validWordAbbreviation("substitution", "s10n") is True, "Test 3 Failed"
+    print("Test 3 Passed: s10n")
+    assert sol.validWordAbbreviation("hi", "2") is True, "Test 4 Failed"
+    print("Test 4 Passed: digit covers word")
+    assert sol.validWordAbbreviation("word", "5") is False, "Test 5 Failed"
+    print("Test 5 Passed: skip exceeds length")
+    print("\nAll test cases passed!")
+````

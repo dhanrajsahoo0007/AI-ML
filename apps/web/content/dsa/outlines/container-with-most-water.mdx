@@ -1,0 +1,87 @@
+---
+title: "Container With Most Water"
+description: "Given an integer array height of length n, choose two lines together with the x-axis to form a container."
+topics: [two-pointers]
+group: "04. Water Container Problems"
+number: "02"
+order: 6004002000000
+status: outline
+---
+
+Given an integer array height of length n, choose two lines together with the x-axis to form a container.
+Return the maximum amount of water the container can store. You may not slant the container.
+
+## Examples
+
+````text
+Example 1:
+    Input: height = [1, 8, 6, 2, 5, 4, 8, 3, 7]
+    Output: 49
+Example 2:
+    Input: height = [1, 1]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- n == len(height)
+- 2 <= n <= 10^5
+- 0 <= height[i] <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Shrinking two pointers
+Always discard the shorter side because keeping it cannot increase the limiting height while width only shrinks.
+
+1. Initialize pointers at the leftmost and rightmost indices and track best area.
+2. Compute area as the minimum of the two heights times the width between them.
+3. Move the pointer at the shorter line inward to search for a potentially taller boundary.
+4. Repeat while the pointers stay apart, updating the maximum area seen.
+
+## Complexity
+
+**Time:** O(n) - Each pointer traverses the array at most once.
+
+**Space:** O(1) - Only a constant number of variables are used.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxArea(self, height: List[int]) -> int:
+        left, right = 0, len(height) - 1
+        best = 0
+        while left < right:
+            h = min(height[left], height[right])
+            best = max(best, h * (right - left))
+            if height[left] < height[right]:
+                left += 1
+            else:
+                right -= 1
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.maxArea([1, 8, 6, 2, 5, 4, 8, 3, 7]) == 49, "Test 1 Failed"
+    print("Test 1 Passed: classic mixed heights")
+    assert sol.maxArea([1, 1]) == 1, "Test 2 Failed"
+    print("Test 2 Passed: equal heights")
+    assert sol.maxArea([4, 3, 2, 1, 4]) == 16, "Test 3 Failed"
+    print("Test 3 Passed: plateau endpoints")
+    assert sol.maxArea([1, 2, 1]) == 2, "Test 4 Failed"
+    print("Test 4 Passed: single peak")
+    assert sol.maxArea([2, 3, 4, 5, 18, 17, 6]) == 17, "Test 5 Failed"
+    print("Test 5 Passed: tall inner wall ignored")
+    print("\nAll test cases passed!")
+````

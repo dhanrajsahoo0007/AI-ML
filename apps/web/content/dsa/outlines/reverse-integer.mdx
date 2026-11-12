@@ -1,0 +1,80 @@
+---
+title: "Reverse Integer"
+description: "Reverse the digits of a signed 32-bit integer x."
+topics: [bit-manipulation]
+group: "02. Leetcode and Alphabet 150"
+number: "18"
+order: 22002018000000
+status: outline
+---
+
+Reverse the digits of a signed 32-bit integer x. Return 0 if the reversed
+value overflows 32-bit signed range.
+
+## Examples
+
+````text
+Example 1:
+    Input: x = 123
+    Output: 321
+Example 2:
+    Input: x = -123
+    Output: -321
+````
+
+## Constraints
+
+````text
+- -2^31 <= x <= 2^31 - 1
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Pop/push digits with overflow check
+Repeatedly take x % 10 and update rev = rev \* 10 + digit with bounds checks.
+
+1. Track sign, work with abs(x).
+2. While x &gt; 0: pop digit; if rev would exceed INT\_MAX/10 boundary, return 0.
+3. Apply sign to result.
+
+## Complexity
+
+**Time:** O(log10 \|x\|)
+
+**Space:** O(1)
+
+## Solution
+
+````python
+INT_MAX = 2**31 - 1
+INT_MIN = -(2**31)
+
+
+class Solution:
+    def reverse(self, x: int) -> int:
+        sign = -1 if x < 0 else 1
+        x = abs(x)
+        rev = 0
+        while x:
+            d = x % 10
+            x //= 10
+            if rev > (INT_MAX - d) // 10:
+                return 0
+            rev = rev * 10 + d
+        return sign * rev
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.reverse(123) == 321, "Test 1 Failed"
+    assert sol.reverse(-123) == -321, "Test 2 Failed"
+    assert sol.reverse(120) == 21, "Test 3 Failed"
+    assert sol.reverse(1534236469) == 0, "Test 4 Failed"
+    assert sol.reverse(0) == 0, "Test 5 Failed"
+    print("\nAll test cases passed!")
+````

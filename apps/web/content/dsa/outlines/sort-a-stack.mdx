@@ -1,0 +1,107 @@
+---
+title: "Sort a Stack"
+description: "Given a list used as a stack (top at the end), sort it in ascending order using only recursive calls and stack operations (pop / append); no explicit sort bu…"
+topics: [recursion]
+group: "01. Basic Recursion Concepts"
+number: "02"
+order: 11001002000000
+status: outline
+---
+
+Given a list used as a stack (top at the end), sort it in ascending order using only
+recursive calls and stack operations (pop / append); no explicit sort built-ins.
+
+## Examples
+
+````text
+Example 1:
+Input: stack bottom -> top as [34, 3, 31, 98, 92, 23]
+Output: [3, 23, 31, 34, 92, 98]
+````
+
+## Constraints
+
+````text
+- Elements are comparable (e.g. integers)
+- Stack is represented as a list with the top at index -1
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Recursion + insert in sorted order
+Recursively sort the tail, then insert the popped top into its correct place.
+
+1. Base case: empty stack or one element is sorted.
+2. Pop the top, recursively sort the remainder.
+3. Insert the popped value using insert\_sorted so order stays ascending bottom to top.
+
+Restored notes (archived workbook):
+
+The main function sort\_stack:
+Base case: If the stack is empty or has only one element, it's already sorted, so we return it.
+Recursive case:
+We remove the top element.
+We recursively sort the remaining stack.
+We insert the removed element back into its correct position using the insert\_sorted function.
+
+The insert\_sorted function:
+Base case: If the stack is empty or the top element is smaller than the current element, we insert the element at the top.
+Recursive case:
+We remove the top element.
+We recursively insert the current element.
+We put back the removed top element.
+
+## Complexity
+
+**Time:** O(n^2) - each insert may scan the whole stack
+
+**Space:** O(n) - recursion depth
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def sort_stack(self, stack: List[int]) -> List[int]:
+        if len(stack) <= 1:
+            return stack
+        top = stack.pop()
+        self.sort_stack(stack)
+        self._insert_sorted(stack, top)
+        return stack
+
+    def _insert_sorted(self, stack: List[int], element: int) -> None:
+        if not stack or element >= stack[-1]:
+            stack.append(element)
+            return
+        top = stack.pop()
+        self._insert_sorted(stack, element)
+        stack.append(top)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    s1 = [34, 3, 31, 98, 92, 23]
+    assert sol.sort_stack(s1) == [3, 23, 31, 34, 92, 98], "Test 1 Failed"
+    s2: List[int] = []
+    assert sol.sort_stack(s2) == [], "Test 2 Failed"
+    s3 = [5]
+    assert sol.sort_stack(s3) == [5], "Test 3 Failed"
+    s4 = [2, 2, 1]
+    assert sol.sort_stack(s4) == [1, 2, 2], "Test 4 Failed"
+    s5 = [9, 8, 7, 6, 5]
+    assert sol.sort_stack(s5) == [5, 6, 7, 8, 9], "Test 5 Failed"
+    print("Test 1 Passed: mixed values")
+    print("Test 2 Passed: empty stack")
+    print("Test 3 Passed: single element")
+    print("Test 4 Passed: duplicates")
+    print("Test 5 Passed: reverse sorted")
+    print("\nAll test cases passed!")
+````

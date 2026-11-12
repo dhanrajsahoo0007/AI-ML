@@ -1,0 +1,93 @@
+---
+title: "Gas Station"
+description: "There are n gas stations in a circle."
+topics: [greedy]
+group: "01. Introduction to Greedy Algorithms"
+number: "05"
+order: 18001005000000
+status: outline
+---
+
+There are n gas stations in a circle. gas\[i\] is fuel available at station i, and cost\[i\] is fuel
+needed to travel from station i to i+1 (wrap from n-1 to 0). Starting with an empty tank at some
+station, return the starting index from which you can complete one full circuit, or -1 if impossible.
+
+## Examples
+
+````text
+Example 1:
+    Input: gas = [1,2,3,4,5], cost = [3,4,5,1,2]
+    Output: 3
+
+Example 2:
+    Input: gas = [2,3,4], cost = [3,4,3]
+    Output: -1
+
+Example 3:
+    Input: gas = [5], cost = [4]
+    Output: 0
+````
+
+## Constraints
+
+````text
+- n == len(gas) == len(cost)
+- 1 <= n <= 10^5
+- 0 <= gas[i], cost[i] <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Circuit Reset
+If total fuel covers total cost, a unique start exists; reset candidate start whenever running tank drops negative.
+
+1. If sum(gas) &lt; sum(cost), return -1.
+2. Track tank and candidate start; for each i, subtract cost\[i\] and add gas\[i+1\] conceptually as you move.
+3. Standard formulation: iterate i, tank += gas\[i\] - cost\[i\]; if tank &lt; 0, set start = i+1 and tank = 0.
+
+## Complexity
+
+**Time:** O(n) - One pass after optional O(n) sums (can combine in one pass).
+
+**Space:** O(1) - Few integers.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def canCompleteCircuit(self, gas: List[int], cost: List[int]) -> int:
+        total = 0
+        start = 0
+        tank = 0
+        for i in range(len(gas)):
+            diff = gas[i] - cost[i]
+            total += diff
+            tank += diff
+            if tank < 0:
+                start = i + 1
+                tank = 0
+        return start if total >= 0 else -1
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.canCompleteCircuit([1, 2, 3, 4, 5], [3, 4, 5, 1, 2]) == 3, "Test 1 Failed"
+    print("Test 1 Passed: start at station three")
+    assert sol.canCompleteCircuit([2, 3, 4], [3, 4, 3]) == -1, "Test 2 Failed"
+    print("Test 2 Passed: impossible circuit")
+    assert sol.canCompleteCircuit([5], [4]) == 0, "Test 3 Failed"
+    print("Test 3 Passed: single station")
+    assert sol.canCompleteCircuit([3, 1, 1], [1, 2, 2]) == 0, "Test 4 Failed"
+    print("Test 4 Passed: start at zero")
+    assert sol.canCompleteCircuit([2, 0, 0, 0, 0], [0, 1, 0, 0, 0]) == 0, "Test 5 Failed"
+    print("Test 5 Passed: plenty at start")
+    print("\nAll test cases passed!")
+````

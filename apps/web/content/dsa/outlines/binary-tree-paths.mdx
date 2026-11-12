@@ -1,0 +1,150 @@
+---
+title: "Binary Tree Paths"
+description: "Given the root of a binary tree, return all root-to-leaf paths as strings \"a->b->c\"."
+topics: [trees]
+group: "01. Binary Tree › 05. Path and Sum Problems"
+number: "01"
+order: 14001005001000
+status: outline
+---
+
+Given the root of a binary tree, return all root-to-leaf paths as strings "a-&gt;b-&gt;c".
+
+## Examples
+
+````text
+Example 1:
+    Input: root = [1,2,3,5]
+    Output: ["1->2->5","1->3"]
+Example 2:
+    Input: root = [1]
+    Output: ["1"]
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [1, 100].
+- Node values are in [-100, 100].
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS backtracking
+Walk to leaves while building a path string list; on leaf, snapshot the path.
+
+1. DFS with current path of values.
+2. At a leaf, join with "-&gt;".
+3. Pop after exploring children.
+
+## Complexity
+
+**Time:** O(n) paths length proportional to height per leaf.
+
+**Space:** O(h) recursion plus path storage.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given the root of a binary tree, collect the tree's nodes as if you were doing this:
+1. Collect all the leaf nodes.
+2. Remove all the leaf nodes.
+3. Repeat until the tree is empty.
+
+The goal is to return a list of lists, where each inner list represents the leaves collected in one round.
+
+Example 1:
+Input: root = \[1,2,3,4,5\]
+Output: \[\[4,5,3\],\[2\],\[1\]\]
+Explanation:
+1
+/ 2   3
+/ 4 5
+First round: \[4,5,3\]
+Second round: \[2\]
+Third round: \[1\]
+
+Example 2:
+Input: root = \[1\]
+Output: \[\[1\]\]
+
+Constraints:
+\* The number of nodes in the tree is in the range \[1, 100\].
+\* -100 &lt;= Node.val &lt;= 100
+
+Time Complexity: O(n), where n is the number of nodes in the tree.
+We visit each node once during the DFS traversal.
+
+Space Complexity: O(n)
+- O(n) for the result dictionary to store all nodes.
+- O(h) for the recursion stack, where h is the height of the tree (worst case O(n) for a skewed tree).
+- Overall, the space complexity is O(n).
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    from collections import deque
+
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def binaryTreePaths(self, root: Optional[TreeNode]) -> List[str]:
+        out: List[str] = []
+        path: List[str] = []
+
+        def dfs(node: Optional[TreeNode]) -> None:
+            if not node:
+                return
+            path.append(str(node.val))
+            if node.left is None and node.right is None:
+                out.append("->".join(path))
+            else:
+                dfs(node.left)
+                dfs(node.right)
+            path.pop()
+
+        dfs(root)
+        return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    t1 = build_tree_from_level_order([1, 2, 3, 5])
+    assert sorted(sol.binaryTreePaths(t1)) == sorted(["1->2->5", "1->3"])
+    t2 = TreeNode(1)
+    assert sol.binaryTreePaths(t2) == ["1"]
+    assert sol.binaryTreePaths(None) == []
+    t3 = build_tree_from_level_order([1, 2, None, 3])
+    assert sol.binaryTreePaths(t3) == ["1->2->3"]
+    print("\nAll test cases passed!")
+````

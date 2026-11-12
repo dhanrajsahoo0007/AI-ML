@@ -1,0 +1,100 @@
+---
+title: "Remove middle element stack"
+description: "Remove the middle element from a stack represented as a list (top at the end) using recursion only—no index-based middle removal without recursion."
+topics: [recursion]
+group: "01. Basic Recursion Concepts"
+number: "03"
+order: 11001003000000
+status: outline
+---
+
+Remove the middle element from a stack represented as a list (top at the end)
+using recursion only—no index-based middle removal without recursion.
+
+## Examples
+
+````text
+Example 1:
+    Input: [1, 2, 3, 4, 5] (bottom to top)
+    Output: [1, 2, 4, 5] (3 removed)
+
+Example 2:
+    Input: [1, 2, 3, 4, 5, 6]
+    Output: [1, 2, 4, 5, 6] (element 3 removed)
+````
+
+## Constraints
+
+````text
+- Stack non-empty for meaningful removal; empty stack is a no-op
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Recursion with stack unwinding
+Pop elements until the middle depth is reached, drop that element, then push
+stored elements back to preserve order.
+
+1. Fix n = initial size and mid = n // 2 (index of removed element counting from the top pops).
+2. Pop top, recurse until current reaches n (stack empty), then unwind.
+3. While unwinding, skip re-pushing the element popped when current == mid.
+
+## Complexity
+
+**Time:** O(n) - each element pushed/popped a constant number of times
+
+**Space:** O(n) - recursion depth
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def delete_middle(self, stack: List[int]) -> None:
+        if not stack:
+            return
+        n = len(stack)
+        mid = n // 2
+
+        def recurse(current: int) -> None:
+            if not stack or current == n:
+                return
+            temp = stack.pop()
+            recurse(current + 1)
+            if current != mid:
+                stack.append(temp)
+
+        recurse(0)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    a = [1, 2, 3, 4, 5]
+    sol.delete_middle(a)
+    assert a == [1, 2, 4, 5], "Test 1 Failed"
+    b = [1, 2, 3, 4, 5, 6]
+    sol.delete_middle(b)
+    assert b == [1, 2, 4, 5, 6], "Test 2 Failed"
+    c = [42]
+    sol.delete_middle(c)
+    assert c == [], "Test 3 Failed"
+    d = [10, 20]
+    sol.delete_middle(d)
+    assert d == [20], "Test 4 Failed"
+    e: List[int] = []
+    sol.delete_middle(e)
+    assert e == [], "Test 5 Failed"
+    print("Test 1 Passed: odd length")
+    print("Test 2 Passed: even length")
+    print("Test 3 Passed: single element")
+    print("Test 4 Passed: two elements")
+    print("Test 5 Passed: empty stack")
+    print("\nAll test cases passed!")
+````

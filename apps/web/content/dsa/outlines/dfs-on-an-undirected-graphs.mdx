@@ -1,0 +1,100 @@
+---
+title: "DFS on an undirected Graphs"
+description: "Given the number of vertices V and a list of undirected edges, build an adjacency list and return the depth-first traversal order starting from vertex 0."
+topics: [graphs]
+group: "01. DFS"
+number: "01"
+order: 17001001000000
+status: outline
+---
+
+Given the number of vertices V and a list of undirected edges, build an adjacency list and return
+the depth-first traversal order starting from vertex 0. Neighbors may be visited in adjacency-list order.
+
+## Examples
+
+````text
+Example 1:
+    Input: V = 5, edges = [[0,2],[0,3],[0,1],[2,4]]
+    Output: [0, 2, 4, 3, 1] (depends on neighbor order in adjacency lists)
+Example 2:
+    Input: V = 4, edges = [[0,1],[0,3],[1,2]]
+    Output: [0, 1, 2, 3]
+````
+
+## Constraints
+
+````text
+- 1 <= V <= 10^4
+- 0 <= u, v < V
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Depth-first search on graph
+Recursively visit unvisited neighbors from a start vertex using a visited array.
+
+1. Build undirected adjacency lists from edges.
+2. Mark the start vertex visited and append to the result.
+3. For each neighbor not yet visited, recurse.
+
+## Complexity
+
+**Time:** O(V + E) — each vertex and edge is touched once in the traversal.
+
+**Space:** O(V + E) — adjacency list plus recursion stack O(V).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def create_graph(self, V: int, edges: List[List[int]]) -> List[List[int]]:
+        adj: List[List[int]] = [[] for _ in range(V)]
+        for u, v in edges:
+            adj[u].append(v)
+            adj[v].append(u)
+        return adj
+
+    def dfs_of_graph(self, V: int, adj: List[List[int]]) -> List[int]:
+        visited = [False] * V
+        result: List[int] = []
+
+        def dfs(u: int) -> None:
+            visited[u] = True
+            result.append(u)
+            for v in adj[u]:
+                if not visited[v]:
+                    dfs(v)
+
+        dfs(0)
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    V1, e1 = 5, [[0, 2], [0, 3], [0, 1], [2, 4]]
+    a1 = sol.create_graph(V1, e1)
+    assert sol.dfs_of_graph(V1, a1) == [0, 2, 4, 3, 1], "Test 1 Failed"
+    print("Test 1 Passed: DFS on five-node graph")
+    V2, e2 = 4, [[0, 1], [0, 3], [1, 2]]
+    a2 = sol.create_graph(V2, e2)
+    assert sol.dfs_of_graph(V2, a2) == [0, 1, 2, 3], "Test 2 Failed"
+    print("Test 2 Passed: linear chain from 0")
+    V3, e3 = 1, []
+    a3 = sol.create_graph(V3, e3)
+    assert sol.dfs_of_graph(V3, a3) == [0], "Test 3 Failed"
+    print("Test 3 Passed: single vertex")
+    V4, e4 = 3, [[0, 1], [1, 2]]
+    a4 = sol.create_graph(V4, e4)
+    assert sol.dfs_of_graph(V4, a4) == [0, 1, 2], "Test 4 Failed"
+    print("Test 4 Passed: path graph")
+    print("All tests passed!")
+````

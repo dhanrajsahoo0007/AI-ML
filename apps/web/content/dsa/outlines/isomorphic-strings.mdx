@@ -1,0 +1,97 @@
+---
+title: "Isomorphic Strings"
+description: "Given two strings s and t, determine if they are isomorphic: characters may be replaced to map s to t while preserving one-to-one mapping in both directions."
+topics: [strings]
+group: "03. String Comparison and Validation"
+number: "03"
+order: 5003003000000
+status: outline
+---
+
+Given two strings s and t, determine if they are isomorphic: characters may be
+replaced to map s to t while preserving one-to-one mapping in both directions.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "egg", t = "add"
+    Output: True
+
+Example 2:
+    Input: s = "foo", t = "bar"
+    Output: False
+
+Example 3:
+    Input: s = "paper", t = "title"
+    Output: True
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) == len(t) <= 5 * 10^4
+- s and t consist of any valid ASCII characters.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two hash maps (or fixed arrays for ASCII)
+Record the last seen index for each mapped pair; mismatched reuse breaks isomorphism.
+
+1. If lengths differ, return False.
+2. For each index, map s\[i\] and t\[i\] to i+1 in two parallel tables (or compare last indices).
+3. If a character repeats with a different partner, return False.
+4. Otherwise return True.
+
+## Complexity
+
+**Time:** O(n) - Single pass over the strings.
+
+**Space:** O(1) - Two tables of bounded alphabet size (or O(n) if storing all seen chars).
+
+## Solution
+
+````python
+from typing import Dict
+
+
+class Solution:
+    def isIsomorphic(self, s: str, t: str) -> bool:
+        if len(s) != len(t):
+            return False
+        map_s: Dict[str, str] = {}
+        map_t: Dict[str, str] = {}
+        for a, b in zip(s, t):
+            if a in map_s:
+                if map_s[a] != b:
+                    return False
+            else:
+                map_s[a] = b
+            if b in map_t:
+                if map_t[b] != a:
+                    return False
+            else:
+                map_t[b] = a
+        return True
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.isIsomorphic("egg", "add") is True, "Test 1 Failed"
+    print("Test 1 Passed: egg / add")
+    assert sol.isIsomorphic("foo", "bar") is False, "Test 2 Failed"
+    print("Test 2 Passed: foo / bar")
+    assert sol.isIsomorphic("paper", "title") is True, "Test 3 Failed"
+    print("Test 3 Passed: paper / title")
+    assert sol.isIsomorphic("ab", "aa") is False, "Test 4 Failed"
+    print("Test 4 Passed: injective violation")
+    assert sol.isIsomorphic("13", "42") is True, "Test 5 Failed"
+    print("Test 5 Passed: digits")
+    print("\nAll test cases passed!")
+````

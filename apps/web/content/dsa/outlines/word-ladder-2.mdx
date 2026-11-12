@@ -1,0 +1,118 @@
+---
+title: "Word Ladder 2"
+description: "Same adjacency rules as Word Ladder I, but return all shortest transformation sequences from beginWord to endWord."
+topics: [graphs]
+group: "04. BFS Story Based › 03. Shortest Path Problems"
+number: "04"
+order: 17004003004000
+status: outline
+---
+
+Same adjacency rules as Word Ladder I, but return all shortest transformation sequences from beginWord to
+endWord. If none exist, return \[\]. Each sequence is a list of words from beginWord to endWord inclusive.
+
+## Examples
+
+````text
+Example 1:
+    Input: beginWord = "hit", endWord = "cog",
+        wordList = ["hot","dot","dog","lot","log","cog"]
+    Output: [["hit","hot","dot","dog","cog"],["hit","hot","lot","log","cog"]]
+Example 2:
+    Input: beginWord = "hit", endWord = "cog",
+        wordList = ["hot","dot","dog","lot","log"]
+    Output: []
+````
+
+## Constraints
+
+````text
+- As in LeetCode 126; all words same length; beginWord != endWord
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph BFS layer peeling + backtracking / parent map
+
+1. BFS by layers: from the current frontier, discover next words still in the dictionary set; record
+all parents that reach each next word at the shortest depth.
+2. Stop when the current layer contains endWord (shortest depth found).
+3. DFS from endWord to beginWord using parents to emit reversed paths.
+
+## Complexity
+
+**Time:** O(N \* L^2 \* 26) in worst case for BFS neighbor generation over dictionary-sized layers.
+
+**Space:** O(N) for sets, parent map, and output accumulation.
+
+## Original notes
+
+````text
+Note preserved from original implementation discussion:
+For a more optimized approach, advanced solutions combine bidirectional BFS with pruning; this file uses
+layer-wise BFS with a predecessor map then backtracking (NOte: For more optimized approach use the
+backtracking way to solve this — here backtracking is used to reconstruct all shortest paths).
+````
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict
+import string
+
+
+class Solution:
+    def findLadders(self, beginWord: str, endWord: str, wordList: List[str]) -> List[List[str]]:
+        if endWord not in wordList:
+            return []
+
+        word_set = set(wordList)
+        parents: defaultdict[str, set[str]] = defaultdict(set)
+        layer = {beginWord}
+
+        while layer:
+            if endWord in layer:
+                break
+            word_set -= layer
+            next_layer: defaultdict[str, set[str]] = defaultdict(set)
+            for word in layer:
+                for i in range(len(word)):
+                    for c in string.ascii_lowercase:
+                        nw = word[:i] + c + word[i + 1 :]
+                        if nw in word_set:
+                            next_layer[nw].add(word)
+            if not next_layer:
+                return []
+            layer = set(next_layer.keys())
+            for w in next_layer:
+                parents[w] |= next_layer[w]
+
+        res: List[List[str]] = []
+
+        def dfs(word: str, path: List[str]) -> None:
+            if word == beginWord:
+                res.append(path[::-1])
+                return
+            for p in parents[word]:
+                dfs(p, path + [p])
+
+        dfs(endWord, [endWord])
+        return res
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    wl = ["hot", "dot", "dog", "lot", "log", "cog"]
+    out = sol.findLadders("hit", "cog", wl)
+    expected = [["hit", "hot", "dot", "dog", "cog"], ["hit", "hot", "lot", "log", "cog"]]
+    assert sorted(out) == sorted(expected), "Test 1 Failed"
+    assert sol.findLadders("hit", "cog", ["hot", "dot", "dog", "lot", "log"]) == [], "Test 2 Failed"
+    assert sol.findLadders("a", "c", ["a", "b", "c"]) == [["a", "c"]], "Test 3 Failed"
+    print("All tests passed!")
+````

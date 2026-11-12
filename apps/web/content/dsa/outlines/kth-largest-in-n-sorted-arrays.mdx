@@ -1,0 +1,115 @@
+---
+title: "Kth Largest in N Sorted Arrays"
+description: "Given N sorted arrays (in descending order) and an integer K, find the Kth largest element among all the arrays."
+topics: [heaps]
+group: "02. K-Way Merge Pattern"
+number: "02"
+order: 10002002000000
+status: outline
+---
+
+Given N sorted arrays (in descending order) and an integer K, find the Kth largest
+element among all the arrays.
+
+## Examples
+
+````text
+Example 1:
+    Input: arrays = [[9,8,7,6],[5,4,3],[2,1]], k = 3
+    Output: 7
+
+Example 2:
+    Input: arrays = [[5,4],[3,2],[1]], k = 4
+    Output: 2
+````
+
+## Constraints
+
+````text
+- 1 <= N <= 10^4 (number of arrays)
+- 1 <= len(arrays[i]) <= 10^5
+- Each array is sorted in descending order.
+- 1 <= K <= total number of elements in all arrays
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** K-Way Merge
+We treat the N sorted arrays as N sorted streams and use a max-heap to
+always pick the largest remaining element across all arrays.
+
+1. Push the first (largest) element of each array into a max-heap.
+2. Pop the largest element k-1 times.
+3. After k-1 pops, push the next element from the same array each time.
+4. The top of the heap is the kth largest element.
+
+## Complexity
+
+**Time:** O(N log N + K log N)
+- O(N log N) to initialize heap with N arrays.
+- O(K log N) for K iterations of pop/push.
+
+**Space:** O(N) for the heap
+
+## Original notes
+
+````text
+Original notes (restored):
+Arrays are sorted descending; the frontier is the current index in each array.
+Start with index 0 of every array in a max-heap (negate values). Each pop takes the current
+global maximum; push the next element from that array. After k-1 pops, the heap top is the
+kth largest overall. Original complexity discussion: init O(N log N), k-1 steps O(k log N).
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def kthLargestInNArrays(self, arrays: List[List[int]], k: int) -> int:
+        max_heap = []
+
+        for i, arr in enumerate(arrays):
+            if arr:
+                heapq.heappush(max_heap, (-arr[0], i, 0))
+
+        for _ in range(k - 1):
+            _, array_idx, elem_idx = heapq.heappop(max_heap)
+
+            # Extend the winning array's pointer — its next value is the next candidate "largest".
+            if elem_idx + 1 < len(arrays[array_idx]):
+                next_val = arrays[array_idx][elem_idx + 1]
+                heapq.heappush(max_heap, (-next_val, array_idx, elem_idx + 1))
+
+        return -max_heap[0][0]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Basic case
+    assert sol.kthLargestInNArrays([[9, 8, 7, 6], [5, 4, 3], [2, 1]], 3) == 7, "Test 1 Failed"
+    print("Test 1 Passed: k=3 -> 7")
+
+    # Test Case 2: Another case
+    assert sol.kthLargestInNArrays([[5, 4], [3, 2], [1]], 4) == 2, "Test 2 Failed"
+    print("Test 2 Passed: k=4 -> 2")
+
+    # Test Case 3: k=1 (find maximum)
+    assert sol.kthLargestInNArrays([[9, 8], [7, 6], [5]], 1) == 9, "Test 3 Failed"
+    print("Test 3 Passed: k=1 -> 9")
+
+    # Test Case 4: Single array
+    assert sol.kthLargestInNArrays([[10, 8, 5, 3]], 2) == 8, "Test 4 Failed"
+    print("Test 4 Passed: single array, k=2 -> 8")
+
+    print("\nAll test cases passed!")
+````

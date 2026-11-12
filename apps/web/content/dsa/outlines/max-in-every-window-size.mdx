@@ -1,0 +1,112 @@
+---
+title: "Max in every window size"
+description: "Given an array of integers and a positive integer k, find the maximum sum of any contiguous subarray of length exactly k."
+topics: [sliding-window]
+group: "01. Fixed Size"
+number: "01"
+order: 7001001000000
+status: outline
+---
+
+Given an array of integers and a positive integer k, find the maximum sum of any
+contiguous subarray of length exactly k.
+
+## Examples
+
+````text
+Example 1:
+    Input: arr = [1, 4, 2, 10, 23, 3, 1, 0, 20], k = 4
+    Output: 39
+Example 2:
+    Input: arr = [100, 200, 300], k = 2
+    Output: 500
+````
+
+## Constraints
+
+````text
+- 1 <= k <= len(arr) when a result exists; if len(arr) < k the problem is undefined (return None).
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Fixed-size sliding window
+Accumulate the first window, then slide by subtracting the outgoing element and adding the incoming one.
+
+1. Grow the window with the right pointer until its length is k.
+2. Record the window sum and update the maximum.
+3. Slide: subtract arr\[left\], increment left and right, add arr\[right\] until the end.
+
+Restored notes (archived workbook):
+
+Problem Statement:
+Given an array of integers and a positive integer K, find the maximum sum of any contiguous subarray of size K.
+
+Explanation:
+This solution uses the Sliding Window technique with two pointers, i and j.
+1. Initialize window\_sum and max\_sum.
+2. Move j to the right, adding elements to window\_sum.
+3. If window size &lt; k, keep expanding by moving j.
+4. When window size == k:
+- Update max\_sum if necessary.
+- Remove the leftmost element from window\_sum.
+- Slide the window by incrementing both i and j.
+5. Repeat until j reaches the end of the array.
+
+Time Complexity: O(n), where n is the length of the input arrayWe traverse the array once with the two pointers.
+Space Complexity: O(1), as we only use a constant amount of extra space,regardless of the input size.
+
+## Complexity
+
+**Time:** O(n) - Each index is visited a constant number of times.
+
+**Space:** O(1) - Only a few scalar variables are used.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class Solution:
+    def maxSumSubarray(self, arr: List[int], k: int) -> Optional[int]:
+        n = len(arr)
+        if n < k:
+            return None
+
+        window_sum = 0
+        for j in range(k):
+            window_sum += arr[j]
+
+        max_sum = window_sum
+        for j in range(k, n):
+            window_sum += arr[j] - arr[j - k]
+            max_sum = max(max_sum, window_sum)
+
+        return max_sum
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.maxSumSubarray([1, 4, 2, 10, 23, 3, 1, 0, 20], 4) == 39, "Test 1 Failed"
+    print("Test 1 Passed: max sum window of size 4")
+
+    assert sol.maxSumSubarray([100, 200, 300], 2) == 500, "Test 2 Failed"
+    print("Test 2 Passed: two-element window")
+
+    assert sol.maxSumSubarray([5], 1) == 5, "Test 3 Failed"
+    print("Test 3 Passed: single element")
+
+    assert sol.maxSumSubarray([1, 2, 3, 4, 5], 5) == 15, "Test 4 Failed"
+    print("Test 4 Passed: full array window")
+
+    assert sol.maxSumSubarray([1, 2], 3) is None, "Test 5 Failed"
+    print("Test 5 Passed: k larger than array returns None")
+
+    print("\nAll test cases passed!")
+````

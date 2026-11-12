@@ -1,0 +1,123 @@
+---
+title: "Template: Grid Traversal"
+description: "Given an m x n grid of 0 (wall) and 1 (open), determine whether a path exists from the top-left cell (0, 0) to the bottom-right cell (m - 1, n - 1) using onl…"
+topics: [backtracking]
+group: "04. Grid Traversal"
+number: "00"
+order: 12004000000000
+status: outline
+---
+
+Given an m x n grid of 0 (wall) and 1 (open), determine whether a path exists from the
+top-left cell (0, 0) to the bottom-right cell (m - 1, n - 1) using only up, down, left, right
+moves through open cells.
+
+## Examples
+
+````text
+Example 1:
+Input: grid = [[1,0,1],[1,1,1],[0,0,1]]
+Output: True
+````
+
+## Constraints
+
+````text
+- 1 <= m, n <= 10
+- grid[i][j] is 0 or 1.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Grid DFS with backtracking
+Mark the current cell visited, try four neighbors, then unmark when unwinding.
+
+1. If start or goal is blocked, return False.
+2. DFS from (0,0): mark visited, recurse to neighbors in bounds with value 1, backtrack unmark.
+3. Return True when (m-1, n-1) is reached.
+
+## Complexity
+
+**Time:** O(4^(mn)) worst-case exploration (pruned by revisits in practice).
+
+**Space:** O(mn) - visited matrix and recursion stack.
+
+## Original notes
+
+````text
+Restored pattern sketch (from original notes file):
+
+directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]  # Right, Down, Left, Up
+
+def grid_traversal_pattern(grid):
+    def backtrack(row, col):
+        if invalid(row, col):
+            return False
+        if is_goal(row, col):
+            return True
+
+        for direction in directions:
+            new_row, new_col = row + direction[0], col + direction[1]
+            if backtrack(new_row, new_col):
+                return True
+        return False
+
+    return backtrack(0, 0)
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def hasPath(self, grid: List[List[int]]) -> bool:
+        if not grid or not grid[0]:
+            return False
+        m, n = len(grid), len(grid[0])
+        if grid[0][0] == 0 or grid[m - 1][n - 1] == 0:
+            return False
+        dirs = ((0, 1), (1, 0), (0, -1), (-1, 0))
+        seen = [[False] * n for _ in range(m)]
+
+        def dfs(r: int, c: int) -> bool:
+            if r == m - 1 and c == n - 1:
+                return True
+            seen[r][c] = True
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < m and 0 <= nc < n and grid[nr][nc] == 1 and not seen[nr][nc]:
+                    if dfs(nr, nc):
+                        return True
+            seen[r][c] = False
+            return False
+
+        return dfs(0, 0)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    g1 = [[1, 0, 1], [1, 1, 1], [0, 0, 1]]
+    assert sol.hasPath(g1) is True, "Test 1 Failed"
+    print("Test 1 Passed: path exists")
+
+    g2 = [[1, 0], [0, 1]]
+    assert sol.hasPath(g2) is False, "Test 2 Failed"
+    print("Test 2 Passed: no path")
+
+    g3 = [[1]]
+    assert sol.hasPath(g3) is True, "Test 3 Failed"
+    print("Test 3 Passed: single cell")
+
+    g4 = [[1, 1, 1, 1]]
+    assert sol.hasPath(g4) is True, "Test 4 Failed"
+    print("Test 4 Passed: single row")
+
+    print("\nAll test cases passed!")
+````

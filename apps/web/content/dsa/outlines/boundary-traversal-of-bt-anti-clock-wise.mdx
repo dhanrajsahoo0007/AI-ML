@@ -1,0 +1,151 @@
+---
+title: "Boundary Traversal of BT (Anti-Clock Wise)"
+description: "Return the anti-clockwise boundary traversal: root, left boundary (excluding leaves), leaves left-to-right, then right boundary bottom-to-top (excluding leav…"
+topics: [trees]
+group: "01. Binary Tree › 02. Tree Views and Projections"
+number: "08"
+order: 14001002008000
+status: outline
+---
+
+Return the anti-clockwise boundary traversal: root, left boundary (excluding leaves),
+leaves left-to-right, then right boundary bottom-to-top (excluding leaves).
+
+## Examples
+
+````text
+Example 1:
+Tree:
+        1
+     /                  2        3
+   / \      /           4   5    6   7
+ / \   \        /
+8   9   10     11
+Output: [1, 2, 4, 8, 9, 10, 6, 11, 7, 3]
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [1, 2000].
+- Node values fit in 32-bit signed integers.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Boundary decomposition
+Same as classic boundary traversal: left spine, leaves inorder, reversed right spine.
+
+1. Seed result with root.
+2. Walk left boundary top-down skipping leaves.
+3. Collect leaves with standard left-first DFS.
+4. Walk right boundary into a buffer, then extend result reversed.
+
+## Complexity
+
+**Time:** O(n)
+
+**Space:** O(h) for recursion and temporary right-boundary list.
+Restored (original notes, diagrams, and walkthrough):
+Perform a boundary order traversal of a binary tree.
+Boundary order traversal visits nodes in the following order:
+1. Root node
+2. Left boundary nodes (top to bottom)
+3. Leaf nodes (left to right)
+4. Right boundary nodes (Reverse)(bottom to top, excluding leaves)
+
+\#           1
+\#        /                      #       2        3
+\#      / \\      /                 #     4   5     6   7
+\#    / \\   \\        /
+\#   8   9   10     11
+
+Boundary Traversal: \[1, 2, 4, 8, 9, 10, 6, 11, 7, 3\]
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_boundary_sample_tree() -> TreeNode:
+    root = TreeNode(1)
+    root.left = TreeNode(2)
+    root.right = TreeNode(3)
+    root.left.left = TreeNode(4)
+    root.left.right = TreeNode(5)
+    root.right.left = TreeNode(6)
+    root.right.right = TreeNode(7)
+    root.left.left.left = TreeNode(8)
+    root.left.left.right = TreeNode(9)
+    root.left.right.right = TreeNode(10)
+    root.right.right.left = TreeNode(11)
+    return root
+
+
+class Solution:
+    def boundaryTraversal(self, root: Optional[TreeNode]) -> List[int]:
+        if not root:
+            return []
+
+        def is_leaf(node: TreeNode) -> bool:
+            return node.left is None and node.right is None
+
+        if is_leaf(root):
+            return [root.val]
+
+        result: List[int] = [root.val]
+
+        def add_left_boundary(node: TreeNode) -> None:
+            cur = node.left
+            while cur:
+                if not is_leaf(cur):
+                    result.append(cur.val)
+                cur = cur.left if cur.left else cur.right
+
+        def add_right_boundary(node: TreeNode) -> None:
+            cur = node.right
+            buf: List[int] = []
+            while cur:
+                if not is_leaf(cur):
+                    buf.append(cur.val)
+                cur = cur.right if cur.right else cur.left
+            result.extend(reversed(buf))
+
+        def add_leaves(node: TreeNode) -> None:
+            if is_leaf(node):
+                result.append(node.val)
+                return
+            if node.left:
+                add_leaves(node.left)
+            if node.right:
+                add_leaves(node.right)
+
+        if not is_leaf(root):
+            add_left_boundary(root)
+        add_leaves(root)
+        if not is_leaf(root):
+            add_right_boundary(root)
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    root = build_boundary_sample_tree()
+    assert sol.boundaryTraversal(root) == [1, 2, 4, 8, 9, 10, 6, 11, 7, 3]
+    assert sol.boundaryTraversal(None) == []
+    assert sol.boundaryTraversal(TreeNode(9)) == [9]
+    print("\nAll test cases passed!")
+````

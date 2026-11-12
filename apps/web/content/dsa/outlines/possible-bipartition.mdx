@@ -1,0 +1,187 @@
+---
+title: "Possible Bipartition"
+description: "Split n people labeled 1..n into two groups."
+topics: [graphs]
+group: "03. DFS Story Based › 02. Graph Properties and Connectivity"
+number: "02"
+order: 17003002002000
+status: outline
+---
+
+Split n people labeled 1..n into two groups. dislikes\[i\] = \[ai, bi\] means ai and bi must not be in the
+same group. Return true if such a split exists.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 4, dislikes = [[1, 2], [1, 3], [2, 4]]
+    Output: True
+Example 2:
+    Input: n = 3, dislikes = [[1, 2], [1, 3], [2, 3]]
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 2000
+- 0 <= len(dislikes) <= 10^4
+- dislikes[i].length == 2, 1 <= ai, bi <= n, ai != bi
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph DFS (bipartite / two-coloring on dislike graph)
+
+1. Build undirected adjacency list for dislikes.
+2. color\[i\] in &#123;-1, 0, 1&#125;; for each uncolored person, set color and DFS neighbors with opposite color.
+3. If an edge joins two vertices of the same color, return False.
+
+## Complexity
+
+**Time:** O(N + E) — each person and dislike edge explored once.
+
+**Space:** O(N + E) — adjacency list; O(N) for colors and recursion stack.
+
+## Original notes
+
+````text
+Explanation (preserved from original):
+A graph is bipartite if we can color its nodes using two colors such that no two adjacent nodes share
+the same color. Here, a valid two-coloring corresponds to splitting people into two groups with no
+disliked pair in the same group.
+````
+
+## Solution
+
+````python
+from typing import Dict, List
+from collections import defaultdict
+
+
+class Solution:
+    def isBipartiteDFS(self, adj: Dict[int, List[int]], u: int, color: List[int]) -> bool:
+        for v in adj[u]:
+            if color[v] == -1:
+                color[v] = 1 - color[u]
+                if not self.isBipartiteDFS(adj, v, color):
+                    return False
+            elif color[v] == color[u]:
+                return False
+        return True
+
+    def possibleBipartition(self, n: int, dislikes: List[List[int]]) -> bool:
+        adj: Dict[int, List[int]] = defaultdict(list)
+
+        for vec in dislikes:
+            u, v = vec
+            adj[u].append(v)
+            adj[v].append(u)
+
+        color = [-1] * (n + 1)
+
+        for i in range(1, n + 1):
+            if color[i] == -1:
+                color[i] = 1
+                # Use either BFS or DFS
+                if not self.isBipartiteDFS(adj, i, color):
+                    return False
+
+        return True
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.possibleBipartition(4, [[1, 2], [1, 3], [2, 4]]) is True, "Test 1 Failed"
+    assert sol.possibleBipartition(3, [[1, 2], [1, 3], [2, 3]]) is False, "Test 2 Failed"
+    assert sol.possibleBipartition(5, [[1, 2], [2, 3], [3, 4], [4, 5], [1, 5]]) is False, "Test 3 Failed"
+    assert sol.possibleBipartition(1, []) is True, "Test 4 Failed"
+    print("All tests passed!")
+````
+
+## Another version
+
+From 17. Graphs/04. BFS Story Based/02. Graph Properties and Connectivity.
+
+### Approach
+
+**Pattern:** Graph BFS (bipartite check on dislike graph)
+
+1. Build adjacency list for dislikes (undirected).
+2. BFS each uncolored component; assign opposite colors along edges.
+3. Conflict on a colored neighbor with same color =&gt; False.
+
+### Complexity
+
+**Time:** O(N + E)
+
+**Space:** O(N + E) for adjacency; O(N) for colors and queue.
+
+### Original notes
+
+````text
+Explanation (preserved from original):
+BFS checks whether the dislike graph is bipartite (two-colorable). A valid coloring corresponds to a
+valid split into two groups.
+````
+
+### Solution
+
+````python
+from typing import Dict, List
+from collections import deque, defaultdict
+
+
+class Solution:
+    def isBipartite(self, adj: Dict[int, List[int]], node: int, color: List[int]) -> bool:
+        queue = deque([node])
+        color[node] = 1  # Color the starting node
+
+        while queue:
+            u = queue.popleft()
+
+            for v in adj[u]:
+                if color[v] == color[u]:
+                    return False  # Adjacent nodes have the same color, not bipartite
+
+                if color[v] == -1:
+                    color[v] = 1 - color[u]  # Color with the opposite color
+                    queue.append(v)
+
+        return True
+
+    def possibleBipartition(self, n: int, dislikes: List[List[int]]) -> bool:
+        # Create adjacency list
+        adj: Dict[int, List[int]] = defaultdict(list)
+        for u, v in dislikes:
+            adj[u].append(v)
+            adj[v].append(u)
+
+        # Initialize colors: -1 means uncolored
+        color = [-1] * (n + 1)  # +1 because people are labeled from 1 to n
+
+        # Check each uncolored person
+        for i in range(1, n + 1):
+            if color[i] == -1:
+                if not self.isBipartite(adj, i, color):
+                    return False
+
+        return True
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.possibleBipartition(4, [[1, 2], [1, 3], [2, 4]]) is True, "Test 1 Failed"
+    assert sol.possibleBipartition(3, [[1, 2], [1, 3], [2, 3]]) is False, "Test 2 Failed"
+    assert sol.possibleBipartition(5, [[1, 2], [2, 3], [3, 4], [4, 5], [1, 5]]) is False, "Test 3 Failed"
+    print("All tests passed!")
+````

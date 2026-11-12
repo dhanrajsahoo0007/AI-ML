@@ -1,0 +1,114 @@
+---
+title: "Sort Nearly Sorted Array"
+description: "Given a K-sorted (nearly sorted) array where each element is at most K positions away from its position in the sorted array, sort the array efficiently."
+topics: [heaps]
+group: "02. K-Way Merge Pattern"
+number: "05"
+order: 10002005000000
+status: outline
+---
+
+Given a K-sorted (nearly sorted) array where each element is at most K positions
+away from its position in the sorted array, sort the array efficiently.
+
+## Examples
+
+````text
+Example 1:
+    Input: arr = [6, 5, 3, 2, 8, 10, 9], k = 3
+    Output: [2, 3, 5, 6, 8, 9, 10]
+
+Example 2:
+    Input: arr = [10, 9, 8, 7, 4, 70, 60, 50], k = 4
+    Output: [4, 7, 8, 9, 10, 50, 60, 70]
+````
+
+## Constraints
+
+````text
+- 1 <= arr.length <= 10^5
+- 0 <= k <= arr.length
+- Each element is at most k positions from its sorted position.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** K-Way Merge
+We use a sliding window min-heap of size k+1. Since each element is at most
+k positions away, the correct element must be within the next k+1 elements.
+
+1. Create a min-heap of the first k+1 elements.
+2. For each remaining element:
+a. Pop the minimum from the heap and place it in the output.
+b. Push the next element into the heap.
+3. Pop remaining elements from the heap.
+
+## Complexity
+
+**Time:** O(n log k)
+- Each of n elements requires O(log k) for heap operations.
+
+**Space:** O(k) for the heap of size k+1
+
+## Original notes
+
+````text
+Original notes (restored):
+Definition: each element is at most k positions away from its sorted slot. Then the true
+minimum of the next output position always lies inside a sliding window of size k+1.
+Algorithm: min-heap the first k+1 items, repeatedly extract-min to the output tail, push the
+next input element. Equivalent to merging k+1-way sorted chunks in streaming order.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def sortNearlySorted(self, arr: List[int], k: int) -> List[int]:
+        n = len(arr)
+        min_heap = arr[:k + 1]
+        heapq.heapify(min_heap)
+
+        result = []
+
+        for i in range(k + 1, n):
+            # Smallest in window is the next globally smallest element.
+            result.append(heapq.heappop(min_heap))
+            heapq.heappush(min_heap, arr[i])
+
+        while min_heap:
+            result.append(heapq.heappop(min_heap))
+
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Basic case
+    assert sol.sortNearlySorted([6, 5, 3, 2, 8, 10, 9], 3) == [2, 3, 5, 6, 8, 9, 10], "Test 1 Failed"
+    print("Test 1 Passed: k=3 -> [2,3,5,6,8,9,10]")
+
+    # Test Case 2: Another case
+    assert sol.sortNearlySorted([10, 9, 8, 7, 4, 70, 60, 50], 4) == [4, 7, 8, 9, 10, 50, 60, 70], "Test 2 Failed"
+    print("Test 2 Passed: k=4 -> [4,7,8,9,10,50,60,70]")
+
+    # Test Case 3: Already sorted
+    assert sol.sortNearlySorted([1, 2, 3, 4, 5], 0) == [1, 2, 3, 4, 5], "Test 3 Failed"
+    print("Test 3 Passed: already sorted -> same")
+
+    # Test Case 4: Single element
+    assert sol.sortNearlySorted([1], 0) == [1], "Test 4 Failed"
+    print("Test 4 Passed: single element -> [1]")
+
+    print("\nAll test cases passed!")
+````

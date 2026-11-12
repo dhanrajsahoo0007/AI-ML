@@ -1,0 +1,85 @@
+---
+title: "Logger Design"
+description: "Design a logger that receives (timestamp, message) and returns True the first time a message is seen in a new 10-second window; repeat prints of the same mes…"
+topics: [design-questions]
+number: "17"
+order: 25017000000000
+status: outline
+---
+
+Design a logger that receives (timestamp, message) and returns True the first time a message
+is seen in a new 10-second window; repeat prints of the same message within 10 seconds of
+the last print should return False (LeetCode 359 style rate limiter).
+
+## Examples
+
+````text
+Example 1:
+shouldPrint(1,'a') True; shouldPrint(2,'a') False; shouldPrint(11,'a') True.
+````
+
+## Constraints
+
+````text
+- Timestamps are monotonic non-decreasing integers; message strings arbitrary.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hash map of last-print time per message
+Compare current timestamp with stored last time for that key.
+
+1. Keep dict message -&gt; last\_printed\_timestamp.
+2. On call, if t &lt; last + 10 return False else update last to t and return True.
+
+## Complexity
+
+**Time:** O(1) per call.
+
+**Space:** O(unique messages).
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Very complicated problem of designing a logic for a logger. 
+I was successfully able to provide a solution using sliding window approach
+but for the follow up question my approach didn't work. 
+I had to come up with an entirely new algorithm, and hence took me sometime to figure out 
+and rewrite all the code. The solution was correct (I think!) but was not able to code it fully.
+The interviewer looked satisfied though.
+````
+
+## Solution
+
+````python
+from typing import Dict
+
+
+class Logger:
+    def __init__(self) -> None:
+        self._last: Dict[str, int] = {}
+
+    def shouldPrintMessage(self, timestamp: int, message: str) -> bool:
+        prev = self._last.get(message, -10_000_000)
+        if timestamp < prev + 10:
+            return False
+        self._last[message] = timestamp
+        return True
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    log = Logger()
+    assert log.shouldPrintMessage(1, "foo") is True
+    assert log.shouldPrintMessage(2, "foo") is False
+    assert log.shouldPrintMessage(10, "foo") is False
+    assert log.shouldPrintMessage(11, "foo") is True
+    assert log.shouldPrintMessage(11, "bar") is True
+    print("\nAll test cases passed!")
+````

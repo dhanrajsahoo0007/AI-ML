@@ -1,0 +1,73 @@
+---
+title: "MCM Recurssive"
+description: "Given array p of length n+1 describing n matrices with dimensions p[i]×p[i+1], parenthesize to minimize total scalar multiplications."
+topics: [dynamic-programming]
+group: "07. Matrix Chain Multiplication"
+number: "01"
+order: 20007001000000
+status: outline
+---
+
+Given array p of length n+1 describing n matrices with dimensions p\[i\]×p\[i+1\],
+parenthesize to minimize total scalar multiplications.
+
+## Examples
+
+````text
+Example 1: p = [1,2,3,4] -> 18
+````
+
+## Constraints
+
+````text
+- 2 <= len(p) <= 100
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Interval DP (recursive)
+Split chain at every k and combine optimal halves.
+
+1. solve(i,j) min cost to multiply matrices i..j inclusive.
+2. Try split k: p\[i\]\*p\[k+1\]\*p\[j+1\] + solve(i,k)+solve(k+1,j).
+
+## Complexity
+
+**Time:** O(3^n) naive recursion.
+
+**Space:** O(n) stack.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def matrixChainOrder(self, p: List[int]) -> int:
+        n = len(p) - 1
+
+        def rec(i: int, j: int) -> int:
+            if i == j:
+                return 0
+            return min(
+                p[i] * p[k + 1] * p[j + 1] + rec(i, k) + rec(k + 1, j) for k in range(i, j)
+            )
+
+        return rec(0, n - 1)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.matrixChainOrder([1, 2, 3, 4]) == 18, "Test 1 Failed"
+    assert sol.matrixChainOrder([10, 20, 30]) == 6000, "Test 2 Failed"
+    assert sol.matrixChainOrder([40, 20, 30, 10, 30]) == 26000, "Test 3 Failed"
+    assert sol.matrixChainOrder([1, 2]) == 0, "Test 4 Failed"
+    assert sol.matrixChainOrder([4, 10, 3, 12, 20, 7]) == 1344, "Test 5 Failed"
+    print("\nAll test cases passed!")
+````

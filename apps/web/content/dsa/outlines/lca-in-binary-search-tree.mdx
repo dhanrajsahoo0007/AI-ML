@@ -1,0 +1,164 @@
+---
+title: "LCA in Binary Search Tree"
+description: "Given the root of a binary search tree and two nodes p and q, return their lowest common ancestor."
+topics: [binary-search-trees]
+group: "06. Tree Ancestor Problems"
+number: "01"
+order: 15006001000000
+status: outline
+---
+
+Given the root of a binary search tree and two nodes p and q, return their lowest common ancestor.
+A node may be considered a descendant of itself.
+
+## Examples
+
+````text
+Example 1:
+    Input: BST [6,2,8,0,4,7,9,3,5], p=2, q=8
+    Output: node 6
+
+Example 2:
+    Input: same tree, p=2, q=4
+    Output: node 2
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [2, 10^5].
+- Values are unique; p and q exist in the tree.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** BST value-guided walk
+Walk from the root: if both targets lie strictly to one side, descend that side; otherwise the current node splits them and is the LCA.
+
+1. Optionally swap p and q so that p.val &lt;= q.val.
+2. While current is not between p.val and q.val, move left or right according to BST order.
+3. Return the first node whose value lies in the closed interval \[p.val, q.val\].
+
+## Complexity
+
+**Time:** O(h) - One path from root toward a leaf.
+
+**Space:** O(1) - Iterative version uses constant extra memory.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given a binary search tree (BST), find the lowest common ancestor (LCA) of two given nodes in the BST.
+The lowest common ancestor is defined between two nodes p and q as the lowest node in T
+that has both p and q as descendants (where we allow a node to be a descendant of itself).
+
+Time Complexity: O(h), where h is the height of the tree.
+In the worst case (skewed tree), h can be n, but for a balanced BST, h would be log(n).
+
+Space Complexity: O(1) for the iterative solution, O(h) for the recursive solution due to the call stack.
+
+Explanation:
+We can leverage the properties of a BST to solve this problem efficiently:
+1. If both nodes are smaller than the current node, the LCA must be in the left subtree.
+2. If both nodes are larger than the current node, the LCA must be in the right subtree.
+3. If one node is smaller and the other is larger (or equal), the current node is the LCA.
+
+Examples:
+1. Regular case:
+6
+/       2   8
+/ \\  /    0  4 7  9
+/  3  5
+LCA(2, 8) = 6
+LCA(2, 4) = 2
+
+2. One node is the ancestor of the other:
+6
+/       2   8
+/     0   4
+LCA(2, 4) = 2
+
+3. Edge case - nodes are the same:
+2
+LCA(2, 2) = 2
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: list[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+def find_node(root: Optional[TreeNode], val: int) -> TreeNode:
+    cur = root
+    while cur:
+        if cur.val == val:
+            return cur
+        cur = cur.left if val < cur.val else cur.right
+    raise ValueError("node missing")
+
+
+class Solution:
+    def lowestCommonAncestor(self, root: TreeNode, p: TreeNode, q: TreeNode) -> TreeNode:
+        a, b = (p, q) if p.val <= q.val else (q, p)
+        cur = root
+        while cur:
+            if a.val <= cur.val <= b.val:
+                return cur
+            cur = cur.left if b.val < cur.val else cur.right
+        raise RuntimeError("unreachable")
+
+    def lowestCommonAncestorRecursive(self, root: Optional[TreeNode], p: TreeNode, q: TreeNode) -> Optional[TreeNode]:
+        if root is None:
+            return None
+        if p.val > q.val:
+            p, q = q, p
+        if root.val < p.val:
+            return self.lowestCommonAncestorRecursive(root.right, p, q)
+        if root.val > q.val:
+            return self.lowestCommonAncestorRecursive(root.left, p, q)
+        return root
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    root = build_bst_insert([6, 2, 8, 0, 4, 7, 9, 3, 5])
+    p2, p8 = find_node(root, 2), find_node(root, 8)
+    assert sol.lowestCommonAncestor(root, p2, p8).val == 6
+    p4 = find_node(root, 4)
+    assert sol.lowestCommonAncestor(root, p2, p4).val == 2
+    assert sol.lowestCommonAncestorRecursive(root, p2, p8).val == 6
+    r2 = build_bst_insert([10, 5, 15])
+    assert sol.lowestCommonAncestor(r2, find_node(r2, 5), find_node(r2, 15)).val == 10
+    print("\nAll test cases passed!")
+````

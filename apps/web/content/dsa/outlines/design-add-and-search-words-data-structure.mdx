@@ -1,0 +1,99 @@
+---
+title: "Design Add And Search Words Data Structure"
+description: "Design a dictionary that supports adding a word and searching a word where '.' matches any single letter."
+topics: [design-questions]
+number: "05"
+order: 25005000000000
+status: outline
+---
+
+Design a dictionary that supports adding a word and searching a word where '.'
+matches any single letter.
+
+## Examples
+
+````text
+Example 1:
+addWord("bad"), addWord("dad"), addWord("mad")
+search("pad") -> False, search("bad") -> True, search(".ad") -> True, search("b..") -> True
+````
+
+## Constraints
+
+````text
+- Words consist of a-z lowercase; search may contain '.'.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Trie + DFS for wildcard
+Store words in a trie; on '.' recurse into all non-null child branches.
+
+1. TrieNode holds children dict or array and end flag.
+2. addWord walks/creates nodes for each character.
+3. search uses DFS; on '.' try every child at current depth.
+
+## Complexity
+
+**Time:** Add O(L); search O(26^L) worst for all dots; O(L) for no dots.
+
+**Space:** O(total characters stored in trie).
+
+## Solution
+
+````python
+from typing import Dict, Optional
+
+
+class TrieNode:
+    __slots__ = ("children", "end")
+
+    def __init__(self) -> None:
+        self.children: Dict[str, TrieNode] = {}
+        self.end: bool = False
+
+
+class WordDictionary:
+    def __init__(self) -> None:
+        self._root = TrieNode()
+
+    def addWord(self, word: str) -> None:
+        node = self._root
+        for ch in word:
+            if ch not in node.children:
+                node.children[ch] = TrieNode()
+            node = node.children[ch]
+        node.end = True
+
+    def search(self, word: str) -> bool:
+        def dfs(i: int, node: TrieNode) -> bool:
+            if i == len(word):
+                return node.end
+            ch = word[i]
+            if ch == ".":
+                return any(dfs(i + 1, child) for child in node.children.values())
+            if ch not in node.children:
+                return False
+            return dfs(i + 1, node.children[ch])
+
+        return dfs(0, self._root)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    wd = WordDictionary()
+    wd.addWord("bad")
+    wd.addWord("dad")
+    wd.addWord("mad")
+    assert wd.search("pad") is False
+    assert wd.search("bad") is True
+    assert wd.search(".ad") is True
+    assert wd.search("b..") is True
+    wd.addWord("a")
+    assert wd.search(".") is True
+    print("\nAll test cases passed!")
+````

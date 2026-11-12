@@ -1,0 +1,90 @@
+---
+title: "Letter Case Combinations"
+description: "Return all strings obtainable by toggling any subset of letter positions to upper or lower case while leaving digits untouched."
+topics: [recursion]
+group: "05. Permutation Problems"
+number: "03"
+order: 11005003000000
+status: outline
+---
+
+Return all strings obtainable by toggling any subset of letter positions to upper
+or lower case while leaving digits untouched.
+
+## Examples
+
+````text
+Example 1:
+    Input: "Jw"
+    Output sorted includes "JW", "Jw", "jW", "jw"
+
+Example 2:
+    Input: ""
+    Output: [""]
+````
+
+## Constraints
+
+````text
+- Input length small enough for 2^k combinations in tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS with letter forks
+Each alphabetic character doubles the branching factor; digits are linear.
+
+1. If at end of string, push accumulated value.
+2. For letters, recurse with both cases.
+3. For non-letters, recurse once.
+
+## Complexity
+
+**Time:** O(2^k \* n) for k letters
+
+**Space:** O(n) recursion depth
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def letter_case_combinations(self, s: str) -> List[str]:
+        result: List[str] = []
+
+        def dfs(index: int, built: str) -> None:
+            if index == len(s):
+                result.append(built)
+                return
+            ch = s[index]
+            if ch.isalpha():
+                dfs(index + 1, built + ch.lower())
+                dfs(index + 1, built + ch.upper())
+            else:
+                dfs(index + 1, built + ch)
+
+        dfs(0, "")
+        return sorted(result)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.letter_case_combinations("") == [""], "Test 1 Failed"
+    assert sol.letter_case_combinations("Jw") == ["JW", "Jw", "jW", "jw"], "Test 2 Failed"
+    assert sol.letter_case_combinations("a1") == ["A1", "a1"], "Test 3 Failed"
+    assert len(sol.letter_case_combinations("abcd")) == 16, "Test 4 Failed"
+    assert "mN1" in sol.letter_case_combinations("Mn1"), "Test 5 Failed"
+    print("Test 1 Passed: empty string")
+    print("Test 2 Passed: two letters")
+    print("Test 3 Passed: letter+digit")
+    print("Test 4 Passed: four letters count")
+    print("Test 5 Passed: membership spot check")
+    print("\nAll test cases passed!")
+````

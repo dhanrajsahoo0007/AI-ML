@@ -1,0 +1,77 @@
+---
+title: "Valid Parenthesis"
+description: "Given a string of '(', ')', '{', '}', '[' and ']', determine whether the parentheses close in the correct order and nesting."
+topics: [stacks-and-queues]
+group: "02. Parentheses"
+number: "01"
+order: 9002001000000
+status: outline
+---
+
+Given a string of '(', ')', '&#123;', '&#125;', '\[' and '\]', determine whether the parentheses close in the
+correct order and nesting.
+
+## Examples
+
+````text
+Example 1:
+Input: "()"
+Output: True
+````
+
+## Constraints
+
+````text
+- 0 <= len(s) <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Stack Matching
+Push openings and pop when the matching closer appears at the top.
+
+1. Map each opener to its closer.
+2. Iterate characters: push opens; on close, verify stack top pairs or return False.
+3. Return whether the stack is empty at the end.
+
+## Complexity
+
+**Time:** O(n) - Single pass over the string.
+
+**Space:** O(n) - Stack depth in the worst case.
+
+## Solution
+
+````python
+class Solution:
+    def isValid(self, s: str) -> bool:
+        pairs = {"(": ")", "{": "}", "[": "]"}
+        stack: list[str] = []
+        for ch in s:
+            if ch in pairs:
+                stack.append(ch)
+            else:
+                if not stack or pairs[stack.pop()] != ch:
+                    return False
+        return not stack
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.isValid("()") is True, "Test 1 Failed"
+    assert sol.isValid("()[]{}") is True, "Test 2 Failed"
+    assert sol.isValid("(]") is False, "Test 3 Failed"
+    assert sol.isValid("([])") is True, "Test 4 Failed"
+    assert sol.isValid("") is True, "Test 5 Failed"
+    print("Test 1 Passed: simple pair")
+    print("Test 2 Passed: multiple types")
+    print("Test 3 Passed: mismatch")
+    print("Test 4 Passed: nested mix")
+    print("Test 5 Passed: empty string")
+    print("\nAll test cases passed!")
+````

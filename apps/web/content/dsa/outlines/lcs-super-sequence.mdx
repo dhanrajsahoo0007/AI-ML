@@ -1,0 +1,106 @@
+---
+title: "LCS Super Sequence"
+description: "Given two strings str1 and str2, return the shortest string that has both str1 and str2 as subsequences."
+topics: [dynamic-programming]
+group: "04. Longest Common Subsequence"
+number: "03"
+order: 20004003000000
+status: outline
+---
+
+Given two strings str1 and str2, return the shortest string that has both str1
+and str2 as subsequences. If multiple answers exist, any valid one is fine.
+
+## Examples
+
+````text
+Example 1:
+Input: str1 = "abac", str2 = "cab"
+Output: length 5 (e.g. "cabac" or "cabac" variant)
+````
+
+## Constraints
+
+````text
+- 1 <= len(str1), len(str2) <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** LCS-based construction
+Length = len(a)+len(b)-LCS(a,b); build by merging LCS traceback.
+
+1. Compute LCS DP table.
+2. Backtrack from (m,n): on match take char once; else prefer larger dp side.
+
+## Complexity
+
+**Time:** O(m \* n).
+
+**Space:** O(m \* n) for table plus O(m+n) output.
+
+## Solution
+
+````python
+class Solution:
+    def shortestCommonSupersequence(self, str1: str, str2: str) -> str:
+        m, n = len(str1), len(str2)
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if str1[i - 1] == str2[j - 1]:
+                    dp[i][j] = 1 + dp[i - 1][j - 1]
+                else:
+                    dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+        i, j = m, n
+        out: list[str] = []
+        while i > 0 and j > 0:
+            if str1[i - 1] == str2[j - 1]:
+                out.append(str1[i - 1])
+                i -= 1
+                j -= 1
+            elif dp[i - 1][j] >= dp[i][j - 1]:
+                out.append(str1[i - 1])
+                i -= 1
+            else:
+                out.append(str2[j - 1])
+                j -= 1
+        while i > 0:
+            out.append(str1[i - 1])
+            i -= 1
+        while j > 0:
+            out.append(str2[j - 1])
+            j -= 1
+        return "".join(reversed(out))
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    a, b = "abac", "cab"
+    scs = sol.shortestCommonSupersequence(a, b)
+    assert len(scs) == len(a) + len(b) - 2, "Test 1 Failed"
+    print("Test 1 Passed: length m+n-LCS")
+    i = j = 0
+    for ch in scs:
+        if i < len(a) and ch == a[i]:
+            i += 1
+        if j < len(b) and ch == b[j]:
+            j += 1
+    assert i == len(a) and j == len(b), "Test 1b Failed"
+    assert sol.shortestCommonSupersequence("a", "b") in ("ab", "ba"), "Test 2 Failed"
+    print("Test 2 Passed: two single letters")
+    assert len(sol.shortestCommonSupersequence("abc", "def")) == 6, "Test 3 Failed"
+    print("Test 3 Passed: no overlap full concat length")
+    assert sol.shortestCommonSupersequence("x", "x") == "x", "Test 4 Failed"
+    print("Test 4 Passed: identical single char")
+    s = sol.shortestCommonSupersequence("abcd", "bd")
+    assert len(s) == 4, "Test 5 Failed"
+    assert s == "abcd", "Test 5b Failed"
+    print("Test 5 Passed: bd inside abcd yields abcd")
+    print("\nAll test cases passed!")
+````

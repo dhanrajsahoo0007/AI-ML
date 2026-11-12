@@ -1,0 +1,187 @@
+---
+title: "Number of islands"
+description: "Given an m x n binary grid of '1' (land) and '0' (water), return the number of islands."
+topics: [graphs]
+group: "04. BFS Story Based › 02. Graph Properties and Connectivity"
+number: "03"
+order: 17004002003000
+status: outline
+---
+
+Given an m x n binary grid of '1' (land) and '0' (water), return the number of islands. An island is a
+maximal group of land cells connected 4-directionally. You may assume the grid border is surrounded by water.
+
+## Examples
+
+````text
+Example 1:
+    Input: grid = [
+        ["1","1","1","1","0"],
+        ["1","1","0","1","0"],
+        ["1","1","0","0","0"],
+        ["0","0","0","0","0"],
+    ]
+    Output: 1
+Example 2:
+    Input: grid = [
+        ["1","1","0","0","0"],
+        ["1","1","0","0","0"],
+        ["0","0","1","0","0"],
+        ["0","0","0","1","1"],
+    ]
+    Output: 3
+````
+
+## Constraints
+
+````text
+- m == grid.length, n == grid[i].length
+- 1 <= m, n <= 300
+- grid[i][j] is '0' or '1'
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph BFS on implicit grid graph (multi-source / island marking)
+
+1. Scan the grid; when a '1' is found, start BFS, mark visited cells as '0'.
+2. Increment island count for each BFS start.
+
+## Complexity
+
+**Time:** O(m \* n)
+
+**Space:** O(min(m, n)) for the queue in the worst case (often stated as O(m \* n) for the queue size bound).
+
+## Solution
+
+````python
+from typing import List
+from collections import deque
+
+
+class Solution:
+    def numIslands(self, grid: List[List[str]]) -> int:
+        if not grid:
+            return 0
+
+        row_count = len(grid)
+        col_count = len(grid[0])
+        DIRECTIONS = [[0, 1], [0, -1], [-1, 0], [1, 0]]
+        q: deque[tuple[int, int]] = deque()
+
+        def bfs(q: deque[tuple[int, int]], grid: List[List[str]]) -> None:
+            while q:
+                x, y = q.popleft()
+                for dx, dy in DIRECTIONS:
+                    nx = x + dx
+                    ny = y + dy
+                    if nx < 0 or nx >= row_count or ny < 0 or ny >= col_count or grid[nx][ny] == "0":
+                        continue
+                    grid[nx][ny] = "0"
+                    q.append((nx, ny))
+
+        island_count = 0
+        for x in range(row_count):
+            for y in range(col_count):
+                if grid[x][y] == "0":
+                    continue
+                grid[x][y] = "0"
+                q.append((x, y))
+                bfs(q, grid)
+                island_count += 1
+        return island_count
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    g1 = [
+        ["1", "1", "1", "1", "0"],
+        ["1", "1", "0", "1", "0"],
+        ["1", "1", "0", "0", "0"],
+        ["0", "0", "0", "0", "0"],
+    ]
+    assert sol.numIslands([r[:] for r in g1]) == 1, "Test 1 Failed"
+    g2 = [
+        ["1", "1", "0", "0", "0"],
+        ["1", "1", "0", "0", "0"],
+        ["0", "0", "1", "0", "0"],
+        ["0", "0", "0", "1", "1"],
+    ]
+    assert sol.numIslands([r[:] for r in g2]) == 3, "Test 2 Failed"
+    assert sol.numIslands([["1"]]) == 1, "Test 3 Failed"
+    print("All tests passed!")
+````
+
+## Another version
+
+From 17. Graphs/13. Flood Fill.
+
+### Approach
+
+**Pattern:** Connected components on implicit grid graph
+Each unseen land cell starts a DFS/BFS that marks its entire island visited.
+
+1. Scan the grid; on finding '1', increment count and DFS-mark the whole island as visited ('0').
+
+### Complexity
+
+**Time:** O(m \* n)
+
+**Space:** O(m \* n) worst-case recursion depth.
+
+### Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def numIslands(self, grid: List[List[str]]) -> int:
+        if not grid:
+            return 0
+        m, n = len(grid), len(grid[0])
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+        def dfs(r: int, c: int) -> None:
+            grid[r][c] = "0"
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < m and 0 <= nc < n and grid[nr][nc] == "1":
+                    dfs(nr, nc)
+
+        islands = 0
+        for i in range(m):
+            for j in range(n):
+                if grid[i][j] == "1":
+                    islands += 1
+                    dfs(i, j)
+        return islands
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def clone(g: List[List[str]]) -> List[List[str]]:
+        return [row[:] for row in g]
+
+    g1 = [["1", "1", "0"], ["1", "0", "0"], ["0", "0", "1"]]
+    assert sol.numIslands(clone(g1)) == 2, "Test 1 Failed"
+    print("Test 1 Passed: two islands")
+    g2 = [["1", "1", "1"], ["0", "1", "0"], ["1", "1", "1"]]
+    assert sol.numIslands(clone(g2)) == 1, "Test 2 Failed"
+    print("Test 2 Passed: ring island")
+    assert sol.numIslands(clone([["0"]])) == 0, "Test 3 Failed"
+    print("Test 3 Passed: all water")
+    assert sol.numIslands(clone([["1"]])) == 1, "Test 4 Failed"
+    print("Test 4 Passed: all land")
+    print("\nAll test cases passed!")
+````

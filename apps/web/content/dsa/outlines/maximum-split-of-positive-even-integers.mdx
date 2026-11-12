@@ -1,0 +1,92 @@
+---
+title: "Maximum Split of Positive Even Integers"
+description: "Given a positive even integer finalSum, split it into a maximum-length list of distinct positive even integers that sum to finalSum."
+topics: [arrays]
+group: "04. Mathematical Array Problems"
+number: "04"
+order: 1004004000000
+status: outline
+---
+
+Given a positive even integer finalSum, split it into a maximum-length list of distinct positive
+even integers that sum to finalSum. If impossible, return an empty list.
+
+## Examples
+
+````text
+Example 1:
+    Input: finalSum = 12
+    Output: [2, 4, 6]
+Example 2:
+    Input: finalSum = 7
+    Output: []
+````
+
+## Constraints
+
+````text
+- 1 <= finalSum <= 10^10
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy construction
+Take the smallest unused even numbers 2, 4, 6, ... until the next would overshoot, then adjust
+the last chosen value to absorb the remaining even sum.
+
+1. If finalSum is odd, return \[\].
+2. Build answer with 2, 4, 6, ... while the next even can still leave a positive remainder larger
+than the last pick (grow greedily).
+3. A concise approach: repeatedly append the next even i starting at 2 while i &lt;= remaining sum,
+subtract i from remaining, increase i by 2; if anything remains, add it to the last element.
+
+## Complexity
+
+**Time:** O(sqrt(finalSum)) - Roughly O(k) terms where k^2 \~ finalSum.
+
+**Space:** O(k) - The list of parts.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maximumEvenSplit(self, finalSum: int) -> List[int]:
+        if finalSum % 2:
+            return []
+        ans: List[int] = []
+        need = finalSum
+        nxt = 2
+        while nxt <= need:
+            ans.append(nxt)
+            need -= nxt
+            nxt += 2
+        if need:
+            ans[-1] += need
+        return ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sum(sol.maximumEvenSplit(12)) == 12 and len(set(sol.maximumEvenSplit(12))) == len(
+        sol.maximumEvenSplit(12)
+    ), "Test 1 Failed"
+    print("Test 1 Passed: split twelve")
+    assert sol.maximumEvenSplit(7) == [], "Test 2 Failed"
+    print("Test 2 Passed: odd impossible")
+    assert sum(sol.maximumEvenSplit(10)) == 10, "Test 3 Failed"
+    print("Test 3 Passed: split ten")
+    s4 = sol.maximumEvenSplit(8)
+    assert sum(s4) == 8 and all(x % 2 == 0 for x in s4), "Test 4 Failed"
+    print("Test 4 Passed: split eight")
+    assert sol.maximumEvenSplit(2) == [2], "Test 5 Failed"
+    print("Test 5 Passed: minimal even")
+    print("\nAll test cases passed!")
+````

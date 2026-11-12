@@ -1,0 +1,176 @@
+---
+title: "Permutation II"
+description: "Given an array nums that may contain duplicates, return all unique permutations."
+topics: [backtracking]
+group: "01. Permutation Pattern"
+number: "02"
+order: 12001002000000
+status: outline
+---
+
+Given an array nums that may contain duplicates, return all unique permutations.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 1, 2]
+    Output: [[1,1,2],[1,2,1],[2,1,1]]
+
+Example 2:
+    Input: nums = [1, 2, 3]
+    Output: six permutations of three distinct values.
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 8
+- -10 <= nums[i] <= 10
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Permutation by swap with duplicate pruning
+Sort nums; at each recursion depth skip choosing the same value twice at the same swap level.
+
+1. Sort nums to group equal values.
+2. At index \`start\`, for each i &gt;= start, if nums\[i\] was already swapped into position \`start\` in this loop, skip.
+3. Swap nums\[start\] with nums\[i\], recurse on start + 1, then swap back.
+
+## Complexity
+
+**Time:** O(n \* n!) in the distinct case; less with many duplicates.
+
+**Space:** O(n) - recursion depth and auxiliary sets per level.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem Statement:
+    Given a collection of numbers, nums, that might contain duplicates, return all possible
+    unique permutations in any order.
+
+    Example 1:
+    Input: nums = [1,1,2]
+    Output: [[1,1,2], [1,2,1], [2,1,1]]
+
+    Example 2:
+    Input: nums = [1,2,3]
+    Output: [[1,2,3],[1,3,2],[2,1,3],[2,3,1],[3,1,2],[3,2,1]]
+
+    Constraints:
+    * 1 <= nums.length <= 8
+    * -10 <= nums[i] <= 10
+
+Approach:
+    We use a backtracking algorithm with a modification to handle duplicates:
+    1. Sort the input array to group duplicates together.
+    2. Use a backtracking function that builds permutations incrementally.
+    3. For each position, keep track of used numbers to avoid duplicate permutations.
+    4. Use a swap method to generate different permutations.
+    5. Backtrack by undoing the swaps.
+
+Time Complexity: O(n * n!)
+    - In the worst case (no duplicates), we generate n! permutations.
+    - Each permutation takes O(n) time to construct.
+    - The actual number of permutations will be less if there are duplicates.
+
+Space Complexity: O(n * n!)
+    - We store up to n! permutations in the worst case.
+    - Each permutation is of length n.
+    - The recursion stack can go up to depth n.
+
+Recursive Tree for input [1,1,2]:
+
+                 [1,1,2]
+                /   |               [1,1,2] [1,1,2] [2,1,1]
+              |       |
+            [1,1,2] [1,2,1]
+
+Explanation of the Recursive Tree:
+    - Root: The initial sorted array [1,1,2]
+    - Level 1: Represents choices for the first position
+        - [1,1,2]: First '1' stays in place
+        - [1,1,2]: Second '1' is not swapped (skipped to avoid duplication)
+        - [2,1,1]: '2' is swapped to first position
+    - Level 2: Represents choices for the second position
+        - For [1,1,2]: Second '1' stays, then '2' is swapped
+        - For [2,1,1]: No more unique permutations (both are '1')
+    - Level 3: Final permutations
+
+Key Points:
+    1. Sorting groups duplicates together, making it easier to skip duplicates.
+    2. The 'used' set in each recursive call prevents duplicate permutations.
+    3. Swapping is used to generate permutations efficiently.
+    4. Backtracking (undoing swaps) allows exploration of all possibilities.
+    5. The number of unique permutations may be less than n! due to duplicates.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def permuteUnique(self, nums: List[int]) -> List[List[int]]:
+        nums.sort()
+        result: List[List[int]] = []
+
+        def swap(i: int, j: int) -> None:
+            nums[i], nums[j] = nums[j], nums[i]
+
+        def backtrack(start: int) -> None:
+            if start == len(nums):
+                result.append(nums[:])
+                return
+            # `seen` is local to this depth: skip duplicate values already tried at index `start`.
+            seen: set[int] = set()
+            for i in range(start, len(nums)):
+                if nums[i] in seen:
+                    continue
+                seen.add(nums[i])
+                swap(start, i)
+                backtrack(start + 1)
+                swap(start, i)  # restore array before trying the next swap partner
+
+        backtrack(0)
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def norm(rows: List[List[int]]) -> List[tuple]:
+        return sorted(tuple(r) for r in rows)
+
+    assert norm(sol.permuteUnique([1, 1, 2])) == [(1, 1, 2), (1, 2, 1), (2, 1, 1)], "Test 1 Failed"
+    print("Test 1 Passed: [1,1,2]")
+
+    assert len(sol.permuteUnique([1, 2, 3])) == 6, "Test 2 Failed"
+    print("Test 2 Passed: three distinct numbers")
+
+    assert norm(sol.permuteUnique([2, 2, 1, 1])) == norm(
+        [
+            [1, 1, 2, 2],
+            [1, 2, 1, 2],
+            [1, 2, 2, 1],
+            [2, 1, 1, 2],
+            [2, 1, 2, 1],
+            [2, 2, 1, 1],
+        ]
+    ), "Test 3 Failed"
+    print("Test 3 Passed: two pairs")
+
+    assert sol.permuteUnique([0]) == [[0]], "Test 4 Failed"
+    print("Test 4 Passed: single element")
+
+    print("\nAll test cases passed!")
+````

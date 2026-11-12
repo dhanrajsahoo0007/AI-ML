@@ -1,0 +1,114 @@
+---
+title: "Longest Substring Without Repeating Characters"
+description: "Given a string s, return the length of the longest substring that contains no repeated characters."
+topics: [sliding-window]
+group: "02. String Manipulation with Sliding Window"
+number: "01"
+order: 7002001000000
+status: outline
+---
+
+Given a string s, return the length of the longest substring that contains no
+repeated characters.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "abcabcbb"
+    Output: 3
+Example 2:
+    Input: s = "bbbbb"
+    Output: 1
+Example 3:
+    Input: s = "pwwkew"
+    Output: 3
+````
+
+## Constraints
+
+````text
+- 0 <= len(s) <= 5 * 10^4 in typical online judge statements.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Variable-size sliding window with last-seen indices
+Expand the right end while characters are unique; when a repeat appears inside the window, move the left bound past its previous index.
+
+1. Track the last index of each character (or use a set with two pointers).
+2. Advance the right pointer; if s\[right\] was seen at or after left, set left to last\_index + 1.
+3. Update the last index and maximize the window length.
+
+Restored notes (archived workbook):
+
+LeetCode 3. Longest Substring Without Repeating Characters
+
+Given a string s, find the length of the longest substring without duplicate characters.
+
+Example 1:
+Input: s = "abcabcbb"
+Output: 3
+Explanation: The answer is "abc", with the length of 3.
+
+Example 2:
+Input: s = "bbbbb"
+Output: 1
+Explanation: The answer is "b", with the length of 1.
+
+Constraints:
+0 &lt;= s.length &lt;= 5 \* 10^4
+s consists of English letters, digits, symbols and spaces.
+
+## Complexity
+
+**Time:** O(n) - Each index is visited by the right pointer once; left only moves forward.
+
+**Space:** O(alphabet) - Storage for character positions is bounded by the alphabet size.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def lengthOfLongestSubstring(self, s: str) -> int:
+        last: List[int] = [-1] * 256
+        left = 0
+        best = 0
+
+        for right, ch in enumerate(s):
+            code = ord(ch)
+            if last[code] >= left:
+                left = last[code] + 1
+            last[code] = right
+            best = max(best, right - left + 1)
+
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.lengthOfLongestSubstring("abcabcbb") == 3, "Test 1 Failed"
+    print("Test 1 Passed: abcabcbb")
+
+    assert sol.lengthOfLongestSubstring("bbbbb") == 1, "Test 2 Failed"
+    print("Test 2 Passed: single character run")
+
+    assert sol.lengthOfLongestSubstring("pwwkew") == 3, "Test 3 Failed"
+    print("Test 3 Passed: pwwkew")
+
+    assert sol.lengthOfLongestSubstring("") == 0, "Test 4 Failed"
+    print("Test 4 Passed: empty string")
+
+    assert sol.lengthOfLongestSubstring("dvdf") == 3, "Test 5 Failed"
+    print("Test 5 Passed: left jumps over earlier duplicate")
+
+    print("\nAll test cases passed!")
+````

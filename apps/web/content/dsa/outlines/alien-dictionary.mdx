@@ -1,0 +1,130 @@
+---
+title: "Alien dictionary"
+description: "Given sorted words from an alien dictionary using some unknown total order of letters, derive any valid order of letters consistent with the words."
+topics: [graphs]
+group: "05. Topological Sort"
+number: "06"
+order: 17005006000000
+status: outline
+---
+
+Given sorted words from an alien dictionary using some unknown total order of letters, derive any valid
+order of letters consistent with the words. If no valid order exists, return "".
+
+## Examples
+
+````text
+Example 1:
+    Input: words = ["wrt","wrf","er","ett","rftt"]
+    Output: "wertf"
+Example 2:
+    Input: words = ["z","x"]
+    Output: "zx"
+Example 3:
+    Input: words = ["z","x","z"]
+    Output: ""
+````
+
+## Constraints
+
+````text
+- 1 <= len(words) <= 100
+- 1 <= len(words[i]) <= 100
+- words[i] contains lowercase English letters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Topological sort on inferred letter graph
+Compare adjacent words to infer directed edges between first differing letters; detect cycles via DFS states.
+
+1. Collect all characters; build adjacency sets from adjacent word pairs (prefix rule for invalid orders).
+2. DFS postorder with visit states; cycle if revisiting a node on the active path.
+3. Reverse DFS finish order to obtain a valid alphabet ordering.
+
+## Complexity
+
+**Time:** O(C) for total characters across words (bounded by input size).
+
+**Space:** O(1) alphabet size (at most 26 letters) plus graph storage O(26^2) worst case.
+
+## Original notes
+
+````text
+See also: Kahn's queue formulation can replace DFS ordering.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def alienOrder(self, words: List[str]) -> str:
+        adj = {c: set() for w in words for c in w}
+        for i in range(len(words) - 1):
+            w1, w2 = words[i], words[i + 1]
+            if len(w1) > len(w2) and w1.startswith(w2):
+                return ""
+            for a, b in zip(w1, w2):
+                if a != b:
+                    adj[a].add(b)
+                    break
+        visit: dict[str, bool] = {}
+        order: List[str] = []
+
+        def dfs(c: str) -> bool:
+            if c in visit:
+                return visit[c]
+            visit[c] = False
+            for nei in adj[c]:
+                if not dfs(nei):
+                    return False
+            visit[c] = True
+            order.append(c)
+            return True
+
+        for ch in adj:
+            if ch not in visit:
+                if not dfs(ch):
+                    return ""
+        return "".join(order[::-1])
+
+
+def _is_valid_alien_order(words: List[str], order: str) -> bool:
+    if not order:
+        return False
+    rank = {c: i for i, c in enumerate(order)}
+    for w1, w2 in zip(words, words[1:]):
+        if len(w1) > len(w2) and w1.startswith(w2):
+            return False
+        for a, b in zip(w1, w2):
+            if a != b:
+                if rank[a] > rank[b]:
+                    return False
+                break
+    return len(set(order)) == len(order) == len({c for w in words for c in w})
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.alienOrder(["wrt", "wrf", "er", "ett", "rftt"]) == "wertf", "Test 1 Failed"
+    print("Test 1 Passed: classic alien sample")
+    assert sol.alienOrder(["z", "x"]) == "zx", "Test 2 Failed"
+    print("Test 2 Passed: two-letter order")
+    assert sol.alienOrder(["z", "x", "z"]) == "", "Test 3 Failed"
+    print("Test 3 Passed: inconsistent repeats")
+    assert sol.alienOrder(["abc", "ab"]) == "", "Test 4 Failed"
+    print("Test 4 Passed: invalid prefix ordering")
+    words5 = ["ac", "ab", "zc", "zb"]
+    out5 = sol.alienOrder(words5)
+    assert _is_valid_alien_order(words5, out5), "Test 5 Failed"
+    print("Test 5 Passed: validator accepts derived order")
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,78 @@
+---
+title: "Find the Celebrity"
+description: "In a party of n people labeled 0..n-1, a celebrity is known by everyone but knows nobody."
+topics: [graphs]
+group: "11. Others"
+order: 17011999000000
+status: outline
+---
+
+In a party of n people labeled 0..n-1, a celebrity is known by everyone but knows nobody.
+You may query knows(a,b) (whether a knows b). Find the celebrity if unique, else -1.
+
+## Examples
+
+````text
+Example 1:
+Input: n = 3, celebrity = 1 (knows matrix implies person 1 is celebrity)
+Output: 1
+````
+
+## Constraints
+
+````text
+- 2 <= n <= 100
+- Exactly one celebrity if exists
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Two-pointer elimination on tournament graph
+
+1. Eliminate candidates: if knows(cand, i) then cand cannot be celebrity; else i cannot be.
+2. Verify the survivor against all others.
+
+## Complexity
+
+**Time:** O(n) queries for elimination + O(n) verification.
+
+**Space:** O(1) extra.
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+_KNOWS_MATRIX: List[List[bool]] = []
+
+
+def knows(a: int, b: int) -> bool:
+    return _KNOWS_MATRIX[a][b]
+
+
+class Solution:
+    def findCelebrity(self, n: int) -> int:
+        cand = 0
+        for i in range(1, n):
+            if knows(cand, i):
+                cand = i
+        for i in range(n):
+            if i != cand and (knows(cand, i) or not knows(i, cand)):
+                return -1
+        return cand
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    _KNOWS_MATRIX = [[True, True, False], [False, True, False], [True, True, True]]
+    assert sol.findCelebrity(3) == 1, "Test 1 Failed"
+    _KNOWS_MATRIX = [[True, True], [False, True]]
+    assert sol.findCelebrity(2) == 1, "Test 2 Failed"
+    print("All tests passed!")
+````

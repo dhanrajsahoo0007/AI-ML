@@ -1,0 +1,152 @@
+---
+title: "BST Iterator"
+description: "Design an iterator over a binary search tree that is initialized with the root."
+topics: [binary-search-trees]
+group: "01. Basic BST Operations"
+number: "05"
+order: 15001005000000
+status: outline
+---
+
+Design an iterator over a binary search tree that is initialized with the root. Implement
+next() to return the next smallest element in ascending order, and hasNext() to indicate
+whether another element exists.
+
+## Examples
+
+````text
+Example 1:
+Input: BST [7,3,15,null,null,9,20], call next/hasNext in order
+Output values from next(): 3, 7, 9, 15, 20 then hasNext() is False
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 10^5].
+- next() and hasNext() run in amortized O(1) time with a stack-based inorder simulation.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Controlled inorder traversal (stack)
+Keep a stack of nodes along the left spine; each next() pops, then pushes the left spine of the right child.
+
+1. On construction, push the leftmost chain from the root onto a stack.
+2. next() pops the top node, pushes the left chain starting at its right child, returns popped value.
+3. hasNext() returns whether the stack is non-empty.
+
+## Complexity
+
+**Time:** O(1) amortized per next() and O(1) per hasNext() - each edge is pushed/popped once overall.
+
+**Space:** O(h) - Stack holds at most one left path from root, height h.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Implement an iterator over a binary search tree (BST). Your iterator will be initialized with the root node of a BST.
+- next() returns the next smallest number in the BST.
+- hasNext() returns whether we have a next smallest number.
+
+Time Complexity:
+- Constructor: O(h), where h is the height of the tree
+- next(): Amortized O(1)
+- hasNext(): O(1)
+
+Space Complexity:
+- O(h), where h is the height of the tree
+
+Explanation:
+1. The iterator maintains a stack of nodes. When initialized, it pushes all leftmost nodes onto the stack.
+2. The next() method pops the top node (which is the next smallest), processes its right subtree, and returns its value.
+3. The hasNext() method simply checks if the stack is empty.
+
+Example:
+Input:
+7
+/   3  15
+/     9   20
+
+BSTIterator iterator = new BSTIterator(root);
+iterator.next();    // return 3
+iterator.next();    // return 7
+iterator.hasNext(); // return true
+iterator.next();    // return 9
+iterator.hasNext(); // return true
+iterator.next();    // return 15
+iterator.next();    // return 20
+iterator.hasNext(); // return false
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: List[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+class BSTIterator:
+    def __init__(self, root: Optional[TreeNode]):
+        self.stack: List[TreeNode] = []
+        self._push_left(root)
+
+    def _push_left(self, node: Optional[TreeNode]) -> None:
+        while node:
+            self.stack.append(node)
+            node = node.left
+
+    def next(self) -> int:
+        node = self.stack.pop()
+        self._push_left(node.right)
+        return node.val
+
+    def hasNext(self) -> bool:
+        return len(self.stack) > 0
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    root = build_bst_insert([7, 3, 15, 9, 20])
+    it = BSTIterator(root)
+    out: List[int] = []
+    while it.hasNext():
+        out.append(it.next())
+    assert out == [3, 7, 9, 15, 20]
+    it2 = BSTIterator(TreeNode(42))
+    assert it2.hasNext() and it2.next() == 42 and not it2.hasNext()
+    it3 = BSTIterator(None)
+    assert not it3.hasNext()
+    r3 = build_bst_insert([2, 1])
+    it4 = BSTIterator(r3)
+    assert it4.next() == 1 and it4.next() == 2
+    print("\nAll test cases passed!")
+````

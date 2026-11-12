@@ -1,0 +1,106 @@
+---
+title: "Detect Cycle in Undirected Graph using DFS"
+description: "Given an undirected graph with V vertices (0..V-1) and a list of edges, determine whether the graph contains any cycle."
+topics: [graphs]
+group: "01. DFS"
+number: "02"
+order: 17001002000000
+status: outline
+---
+
+Given an undirected graph with V vertices (0..V-1) and a list of edges, determine whether the graph
+contains any cycle. The graph may be disconnected.
+
+## Examples
+
+````text
+Example 1:
+    Input: V = 5, edges = [[0,1],[1,2],[2,3],[3,4],[4,1]]
+    Output: True
+Example 2:
+    Input: V = 4, edges = [[0,1],[1,2],[2,3]]
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= V, number of edges <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS cycle detection (parent tracking)
+In an undirected graph, a back edge to a visited vertex that is not the parent implies a cycle.
+
+1. Build adjacency lists.
+2. For each unvisited component, DFS from a start node with parent -1.
+3. If a neighbor is visited and not the parent, return True; else recurse on unvisited neighbors.
+
+## Complexity
+
+**Time:** O(V + E)
+
+**Space:** O(V + E) for the graph and O(V) for visited / recursion stack.
+
+## Original notes
+
+````text
+See also: BFS version in `02. BFS/02. Detect Cycle in Undirected Graph using BFS.py`
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def create_graph(self, V: int, edges: List[List[int]]) -> List[List[int]]:
+        adj: List[List[int]] = [[] for _ in range(V)]
+        for u, v in edges:
+            adj[u].append(v)
+            adj[v].append(u)
+        return adj
+
+    def has_cycle(self, V: int, adj: List[List[int]]) -> bool:
+        visited = [False] * V
+
+        def dfs(u: int, parent: int) -> bool:
+            visited[u] = True
+            for v in adj[u]:
+                if v == parent:
+                    continue
+                if visited[v]:
+                    return True
+                if dfs(v, u):
+                    return True
+            return False
+
+        for i in range(V):
+            if not visited[i] and dfs(i, -1):
+                return True
+        return False
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    V1, e1 = 5, [[0, 1], [1, 2], [2, 3], [3, 4], [4, 1]]
+    assert sol.has_cycle(V1, sol.create_graph(V1, e1)) is True, "Test 1 Failed"
+    print("Test 1 Passed: cycle in component")
+    V2, e2 = 4, [[0, 1], [1, 2], [2, 3]]
+    assert sol.has_cycle(V2, sol.create_graph(V2, e2)) is False, "Test 2 Failed"
+    print("Test 2 Passed: tree is acyclic")
+    V3, e3 = 2, [[0, 1]]
+    assert sol.has_cycle(V3, sol.create_graph(V3, e3)) is False, "Test 3 Failed"
+    print("Test 3 Passed: single edge")
+    V4, e4 = 3, [[0, 1], [1, 2], [2, 0]]
+    assert sol.has_cycle(V4, sol.create_graph(V4, e4)) is True, "Test 4 Failed"
+    print("Test 4 Passed: triangle")
+    print("All tests passed!")
+````

@@ -1,0 +1,116 @@
+---
+title: "Similar String Groups"
+description: "Two strings are similar if you can swap two letters in one string to get the other, or they are equal."
+topics: [graphs]
+group: "03. DFS Story Based › 06. String and Grid-based DFS"
+number: "02"
+order: 17003006002000
+status: outline
+---
+
+Two strings are similar if you can swap two letters in one string to get the other, or they are equal.
+Strings are in the same group if they are similar (transitively). Given an array of strings of equal
+length, return the number of groups.
+
+## Examples
+
+````text
+Example 1:
+    Input: strs = ["tars","rats","arts","star"]
+    Output: 2
+Example 2:
+    Input: strs = ["omv","ovm"]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= len(strs) <= 300
+- 1 <= len(strs[i]) <= 300
+- strs[i] consist of lowercase letters only.
+- All strings have the same length.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Union-Find on string indices
+Connect indices whose strings are similar; count DSU components.
+
+1. For each pair i &lt; j, check similarity (equal or exactly two differing positions with swapped chars).
+2. Union similar indices.
+3. Count distinct roots.
+
+## Complexity
+
+**Time:** O(n^2 \* L) for n strings of length L.
+
+**Space:** O(n) for DSU.
+
+## Original notes
+
+````text
+See also: BFS/union variant in `04. BFS Story Based/06. String Manipulation with BFS/01. Similar String Groups.py`
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def numSimilarGroups(self, strs: List[str]) -> int:
+        n = len(strs)
+
+        def similar(a: str, b: str) -> bool:
+            if len(a) != len(b):
+                return False
+            diff = [i for i in range(len(a)) if a[i] != b[i]]
+            if not diff:
+                return True
+            if len(diff) != 2:
+                return False
+            i, j = diff
+            return a[i] == b[j] and a[j] == b[i]
+
+        parent = list(range(n))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                if similar(strs[i], strs[j]):
+                    union(i, j)
+
+        return len({find(i) for i in range(n)})
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.numSimilarGroups(["tars", "rats", "arts", "star"]) == 2, "Test 1 Failed"
+    print("Test 1 Passed: tars/rats/arts/star")
+    assert sol.numSimilarGroups(["omv", "ovm"]) == 1, "Test 2 Failed"
+    print("Test 2 Passed: omv/ovm")
+    assert sol.numSimilarGroups(["ab", "ba"]) == 1, "Test 3 Failed"
+    print("Test 3 Passed: length-2 swap")
+    assert sol.numSimilarGroups(["a"]) == 1, "Test 4 Failed"
+    print("Test 4 Passed: singleton")
+    assert sol.numSimilarGroups(["abc", "acb"]) == 1, "Test 5 Failed"
+    print("Test 5 Passed: adjacent swap pair")
+    print("All tests passed!")
+````

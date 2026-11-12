@@ -1,0 +1,79 @@
+---
+title: "[Hard] Longest Valid Parentheses"
+description: "Given a string of '(' and ')', return the length of the longest contiguous valid parentheses substring."
+topics: [stacks-and-queues]
+group: "02. Parentheses"
+number: "07"
+order: 9002007000000
+status: outline
+---
+
+Given a string of '(' and ')', return the length of the longest contiguous valid parentheses substring.
+
+## Examples
+
+````text
+Example 1:
+Input: ")()())"
+Output: 4
+````
+
+## Constraints
+
+````text
+- 0 <= len(s) <= 3 * 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Stack with Sentinel Index
+Keep a stack of unmatched indices; valid segments appear between consecutive unmatched positions.
+
+1. Seed the stack with -1 as a sentinel boundary.
+2. Push indices of '(' ; on ')', pop. If empty, push current index as new boundary else update best length.
+3. Return the maximum span observed.
+
+## Complexity
+
+**Time:** O(n) - Each index is pushed and popped at most once.
+
+**Space:** O(n) - Stack holds unmatched positions.
+
+## Solution
+
+````python
+class Solution:
+    def longestValidParentheses(self, s: str) -> int:
+        stack: list[int] = [-1]
+        best = 0
+        for i, ch in enumerate(s):
+            if ch == "(":
+                stack.append(i)
+            else:
+                stack.pop()
+                if not stack:
+                    stack.append(i)
+                else:
+                    best = max(best, i - stack[-1])
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.longestValidParentheses("(()") == 2, "Test 1 Failed"
+    assert sol.longestValidParentheses(")()())") == 4, "Test 2 Failed"
+    assert sol.longestValidParentheses("") == 0, "Test 3 Failed"
+    assert sol.longestValidParentheses("())((()))(())(") == 10, "Test 4 Failed"
+    assert sol.longestValidParentheses("()(())") == 6, "Test 5 Failed"
+    print("Test 1 Passed: prefix invalid")
+    print("Test 2 Passed: embedded segment")
+    print("Test 3 Passed: empty input")
+    print("Test 4 Passed: multiple islands")
+    print("Test 5 Passed: combined valid run")
+    print("\nAll test cases passed!")
+````

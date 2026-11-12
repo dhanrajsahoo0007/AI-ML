@@ -1,0 +1,147 @@
+---
+title: "Floor in a BST"
+description: "Given the root of a BST and a number x, find the floor of x: the largest tree value that is less than or equal to x."
+topics: [binary-search-trees]
+group: "02. BST Properties and Traversal"
+number: "03"
+order: 15002003000000
+status: outline
+---
+
+Given the root of a BST and a number x, find the floor of x: the largest tree value that
+is less than or equal to x. If none exists, return None.
+
+## Examples
+
+````text
+Example 1:
+    Input: BST [8,4,12,2,6,10,14], x = 5
+    Output: 4
+
+Example 2:
+    Input: same tree, x = 2
+    Output: 2
+````
+
+## Constraints
+
+````text
+- The tree follows BST ordering on distinct values.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** BST walk with candidate
+Track the best candidate when going right; go left when the current value is too large.
+
+1. Initialize floor as None and current at root.
+2. If current equals x, return x.
+3. If current is greater than x, move left; else update floor and move right.
+4. Return floor after the walk.
+
+## Complexity
+
+**Time:** O(h) - One root-to-leaf style path.
+
+**Space:** O(1) - Iterative; O(h) if implemented recursively.
+Restored (original notes, diagrams, and walkthrough):
+Binary Search Tree (BST) Floor Implementation
+
+Problem Statement:
+Given a BST and a value X, find the floor of X in the BST.
+The floor of X is the largest value in the BST that is smaller than or equal to X.
+
+Time Complexity: O(h), where h is the height of the tree.
+- In a balanced BST, h = log(n), where n is the number of nodes.
+- In the worst case (skewed tree), h = n.
+
+Space Complexity:
+- O(h) for the recursive approach due to the call stack.
+- O(1) for the iterative approach.
+
+Explanation:
+The algorithm works by traversing the BST while keeping track of the potential floor value.
+- If the current node's value is equal to X, we've found the exact floor.
+- If X is less than the current node's value, we move to the left subtree.
+- If X is greater than the current node's value, we update our potential floor and move to the right subtree.
+
+8
+/         4    12
+/ \\   /     2   6 10 14
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: list[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+class Solution:
+    def floor(self, root: Optional[TreeNode], x: int) -> Optional[int]:
+        best: Optional[int] = None
+        cur = root
+        while cur:
+            if cur.val == x:
+                return x
+            if cur.val > x:
+                cur = cur.left
+            else:
+                best = cur.val
+                cur = cur.right
+        return best
+
+    def floorRecursive(self, root: Optional[TreeNode], x: int) -> Optional[int]:
+        def helper(node: Optional[TreeNode], best: Optional[int]) -> Optional[int]:
+            if node is None:
+                return best
+            if node.val == x:
+                return x
+            if node.val > x:
+                return helper(node.left, best)
+            return helper(node.right, node.val)
+
+        return helper(root, None)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    root = build_bst_insert([8, 4, 12, 2, 6, 10, 14])
+    assert sol.floor(root, 5) == 4
+    assert sol.floor(root, 2) == 2
+    assert sol.floor(root, 1) is None
+    assert sol.floorRecursive(root, 13) == 12
+    assert sol.floor(None, 5) is None
+    print("\nAll test cases passed!")
+````

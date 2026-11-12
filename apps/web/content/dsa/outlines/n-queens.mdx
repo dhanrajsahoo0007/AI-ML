@@ -1,0 +1,154 @@
+---
+title: "N Queens"
+description: "Place n queens on an n x n chessboard so none attack; return all distinct boards as lists of strings using 'Q' and '.'."
+topics: [backtracking]
+group: "04. Grid Traversal"
+number: "05"
+order: 12004005000000
+status: outline
+---
+
+Place n queens on an n x n chessboard so none attack; return all distinct boards as lists
+of strings using 'Q' and '.'.
+
+## Examples
+
+````text
+Example 1:
+Input: n = 4
+Output: two board layouts (see tests)
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 9
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Row-wise queen placement with diagonal sets
+Track occupied columns and both diagonals; place one queen per row then recurse.
+
+1. For each row try each column not attacked by column or diagonal sets.
+2. Place queen, update sets, recurse next row, then undo.
+3. When row == n, snapshot the board.
+
+## Complexity
+
+**Time:** O(n!) worst-case search tree.
+
+**Space:** O(n) for sets and recursion excluding outputs.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem Statement: N Queens
+    The N-Queens puzzle is the problem of placing N chess queens on an N×N chessboard 
+    so that no two queens threaten each other. Thus, a solution requires that no two 
+    queens share the same row, column, or diagonal.
+
+Time Complexity: O(N!), where N is the size of the board. 
+    In the worst case, we explore all possible configurations of queens on the board.
+
+Space Complexity: O(N) for the recursive call stack and the sets used to track 
+    occupied positions. The board itself also takes O(N^2) space, but this is dominated 
+    by O(N!) for large N when considering the space needed to store all solutions.
+
+Explanation:
+This solution uses a backtracking algorithm with some optimizations:
+    1. We use sets to keep track of occupied columns and diagonals, allowing for O(1) lookup.
+    2. We represent diagonals using r+c for positive diagonals and r-c for negative diagonals.
+    3. We build the board row by row, which eliminates the need to check for row conflicts.
+    4. When a valid configuration is found, we convert it to the required string format and add it to our results.
+
+Example:
+For a 4x4 board, one solution might be:
+    .Q..  # Queen in the second column of the first row
+    ...Q  # Queen in the fourth column of the second row
+    Q...  # Queen in the first column of the third row
+    ..Q.  # Queen in the third column of the fourth row
+
+
+Additional Notes:
+    1. The use of sets (col, posDiag, negDiag) allows for O(1) time complexity when 
+        checking if a position is under attack, which is a significant optimization.
+
+    2. The representation of diagonals is clever:
+        - For positive diagonals (↘), r+c is constant for each diagonal.
+        - For negative diagonals (↙), r-c is constant for each diagonal.
+
+    3. By building the solution row by row, we eliminate the need to check for row conflicts,
+        as we know we're only placing one queen per row.
+
+    4. The backtracking approach allows us to efficiently explore the solution space
+        without explicitly trying every possible configuration.
+
+    5. This solution finds all possible configurations, which is why we store them in 
+        the 'res' list and return all of them at the end.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def solveNQueens(self, n: int) -> List[List[str]]:
+        cols = set()
+        pos_diag = set()
+        neg_diag = set()
+        board = [["."] * n for _ in range(n)]
+        result: List[List[str]] = []
+
+        def backtrack(row: int) -> None:
+            if row == n:
+                result.append(["".join(r) for r in board])
+                return
+            for col in range(n):
+                if col in cols or (row + col) in pos_diag or (row - col) in neg_diag:
+                    continue
+                cols.add(col)
+                pos_diag.add(row + col)
+                neg_diag.add(row - col)
+                board[row][col] = "Q"
+                backtrack(row + 1)
+                board[row][col] = "."
+                cols.remove(col)
+                pos_diag.remove(row + col)
+                neg_diag.remove(row - col)
+
+        backtrack(0)
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    n4 = sol.solveNQueens(4)
+    assert len(n4) == 2, "Test 1 Failed"
+    assert sorted(n4) == sorted(
+        [
+            [".Q..", "...Q", "Q...", "..Q."],
+            ["..Q.", "Q...", "...Q", ".Q.."],
+        ]
+    ), "Test 1 Failed"
+    print("Test 1 Passed: four queens")
+
+    assert sol.solveNQueens(1) == [["Q"]], "Test 2 Failed"
+    print("Test 2 Passed: single queen")
+
+    assert sol.solveNQueens(2) == [], "Test 3 Failed"
+    print("Test 3 Passed: no solution for n=2")
+
+    assert sol.solveNQueens(3) == [], "Test 4 Failed"
+    print("Test 4 Passed: no solution for n=3")
+
+    print("\nAll test cases passed!")
+````

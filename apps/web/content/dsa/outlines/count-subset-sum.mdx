@@ -1,0 +1,86 @@
+---
+title: "Count subset sum"
+description: "Count subsets of nums whose elements sum exactly to target (each element used at most once; order of picking does not create new subsets)."
+topics: [dynamic-programming]
+group: "02. 0-1 Knapsack"
+number: "06"
+order: 20002006000000
+status: outline
+---
+
+Count subsets of nums whose elements sum exactly to target (each element used
+at most once; order of picking does not create new subsets).
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 2, 3, 3], target = 6
+    Output: 3
+Example 2:
+    Input: nums = [1, 1, 1], target = 2
+    Output: 3
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 200
+- 0 <= nums[i] <= 1000
+- 0 <= target <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 0-1 Knapsack counting
+dp\[i\]\[j\] = number of ways to reach sum j with first i items.
+
+1. dp\[i\]\[0\] = 1 for all i (empty subset for sum 0).
+2. dp\[i\]\[j\] = dp\[i-1\]\[j\] + dp\[i-1\]\[j-nums\[i-1\]\] when j&gt;=nums\[i-1\].
+3. Return dp\[n\]\[target\].
+
+## Complexity
+
+**Time:** O(n \* target).
+
+**Space:** O(n \* target).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def countSubsets(self, nums: List[int], target: int) -> int:
+        n = len(nums)
+        dp = [[0] * (target + 1) for _ in range(n + 1)]
+        for i in range(n + 1):
+            dp[i][0] = 1
+        for i in range(1, n + 1):
+            for j in range(target + 1):
+                dp[i][j] = dp[i - 1][j]
+                if nums[i - 1] <= j:
+                    dp[i][j] += dp[i - 1][j - nums[i - 1]]
+        return dp[n][target]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.countSubsets([1, 2, 3, 3], 6) == 3, "Test 1 Failed"
+    print("Test 1 Passed: three ways to six")
+    assert sol.countSubsets([1, 1, 1], 2) == 3, "Test 2 Failed"
+    print("Test 2 Passed: pick two of three ones")
+    assert sol.countSubsets([], 0) == 1, "Test 3 Failed"
+    print("Test 3 Passed: empty set one way for sum 0")
+    assert sol.countSubsets([2, 4, 6], 6) == 2, "Test 4 Failed"
+    print("Test 4 Passed: {6} or {2,4}")
+    assert sol.countSubsets([1, 2, 3], 4) == 1, "Test 5 Failed"
+    print("Test 5 Passed: unique combo 1+3")
+    print("\nAll test cases passed!")
+````

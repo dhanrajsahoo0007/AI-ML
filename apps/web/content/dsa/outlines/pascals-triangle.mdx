@@ -1,0 +1,106 @@
+---
+title: "Pascals Triangle"
+description: "Given an integer numRows, return the first numRows of Pascal's triangle."
+topics: [arrays]
+group: "04. Mathematical Array Problems"
+number: "02"
+order: 1004002000000
+status: outline
+---
+
+Given an integer numRows, return the first numRows of Pascal's triangle. Each row starts and ends
+with 1, and each interior value is the sum of the two values above it from the previous row.
+
+## Examples
+
+````text
+Example 1:
+    Input: numRows = 5
+    Output: [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1]]
+Example 2:
+    Input: numRows = 1
+    Output: [[1]]
+````
+
+## Constraints
+
+````text
+- 1 <= numRows <= 30
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Iterative row construction
+Build each row from the previous row using adjacent sums.
+
+1. Start with triangle = \[\[1\]\].
+2. For i from 1 to numRows - 1, form a new row beginning with 1.
+3. For j from 1 to i - 1, append triangle\[i - 1\]\[j - 1\] + triangle\[i - 1\]\[j\].
+4. Append 1 to finish the row and add it to triangle.
+5. Return triangle.
+
+## Complexity
+
+**Time:** O(numRows^2) - Row i has O(i) work; sum 1..numRows is quadratic.
+
+**Space:** O(numRows^2) - Store all generated entries in the triangle.
+
+## Original notes
+
+````text
+(preamble)
+Each interior entry is the sum of the two entries above it (same property as ``C(n,k)`` rows).
+Step-by-step (original notes):
+
+Visual (first five rows)::
+1
+               1 1
+              1 2 1
+             1 3 3 1
+            1 4 6 4 1
+
+
+1. Seed with ``[1]``.
+2. For each new row, start and end with ``1``.
+3. Middle positions ``j`` satisfy ``row[j] = previous[j-1] + previous[j]``.
+4. Append the finished row and repeat until ``numRows`` rows exist.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def generate(self, numRows: int) -> List[List[int]]:
+        triangle: List[List[int]] = [[1]]  # first row is always [1]
+        for i in range(1, numRows):
+            row = [1]  # left boundary
+            for j in range(1, i):
+                # Pascal rule: sum of the two parents from the prior row
+                row.append(triangle[i - 1][j - 1] + triangle[i - 1][j])
+            row.append(1)  # right boundary
+            triangle.append(row)
+        return triangle
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.generate(5) == [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1]], "Test 1 Failed"
+    print("Test 1 Passed: five rows")
+    assert sol.generate(1) == [[1]], "Test 2 Failed"
+    print("Test 2 Passed: single row")
+    assert sol.generate(2) == [[1], [1, 1]], "Test 3 Failed"
+    print("Test 3 Passed: two rows")
+    assert sol.generate(3) == [[1], [1, 1], [1, 2, 1]], "Test 4 Failed"
+    print("Test 4 Passed: three rows")
+    assert sol.generate(4)[-1] == [1, 3, 3, 1], "Test 5 Failed"
+    print("Test 5 Passed: fourth row slice")
+    print("\nAll test cases passed!")
+````

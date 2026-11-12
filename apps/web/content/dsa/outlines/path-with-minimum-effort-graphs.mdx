@@ -1,0 +1,182 @@
+---
+title: "Path With Minimum Effort"
+description: "Given a 2D grid of heights, travel from the top-left to the bottom-right moving only up, down, left, or right."
+topics: [graphs]
+group: "11. Others"
+order: 17011999000000
+status: outline
+---
+
+Given a 2D grid of heights, travel from the top-left to the bottom-right moving only
+up, down, left, or right. The effort of a route is the maximum absolute height difference
+between two consecutive cells on the route. Return the minimum effort among all routes.
+
+## Examples
+
+````text
+Example 1:
+    Input: heights = [[1,2,2],[3,8,2],[5,3,5]]
+    Output: 2
+Example 2:
+    Input: heights = [[1,2,3],[3,8,4],[5,3,5]]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- rows == len(heights), columns == len(heights[0])
+- 1 <= rows, columns <= 100
+- 1 <= heights[i][j] <= 10^6
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Shortest Path (Dijkstra / minimax edge relaxation)
+
+1. Model each cell as a node; moving to a neighbor relaxes effort with max(current, edge diff).
+2. Run Dijkstra from (0,0) using a min-heap keyed by effort so far.
+3. Return effort when (m-1, n-1) is first finalized (or equivalent best value at destination).
+
+## Complexity
+
+**Time:** O(m \* n \* log(m \* n)) - each cell pushed/popped from heap at most a few times.
+
+**Space:** O(m \* n) - distance grid and heap.
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+import heapq
+
+
+class Solution:
+    def minimumEffortPath(self, heights: List[List[int]]) -> int:
+        m, n = len(heights), len(heights[0])
+        dist = [[float("inf")] * n for _ in range(m)]
+        dist[0][0] = 0
+        pq = [(0, 0, 0)]
+        dirs = ((-1, 0), (1, 0), (0, -1), (0, 1))
+
+        while pq:
+            d, r, c = heapq.heappop(pq)
+            if d > dist[r][c]:
+                continue
+            if r == m - 1 and c == n - 1:
+                return d
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < m and 0 <= nc < n:
+                    nd = max(d, abs(heights[r][c] - heights[nr][nc]))
+                    if nd < dist[nr][nc]:
+                        dist[nr][nc] = nd
+                        heapq.heappush(pq, (nd, nr, nc))
+        return dist[m - 1][n - 1]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minimumEffortPath([[1, 2, 2], [3, 8, 2], [5, 3, 5]]) == 2, "Test 1 Failed"
+    assert sol.minimumEffortPath([[1, 2, 3], [3, 8, 4], [5, 3, 5]]) == 1, "Test 2 Failed"
+    assert sol.minimumEffortPath([[1, 2, 1, 1, 1], [1, 2, 1, 2, 1], [1, 2, 1, 2, 1], [1, 2, 1, 2, 1], [1, 1, 1, 2, 1]]) == 0, "Test 3 Failed"
+    print("All tests passed!")
+````
+
+## Another version
+
+From 17. Graphs/07. Shortest Path Algorithm/01. Dijkstra's Algorithm/04. Variations and Optimizations.
+
+### Original notes
+
+````text
+(preamble)
+1631. Path With Minimum Effort
+Solved
+Medium
+Topics
+Companies
+Hint
+You are a hiker preparing for an upcoming hike. You are given heights, a 2D array of size rows x columns, where heights[row][col] represents the height of cell (row, col). You are situated in the top-left cell, (0, 0), and you hope to travel to the bottom-right cell, (rows-1, columns-1) (i.e., 0-indexed). You can move up, down, left, or right, and you wish to find a route that requires the minimum effort.
+
+A route's effort is the maximum absolute difference in heights between two consecutive cells of the route.
+
+Return the minimum effort required to travel from the top-left cell to the bottom-right cell.
+
+ 
+
+Example 1:
+
+
+
+Input: heights = [[1,2,2],[3,8,2],[5,3,5]]
+Output: 2
+Explanation: The route of [1,3,5,3,5] has a maximum absolute difference of 2 in consecutive cells.
+This is better than the route of [1,2,2,2,5], where the maximum absolute difference is 3.
+Example 2:
+
+
+
+Input: heights = [[1,2,3],[3,8,4],[5,3,5]]
+Output: 1
+Explanation: The route of [1,2,3,4,5] has a maximum absolute difference of 1 in consecutive cells, which is better than route [1,3,5,3,5].
+Example 3:
+
+
+Input: heights = [[1,2,1,1,1],[1,2,1,2,1],[1,2,1,2,1],[1,2,1,2,1],[1,1,1,2,1]]
+Output: 0
+Explanation: This route does not require any effort.
+ 
+
+columns == heights[i].length
+1 <= rows, columns <= 100
+1 <= heights[i][j] <= 106
+
+rows == heights.length
+````
+
+### Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def minimumEffortPath(self, heights: List[List[int]]) -> int:
+        row_len = len(heights)
+        col_len = len(heights[0])
+        effort_grid = [[float("inf") for _ in range(col_len)] for _ in range(row_len)]
+        source = (0, 0,0)
+        effort_queue = []
+        effort_queue.append(source)
+        effort_grid[0][0] = 0
+        def get_neighbors(row, col):
+            neighbors = []
+            directions = [(-1,0), (1,0), (0,1), (0,-1)]
+            for dx, dy in directions:
+                nrow = row+dx
+                ncol = col+dy
+                if nrow<0 or nrow>=row_len or ncol<0 or ncol>=col_len:
+                    continue
+                neighbors.append((nrow, ncol))
+            return neighbors
+        
+        while effort_queue:
+            effort, row, col = heapq.heappop(effort_queue)
+            if row == row_len-1 and col==col_len-1 and effort >= effort_grid[row_len-1][col_len-1]:
+                break
+            for nrow, ncol in get_neighbors(row, col):
+                neighbor_effort = abs(heights[row][col] - heights[nrow][ncol])
+                max_effort = max(neighbor_effort, effort)
+                if max_effort < effort_grid[nrow][ncol]:
+                    effort_grid[nrow][ncol] = max_effort
+                    heapq.heappush(effort_queue, (max_effort, nrow, ncol) )
+        return effort_grid[row_len-1][col_len-1]
+````

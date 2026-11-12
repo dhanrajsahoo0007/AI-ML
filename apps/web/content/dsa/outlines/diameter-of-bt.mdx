@@ -1,0 +1,128 @@
+---
+title: "Diameter of BT"
+description: "Given the root of a binary tree, return the length of the diameter (longest path between any two nodes)."
+topics: [trees]
+group: "01. Binary Tree › 03. Tree Properties and Characteristics"
+number: "04"
+order: 14001003004000
+status: outline
+---
+
+Given the root of a binary tree, return the length of the diameter (longest path between any two nodes).
+The length is the number of edges on that path.
+
+## Examples
+
+````text
+Example 1:
+    Input: root = [1,2,3,4,5]
+    Output: 3
+Example 2:
+    Input: root = [1,2]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [1, 10^4].
+- Node values fit in 32-bit signed integers.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Post-order DFS with global best
+For each node, diameter through it is left height + right height; subtree height is 1 + max child heights.
+
+1. DFS returns height of subtree rooted at node.
+2. At each node update answer with left\_height + right\_height.
+3. Return 1 + max(left\_height, right\_height).
+
+## Complexity
+
+**Time:** O(n)
+
+**Space:** O(h) for recursion stack.
+
+Restored (original notes, diagrams, and walkthrough):
+The original backup also kept two exploratory variants:
+
+BFS-style diameter scan:
+Walk every node (queue), compute subtree height for its left and right child via recursion,
+and track the best \`left\_height + right\_height\` seen anywhere.
+
+DFS with a mutable accumulator:
+Because Python integers are immutable, the original used \`diameter = \[0\]\` and updated
+\`diameter\[0\]\` inside a helper—lists are mutable containers, so nested calls share state.
+
+The standardized solution folds the same measurement into one post-order pass with a nonlocal
+or nested helper, which is the usual interview form.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    from collections import deque
+
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def diameterOfBinaryTree(self, root: Optional[TreeNode]) -> int:
+        best = 0
+
+        def height(node: Optional[TreeNode]) -> int:
+            nonlocal best
+            if not node:
+                return 0
+            lh = height(node.left)
+            rh = height(node.right)
+            best = max(best, lh + rh)
+            return 1 + max(lh, rh)
+
+        height(root)
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    t1 = build_tree_from_level_order([1, 2, 3, 4, 5])
+    assert sol.diameterOfBinaryTree(t1) == 3
+    t2 = build_tree_from_level_order([1, 2])
+    assert sol.diameterOfBinaryTree(t2) == 1
+    single = TreeNode(1)
+    assert sol.diameterOfBinaryTree(single) == 0
+    t3 = build_tree_from_level_order([1, 2, 3, 4, 5, 6, 7])
+    assert sol.diameterOfBinaryTree(t3) == 4
+    print("\nAll test cases passed!")
+````
