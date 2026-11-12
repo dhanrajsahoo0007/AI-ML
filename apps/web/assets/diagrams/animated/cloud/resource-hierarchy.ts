@@ -14,13 +14,13 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Layout: a tree drawn top to bottom, in three columns, one branch each.
 //   Left (x 130), the non-production branch: guardrail on top, then folder, test account, test copy, script.
-//   Middle (x 400), the production branch: organisation root, folder, shop account, workload group, orders database.
+//   Middle (x 390), the production branch: organisation root, folder, shop account, workload group, orders database.
 //   Right (x 672), the security branch and the tools that hang on the tree: budget, folder, audit account, tags, lock.
 // Rows (centres): 90 | 200 | 315 | 425 | 550 | 705. The top row starts 30 units down so a NEW badge on the
 // budget alert (top right) clears the figure's pause button.
-// guardrail 130,90 | org 400,90 | budget 672,90 | nonprod 130,200 | prod 400,200 | security 672,200 |
-// testacct 130,315 | shop 400,315 | audit 672,315 | rg 400,425 | tags 672,425 |
-// testdb 130,550 | ordersdb 400,550 | lock 672,550 | script 130,705.
+// guardrail 130,90 | org 390,90 | budget 672,90 | nonprod 130,200 | prod 390,200 | security 672,200 |
+// testacct 130,315 | shop 390,315 | audit 672,315 | rg 390,425 | tags 672,425 |
+// testdb 130,550 | ordersdb 390,550 | lock 672,550 | script 130,705.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 use only the
 // left and middle columns (shop account, both databases, the script), so the free preview and the failure are seen
@@ -53,7 +53,7 @@ const spec: DiagramSpec = {
       sub: "the live shop",
       icon: "package",
       tone: "neutral",
-      x: 400,
+      x: 390,
       y: 315,
       w: 180,
       cloud: {
@@ -69,7 +69,7 @@ const spec: DiagramSpec = {
       icon: "database",
       tone: "violet",
       variant: "glyph",
-      x: 400,
+      x: 390,
       y: 550,
       cloud: { aws: "aws-rds", gcp: "gcp-cloud-sql", azure: { id: "azure-postgresql", label: "Azure Postgres" } },
     },
@@ -103,7 +103,7 @@ const spec: DiagramSpec = {
       icon: "tree",
       tone: "orange",
       step: 3,
-      x: 400,
+      x: 390,
       y: 90,
       w: 190,
       cloud: {
@@ -135,7 +135,7 @@ const spec: DiagramSpec = {
       icon: "folder",
       tone: "orange",
       step: 3,
-      x: 400,
+      x: 390,
       y: 200,
       w: 200,
       cloud: {
@@ -199,7 +199,7 @@ const spec: DiagramSpec = {
       icon: "layers",
       tone: "neutral",
       step: 3,
-      x: 400,
+      x: 390,
       y: 425,
       w: 180,
       cloud: {
@@ -285,13 +285,15 @@ const spec: DiagramSpec = {
     { from: "shop", to: "testdb", label: "holds", labelAt: 0.4, until: 2 },
     { from: "script", to: "testdb", label: "delete test copy", packet: true },
 
-    // Step 2: the script's name filter also matches the live database, and the account lets it.
+    // Step 2: the script's name filter also matches the live database, and the account lets it. This edge and the
+    // refused one in step 3 bend at (300, 560) so the arrow meets the database's drawing, not its label.
     {
       from: "script",
       to: "ordersdb",
       label: "delete: allowed",
       tone: "red",
       packet: true,
+      via: [[300, 560]],
       step: 2,
       until: 2,
     },
@@ -312,6 +314,7 @@ const spec: DiagramSpec = {
       label: "wall: refused",
       tone: "red",
       dashed: true,
+      via: [[300, 560]],
       step: 3,
     },
 
