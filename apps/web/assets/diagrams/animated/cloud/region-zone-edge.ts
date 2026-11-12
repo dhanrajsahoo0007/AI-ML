@@ -57,8 +57,8 @@ const spec: DiagramSpec = {
     // Step 1
     {
       id: "users",
-      label: "UK customers",
-      sub: "most orders",
+      label: "Customers",
+      sub: "in the UK",
       icon: "users",
       tone: "neutral",
       variant: "glyph",
@@ -144,8 +144,8 @@ const spec: DiagramSpec = {
     // Step 4
     {
       id: "sydney",
-      label: "Sydney customers",
-      sub: "30 orders a day",
+      label: "Customers",
+      sub: "in Sydney",
       icon: "users",
       tone: "neutral",
       variant: "glyph",
