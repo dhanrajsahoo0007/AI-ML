@@ -1,11 +1,293 @@
 ---
 title: "How Cloud Pricing Works"
 description: "The few meters every cloud bill is built from, the three ways to buy compute, and where to get help when something breaks."
-status: outline
+updated: 2026-11-12
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the handful of meters every bill is built from (time, storage, requests and data leaving the cloud), the three ways to buy compute (on demand, commitment and spot), free tiers, and support plans. It shows shapes, not numbers: no prices appear on the page.
+<KeyIdea>
+  A cloud bill adds up a few meters: how long machines run, how much you keep, how often you ask, and how much data you send out.
+</KeyIdea>
 
-**Related reading on this site:** [Cloud Basics](/cloud/start-here/cloud-basics) · [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning)
+## The story
+
+Brightpost's cloud bill has five lines most months: servers, the database, storage, data leaving the cloud, and logs. The servers and the database are most of it, and storage is the smallest line. Two days before its biggest sale day, the one with 4,000 orders, Asha builds a full copy of the shop to load-test it. The copy has 4 servers and its own database. The test takes 3 hours and goes well. Nobody switches the copy off. It runs for 30 days, 720 hours, and logs every request in full detail. The shop itself runs 2 servers, which is 1,440 server-hours a month. The forgotten copy adds 2,880 more. When the finance lead opens the bill at the end of the month, it is twice the usual size.
+
+Every step below builds that bill one meter at a time, then shows how to catch the copy on day 3 instead of day 30.
+
+## How it works
+
+Three words first. A **meter** is one thing the provider counts and charges for, such as hours or gigabytes. Each meter has a **rate**, the price of one unit. The **bill** is every meter times its rate, added up for the month.
+
+### Step 1: Every bill is built from a few meters
+
+<AnimatedDiagram spec="animated/cloud/pricing-basics-1" step={1} minWidth={620} caption="Brightpost's first meter: two app servers, billed for every hour they run." />
+
+A provider counts what you use and charges for each unit. Five kinds of meter cover almost every line on every bill:
+
+1. **Time.** The hours or seconds a machine runs, busy or idle.
+2. **Storage held.** Gigabytes kept, counted over the month.
+3. **Requests.** Each read, write or call, counted in thousands or millions.
+4. **Data leaving.** Gigabytes sent out of the cloud.
+5. **Service units.** Whatever a managed service counts, such as gigabytes of logs.
+
+In the picture, Brightpost's 2 app servers run on the time meter. They run all day, all month: 2 × 720 = 1,440 server-hours. An idle server costs the same per hour as a busy one. How many servers you need is a capacity question, covered in [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning). This page is about what each one costs.
+
+<PremiumBreak />
+
+### Step 2: Storage: billed for what you keep
+
+<AnimatedDiagram spec="animated/cloud/pricing-basics-1" step={2} minWidth={620} caption="The database bills for hours and gigabytes held; the buckets bill for gigabytes held and for each request." />
+
+The database runs on two meters: the hours it runs and the gigabytes it holds. The buckets also run on two: gigabytes held and requests. A **GB-month** is one gigabyte kept for one month, the usual unit for storage.
+
+Storage grows quietly. Brightpost's orders bucket gains one export file every night, 730 files after two years, and nothing deletes them. A <Term id="lifecycle-rule">lifecycle rule</Term> moves old files to a cheaper <Term id="storage-class">storage class</Term> or deletes them on a schedule. Requests matter most for pages that make many small reads, such as a gallery that loads 50 thumbnails at once.
+
+### Step 3: Data leaving the cloud: billed per gigabyte
+
+<AnimatedDiagram spec="animated/cloud/pricing-basics-1" step={3} minWidth={620} caption="Product photos leave the cloud through the CDN, and every gigabyte that leaves is metered." />
+
+Data coming into a cloud is usually free. Data leaving it usually is not. That outbound traffic is called <Term id="egress">egress</Term>. Every product photo that reaches a customer's phone is egress.
+
+Brightpost sends its photos through a <Term id="cdn">CDN</Term>. Photos load faster, and the buckets get fewer requests. The CDN still bills for each gigabyte it sends.
+
+This is the line that surprises people, because it follows traffic, not anything you built. On the sale day, 10 times the orders means about 10 times the photos leaving. Some paths inside a cloud are metered too: between <Term id="availability-zone">zones</Term>, between regions, and through a <Term id="nat-gateway">NAT gateway</Term>. [Cost Models and Purchasing Options](/cloud/operations/cloud-cost-models) maps those paths.
+
+### Step 4: Managed services count their own units
+
+<AnimatedDiagram spec="animated/cloud/pricing-basics-1" step={4} minWidth={620} caption="Every request writes a log line, and the log service bills per gigabyte written and kept." />
+
+A managed service is one the provider runs for you, and it picks its own meter. A log service bills for gigabytes written and for gigabytes kept each month. A queue might bill per million messages. A serverless function bills per request and per second of running time.
+
+Brightpost's servers write one log line per request. Logs stay a small line until someone switches on full detail, the debug level. Then the log bill can outgrow the servers that write it.
+
+### Step 5: Idle things still bill
+
+<AnimatedDiagram spec="animated/cloud/pricing-basics-1" step={5} minWidth={620} caption="The failure: the test copy does no work after the test, but every meter on it keeps counting." />
+
+The test copy finished its job on day 1. Its meters did not stop.
+
+<Callout tone="red" title="What breaks">
+  The copy runs 4 servers for 720 hours: 2,880 server-hours, twice the shop's 1,440. Its database bills for every hour and every gigabyte it holds. Its debug logs record every request in full. Nothing in the cloud warns anyone, because nothing is broken: the copy is doing exactly what Asha started. The bill arrives 30 days later at twice its usual size.
+</Callout>
+
+Other surprises have the same shape: something keeps running or growing, and nobody watches it. A disk left behind after its server was deleted. Backups kept forever. A large file downloaded again and again.
+
+### Step 6: See it, get warned, switch it off
+
+<AnimatedDiagram spec="animated/cloud/pricing-basics-1" step={6} minWidth={620} caption="Tags put the copy on its own line, the budget alert fires on day 3, and a schedule switches test machines off at night." />
+
+Three habits would have caught the copy on day 3.
+
+- **Tags.** A <Term id="tag">tag</Term> is a label such as `env: test` on each resource. Cost reports group the bill by tag, so "test" shows up as its own line.
+- **A budget alert.** A **budget** is the amount you expect to spend in a month. The provider forecasts the month from the spend so far. It sends an alert when the forecast passes the budget. A budget warns; it does not stop anything by itself.
+- **A switch-off schedule.** Test machines run during working hours only: on at 8 am, off at 7 pm, off at weekends. That cuts their hours by about two thirds. A test copy that has done its job is deleted.
+
+Turning this into a monthly habit is called <Term id="finops">FinOps</Term>. [FinOps and the Cost Tools](/cloud/operations/finops-and-cost-tools) covers it.
+
+### Step 7: Three ways to buy compute
+
+<AnimatedDiagram spec="animated/cloud/pricing-basics-1" step={7} minWidth={620} caption="A commitment covers the two servers that run all year, and the resize worker moves to spare capacity." />
+
+The same server can be bought in three ways.
+
+1. **On demand.** The full rate, no promise, stop at any time. Right for anything new or spiky, such as the third server Brightpost adds on its 30 busiest days.
+2. **A commitment.** You promise to use a set amount for 1 or 3 years and get a lower rate. This is called <Term id="reserved-capacity">reserved capacity</Term>. You pay whether you use it or not. Right for the steady base: Brightpost's 2 app servers run 8,760 hours a year.
+3. **Spot.** <Term id="spot-capacity">Spot capacity</Term> is the provider's spare machines, often several times cheaper per hour. The provider can take one back at short notice. Right for work that can stop and resume.
+
+Brightpost's image-resize worker runs about 2 hours a night. If its spot machine is taken back, the unfinished photos wait in the uploads bucket, and the next machine picks them up. Thumbnails arrive a few minutes late, and no order is lost.
+
+### Step 8: Free tiers are small and limited
+
+A **free tier** lets you use some services without paying. It comes in three shapes. Some services are free up to a small amount each month. Some are free for a trial period after sign-up. New accounts may get credits that expire.
+
+Free tiers are for learning and tiny projects. They do not cover a running shop, and they end or cap without asking you. A common trap is a learner's machine that keeps running after the trial ends. Set a budget alert for a small amount on day one, even on a free account.
+
+### Step 9: Support and getting help
+
+Every account comes with basic help for billing and account questions. Paid support plans add technical help. The shape is the same on every cloud: the more you pay, the faster a person answers and the more of your system they will look at. The top tiers add a named contact who knows your setup.
+
+Look in two places before you open a case. The provider's **status page** is public and shows incidents that hit many customers. Your account's **health dashboard** shows events that touch your own resources, such as planned maintenance on one of your servers. Check the dashboard first.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: the same meters, the same three ways to buy compute, and budgets that warn but do not stop spending.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Commitment:** Savings Plans, a promise to spend a set amount per hour for 1 or 3 years. Reserved Instances commit to a fixed instance type or a database.
+    - **Spare capacity:** Spot Instances. AWS gives a two-minute warning before it takes one back.
+    - **Bill and budgets:** Cost Explorer for reports by service and tag. A tag appears there only after you activate it as a cost allocation tag. AWS Budgets for alerts.
+    - **Advice:** AWS Compute Optimizer suggests smaller instance types for servers that sit mostly idle.
+    - **Health:** the AWS Health Dashboard, with a public view and a personal view of events in your account.
+
+    **The difference that changes a design.** A Compute Savings Plan is a promise in money per hour, not in a machine type. It applies across instance families and regions, and to Fargate and Lambda too. So Brightpost can change server types, or move the shop to containers, and keep its lower rate.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Commitment:** committed use discounts for 1 or 3 years, either for a set amount of CPU and memory or for a set spend per hour.
+    - **Spare capacity:** Spot VMs. Google Cloud sends a short notice, about 30 seconds, before it stops one.
+    - **Bill and budgets:** Cloud Billing reports by project, service and label, plus budgets with alert thresholds. Google Cloud's word for a cost tag is a label.
+    - **Advice:** the Recommender suggests resizing or deleting idle VMs.
+    - **Health:** Personalized Service Health for your projects, and the public Google Cloud Service Health page.
+
+    **The difference that changes a design.** Sustained use discounts apply automatically on some machine types. A VM that runs for a large part of the month gets a lower rate with no promise at all. So a server that runs all month already costs less than its hourly rate suggests. Which machine types qualify can change, so check before you plan around it.
+  </Tab>
+  <Tab label="Azure">
+    - **Commitment:** reservations for a VM size in a region, or for a database, for 1 or 3 years. The savings plan for compute is a promise to spend a set amount per hour across sizes and regions.
+    - **Spare capacity:** Spot VMs. Azure gives about 30 seconds' notice, and you choose whether an evicted VM is stopped or deleted.
+    - **Bill and budgets:** Microsoft Cost Management, with cost analysis by subscription, resource group and tag, and budgets with alerts.
+    - **Advice:** Azure Advisor flags idle and oversized VMs.
+    - **Health:** Azure Service Health for your subscriptions, and the public Azure status page.
+
+    **The difference that changes a design.** Every Azure resource lives in a resource group, a folder for related resources. If Brightpost puts the test copy in its own resource group, cost analysis shows it as one line even without tags. Deleting the group deletes the whole copy in one action.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/pricing-basics-1" stepper minWidth={620} caption="The whole month in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/pricing-basics-1" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="How should I buy this compute?"
+  tree={{
+    q: "Do you know yet how much this workload will use?",
+    no: "On demand first. Measure for a few weeks, then commit to the part that never goes away.",
+    yes: {
+      q: "Does it run steadily, all day and all year?",
+      yes: "A commitment for 1 or 3 years, sized to the floor. Brightpost's 2 app servers are this case.",
+      no: {
+        q: "Can the work stop at any moment and pick up again later?",
+        yes: {
+          answer: "Spot capacity, with a queue or a bucket that keeps the unfinished work. Brightpost's resize worker is this case.",
+          href: "/cloud/compute/batch-hpc-gpus",
+        },
+        no: {
+          answer: "On demand, with autoscaling so you pay only for the busy hours. Brightpost's sale-day server is this case.",
+          href: "/cloud/compute/autoscaling",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The test copy ran 4 servers for 30 days. How many server-hours is that, and how does it compare with the shop?" hint="A 30-day month has 720 hours.">
+    4 × 720 = 2,880 server-hours. The shop's 2 servers use 1,440, so the copy alone used twice as many hours as the real shop.
+  </QuizItem>
+  <QuizItem question="Brightpost's budget alert fires on day 3. Does the cloud stop the test copy?" hint="What does a budget do by itself?">
+    No. A budget only warns. Someone has to switch the copy off, or an automated action has to do it. Caught on day 3, the copy costs 3 days of meters instead of 30.
+  </QuizItem>
+  <QuizItem question="The spot machine running the resize worker is taken back halfway through the night. What is lost?">
+    Nothing that matters. The unfinished photos are still in the uploads bucket, and the next machine resizes them. Thumbnails arrive a few minutes late.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "On demand", "Commitment", "Spot"]}
+  rows={[
+    ["You promise", "Nothing", "1 or 3 years of use", "Nothing"],
+    ["Rate per hour", "Full rate", "Lower", "Lowest, often several times below on demand"],
+    ["Can be taken back", false, false, true],
+    ["If your use shrinks", "You pay less at once", "You still pay the promise", "You pay less at once"],
+    ["Brightpost uses it for", "The sale-day third server, about 720 hours a year", "2 app servers, 17,520 hours a year", "The resize worker, about 730 hours a year"],
+  ]}
+  caption="Brightpost's compute, bought three ways. The hours are Brightpost's; real rates differ by cloud and change over time."
+/>
+
+Brightpost commits only to the floor it uses every hour of the year. The third server runs 720 hours, a twelfth of the year, so a commitment for it would be paid for twelve times longer than it is used.
+
+## Common pitfalls
+
+- **Leaving test copies running.** Idle resources bill like busy ones. Tag every resource, put test machines on a schedule, and delete a copy when its test is done.
+- **Committing before measuring.** A commitment sized on a guess is paid in full for years. Run on demand for a few weeks, then commit to the lowest level you never drop below.
+- **Spot for work that cannot stop.** A checkout or a database on spot loses work when the machine is taken back. Keep spot for jobs that save their progress and can resume.
+- **Forgetting how data moves.** Egress, cross-zone traffic and NAT gateways meter every gigabyte. Draw the data path and ask which hop crosses a boundary.
+- **Logs at full detail, kept forever.** Debug logs can outgrow the servers that write them. Log at a normal level, and keep logs only as long as someone reads them.
+
+## How to say it in an interview
+
+"A cloud bill is a few meters: time for compute, gigabytes held for storage, requests, data leaving the cloud, and whatever a managed service counts. I read a design for its cost shape by asking which meter each box runs on and what makes it grow. Data leaving the cloud or crossing zones is the line people forget, and idle resources bill as much as busy ones. For compute I measure on demand first, commit to the steady floor for one or three years, and put work that can stop and resume on spot capacity. Every resource gets an owner and an environment tag, and every account gets a budget alert. A budget only warns, so someone has to own the response."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Name the things a cloud bill is usually made of." level="Junior" category="Cloud">
+    **Short answer.** Five meters, each times a rate: machine time, storage held, requests, data leaving the cloud, and the units a managed service counts.
+
+    **Why.** Brightpost's bill shows each one. The 2 app servers bill for time: 1,440 server-hours a month. The database bills for hours and gigabytes held. The buckets bill for gigabytes held and for requests. The CDN bills for every gigabyte of photos sent to customers. The log service bills for gigabytes written and kept. Knowing the meter tells you what makes a line grow. Traffic grows data leaving and requests. Time grows compute, even when the servers are idle.
+
+    <AnimatedDiagram spec="animated/cloud/pricing-basics-1" step={4} caption="Every box on the request path runs on its own meter." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which of these lines grows when traffic doubles?
+    - Which one keeps growing with no traffic at all?
+
+    **Watch out for.** Listing only servers and storage. Data leaving the cloud is often the line that surprises people.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When does a commitment make sense for Brightpost's web tier?" level="Mid" category="Cloud">
+    **Short answer.** When part of the tier runs all the time and will keep running for the whole term. Commit to that floor, the 2 servers that never switch off, and keep the sale-day third server on demand.
+
+    **Why.** A commitment trades flexibility for a lower rate, and you pay for it whether you use it or not. The 2 servers run 8,760 hours a year each, so every committed hour is used. The third server runs about 720 hours a year. A commitment for it would be paid for 8,760 hours and used for one twelfth of them. Measure for a few weeks on demand before you sign. If server types may change, prefer a commitment in money per hour over one tied to a machine type.
+
+    <AnimatedDiagram spec="animated/cloud/pricing-basics-1" step={7} highlight={["commit", "servers"]} caption="The commitment covers the two servers that run every hour of the year." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if Brightpost moves the shop to containers next year?
+    - How do you choose between a 1-year and a 3-year term?
+
+    **Watch out for.** Committing to the peak. Then Brightpost pays for sale-day capacity on all 365 days.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where does data-transfer cost hide in a three-tier design?" level="Mid" category="Cloud">
+    **Short answer.** On every path where data leaves the cloud or crosses a boundary inside it: out to users, between zones, between regions, and through a managed NAT gateway. Data coming in is usually free.
+
+    **Why.** Photos sent to customers are the obvious line. Three others hide in the design. App servers in one zone that query a database in another cross a zone boundary on every query, and some clouds meter that. A database replica in another region copies every write across regions. Servers in private subnets that download updates through a NAT gateway pay for each gigabyte it passes. Fixes: serve large files through a CDN, keep chatty tiers close where availability allows, and reach provider services through private endpoints instead of the NAT.
+
+    <AnimatedDiagram spec="animated/cloud/pricing-basics-1" step={3} path="buckets>cdn>customers" caption="Photos leave through the CDN: the obvious data-transfer line." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you find out which path costs the most?
+    - Is it worth keeping the database in one zone to save cross-zone traffic?
+
+    **Watch out for.** Putting everything in one zone to save transfer costs. That swaps a small bill for losing the whole shop when the zone fails.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The cloud bill doubled this month and nobody knows why. How do you find the cause and stop it happening again?" level="Senior" category="Cloud">
+    **Short answer.** Break the bill down by service, then by tag or account, then by day, until one line explains the jump. Stop or delete that resource. Then add what would have caught it early: required tags, a budget alert on the forecast, schedules for test machines, and an owner for every resource.
+
+    **Why.** At Brightpost the jump sits in servers. Grouped by tag, it sits in "test". By day, it starts on the day of the load test. If the copy had no tags, the clue is resources created that day. The fix is to delete the copy. The prevention has four parts. Tags are required at the organization level. A budget alert fires on the forecast. Non-production machines switch off at night. A short monthly review covers the top five lines. Caught on day 3, the copy costs 3 days of meters instead of 30.
+
+    <AnimatedDiagram spec="animated/cloud/pricing-basics-1" step={6} highlight={["test", "reports", "alert", "schedule"]} caption="Tags, reports, a budget alert and a schedule turn a 30-day surprise into a 3-day one." />
+
+    **Follow-ups the interviewer may ask.**
+    - What do you do with resources that nobody owns?
+    - Should a budget switch things off automatically?
+
+    **Watch out for.** Reaching for commitments first. A lower rate on a forgotten copy is still waste: remove the waste, then commit to what is left.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [What the Cloud Is](/cloud/fundamentals/what-is-cloud)
+- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [Cost Models and Purchasing Options](/cloud/operations/cloud-cost-models)
+- [FinOps and the Cost Tools](/cloud/operations/finops-and-cost-tools)
+- [NAT & Leaving the Network](/cloud/networking/nat-and-egress)
+- [Object Storage: Tiers, Lifecycle, Versioning and Redundancy](/cloud/data/object-storage)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning)
+
+## Further reading
+
+- [How AWS Pricing Works](https://docs.aws.amazon.com/whitepapers/latest/how-aws-pricing-works/welcome.html): the pricing model and the ways to buy.
+- [Google Cloud Billing documentation](https://cloud.google.com/billing/docs): reports, budgets and discounts.
+- [Microsoft Cost Management documentation](https://learn.microsoft.com/azure/cost-management-billing/): cost analysis, budgets and reservations.
+- [AWS Savings Plans User Guide](https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html): how a spend-per-hour commitment applies.

@@ -1,11 +1,314 @@
 ---
 title: "Service Models: How Much Do You Run?"
-description: "The ladder from a bare virtual machine to a finished product, and how to pick the most managed option that still meets the need."
-status: outline
+description: "The ladder from your own building to a rented product: who runs each layer on each rung, and how to pick the most managed option that fits."
+updated: 2026-11-12
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the control ladder from a bare VM to a finished product (IaaS, PaaS, FaaS and SaaS) and the three ways to run anything: self-managed, managed and serverless. The rule it teaches: pick the most managed option that meets the requirement.
+<KeyIdea>
+  Running an app takes a stack of jobs, from keeping the power on to updating the code. The more of them you hand to someone else, the less you run and the less you control.
+</KeyIdea>
 
-**Related reading on this site:** [Cloud Basics](/cloud/start-here/cloud-basics) · [Choosing Compute on AWS](/cloud/start-here/choosing-compute)
+## The story
+
+Brightpost's shop app and its orders database share one rented virtual machine (VM). A VM is a slice of a big computer in the provider's building that acts like a computer of its own. Asha installed the database, Postgres, herself. She updates it, takes the backups and watches the disk, about 6 hours a month. One Saturday at 3:10 a.m. the database's disk fills up. Postgres stops saving anything, so every checkout fails. An alert goes to Asha's phone, but she is asleep. She wakes at 7:40, clears space, and the shop takes orders again at 8:30. In those 5 hours and 20 minutes, about 40 customers could not pay.
+
+The question for the rest of this page: which of those jobs should Brightpost be doing at all?
+
+## How it works
+
+Three words first. A **layer** is one job that must be done for an app to run, such as keeping the power on or updating the software. The **operating system** (OS) is the base software every program runs on, such as Linux or Windows. A **service model** says which layers the provider runs and which stay yours.
+
+### Step 1: Seven layers, five ways to split them
+
+<AnimatedDiagram spec="animated/cloud/service-model-ladder" stepper minWidth={620} caption="The ladder: five ways to run the same app. Step through it to watch each rung hand more layers to the provider." />
+
+Read each column from the bottom up. At the bottom are the building and the hardware. Above them, **virtual machines** split one big computer into many. Then comes the OS, then the **runtime**: the language or database engine your code needs. Above that sit scaling (how many copies run), your code, and at the top your data and your users.
+
+Each column is one rung of the ladder:
+
+- **On-premises.** Your own building. Every layer is yours.
+- **<Term id="iaas">IaaS</Term>.** You rent virtual machines. You run the OS and everything above it.
+- **<Term id="paas">PaaS</Term>.** You hand over your code or your database. The provider runs the OS, and you choose the runtime version.
+- **Functions.** You hand over one small task that runs when something happens. This rung is also called FaaS, functions as a service.
+- **<Term id="saas">SaaS</Term>.** You rent a finished product. You bring only your data and your users.
+
+Each rung up means less work and less control. The rule this page teaches: for each part of a system, pick the most managed rung that still meets the need.
+
+<PremiumBreak />
+
+### Step 2: Where Brightpost stands: one VM, run by hand
+
+<AnimatedDiagram spec="animated/cloud/service-models-1" step={1} minWidth={620} caption="Brightpost's starting point: the shop and its database share one VM, and Asha runs both." />
+
+Brightpost sits on the IaaS rung. The provider runs the building, the hardware and the virtual machine. Everything above it is Asha's: OS updates, installing and upgrading Postgres, backups, disk space, and whatever fails at night.
+
+This rung has real strengths. The VM behaves like a computer you own, so almost any software that runs on Linux runs here. Moving an app to the cloud this way, with no redesign, is called <Term id="lift-and-shift">lift and shift</Term>, and many teams start like this. The price is the dashed lines in the picture. Each one is a job that a person must do, on time, for as long as the app runs.
+
+### Step 3: The 3 a.m. problem
+
+<AnimatedDiagram spec="animated/cloud/service-models-1" step={2} minWidth={620} caption="The failure: the database disk is full, checkouts fail, and the alert reaches a phone nobody is awake to answer." />
+
+A layer you run is a layer that can wake you up. The disk had been filling for months with old log files. Nobody checks a disk every night, so nobody saw it coming.
+
+<Callout tone="red" title="What breaks">
+  At 3:10 a.m. the disk is full and Postgres stops accepting writes. The shop's pages still load, so customers only find out at the last click, when payment fails. The alert reaches Asha's phone while she sleeps. By 8:30 a.m., about 40 orders are lost.
+</Callout>
+
+The fix is not "watch the disk harder". A team of 3 engineers cannot stay awake all night. The fix is to stop running the layers that a provider runs better.
+
+### Step 4: Hand the database to the provider
+
+<AnimatedDiagram spec="animated/cloud/service-models-1" step={3} minWidth={620} caption="The provider's operations team now patches and backs up the database. Asha only picks its size." />
+
+A **managed database** is a database engine that the provider installs, patches and backs up for you. Brightpost still gets Postgres and keeps the same queries. Asha picks a size, a backup time and a maintenance window, and the provider does the rest. It is PaaS for data.
+
+Managed engines can grow the disk by themselves; on some clouds that is a setting you switch on. They can also keep a standby copy in a second building. If the first copy fails, the standby takes over in a minute or two. That switch is called <Term id="failover">failover</Term>.
+
+Brightpost moves the orders database in one evening. Asha's database work drops from about 6 hours a month to about 1. The full disk at 3 a.m. is now the provider's problem, and the provider has people awake. The data, its shape and who may connect stay Brightpost's. [Managed Relational Databases](/cloud/data/managed-relational) covers standbys and replicas in depth.
+
+### Step 5: Hand one task to a function
+
+<AnimatedDiagram spec="animated/cloud/service-models-1" step={4} minWidth={620} caption="Each new photo starts the resize function, which writes a thumbnail back. The provider runs it and adds copies when photos arrive together." />
+
+A **function** is a small piece of code that the provider runs only when something happens, such as a new file arriving. Nothing runs between events, and you pay for the time it runs. This is the <Term id="serverless">serverless</Term> idea: no server to size or patch.
+
+Brightpost's image-resize worker fits well. About 300 new product photos arrive a week, and each takes about 2 seconds to resize. That is 10 minutes of work a week. A VM kept for that job would sit idle 99.9% of the time.
+
+The function has a cost of its own. After a quiet night, the first photo waits about a second extra while the provider starts a fresh copy. That wait is a <Term id="cold-start">cold start</Term>. Nobody notices it on a background job. On the checkout page, customers would.
+
+### Step 6: Rent what is not your business
+
+<AnimatedDiagram spec="animated/cloud/service-models-1" step={5} minWidth={620} caption="The support agent answers customers in a rented help desk. A vendor runs every layer of it." />
+
+Brightpost sells posters, not help-desk software. So its support agent uses a rented help desk, a SaaS product that a vendor runs end to end. Brightpost writes no code for it and patches nothing. Its jobs are the top layer only: who may sign in, and what customer data goes in.
+
+SaaS is the top rung, and often the easiest win. Email, chat, payroll and accounting tools are usually rented. Ask the same question of each one: does building it ourselves make us different? If not, rent it.
+
+### Step 7: Self-managed, managed or serverless
+
+The ladder has a second axis. Almost any kind of service, such as a database, a queue or compute, comes in up to three forms.
+
+<Compare
+  columns={["", "Self-managed", "Managed", "Serverless"]}
+  rows={[
+    ["What you get", "Software you install on your own VMs", "The provider runs the software", "No servers and no size to pick"],
+    ["What you choose", "Machines, versions, every setting", "A size and a few settings", "Limits, such as the most copies at once"],
+    ["Who patches it", "You", "The provider", "The provider"],
+    ["Capacity", "Fixed until you change it", "Fixed until you resize it", "Follows the load, sometimes down to zero"],
+    ["You pay for", "Machines, busy or idle", "The size you picked, by the hour", "Each request and each second of work"],
+    ["Brightpost example", "Postgres on the VM, before", "The orders database, now", "The resize function"],
+  ]}
+  caption="Three forms of the same kind of service. Each cloud offers at least two of them for databases and for compute."
+/>
+
+Managed means someone else runs the software. Serverless goes one step further: there is no size to choose either, and capacity follows the requests.
+
+### Step 8: What you give up as you climb
+
+<AnimatedDiagram spec="animated/cloud/service-model-ladder" step={6} minWidth={620} caption="The limit step: each rung takes something away, from your say over the hardware up to your say over the code." />
+
+Every rung up removes a job, and a choice goes with it.
+
+- **IaaS.** You pick sizes from the provider's menu. You never choose the hardware.
+- **PaaS.** You cannot log in to the machine, install a system tool or tune the OS. You get the versions and settings the platform offers.
+- **Functions.** You add cold starts and a time limit on each run, counted in minutes. A two-hour job does not fit in one function on most plans.
+- **SaaS.** You get the product's features and no others.
+
+Notice what did not move: the shop app is still on its VM. It works, and the team has other priorities. Moving it into a <Term id="container">container</Term> on a managed platform is its next rung, and [Choosing Compute](/cloud/start-here/choosing-compute) walks through that choice.
+
+So the rule has two halves. Take the most managed rung that meets the need. Then name what that rung takes away, and check that you can live without it.
+
+## On AWS, Google Cloud and Azure
+
+The ladder is the same on all three clouds: virtual machines at the bottom, then code and container platforms, managed databases and functions.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Machines (IaaS):** Amazon EC2.
+    - **Code platform (PaaS):** AWS Elastic Beanstalk. You upload code, and it creates EC2 machines in your account to run it.
+    - **Containers without servers:** AWS Fargate, used through Amazon ECS or Amazon EKS.
+    - **Managed database:** Amazon RDS, including RDS for PostgreSQL, and Amazon Aurora.
+    - **Functions:** AWS Lambda.
+
+    **The difference that changes a design.** Fargate is not a product on its own. You run it under a container service, ECS or EKS, so even the "no servers" option asks you to define a cluster, tasks and services. Lambda stops any single run after 15 minutes. So a long job on AWS goes to Fargate or EC2. Moving from a function to a container is a bigger step here than on the other two clouds.
+
+    <ResponsibilityGrid set="aws-compute" />
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Machines (IaaS):** Compute Engine.
+    - **Code platform (PaaS):** App Engine. You deploy code, and Google runs the servers.
+    - **Containers without servers:** Cloud Run.
+    - **Managed database:** Cloud SQL, including Cloud SQL for PostgreSQL, and AlloyDB for PostgreSQL.
+    - **Functions:** Cloud Run functions.
+
+    **The difference that changes a design.** Functions and containers share one platform. A Cloud Run function is deployed as a Cloud Run service, with the same scaling, networking and identity settings. So when a job outgrows a function, it can become a container on the same platform. Moving down one rung changes the packaging, not the platform.
+
+    <ResponsibilityGrid set="gcp-compute" />
+  </Tab>
+  <Tab label="Azure">
+    - **Machines (IaaS):** Azure Virtual Machines.
+    - **Code platform (PaaS):** Azure App Service. You deploy code or a container to a plan that you size.
+    - **Containers without servers:** Azure Container Apps.
+    - **Managed database:** Azure Database for PostgreSQL, and Azure SQL Database.
+    - **Functions:** Azure Functions.
+
+    **The difference that changes a design.** A function app runs on a hosting plan that you choose, and the plan changes the rules. A consumption plan scales to zero and bills per run, with cold starts and a time limit. A premium or dedicated plan keeps copies warm and allows long runs, but you pay for those copies by the hour. The same function code can sit on two different rungs.
+
+    <ResponsibilityGrid set="azure-compute" />
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/service-models-1" stepper minWidth={620} caption="Brightpost's climb in five steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/service-models-1" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which rung for this part?"
+  tree={{
+    q: "Does a finished product already do this job, and is the job not what makes you different?",
+    yes: "SaaS. Rent it, then decide who may sign in and what data goes in.",
+    no: {
+      q: "Is it a short task, started by an event such as a new file, that finishes in minutes?",
+      yes: {
+        answer: "A function. Check the time limit, and whether a cold start matters to whoever waits.",
+        href: "/cloud/compute/serverless-functions",
+      },
+      no: {
+        q: "Does it need something only a full machine gives, such as an OS setting, a system driver or software no platform allows?",
+        yes: "A VM (IaaS). Write down who patches it, who backs it up and who is woken at 3 a.m.",
+        no: {
+          answer: "A platform: a managed database for data, a container or code platform for the app.",
+          href: "/cloud/start-here/choosing-compute",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost's disk filled at 3:10 a.m., and the shop came back at 8:30. With a managed database and automatic disk growth switched on, what would most likely have happened?" hint="Who runs the disk layer now?">
+    Nothing a customer would notice. The provider grows the disk before it is full, and its own team handles faults at that layer. No alert wakes Asha, and the 40 orders go through.
+  </QuizItem>
+  <QuizItem question="The resize function sits idle all night. The first photo at 9 a.m. takes about a second longer than the rest. What is that, and should Brightpost fix it?" hint="Who is waiting for the result?">
+    A cold start: the provider starts a fresh copy of the function. Brightpost can leave it alone, because nobody waits on a thumbnail. On the checkout path the same second would matter.
+  </QuizItem>
+  <QuizItem question="Which layer stays Brightpost's job on every rung, even for the rented help desk?">
+    The top one: its data and its users. Brightpost decides what customer data goes in and which staff may sign in. No vendor can make those choices for it.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "VM (IaaS)", "Platform (PaaS)", "Function", "Rented product (SaaS)"]}
+  rows={[
+    ["Brightpost part on this rung", "Shop app", "Orders database", "Resize worker", "Help desk"],
+    ["Layers Brightpost runs, of 7", "5", "2, and sets 2 more", "2, and sets 1 more", "1"],
+    ["Who is woken at 3 a.m. for the platform", "Brightpost", "The provider", "The provider", "The vendor"],
+    ["Can tune the OS", true, false, false, false],
+    ["Delay after a quiet spell", "None: it is always on", "None at a fixed size", "About 1 second (cold start)", "None"],
+    ["Cost shape", "Per hour, busy or idle", "Per hour for the size", "Per run and per second", "Per user or per month"],
+    ["Hardest limit", "Your team's time", "Only the versions it offers", "A time limit on each run", "Only the features it has"],
+  ]}
+  caption="Brightpost's four rungs today. The layer counts come from the ladder in Step 1."
+/>
+
+Each column to the right buys back hours and sleep, and costs a choice. The cost shape flips at high, steady load: a function billed by the second can cost more than a VM that is busy all day.
+
+## Common pitfalls
+
+- **Staying on a VM out of habit.** Every layer you run can page someone at night, as Brightpost learned at 3:10 a.m. Ask of each VM: what does it give us that a platform would not?
+- **Climbing for its own sake.** A function that is busy all day is billed for every second of every day. When a load is high and steady, a fixed-size platform or VM costs less. Measure the busy hours first.
+- **Reading "managed" as "nothing left to do".** The provider patches the engine. It does not choose who may connect, or test that a backup restores. Those jobs stay yours, as [Shared Responsibility](/cloud/fundamentals/shared-responsibility) explains.
+- **Finding the limits at launch.** A cold start on a checkout page, a two-hour job in a function, a system tool a platform will not install. Read a rung's limits before you move a part onto it.
+- **Moving everything at once.** Brightpost moved one part at a time: the database, then the photo job, then the help desk. Each move stayed small and easy to undo.
+
+## How to say it in an interview
+
+"I think of service models as a ladder of who runs each layer: on-premises, virtual machines, platforms, functions and finished SaaS products. Each rung up hands the provider more layers, such as the operating system or scaling, and takes away a choice, such as tuning the OS. My default is the most managed option that still meets the requirement, chosen part by part. A database usually goes to a managed engine, a short event-driven job to a function, and a commodity tool like a help desk to SaaS. I keep a VM only when I can name what it gives me that a platform does not. On every rung, the data and who may reach it stay my job."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Is a managed database IaaS or PaaS, and why does it matter?" level="Junior" category="Cloud">
+    **Short answer.** PaaS. The provider runs the machine, the operating system and the database engine, including patches and backups. You bring the schema, the data and the settings. The label matters because it tells you which jobs are still on your list.
+
+    **Why.** On a VM, which is IaaS, the database is software you installed. Every update, backup and full disk is yours, which is how Brightpost lost about 40 orders after 3:10 a.m. On a managed engine those layers move to the provider. Some things never move: who may connect, how the data is shaped, and whether a restore really works.
+
+    <AnimatedDiagram spec="animated/cloud/service-models-1" step={3} highlight={["provider", "db", "asha"]} caption="After the move, the provider patches and backs up the database, and Asha only picks its size." />
+
+    **Follow-ups the interviewer may ask.**
+    - What can you no longer do on a managed database that you could do on a VM?
+    - Who brings the data back after someone deletes a table by mistake?
+
+    **Watch out for.** Saying "it is managed, so the provider handles everything". A backup that nobody has tried to restore is a hope, not a backup.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost runs Postgres on a VM. Argue for and against moving it to the managed engine." level="Mid" category="Cloud">
+    **Short answer.** For: the provider takes patching, backups, disk growth and failover, so a full disk at 3 a.m. stops being Brightpost's problem. Against: less control, such as no OS access and only the versions and extensions the engine offers, and a higher hourly price than the bare VM. For a team of 3 engineers, the move wins.
+
+    **Why.** Count the work, not only the bill. Asha spent about 6 hours a month on the database, and the one night it failed cost about 40 orders. After the move she spends about 1 hour. The case against is real when the database needs an extension the managed engine does not offer, or a setting that only a full administrator can change. Managed engines never hand out full administrator rights. Check those needs first, then move.
+
+    <AnimatedDiagram spec="animated/cloud/service-models-1" step={2} caption="The case for moving: a layer you run is a layer that can wake you at 3:10 a.m." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you move the data with only a few minutes of downtime?
+    - Which settings and extensions would you check before moving?
+
+    **Watch out for.** Comparing only the hourly prices. The VM's price leaves out Asha's hours and the lost orders.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where does serverless become the expensive choice?" level="Mid" category="Cloud">
+    **Short answer.** When the load is high and steady. A function bills for each run and each second, so its cost grows in a straight line with use. A VM or a fixed-size platform costs the same, busy or idle. Past some level of steady use, the fixed machine is cheaper.
+
+    **Why.** Brightpost's resize job runs about 10 minutes a week, so a function costs far less than a VM that idles 99.9% of the time. Now picture a job that is busy all day: 50 requests a second at 200 ms each. That keeps about 10 copies busy around the clock, billed by the second. A few always-on machines would do the same work for less. Spiky or mostly idle loads favour serverless; flat, busy loads favour fixed capacity.
+
+    <AnimatedDiagram spec="animated/cloud/service-models-1" step={4} highlight={["photos", "fn", "provider"]} caption="A good fit for a function: about 300 photos a week, 2 seconds each." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you find the crossover point for a real workload?
+    - Apart from price, what else gets harder when a busy function talks to a database?
+
+    **Watch out for.** "Serverless is always cheaper, because you pay only for use." Paying only for use is cheap only while use is low.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you decide where each part of a new system runs, from virtual machines to SaaS?" level="Senior" category="Cloud">
+    **Short answer.** Part by part. I start at the top of the ladder and step down only when a requirement forces it. For each part I ask three questions: is there a product to rent, is it a short task started by an event, does it need a full machine? I take the most managed rung that passes, and I write down what that rung takes away.
+
+    **Why.** Every layer you run costs hours and can page you at night, so the default is to hand it over. The limits are the reasons to step down: a cold start where a person waits, a time limit shorter than the job, a missing driver or extension. Team size counts too, because 3 engineers cannot run many layers well. At Brightpost this gives four rungs at once. The help desk is on SaaS, the resize job on a function and the database on a managed engine. The shop app stays on a VM until it moves to a container platform.
+
+    <AnimatedDiagram spec="animated/cloud/service-model-ladder" step={6} caption="Each rung takes something away. The requirement decides which loss is acceptable." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would make you choose a VM for a new service today?
+    - How do you keep the option to move a part to another provider later?
+
+    **Watch out for.** Picking one rung for the whole system, such as "everything on functions" or "everything on VMs". Each part has its own needs and its own best rung.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [What the Cloud Is](/cloud/fundamentals/what-is-cloud)
+- [Shared Responsibility](/cloud/fundamentals/shared-responsibility)
+- [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics)
+- [Choosing Compute on AWS](/cloud/start-here/choosing-compute)
+- [The Compute Spectrum: VMs to Functions](/cloud/compute/compute-spectrum)
+- [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas)
+- [Serverless Functions: Triggers, Cold Starts and Concurrency](/cloud/compute/serverless-functions)
+- [Managed Relational Databases](/cloud/data/managed-relational)
+- [Compute on AWS](/cloud/aws/compute)
+- [Compute on Google Cloud](/cloud/gcp/compute)
+- [Compute on Azure](/cloud/azure/compute)
+- [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+
+## Further reading
+
+- [AWS overview: types of cloud computing](https://docs.aws.amazon.com/whitepapers/latest/aws-overview/types-of-cloud-computing.html): IaaS, PaaS and SaaS on AWS.
+- [Google Cloud: PaaS vs IaaS vs SaaS](https://cloud.google.com/learn/paas-vs-iaas-vs-saas): the three models compared.
+- [What is Cloud Run](https://cloud.google.com/run/docs/overview/what-is-cloud-run): containers and functions on one platform.
+- [Azure Functions hosting options](https://learn.microsoft.com/azure/azure-functions/functions-scale): how the plan changes scaling and limits.
