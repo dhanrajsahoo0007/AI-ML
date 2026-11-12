@@ -1,0 +1,98 @@
+---
+title: "Sort Array by Increasing Frequency"
+description: "Given an array of integers nums, sort the array in increasing order based on the frequency of the values."
+difficulty: easy
+patterns: [top-k-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: frequency_sort }
+starter:
+  python: |
+    def frequency_sort(nums: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/sort-array-by-increasing-frequency.public.json, hidden: tests/sort-array-by-increasing-frequency.hidden.json }
+complexity: { time: "O(n log k), where k is the number of unique elements", space: "O(n)" }
+group: "01. Top-K Pattern"
+number: "07"
+leetcode: sort-array-by-increasing-frequency
+leetcodeId: 1636
+order: 10001007000000
+---
+
+Given an array of integers nums, sort the array in increasing order based on the
+frequency of the values. If multiple values have the same frequency, sort them
+in decreasing order. Return the sorted array.
+
+This is an alternative implementation using a 3-tuple heap key for stable tie-breaking.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1,1,2,2,2,3]
+    Output: [3,1,1,2,2,2]
+
+Example 2:
+    Input: nums = [2,3,1,3,2]
+    Output: [1,3,3,2,2]
+````
+
+## Constraints
+
+````text
+- 1 <= nums.length <= 100
+- -100 <= nums[i] <= 100
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Top-K
+Uses a min-heap with (freq, -num, num) tuples. The extra -num ensures
+that when frequencies are equal, larger values come first (decreasing order).
+
+1. Count frequencies using Counter.
+2. Push (freq, -num, num) tuples into a min-heap.
+3. Pop and extend result with freq copies of num.
+
+## Complexity
+
+**Time:** O(n log k), where k is the number of unique elements
+
+**Space:** O(n)
+
+## Original notes
+
+````text
+Original notes (restored):
+Equivalent tie logic with an explicit 3-tuple `(freq, -num, num)` from the user's notebook:
+the middle `-num` encodes "larger values first when freq ties", matching the 1636 output order.
+````
+
+## Solution
+
+````python
+import heapq
+from collections import Counter
+from typing import List
+
+
+class Solution:
+    def frequencySort(self, nums: List[int]) -> List[int]:
+        counter = Counter(nums)
+        min_heap = []
+        result = []
+
+        for num, freq in counter.items():
+            # Same freq → sort values descending → push (-num) before stable num field.
+            heapq.heappush(min_heap, (freq, -num, num))
+
+        while min_heap:
+            freq, _, num = heapq.heappop(min_heap)
+            result.extend([num] * freq)
+
+        return result
+````

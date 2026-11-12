@@ -1,0 +1,78 @@
+---
+title: "Colorful Number"
+description: "A positive integer is colorful if the products of every consecutive sequence of digits are all distinct."
+difficulty: medium
+patterns: [hash-maps]
+topics: [hash-maps]
+companies: []
+languages: [python]
+entry: { python: colorful }
+starter:
+  python: |
+    def colorful(A: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/colorful-number.public.json, hidden: tests/colorful-number.hidden.json }
+complexity: { time: "O(d^2) where d is the number of digits", space: "O(d^2) - at most O(d^2) distinct products stored" }
+number: "02"
+order: 4002000000000
+---
+
+A positive integer is colorful if the products of every consecutive sequence
+of digits are all distinct. Given an integer A, return 1 if it is colorful, else 0.
+
+## Examples
+
+````text
+Example 1:
+    Input: A = 23
+    Output: 1
+Example 2:
+    Input: A = 236
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 1 <= A <= 10^6 (typical interview constraints)
+- Treat digits without leading zeros in the decimal string
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hash set of products
+Enumerate all contiguous digit subsequences and track products in a set.
+
+1. Convert A to a string of digits.
+2. For each start index, extend the end and multiply into a running product.
+3. If a product repeats, return 0; else after all subsequences return 1.
+
+## Complexity
+
+**Time:** O(d^2) where d is the number of digits
+
+**Space:** O(d^2) - at most O(d^2) distinct products stored
+
+## Solution
+
+````python
+from typing import Set
+
+
+class Solution:
+    def colorful(self, A: int) -> int:
+        s = str(abs(A))
+        seen: Set[int] = set()
+        n = len(s)
+        for i in range(n):
+            prod = 1
+            for j in range(i, n):
+                prod *= int(s[j])
+                if prod in seen:
+                    return 0
+                seen.add(prod)
+        return 1
+````

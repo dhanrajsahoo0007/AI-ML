@@ -1,0 +1,89 @@
+---
+title: "Minimum Platforms Railway"
+description: "Given arrival and departure times of trains at a station (same length arrays), find the minimum number of platforms required so that no train waits (all arri…"
+difficulty: medium
+patterns: [interval-and-scheduling-problems]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: find_platform }
+starter:
+  python: |
+    def find_platform(arr: list[int], dep: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-platforms-railway.public.json, hidden: tests/minimum-platforms-railway.hidden.json }
+complexity: { time: "O(n log n) - Sorting dominates.", space: "O(1) extra beyond input sorting buffers." }
+group: "03. Interval and Scheduling Problems"
+number: "03"
+order: 18003003000000
+---
+
+Given arrival and departure times of trains at a station (same length arrays), find the minimum
+number of platforms required so that no train waits (all arrivals and departures in chronological order per train).
+
+## Examples
+
+````text
+Example 1:
+    Input: arr = [900, 940, 950, 1100, 1500, 1800], dep = [910, 1200, 1120, 1130, 1900, 2000]
+    Output: 3
+
+Example 2:
+    Input: arr = [10, 200], dep = [50, 250]
+    Output: 1
+
+Example 3:
+    Input: arr = [10, 12], dep = [20, 25]
+    Output: 2
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 10^5
+- 0 <= arr[i], dep[i] <= 2359
+- dep[i] > arr[i] for each train in typical formulations
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Two-Pointer Sweep
+Sort arrivals and departures; increase platforms when the next event is an arrival before the earliest pending departure.
+
+1. Sort both arrays ascending.
+2. Use pointers i, j and counters for current and maximum platforms.
+3. If arr\[i\] &lt;= dep\[j\], a train needs a platform before any departure; else release a platform.
+
+## Complexity
+
+**Time:** O(n log n) - Sorting dominates.
+
+**Space:** O(1) extra beyond input sorting buffers.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findPlatform(self, arr: List[int], dep: List[int]) -> int:
+        arr.sort()
+        dep.sort()
+        i = j = 0
+        need = 0
+        best = 0
+        n = len(arr)
+        while i < n:
+            if arr[i] <= dep[j]:
+                need += 1
+                best = max(best, need)
+                i += 1
+            else:
+                need -= 1
+                j += 1
+        return best
+````

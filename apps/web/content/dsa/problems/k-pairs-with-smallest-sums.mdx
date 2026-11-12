@@ -1,0 +1,108 @@
+---
+title: "K Pairs with Smallest Sums"
+description: "You are given two integer arrays nums1 and nums2 sorted in non-decreasing order and an integer k."
+difficulty: medium
+patterns: [k-way-merge-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: k_smallest_pairs }
+starter:
+  python: |
+    def k_smallest_pairs(nums1: list[int], nums2: list[int], k: int) -> list[list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/k-pairs-with-smallest-sums.public.json, hidden: tests/k-pairs-with-smallest-sums.hidden.json }
+complexity: { time: "O(k log k)", space: "O(k) for the heap and visited set" }
+group: "02. K-Way Merge Pattern"
+number: "03"
+order: 10002003000000
+---
+
+You are given two integer arrays nums1 and nums2 sorted in non-decreasing order
+and an integer k. Return the k pairs (u, v) with the smallest sums where u is
+from nums1 and v is from nums2.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums1 = [1,7,11], nums2 = [2,4,6], k = 3
+    Output: [[1,2],[1,4],[1,6]]
+
+Example 2:
+    Input: nums1 = [1,1,2], nums2 = [1,2,3], k = 2
+    Output: [[1,1],[1,1]]
+````
+
+## Constraints
+
+````text
+- 1 <= nums1.length, nums2.length <= 10^5
+- -10^9 <= nums1[i], nums2[i] <= 10^9
+- nums1 and nums2 are sorted in non-decreasing order.
+- 1 <= k <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** K-Way Merge
+We treat this as a BFS on a virtual grid where cell (i,j) has sum nums1\[i\]+nums2\[j\].
+We explore cells in order of their sums using a min-heap.
+
+1. Start with pair (0, 0) in the heap.
+2. Pop the smallest sum pair and add it to results.
+3. Push adjacent pairs (i+1, j) and (i, j+1) if not visited.
+4. Repeat until we have k pairs.
+
+## Complexity
+
+**Time:** O(k log k)
+- Each iteration pops and pushes at most 2 pairs.
+
+**Space:** O(k) for the heap and visited set
+
+## Original notes
+
+````text
+Original notes (restored):
+Picture nums1 as rows and nums2 as columns of a sorted matrix of sums; from (0,0) you can
+move down (+1,0) or right (0,+1) to larger sums. A best-first search with `heapq` visits sums
+in ascending order; a `seen` set stops duplicate pushes.
+Hand-worked sketch from the old notes (nums1 = [3,7,11], nums2 = [1,2,6]): start at (3+1),
+branch to (7+1) and (3+2), etc., always extracting the smallest head sum until k pairs.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def kSmallestPairs(self, nums1: List[int], nums2: List[int], k: int) -> List[List[int]]:
+        if not nums1 or not nums2:
+            return []
+
+        results = []
+        heap = [(nums1[0] + nums2[0], 0, 0)]
+        seen = {(0, 0)}
+
+        while len(results) < k and heap:
+            _, i, j = heapq.heappop(heap)
+            results.append([nums1[i], nums2[j]])
+
+            # Explore neighbors in the "sum matrix" without revisiting coordinates.
+            if i + 1 < len(nums1) and (i + 1, j) not in seen:
+                heapq.heappush(heap, (nums1[i + 1] + nums2[j], i + 1, j))
+                seen.add((i + 1, j))
+
+            if j + 1 < len(nums2) and (i, j + 1) not in seen:
+                heapq.heappush(heap, (nums1[i] + nums2[j + 1], i, j + 1))
+                seen.add((i, j + 1))
+
+        return results
+````

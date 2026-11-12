@@ -1,0 +1,72 @@
+---
+title: "Kth Symbol in Grammer"
+description: "In row 1 the grammar string is \"0\"."
+difficulty: medium
+patterns: [basic-recursion-concepts]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: kth_symbol }
+starter:
+  python: |
+    def kth_symbol(n: int, k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/kth-symbol-in-grammer.public.json, hidden: tests/kth-symbol-in-grammer.hidden.json }
+complexity: { time: "O(n) - one recursive step per row", space: "O(n) - call stack" }
+group: "01. Basic Recursion Concepts"
+number: "05"
+order: 11001005000000
+---
+
+In row 1 the grammar string is "0". Each later row replaces 0 with "01" and 1 with
+"10". Return the k-th symbol (1-indexed) in row n as 0 or 1.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 1, k = 1
+    Output: 0
+
+Example 2:
+    Input: n = 4, k = 3
+    Output: 1 (row 4 begins 0110...)
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 30 for recursion depth in tests; k is valid for row n
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Halving recursion
+Row n splits into two mirrored halves of row n-1; the first half matches the
+previous row, the second half complements the mapped index.
+
+1. If n == 1, return 0.
+2. Let half = 2 \*\* (n - 2). If k &lt;= half, recurse on (n - 1, k).
+3. Otherwise return 1 - recurse(n - 1, k - half).
+
+## Complexity
+
+**Time:** O(n) - one recursive step per row
+
+**Space:** O(n) - call stack
+
+## Solution
+
+````python
+class Solution:
+    def kth_symbol(self, n: int, k: int) -> int:
+        if n == 1:
+            return 0
+        half = 1 << (n - 2)
+        if k <= half:
+            return self.kth_symbol(n - 1, k)
+        return 1 - self.kth_symbol(n - 1, k - half)
+````

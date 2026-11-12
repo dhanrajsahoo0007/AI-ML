@@ -1,0 +1,100 @@
+---
+title: "Last Stone Weight"
+description: "You are given an array of integers stones where stones[i] is the weight of the ith stone."
+difficulty: easy
+patterns: [greedy-with-heap-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: last_stone_weight }
+starter:
+  python: |
+    def last_stone_weight(stones: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/last-stone-weight.public.json, hidden: tests/last-stone-weight.hidden.json }
+complexity: { time: "O(n log n)", space: "O(n) for the heap." }
+group: "04. Greedy with Heap Pattern"
+number: "01"
+leetcode: last-stone-weight
+leetcodeId: 1046
+order: 10004001000000
+---
+
+You are given an array of integers stones where stones\[i\] is the weight of the ith stone.
+On each turn, choose the two heaviest stones and smash them together.
+If x == y, both are destroyed. If x != y, the stone of weight y-x remains.
+Return the weight of the last remaining stone, or 0 if none left.
+
+## Examples
+
+````text
+Example 1:
+    Input: stones = [2,7,4,1,8,1]
+    Output: 1
+    Explanation: 7&8->1, 2&4->2, 2&1->1, 1&1->0, remaining: 1
+
+Example 2:
+    Input: stones = [1]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= stones.length <= 30
+- 1 <= stones[i] <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy with Heap
+We always pick the two heaviest stones (greedy choice). A max-heap efficiently
+gives us the heaviest stones in O(log n) time.
+
+1. Build a max-heap (using negated values).
+2. While more than one stone remains, pop two heaviest.
+3. If they differ, push the difference back.
+4. Return the remaining stone weight or 0.
+
+## Complexity
+
+**Time:** O(n log n)
+- Each smash involves 2 pops and at most 1 push: O(log n).
+- At most n-1 smashes.
+
+**Space:** O(n) for the heap.
+
+## Original notes
+
+````text
+Original notes (restored):
+Smash trace for `[2,7,4,1,8,1]` from the user's sheet: combine 7&8 → 1, array becomes `[2,4,1,1,1]`,
+then 2&4 → 2, then 2&1 → 1, then 1&1 → 0 leaving `[1]`. Max-heap via negation because `heapq`
+is a min-heap.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def lastStoneWeight(self, stones: List[int]) -> int:
+        max_heap = [-s for s in stones]
+        heapq.heapify(max_heap)
+
+        while len(max_heap) > 1:
+            y = -heapq.heappop(max_heap)
+            x = -heapq.heappop(max_heap)
+
+            if x != y:
+                # Larger survives with reduced weight.
+                heapq.heappush(max_heap, -(y - x))
+
+        return -max_heap[0] if max_heap else 0
+````

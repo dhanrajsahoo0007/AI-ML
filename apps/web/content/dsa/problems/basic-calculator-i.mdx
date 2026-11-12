@@ -1,0 +1,117 @@
+---
+title: "Basic Calculator I"
+description: "Evaluate a valid expression containing non-negative integers, + - operators, parentheses, and spaces."
+difficulty: medium
+patterns: [expression-evaluation]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: calculate }
+starter:
+  python: |
+    def calculate(s: str) -> int:
+        # Your code here
+        pass
+tests: { public: tests/basic-calculator-i.public.json, hidden: tests/basic-calculator-i.hidden.json }
+complexity: { time: "O(n) - Single pass.", space: "O(n) - Stack depth for parentheses." }
+group: "04. Expression Evaluation"
+number: "02"
+order: 9004002000000
+---
+
+Evaluate a valid expression containing non-negative integers, + - operators, parentheses, and spaces.
+
+## Examples
+
+````text
+Example 1:
+Input: "1 + 1"
+Output: 2
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 3 * 10^5
+- s is a valid expression with digits and balanced parentheses
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Recursive Sign Stack
+Push accumulated results and active signs whenever '(' appears, unwind on ')'.
+
+1. Track current number, running total, active sign, and a stack of saved totals/signs.
+2. On '(' push context and reset; on ')' fold inner total with popped sign and outer total.
+3. Flush pending numbers on +/- and after the loop ends.
+
+Restored notes (archived workbook):
+
+Problem Statement: Basic Calculator
+Implement a basic calculator to evaluate a simple expression string.
+The expression string may contain open ( and closing parentheses ), the plus + or minus sign -, non-negative integers and empty spaces.
+
+Time Complexity: O(n), where n is the length of the input string.
+- We iterate through each character in the string once.
+
+Space Complexity: O(n)
+- In the worst case, we might push all numbers onto the stack for deeply nested parentheses.
+
+Explanation:
+1. Initialization:
+- Initialize variables for current number, result, sign, and a stack for handling parentheses.
+
+2. Iteration:
+- Iterate through each character in the input string.
+
+3. Number Building:
+- If the character is a digit, build the current number.
+
+4. Operation Processing:
+- For '+': Update result with the current number and reset for the next number.
+- For '-': Update result with the negative of the current number and reset.
+- For '(': Push current result and sign to stack, reset result and sign.
+- For ')': Compute result within parentheses and combine with previous result.
+
+5. Final Calculation:
+- After processing all characters, add the last number to the result.
+
+Note: This implementation handles parentheses and unary minus operations.
+
+## Complexity
+
+**Time:** O(n) - Single pass.
+
+**Space:** O(n) - Stack depth for parentheses.
+
+## Solution
+
+````python
+class Solution:
+    def calculate(self, s: str) -> int:
+        stack: list[int] = []
+        total = 0
+        num = 0
+        sign = 1
+        for ch in s:
+            if ch.isdigit():
+                num = num * 10 + int(ch)
+            elif ch in "+-":
+                total += sign * num
+                num = 0
+                sign = 1 if ch == "+" else -1
+            elif ch == "(":
+                stack.append(total)
+                stack.append(sign)
+                total = 0
+                sign = 1
+            elif ch == ")":
+                total += sign * num
+                num = 0
+                total *= stack.pop()
+                total += stack.pop()
+        total += sign * num
+        return total
+````

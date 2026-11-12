@@ -1,0 +1,74 @@
+---
+title: "Longest Palindromic Subsequence"
+description: "Given a string s, return the length of its longest palindromic subsequence."
+difficulty: medium
+patterns: [longest-palindromic-subsequence]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: longest_palindrome_subseq }
+starter:
+  python: |
+    def longest_palindrome_subseq(s: str) -> int:
+        # Your code here
+        pass
+tests: { public: tests/longest-palindromic-subsequence.public.json, hidden: tests/longest-palindromic-subsequence.hidden.json }
+complexity: { time: "O(n^2).", space: "O(n^2)." }
+group: "05. Longest Palindromic Subsequence"
+number: "01"
+leetcode: longest-palindromic-subsequence
+leetcodeId: 516
+order: 20005001000000
+---
+
+Given a string s, return the length of its longest palindromic subsequence.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "bbbab"
+    Output: 4
+Example 2:
+    Input: s = "cbbd"
+    Output: 2
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** LCS with reverse
+LPS(s) = LCS(s, reverse(s)).
+
+1. dp\[i\]\[j\] = LPS length within s\[i..j\] inclusive.
+2. If s\[i\]==s\[j\]: dp\[i\]\[j\]=2+dp\[i+1\]\[j-1\] or 1 if i==j; else max(dp\[i+1\]\[j\], dp\[i\]\[j-1\]).
+
+## Complexity
+
+**Time:** O(n^2).
+
+**Space:** O(n^2).
+
+## Solution
+
+````python
+class Solution:
+    def longestPalindromeSubseq(self, s: str) -> int:
+        n = len(s)
+        dp = [[0] * n for _ in range(n)]
+        for i in range(n - 1, -1, -1):
+            dp[i][i] = 1
+            for j in range(i + 1, n):
+                if s[i] == s[j]:
+                    dp[i][j] = 2 + (dp[i + 1][j - 1] if i + 1 <= j - 1 else 0)
+                else:
+                    dp[i][j] = max(dp[i + 1][j], dp[i][j - 1])
+        return dp[0][n - 1]
+````

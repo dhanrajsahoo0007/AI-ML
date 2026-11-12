@@ -1,0 +1,145 @@
+---
+title: "First & Last Occurance"
+description: "Given a sorted array of integers and a target, return the indices of the first and last position of target."
+difficulty: medium
+patterns: [basic]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: search_range }
+starter:
+  python: |
+    def search_range(nums: list[int], target: int) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/first-and-last-occurance.public.json, hidden: tests/first-and-last-occurance.hidden.json }
+complexity: { time: "O(log n) - Two binary searches on the same array.", space: "O(1) - Only a few integers stored." }
+group: "01. Basic"
+number: "04"
+order: 8001004000000
+---
+
+Given a sorted array of integers and a target, return the indices of the first and last position
+of target. If target is not in the array, return \[-1, -1\].
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 3, 3, 3, 5, 5, 5, 7, 8, 9], target = 5
+    Output: [4, 6]
+
+Example 2:
+    Input: nums = [1, 2, 3, 4, 5, 6], target = 7
+    Output: [-1, -1]
+````
+
+## Constraints
+
+````text
+- 0 <= len(nums) <= 10^5
+- nums is sorted in non-decreasing order
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search for Boundary
+Run one search biased to the left bound and one biased to the right bound.
+
+1. First occurrence: when nums\[mid\] == target, record mid and set right = mid - 1.
+2. Last occurrence: when nums\[mid\] == target, record mid and set left = mid + 1.
+3. Return \[first, last\].
+
+## Complexity
+
+**Time:** O(log n) - Two binary searches on the same array.
+
+**Space:** O(1) - Only a few integers stored.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement: First and Last Occurrence of an Element in Sorted Array
+
+Given a sorted array of integers and a target element, find the index of the first and last occurrence of the target element in the array.
+If the target is not found in the array, return \[-1, -1\].
+
+Examples:
+
+1. Input: arr = \[1, 3, 3, 3, 5, 5, 5, 7, 8, 9\], target = 5
+Output: \[4, 6\]
+Explanation: The first occurrence of 5 is at index 4, and the last occurrence is at index 6.
+
+2. Input: arr = \[1, 2, 3, 4, 5, 6\], target = 7
+Output: \[-1, -1\]
+Explanation: 7 is not present in the array.
+
+3. Input: arr = \[1, 1, 1, 1, 1, 1\], target = 1
+Output: \[0, 5\]
+Explanation: 1 occurs throughout the array, from index 0 to 5.
+
+The approach uses separate binary search methods to efficiently find the first and last occurrences.
+
+Explanation of the approach:
+
+1. Separate Methods:
+- We use two separate methods for finding the first and last occurrences:
+\* find\_first\_occurrence: Searches for the leftmost occurrence of the target.
+\* find\_last\_occurrence: Searches for the rightmost occurrence of the target.
+
+2. Binary Search Logic:
+- Both methods use a modified binary search algorithm.
+- The key difference is in how they handle finding the target:
+\* find\_first\_occurrence moves the right pointer when a match is found to search for earlier occurrences.
+\* find\_last\_occurrence moves the left pointer when a match is found to search for later occurrences.
+
+3. Result Tracking:
+- Both methods use a 'result' variable to keep track of the most recent valid occurrence found.
+- This ensures that even if we continue searching, we always have the correct index stored.
+
+4. Combining Results:
+- The find\_first\_and\_last function calls both search methods and returns their results as a pair.
+
+5. Time Complexity: O(log n) for each method, where n is the number of elements in the array.
+- We perform two separate binary searches, each taking O(log n) time.
+
+6. Space Complexity: O(1)
+- We use only a constant amount of extra space in each method.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def searchRange(self, nums: List[int], target: int) -> List[int]:
+        def first() -> int:
+            left, right = 0, len(nums) - 1
+            res = -1
+            while left <= right:
+                mid = left + (right - left) // 2
+                if nums[mid] == target:
+                    res = mid
+                    right = mid - 1
+                elif nums[mid] < target:
+                    left = mid + 1
+                else:
+                    right = mid - 1
+            return res
+
+        def last() -> int:
+            left, right = 0, len(nums) - 1
+            res = -1
+            while left <= right:
+                mid = left + (right - left) // 2
+                if nums[mid] == target:
+                    res = mid
+                    left = mid + 1
+                elif nums[mid] < target:
+                    left = mid + 1
+                else:
+                    right = mid - 1
+            return res
+
+        return [first(), last()]
+````

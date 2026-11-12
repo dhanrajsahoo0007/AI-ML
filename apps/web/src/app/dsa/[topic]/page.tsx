@@ -8,7 +8,7 @@ import {
   DifficultyLabel,
   getTopic,
   numberedTitle,
-  practiceGroups,
+  topicGroups,
   topicParams,
   type TopicParams,
   hubCrumbs,
@@ -32,7 +32,8 @@ export async function generateMetadata({ params }: { params: TopicParams }, pare
 // A topic article, compiled with the same MDX pipeline as docs articles, then the problems that use it, grouped
 // by pattern.
 export default async function TopicPage({ params }: { params: TopicParams }) {
-  const { section, topic, problems, topicOutlines } = getTopic((await params).topic);
+  const { section, topic, items } = getTopic((await params).topic);
+  const groups = topicGroups(items, topic.slug);
   const doc = await loadMdxDoc(section.key, [TOPICS_DIR, topic.slug]);
   const seo = await topicSeo(section, topic);
   return (
@@ -51,38 +52,24 @@ export default async function TopicPage({ params }: { params: TopicParams }) {
         }}
       >
         {doc.body}
-        {problems.length > 0 && (
+        {groups.length > 0 && (
           <>
-            <h2 id="practice">Practice problems</h2>
-            {practiceGroups(section, problems).map((g) => (
-              <section key={g.slug} aria-labelledby={`practice-${g.slug}`}>
-                <h3 id={`practice-${g.slug}`}>{g.label}</h3>
+            <h2 id="practice">Problems</h2>
+            {groups.map((g) => (
+              <section key={g.title} aria-label={g.title}>
+                <h3>{g.title}</h3>
                 <ul>
-                  {g.problems.map((p) => (
-                    <li key={p.slug}>
-                      <Link href={p.href} prefetch={false}>
-                        {p.fm.title}
-                      </Link>{" "}
-                      · <DifficultyLabel difficulty={p.fm.difficulty} />
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            ))}
-          </>
-        )}
-        {topicOutlines.length > 0 && (
-          <>
-            <h2 id="outlines">More problems in this topic</h2>
-            {outlineGroups(topicOutlines).map(([group, list]) => (
-              <section key={group} aria-label={group}>
-                <h3>{group}</h3>
-                <ul>
-                  {list.map((o) => (
-                    <li key={o.slug}>
-                      <Link href={o.href} prefetch={false}>
-                        {numberedTitle(o)}
+                  {g.items.map((item) => (
+                    <li key={item.slug}>
+                      <Link href={item.href} prefetch={false}>
+                        {numberedTitle(item)}
                       </Link>
+                      {item.type === "problem" && item.fm && (
+                        <>
+                          {" "}
+                          · <DifficultyLabel difficulty={item.fm.difficulty} />
+                        </>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -93,11 +80,4 @@ export default async function TopicPage({ params }: { params: TopicParams }) {
       </ArticleLayout>
     </div>
   );
-}
-
-/** Outlines under their `group` heading, groups in the order their first outline appears. */
-function outlineGroups<T extends { fm: { group?: string } }>(outlines: T[]): [string, T[]][] {
-  const groups = new Map<string, T[]>();
-  for (const o of outlines) groups.set(o.fm.group ?? "Other", [...(groups.get(o.fm.group ?? "Other") ?? []), o]);
-  return [...groups];
 }

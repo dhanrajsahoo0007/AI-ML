@@ -1,0 +1,72 @@
+---
+title: "[Hard] Longest Valid Parentheses"
+description: "Given a string of '(' and ')', return the length of the longest contiguous valid parentheses substring."
+difficulty: medium
+patterns: [parentheses]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: longest_valid_parentheses }
+starter:
+  python: |
+    def longest_valid_parentheses(s: str) -> int:
+        # Your code here
+        pass
+tests: { public: tests/hard-longest-valid-parentheses.public.json, hidden: tests/hard-longest-valid-parentheses.hidden.json }
+complexity: { time: "O(n) - Each index is pushed and popped at most once.", space: "O(n) - Stack holds unmatched positions." }
+group: "02. Parentheses"
+number: "07"
+order: 9002007000000
+---
+
+Given a string of '(' and ')', return the length of the longest contiguous valid parentheses substring.
+
+## Examples
+
+````text
+Example 1:
+Input: ")()())"
+Output: 4
+````
+
+## Constraints
+
+````text
+- 0 <= len(s) <= 3 * 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Stack with Sentinel Index
+Keep a stack of unmatched indices; valid segments appear between consecutive unmatched positions.
+
+1. Seed the stack with -1 as a sentinel boundary.
+2. Push indices of '(' ; on ')', pop. If empty, push current index as new boundary else update best length.
+3. Return the maximum span observed.
+
+## Complexity
+
+**Time:** O(n) - Each index is pushed and popped at most once.
+
+**Space:** O(n) - Stack holds unmatched positions.
+
+## Solution
+
+````python
+class Solution:
+    def longestValidParentheses(self, s: str) -> int:
+        stack: list[int] = [-1]
+        best = 0
+        for i, ch in enumerate(s):
+            if ch == "(":
+                stack.append(i)
+            else:
+                stack.pop()
+                if not stack:
+                    stack.append(i)
+                else:
+                    best = max(best, i - stack[-1])
+        return best
+````

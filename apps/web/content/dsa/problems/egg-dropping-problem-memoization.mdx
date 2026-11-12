@@ -1,0 +1,59 @@
+---
+title: "Egg Dropping Problem Memoization"
+description: "Same egg dropping with memoization (identical recurrence as file 09)."
+difficulty: medium
+patterns: [matrix-chain-multiplication]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: super_egg_drop }
+starter:
+  python: |
+    def super_egg_drop(k: int, n: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/egg-dropping-problem-memoization.public.json, hidden: tests/egg-dropping-problem-memoization.hidden.json }
+complexity: { time: "O(k * n^2) states.", space: "O(k * n)." }
+group: "07. Matrix Chain Multiplication"
+number: "10"
+order: 20007010000000
+---
+
+Same egg dropping with memoization (identical recurrence as file 09).
+
+<PremiumBreak />
+
+## Complexity
+
+**Time:** O(k \* n^2) states.
+
+**Space:** O(k \* n).
+
+## Solution
+
+````python
+from functools import lru_cache
+
+
+class Solution:
+    def superEggDrop(self, k: int, n: int) -> int:
+        @lru_cache(None)
+        def dp(e: int, f: int) -> int:
+            if f == 0:
+                return 0
+            if e == 1:
+                return f
+            lo, hi = 1, f
+            while lo + 1 < hi:
+                mid = (lo + hi) // 2
+                left = dp(e - 1, mid - 1)
+                right = dp(e, f - mid)
+                if left < right:
+                    lo = mid
+                else:
+                    hi = mid
+            x = hi
+            return 1 + max(dp(e - 1, x - 1), dp(e, f - x))
+
+        return dp(k, n)
+````

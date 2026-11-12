@@ -1,0 +1,135 @@
+---
+title: "Minimum Operations to Make All Array Elements Equal"
+description: "For each query value, reset nums to its original multiset and compute the minimum total increment or decrement operations (cost 1 per unit) to make every ele…"
+difficulty: medium
+patterns: [prefix-sum]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: min_operations }
+starter:
+  python: |
+    def min_operations(nums: list[int], queries: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/minimum-operations-to-make-all-array-elements-equal.public.json, hidden: tests/minimum-operations-to-make-all-array-elements-equal.hidden.json }
+complexity: { time: "O((n + m) log n) - Sort once, each query O(log n).", space: "O(n) - Prefix array." }
+group: "08. Prefix Sum"
+number: "01"
+order: 8008001000000
+---
+
+For each query value, reset nums to its original multiset and compute the minimum total increment or
+decrement operations (cost 1 per unit) to make every element equal to that query.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [3, 1, 6, 8], queries = [1, 5]
+Output: [14, 10]
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums), len(queries) <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sort + Prefix Sum + Binary Search
+Sort nums; for query q, split into elements &lt; q and &gt; q; costs use prefix sums and index counts.
+
+1. Sort nums and build prefix sums.
+2. For each q, bisect\_left for split index; left cost = q \* i - pref\[i\], right cost = (pref\[n\]-pref\[i\]) - q \* (n-i).
+
+## Complexity
+
+**Time:** O((n + m) log n) - Sort once, each query O(log n).
+
+**Space:** O(n) - Prefix array.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Problem Statement: Minimum Operations to Make All Array Elements Equal
+    
+    Given an array 'nums' of positive integers and an array 'queries', 
+    find the minimum number of operations to make all elements in 'nums' equal to each query value. 
+    An operation is defined as increasing or decreasing an element by 1. 
+    The array is reset after each query.
+
+Time Complexity: O((n + m) log n), where n is the length of nums and m is the length of queries.
+    - Sorting nums: O(n log n)
+    - Calculating prefix sum: O(n)
+    - For each query: O(log n) for binary search
+    - Total: O(n log n) + O(n) + O(m log n) = O((n + m) log n)
+
+Space Complexity: O(n) for the prefix sum array.
+
+Explanation:
+    1. Sort the nums array to efficiently find elements smaller/larger than each query.
+    2. Use prefix sum for quick calculation of sum of elements up to any index.
+    3. For each query:
+        a. Use binary search to find where the query would be inserted in sorted nums.
+        b. Calculate operations for elements smaller than query: sum(query - element).
+        c. Calculate operations for elements larger than query: sum(element - query).
+        d. Total operations = operations for smaller elements + operations for larger elements.
+    4. Return the list of minimum operations for each query.
+
+Example Explanation:
+Let's work through the first example: nums = [3, 1, 6, 8], queries = [1, 5]
+
+    1. Sort nums: [1, 3, 6, 8]
+    2. Calculate prefix sum: [0, 1, 4, 10, 18]
+       (0 is added at the beginning for easier calculations)
+
+    3. For query = 1:
+        a. Binary search finds index 1 (where 1 would be inserted)
+        b. Operations for smaller elements:
+            - No elements smaller than 1
+        c. Operations for larger elements:
+            - Sum of larger elements: 18 - 1 = 17
+            - Operations: 17 - 1 * 3 = 14
+        d. Total operations: 0 + 14 = 14
+
+    4. For query = 5:
+        a. Binary search finds index 2 (where 5 would be inserted)
+        b. Operations for smaller elements:
+            - Sum of smaller elements: 4
+            - Operations: 5 * 2 - 4 = 6
+        c. Operations for larger elements:
+            - Sum of larger elements: 18 - 4 = 14
+            - Operations: 14 - 5 * 2 = 4
+        d. Total operations: 6 + 4 = 10
+
+5. Final result: [14, 10]
+````
+
+## Solution
+
+````python
+from bisect import bisect_left
+from typing import List
+
+
+class Solution:
+    def minOperations(self, nums: List[int], queries: List[int]) -> List[int]:
+        nums.sort()
+        n = len(nums)
+        pref = [0] * (n + 1)
+        for i in range(n):
+            pref[i + 1] = pref[i] + nums[i]
+        out: List[int] = []
+        for q in queries:
+            i = bisect_left(nums, q)
+            left_ops = q * i - pref[i]
+            right_ops = (pref[n] - pref[i]) - q * (n - i)
+            out.append(left_ops + right_ops)
+        return out
+````

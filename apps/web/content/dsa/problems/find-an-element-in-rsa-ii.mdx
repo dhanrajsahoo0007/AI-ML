@@ -1,0 +1,136 @@
+---
+title: "Find an Element in RSA II"
+description: "Given a rotated sorted array that may contain duplicates, return whether target exists."
+difficulty: medium
+patterns: [rotated-array]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: search }
+starter:
+  python: |
+    def search(nums: list[int], target: int) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/find-an-element-in-rsa-ii.public.json, hidden: tests/find-an-element-in-rsa-ii.hidden.json }
+complexity: { time: "O(n) worst case (all equal), O(log n) typical when informative comparisons exist.", space: "O(1) - Two pointers only." }
+group: "02. Rotated Array"
+number: "04"
+order: 8002004000000
+---
+
+Given a rotated sorted array that may contain duplicates, return whether target exists.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [3, 3, 1, 2, 3, 3], target = 1
+    Output: True
+
+Example 2:
+    Input: nums = [1, 2, 3, 4, 5], target = 6
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 5000
+- Worst-case time can degrade when many duplicates obscure which side is sorted
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search with Ambiguity Shrink
+When nums\[left\] == nums\[mid\] == nums\[right\], shrink both ends; otherwise apply rotated-sorted logic.
+
+1. Standard rotated BS, but if arr\[left\]==arr\[mid\]==arr\[right\], increment left and decrement right.
+2. Otherwise detect sorted half and narrow as in the distinct case.
+
+## Complexity
+
+**Time:** O(n) worst case (all equal), O(log n) typical when informative comparisons exist.
+
+**Space:** O(1) - Two pointers only.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Problem Statement:
+    Given an integer array arr of size N, sorted in ascending order (may contain duplicate values)
+    and a target value k. Now the array is rotated at some pivot point unknown to you. 
+    Return True if k is present and otherwise, return False.
+
+Example:
+    Input: arr = [3, 3, 1, 2, 3, 3], k = 1
+    Output: True
+
+Explanation:
+    The array is rotated, and the target value 1 is present in the array.
+
+    Approach:
+        1. We can't directly apply binary search due to the presence of duplicates.
+        2. We'll use a modified binary search that handles duplicates and rotation.
+        3. At each step, we'll compare the middle element with the target and the ends of the current subarray.
+        4. If we can't determine which half to search, we'll reduce the search space by one element.
+
+
+Explanation of the algorithm:
+
+    1. We use two pointers, 'left' and 'right', to define the current search range.
+
+    2. In each iteration:
+        a. We calculate the middle index 'mid'.
+        b. If arr[mid] is the target, we return True.
+        c. We then handle three cases:
+
+            Case 1: If arr[left] == arr[mid] == arr[right], we can't determine which half to search.
+                In this case, we simply reduce our search space by moving left pointer right and right pointer left.
+
+            Case 2: If the left half is sorted (arr[left] <= arr[mid]):
+                - If the target is in the range [arr[left], arr[mid]), we search the left half.
+                - Otherwise, we search the right half.
+
+            Case 3: If the right half is sorted:
+                - If the target is in the range (arr[mid], arr[right]], we search the right half.
+                - Otherwise, we search the left half.
+
+    3. If we exit the while loop without finding the target, we return False.
+
+Time Complexity: O(N) in the worst case (when all elements are the same), O(log N) in the average case.
+Space Complexity: O(1) as we're using constant extra space.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def search(self, nums: List[int], target: int) -> bool:
+        left, right = 0, len(nums) - 1
+        while left <= right:
+            mid = (left + right) // 2
+            if nums[mid] == target:
+                return True
+            if nums[left] == nums[mid] == nums[right]:
+                left += 1
+                right -= 1
+            elif nums[left] <= nums[mid]:
+                if nums[left] <= target < nums[mid]:
+                    right = mid - 1
+                else:
+                    left = mid + 1
+            else:
+                if nums[mid] < target <= nums[right]:
+                    left = mid + 1
+                else:
+                    right = mid - 1
+        return False
+````

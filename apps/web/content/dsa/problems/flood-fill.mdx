@@ -1,0 +1,82 @@
+---
+title: "Flood Fill"
+description: "You are given an m x n integer image, a starting pixel (sr, sc), and a newColor."
+difficulty: easy
+patterns: [flood-fill]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: flood_fill }
+starter:
+  python: |
+    def flood_fill(image: list[list[int]], sr: int, sc: int, newColor: int) -> list[list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/flood-fill.public.json, hidden: tests/flood-fill.hidden.json }
+complexity: { time: "O(m * n) worst case visiting every cell once.", space: "O(m * n) recursion stack in worst case." }
+group: "13. Flood Fill"
+number: "01"
+leetcode: flood-fill
+leetcodeId: 733
+order: 17013001000000
+---
+
+You are given an m x n integer image, a starting pixel (sr, sc), and a newColor. Perform a flood fill:
+replace the starting color and any 4-directionally connected pixels with the same starting color with newColor.
+
+## Examples
+
+````text
+Example 1:
+Input: image = [[1,1,1],[1,1,0],[1,0,1]], sr = 1, sc = 1, newColor = 2
+Output: [[2,2,2],[2,2,0],[2,0,1]]
+````
+
+## Constraints
+
+````text
+- m == len(image), n == len(image[0])
+- 1 <= m, n <= 50
+- 0 <= image[i][j], newColor < 2^16
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS/BFS on grid graph
+Traverse the connected component of the original color from the seed using four-neighbor moves.
+
+1. Remember start\_color at (sr, sc); if it equals newColor, return early.
+2. DFS from (sr, sc), recoloring matching cells and recursing to neighbors in bounds with same color.
+
+## Complexity
+
+**Time:** O(m \* n) worst case visiting every cell once.
+
+**Space:** O(m \* n) recursion stack in worst case.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def floodFill(self, image: List[List[int]], sr: int, sc: int, newColor: int) -> List[List[int]]:
+        start = image[sr][sc]
+        if start == newColor:
+            return image
+        m, n = len(image), len(image[0])
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+        def dfs(r: int, c: int) -> None:
+            image[r][c] = newColor
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < m and 0 <= nc < n and image[nr][nc] == start:
+                    dfs(nr, nc)
+
+        dfs(sr, sc)
+        return image
+````

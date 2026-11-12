@@ -1,0 +1,94 @@
+---
+title: "Descending Array BS"
+description: "Given integers sorted in strictly descending order and a target, return the index of the target if present, otherwise -1."
+difficulty: medium
+patterns: [basic]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: search }
+starter:
+  python: |
+    def search(nums: list[int], target: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/descending-array-bs.public.json, hidden: tests/descending-array-bs.hidden.json }
+complexity: { time: "O(log n) - Halving the search space each iteration.", space: "O(1) - Constant extra variables." }
+group: "01. Basic"
+number: "02"
+order: 8001002000000
+---
+
+Given integers sorted in strictly descending order and a target, return the index of the target
+if present, otherwise -1.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [10, 8, 6, 4, 2, 1], target = 6
+    Output: 2
+
+Example 2:
+    Input: nums = [9, 7, 5, 3, 1], target = 8
+    Output: -1
+````
+
+## Constraints
+
+````text
+- nums is sorted in non-increasing order
+- 0 <= len(nums) <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Reverse-Sorted Array
+Mirror the ascending case: shrink the interval using comparisons that match descending order.
+
+1. Initialize left and right to the array ends.
+2. While left &lt;= right, compare nums\[mid\] to target.
+3. If equal, return mid; if nums\[mid\] &gt; target, the target (if any) lies to the right; else left.
+4. Return -1 if not found.
+
+## Complexity
+
+**Time:** O(log n) - Halving the search space each iteration.
+
+**Space:** O(1) - Constant extra variables.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement: Binary Search on Reverse Sorted Array
+
+Examples:
+
+1. Input: arr = \[10, 8, 6, 4, 2, 1\], target = 6
+Output: 2
+Explanation: 6 is present at index 2.
+
+2. Input: arr = \[9, 7, 5, 3, 1\], target = 8
+Output: -1
+Explanation: 8 is not present in the array.
+
+The approach modifies the standard binary search algorithm to work with descending order.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def search(self, nums: List[int], target: int) -> int:
+        left, right = 0, len(nums) - 1
+        while left <= right:
+            mid = left + (right - left) // 2
+            if nums[mid] == target:
+                return mid
+            if nums[mid] > target:
+                left = mid + 1
+            else:
+                right = mid - 1
+        return -1
+````

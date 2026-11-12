@@ -1,0 +1,75 @@
+---
+title: "Maximum sum of non-adjacent elements"
+description: "Given an integer array, pick a subsequence with maximum sum such that no two chosen elements are adjacent in the original array."
+difficulty: medium
+patterns: [1d-dp]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: rob_linear }
+starter:
+  python: |
+    def rob_linear(nums: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/maximum-sum-of-non-adjacent-elements.public.json, hidden: tests/maximum-sum-of-non-adjacent-elements.hidden.json }
+complexity: { time: "O(n) - one pass.", space: "O(1) - two accumulated values." }
+group: "01. 1D DP"
+number: "05"
+order: 20001005000000
+---
+
+Given an integer array, pick a subsequence with maximum sum such that no two
+chosen elements are adjacent in the original array.
+
+## Examples
+
+````text
+Example 1:
+    Input: arr = [5, 5, 10, 100, 10, 5]
+    Output: 110
+Example 2:
+    Input: arr = [3, 2, 7, 10]
+    Output: 13
+````
+
+## Constraints
+
+````text
+- 1 <= len(arr) <= 10^5
+- 0 <= arr[i] <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 1D Dynamic Programming
+At each index, either skip the element or take it and add best up to i-2.
+
+1. Track take/nottake or dp\[i\] = max(dp\[i-1\], dp\[i-2\]+arr\[i\]).
+2. Use O(1) space: (prev2, prev1) rolling maximum.
+
+## Complexity
+
+**Time:** O(n) - one pass.
+
+**Space:** O(1) - two accumulated values.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def robLinear(self, nums: List[int]) -> int:
+        if not nums:
+            return 0
+        if len(nums) == 1:
+            return nums[0]
+        prev2, prev1 = nums[0], max(nums[0], nums[1])
+        for i in range(2, len(nums)):
+            prev2, prev1 = prev1, max(prev1, prev2 + nums[i])
+        return prev1
+````

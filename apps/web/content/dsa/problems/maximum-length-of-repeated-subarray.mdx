@@ -1,0 +1,81 @@
+---
+title: "Maximum Length of Repeated Subarray"
+description: "Given two integer arrays nums1 and nums2, return the maximum length of a subarray that appears in both arrays (contiguous and identical values)."
+difficulty: medium
+patterns: [rabin-karp-rolling-hash]
+topics: [strings]
+companies: []
+languages: [python]
+entry: { python: find_length }
+starter:
+  python: |
+    def find_length(nums1: list[int], nums2: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/maximum-length-of-repeated-subarray.public.json, hidden: tests/maximum-length-of-repeated-subarray.hidden.json }
+complexity: { time: "O(m * n) - Full table fill.", space: "O(m * n) - DP table (can be optimized to O(n))." }
+group: "07. Rabin-Karp | Rolling hash"
+number: "03"
+leetcode: maximum-length-of-repeated-subarray
+leetcodeId: 718
+order: 5007003000000
+---
+
+Given two integer arrays nums1 and nums2, return the maximum length of a subarray
+that appears in both arrays (contiguous and identical values).
+
+## Examples
+
+````text
+Example 1:
+    Input: nums1 = [1, 2, 3, 2, 1], nums2 = [3, 2, 1, 4, 7]
+    Output: 3
+    Explanation: [3, 2, 1] is the longest shared subarray.
+
+Example 2:
+    Input: nums1 = [0, 0, 0, 0, 0], nums2 = [0, 0, 0, 0, 0]
+    Output: 5
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums1), len(nums2) <= 1000
+- 0 <= nums1[i], nums2[i] <= 100
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Dynamic programming on pairs of indices
+dp\[i\]\[j\] is the longest common suffix of nums1\[:i\] and nums2\[:j\] ending at i-1, j-1.
+
+1. Allocate dp with dimensions (m+1) x (n+1).
+2. If nums1\[i-1\] == nums2\[j-1\], set dp\[i\]\[j\] = dp\[i-1\]\[j-1\] + 1; track the maximum.
+3. Return the maximum value found.
+
+## Complexity
+
+**Time:** O(m \* n) - Full table fill.
+
+**Space:** O(m \* n) - DP table (can be optimized to O(n)).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findLength(self, nums1: List[int], nums2: List[int]) -> int:
+        m, n = len(nums1), len(nums2)
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+        best = 0
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if nums1[i - 1] == nums2[j - 1]:
+                    dp[i][j] = dp[i - 1][j - 1] + 1
+                    best = max(best, dp[i][j])
+        return best
+````

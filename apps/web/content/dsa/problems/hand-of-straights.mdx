@@ -1,0 +1,89 @@
+---
+title: "Hand of Straights"
+description: "Alice has a hand of integer cards and wants to rearrange them into groups of size groupSize where each group is k consecutive integers (a straight)."
+difficulty: medium
+patterns: [basic-optimization-problems]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: is_n_straight_hand }
+starter:
+  python: |
+    def is_n_straight_hand(hand: list[int], groupSize: int) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/hand-of-straights.public.json, hidden: tests/hand-of-straights.hidden.json }
+complexity: { time: "O(n log n) - Sorting distinct keys dominates.", space: "O(n) - Counter storage." }
+group: "02. Basic Optimization Problems"
+number: "05"
+leetcode: hand-of-straights
+leetcodeId: 846
+order: 18002005000000
+---
+
+Alice has a hand of integer cards and wants to rearrange them into groups of size groupSize where
+each group is k consecutive integers (a straight). Return whether the cards can be partitioned that way.
+
+## Examples
+
+````text
+Example 1:
+    Input: hand = [1,2,3,6,2,3,4,7,8], groupSize = 3
+    Output: True
+
+Example 2:
+    Input: hand = [1,2,3,4,5], groupSize = 4
+    Output: False
+
+Example 3:
+    Input: hand = [8,10,12], groupSize = 3
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= len(hand) <= 10^5
+- 0 <= hand[i] <= 10^9
+- 1 <= groupSize <= len(hand)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Frequency Depletion
+Process values in sorted order and repeatedly start a straight from the smallest unused value.
+
+1. Count each card with a frequency map; if len(hand) is not divisible by groupSize, return False.
+2. For each value in sorted order, while it still has copies, try to consume groupSize consecutive values each by that count.
+3. If any value in the window is insufficient, return False; otherwise return True.
+
+## Complexity
+
+**Time:** O(n log n) - Sorting distinct keys dominates.
+
+**Space:** O(n) - Counter storage.
+
+## Solution
+
+````python
+from collections import Counter
+from typing import List
+
+
+class Solution:
+    def isNStraightHand(self, hand: List[int], groupSize: int) -> bool:
+        if len(hand) % groupSize:
+            return False
+        cnt = Counter(hand)
+        for x in sorted(cnt):
+            need = cnt[x]
+            if need == 0:
+                continue
+            for y in range(x, x + groupSize):
+                if cnt[y] < need:
+                    return False
+                cnt[y] -= need
+        return True
+````

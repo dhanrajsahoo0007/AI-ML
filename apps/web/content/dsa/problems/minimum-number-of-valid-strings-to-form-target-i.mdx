@@ -1,0 +1,115 @@
+---
+title: "Minimum Number of Valid Strings to Form Target I"
+description: "Given an array of strings words and a string target, a string is valid if it is a non-empty prefix of some word in words."
+difficulty: medium
+patterns: [kmp-algorithm]
+topics: [strings]
+companies: []
+languages: [python]
+entry: { python: min_valid_strings }
+starter:
+  python: |
+    def min_valid_strings(words: list[str], target: str) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-number-of-valid-strings-to-form-target-i.public.json, hidden: tests/minimum-number-of-valid-strings-to-form-target-i.hidden.json }
+complexity: { time: "O(n * alphabet * depth) with memoization bounds (editorial ~ O(n^2 + L)).", space: "O(L + n) for trie nodes and memo table." }
+group: "06. KMP Algorithm"
+number: "04"
+leetcode: minimum-number-of-valid-strings-to-form-target-i
+leetcodeId: 3291
+order: 5006004000000
+---
+
+Given an array of strings words and a string target, a string is valid if it is a
+non-empty prefix of some word in words. Concatenate valid strings in order to
+exactly form target using as few pieces as possible. If impossible, return -1.
+
+## Examples
+
+````text
+Example 1:
+    Input: words = ["abc", "aaaaa", "bcdef"], target = "aabcdabc"
+    Output: 3
+
+Example 2:
+    Input: words = ["abababab", "ab"], target = "ababaababa"
+    Output: 2
+
+Example 3:
+    Input: words = ["abcdef"], target = "xyz"
+    Output: -1
+````
+
+## Constraints
+
+````text
+- 1 <= len(words) <= 100
+- Total characters in words <= 10^5
+- 1 <= len(target) <= 5000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Trie plus memoized DFS
+Insert all words into a trie, then dfs(i) tries every matching prefix along target from i.
+
+1. Build a 26-way trie from every word in words.
+2. Define dfs(i) as the minimum pieces to build target\[i:\]; memoize on i.
+3. Walk the trie along target characters from i until a branch ends; each step updates the best with 1 + dfs(j+1).
+4. Return dfs(0) or -1 if it stays infinite.
+
+## Complexity
+
+**Time:** O(n \* alphabet \* depth) with memoization bounds (editorial \~ O(n^2 + L)).
+
+**Space:** O(L + n) for trie nodes and memo table.
+
+## Solution
+
+````python
+from functools import cache
+from typing import List, Optional
+
+
+class TrieNode:
+    __slots__ = ("children",)
+
+    def __init__(self) -> None:
+        self.children: List[Optional[TrieNode]] = [None] * 26
+
+
+class Solution:
+    def minValidStrings(self, words: List[str], target: str) -> int:
+        root = TrieNode()
+        for w in words:
+            node = root
+            for ch in w:
+                idx = ord(ch) - ord("a")
+                if node.children[idx] is None:
+                    node.children[idx] = TrieNode()
+                node = node.children[idx]
+
+        n = len(target)
+        inf = 10**9
+
+        @cache
+        def dfs(i: int) -> int:
+            if i >= n:
+                return 0
+            node = root
+            best = inf
+            for j in range(i, n):
+                idx = ord(target[j]) - ord("a")
+                nxt = node.children[idx]
+                if nxt is None:
+                    break
+                node = nxt
+                best = min(best, 1 + dfs(j + 1))
+            return best
+
+        ans = dfs(0)
+        return ans if ans < inf else -1
+````

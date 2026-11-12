@@ -1,0 +1,91 @@
+---
+title: "Subarray with k different integers"
+description: "Given an integer array nums and a positive integer k, return the number of good subarrays."
+difficulty: medium
+patterns: [sliding-window-with-special-conditions-py]
+topics: [sliding-window]
+companies: []
+languages: [python]
+entry: { python: subarrays_with_k_distinct }
+starter:
+  python: |
+    def subarrays_with_k_distinct(nums: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/subarray-with-k-different-integers.public.json, hidden: tests/subarray-with-k-different-integers.hidden.json }
+complexity: { time: "O(n) for each pass; two passes yield O(n) overall.", space: "O(n) - Frequency map may grow with distinct elements in the window." }
+group: "07. Sliding Window with Special Conditions"
+number: "01"
+order: 7007001000000
+---
+
+Given an integer array nums and a positive integer k, return the number of good
+subarrays. A subarray is good if it is non-empty and contains exactly k distinct integers.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 2, 1, 2, 3], k = 2
+    Output: 7
+Example 2:
+    Input: nums = [1, 2, 1, 3, 4], k = 3
+    Output: 3
+Example 3:
+    Input: nums = [1, 1, 1, 1], k = 1
+    Output: 10
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 20000
+- 1 <= nums[i], k <= len(nums)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** At-most sliding window transform
+Count subarrays with at most k distinct values minus those with at most k - 1 distinct values.
+
+1. Define helper at\_most(t) counting subarrays with at most t distinct integers using two pointers.
+2. Expand the right edge while tracking frequencies; shrink while distinct count exceeds t.
+3. Each valid right endpoint contributes (right - left + 1) subarrays ending at right.
+
+## Complexity
+
+**Time:** O(n) for each pass; two passes yield O(n) overall.
+
+**Space:** O(n) - Frequency map may grow with distinct elements in the window.
+
+## Solution
+
+````python
+from collections import defaultdict
+from typing import Dict, List
+
+
+class Solution:
+    def subarraysWithKDistinct(self, nums: List[int], k: int) -> int:
+        def at_most(distinct_limit: int) -> int:
+            freq: Dict[int, int] = defaultdict(int)
+            left = 0
+            total = 0
+
+            for right, value in enumerate(nums):
+                freq[value] += 1
+
+                while len(freq) > distinct_limit:
+                    freq[nums[left]] -= 1
+                    if freq[nums[left]] == 0:
+                        del freq[nums[left]]
+                    left += 1
+
+                total += right - left + 1
+
+            return total
+
+        return at_most(k) - at_most(k - 1)
+````

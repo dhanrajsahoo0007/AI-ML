@@ -1,0 +1,93 @@
+---
+title: "Minimize the Maximum Difference of Pairs"
+description: "Choose p disjoint pairs of indices so no index is used twice."
+difficulty: medium
+patterns: [maximum-of-minimum-minimum-of-maximum]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: minimize_max }
+starter:
+  python: |
+    def minimize_max(nums: list[int], p: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimize-the-maximum-difference-of-pairs.public.json, hidden: tests/minimize-the-maximum-difference-of-pairs.hidden.json }
+complexity: { time: "O(n log W) - W = max - min.", space: "O(n) - Sorted copy (or sort in place if allowed)." }
+group: "07. Maximum of Minimum | Minimum of Maximum"
+number: "06"
+order: 8007006000000
+---
+
+Choose p disjoint pairs of indices so no index is used twice. Minimize the largest absolute value
+difference among the chosen pairs.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [10, 1, 2, 7, 1, 3], p = 2
+    Output: 1
+
+Example 2:
+    Input: nums = [4, 2, 1, 2], p = 1
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 0 <= p <= len(nums) // 2
+- 1 <= len(nums) <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer + Greedy on Sorted Values
+Sort nums; for a trial D, greedily pair adjacent elements whenever their gap is at most D to maximize pair count.
+
+1. Sort a copy of nums.
+2. Binary search D; count pairs with the standard left-to-right greedy on the sorted array.
+3. Return smallest D with count &gt;= p.
+
+## Complexity
+
+**Time:** O(n log W) - W = max - min.
+
+**Space:** O(n) - Sorted copy (or sort in place if allowed).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def minimizeMax(self, nums: List[int], p: int) -> int:
+        if p == 0:
+            return 0
+        nums = sorted(nums)
+
+        def count_pairs(limit: int) -> int:
+            i = 0
+            c = 0
+            n = len(nums)
+            while i < n - 1:
+                if nums[i + 1] - nums[i] <= limit:
+                    c += 1
+                    i += 2
+                else:
+                    i += 1
+            return c
+
+        lo, hi = 0, nums[-1] - nums[0]
+        while lo < hi:
+            mid = lo + (hi - lo) // 2
+            if count_pairs(mid) >= p:
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+````

@@ -1,0 +1,77 @@
+---
+title: "Simplify Path"
+description: "Convert an absolute Unix-style path with '.', '..', repeated slashes, and literal names into its canonical form starting with '/' and without redundant segme…"
+difficulty: medium
+patterns: [string-manipulation-with-stack]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: simplify_path }
+starter:
+  python: |
+    def simplify_path(path: str) -> str:
+        # Your code here
+        pass
+tests: { public: tests/simplify-path.public.json, hidden: tests/simplify-path.hidden.json }
+complexity: { time: "O(n) - Single traversal of the string plus joining.", space: "O(n) - Stack of path components." }
+group: "03. String Manipulation with Stack"
+number: "04"
+leetcode: simplify-path
+leetcodeId: 71
+order: 9003004000000
+---
+
+Convert an absolute Unix-style path with '.', '..', repeated slashes, and literal names into its
+canonical form starting with '/' and without redundant segments.
+
+## Examples
+
+````text
+Example 1:
+Input: "/home/"
+Output: "/home"
+````
+
+## Constraints
+
+````text
+- 1 <= len(path) <= 3000
+- path contains '/', '.', '..', or names built from English letters, digits, or '_'
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Token Stack
+Split on '/', ignore empties and '.', pop on '..', otherwise push directory tokens.
+
+1. Split the string on '/'.
+2. Push non-empty names; pop when encountering '..' if possible.
+3. Join stack with '/' and prefix with '/'.
+
+## Complexity
+
+**Time:** O(n) - Single traversal of the string plus joining.
+
+**Space:** O(n) - Stack of path components.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def simplifyPath(self, path: str) -> str:
+        stack: List[str] = []
+        for part in path.split("/"):
+            if not part or part == ".":
+                continue
+            if part == "..":
+                if stack:
+                    stack.pop()
+            else:
+                stack.append(part)
+        return "/" + "/".join(stack)
+````

@@ -1,0 +1,85 @@
+---
+title: "Continuous Subarray Sum"
+description: "Given an integer array nums and an integer k, return True if nums has a contiguous subarray of length at least two whose sum is a multiple of k."
+difficulty: medium
+patterns: [subarray-problem]
+topics: [arrays]
+companies: []
+languages: [python]
+entry: { python: check_subarray_sum }
+starter:
+  python: |
+    def check_subarray_sum(nums: list[int], k: int) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/continuous-subarray-sum.public.json, hidden: tests/continuous-subarray-sum.hidden.json }
+complexity: { time: "O(n) - Single pass.", space: "O(min(n, k)) - At most k distinct remainders (bounded in practice by map size)." }
+group: "05. Subarray Problem"
+number: "03"
+leetcode: continuous-subarray-sum
+leetcodeId: 523
+order: 1005003000000
+---
+
+Given an integer array nums and an integer k, return True if nums has a contiguous subarray of
+length at least two whose sum is a multiple of k.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [23, 2, 4, 6, 7], k = 6
+    Output: True  # [2, 4, 6]
+Example 2:
+    Input: nums = [23, 2, 6, 4, 7], k = 6
+    Output: True  # [23, 2, 6, 4, 7]
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 10^5
+- 0 <= nums[i] <= 10^9
+- 1 <= k <= 2^31 - 1
+````
+
+**Also in the notes under:** [02. Prefix Sum/04. Subarray Sum Problems](/dsa/problems/continuous-subarray-sum-subarray-sum-problems).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix remainder map
+Equal prefix mod k at indices at least two apart yields a valid subarray sum divisible by k.
+
+1. Track running sum modulo k and first index where each remainder appeared.
+2. Initialize map &#123;0: -1&#125;.
+3. For each i, update pref = (pref + nums\[i\]) % k; if pref seen before with gap &gt; 1, return True;
+else if pref unseen, record pref -&gt; i.
+4. Return False.
+
+## Complexity
+
+**Time:** O(n) - Single pass.
+
+**Space:** O(min(n, k)) - At most k distinct remainders (bounded in practice by map size).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def checkSubarraySum(self, nums: List[int], k: int) -> bool:
+        pref = 0
+        seen: dict[int, int] = {0: -1}
+        for i, v in enumerate(nums):
+            pref = (pref + v) % k
+            if pref in seen:
+                if i - seen[pref] > 1:
+                    return True
+            else:
+                seen[pref] = i
+        return False
+````

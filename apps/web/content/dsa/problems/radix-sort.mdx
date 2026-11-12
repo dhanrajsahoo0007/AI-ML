@@ -1,0 +1,80 @@
+---
+title: "Radix Sort"
+description: "Sort a list of non-negative integers using least-significant-digit (LSD) radix sort and return the sorted list."
+difficulty: medium
+patterns: [radix-sort]
+topics: [sorting]
+companies: []
+languages: [python]
+entry: { python: radix_sort }
+starter:
+  python: |
+    def radix_sort(nums: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/radix-sort.public.json, hidden: tests/radix-sort.hidden.json }
+complexity: { time: "O(d * (n + 10)) with d digits", space: "O(n)" }
+group: "03. Radix Sort"
+number: "01"
+order: 23003001000000
+---
+
+Sort a list of non-negative integers using least-significant-digit (LSD)
+radix sort and return the sorted list.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [170, 45, 75, 90, 2, 802, 24, 66]
+    Output: sorted ascending
+Example 2:
+    Input: nums = [5, 1, 3]
+    Output: [1, 3, 5]
+````
+
+## Constraints
+
+````text
+- 0 <= nums[i] <= 10^6 typical
+- len(nums) <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Radix sort (LSD)
+Stable bucket by each digit from units upward using counting sort per digit.
+
+1. Find max value to know digit count.
+2. For each digit position exp = 1,10,..., bucket by (num // exp) % 10.
+3. Rebuild nums from buckets stably.
+
+## Complexity
+
+**Time:** O(d \* (n + 10)) with d digits
+
+**Space:** O(n)
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def radixSort(self, nums: List[int]) -> List[int]:
+        if not nums:
+            return []
+        m = max(nums)
+        exp = 1
+        out = list(nums)
+        while m // exp > 0:
+            buckets: List[List[int]] = [[] for _ in range(10)]
+            for x in out:
+                buckets[(x // exp) % 10].append(x)
+            out = [x for b in buckets for x in b]
+            exp *= 10
+        return out
+````

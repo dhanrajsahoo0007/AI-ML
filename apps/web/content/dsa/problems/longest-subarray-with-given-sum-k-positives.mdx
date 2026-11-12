@@ -1,0 +1,82 @@
+---
+title: "Longest subarray with given sum K(positives)"
+description: "Given an array nums of positive integers and an integer k, return the length of the longest contiguous subarray whose sum equals k."
+difficulty: medium
+patterns: [subarray-problem]
+topics: [arrays]
+companies: []
+languages: [python]
+entry: { python: longest_subarray_positive_sum }
+starter:
+  python: |
+    def longest_subarray_positive_sum(nums: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/longest-subarray-with-given-sum-k-positives.public.json, hidden: tests/longest-subarray-with-given-sum-k-positives.hidden.json }
+complexity: { time: "O(n) - Each index moves at most once.", space: "O(1) - Only pointers and sums." }
+group: "05. Subarray Problem"
+number: "01"
+order: 1005001000000
+---
+
+Given an array nums of positive integers and an integer k, return the length of the longest
+contiguous subarray whose sum equals k. If none exists, return 0.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 2, 3, 4, 5], k = 9
+    Output: 3  # subarray [2, 3, 4]
+Example 2:
+    Input: nums = [1, 1, 1], k = 3
+    Output: 3
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 10^5
+- 1 <= nums[i] <= 1000
+- 1 <= k <= 10^8
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sliding window (two pointers)
+With all positives, expanding increases sum and shrinking from the left decreases it monotonically.
+
+1. Initialize left = 0, cur = 0, best = 0.
+2. For each right, add nums\[right\] to cur.
+3. While cur &gt; k and left &lt;= right, subtract nums\[left\] and increment left.
+4. If cur == k, update best with window length.
+5. Return best.
+
+## Complexity
+
+**Time:** O(n) - Each index moves at most once.
+
+**Space:** O(1) - Only pointers and sums.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def longestSubarrayPositiveSum(self, nums: List[int], k: int) -> int:
+        left = 0
+        cur = 0
+        best = 0
+        for right in range(len(nums)):
+            cur += nums[right]
+            while cur > k and left <= right:
+                cur -= nums[left]
+                left += 1
+            if cur == k:
+                best = max(best, right - left + 1)
+        return best
+````

@@ -1,0 +1,72 @@
+---
+title: "Score of Parentheses"
+description: "Given a balanced parentheses string, compute its score where \"()\" scores 1, concatenation adds scores, and wrapping \"(A)\" doubles A's score."
+difficulty: medium
+patterns: [parentheses]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: score_of_parentheses }
+starter:
+  python: |
+    def score_of_parentheses(s: str) -> int:
+        # Your code here
+        pass
+tests: { public: tests/score-of-parentheses.public.json, hidden: tests/score-of-parentheses.hidden.json }
+complexity: { time: "O(n) - Each character is processed once.", space: "O(n) - Stack depth equals nesting depth." }
+group: "02. Parentheses"
+number: "06"
+leetcode: score-of-parentheses
+leetcodeId: 856
+order: 9002006000000
+---
+
+Given a balanced parentheses string, compute its score where "()" scores 1, concatenation adds
+scores, and wrapping "(A)" doubles A's score.
+
+## Examples
+
+````text
+Example 1:
+Input: "()"
+Output: 1
+````
+
+## Constraints
+
+````text
+- 2 <= len(s) <= 50
+- s is balanced using '(' and ')'
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Stack of Layer Totals
+Treat '(' as starting a new layer with score 0; on ')', fold inner score into the parent.
+
+1. Push 0 for each '(' as a placeholder score for that layer.
+2. On ')', pop inner score; if zero treat as primitive pair worth 1 else double it.
+3. Add the folded value to the new stack top representing the outer layer.
+
+## Complexity
+
+**Time:** O(n) - Each character is processed once.
+
+**Space:** O(n) - Stack depth equals nesting depth.
+
+## Solution
+
+````python
+class Solution:
+    def scoreOfParentheses(self, s: str) -> int:
+        stack: list[int] = [0]
+        for ch in s:
+            if ch == "(":
+                stack.append(0)
+            else:
+                inner = stack.pop()
+                stack[-1] += max(2 * inner, 1)
+        return stack[0]
+````

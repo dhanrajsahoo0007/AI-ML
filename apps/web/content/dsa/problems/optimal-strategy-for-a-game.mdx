@@ -1,0 +1,52 @@
+---
+title: "Optimal Strategy For A Game"
+description: "Two players pick from ends of array; first wants maximize own sum vs optimal opponent."
+difficulty: medium
+patterns: [game-strategy]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: predict_the_winner }
+starter:
+  python: |
+    def predict_the_winner(nums: list[int]) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/optimal-strategy-for-a-game.public.json, hidden: tests/optimal-strategy-for-a-game.hidden.json }
+complexity: { time: "O(n^2).", space: "See the notes" }
+group: "11. Game Strategy"
+number: "01"
+order: 20011001000000
+---
+
+Two players pick from ends of array; first wants maximize own sum vs optimal opponent.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Minimax interval DP.
+
+## Complexity
+
+**Time:** O(n^2).
+
+## Solution
+
+````python
+from functools import lru_cache
+from typing import List
+
+
+class Solution:
+    def predictTheWinner(self, nums: List[int]) -> bool:
+        @lru_cache(None)
+        def score(i: int, j: int) -> int:
+            if i > j:
+                return 0
+            take_left = nums[i] - score(i + 1, j)
+            take_right = nums[j] - score(i, j - 1)
+            return max(take_left, take_right)
+
+        return score(0, len(nums) - 1) >= 0
+````

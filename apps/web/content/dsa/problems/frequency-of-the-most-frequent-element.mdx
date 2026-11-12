@@ -1,0 +1,127 @@
+---
+title: "Frequency of the Most Frequent Element"
+description: "You are given an integer array nums and an integer k."
+difficulty: medium
+patterns: [alphabet150]
+topics: [sliding-window]
+companies: []
+languages: [python]
+entry: { python: max_frequency }
+starter:
+  python: |
+    def max_frequency(nums: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/frequency-of-the-most-frequent-element.public.json, hidden: tests/frequency-of-the-most-frequent-element.hidden.json }
+complexity: { time: "O(n log n) - Sorting dominates; the scan across the sorted array is linear.", space: "O(n) - A sorted copy of the input is stored." }
+group: "08. Alphabet150"
+number: "03"
+leetcode: frequency-of-the-most-frequent-element
+leetcodeId: 1838
+order: 7008003000000
+---
+
+You are given an integer array nums and an integer k. In one operation you may
+increment any element by 1, at most k total increments across all operations. Return
+the maximum achievable frequency of any single value after the operations.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 2, 4], k = 5
+    Output: 3
+Example 2:
+    Input: nums = [1, 4, 8, 13], k = 5
+    Output: 2
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 10^5
+- 1 <= nums[i], k <= 10^5
+````
+
+**Also in the notes under:** [08. Binary Search/07. Sliding Window](/dsa/problems/frequency-of-the-most-frequent-element-sliding-window).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sorted sliding window with operation budget
+After sorting, a window is feasible if you can raise every element to nums\[right\] within k increments.
+
+1. Sort a copy of nums so all values in a window are non-decreasing.
+2. Expand the right edge while maintaining the sum of the current window.
+3. If making every element in the window equal to the right endpoint costs more than k, shrink from the left.
+
+Restored notes (archived workbook):
+
+Frequency of the Most Frequent Element
+Solved
+Medium
+Topics
+Companies
+Hint
+The frequency of an element is the number of times it occurs in an array.
+
+You are given an integer array nums and an integer k. In one operation, you can choose an index of nums and increment the element at that index by 1.
+
+Return the maximum possible frequency of an element after performing at most k operations.
+
+Example 1:
+
+Input: nums = \[1,2,4\], k = 5
+Output: 3
+Explanation: Increment the first element three times and the second element two times to make nums = \[4,4,4\].
+4 has a frequency of 3.
+Example 2:
+
+Input: nums = \[1,4,8,13\], k = 5
+Output: 2
+Explanation: There are multiple optimal solutions:
+- Increment the first element three times to make nums = \[4,4,8,13\]. 4 has a frequency of 2.
+- Increment the second element four times to make nums = \[1,8,8,13\]. 8 has a frequency of 2.
+- Increment the third element five times to make nums = \[1,4,13,13\]. 13 has a frequency of 2.
+Example 3:
+
+Input: nums = \[3,9,6\], k = 2
+Output: 1
+
+Constraints:
+
+1 &lt;= nums.length &lt;= 105
+1 &lt;= nums\[i\] &lt;= 105
+1 &lt;= k &lt;= 105
+
+## Complexity
+
+**Time:** O(n log n) - Sorting dominates; the scan across the sorted array is linear.
+
+**Space:** O(n) - A sorted copy of the input is stored.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxFrequency(self, nums: List[int], k: int) -> int:
+        nums_sorted = sorted(nums)
+        left = 0
+        total = 0
+        best = 0
+
+        for right in range(len(nums_sorted)):
+            total += nums_sorted[right]
+
+            while nums_sorted[right] * (right - left + 1) > total + k:
+                total -= nums_sorted[left]
+                left += 1
+
+            best = max(best, right - left + 1)
+
+        return best
+````

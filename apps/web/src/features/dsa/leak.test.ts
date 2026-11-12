@@ -115,6 +115,7 @@ describe("hidden tests stay on the build machine", () => {
 describe("premium problems keep their solution and editorial out of the page", () => {
   const premium = problems.filter((p) => problemsKind.access(section, p) === "premium");
 
+  // Hundreds of lines against every bundle: seconds, not milliseconds.
   it("reference solutions and editorials are not in any client bundle", () => {
     const lines = premium.flatMap((p) => {
       const ref = readReferenceSolutionForValidation(section, p.slug);
@@ -128,7 +129,7 @@ describe("premium problems keep their solution and editorial out of the page", (
       for (const l of lines) if (text.includes(l)) hits.push(`${rel(file)}: ${l}`);
     }
     expect(hits).toEqual([]);
-  });
+  }, 120_000);
 
   it("a distinctive line of the reference solution and of the editorial is absent from the prerendered page", () => {
     const hits: string[] = [];

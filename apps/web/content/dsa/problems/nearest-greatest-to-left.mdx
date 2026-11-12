@@ -1,0 +1,81 @@
+---
+title: "Nearest Greatest to Left"
+description: "Given an integer array, for each index return the nearest element to the left that is strictly greater than the current value."
+difficulty: medium
+patterns: [basics]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: nearest_greater_to_left }
+starter:
+  python: |
+    def nearest_greater_to_left(arr: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/nearest-greatest-to-left.public.json, hidden: tests/nearest-greatest-to-left.hidden.json }
+complexity: { time: "O(n) - Linear amortized stack work per element.", space: "O(n) - Stack and output storage." }
+group: "01. Basics"
+number: "02"
+order: 9001002000000
+---
+
+Given an integer array, for each index return the nearest element to the left that is strictly
+greater than the current value. If none exists, use -1.
+
+## Examples
+
+````text
+Example 1:
+Input: [4, 5, 2, 25, 7, 8]
+Output: [-1, -1, 5, -1, 25, 25]
+````
+
+## Constraints
+
+````text
+- 1 <= len(arr) <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Monotonic Decreasing Stack
+Scan left-to-right; the stack preserves candidates for the next greater on the left.
+
+1. Initialize result with -1 and an empty stack.
+2. For each index i from 0 to n-1, pop while top &lt;= arr\[i\].
+3. If stack is non-empty, result\[i\] is stack\[-1\]; push arr\[i\].
+4. Return result.
+
+Restored notes (archived workbook):
+
+Problem Statement:
+Given an array, find the nearest greater element to the left for each element.
+If there is no greater element to the left, use -1.
+
+## Complexity
+
+**Time:** O(n) - Linear amortized stack work per element.
+
+**Space:** O(n) - Stack and output storage.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def nearestGreaterToLeft(self, arr: List[int]) -> List[int]:
+        n = len(arr)
+        result = [-1] * n
+        stack: List[int] = []
+        for i in range(n):
+            while stack and stack[-1] <= arr[i]:
+                stack.pop()
+            if stack:
+                result[i] = stack[-1]
+            stack.append(arr[i])
+        return result
+````

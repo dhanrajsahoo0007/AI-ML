@@ -1,0 +1,77 @@
+---
+title: "Decode String"
+description: "Decode strings of the form k[encoded_string], allowing nesting, into the expanded plaintext."
+difficulty: medium
+patterns: [string-manipulation-with-stack]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: decode_string }
+starter:
+  python: |
+    def decode_string(s: str) -> str:
+        # Your code here
+        pass
+tests: { public: tests/decode-string.public.json, hidden: tests/decode-string.hidden.json }
+complexity: { time: "O(output length) - Proportional to decoded size.", space: "O(n) - Stack holds partial fragments." }
+group: "03. String Manipulation with Stack"
+number: "05"
+leetcode: decode-string
+leetcodeId: 394
+order: 9003005000000
+---
+
+Decode strings of the form k\[encoded\_string\], allowing nesting, into the expanded plaintext.
+
+## Examples
+
+````text
+Example 1:
+Input: "3[a]2[bc]"
+Output: "aaabcbc"
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 30
+- k is positive and digits may span multiple characters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Stack Expansion
+Push literals and numbers until '\]', then pop the inner string and multiplier to push the repeat.
+
+1. Walk characters; push everything except '\]'.
+2. On '\]', pop letters until '\[', pop digits to build k, push k copies back.
+3. Join the final stack.
+
+## Complexity
+
+**Time:** O(output length) - Proportional to decoded size.
+
+**Space:** O(n) - Stack holds partial fragments.
+
+## Solution
+
+````python
+class Solution:
+    def decodeString(self, s: str) -> str:
+        stack: list[str] = []
+        for ch in s:
+            if ch != "]":
+                stack.append(ch)
+                continue
+            fragment: list[str] = []
+            while stack[-1] != "[":
+                fragment.append(stack.pop())
+            stack.pop()
+            repeat = ""
+            while stack and stack[-1].isdigit():
+                repeat = stack.pop() + repeat
+            stack.append(int(repeat) * "".join(reversed(fragment)))
+        return "".join(stack)
+````

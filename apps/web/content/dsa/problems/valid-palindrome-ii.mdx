@@ -1,0 +1,85 @@
+---
+title: "Valid Palindrome II"
+description: "Given a string s, return true if s can become a palindrome after deleting at most one character."
+difficulty: easy
+patterns: [string-manipulation-with-two-pointers]
+topics: [two-pointers]
+companies: []
+languages: [python]
+entry: { python: valid_palindrome }
+starter:
+  python: |
+    def valid_palindrome(s: str) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/valid-palindrome-ii.public.json, hidden: tests/valid-palindrome-ii.hidden.json }
+complexity: { time: "O(n) - At most two linear scans over the string.", space: "O(1) - Only pointer indices are used." }
+group: "01. String Manipulation with Two Pointers"
+number: "03"
+leetcode: valid-palindrome-ii
+leetcodeId: 680
+order: 6001003000000
+---
+
+Given a string s, return true if s can become a palindrome after deleting at most one character.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "aba"
+    Output: true
+Example 2:
+    Input: s = "abca"
+    Output: true
+Example 3:
+    Input: s = "abc"
+    Output: false
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 10^5
+- s consists of lowercase English letters.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two pointers with one skip
+Scan from both ends; on the first mismatch, check whether skipping either side yields a palindrome.
+
+1. Move left and right pointers toward the center while characters match.
+2. On mismatch, try the substring that skips the left character or the right character.
+3. Return true if either substring is a palindrome; otherwise return false.
+
+## Complexity
+
+**Time:** O(n) - At most two linear scans over the string.
+
+**Space:** O(1) - Only pointer indices are used.
+
+## Solution
+
+````python
+class Solution:
+    def _is_sub_palindrome(self, s: str, i: int, j: int) -> bool:
+        while i < j:
+            if s[i] != s[j]:
+                return False
+            i += 1
+            j -= 1
+        return True
+
+    def validPalindrome(self, s: str) -> bool:
+        i, j = 0, len(s) - 1
+        while i < j:
+            if s[i] == s[j]:
+                i += 1
+                j -= 1
+            else:
+                return self._is_sub_palindrome(s, i + 1, j) or self._is_sub_palindrome(s, i, j - 1)
+        return True
+````

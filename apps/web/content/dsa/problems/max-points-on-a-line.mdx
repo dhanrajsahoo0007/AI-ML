@@ -1,0 +1,106 @@
+---
+title: "Max Points on a Line"
+description: "Given integer 2D points, return the maximum number of points that lie on the same straight line."
+difficulty: hard
+patterns: [leetcode-and-alphabet-150]
+topics: [math-and-geometry]
+companies: []
+languages: [python]
+entry: { python: max_points }
+starter:
+  python: |
+    def max_points(points: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/max-points-on-a-line.public.json, hidden: tests/max-points-on-a-line.hidden.json }
+complexity: { time: "O(n^2)", space: "O(n) per anchor" }
+group: "02. Leetcode and Alphabet 150"
+number: "10"
+leetcode: max-points-on-a-line
+leetcodeId: 149
+order: 21002010000000
+---
+
+Given integer 2D points, return the maximum number of points that lie on the
+same straight line.
+
+## Examples
+
+````text
+Example 1:
+    Input: points = [[1,1],[2,2],[3,3]]
+    Output: 3
+Example 2:
+    Input: points = [[1,1],[3,2],[5,3],[4,1],[2,3],[1,4]]
+    Output: 4
+````
+
+## Constraints
+
+````text
+- 1 <= len(points) <= 300
+- Coordinates fit in 32-bit signed integers
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hash map of reduced direction vectors
+For each anchor, group other points by slope (dx, dy) normalized with gcd
+and a fixed sign convention; count duplicates at the anchor separately.
+
+1. For each point i, maintain a map from slope tuple to count.
+2. For each j != i, if same coordinates, increment duplicates; else increment
+slope bucket gcd-normalized (dx, dy).
+3. Track global maximum of duplicates + best slope count for that anchor.
+
+## Complexity
+
+**Time:** O(n^2)
+
+**Space:** O(n) per anchor
+
+## Solution
+
+````python
+import math
+from collections import defaultdict
+from typing import Dict, List, Tuple
+
+
+class Solution:
+    def maxPoints(self, points: List[List[int]]) -> int:
+        n = len(points)
+        if n <= 2:
+            return n
+        best = 0
+
+        def norm(dx: int, dy: int) -> Tuple[int, int]:
+            if dx == 0 and dy == 0:
+                return (0, 0)
+            g = math.gcd(dx, dy)
+            dx //= g
+            dy //= g
+            if dx < 0 or (dx == 0 and dy < 0):
+                dx, dy = -dx, -dy
+            return (dx, dy)
+
+        for i in range(n):
+            slopes: Dict[Tuple[int, int], int] = defaultdict(int)
+            same = 1
+            for j in range(n):
+                if i == j:
+                    continue
+                dx = points[j][0] - points[i][0]
+                dy = points[j][1] - points[i][1]
+                if dx == 0 and dy == 0:
+                    same += 1
+                else:
+                    slopes[norm(dx, dy)] += 1
+            local = same
+            for c in slopes.values():
+                local = max(local, same + c)
+            best = max(best, local)
+        return best
+````

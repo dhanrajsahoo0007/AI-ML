@@ -1,0 +1,75 @@
+---
+title: "Sort an Array"
+description: "Sort an integer array recursively using insertion-style recursion: sort the prefix, then insert the last element into the sorted prefix."
+difficulty: medium
+patterns: [recursive-sorting]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: sort_array }
+starter:
+  python: |
+    def sort_array(nums: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/sort-an-array.public.json, hidden: tests/sort-an-array.hidden.json }
+complexity: { time: "O(n^2) - recursive insertion sort", space: "O(n) - recursion stack and copied prefix" }
+group: "02. Recursive Sorting"
+number: "01"
+leetcode: sort-an-array
+leetcodeId: 912
+order: 11002001000000
+---
+
+Sort an integer array recursively using insertion-style recursion: sort the prefix,
+then insert the last element into the sorted prefix.
+
+## Examples
+
+````text
+Example 1:
+Input: [3, 1, 2]
+Output: [1, 2, 3]
+````
+
+## Constraints
+
+````text
+- Reasonable length for O(n^2) time in tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Recursion + sorted insert
+Reduce to sorting n-1 elements, then linearly insert the nth element into order.
+
+1. Base case: length &lt;= 1 is sorted.
+2. Recursively sort all but the last element.
+3. Insert the final element into the sorted prefix with a helper scan.
+
+## Complexity
+
+**Time:** O(n^2) - recursive insertion sort
+
+**Space:** O(n) - recursion stack and copied prefix
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def sort_array(self, nums: List[int]) -> List[int]:
+        if len(nums) <= 1:
+            return list(nums)
+        head = self.sort_array(nums[:-1])
+        return self._insert_sorted(head, nums[-1])
+
+    def _insert_sorted(self, sorted_vals: List[int], value: int) -> List[int]:
+        if not sorted_vals or value >= sorted_vals[-1]:
+            return sorted_vals + [value]
+        return self._insert_sorted(sorted_vals[:-1], value) + [sorted_vals[-1]]
+````

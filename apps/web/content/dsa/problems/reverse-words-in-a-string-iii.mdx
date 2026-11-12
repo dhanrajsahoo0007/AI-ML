@@ -1,0 +1,89 @@
+---
+title: "Reverse Words in a String III"
+description: "Given a string s, reverse the order of characters in each word while preserving whitespace and initial word order."
+difficulty: easy
+patterns: [basic-string-operations]
+topics: [strings]
+companies: []
+languages: [python]
+entry: { python: reverse_words }
+starter:
+  python: |
+    def reverse_words(s: str) -> str:
+        # Your code here
+        pass
+tests: { public: tests/reverse-words-in-a-string-iii.public.json, hidden: tests/reverse-words-in-a-string-iii.hidden.json }
+complexity: { time: "O(n) - Each character is visited a constant number of times.", space: "O(n) - The mutable copy of the string for swapping." }
+group: "01. Basic String Operations"
+number: "05"
+leetcode: reverse-words-in-a-string-iii
+leetcodeId: 557
+order: 5001005000000
+---
+
+Given a string s, reverse the order of characters in each word while preserving
+whitespace and initial word order.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "Let's take LeetCode contest"
+    Output: "s'teL ekat edoCteeL tsetnoc"
+
+Example 2:
+    Input: s = "Mr Ding"
+    Output: "rM gniD"
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 5 * 10^4
+- s contains printable ASCII characters.
+- s does not contain any leading or trailing spaces.
+- There is exactly one space between consecutive words.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two pointers per word
+Identify word boundaries, then reverse characters between them in place on a list.
+
+1. Convert s to a list of characters for in-place swaps.
+2. Track the start of each word; on space or end, reverse chars from start to i-1.
+3. Advance start past the space to the next word.
+4. Join the list back into a string.
+
+## Complexity
+
+**Time:** O(n) - Each character is visited a constant number of times.
+
+**Space:** O(n) - The mutable copy of the string for swapping.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def reverseWords(self, s: str) -> str:
+        chars: List[str] = list(s)
+        n = len(chars)
+
+        def reverse_range(left: int, right: int) -> None:
+            while left < right:
+                chars[left], chars[right] = chars[right], chars[left]
+                left += 1
+                right -= 1
+
+        start = 0
+        for i in range(n + 1):
+            if i == n or chars[i] == " ":
+                reverse_range(start, i - 1)
+                start = i + 1
+        return "".join(chars)
+````

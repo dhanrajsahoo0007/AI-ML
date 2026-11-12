@@ -1,0 +1,95 @@
+---
+title: "Sort a Stack"
+description: "Given a list used as a stack (top at the end), sort it in ascending order using only recursive calls and stack operations (pop / append); no explicit sort bu…"
+difficulty: medium
+patterns: [basic-recursion-concepts]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: sort_stack }
+starter:
+  python: |
+    def sort_stack(stack: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/sort-a-stack.public.json, hidden: tests/sort-a-stack.hidden.json }
+complexity: { time: "O(n^2) - each insert may scan the whole stack", space: "O(n) - recursion depth" }
+group: "01. Basic Recursion Concepts"
+number: "02"
+order: 11001002000000
+---
+
+Given a list used as a stack (top at the end), sort it in ascending order using only
+recursive calls and stack operations (pop / append); no explicit sort built-ins.
+
+## Examples
+
+````text
+Example 1:
+Input: stack bottom -> top as [34, 3, 31, 98, 92, 23]
+Output: [3, 23, 31, 34, 92, 98]
+````
+
+## Constraints
+
+````text
+- Elements are comparable (e.g. integers)
+- Stack is represented as a list with the top at index -1
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Recursion + insert in sorted order
+Recursively sort the tail, then insert the popped top into its correct place.
+
+1. Base case: empty stack or one element is sorted.
+2. Pop the top, recursively sort the remainder.
+3. Insert the popped value using insert\_sorted so order stays ascending bottom to top.
+
+Restored notes (archived workbook):
+
+The main function sort\_stack:
+Base case: If the stack is empty or has only one element, it's already sorted, so we return it.
+Recursive case:
+We remove the top element.
+We recursively sort the remaining stack.
+We insert the removed element back into its correct position using the insert\_sorted function.
+
+The insert\_sorted function:
+Base case: If the stack is empty or the top element is smaller than the current element, we insert the element at the top.
+Recursive case:
+We remove the top element.
+We recursively insert the current element.
+We put back the removed top element.
+
+## Complexity
+
+**Time:** O(n^2) - each insert may scan the whole stack
+
+**Space:** O(n) - recursion depth
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def sort_stack(self, stack: List[int]) -> List[int]:
+        if len(stack) <= 1:
+            return stack
+        top = stack.pop()
+        self.sort_stack(stack)
+        self._insert_sorted(stack, top)
+        return stack
+
+    def _insert_sorted(self, stack: List[int], element: int) -> None:
+        if not stack or element >= stack[-1]:
+            stack.append(element)
+            return
+        top = stack.pop()
+        self._insert_sorted(stack, element)
+        stack.append(top)
+````

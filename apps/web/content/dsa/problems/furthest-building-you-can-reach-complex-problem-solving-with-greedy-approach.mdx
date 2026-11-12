@@ -1,0 +1,92 @@
+---
+title: "Furthest Building You Can Reach"
+description: "Given building heights, a brick budget, and a ladder count, move from building 0 rightward."
+difficulty: medium
+patterns: [complex-problem-solving-with-greedy-approach]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: furthest_building }
+starter:
+  python: |
+    def furthest_building(heights: list[int], bricks: int, ladders: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/furthest-building-you-can-reach-complex-problem-solving-with-greedy-approach.public.json, hidden: tests/furthest-building-you-can-reach-complex-problem-solving-with-greedy-approach.hidden.json }
+complexity: { time: "O(n log L) with L ladders (heap size bounded by ladders).", space: "O(L) - Heap storage." }
+group: "08. Complex Problem Solving with Greedy Approach"
+number: "02"
+leetcode: furthest-building-you-can-reach
+leetcodeId: 1642
+order: 18008002000000
+---
+
+Given building heights, a brick budget, and a ladder count, move from building 0 rightward.
+To climb a positive height difference you may spend one ladder (covers any climb) or bricks equal
+to the climb. Return the furthest index you can reach (0-indexed).
+
+## Examples
+
+````text
+Example 1:
+    Input: heights = [4,2,7,6,9,14,12], bricks = 5, ladders = 1
+    Output: 4
+
+Example 2:
+    Input: heights = [4,12,11,7,3], bricks = 7, ladders = 1
+    Output: 4
+
+Example 3:
+    Input: heights = [14,3,19,3], bricks = 17, ladders = 0
+    Output: 3
+````
+
+## Constraints
+
+````text
+- 1 <= len(heights) <= 10^5
+- 1 <= heights[i] <= 10^6
+- 0 <= bricks <= 10^9
+- 0 <= ladders <= heights.length
+````
+
+**Also in the notes under:** [10. Heap/04. Greedy with Heap Pattern](/dsa/problems/furthest-building-you-can-reach).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Resource Allocation
+Use ladders on the largest climbs encountered so far by tracking climbs in a min-heap and refunding bricks from the smallest ladder-assigned climb when out of bricks.
+
+1. Iterate consecutive climbs; push positive climbs onto a min-heap of size at most ladders.
+2. When heap size exceeds ladders, pop the smallest climb and pay it with bricks.
+3. If bricks go negative, stop before that edge; else finish at last index.
+
+## Complexity
+
+**Time:** O(n log L) with L ladders (heap size bounded by ladders).
+
+**Space:** O(L) - Heap storage.
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def furthestBuilding(self, heights: List[int], bricks: int, ladders: int) -> int:
+        heap: List[int] = []
+        for i in range(len(heights) - 1):
+            diff = heights[i + 1] - heights[i]
+            if diff <= 0:
+                continue
+            heapq.heappush(heap, diff)
+            if len(heap) > ladders:
+                bricks -= heapq.heappop(heap)
+            if bricks < 0:
+                return i
+        return len(heights) - 1
+````

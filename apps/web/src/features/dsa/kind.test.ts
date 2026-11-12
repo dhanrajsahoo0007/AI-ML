@@ -142,7 +142,11 @@ describe("problems kind: validate", () => {
   };
 
   it("passes on the real content", async () => {
-    expect(await problemsKind.validate(section, items)).toEqual([]);
+    // No errors. The one warning the real content may carry: a problem built from the owner's own test block has
+    // fewer hidden cases than the target until more are written (import plan, wave 4).
+    const issues = await problemsKind.validate(section, items);
+    expect(issues.filter((i) => i.level !== "warning")).toEqual([]);
+    expect(issues.filter((i) => !/^only \d+ hidden tests/.test(i.message))).toEqual([]);
   });
   it("reports frontmatter issues", async () => {
     const p = byTitle("Two Sum");

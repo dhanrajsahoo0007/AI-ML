@@ -1,0 +1,95 @@
+---
+title: "Summary Ranges"
+description: "You are given a sorted unique integer array nums."
+difficulty: easy
+patterns: [interval-manipulation]
+topics: [intervals]
+companies: []
+languages: [python]
+entry: { python: summary_ranges }
+starter:
+  python: |
+    def summary_ranges(nums: list[int]) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/summary-ranges.public.json, hidden: tests/summary-ranges.hidden.json }
+complexity: { time: "O(n) - single pass over n integers.", space: "O(1) extra besides the output list of strings." }
+group: "02. Interval Manipulation"
+number: "02"
+leetcode: summary-ranges
+leetcodeId: 228
+order: 19002002000000
+---
+
+You are given a sorted unique integer array nums. Return the smallest sorted list of
+ranges that cover all the numbers in the array exactly. Each element of nums must be
+covered by exactly one range, and there is no integer x such that x is in one of the
+ranges but not in nums. A range is formatted as "a" if a == b or "a-&gt;b" if a &lt; b.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [0,1,2,4,5,7]
+    Output: ["0->2","4->5","7"]
+
+Example 2:
+    Input: nums = [0,2,3,4,6,8,9]
+    Output: ["0","2->4","6","8->9"]
+````
+
+## Constraints
+
+````text
+- 0 <= len(nums) <= 20
+- -2^31 <= nums[i] <= 2^31 - 1
+- All values in nums are unique and nums is sorted ascending
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two-pointer contiguous run grouping
+Because nums is sorted, each contiguous arithmetic run with difference 1 becomes one
+interval; a gap of more than one starts a new range.
+
+1. Walk nums with a start index anchored at each range beginning.
+2. Advance while consecutive values differ by exactly one.
+3. Emit either "x" or "x-&gt;y" when the run ends, then reset the anchor.
+4. Return the collected strings.
+
+## Complexity
+
+**Time:** O(n) - single pass over n integers.
+
+**Space:** O(1) extra besides the output list of strings.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def summaryRanges(self, nums: List[int]) -> List[str]:
+        if not nums:
+            return []
+
+        out: List[str] = []
+        i = 0
+        n = len(nums)
+
+        while i < n:
+            start = nums[i]
+            while i + 1 < n and nums[i + 1] == nums[i] + 1:
+                i += 1
+            end = nums[i]
+            if start == end:
+                out.append(str(start))
+            else:
+                out.append(f"{start}->{end}")
+            i += 1
+
+        return out
+````

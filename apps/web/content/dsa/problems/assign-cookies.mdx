@@ -1,0 +1,104 @@
+---
+title: "Assign Cookies"
+description: "You are the parent with cookies and children."
+difficulty: easy
+patterns: [introduction-to-greedy-algorithms]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: find_content_children }
+starter:
+  python: |
+    def find_content_children(g: list[int], s: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/assign-cookies.public.json, hidden: tests/assign-cookies.hidden.json }
+complexity: { time: "O(n log n + m log m) - Sorting dominates for lengths n, m.", space: "O(1) extra if sorting in-place; sort may use O(n) stack/heap depending on implementation." }
+group: "01. Introduction to Greedy Algorithms"
+number: "02"
+leetcode: assign-cookies
+leetcodeId: 455
+order: 18001002000000
+---
+
+You are the parent with cookies and children. Each child i has a greed factor g\[i\] (minimum
+cookie size needed to be happy). Each cookie j has size s\[j\]. If s\[j\] &gt;= g\[i\], assign that
+cookie to the child (each child gets at most one cookie). Maximize the number of happy children.
+
+## Examples
+
+````text
+Example 1:
+    Input: g = [1,2,3], s = [1,1]
+    Output: 1
+
+Example 2:
+    Input: g = [1,2], s = [1,2,3]
+    Output: 2
+
+Example 3:
+    Input: g = [10, 11], s = [1, 2, 3]
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 1 <= g.length <= 3 * 10^4
+- 0 <= s.length <= 3 * 10^4
+- 1 <= g[i], s[j] <= 2^31 - 1
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy + Two Pointers
+Sort both lists and always try to satisfy the least greedy child with the smallest cookie that fits.
+
+1. Sort g and s ascending.
+2. Walk cookies with pointer j; for each cookie, if it satisfies g\[i\], advance i.
+3. Always advance j so each cookie is used at most once.
+4. Return i as the count of satisfied children.
+
+## Complexity
+
+**Time:** O(n log n + m log m) - Sorting dominates for lengths n, m.
+
+**Space:** O(1) extra if sorting in-place; sort may use O(n) stack/heap depending on implementation.
+
+## Original notes
+
+````text
+(preamble)
+Walkthrough (from original notes, condensed):
+
+Why this greedy order works:
+Giving the smallest workable cookie to the currently least-greedy unsatisfied child
+preserves larger cookies for harder-to-satisfy children later. Trying to satisfy a
+higher greed factor first can "waste" a big cookie early and reduce the total count.
+
+Example: g = [1, 2, 3], s = [1, 1] → only one child with greed 1 can be satisfied,
+because both cookies are size 1 and the remaining children need ≥ 2 and ≥ 3.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findContentChildren(self, g: List[int], s: List[int]) -> int:
+        g.sort()  # smallest greed first
+        s.sort()  # smallest cookie first
+        child = 0  # index of the next child we still need to satisfy
+        cookie = 0  # index of the next available cookie
+        while child < len(g) and cookie < len(s):
+            if s[cookie] >= g[child]:
+                # Cookie is large enough for this child; consume both.
+                child += 1
+            # Whether we satisfied a child or not, this cookie cannot be reused.
+            cookie += 1
+        return child
+````

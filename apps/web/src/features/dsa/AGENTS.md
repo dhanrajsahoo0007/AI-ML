@@ -12,7 +12,7 @@ use; the client islands are imported by path. `apps/web/src/features/sections/ki
 
 - `kind.ts`: `problemsKind` (`SectionKind<DsaItem>`), registered in `apps/web/src/features/sections/kinds.ts`.
 - `routes.ts`: `dsaSection()` (404 when off), `dsaContent()` (drafts left out), `topicParams()`, `problemParams()`,
-  `getTopic()`, `practiceGroups()` (a topic's problems by first pattern).
+  `getTopic()`; `topicGroups()` in `kind.ts` lists a topic's problems and outlines under the headings of the owner's notes.
 - `source.ts`: reads topics, problems, public tests and `apps/web/content/dsa/patterns.yaml` from disk;
   `readHiddenTestsForValidation()`, `readReferenceSolutionForValidation()`, `withoutDrafts()`.
 - `schema.ts`: problem/topic frontmatter, test-file and pattern schemas; `MIN_HIDDEN_TESTS`, `PREMIUM_BREAK`.

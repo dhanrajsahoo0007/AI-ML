@@ -1,0 +1,97 @@
+---
+title: "Sort Characters by Frequency"
+description: "Given a string s, sort it in decreasing order based on character frequency."
+difficulty: medium
+patterns: [heap-with-other-ds-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: frequency_sort }
+starter:
+  python: |
+    def frequency_sort(s: str) -> str:
+        # Your code here
+        pass
+tests: { public: tests/sort-characters-by-frequency.public.json, hidden: tests/sort-characters-by-frequency.hidden.json }
+complexity: { time: "O(n log k) where k is number of unique characters", space: "O(n)" }
+group: "07. Heap with Other DS Pattern"
+number: "04"
+leetcode: sort-characters-by-frequency
+leetcodeId: 451
+order: 10007004000000
+---
+
+Given a string s, sort it in decreasing order based on character frequency.
+Return the sorted string.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "tree"
+    Output: "eert"
+
+Example 2:
+    Input: s = "cccaaa"
+    Output: "aaaccc" or "cccaaa"
+
+Example 3:
+    Input: s = "Aabb"
+    Output: "bbAa"
+````
+
+## Constraints
+
+````text
+- 1 <= s.length <= 5 * 10^5
+- s consists of uppercase/lowercase English letters and digits.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap with Other DS (Heap + Hash Map)
+Count frequencies with a hash map, then use a max-heap to extract
+characters in decreasing frequency order.
+
+1. Build a frequency map.
+2. Push (-freq, char) into a max-heap.
+3. Pop each entry and append char \* freq to result.
+
+## Complexity
+
+**Time:** O(n log k) where k is number of unique characters
+
+**Space:** O(n)
+
+## Original notes
+
+````text
+Original notes (restored):
+LC 451: max-heap on `(-freq, char)` then expand `char * freq` into the answer. The archived file also
+compared alternatives — `Counter` + `sorted` one-liner, bucket sort by frequency, and ASCII-array tricks —
+noting trade-offs (streaming vs bounded alphabet vs simplicity). This template keeps the canonical heap
+version for clarity.
+````
+
+## Solution
+
+````python
+import heapq
+from collections import Counter
+
+
+class Solution:
+    def frequencySort(self, s: str) -> str:
+        freq = Counter(s)
+        heap = [(-count, char) for char, count in freq.items()]
+        heapq.heapify(heap)
+
+        result = []
+        while heap:
+            count, char = heapq.heappop(heap)
+            result.append(char * (-count))
+
+        return "".join(result)
+````

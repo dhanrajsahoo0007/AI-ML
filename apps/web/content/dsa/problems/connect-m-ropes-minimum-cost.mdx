@@ -1,0 +1,99 @@
+---
+title: "Connect M Ropes Minimum Cost"
+description: "Given n ropes of different lengths, connect them into one rope."
+difficulty: medium
+patterns: [greedy-with-heap-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: connect_ropes }
+starter:
+  python: |
+    def connect_ropes(ropes: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/connect-m-ropes-minimum-cost.public.json, hidden: tests/connect-m-ropes-minimum-cost.hidden.json }
+complexity: { time: "O(n log n)", space: "O(n) for the heap" }
+group: "04. Greedy with Heap Pattern"
+number: "02"
+order: 10004002000000
+---
+
+Given n ropes of different lengths, connect them into one rope.
+The cost of connecting two ropes equals the sum of their lengths.
+Find the minimum total cost to connect all ropes.
+
+## Examples
+
+````text
+Example 1:
+    Input: ropes = [4, 3, 2, 6]
+    Output: 29
+    Explanation: 2+3=5 (cost 5), 4+5=9 (cost 9), 6+9=15 (cost 15). Total: 29.
+
+Example 2:
+    Input: ropes = [1, 2, 3]
+    Output: 9
+    Explanation: 1+2=3 (cost 3), 3+3=6 (cost 6). Total: 9.
+````
+
+## Constraints
+
+````text
+- 1 <= ropes.length <= 10^4
+- 1 <= ropes[i] <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy with Heap (Huffman Coding)
+Always connect the two shortest ropes first (greedy choice).
+This minimizes the total cost because shorter ropes contribute to
+fewer subsequent connection costs.
+
+1. Build a min-heap from all rope lengths.
+2. While more than one rope remains:
+a. Pop the two shortest ropes.
+b. Connect them (sum) and add the cost.
+c. Push the combined rope back.
+3. Return total cost.
+
+## Complexity
+
+**Time:** O(n log n)
+
+**Space:** O(n) for the heap
+
+## Original notes
+
+````text
+Original notes (restored):
+Worked example `[4,3,2,6]`: merge 2+3 (cost 5) → `[4,5,6]`, merge 4+5 (cost 9) → `[6,9]`,
+merge 6+9 (cost 15) → total 5+9+15 = 29. Suboptimal order like pairing 6+4 first inflates later sums —
+Huffman / "always two smallest" proves optimal here.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def connectRopes(self, ropes: List[int]) -> int:
+        heapq.heapify(ropes)
+        total_cost = 0
+
+        while len(ropes) > 1:
+            first = heapq.heappop(ropes)
+            second = heapq.heappop(ropes)
+            # Pay now; push combined rope so it can participate in later merges.
+            cost = first + second
+            total_cost += cost
+            heapq.heappush(ropes, cost)
+
+        return total_cost
+````

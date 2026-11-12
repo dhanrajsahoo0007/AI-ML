@@ -1,0 +1,111 @@
+---
+title: "N Digit in Increasing Order"
+description: "Given a positive integer N, list every N-digit positive integer whose digits are strictly increasing from left to right (no leading zero in the N-digit numbe…"
+difficulty: medium
+patterns: [permutation-pattern]
+topics: [backtracking]
+companies: []
+languages: [python]
+entry: { python: increasing_numbers }
+starter:
+  python: |
+    def increasing_numbers(n: int) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/n-digit-in-increasing-order.public.json, hidden: tests/n-digit-in-increasing-order.hidden.json }
+complexity: { time: "O(C(9, N)) - choose N distinct increasing digits from 1..9.", space: "O(N) - recursion depth excluding output." }
+group: "01. Permutation Pattern"
+number: "05"
+order: 12001005000000
+---
+
+Given a positive integer N, list every N-digit positive integer whose digits are strictly
+increasing from left to right (no leading zero in the N-digit number when N &gt; 1).
+
+## Examples
+
+````text
+Example 1:
+    Input: N = 1
+    Output: [0,1,2,...,9] (every one-digit number vacuously has strictly increasing digits)
+
+Example 2:
+    Input: N = 2
+    Output starts with 12,13,...,89 (36 numbers total)
+````
+
+## Constraints
+
+````text
+- 1 <= N <= 9
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Backtracking with increasing constraint
+Build digit lists; each new digit must exceed the previous; for N&gt;1 first digit is 1..9.
+
+1. DFS appends digits d with d &gt; last (or any 1..9 when empty).
+2. When length equals N, convert digit list to integer and append.
+3. For N == 1, return 0..9; for N &gt; 1 the first digit is 1..9 so there is no leading zero.
+
+## Complexity
+
+**Time:** O(C(9, N)) - choose N distinct increasing digits from 1..9.
+
+**Space:** O(N) - recursion depth excluding output.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem Statement:
+    Given an integer N, find all N-digit numbers with digits in strictly increasing order.
+
+Time Complexity: O(9^N)
+    - In the worst case, we explore 9 choices for each of the N digits.
+
+Space Complexity: O(9^N) for the result list, O(N) for the recursion stack
+    - We store all valid numbers in the result list.
+    - The recursion depth is at most N.
+
+Explanation:
+    This solution uses a recursive approach to generate all N-digit numbers with strictly increasing digits.
+    It builds the numbers digit by digit, ensuring each new digit is greater than the previous one.
+    For N=1, it handles the case separately to include 0.
+
+Examples:
+N = 1: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+N = 2: [12, 13, 14, 15, 16, 17, 18, 19, 23, 24, 25, 26, 27, 28, 29, 34, 35, 36, 37, 38, 39, 45, 46, 47, 48, 49, 56, 57, 58, 59, 67, 68, 69, 78, 79, 89]
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def increasingNumbers(self, n: int) -> List[int]:
+        result: List[int] = []
+
+        def backtrack(path: List[int]) -> None:
+            if len(path) == n:
+                value = 0
+                for d in path:
+                    value = value * 10 + d
+                result.append(value)
+                return
+            start = (path[-1] + 1) if path else 1
+            for d in range(start, 10):
+                path.append(d)
+                backtrack(path)
+                path.pop()
+
+        if n == 1:
+            return list(range(10))
+        backtrack([])
+        return result
+````

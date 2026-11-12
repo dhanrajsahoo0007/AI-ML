@@ -1,0 +1,75 @@
+---
+title: "Nearest Smaller to Left"
+description: "Given an integer array, for each index return the nearest element to the left that is strictly smaller than the current value."
+difficulty: medium
+patterns: [basics]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: nearest_smaller_to_left }
+starter:
+  python: |
+    def nearest_smaller_to_left(arr: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/nearest-smaller-to-left.public.json, hidden: tests/nearest-smaller-to-left.hidden.json }
+complexity: { time: "O(n) - Each element is stacked once and discarded at most once.", space: "O(n) - Stack plus output array." }
+group: "01. Basics"
+number: "04"
+order: 9001004000000
+---
+
+Given an integer array, for each index return the nearest element to the left that is strictly
+smaller than the current value. If none exists, use -1.
+
+## Examples
+
+````text
+Example 1:
+Input: [4, 3, 2, 10, 8]
+Output: [-1, -1, -1, 2, 2]
+````
+
+## Constraints
+
+````text
+- 1 <= len(arr) <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Monotonic Increasing Stack
+Walk left to right while popping larger-or-equal values so the top is the previous smaller.
+
+1. Initialize result with -1 and an empty stack.
+2. For each value, pop while stack top &gt;= current.
+3. If stack not empty, assign stack\[-1\] to result\[i\]; push current.
+4. Return result.
+
+## Complexity
+
+**Time:** O(n) - Each element is stacked once and discarded at most once.
+
+**Space:** O(n) - Stack plus output array.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def nearestSmallerToLeft(self, arr: List[int]) -> List[int]:
+        n = len(arr)
+        result = [-1] * n
+        stack: List[int] = []
+        for i in range(n):
+            while stack and stack[-1] >= arr[i]:
+                stack.pop()
+            if stack:
+                result[i] = stack[-1]
+            stack.append(arr[i])
+        return result
+````

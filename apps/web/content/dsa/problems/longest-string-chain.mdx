@@ -1,0 +1,83 @@
+---
+title: "Longest String Chain"
+description: "Given an array of strings words, find the longest chain w1 -> w2 -> ..."
+difficulty: medium
+patterns: [1d-dp]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: longest_str_chain }
+starter:
+  python: |
+    def longest_str_chain(words: list[str]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/longest-string-chain.public.json, hidden: tests/longest-string-chain.hidden.json }
+complexity: { time: "O(n * L^2) where L is max word length (neighbors per word).", space: "O(n) for dp dictionary." }
+group: "01. 1D DP"
+number: "13"
+leetcode: longest-string-chain
+leetcodeId: 1048
+order: 20001013000000
+---
+
+Given an array of strings words, find the longest chain w1 -&gt; w2 -&gt; ... where
+each word is a subsequence formed by inserting exactly one character into the
+previous word (so lengths increase by 1). Return the maximum chain length.
+
+## Examples
+
+````text
+Example 1:
+    Input: words = ["a", "b", "ba", "bca", "bda", "bdca"]
+    Output: 4
+Example 2:
+    Input: words = ["xbc", "pcxbcf", "xb", "cxbc", "pcxbc"]
+    Output: 5
+````
+
+## Constraints
+
+````text
+- 1 <= len(words) <= 1000
+- 1 <= len(words[i]) <= 16
+- words[i] only English letters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 1D DP on sorted words
+Sort by length; dp\[w\] = 1 + max(dp\[pred\]) over predecessors pred obtained by deleting one char.
+
+1. Sort words by increasing length.
+2. For each word, generate all length-1 predecessors and relax dp.
+3. Track global maximum dp value.
+
+## Complexity
+
+**Time:** O(n \* L^2) where L is max word length (neighbors per word).
+
+**Space:** O(n) for dp dictionary.
+
+## Solution
+
+````python
+from typing import Dict, List
+
+
+class Solution:
+    def longestStrChain(self, words: List[str]) -> int:
+        words.sort(key=len)
+        best: Dict[str, int] = {}
+        ans = 0
+        for w in words:
+            cur = 1
+            for i in range(len(w)):
+                pred = w[:i] + w[i + 1 :]
+                cur = max(cur, best.get(pred, 0) + 1)
+            best[w] = cur
+            ans = max(ans, cur)
+        return ans
+````

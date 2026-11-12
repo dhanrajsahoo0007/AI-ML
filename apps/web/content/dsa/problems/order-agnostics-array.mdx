@@ -1,0 +1,134 @@
+---
+title: "Order Agnostics Array"
+description: "Given a sorted array in either ascending or descending order (unknown which) and a target, return the index of the target if it exists, or -1."
+difficulty: medium
+patterns: [basic]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: search }
+starter:
+  python: |
+    def search(nums: list[int], target: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/order-agnostics-array.public.json, hidden: tests/order-agnostics-array.hidden.json }
+complexity: { time: "O(log n) - Single binary search regardless of order.", space: "O(1) - Only index variables." }
+group: "01. Basic"
+number: "03"
+order: 8001003000000
+---
+
+Given a sorted array in either ascending or descending order (unknown which) and a target,
+return the index of the target if it exists, or -1.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], target = 6
+    Output: 5
+
+Example 2:
+    Input: nums = [10, 8, 6, 4, 2, 1], target = 4
+    Output: 3
+````
+
+## Constraints
+
+````text
+- nums is monotonic (all ascending or all descending)
+- 0 <= len(nums) <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Order-Agnostic Binary Search
+Compare first and last elements to detect order, then apply the correct comparison at each step.
+
+1. If nums is empty, return -1. Detect ascending via nums\[0\] &lt; nums\[-1\].
+2. Binary search: at each mid, if nums\[mid\] == target return mid.
+3. If ascending, move left/right as in standard BS; if descending, invert the inequalities.
+4. Return -1 when the interval is exhausted.
+
+## Complexity
+
+**Time:** O(log n) - Single binary search regardless of order.
+
+**Space:** O(1) - Only index variables.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement: Order-Agnostic Binary Search
+
+Implement a binary search algorithm that can find a target element in a sorted array,
+without knowing in advance whether the array is sorted in ascending or descending order.
+The function should return the index of the target element if it's present in the array,
+or -1 if it's not found.
+
+Examples:
+
+1. Input: arr = \[1, 2, 3, 4, 5, 6, 7, 8, 9, 10\], target = 6
+Output: 5
+Explanation: Array is in ascending order, 6 is present at index 5.
+
+2. Input: arr = \[10, 8, 6, 4, 2, 1\], target = 4
+Output: 3
+Explanation: Array is in descending order, 4 is present at index 3.
+
+3. Input: arr = \[5\], target = 5
+Output: 0
+Explanation: Single element array, 5 is present at index 0.
+
+The approach modifies the standard binary search to first determine the order of sorting,
+then proceed with the search accordingly.
+
+Explanation of the order-agnostic binary search algorithm:
+
+1. Determine Sorting Order:
+- Before starting the search, we check if the array is sorted in ascending or descending order.
+- This is done by comparing the first and last elements of the array.
+
+2. Binary Search:
+- The core binary search algorithm remains similar to the standard version.
+- The key difference is in how we update the search range based on the determined sort order.
+
+3. Search Space Reduction:
+- If the array is ascending:
+\* If target &lt; mid element, search in the left half
+\* If target &gt; mid element, search in the right half
+- If the array is descending:
+\* If target &gt; mid element, search in the left half
+\* If target &lt; mid element, search in the right half
+
+4. Edge Cases:
+- The function handles empty arrays and single-element arrays correctly.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def search(self, nums: List[int], target: int) -> int:
+        if not nums:
+            return -1
+        left, right = 0, len(nums) - 1
+        is_ascending = nums[left] < nums[right]
+        while left <= right:
+            mid = left + (right - left) // 2
+            if nums[mid] == target:
+                return mid
+            if is_ascending:
+                if target < nums[mid]:
+                    right = mid - 1
+                else:
+                    left = mid + 1
+            else:
+                if target > nums[mid]:
+                    right = mid - 1
+                else:
+                    left = mid + 1
+        return -1
+````

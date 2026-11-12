@@ -1,0 +1,82 @@
+---
+title: "Max Area of Island"
+description: "Given an m x n binary matrix, return the maximum area of an island (4-directionally connected 1s)."
+difficulty: medium
+patterns: [flood-fill]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: max_area_of_island }
+starter:
+  python: |
+    def max_area_of_island(grid: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/max-area-of-island-flood-fill.public.json, hidden: tests/max-area-of-island-flood-fill.hidden.json }
+complexity: { time: "O(m * n)", space: "O(m * n) recursion stack worst case." }
+group: "13. Flood Fill"
+number: "06"
+leetcode: max-area-of-island
+leetcodeId: 695
+order: 17013006000000
+---
+
+Given an m x n binary matrix, return the maximum area of an island (4-directionally connected 1s).
+If there is no land, return 0.
+
+## Examples
+
+````text
+Example 1:
+Input: grid = [[0,0,1,0,0,0,0,1,0,0,0,0,0],[0,0,0,0,0,0,0,1,1,1,0,0,0],...]
+Output: 6 (for the classic sample with largest area six)
+````
+
+## Constraints
+
+````text
+- m == len(grid), n == len(grid[0])
+- 1 <= m, n <= 50
+````
+
+**Also in the notes under:** [17. Graphs/06. Disjoint Union Sets/03. Connected Components and Islands](/dsa/problems/max-area-of-island).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS area on grid components
+For each unvisited land cell, DFS to count its component size and track the maximum.
+
+1. Scan grid; when encountering a 1, DFS to count reachable 1 cells while marking them 0.
+
+## Complexity
+
+**Time:** O(m \* n)
+
+**Space:** O(m \* n) recursion stack worst case.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxAreaOfIsland(self, grid: List[List[int]]) -> int:
+        m, n = len(grid), len(grid[0])
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+        def dfs(r: int, c: int) -> int:
+            if r < 0 or c < 0 or r >= m or c >= n or grid[r][c] == 0:
+                return 0
+            grid[r][c] = 0
+            return 1 + sum(dfs(r + dr, c + dc) for dr, dc in dirs)
+
+        best = 0
+        for i in range(m):
+            for j in range(n):
+                if grid[i][j] == 1:
+                    best = max(best, dfs(i, j))
+        return best
+````

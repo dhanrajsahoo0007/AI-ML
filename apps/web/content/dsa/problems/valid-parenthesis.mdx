@@ -1,0 +1,70 @@
+---
+title: "Valid Parenthesis"
+description: "Given a string of '(', ')', '{', '}', '[' and ']', determine whether the parentheses close in the correct order and nesting."
+difficulty: medium
+patterns: [parentheses]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: is_valid }
+starter:
+  python: |
+    def is_valid(s: str) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/valid-parenthesis.public.json, hidden: tests/valid-parenthesis.hidden.json }
+complexity: { time: "O(n) - Single pass over the string.", space: "O(n) - Stack depth in the worst case." }
+group: "02. Parentheses"
+number: "01"
+order: 9002001000000
+---
+
+Given a string of '(', ')', '&#123;', '&#125;', '\[' and '\]', determine whether the parentheses close in the
+correct order and nesting.
+
+## Examples
+
+````text
+Example 1:
+Input: "()"
+Output: True
+````
+
+## Constraints
+
+````text
+- 0 <= len(s) <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Stack Matching
+Push openings and pop when the matching closer appears at the top.
+
+1. Map each opener to its closer.
+2. Iterate characters: push opens; on close, verify stack top pairs or return False.
+3. Return whether the stack is empty at the end.
+
+## Complexity
+
+**Time:** O(n) - Single pass over the string.
+
+**Space:** O(n) - Stack depth in the worst case.
+
+## Solution
+
+````python
+class Solution:
+    def isValid(self, s: str) -> bool:
+        pairs = {"(": ")", "{": "}", "[": "]"}
+        stack: list[str] = []
+        for ch in s:
+            if ch in pairs:
+                stack.append(ch)
+            else:
+                if not stack or pairs[stack.pop()] != ch:
+                    return False
+        return not stack
+````

@@ -1,0 +1,90 @@
+---
+title: "Jump Game IV"
+description: "Given an integer array arr, start at index 0."
+difficulty: hard
+patterns: [others]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: min_jumps }
+starter:
+  python: |
+    def min_jumps(arr: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/jump-game-iv.public.json, hidden: tests/jump-game-iv.hidden.json }
+complexity: { time: "O(n) amortized.", space: "O(n)." }
+group: "11. Others"
+leetcode: jump-game-iv
+leetcodeId: 1345
+order: 17011999000000
+---
+
+Given an integer array arr, start at index 0. In one jump you may move to i+1, i-1, or any
+index j with arr\[j\] == arr\[i\]. Return the minimum number of jumps to reach index n-1.
+
+## Examples
+
+````text
+Example 1:
+    Input: arr = [100,-23,-23,404,100,23,23,23,3,404]
+    Output: 3
+Example 2:
+    Input: arr = [7]
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 1 <= len(arr) <= 5 * 10^4
+- -10^8 <= arr[i] <= 10^8
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - BFS with value-index buckets
+
+1. BFS from index 0; neighbors are i±1 and all unvisited indices with the same value.
+2. Clear the adjacency list for a value after processing to avoid redundant work.
+
+## Complexity
+
+**Time:** O(n) amortized.
+
+**Space:** O(n).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def minJumps(self, arr: List[int]) -> int:
+        n = len(arr)
+        if n == 1:
+            return 0
+        pos = defaultdict(list)
+        for i, v in enumerate(arr):
+            pos[v].append(i)
+        q = deque([(0, 0)])
+        seen = {0}
+        while q:
+            i, d = q.popleft()
+            if i == n - 1:
+                return d
+            for j in (i - 1, i + 1):
+                if 0 <= j < n and j not in seen:
+                    seen.add(j)
+                    q.append((j, d + 1))
+            for j in pos[arr[i]]:
+                if j not in seen:
+                    seen.add(j)
+                    q.append((j, d + 1))
+            pos[arr[i]].clear()
+        return -1
+````

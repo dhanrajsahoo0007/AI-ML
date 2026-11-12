@@ -1,0 +1,82 @@
+---
+title: "Stone Game IX"
+description: "Alice and Bob play a stone game with values given in stones."
+difficulty: medium
+patterns: [greedy-with-dp-elements]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: stone_game_ix }
+starter:
+  python: |
+    def stone_game_ix(stones: list[int]) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/stone-game-ix.public.json, hidden: tests/stone-game-ix.hidden.json }
+complexity: { time: "O(n) - Counting pass.", space: "O(1) - Three counters." }
+group: "07. Greedy with DP Elements"
+number: "01"
+leetcode: stone-game-ix
+leetcodeId: 2029
+order: 18007001000000
+---
+
+Alice and Bob play a stone game with values given in stones. They remove stones in turns starting
+with Alice; the running sum of removed values must never become divisible by three. If a player
+cannot move, they lose. If all stones are removed, Bob wins. Return whether Alice wins with optimal play.
+
+## Examples
+
+````text
+Example 1:
+    Input: stones = [5,1,2,4,3]
+    Output: False
+
+Example 2:
+    Input: stones = [2,1]
+    Output: True
+
+Example 3:
+    Input: stones = [1,1,1]
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= len(stones) <= 10^5
+- 1 <= stones[i] <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Modulo Counting
+Only residues modulo three matter; counts of zeros toggle parity of extra moves while ones and twos set the outcome.
+
+1. Count stones by value mod 3 into three buckets.
+2. If the number of multiples of three is even, Alice wins exactly when both residue classes 1 and 2 exist.
+3. If it is odd, Alice wins when the counts of residues 1 and 2 differ by more than two.
+
+## Complexity
+
+**Time:** O(n) - Counting pass.
+
+**Space:** O(1) - Three counters.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def stoneGameIX(self, stones: List[int]) -> bool:
+        c = [0, 0, 0]
+        for a in stones:
+            c[a % 3] += 1
+        if c[0] % 2 == 0:
+            return min(c[1], c[2]) > 0
+        return abs(c[1] - c[2]) > 2
+````

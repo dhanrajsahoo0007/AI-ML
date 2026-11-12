@@ -1,0 +1,96 @@
+---
+title: "Largest Substring with distinct k characters"
+description: "Given a string s and an integer k, return the length of the longest substring that contains at most k distinct characters."
+difficulty: medium
+patterns: [advanced-string-problems]
+topics: [sliding-window]
+companies: []
+languages: [python]
+entry: { python: longest_substring_at_most_k_distinct }
+starter:
+  python: |
+    def longest_substring_at_most_k_distinct(s: str, k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/largest-substring-with-distinct-k-characters.public.json, hidden: tests/largest-substring-with-distinct-k-characters.hidden.json }
+complexity: { time: "O(n) - Each character is inserted and removed at most once.", space: "O(k) - At most k + 1 distinct keys live in the frequency map while adjusting the window." }
+group: "04. Advanced String Problems"
+number: "01"
+order: 7004001000000
+---
+
+Given a string s and an integer k, return the length of the longest substring that
+contains at most k distinct characters.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "eceba", k = 2
+    Output: 3
+Example 2:
+    Input: s = "aa", k = 1
+    Output: 2
+````
+
+## Constraints
+
+````text
+- 0 <= k <= len(s)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Variable-size sliding window with distinct-character budget
+Grow the right edge while distinct types stay within k; shrink from the left when the budget is exceeded.
+
+1. Maintain counts of characters inside the window.
+2. When more than k distinct characters appear, move the left pointer until the window is valid again.
+3. Track the maximum valid window length.
+
+Restored notes (archived workbook):
+
+Problem Statement:
+Given a string and an integer K, find the length of the longest substring that contains exactly K unique characters.
+
+Time Complexity: O(n), where n is the length of the string.
+Space Complexity: O(K), where K is the number of unique characters we're looking for.
+
+## Complexity
+
+**Time:** O(n) - Each character is inserted and removed at most once.
+
+**Space:** O(k) - At most k + 1 distinct keys live in the frequency map while adjusting the window.
+
+## Solution
+
+````python
+from collections import defaultdict
+from typing import Dict
+
+
+class Solution:
+    def longestSubstringAtMostKDistinct(self, s: str, k: int) -> int:
+        if k == 0:
+            return 0
+
+        freq: Dict[str, int] = defaultdict(int)
+        left = 0
+        best = 0
+
+        for right, ch in enumerate(s):
+            freq[ch] += 1
+
+            while len(freq) > k:
+                left_ch = s[left]
+                freq[left_ch] -= 1
+                if freq[left_ch] == 0:
+                    del freq[left_ch]
+                left += 1
+
+            best = max(best, right - left + 1)
+
+        return best
+````

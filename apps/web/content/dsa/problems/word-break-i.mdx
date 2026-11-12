@@ -1,0 +1,88 @@
+---
+title: "Word Break I"
+description: "Given a string s and a list of words wordDict, determine if s can be segmented into a sequence of one or more dictionary words separated without extra letter…"
+difficulty: medium
+patterns: [1d-dp]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: word_break }
+starter:
+  python: |
+    def word_break(s: str, wordDict: list[str]) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/word-break-i.public.json, hidden: tests/word-break-i.hidden.json }
+complexity: { time: "O(n^2 * m) in worst case (n string length, m total dictionary size factor).", space: "O(n) for memo and recursion depth." }
+group: "01. 1D DP"
+number: "18"
+leetcode: word-break
+leetcodeId: 139
+order: 20001018000000
+---
+
+Given a string s and a list of words wordDict, determine if s can be segmented
+into a sequence of one or more dictionary words separated without extra letters.
+Words may be reused.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "leetcode", wordDict = ["leet", "code"]
+    Output: True
+Example 2:
+    Input: s = "catsandog", wordDict = ["cats", "dog", "sand", "and", "cat"]
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 300
+- 1 <= len(wordDict) <= 1000
+- 1 <= len(wordDict[i]) <= 20
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 1D Dynamic Programming / memoized DFS
+canBreak\[i\] is true if some word matches s starting at i and the remainder is breakable.
+
+1. DFS from index i; if i==len(s) return True.
+2. Try each word: if s starts with word at i, recurse from i+len(word).
+3. Memoize boolean results per starting index.
+
+## Complexity
+
+**Time:** O(n^2 \* m) in worst case (n string length, m total dictionary size factor).
+
+**Space:** O(n) for memo and recursion depth.
+
+## Solution
+
+````python
+from typing import Dict, List
+
+
+class Solution:
+    def wordBreak(self, s: str, wordDict: List[str]) -> bool:
+        n = len(s)
+        memo: Dict[int, bool] = {}
+
+        def dfs(i: int) -> bool:
+            if i >= n:
+                return True
+            if i in memo:
+                return memo[i]
+            for w in wordDict:
+                if s.startswith(w, i) and dfs(i + len(w)):
+                    memo[i] = True
+                    return True
+            memo[i] = False
+            return False
+
+        return dfs(0)
+````

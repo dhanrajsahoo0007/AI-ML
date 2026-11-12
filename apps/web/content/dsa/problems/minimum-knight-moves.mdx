@@ -1,0 +1,84 @@
+---
+title: "Minimum Knight Moves"
+description: "On an infinite chessboard, a knight starts at square (0, 0)."
+difficulty: medium
+patterns: [others]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: min_knight_moves }
+starter:
+  python: |
+    def min_knight_moves(x: int, y: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-knight-moves.public.json, hidden: tests/minimum-knight-moves.hidden.json }
+complexity: { time: "O(B^2) for bounding box side B (small in practice for given constraints).", space: "O(B^2) for visited set." }
+group: "11. Others"
+leetcode: minimum-knight-moves
+leetcodeId: 1197
+order: 17011999000000
+---
+
+On an infinite chessboard, a knight starts at square (0, 0). Return the minimum number of
+knight moves to reach square (x, y). Knight moves follow standard chess rules.
+
+## Examples
+
+````text
+Example 1:
+    Input: x = 2, y = 1
+    Output: 1
+Example 2:
+    Input: x = 5, y = 5
+    Output: 4
+````
+
+## Constraints
+
+````text
+- |x|, |y| <= 300
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - BFS on implicit infinite grid (pruned)
+
+1. Exploit symmetry: work with (abs(x), abs(y)).
+2. BFS from (0,0) with eight knight deltas; prune search to a modest bounding box around the
+target to keep the state space finite.
+
+## Complexity
+
+**Time:** O(B^2) for bounding box side B (small in practice for given constraints).
+
+**Space:** O(B^2) for visited set.
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def minKnightMoves(self, x: int, y: int) -> int:
+        x, y = abs(x), abs(y)
+        q = deque([(0, 0, 0)])
+        vis = {(0, 0)}
+        moves = ((2, 1), (2, -1), (-2, 1), (-2, -1), (1, 2), (1, -2), (-1, 2), (-1, -2))
+        while q:
+            i, j, d = q.popleft()
+            if i == x and j == y:
+                return d
+            for di, dj in moves:
+                ni, nj = i + di, j + dj
+                if ni < -2 or nj < -2 or ni > x + 2 or nj > y + 2:
+                    continue
+                if (ni, nj) not in vis:
+                    vis.add((ni, nj))
+                    q.append((ni, nj, d + 1))
+        return -1
+````

@@ -1,0 +1,97 @@
+---
+title: "Minimum Time to Revert Word to Initial State I"
+description: "You are given a string word and an integer k."
+difficulty: medium
+patterns: [string-compression-and-manipulation]
+topics: [strings]
+companies: []
+languages: [python]
+entry: { python: minimum_time_to_initial_state }
+starter:
+  python: |
+    def minimum_time_to_initial_state(word: str, k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-time-to-revert-word-to-initial-state-i.public.json, hidden: tests/minimum-time-to-revert-word-to-initial-state-i.hidden.json }
+complexity: { time: "O(n) - Z-array construction plus a linear scan over multiples of k.", space: "O(n) - The Z-array." }
+group: "02. String Compression and Manipulation"
+number: "03"
+leetcode: minimum-time-to-revert-word-to-initial-state-i
+leetcodeId: 3029
+order: 5002003000000
+---
+
+You are given a string word and an integer k. Each second you must remove the first
+k characters of word and append any k characters to the end. Return the minimum
+positive number of seconds after which the string can equal its initial value again.
+
+## Examples
+
+````text
+Example 1:
+    Input: word = "abacaba", k = 2
+    Output: 2
+
+Example 2:
+    Input: word = "abcd", k = 2
+    Output: 2
+
+Example 3:
+    Input: word = "aa", k = 2
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= len(word) <= 10^5
+- 1 <= k <= len(word)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Z-function / KMP on self-overlap
+After t seconds, the first t\*k characters have been removed; the rest must match a
+prefix of word so you can append to restore. The Z-array checks that in O(1) per step.
+
+1. If k &gt;= n, one operation removes the whole string and you can re-append to restore in 1 second.
+2. Build the Z-array of word so z\[i\] is the longest prefix match starting at i.
+3. For each pos = k, 2k, ... less than n, if z\[pos\] &gt;= n - pos then return pos // k.
+4. Otherwise return ceil(n / k).
+
+## Complexity
+
+**Time:** O(n) - Z-array construction plus a linear scan over multiples of k.
+
+**Space:** O(n) - The Z-array.
+
+## Solution
+
+````python
+class Solution:
+    def minimumTimeToInitialState(self, word: str, k: int) -> int:
+        n = len(word)
+        if k >= n:
+            return 1
+        z = self._z_function(word)
+        for pos in range(k, n, k):
+            if z[pos] >= n - pos:
+                return pos // k
+        return (n + k - 1) // k
+
+    def _z_function(self, s: str) -> list[int]:
+        n = len(s)
+        z = [0] * n
+        left = 0
+        right = 0
+        for i in range(1, n):
+            if i <= right:
+                z[i] = min(right - i + 1, z[i - left])
+            while i + z[i] < n and s[z[i]] == s[i + z[i]]:
+                z[i] += 1
+            if i + z[i] - 1 > right:
+                left, right = i, i + z[i] - 1
+        return z
+````

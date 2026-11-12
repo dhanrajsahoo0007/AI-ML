@@ -1,0 +1,95 @@
+---
+title: "Minimum Time to Revert Word to Initial State II"
+description: "Same as part I: each second remove the first k characters of word and append any k characters to the end; return the minimum positive time to restore the ori…"
+difficulty: hard
+patterns: [string-compression-and-manipulation]
+topics: [strings]
+companies: []
+languages: [python]
+entry: { python: minimum_time_to_initial_state }
+starter:
+  python: |
+    def minimum_time_to_initial_state(word: str, k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-time-to-revert-word-to-initial-state-ii.public.json, hidden: tests/minimum-time-to-revert-word-to-initial-state-ii.hidden.json }
+complexity: { time: "O(n) - Linear Z-array and scan.", space: "O(n) - Z-array storage." }
+group: "02. String Compression and Manipulation"
+number: "04"
+leetcode: minimum-time-to-revert-word-to-initial-state-ii
+leetcodeId: 3031
+order: 5002004000000
+---
+
+Same as part I: each second remove the first k characters of word and append any k
+characters to the end; return the minimum positive time to restore the original
+string. Constraints are larger, so the solution must stay linear.
+
+## Examples
+
+````text
+Example 1:
+    Input: word = "abacaba", k = 2
+    Output: 2
+
+Example 2:
+    Input: word = "abcd", k = 2
+    Output: 2
+
+Example 3:
+    Input: word = "aa", k = 2
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= len(word) <= 10^6
+- 1 <= k <= len(word)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Z-function on self-overlap
+Identical logic to part I: Z-values test whether the untouched suffix matches a prefix.
+
+1. If k &gt;= n, return 1.
+2. Build Z-array in O(n).
+3. Scan multiples of k for the first suffix-prefix match; otherwise return ceil(n / k).
+
+## Complexity
+
+**Time:** O(n) - Linear Z-array and scan.
+
+**Space:** O(n) - Z-array storage.
+
+## Solution
+
+````python
+class Solution:
+    def minimumTimeToInitialState(self, word: str, k: int) -> int:
+        n = len(word)
+        if k >= n:
+            return 1
+        z = self._z_function(word)
+        for pos in range(k, n, k):
+            if z[pos] >= n - pos:
+                return pos // k
+        return (n + k - 1) // k
+
+    def _z_function(self, s: str) -> list[int]:
+        n = len(s)
+        z = [0] * n
+        left = 0
+        right = 0
+        for i in range(1, n):
+            if i <= right:
+                z[i] = min(right - i + 1, z[i - left])
+            while i + z[i] < n and s[z[i]] == s[i + z[i]]:
+                z[i] += 1
+            if i + z[i] - 1 > right:
+                left, right = i, i + z[i] - 1
+        return z
+````

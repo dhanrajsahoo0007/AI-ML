@@ -59,6 +59,12 @@ export const problemFrontmatterSchema = z
     related: z
       .array(z.string().regex(/^\/[a-z0-9/-]+$/, "must be a site path such as /system-design/patterns/caching"))
       .default([]),
+    /** The heading and the number the problem has in the owner's notes, kept so lists stay in that order. */
+    group: z.string().min(1).optional(),
+    number: z
+      .string()
+      .regex(/^\d{2,3}$/)
+      .optional(),
     /** The problem's URL slug on LeetCode (leetcode.com/problems/<slug>/) and its number there, when it has one. */
     leetcode: kebab.optional(),
     leetcodeId: z.number().int().positive().optional(),

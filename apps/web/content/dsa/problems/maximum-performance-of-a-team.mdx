@@ -1,0 +1,100 @@
+---
+title: "Maximum Performance of a Team"
+description: "Given n engineers with speed and efficiency arrays, choose at most k engineers to maximize performance = sum(speeds) * min(efficiency)."
+difficulty: hard
+patterns: [greedy-with-heap-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: max_performance }
+starter:
+  python: |
+    def max_performance(n: int, speed: list[int], efficiency: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/maximum-performance-of-a-team.public.json, hidden: tests/maximum-performance-of-a-team.hidden.json }
+complexity: { time: "O(n(log n + log k))", space: "O(n + k)" }
+group: "04. Greedy with Heap Pattern"
+number: "06"
+leetcode: maximum-performance-of-a-team
+leetcodeId: 1383
+order: 10004006000000
+---
+
+Given n engineers with speed and efficiency arrays, choose at most k engineers
+to maximize performance = sum(speeds) \* min(efficiency). Return result mod 10^9+7.
+
+## Examples
+
+````text
+Example 1:
+    Input: n=6, speed=[2,10,3,1,5,8], efficiency=[5,4,3,9,7,2], k=2
+    Output: 60
+    Explanation: Engineers 2&5: (10+5)*min(4,7) = 60
+
+Example 2:
+    Input: n=6, speed=[2,10,3,1,5,8], efficiency=[5,4,3,9,7,2], k=3
+    Output: 68
+````
+
+## Constraints
+
+````text
+- 1 <= k <= n <= 10^5
+- 1 <= speed[i] <= 10^5
+- 1 <= efficiency[i] <= 10^8
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy with Heap
+Sort by efficiency descending. For each engineer as the minimum-efficiency
+candidate, maintain a min-heap of k speeds to maximize the speed sum.
+
+1. Sort engineers by efficiency in descending order.
+2. Iterate through sorted engineers, maintaining a min-heap of speeds (size k).
+3. For each engineer, add their speed. If heap exceeds k, remove the smallest speed.
+4. Calculate performance = current\_efficiency \* sum\_of\_speeds and track maximum.
+
+## Complexity
+
+**Time:** O(n(log n + log k))
+
+**Space:** O(n + k)
+
+## Original notes
+
+````text
+Original notes (restored):
+Fix minimum efficiency `E` by scanning engineers sorted descending by efficiency. For that `E`,
+you may pick any subset of earlier engineers (efficiency ≥ E); maximize sum of speeds with at
+most k picks → maintain a min-heap of speeds of size k (drop slowest when overfull). Performance
+candidate = `E * sum(heap)`. Modulo `10**9 + 7` on return. Original write-up included detailed
+complexity accounting for Python `sorted` auxiliary space.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def maxPerformance(self, n: int, speed: List[int], efficiency: List[int], k: int) -> int:
+        engineers = sorted(zip(efficiency, speed), reverse=True)
+        speed_heap = []
+        speed_sum = 0
+        max_perf = 0
+
+        for eff, spd in engineers:
+            if len(speed_heap) == k:
+                speed_sum -= heapq.heappop(speed_heap)
+            heapq.heappush(speed_heap, spd)
+            speed_sum += spd
+            max_perf = max(max_perf, eff * speed_sum)
+
+        return max_perf % (10**9 + 7)
+````

@@ -1,0 +1,87 @@
+---
+title: "Merge Triplets to Form Target Triplet"
+description: "You are given triplets of integers and a target triplet."
+difficulty: medium
+patterns: [interval-and-scheduling-problems]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: merge_triplets }
+starter:
+  python: |
+    def merge_triplets(triplets: list[list[int]], target: list[int]) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/merge-triplets-to-form-target-triplet.public.json, hidden: tests/merge-triplets-to-form-target-triplet.hidden.json }
+complexity: { time: "O(n) over triplets.", space: "O(1) - Three flags." }
+group: "03. Interval and Scheduling Problems"
+number: "04"
+leetcode: merge-triplets-to-form-target-triplet
+leetcodeId: 1899
+order: 18003004000000
+---
+
+You are given triplets of integers and a target triplet. You may merge any triplet by taking the
+element-wise maximum with an accumulator that starts at \[0,0,0\]. A triplet is unusable if any
+coordinate exceeds target. Return whether target can be reached.
+
+## Examples
+
+````text
+Example 1:
+    Input: triplets = [[2,5,3],[1,8,4],[1,7,5]], target = [2,7,5]
+    Output: True
+
+Example 2:
+    Input: triplets = [[3,4,5],[4,5,6]], target = [2,5,8]
+    Output: False
+
+Example 3:
+    Input: triplets = [[2,5,3],[2,3,4],[1,2,5],[5,2,3]], target = [5,5,5]
+    Output: True
+````
+
+## Constraints
+
+````text
+- 1 <= triplets.length <= 10^5
+- triplets[i].length == target.length == 3
+- 0 <= triplets[i][j], target[j] <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Filtering
+Ignore triplets that overshoot target; for the rest, OR-track whether each target coordinate can be matched exactly.
+
+1. Initialize three booleans for whether each target coordinate has been seen in an allowed triplet.
+2. For each triplet, skip if any coordinate exceeds target.
+3. For each index, if triplet equals target on that axis, mark that axis satisfied.
+4. Return True only if all three axes were satisfied.
+
+## Complexity
+
+**Time:** O(n) over triplets.
+
+**Space:** O(1) - Three flags.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def mergeTriplets(self, triplets: List[List[int]], target: List[int]) -> bool:
+        a = b = c = False
+        t0, t1, t2 = target
+        for x, y, z in triplets:
+            if x > t0 or y > t1 or z > t2:
+                continue
+            a = a or x == t0
+            b = b or y == t1
+            c = c or z == t2
+        return a and b and c
+````

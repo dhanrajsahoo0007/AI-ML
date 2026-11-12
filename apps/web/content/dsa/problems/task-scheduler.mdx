@@ -1,0 +1,112 @@
+---
+title: "Task Scheduler"
+description: "Given an array of CPU tasks labeled A-Z and a cooldown interval n, find the minimum number of CPU intervals required to complete all tasks."
+difficulty: medium
+patterns: [scheduling-and-simulation-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: least_interval }
+starter:
+  python: |
+    def least_interval(tasks: list[str], n: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/task-scheduler.public.json, hidden: tests/task-scheduler.hidden.json }
+complexity: { time: "O(n * m) where n is total tasks and m is the cooldown", space: "O(1) since at most 26 unique tasks" }
+group: "05. Scheduling and Simulation Pattern"
+number: "01"
+leetcode: task-scheduler
+leetcodeId: 621
+order: 10005001000000
+---
+
+Given an array of CPU tasks labeled A-Z and a cooldown interval n, find the
+minimum number of CPU intervals required to complete all tasks. There must be
+a gap of at least n intervals between two tasks with the same label.
+
+## Examples
+
+````text
+Example 1:
+    Input: tasks = ["A","A","A","B","B","B"], n = 2
+    Output: 8
+    Explanation: A -> B -> idle -> A -> B -> idle -> A -> B
+
+Example 2:
+    Input: tasks = ["A","C","A","B","D","B"], n = 1
+    Output: 6
+
+Example 3:
+    Input: tasks = ["A","A","A","B","B","B"], n = 3
+    Output: 10
+````
+
+## Constraints
+
+````text
+- 1 <= tasks.length <= 10^4
+- tasks[i] is an uppercase English letter.
+- 0 <= n <= 100
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Scheduling and Simulation
+Use a max-heap to always schedule the most frequent task first (minimizes idle time).
+A cooldown queue tracks tasks waiting for their cooldown to expire.
+
+1. Count task frequencies. Push all frequencies into a max-heap.
+2. Use a timer. Each tick: pop the most frequent task, decrement its count.
+3. Place the task in a cooldown deque with (remaining\_count, available\_time).
+4. When a task's cooldown expires, push it back to the heap.
+5. Continue until heap and cooldown are both empty.
+
+## Complexity
+
+**Time:** O(n \* m) where n is total tasks and m is the cooldown
+
+**Space:** O(1) since at most 26 unique tasks
+
+## Original notes
+
+````text
+Original notes (restored):
+LC 621 simulation: prioritize highest remaining frequency (max-heap of counts). A deque stores
+tasks cooling until time `timer+n`; when wall clock catches `available_time`, push counts back.
+Idle ticks still advance `timer` — that models mandatory gaps between identical labels.
+````
+
+## Solution
+
+````python
+import heapq
+from collections import Counter, deque
+from typing import List
+
+
+class Solution:
+    def leastInterval(self, tasks: List[str], n: int) -> int:
+        task_freq = Counter(tasks)
+        heap = [-freq for freq in task_freq.values()]
+        heapq.heapify(heap)
+
+        cooldown = deque()
+        timer = 0
+
+        while heap or cooldown:
+            timer += 1
+            if heap:
+                freq = -heapq.heappop(heap)
+                if freq > 1:
+                    # Task re-enters pool after n idle slots from now.
+                    cooldown.append((freq - 1, timer + n))
+
+            while cooldown and cooldown[0][1] == timer:
+                count, _ = cooldown.popleft()
+                heapq.heappush(heap, -count)
+
+        return timer
+````

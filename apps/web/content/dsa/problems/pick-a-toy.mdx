@@ -1,0 +1,88 @@
+---
+title: "Pick a Toy"
+description: "Toys lined on a shelf each have a category id."
+difficulty: medium
+patterns: [story-problem]
+topics: [sliding-window]
+companies: []
+languages: [python]
+entry: { python: max_toys }
+starter:
+  python: |
+    def max_toys(toys: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/pick-a-toy.public.json, hidden: tests/pick-a-toy.hidden.json }
+complexity: { time: "O(n) - Each toy index is added and removed at most once.", space: "O(k) - The map holds at most k + 1 keys momentarily while shrinking." }
+group: "06. Story Problem"
+number: "03"
+order: 7006003000000
+---
+
+Toys lined on a shelf each have a category id. You may pick at most k different
+categories at a time while taking a contiguous block. Return the maximum number of
+toys you can pick.
+
+## Examples
+
+````text
+Example 1:
+    Input: toys = [1, 2, 1], k = 2
+    Output: 3
+Example 2:
+    Input: toys = [1, 2, 1, 2, 1], k = 2
+    Output: 5
+````
+
+## Constraints
+
+````text
+- 1 <= k <= number of distinct categories present in the input (practically k <= len(toys))
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Longest substring with at most k distinct categories
+Identical to the fruit-into-baskets pattern but parameterized by k.
+
+1. Slide a window while maintaining category counts.
+2. When distinct categories exceed k, shrink from the left until valid.
+3. Record the maximum feasible window size.
+
+## Complexity
+
+**Time:** O(n) - Each toy index is added and removed at most once.
+
+**Space:** O(k) - The map holds at most k + 1 keys momentarily while shrinking.
+
+## Solution
+
+````python
+from collections import defaultdict
+from typing import Dict, List
+
+
+class Solution:
+    def maxToys(self, toys: List[int], k: int) -> int:
+        if k == 0:
+            return 0
+
+        freq: Dict[int, int] = defaultdict(int)
+        left = 0
+        best = 0
+
+        for right, toy in enumerate(toys):
+            freq[toy] += 1
+
+            while len(freq) > k:
+                freq[toys[left]] -= 1
+                if freq[toys[left]] == 0:
+                    del freq[toys[left]]
+                left += 1
+
+            best = max(best, right - left + 1)
+
+        return best
+````

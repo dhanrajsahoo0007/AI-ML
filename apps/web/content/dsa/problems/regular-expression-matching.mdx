@@ -1,0 +1,88 @@
+---
+title: "Regular Expression Matching"
+description: "Implement full matching of a text s against a pattern p where '.' matches any single character and '*' matches zero or more of the preceding element."
+difficulty: hard
+patterns: [permutation-problems]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: is_match }
+starter:
+  python: |
+    def is_match(s: str, p: str) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/regular-expression-matching.public.json, hidden: tests/regular-expression-matching.hidden.json }
+complexity: { time: "O(len(s) * len(p)) memoized states", space: "O(len(s) * len(p)) for memo plus recursion stack" }
+group: "05. Permutation Problems"
+number: "04"
+leetcode: regular-expression-matching
+leetcodeId: 10
+order: 11005004000000
+---
+
+Implement full matching of a text s against a pattern p where '.' matches any
+single character and '\*' matches zero or more of the preceding element.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "aa", p = "a*"
+    Output: True
+
+Example 2:
+    Input: s = "ab", p = ".*"
+    Output: True
+````
+
+## Constraints
+
+````text
+- 0 <= len(s), len(p) <= 20 in tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS with memoization
+Try consuming characters from s and p together; memoize (i, j) positions to avoid
+recomputation of overlapping subproblems.
+
+1. If pattern exhausted, success iff text exhausted.
+2. Detect star at p\[j+1\]; if present, recurse skipping the star block or matching
+one character when the first pattern element fits.
+3. Without star, require first characters to match then recurse on tails.
+
+## Complexity
+
+**Time:** O(len(s) \* len(p)) memoized states
+
+**Space:** O(len(s) \* len(p)) for memo plus recursion stack
+
+## Solution
+
+````python
+from functools import lru_cache
+
+
+class Solution:
+    def is_match(self, s: str, p: str) -> bool:
+        @lru_cache(maxsize=None)
+        def dfs(i: int, j: int) -> bool:
+            if j == len(p):
+                return i == len(s)
+            look_ahead_star = j + 1 < len(p) and p[j + 1] == "*"
+            if look_ahead_star:
+                if dfs(i, j + 2):
+                    return True
+                if i < len(s) and (p[j] == s[i] or p[j] == "."):
+                    return dfs(i + 1, j)
+                return False
+            if i < len(s) and (p[j] == s[i] or p[j] == "."):
+                return dfs(i + 1, j + 1)
+            return False
+
+        return dfs(0, 0)
+````

@@ -1,0 +1,54 @@
+---
+title: "Burst Balloons"
+description: "Given nums, burst balloons to maximize coins: when bursting i, gain nums[left]*nums[i]*nums[right]."
+difficulty: hard
+patterns: [matrix-chain-multiplication]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: max_coins }
+starter:
+  python: |
+    def max_coins(nums: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/burst-balloons.public.json, hidden: tests/burst-balloons.hidden.json }
+complexity: { time: "O(n^3).", space: "See the notes" }
+group: "07. Matrix Chain Multiplication"
+number: "12"
+leetcode: burst-balloons
+leetcodeId: 312
+order: 20007012000000
+---
+
+Given nums, burst balloons to maximize coins: when bursting i, gain nums\[left\]\*nums\[i\]\*nums\[right\].
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Interval DP
+dp\[i\]\[j\] max coins from open interval (i,j).
+
+## Complexity
+
+**Time:** O(n^3).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxCoins(self, nums: List[int]) -> int:
+        a = [1] + nums + [1]
+        n = len(a)
+        dp = [[0] * n for _ in range(n)]
+        for length in range(3, n + 1):
+            for i in range(n - length + 1):
+                j = i + length - 1
+                for k in range(i + 1, j):
+                    dp[i][j] = max(dp[i][j], dp[i][k] + dp[k][j] + a[i] * a[k] * a[j])
+        return dp[0][n - 1]
+````

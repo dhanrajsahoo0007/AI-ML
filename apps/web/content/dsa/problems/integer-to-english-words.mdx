@@ -1,0 +1,138 @@
+---
+title: "Integer to English Words"
+description: "Convert a non-negative integer num into English words (LeetCode style) for 0 <= num <= 2^31 - 1."
+difficulty: hard
+patterns: [basic-string-operations]
+topics: [strings]
+companies: []
+languages: [python]
+entry: { python: number_to_words }
+starter:
+  python: |
+    def number_to_words(num: int) -> str:
+        # Your code here
+        pass
+tests: { public: tests/integer-to-english-words.public.json, hidden: tests/integer-to-english-words.hidden.json }
+complexity: { time: "O(1) - Bounded by a small fixed number of digits.", space: "O(1) - Aside from the output string of bounded length." }
+group: "01. Basic String Operations"
+number: "03"
+leetcode: integer-to-english-words
+leetcodeId: 273
+order: 5001003000000
+---
+
+Convert a non-negative integer num into English words (LeetCode style) for
+0 &lt;= num &lt;= 2^31 - 1.
+
+## Examples
+
+````text
+Example 1:
+    Input: num = 123
+    Output: "One Hundred Twenty Three"
+
+Example 2:
+    Input: num = 12345
+    Output: "Twelve Thousand Three Hundred Forty Five"
+
+Example 3:
+    Input: num = 1234567
+    Output: "One Million Two Hundred Thirty Four Thousand Five Hundred Sixty Seven"
+````
+
+## Constraints
+
+````text
+- 0 <= num <= 2^31 - 1
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Recursive / chunk translation by thousands
+Split the number into billions, millions, thousands, and remainder blocks under 1000.
+
+1. Map under-twenty, tens names, and scales (Thousand, Million, Billion).
+2. Define helper under\_hundred and under\_thousand using those tables.
+3. Recursively emit each non-zero block with its scale word and join with single spaces.
+4. Handle num == 0 as a special case.
+
+## Complexity
+
+**Time:** O(1) - Bounded by a small fixed number of digits.
+
+**Space:** O(1) - Aside from the output string of bounded length.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def numberToWords(self, num: int) -> str:
+        if num == 0:
+            return "Zero"
+        below_20 = [
+            "",
+            "One",
+            "Two",
+            "Three",
+            "Four",
+            "Five",
+            "Six",
+            "Seven",
+            "Eight",
+            "Nine",
+            "Ten",
+            "Eleven",
+            "Twelve",
+            "Thirteen",
+            "Fourteen",
+            "Fifteen",
+            "Sixteen",
+            "Seventeen",
+            "Eighteen",
+            "Nineteen",
+        ]
+        tens = [
+            "",
+            "Ten",
+            "Twenty",
+            "Thirty",
+            "Forty",
+            "Fifty",
+            "Sixty",
+            "Seventy",
+            "Eighty",
+            "Ninety",
+        ]
+        scales = ["", "Thousand", "Million", "Billion"]
+
+        def under_thousand(n: int) -> List[str]:
+            parts: List[str] = []
+            if n >= 100:
+                parts.append(below_20[n // 100])
+                parts.append("Hundred")
+                n %= 100
+            if n >= 20:
+                parts.append(tens[n // 10])
+                n %= 10
+            if n > 0:
+                parts.append(below_20[n])
+            return parts
+
+        words: List[str] = []
+        scale = 0
+        while num > 0:
+            chunk = num % 1000
+            if chunk:
+                chunk_words = under_thousand(chunk)
+                if scales[scale]:
+                    chunk_words.append(scales[scale])
+                words = chunk_words + words
+            num //= 1000
+            scale += 1
+        return " ".join(words)
+````

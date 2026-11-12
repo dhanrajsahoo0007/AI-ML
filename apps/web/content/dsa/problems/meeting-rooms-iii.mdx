@@ -1,0 +1,110 @@
+---
+title: "Meeting Rooms III"
+description: "You have n numbered meeting rooms and a list of meetings [start_i, end_i]."
+difficulty: hard
+patterns: [interval-scheduling]
+topics: [intervals]
+companies: []
+languages: [python]
+entry: { python: most_booked }
+starter:
+  python: |
+    def most_booked(n: int, meetings: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/meeting-rooms-iii.public.json, hidden: tests/meeting-rooms-iii.hidden.json }
+complexity: { time: "O(m log m + m log n) for m meetings due to sorting and heaps.", space: "O(n + m) for heaps and counters." }
+group: "03. Interval Scheduling"
+number: "03"
+leetcode: meeting-rooms-iii
+leetcodeId: 2402
+order: 19003003000000
+---
+
+You have n numbered meeting rooms and a list of meetings \[start\_i, end\_i\]. Process
+meetings in ascending order of start time. Always assign a meeting to the smallest
+numbered room that is free at its scheduled start. If every room is busy, delay the
+meeting until the earliest room frees while keeping the same duration, then assign it
+to that room. Return the room index that hosts the greatest number of meetings; break
+ties by choosing the smallest index.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 2, meetings = [[0,10],[1,5],[2,7],[3,4]]
+    Output: 0
+
+Example 2:
+    Input: n = 3, meetings = [[1,20],[2,10],[3,5],[4,9],[6,8]]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 100
+- 1 <= len(meetings) <= 10^5
+- meetings[i].length == 2 with 0 <= start_i < end_i <= 10^9
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two heaps (free rooms + busy timeline)
+Track available room ids in a min-heap and busy rooms in a min-heap ordered by release
+time so each meeting greedily picks the smallest feasible room after simulating delays.
+
+1. Sort meetings by start time.
+2. Maintain a min-heap of free room ids and a min-heap of (end\_time, room\_id) pairs.
+3. Before each meeting, move every finished meeting from busy back to free.
+4. If a room exists, schedule at the original times; otherwise pop the earliest ending
+busy entry, delay the meeting to that end time, and reuse its room.
+5. Increment usage for the chosen room and push its new busy entry.
+
+## Complexity
+
+**Time:** O(m log m + m log n) for m meetings due to sorting and heaps.
+
+**Space:** O(n + m) for heaps and counters.
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def mostBooked(self, n: int, meetings: List[List[int]]) -> int:
+        meetings.sort()
+        free: List[int] = list(range(n))
+        heapq.heapify(free)
+        busy: List[tuple[int, int]] = []
+        usage = [0] * n
+
+        for start, end in meetings:
+            duration = end - start
+
+            while busy and busy[0][0] <= start:
+                _, room = heapq.heappop(busy)
+                heapq.heappush(free, room)
+
+            if free:
+                room = heapq.heappop(free)
+                actual_start = start
+            else:
+                release, room = heapq.heappop(busy)
+                actual_start = release
+
+            actual_end = actual_start + duration
+            usage[room] += 1
+            heapq.heappush(busy, (actual_end, room))
+
+        best_room = 0
+        for room in range(1, n):
+            if usage[room] > usage[best_room]:
+                best_room = room
+        return best_room
+````

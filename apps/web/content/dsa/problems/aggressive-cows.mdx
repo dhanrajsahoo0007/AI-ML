@@ -1,0 +1,137 @@
+---
+title: "Aggressive Cows"
+description: "Stall positions are given on a line."
+difficulty: medium
+patterns: [maximum-of-minimum-minimum-of-maximum]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: aggressive_cows }
+starter:
+  python: |
+    def aggressive_cows(stalls: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/aggressive-cows.public.json, hidden: tests/aggressive-cows.hidden.json }
+complexity: { time: "O(n log W) - W = coordinate spread, plus O(n log n) sort once.", space: "O(1) - Aside from sorting in place." }
+group: "07. Maximum of Minimum | Minimum of Maximum"
+number: "01"
+order: 8007001000000
+---
+
+Stall positions are given on a line. Place k cows in distinct stalls so that the minimum distance
+between any two cows is as large as possible. Return that maximum achievable minimum distance.
+
+## Examples
+
+````text
+Example 1:
+Input: stalls = [0, 3, 4, 7, 10, 9], k = 4
+Output: 3
+````
+
+## Constraints
+
+````text
+- 2 <= k <= len(stalls) <= 10^5
+- Stall coordinates fit in 32-bit range
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer (maximize minimum)
+Sort stalls; check if k cows can be placed with pairwise distance at least d using a greedy scan.
+
+1. Sort stalls.
+2. Binary search d in \[0, max - min\]; greedy place first cow at stalls\[0\], then next when gap &gt;= d.
+3. Largest d with enough placements wins.
+
+## Complexity
+
+**Time:** O(n log W) - W = coordinate spread, plus O(n log n) sort once.
+
+**Space:** O(1) - Aside from sorting in place.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Problem Statement: Aggressive Cows Problem
+
+    You are given an array 'arr' consisting of 'n' integers which denote the position of a stall.
+    You are also given an integer 'k' which denotes the number of aggressive cows.
+    You are given the task of assigning stalls to 'k' cows such that the minimum distance between any two of them is the maximum possible.
+    
+    return the maximum possible minimum distance.
+
+Examples:
+    Example 1:
+    Input: n = 6, k = 4, arr = [0, 3, 4, 7, 10, 9]
+    Output: 3
+    Explanation: The maximum possible minimum distance will be 3 when 4 cows are placed at positions {0, 3, 7, 10}. 
+    Here distances between cows are 3, 4 and 3 respectively.
+
+    Example 2:
+    Input: n = 5, k = 2, arr = [4, 2, 1, 3, 6]
+    Output: 5
+    Explanation: The maximum possible minimum distance will be 5 when 2 cows are placed at positions {1, 6}.
+
+Constraints:
+    * 2 <= n <= 10^5
+    * 2 <= k <= n
+    * 0 <= arr[i] <= 10^9
+    * Time Limit: 1 sec
+
+Solution Explanation:
+    The solution uses a binary search approach to find the maximum minimum distance:
+
+    1. We define a helper function 'can_place_cows' that checks if it's possible to place 'k' cows with a given minimum distance.
+    2. In the main function 'aggressiveCows', we perform a binary search on the possible range of distances:
+       - The minimum possible distance is 0.
+       - The maximum possible distance is the difference between the largest and smallest stall positions.
+    3. We keep narrowing down our search range until we find the maximum valid distance.
+
+Time Complexity: O(n * log(max_distance)), where n is the number of stalls and max_distance is the difference between the largest and smallest stall positions.
+    - Sorting the stalls takes O(n log n) time.
+    - The binary search takes O(log(max_distance)) iterations.
+    - In each iteration, we call the 'can_place_cows' function which takes O(n) time.
+
+Space Complexity: O(1), as we only use a constant amount of extra space (not counting the input array).
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def aggressiveCows(self, stalls: List[int], k: int) -> int:
+        stalls.sort()
+        n = len(stalls)
+
+        def can(min_dist: int) -> bool:
+            placed = 1
+            last = stalls[0]
+            for i in range(1, n):
+                if stalls[i] - last >= min_dist:
+                    placed += 1
+                    last = stalls[i]
+                    if placed == k:
+                        return True
+            return False
+
+        lo, hi = 0, stalls[-1] - stalls[0]
+        best = 0
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if can(mid):
+                best = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return best
+````

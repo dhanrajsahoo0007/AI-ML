@@ -1,0 +1,85 @@
+---
+title: "Number of Enclaves [Flood Fill - Multisource]"
+description: "Given a binary grid of 1 land and 0 sea, return the number of land cells that cannot reach the boundary via 4-directional moves through land."
+difficulty: medium
+patterns: [flood-fill]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: num_enclaves }
+starter:
+  python: |
+    def num_enclaves(grid: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/number-of-enclaves-flood-fill.public.json, hidden: tests/number-of-enclaves-flood-fill.hidden.json }
+complexity: { time: "O(m * n)", space: "O(m * n) for recursion stack." }
+group: "13. Flood Fill"
+number: "03"
+order: 17013003000000
+---
+
+Given a binary grid of 1 land and 0 sea, return the number of land cells that cannot reach the boundary
+via 4-directional moves through land.
+
+## Examples
+
+````text
+Example 1:
+Input: grid = [[0,0,0,0],[1,0,1,0],[0,1,1,0],[0,0,0,0]]
+Output: 3
+````
+
+## Constraints
+
+````text
+- 1 <= m, n <= 500
+````
+
+**Also in the notes under:** [17. Graphs/03. DFS Story Based/02. Graph Properties and Connectivity](/dsa/problems/number-of-enclaves).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Multi-source flood fill from border
+Remove every land cell connected to the border; remaining land cells are enclaves.
+
+1. DFS from every boundary land cell to mark reachable land as 0.
+2. Count remaining 1 cells in the interior.
+
+## Complexity
+
+**Time:** O(m \* n)
+
+**Space:** O(m \* n) for recursion stack.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def numEnclaves(self, grid: List[List[int]]) -> int:
+        m, n = len(grid), len(grid[0])
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+        def dfs(r: int, c: int) -> None:
+            grid[r][c] = 0
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < m and 0 <= nc < n and grid[nr][nc] == 1:
+                    dfs(nr, nc)
+
+        for i in range(m):
+            for j in (0, n - 1):
+                if grid[i][j] == 1:
+                    dfs(i, j)
+        for j in range(n):
+            for i in (0, m - 1):
+                if grid[i][j] == 1:
+                    dfs(i, j)
+
+        return sum(sum(row) for row in grid)
+````

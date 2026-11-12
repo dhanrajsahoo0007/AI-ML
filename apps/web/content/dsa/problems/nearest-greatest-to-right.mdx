@@ -1,0 +1,82 @@
+---
+title: "Nearest Greatest to Right"
+description: "Given an integer array, for each index return the nearest element to the right that is strictly greater than the current value."
+difficulty: medium
+patterns: [basics]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: nearest_greater_to_right }
+starter:
+  python: |
+    def nearest_greater_to_right(arr: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/nearest-greatest-to-right.public.json, hidden: tests/nearest-greatest-to-right.hidden.json }
+complexity: { time: "O(n) - Each index is pushed and popped at most once.", space: "O(n) - Stack and output each hold up to n integers." }
+group: "01. Basics"
+number: "01"
+order: 9001001000000
+---
+
+Given an integer array, for each index return the nearest element to the right that is strictly
+greater than the current value. If none exists, use -1.
+
+## Examples
+
+````text
+Example 1:
+Input: [4, 5, 2, 25, 7, 8]
+Output: [5, 25, 25, -1, 8, -1]
+````
+
+## Constraints
+
+````text
+- 1 <= len(arr) <= 10^5 (typical stack problem; values fit in normal int range)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Monotonic Decreasing Stack
+Scan right-to-left while the stack keeps decreasing heights so the top is the next greater.
+
+1. Initialize an empty stack and a result array filled with -1.
+2. Walk indices from n-1 down to 0.
+3. Pop while the stack top is not greater than arr\[i\]; if stack non-empty, result\[i\] is stack\[-1\].
+4. Push arr\[i\] onto the stack.
+5. Return result.
+
+Restored notes (archived workbook):
+
+Problem Statement:
+Given an array, find the nearest greater element to the right for each element.
+If there is no greater element to the right, use -1.
+
+## Complexity
+
+**Time:** O(n) - Each index is pushed and popped at most once.
+
+**Space:** O(n) - Stack and output each hold up to n integers.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def nearestGreaterToRight(self, arr: List[int]) -> List[int]:
+        n = len(arr)
+        result = [-1] * n
+        stack: List[int] = []
+        for i in range(n - 1, -1, -1):
+            while stack and stack[-1] <= arr[i]:
+                stack.pop()
+            if stack:
+                result[i] = stack[-1]
+            stack.append(arr[i])
+        return result
+````
