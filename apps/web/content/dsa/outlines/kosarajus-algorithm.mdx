@@ -31,3 +31,109 @@ Example 2:
 - 1 <= V <= 10^4
 - 0 <= len(edges) <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Strongly Connected Components — Kosaraju (two DFS passes + transpose graph)
+
+1. DFS on G, push vertices to a stack in order of finishing times.
+2. Build the transpose graph G^T (reverse every edge).
+3. DFS on G^T in order of decreasing finish time (pop from stack); each DFS tree is one SCC.
+
+## Complexity
+
+**Time:** O(V + E) — two DFS traversals and building the transpose.
+
+**Space:** O(V + E) — adjacency lists, stack, visited flags.
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict
+
+
+class Solution:
+    # --- Original teaching notes (Kosaraju trace on Example 1) ---
+    # Edges: 1->0, 0->2, 2->1 form SCC {0,1,2}. 0->3, 3->4 chain gives SCCs {3},{4}.
+    #
+    # Pass 1 (finish times on G): e.g. start 0 -> ... stack bottom ... top reflects finishes.
+    # Pass 2 on G^T: processing "sink SCCs" of the condensation graph first isolates them.
+    #
+    #   1 ---> 0 ---> 3 ---> 4
+    #   ^      /
+    #    \    v
+    #      2
+    #
+    # Transpose flips arrows; the second pass peels SCCs cleanly.
+    # --- end trace ---
+
+    def kosaraju_sccs(self, V: int, edges: List[List[int]]) -> List[List[int]]:
+        g: defaultdict[int, List[int]] = defaultdict(list)
+        gt: defaultdict[int, List[int]] = defaultdict(list)
+        for u, v in edges:
+            g[u].append(v)
+            gt[v].append(u)
+
+        visited = [False] * V
+        order: List[int] = []
+
+        def dfs1(u: int) -> None:
+            visited[u] = True
+            for v in g[u]:
+                if not visited[v]:
+                    dfs1(v)
+            order.append(u)
+
+        for i in range(V):
+            if not visited[i]:
+                dfs1(i)
+
+        visited2 = [False] * V
+        comps: List[List[int]] = []
+
+        def dfs2(u: int, acc: List[int]) -> None:
+            visited2[u] = True
+            acc.append(u)
+            for v in gt[u]:
+                if not visited2[v]:
+                    dfs2(v, acc)
+
+        for u in reversed(order):
+            if not visited2[u]:
+                comp: List[int] = []
+                dfs2(u, comp)
+                comps.append(sorted(comp))
+
+        # Deterministic ordering: larger SCCs first (by size desc), then by smallest vertex
+        comps.sort(key=lambda c: (-len(c), c[0]))
+        return comps
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    v1, e1 = 5, [[1, 0], [0, 2], [2, 1], [0, 3], [3, 4]]
+    s1 = sol.kosaraju_sccs(v1, e1)
+    assert s1 == [[0, 1, 2], [3], [4]], "Test 1 Failed"
+    print("Test 1 Passed: classic 5-vertex SCC example")
+
+    v2, e2 = 3, [[0, 1], [1, 2]]
+    assert sol.kosaraju_sccs(v2, e2) == [[0], [1], [2]], "Test 2 Failed"
+    print("Test 2 Passed: simple path DAG")
+
+    v3, e3 = 4, [[0, 1], [1, 2], [2, 0], [2, 3], [3, 2]]
+    # One SCC: cycle on 0-1-2 plus 2<->3 merges everyone.
+    assert sol.kosaraju_sccs(v3, e3) == [[0, 1, 2, 3]], "Test 3 Failed"
+    print("Test 3 Passed: merged SCC with 2<->3 bridge into cycle")
+
+    v4, e4 = 1, []
+    assert sol.kosaraju_sccs(v4, e4) == [[0]], "Test 4 Failed"
+    print("Test 4 Passed: single vertex")
+
+    print("\nAll tests passed!")
+````

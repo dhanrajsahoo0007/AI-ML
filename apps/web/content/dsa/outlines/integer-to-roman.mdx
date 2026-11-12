@@ -32,3 +32,71 @@ Example 3:
 ````text
 - 1 <= num <= 3999
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy / lookup table
+Repeatedly subtract the largest representable value and append its symbol.
+
+1. Define ordered (value, numeral) pairs from largest to smallest.
+2. For each pair, append the numeral floor(num / value) times and reduce num.
+3. Stop when num becomes zero and return the built string.
+
+## Complexity
+
+**Time:** O(1) - Bounded by a fixed table of thirteen symbols.
+
+**Space:** O(1) - Output length is bounded by a small constant for num &lt;= 3999.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def intToRoman(self, num: int) -> str:
+        digits = [
+            (1000, "M"),
+            (900, "CM"),
+            (500, "D"),
+            (400, "CD"),
+            (100, "C"),
+            (90, "XC"),
+            (50, "L"),
+            (40, "XL"),
+            (10, "X"),
+            (9, "IX"),
+            (5, "V"),
+            (4, "IV"),
+            (1, "I"),
+        ]
+        roman_parts: List[str] = []
+        for value, symbol in digits:
+            if num == 0:
+                break
+            count = num // value  # how many times this symbol fits
+            num -= count * value
+            roman_parts.append(symbol * count)  # append that many copies
+        return "".join(roman_parts)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.intToRoman(3) == "III", "Test 1 Failed"
+    print("Test 1 Passed: 3 -> III")
+    assert sol.intToRoman(58) == "LVIII", "Test 2 Failed"
+    print("Test 2 Passed: 58 -> LVIII")
+    assert sol.intToRoman(1994) == "MCMXCIV", "Test 3 Failed"
+    print("Test 3 Passed: 1994 -> MCMXCIV")
+    assert sol.intToRoman(3999) == "MMMCMXCIX", "Test 4 Failed"
+    print("Test 4 Passed: upper bound")
+    assert sol.intToRoman(9) == "IX", "Test 5 Failed"
+    print("Test 5 Passed: subtractive nine")
+    print("\nAll test cases passed!")
+````

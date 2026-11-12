@@ -1,0 +1,88 @@
+---
+title: "Template: String Pattern"
+description: "Given an alphabet list and a length n, return all strings of length n formed by choosing one character at each position (Cartesian product / telephone-style…"
+topics: [backtracking]
+group: "05. String Pattern"
+number: "00"
+order: 12005000000000
+status: outline
+---
+
+Given an alphabet list and a length n, return all strings of length n formed by choosing
+one character at each position (Cartesian product / telephone-style enumeration).
+
+## Examples
+
+````text
+Example 1:
+Input: chars = ["a", "b"], n = 2
+Output: ["aa","ab","ba","bb"] (order may vary)
+````
+
+## Constraints
+
+````text
+- 1 <= len(chars) <= 5
+- 0 <= n <= 4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** String building by index backtracking
+Fix position by position; at each depth try every allowed character, then backtrack.
+
+1. If index == n, append the built string and return.
+2. For each character in chars, recurse with index + 1 and extended string.
+
+## Complexity
+
+**Time:** O(len(chars)^n \* n) - strings counted, each length n.
+
+**Space:** O(n) - recursion depth and active string excluding output.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def buildStrings(self, chars: List[str], n: int) -> List[str]:
+        if n == 0:
+            return [""]
+        result: List[str] = []
+
+        def backtrack(i: int, cur: List[str]) -> None:
+            if i == n:
+                result.append("".join(cur))
+                return
+            for ch in chars:
+                cur.append(ch)
+                backtrack(i + 1, cur)
+                cur.pop()
+
+        backtrack(0, [])
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert set(sol.buildStrings(["x"], 3)) == {"xxx"}, "Test 1 Failed"
+    print("Test 1 Passed: one char length 3")
+
+    assert set(sol.buildStrings(["a", "b"], 2)) == {"aa", "ab", "ba", "bb"}, "Test 2 Failed"
+    print("Test 2 Passed: two chars length 2")
+
+    assert sol.buildStrings(["a"], 0) == [""], "Test 3 Failed"
+    print("Test 3 Passed: n=0 -> empty string")
+
+    assert set(sol.buildStrings(["0", "1"], 1)) == {"0", "1"}, "Test 4 Failed"
+    print("Test 4 Passed: binary length 1")
+
+    print("\nAll test cases passed!")
+````

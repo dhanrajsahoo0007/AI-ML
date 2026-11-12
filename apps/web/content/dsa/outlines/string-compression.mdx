@@ -37,3 +37,77 @@ Example 3:
 - 1 <= len(chars) <= 2000
 - chars[i] is a lowercase English letter, uppercase English letter, digit, or symbol.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two pointers (read / write)
+One pointer scans groups; another writes the compact encoding without extra arrays.
+
+1. Walk i through chars, measuring each equal run length.
+2. Write the character at write index, then write each digit of count as characters if count &gt; 1.
+3. Advance i past the run and repeat until the string is exhausted.
+4. Return the final write index.
+
+## Complexity
+
+**Time:** O(n) - Single pass over chars.
+
+**Space:** O(1) - Only index variables besides the required in-place output.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def compress(self, chars: List[str]) -> int:
+        n = len(chars)
+        write = 0  # next position to write in the compressed prefix
+        i = 0  # read head
+        while i < n:
+            curr = chars[i]
+            count = 0
+            while i < n and chars[i] == curr:  # measure full run of ``curr``
+                i += 1
+                count += 1
+            chars[write] = curr
+            write += 1
+            if count > 1:
+                for ch in str(count):  # multi-digit counts split into separate slots
+                    chars[write] = ch
+                    write += 1
+        return write
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    c1 = ["a", "a", "b", "b", "c", "c", "c"]
+    assert sol.compress(c1) == 6, "Test 1 Failed"
+    assert c1[:6] == ["a", "2", "b", "2", "c", "3"], "Test 1 Failed"
+    print("Test 1 Passed: a2b2c3")
+    c2 = ["a"]
+    assert sol.compress(c2) == 1, "Test 2 Failed"
+    assert c2[:1] == ["a"], "Test 2 Failed"
+    print("Test 2 Passed: single char")
+    c3 = ["a", "b", "b", "b", "b", "b", "b", "b", "b", "b", "b", "b", "b"]
+    assert sol.compress(c3) == 4, "Test 3 Failed"
+    assert c3[:4] == ["a", "b", "1", "2"], "Test 3 Failed"
+    print("Test 3 Passed: double-digit count")
+    c4 = ["a", "a", "a", "b", "b", "a", "a"]
+    ln = sol.compress(c4)
+    assert ln == 6, "Test 4 Failed"
+    assert c4[:ln] == ["a", "3", "b", "2", "a", "2"], "Test 4 Failed"
+    print("Test 4 Passed: multiple runs")
+    c5 = ["x"] * 9
+    ln5 = sol.compress(c5)
+    assert ln5 == 2, "Test 5 Failed"
+    assert c5[:ln5] == ["x", "9"], "Test 5 Failed"
+    print("Test 5 Passed: single digit count nine")
+    print("\nAll test cases passed!")
+````

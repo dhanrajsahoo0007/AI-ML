@@ -23,3 +23,61 @@ Example 2: s = "a" -> 0
 ````text
 - 1 <= len(s) <= 2000
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Palindrome preprocessing + recursion
+Try every first palindrome prefix, recurse on suffix.
+
+1. Precompute is\_pal\[i\]\[j\].
+2. dfs(i) = min cuts for s\[i:\]; if suffix palindrome return 0 else 1+min dfs(j+1).
+
+## Complexity
+
+**Time:** O(n^2) with memo.
+
+**Space:** O(n^2) for palindrome table plus O(n) stack.
+
+## Solution
+
+````python
+class Solution:
+    def minCut(self, s: str) -> int:
+        n = len(s)
+        pal = [[False] * n for _ in range(n)]
+        for i in range(n - 1, -1, -1):
+            for j in range(i, n):
+                if s[i] == s[j] and (j - i <= 2 or pal[i + 1][j - 1]):
+                    pal[i][j] = True
+
+        memo: dict[int, int] = {}
+
+        def dfs(i: int) -> int:
+            if i == n:
+                return -1
+            if i in memo:
+                return memo[i]
+            best = n
+            for j in range(i, n):
+                if pal[i][j]:
+                    best = min(best, 1 + dfs(j + 1))
+            memo[i] = best
+            return best
+
+        return dfs(0)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minCut("aab") == 1, "Test 1 Failed"
+    assert sol.minCut("a") == 0, "Test 2 Failed"
+    assert sol.minCut("racecar") == 0, "Test 3 Failed"
+    assert sol.minCut("ab") == 1, "Test 4 Failed"
+    assert sol.minCut("noon") == 0, "Test 5 Failed"
+    print("\nAll test cases passed!")
+````

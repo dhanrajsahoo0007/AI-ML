@@ -1,0 +1,117 @@
+---
+title: "Frequency sort of array"
+description: "Given an array of integers, sort the array by decreasing frequency of each value."
+topics: [basic-python]
+number: "01"
+order: 1000000000
+status: outline
+---
+
+Given an array of integers, sort the array by decreasing frequency of each
+value. If two values appear the same number of times, the smaller value
+should appear first in the output (stable tie-break by numeric order).
+
+## Examples
+
+````text
+Example 1:
+    Input: [2, 5, 2, 8, 5, 6, 8, 8]
+    Output: [8, 8, 8, 2, 2, 5, 5, 6]
+
+Example 2:
+    Input: [2, 5, 2, 6, -1, 9999999, 5, 8, 8, 8]
+    Output: [8, 8, 8, 2, 2, 5, 5, -1, 6, 9999999]
+
+Example 3:
+    Input: [1]
+    Output: [1]
+````
+
+## Constraints
+
+````text
+- 1 <= len(arr) <= 10^5
+- -10^9 <= arr[i] <= 10^9
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hashing + Custom Sort
+Count occurrences with a hash map, then order keys or the full array using a
+composite sort key (negative frequency for descending, then value for ties).
+
+1. Build frequency counts for every element with Counter.
+2. Sort either unique keys by (-freq, value) and expand, or sort the whole
+array with key=lambda x: (-freq\[x\], x).
+3. Return the sorted sequence.
+
+## Complexity
+
+**Time:** O(n log n) — counting is O(n); sorting the full list dominates;
+the unique-key variant is O(n + k log k) for k distinct values.
+
+**Space:** O(n) — frequency map, output, and typical sort auxiliary space.
+
+## Solution
+
+````python
+from collections import Counter
+from typing import List
+
+
+class Solution:
+    def frequency_sort(self, arr: List[int]) -> List[int]:
+        freq = Counter(arr)
+
+        def sort_key(x: int) -> tuple:
+            return (-freq[x], x)
+
+        return sorted(arr, key=sort_key)
+
+    def frequency_sort_by_unique_keys(self, arr: List[int]) -> List[int]:
+        freq = Counter(arr)
+        ordered = sorted(freq.keys(), key=lambda x: (-freq[x], x))
+        out: List[int] = []
+        for x in ordered:
+            out.extend([x] * freq[x])
+        return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.frequency_sort([2, 5, 2, 8, 5, 6, 8, 8]) == [8, 8, 8, 2, 2, 5, 5, 6], (
+        "Test 1 Failed"
+    )
+    print("Test 1 Passed: frequency_sort example 1")
+
+    assert sol.frequency_sort_by_unique_keys([2, 5, 2, 8, 5, 6, 8, 8]) == [
+        8,
+        8,
+        8,
+        2,
+        2,
+        5,
+        5,
+        6,
+    ], "Test 2 Failed"
+    print("Test 2 Passed: frequency_sort_by_unique_keys matches example 1")
+
+    expected = [8, 8, 8, 2, 2, 5, 5, -1, 6, 9999999]
+    assert sol.frequency_sort([2, 5, 2, 6, -1, 9999999, 5, 8, 8, 8]) == expected, (
+        "Test 3 Failed"
+    )
+    assert sol.frequency_sort_by_unique_keys([2, 5, 2, 6, -1, 9999999, 5, 8, 8, 8]) == (
+        expected
+    ), "Test 4 Failed"
+    print("Test 3–4 Passed: both methods agree on example 2")
+
+    assert sol.frequency_sort([1]) == [1], "Test 5 Failed"
+    print("Test 5 Passed: single element")
+
+    print("\nAll test cases passed!")
+````

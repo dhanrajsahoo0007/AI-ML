@@ -34,3 +34,87 @@ Example 2:
 - 1 <= len(meetings) <= 10^5
 - meetings[i].length == 2 with 0 <= start_i < end_i <= 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two heaps (free rooms + busy timeline)
+Track available room ids in a min-heap and busy rooms in a min-heap ordered by release
+time so each meeting greedily picks the smallest feasible room after simulating delays.
+
+1. Sort meetings by start time.
+2. Maintain a min-heap of free room ids and a min-heap of (end\_time, room\_id) pairs.
+3. Before each meeting, move every finished meeting from busy back to free.
+4. If a room exists, schedule at the original times; otherwise pop the earliest ending
+busy entry, delay the meeting to that end time, and reuse its room.
+5. Increment usage for the chosen room and push its new busy entry.
+
+## Complexity
+
+**Time:** O(m log m + m log n) for m meetings due to sorting and heaps.
+
+**Space:** O(n + m) for heaps and counters.
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def mostBooked(self, n: int, meetings: List[List[int]]) -> int:
+        meetings.sort()
+        free: List[int] = list(range(n))
+        heapq.heapify(free)
+        busy: List[tuple[int, int]] = []
+        usage = [0] * n
+
+        for start, end in meetings:
+            duration = end - start
+
+            while busy and busy[0][0] <= start:
+                _, room = heapq.heappop(busy)
+                heapq.heappush(free, room)
+
+            if free:
+                room = heapq.heappop(free)
+                actual_start = start
+            else:
+                release, room = heapq.heappop(busy)
+                actual_start = release
+
+            actual_end = actual_start + duration
+            usage[room] += 1
+            heapq.heappush(busy, (actual_end, room))
+
+        best_room = 0
+        for room in range(1, n):
+            if usage[room] > usage[best_room]:
+                best_room = room
+        return best_room
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.mostBooked(2, [[0, 10], [1, 5], [2, 7], [3, 4]]) == 0, "Test 1 Failed"
+    print("Test 1 Passed: delays favor room zero most often")
+
+    assert sol.mostBooked(3, [[1, 20], [2, 10], [3, 5], [4, 9], [6, 8]]) == 1, "Test 2 Failed"
+    print("Test 2 Passed: busiest room wins tie-breaking")
+
+    assert sol.mostBooked(1, [[5, 10], [1, 3]]) == 0, "Test 3 Failed"
+    print("Test 3 Passed: single room absorbs every meeting")
+
+    assert sol.mostBooked(2, [[0, 1], [1, 2], [2, 3], [3, 4]]) == 0, "Test 4 Failed"
+    print("Test 4 Passed: sequential chain prefers smallest room")
+
+    assert sol.mostBooked(4, [[18, 19], [3, 12], [17, 19], [7, 13], [12, 17]]) == 0, "Test 5 Failed"
+    print("Test 5 Passed: LC sample keeps room zero busiest")
+
+    print("\nAll test cases passed!")
+````

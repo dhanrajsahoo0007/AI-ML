@@ -1,0 +1,101 @@
+---
+title: "Template: Combination Pattern"
+description: "Given integers n and k, return all combinations of k distinct numbers chosen from 1..n."
+topics: [backtracking]
+group: "03. Combination Pattern"
+number: "00"
+order: 12003000000000
+status: outline
+---
+
+Given integers n and k, return all combinations of k distinct numbers chosen from 1..n.
+
+## Examples
+
+````text
+Example 1:
+Input: n = 4, k = 2
+Output: [[1,2],[1,3],[1,4],[2,3],[2,4],[3,4]]
+````
+
+## Constraints
+
+````text
+- 1 <= k <= n <= 20.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Combination / bounded-depth backtracking
+Choose the next element from a moving start index so order increases and duplicates are avoided.
+
+1. When path has length k, record a copy and return.
+2. For each candidate i from start to n, append i and recurse with start i + 1 and k - 1 depth equivalent via path length.
+
+## Complexity
+
+**Time:** O(k \* C(n,k)) - binomial count of combinations, each length k.
+
+**Space:** O(k) - recursion depth and path excluding stored answers.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def combine(self, n: int, k: int) -> List[List[int]]:
+        result: List[List[int]] = []
+
+        def backtrack(start: int, path: List[int]) -> None:
+            if len(path) == k:
+                result.append(path[:])
+                return
+            for i in range(start, n + 1):
+                path.append(i)
+                backtrack(i + 1, path)
+                path.pop()
+
+        backtrack(1, [])
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def norm(combs: List[List[int]]) -> List[tuple]:
+        return sorted(tuple(c) for c in combs)
+
+    assert norm(sol.combine(4, 2)) == [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)], "Test 1 Failed"
+    print("Test 1 Passed: n=4 k=2")
+
+    assert sol.combine(1, 1) == [[1]], "Test 2 Failed"
+    print("Test 2 Passed: n=1 k=1")
+
+    assert norm(sol.combine(5, 3)) == norm(
+        [
+            [1, 2, 3],
+            [1, 2, 4],
+            [1, 2, 5],
+            [1, 3, 4],
+            [1, 3, 5],
+            [1, 4, 5],
+            [2, 3, 4],
+            [2, 3, 5],
+            [2, 4, 5],
+            [3, 4, 5],
+        ]
+    ), "Test 3 Failed"
+    print("Test 3 Passed: n=5 k=3")
+
+    assert sol.combine(3, 3) == [[1, 2, 3]], "Test 4 Failed"
+    print("Test 4 Passed: n=3 k=3")
+
+    print("\nAll test cases passed!")
+````

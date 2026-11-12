@@ -9,3 +9,49 @@ status: outline
 ---
 
 Given k eggs and n floors, find minimum moves in worst case to determine critical floor.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Minimax recursion
+Try first drop at each floor; worst case is max(breaks, survives).
+
+## Complexity
+
+**Time:** Exponential without memo.
+
+## Solution
+
+````python
+from functools import lru_cache
+
+
+class Solution:
+    def superEggDrop(self, k: int, n: int) -> int:
+        @lru_cache(None)
+        def dp(e: int, f: int) -> int:
+            if f == 0:
+                return 0
+            if e == 1:
+                return f
+            best = 10**9
+            for x in range(1, f + 1):
+                best = min(best, 1 + max(dp(e - 1, x - 1), dp(e, f - x)))
+            return best
+
+        return dp(k, n)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.superEggDrop(1, 2) == 2
+    assert sol.superEggDrop(2, 6) == 3
+    assert sol.superEggDrop(3, 14) == 4
+    assert sol.superEggDrop(1, 1) == 1
+    assert sol.superEggDrop(2, 2) == 2
+    print("\nAll test cases passed!")
+````

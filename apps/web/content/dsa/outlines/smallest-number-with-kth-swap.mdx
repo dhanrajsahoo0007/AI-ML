@@ -30,3 +30,77 @@ Example 2:
 - 1 <= len(num_str) <= 10 for exhaustive search
 - Digits are '0'..'9'
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Backtracking with greedy minimum digit
+At each index, if a smaller digit exists to the right, swap with the rightmost minimum to
+preserve options, decrease k, recurse; also try skipping a swap.
+
+1. Track the minimum string found.
+2. From \`index\`, find the minimum digit in digits\[index:\]; if it equals digits\[index\], only recurse forward with same k.
+3. Otherwise swap with each index holding that minimum (try all), recurse with k-1, backtrack.
+
+## Complexity
+
+**Time:** Exponential in worst case; bounded for small inputs.
+
+**Space:** O(n) - recursion depth.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findSmallestNum(self, num_str: str, k: int) -> str:
+        digits: List[str] = list(num_str)
+        best = [num_str]
+
+        def swap(i: int, j: int) -> None:
+            digits[i], digits[j] = digits[j], digits[i]
+
+        def dfs(index: int, swaps: int) -> None:
+            cur = "".join(digits)
+            if cur < best[0]:
+                best[0] = cur
+            if swaps == 0 or index == len(digits):
+                return
+            min_digit = min(digits[index:])
+            if digits[index] != min_digit:
+                for j in range(len(digits) - 1, index, -1):
+                    if digits[j] == min_digit:
+                        swap(index, j)
+                        dfs(index + 1, swaps - 1)
+                        swap(index, j)
+            dfs(index + 1, swaps)
+
+        dfs(0, k)
+        return best[0]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findSmallestNum("4321", 1) == "1324", "Test 1 Failed"
+    print("Test 1 Passed: one swap pulls smallest digit forward")
+
+    assert sol.findSmallestNum("7654321", 1) == "1654327", "Test 2 Failed"
+    print("Test 2 Passed: one swap on descending")
+
+    assert sol.findSmallestNum("221", 2) == "122", "Test 3 Failed"
+    print("Test 3 Passed: duplicates")
+
+    assert sol.findSmallestNum("10", 0) == "10", "Test 4 Failed"
+    print("Test 4 Passed: zero swaps")
+
+    assert sol.findSmallestNum("21", 1) == "12", "Test 5 Failed"
+    print("Test 5 Passed: swap pair to ascending")
+
+    print("\nAll test cases passed!")
+````

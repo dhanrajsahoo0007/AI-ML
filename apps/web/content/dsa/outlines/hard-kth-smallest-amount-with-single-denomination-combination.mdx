@@ -25,3 +25,117 @@ Output: 9
 - 1 <= len(coins) <= 15
 - 1 <= k <= 2 * 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Value + Inclusion–Exclusion
+Count numbers &lt;= X divisible by at least one coin via IE over LCMs of nonempty subsets.
+
+1. count(X) = union size of multiples &lt;= X.
+2. Binary search smallest X with count(X) &gt;= k; expand hi until count(hi) &gt;= k.
+
+## Complexity
+
+**Time:** O(2^n \* n \* log U) - U is answer magnitude bound.
+
+**Space:** O(1) - Subset iteration only.
+Restored (original notes, diagrams, and walkthrough):
+3116. Kth Smallest Amount With Single Denomination Combination
+Hard
+Topics
+Companies
+Hint
+You are given an integer array coins representing coins of different denominations and an integer k.
+
+You have an infinite number of coins of each denomination. However, you are not allowed to combine coins of different denominations.
+
+Return the kth smallest amount that can be made using these coins.
+
+Example 1:
+
+Input: coins = \[3,6,9\], k = 3
+
+Output: 9
+
+Explanation: The given coins can make the following amounts:
+Coin 3 produces multiples of 3: 3, 6, 9, 12, 15, etc.
+Coin 6 produces multiples of 6: 6, 12, 18, 24, etc.
+Coin 9 produces multiples of 9: 9, 18, 27, 36, etc.
+All of the coins combined produce: 3, 6, 9, 12, 15, etc.
+
+Example 2:
+
+Input: coins = \[5,2\], k = 7
+
+Output: 12
+
+Explanation: The given coins can make the following amounts:
+Coin 5 produces multiples of 5: 5, 10, 15, 20, etc.
+Coin 2 produces multiples of 2: 2, 4, 6, 8, 10, 12, etc.
+All of the coins combined produce: 2, 4, 5, 6, 8, 10, 12, 14, 15, etc.
+
+Constraints:
+
+1 &lt;= coins.length &lt;= 15
+1 &lt;= coins\[i\] &lt;= 25
+1 &lt;= k &lt;= 2 \* 109
+coins contains pairwise distinct integers.
+
+## Solution
+
+````python
+from math import gcd
+from typing import List
+
+
+class Solution:
+    def findKthSmallest(self, coins: List[int], k: int) -> int:
+        n = len(coins)
+
+        def count_leq(x: int) -> int:
+            total = 0
+            for mask in range(1, 1 << n):
+                bits = bin(mask).count("1")
+                l = 1
+                for i in range(n):
+                    if mask >> i & 1:
+                        l = l * coins[i] // gcd(l, coins[i])
+                c = x // l
+                if bits % 2 == 1:
+                    total += c
+                else:
+                    total -= c
+            return total
+
+        lo = min(coins)
+        hi = lo
+        while count_leq(hi) < k:
+            hi *= 2
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if count_leq(mid) >= k:
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findKthSmallest([3, 6, 9], 3) == 9, "Test 1 Failed"
+    print("Test 1 Passed: multiples of three dominate early ranks")
+    assert sol.findKthSmallest([5, 2], 7) == 12, "Test 2 Failed"
+    print("Test 2 Passed: interleaving twos and fives")
+    assert sol.findKthSmallest([4], 10) == 40, "Test 3 Failed"
+    print("Test 3 Passed: single arithmetic progression")
+    assert sol.findKthSmallest([3, 5], 1) == 3, "Test 4 Failed"
+    print("Test 4 Passed: smallest coin wins first rank")
+    assert sol.findKthSmallest([7, 11], 5) == 22, "Test 5 Failed"
+    print("Test 5 Passed: two coprime bases")
+    print("\nAll test cases passed!")
+````

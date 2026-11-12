@@ -24,3 +24,82 @@ Output: two board layouts (see tests)
 ````text
 - 1 <= n <= 9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Row-wise queen placement with diagonal sets
+Track occupied columns and both diagonals; place one queen per row then recurse.
+
+1. For each row try each column not attacked by column or diagonal sets.
+2. Place queen, update sets, recurse next row, then undo.
+3. When row == n, snapshot the board.
+
+## Complexity
+
+**Time:** O(n!) worst-case search tree.
+
+**Space:** O(n) for sets and recursion excluding outputs.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def solveNQueens(self, n: int) -> List[List[str]]:
+        cols = set()
+        pos_diag = set()
+        neg_diag = set()
+        board = [["."] * n for _ in range(n)]
+        result: List[List[str]] = []
+
+        def backtrack(row: int) -> None:
+            if row == n:
+                result.append(["".join(r) for r in board])
+                return
+            for col in range(n):
+                if col in cols or (row + col) in pos_diag or (row - col) in neg_diag:
+                    continue
+                cols.add(col)
+                pos_diag.add(row + col)
+                neg_diag.add(row - col)
+                board[row][col] = "Q"
+                backtrack(row + 1)
+                board[row][col] = "."
+                cols.remove(col)
+                pos_diag.remove(row + col)
+                neg_diag.remove(row - col)
+
+        backtrack(0)
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    n4 = sol.solveNQueens(4)
+    assert len(n4) == 2, "Test 1 Failed"
+    assert sorted(n4) == sorted(
+        [
+            [".Q..", "...Q", "Q...", "..Q."],
+            ["..Q.", "Q...", "...Q", ".Q.."],
+        ]
+    ), "Test 1 Failed"
+    print("Test 1 Passed: four queens")
+
+    assert sol.solveNQueens(1) == [["Q"]], "Test 2 Failed"
+    print("Test 2 Passed: single queen")
+
+    assert sol.solveNQueens(2) == [], "Test 3 Failed"
+    print("Test 3 Passed: no solution for n=2")
+
+    assert sol.solveNQueens(3) == [], "Test 4 Failed"
+    print("Test 4 Passed: no solution for n=3")
+
+    print("\nAll test cases passed!")
+````

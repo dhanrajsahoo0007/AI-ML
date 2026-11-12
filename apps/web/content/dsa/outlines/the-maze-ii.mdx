@@ -33,3 +33,70 @@ Example 2:
 - maze[i][j] is 0 or 1 (0 empty, 1 wall)
 - start and destination are distinct empty cells
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Dijkstra / BFS on implicit graph (roll-to-stop edges)
+
+1. From each stopping cell, simulate rolling in four directions until the next wall.
+2. Each roll defines a weighted edge equal to the number of steps rolled.
+3. Run Dijkstra from start; return distance to destination or -1.
+
+## Complexity
+
+**Time:** O(m \* n \* log(m \* n)) in typical sparse roll graph; each cell processed with heap.
+
+**Space:** O(m \* n) for distances and heap.
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+import heapq
+
+
+class Solution:
+    def shortestDistance(self, maze: List[List[int]], start: List[int], destination: List[int]) -> int:
+        m, n = len(maze), len(maze[0])
+        sr, sc = start
+        dr, dc = destination
+        dist = [[float("inf")] * n for _ in range(m)]
+        dist[sr][sc] = 0
+        pq = [(0, sr, sc)]
+        dirs = ((-1, 0), (1, 0), (0, -1), (0, 1))
+
+        while pq:
+            d, r, c = heapq.heappop(pq)
+            if d > dist[r][c]:
+                continue
+            if r == dr and c == dc:
+                return d
+            for dr_, dc_ in dirs:
+                nr, nc, steps = r, c, 0
+                while 0 <= nr + dr_ < m and 0 <= nc + dc_ < n and maze[nr + dr_][nc + dc_] == 0:
+                    nr += dr_
+                    nc += dc_
+                    steps += 1
+                if steps == 0:
+                    continue
+                nd = d + steps
+                if nd < dist[nr][nc]:
+                    dist[nr][nc] = nd
+                    heapq.heappush(pq, (nd, nr, nc))
+        return -1 if dist[dr][dc] == float("inf") else int(dist[dr][dc])
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    maze1 = [[0, 0, 1, 0, 0], [0, 0, 0, 0, 0], [0, 0, 0, 1, 0], [1, 1, 0, 1, 1], [0, 0, 0, 0, 0]]
+    assert sol.shortestDistance(maze1, [0, 4], [4, 4]) == 12, "Test 1 Failed"
+    maze2 = [[0, 0, 0, 0, 0], [1, 1, 0, 0, 1], [0, 0, 0, 0, 0], [0, 1, 0, 0, 1], [0, 1, 0, 0, 0]]
+    assert sol.shortestDistance(maze2, [4, 3], [0, 1]) == -1, "Test 2 Failed"
+    print("All tests passed!")
+````

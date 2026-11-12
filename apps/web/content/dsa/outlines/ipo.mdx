@@ -36,3 +36,77 @@ Example 2:
 - 0 <= profits[i] <= 10^4
 - 0 <= capital[i] <= 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two Heaps
+We use a min-heap sorted by capital requirements and a max-heap for available profits.
+This lets us efficiently find the most profitable affordable project at each step.
+
+1. Sort projects by capital requirement (min-heap).
+2. For each of k rounds:
+a. Move all affordable projects to a max-heap of profits.
+b. Pick the most profitable project and add its profit to capital.
+3. Return final capital.
+
+## Complexity
+
+**Time:** O(N log N)
+- Sorting: O(N log N). Each project pushed/popped once: O(N log N).
+
+**Space:** O(N) for both heaps.
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def findMaximizedCapital(self, k: int, w: int, profits: List[int], capital: List[int]) -> int:
+        projects = sorted(zip(capital, profits))
+        available_profits = []
+        i = 0
+        n = len(profits)
+
+        for _ in range(k):
+            while i < n and projects[i][0] <= w:
+                heapq.heappush(available_profits, -projects[i][1])
+                i += 1
+
+            if not available_profits:
+                break
+
+            # Profit increases capital (undo negation from max-heap encoding).
+            w -= heapq.heappop(available_profits)
+
+        return w
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Basic case
+    assert sol.findMaximizedCapital(2, 0, [1, 2, 3], [0, 1, 1]) == 4, "Test 1 Failed"
+    print("Test 1 Passed: k=2, w=0 -> 4")
+
+    # Test Case 2: Can do all projects
+    assert sol.findMaximizedCapital(3, 0, [1, 2, 3], [0, 1, 2]) == 6, "Test 2 Failed"
+    print("Test 2 Passed: k=3, w=0 -> 6")
+
+    # Test Case 3: High initial capital
+    assert sol.findMaximizedCapital(1, 100, [1, 2, 3], [0, 1, 2]) == 103, "Test 3 Failed"
+    print("Test 3 Passed: w=100, k=1 -> 103")
+
+    # Test Case 4: Cannot afford any project
+    assert sol.findMaximizedCapital(1, 0, [1, 2, 3], [1, 1, 2]) == 0, "Test 4 Failed"
+    print("Test 4 Passed: cannot afford any -> 0")
+
+    print("\nAll test cases passed!")
+````

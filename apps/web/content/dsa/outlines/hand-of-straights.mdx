@@ -34,3 +34,61 @@ Example 3:
 - 0 <= hand[i] <= 10^9
 - 1 <= groupSize <= len(hand)
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Frequency Depletion
+Process values in sorted order and repeatedly start a straight from the smallest unused value.
+
+1. Count each card with a frequency map; if len(hand) is not divisible by groupSize, return False.
+2. For each value in sorted order, while it still has copies, try to consume groupSize consecutive values each by that count.
+3. If any value in the window is insufficient, return False; otherwise return True.
+
+## Complexity
+
+**Time:** O(n log n) - Sorting distinct keys dominates.
+
+**Space:** O(n) - Counter storage.
+
+## Solution
+
+````python
+from collections import Counter
+from typing import List
+
+
+class Solution:
+    def isNStraightHand(self, hand: List[int], groupSize: int) -> bool:
+        if len(hand) % groupSize:
+            return False
+        cnt = Counter(hand)
+        for x in sorted(cnt):
+            need = cnt[x]
+            if need == 0:
+                continue
+            for y in range(x, x + groupSize):
+                if cnt[y] < need:
+                    return False
+                cnt[y] -= need
+        return True
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.isNStraightHand([1, 2, 3, 6, 2, 3, 4, 7, 8], 3) is True, "Test 1 Failed"
+    print("Test 1 Passed: two straights of three")
+    assert sol.isNStraightHand([1, 2, 3, 4, 5], 4) is False, "Test 2 Failed"
+    print("Test 2 Passed: cannot fill group of four")
+    assert sol.isNStraightHand([8, 10, 12], 3) is False, "Test 3 Failed"
+    print("Test 3 Passed: not consecutive")
+    assert sol.isNStraightHand([1, 1, 2, 2, 3, 3], 3) is True, "Test 4 Failed"
+    print("Test 4 Passed: two parallel straights")
+    assert sol.isNStraightHand([1], 1) is True, "Test 5 Failed"
+    print("Test 5 Passed: single card group")
+    print("\nAll test cases passed!")
+````

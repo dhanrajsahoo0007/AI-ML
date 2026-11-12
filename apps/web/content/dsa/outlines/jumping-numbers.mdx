@@ -27,3 +27,64 @@ Example 2:
 ````text
 - 0 <= x <= 10^9 (practical BFS handles typical bounds)
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - BFS / digit DP on implicit number graph
+
+1. Seed the queue with digits 1..9 (and 0) within range.
+2. From each number, append last\_digit +/- 1 if the new number stays &lt;= x.
+3. Collect all reachable values and return sorted unique list.
+
+## Complexity
+
+**Time:** O(k) where k is count of jumping numbers up to x (bounded for practical x).
+
+**Space:** O(k) for the queue and result set.
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def jumpingNumbers(self, x: int) -> List[int]:
+        if x < 0:
+            return []
+        seen = set()
+        q = deque()
+        for d in range(min(10, x + 1)):
+            q.append(d)
+        while q:
+            num = q.popleft()
+            if num in seen:
+                continue
+            seen.add(num)
+            if num > x:
+                continue
+            if num == 0:
+                continue
+            last = num % 10
+            for delta in (-1, 1):
+                nd = last + delta
+                if 0 <= nd <= 9:
+                    nxt = num * 10 + nd
+                    if nxt <= x and nxt not in seen:
+                        q.append(nxt)
+        return sorted(seen)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.jumpingNumbers(20) == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12], "Test 1 Failed"
+    assert sol.jumpingNumbers(0) == [0], "Test 2 Failed"
+    assert 98 in sol.jumpingNumbers(100) and 101 not in sol.jumpingNumbers(100), "Test 3 Failed"
+    print("All tests passed!")
+````

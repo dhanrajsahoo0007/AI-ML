@@ -24,3 +24,108 @@ Output: [1,4,2,3]
 - 1 <= n <= 5 * 10^4
 - 1 <= Node.val <= 1000
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Middle + reverse + weave
+Split at middle, reverse second half, then interleave pointers.
+
+1. Slow/fast to find middle; cut second half.
+2. Reverse second half in-place.
+3. Merge first and second by alternating next pointers.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1).
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+def linked_list_to_list(head: Optional[ListNode]) -> List[int]:
+    out: List[int] = []
+    while head:
+        out.append(head.val)
+        head = head.next
+    return out
+
+
+class Solution:
+    def reorderList(self, head: Optional[ListNode]) -> None:
+        if not head or not head.next:
+            return
+
+        slow = fast = head
+        while fast.next and fast.next.next:
+            slow = slow.next
+            fast = fast.next.next
+
+        second = slow.next
+        slow.next = None
+
+        prev: Optional[ListNode] = None
+        while second:
+            nxt = second.next
+            second.next = prev
+            prev = second
+            second = nxt
+
+        first, second = head, prev
+        while second:
+            t1, t2 = first.next, second.next
+            first.next = second
+            second.next = t1
+            first, second = t1, t2
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    h1 = list_to_linked_list([1, 2, 3, 4])
+    sol.reorderList(h1)
+    assert linked_list_to_list(h1) == [1, 4, 2, 3]
+
+    h2 = list_to_linked_list([1, 2, 3, 4, 5])
+    sol.reorderList(h2)
+    assert linked_list_to_list(h2) == [1, 5, 2, 4, 3]
+
+    h3 = list_to_linked_list([1])
+    sol.reorderList(h3)
+    assert linked_list_to_list(h3) == [1]
+
+    h4 = list_to_linked_list([1, 2])
+    sol.reorderList(h4)
+    assert linked_list_to_list(h4) == [1, 2]
+
+    h5 = list_to_linked_list([1, 2, 3])
+    sol.reorderList(h5)
+    assert linked_list_to_list(h5) == [1, 3, 2]
+
+    print("\nAll test cases passed!")
+````

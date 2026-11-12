@@ -27,3 +27,56 @@ Example 2:
 ````text
 - 0 <= n <= 2000 (keep n modest for recursion depth in CPython)
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Recursion with deferred / immediate work
+Ascending order recurses first then appends the current value; descending prints
+the current value before recursing so larger indices unwind in reverse.
+
+1. For ascending: if n == 0 return \[\]; else return one\_to\_n(n-1) + \[n\].
+2. For descending: if n == 0 return \[\]; else return \[n\] + n\_to\_one(n-1).
+
+## Complexity
+
+**Time:** O(n) - one recursive call per integer
+
+**Space:** O(n) - output size plus O(n) call stack depth
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def one_to_n(self, n: int) -> List[int]:
+        if n <= 0:
+            return []
+        return self.one_to_n(n - 1) + [n]
+
+    def n_to_one(self, n: int) -> List[int]:
+        if n <= 0:
+            return []
+        return [n] + self.n_to_one(n - 1)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.one_to_n(0) == [], "Test 1 Failed"
+    assert sol.one_to_n(5) == [1, 2, 3, 4, 5], "Test 2 Failed"
+    assert sol.n_to_one(0) == [], "Test 3 Failed"
+    assert sol.n_to_one(4) == [4, 3, 2, 1], "Test 4 Failed"
+    assert sol.one_to_n(1) == [1] and sol.n_to_one(1) == [1], "Test 5 Failed"
+    print("Test 1 Passed: empty ascending")
+    print("Test 2 Passed: one_to_n(5)")
+    print("Test 3 Passed: empty descending")
+    print("Test 4 Passed: n_to_one(4)")
+    print("Test 5 Passed: single element")
+    print("\nAll test cases passed!")
+````

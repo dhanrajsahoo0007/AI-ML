@@ -27,3 +27,145 @@ Example 2:
 ````text
 - 1 <= m, n <= 10
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Multi-source BFS on a grid
+Expand rotten frontier level-by-level counting minutes.
+
+1. Enqueue all rotten cells with time 0; count fresh oranges.
+2. BFS pop level; rot adjacent fresh cells and enqueue with time+1.
+3. If fresh remain, return -1; else return elapsed minutes (0 if none were fresh).
+
+## Complexity
+
+**Time:** O(mn)
+
+**Space:** O(mn) for the queue.
+
+## Solution
+
+````python
+from typing import List
+from collections import deque
+
+
+class Solution:
+    def orangesRotting(self, grid: List[List[int]]) -> int:
+        rows, cols = len(grid), len(grid[0])
+        q: deque[tuple[int, int, int]] = deque()
+        fresh = 0
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r][c] == 2:
+                    q.append((r, c, 0))
+                elif grid[r][c] == 1:
+                    fresh += 1
+        if fresh == 0:
+            return 0
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+        minutes = 0
+        while q:
+            r, c, t = q.popleft()
+            minutes = max(minutes, t)
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] == 1:
+                    grid[nr][nc] = 2
+                    fresh -= 1
+                    q.append((nr, nc, t + 1))
+        return -1 if fresh else minutes
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    g1 = [[2, 1, 1], [1, 1, 0], [0, 1, 1]]
+    assert sol.orangesRotting([row[:] for row in g1]) == 4, "Test 1 Failed"
+    print("Test 1 Passed: four minutes")
+    g2 = [[2, 1, 1], [0, 1, 1], [1, 0, 1]]
+    assert sol.orangesRotting([row[:] for row in g2]) == -1, "Test 2 Failed"
+    print("Test 2 Passed: unreachable fresh")
+    assert sol.orangesRotting([[0, 2]]) == 0, "Test 3 Failed"
+    print("Test 3 Passed: no fresh")
+    g4 = [[2, 1], [1, 1], [1, 2]]
+    assert sol.orangesRotting([row[:] for row in g4]) == 1, "Test 4 Failed"
+    print("Test 4 Passed: small grid")
+    assert sol.orangesRotting([[1], [1], [1], [1]]) == -1, "Test 5 Failed"
+    print("Test 5 Passed: no rot")
+    print("All tests passed!")
+````
+
+## Another version
+
+From 17. Graphs/04. BFS Story Based/04. Advanced Graph Traversal.
+
+### Approach
+
+**Pattern:** Multi-source BFS on a grid
+
+1. Enqueue all rotten cells with time 0; count fresh oranges.
+2. If no fresh at start, return 0.
+3. BFS expanding to adjacent fresh cells, rotting them and tracking elapsed minutes; if fresh remain, -1.
+
+### Complexity
+
+**Time:** O(m \* n)
+
+**Space:** O(m \* n) for the queue.
+
+Original LeetCode-style problem statement (994) is summarized above; prior debug print removed in favor of tests.
+
+### Solution
+
+````python
+from typing import List
+from collections import deque
+
+
+class Solution:
+    def orangesRotting(self, grid: List[List[int]]) -> int:
+        if not grid:
+            return 0
+
+        rows, cols = len(grid), len(grid[0])
+        q: deque[tuple[int, int, int]] = deque()
+        fresh = 0
+        for r in range(rows):
+            for c in range(cols):
+                if grid[r][c] == 2:
+                    q.append((r, c, 0))
+                elif grid[r][c] == 1:
+                    fresh += 1
+        if fresh == 0:
+            return 0
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+        minutes = 0
+        while q:
+            r, c, t = q.popleft()
+            minutes = max(minutes, t)
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] == 1:
+                    grid[nr][nc] = 2
+                    fresh -= 1
+                    q.append((nr, nc, t + 1))
+        return -1 if fresh else minutes
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    g1 = [[2, 1, 1], [1, 1, 0], [0, 1, 1]]
+    assert sol.orangesRotting([row[:] for row in g1]) == 4, "Test 1 Failed"
+    g2 = [[2, 1, 1], [0, 1, 1], [1, 0, 1]]
+    assert sol.orangesRotting([row[:] for row in g2]) == -1, "Test 2 Failed"
+    assert sol.orangesRotting([[0, 2]]) == 0, "Test 3 Failed"
+    print("All tests passed!")
+````

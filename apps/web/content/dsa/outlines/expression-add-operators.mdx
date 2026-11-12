@@ -26,3 +26,79 @@ Output: ["1*2*3","1+2+3"]
 - 1 <= len(num) <= 10
 - Operands fit in 64-bit evaluation for tests below
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS with multiplication tail
+Track running sum and last operand so \* can replace the previous additive contribution.
+
+1. DFS chooses the next number span and operator (none for first number).
+2. For \* update sum as sum - last + last \* cur; set last to last \* cur.
+3. Prune leading-zero multi-digit spans.
+
+## Complexity
+
+**Time:** O(4^n \* n) branching across splits and operators.
+
+**Space:** O(n) recursion depth.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def addOperators(self, num: str, target: int) -> List[str]:
+        result: List[str] = []
+
+        def dfs(index: int, path: List[str], total: int, last: int) -> None:
+            if index == len(num):
+                if total == target:
+                    result.append("".join(path))
+                return
+            for j in range(index, len(num)):
+                if j > index and num[index] == "0":
+                    break
+                cur_str = num[index : j + 1]
+                cur = int(cur_str)
+                if not path:
+                    dfs(j + 1, [cur_str], cur, cur)
+                else:
+                    dfs(j + 1, path + ["+", cur_str], total + cur, cur)
+                    dfs(j + 1, path + ["-", cur_str], total - cur, -cur)
+                    dfs(
+                        j + 1,
+                        path + ["*", cur_str],
+                        total - last + last * cur,
+                        last * cur,
+                    )
+
+        dfs(0, [], 0, 0)
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert set(sol.addOperators("123", 6)) == {"1*2*3", "1+2+3"}, "Test 1 Failed"
+    print("Test 1 Passed: 123 -> 6")
+
+    assert set(sol.addOperators("232", 8)) == {"2*3+2", "2+3*2"}, "Test 2 Failed"
+    print("Test 2 Passed: 232 -> 8")
+
+    assert set(sol.addOperators("105", 5)) == {"1*0+5", "10-5"}, "Test 3 Failed"
+    print("Test 3 Passed: 105 -> 5")
+
+    assert sol.addOperators("5", 5) == ["5"], "Test 4 Failed"
+    print("Test 4 Passed: single digit")
+
+    assert sol.addOperators("99", 100) == [], "Test 5 Failed"
+    print("Test 5 Passed: impossible target")
+
+    print("\nAll test cases passed!")
+````

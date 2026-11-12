@@ -27,3 +27,66 @@ Output: 9
 - 1 <= n <= 50
 - 0 <= grid[i][j]
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 3D DP on row and two columns
+State f\[r\]\[c1\]\[c2\] after processing row r at columns c1 and c2.
+
+1. Initialize f\[0\]\[0\]\[n-1\].
+2. For each row transition, add cherries on the two landing cells (dedupe same cell).
+3. Answer f\[n-1\]\[n-1\]\[n-1\].
+
+## Complexity
+
+**Time:** O(n^3).
+
+**Space:** O(n^3) (can compress to O(n^2) per row).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def cherryPickup(self, grid: List[List[int]]) -> int:
+        n = len(grid)
+        if n == 1:
+            return max(0, grid[0][0])
+        neg = -10**9
+        f = [[[neg] * n for _ in range(n)] for _ in range(n)]
+        f[0][0][n - 1] = grid[0][0] + grid[0][n - 1]
+        for r in range(n - 1):
+            for a in range(n):
+                for b in range(n):
+                    if f[r][a][b] <= neg // 2:
+                        continue
+                    for da in (-1, 0, 1):
+                        for db in (-1, 0, 1):
+                            na, nb = a + da, b + db
+                            if 0 <= na < n and 0 <= nb < n:
+                                add = grid[r + 1][na] + (grid[r + 1][nb] if na != nb else 0)
+                                f[r + 1][na][nb] = max(f[r + 1][na][nb], f[r][a][b] + add)
+        return max(0, f[n - 1][n - 1][n - 1])
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.cherryPickup([[3, 1], [2, 5]]) == 9, "Test 1 Failed"
+    print("Test 1 Passed: two by two optimal merge at corner")
+    assert sol.cherryPickup([[1]]) == 1, "Test 2 Failed"
+    print("Test 2 Passed: single cell")
+    assert sol.cherryPickup([[0, 8], [8, 0]]) == 8, "Test 3 Failed"
+    print("Test 3 Passed: symmetric two by two")
+    assert sol.cherryPickup([[5, 2], [3, 4]]) == 11, "Test 4 Failed"
+    print("Test 4 Passed: two row harvest")
+    assert sol.cherryPickup([[1, 0, 2], [0, 3, 0], [4, 0, 5]]) == 11, "Test 5 Failed"
+    print("Test 5 Passed: three by three sparse")
+    print("\nAll test cases passed!")
+````

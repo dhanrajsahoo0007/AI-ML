@@ -9,3 +9,59 @@ status: outline
 ---
 
 Binary tree maximum path sum where path can start/end anywhere (LeetCode 124).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Post-order with global max capturing arch paths.
+
+## Complexity
+
+**Time:** O(n).
+
+## Solution
+
+````python
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass
+class TreeNode:
+    val: int = 0
+    left: Optional['TreeNode'] = None
+    right: Optional['TreeNode'] = None
+
+
+class Solution:
+    def maxPathSum(self, root: Optional[TreeNode]) -> int:
+        self.ans = -10**15
+
+        def dfs(node: Optional[TreeNode]) -> int:
+            if not node:
+                return 0
+            l = max(0, dfs(node.left))
+            r = max(0, dfs(node.right))
+            self.ans = max(self.ans, node.val + l + r)
+            return node.val + max(l, r)
+
+        dfs(root)
+        return self.ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == '__main__':
+    sol = Solution()
+    root = TreeNode(-10, TreeNode(9), TreeNode(20, TreeNode(15), TreeNode(7)))
+    assert sol.maxPathSum(root) == 42
+    assert sol.maxPathSum(TreeNode(1)) == 1
+    assert sol.maxPathSum(TreeNode(-3)) == -3
+    r = TreeNode(2, TreeNode(-1), None)
+    assert sol.maxPathSum(r) == 2
+    r2 = TreeNode(1, TreeNode(2), TreeNode(3))
+    assert sol.maxPathSum(r2) == 6
+    print('\nAll test cases passed!')
+````

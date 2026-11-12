@@ -28,3 +28,77 @@ Example 2:
 ````text
 - 1 <= N <= 9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Backtracking with increasing constraint
+Build digit lists; each new digit must exceed the previous; for N&gt;1 first digit is 1..9.
+
+1. DFS appends digits d with d &gt; last (or any 1..9 when empty).
+2. When length equals N, convert digit list to integer and append.
+3. For N == 1, return 0..9; for N &gt; 1 the first digit is 1..9 so there is no leading zero.
+
+## Complexity
+
+**Time:** O(C(9, N)) - choose N distinct increasing digits from 1..9.
+
+**Space:** O(N) - recursion depth excluding output.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def increasingNumbers(self, n: int) -> List[int]:
+        result: List[int] = []
+
+        def backtrack(path: List[int]) -> None:
+            if len(path) == n:
+                value = 0
+                for d in path:
+                    value = value * 10 + d
+                result.append(value)
+                return
+            start = (path[-1] + 1) if path else 1
+            for d in range(start, 10):
+                path.append(d)
+                backtrack(path)
+                path.pop()
+
+        if n == 1:
+            return list(range(10))
+        backtrack([])
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.increasingNumbers(1) == list(range(10)), "Test 1 Failed"
+    print("Test 1 Passed: N=1 includes zero")
+
+    two = sol.increasingNumbers(2)
+    assert two[0] == 12 and two[-1] == 89 and len(two) == 36, "Test 2 Failed"
+    print("Test 2 Passed: N=2 count and bounds")
+
+    def strictly_increasing_digits(x: int) -> bool:
+        s = str(x)
+        return all(s[i] < s[i + 1] for i in range(len(s) - 1))
+
+    assert all(strictly_increasing_digits(x) for x in two), "Test 3 Failed"
+    print("Test 3 Passed: digits strictly increase")
+
+    assert len(sol.increasingNumbers(3)) == 84, "Test 4 Failed"
+    print("Test 4 Passed: N=3 count C(9,3)")
+
+    assert sol.increasingNumbers(2)[0] == 12, "Test 5 Failed"
+    print("Test 5 Passed: smallest two-digit increasing number")
+
+    print("\nAll test cases passed!")
+````

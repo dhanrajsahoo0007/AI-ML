@@ -23,3 +23,121 @@ Logs with mixed order -> output sorted by end time with readable lines.
 ````text
 - Each reqId has at most one Start and one Finish when complete; missing Finish yields 'unknown'.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hash map aggregation + sort
+Store start/finish per id while streaming; build records then sort by end key.
+
+1. Regex-parse timestamps and ids from each line.
+2. Merge into a dict of partial records; flag finish before start as error when detected.
+3. Sort completed rows by finish time; format title-case id in output.
+
+## Complexity
+
+**Time:** O(L log L) for L requests when sorting.
+
+**Space:** O(L) for stored intervals.
+
+## Solution
+
+````python
+import re
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
+
+@dataclass
+class _Req:
+    start: Optional[int] = None
+    finish: Optional[int] = None
+
+
+class GoogleDocAccessLog:
+    _pat = re.compile(r"^(Start|Finish)\((\d+),\s*([^)]+)\)\s*$", re.I)
+
+    @classmethod
+    def _parse(cls, line: str) -> Tuple[str, int, str]:
+        m = cls._pat.match(line.strip())
+        if not m:
+            raise ValueError(f"bad log line: {line!r}")
+        kind, ts, rid = m.group(1).lower(), int(m.group(2)), m.group(3).strip()
+        return kind, ts, rid
+
+    @classmethod
+    def process(cls, lines: List[str]) -> str:
+        data: Dict[str, _Req] = {}
+        errors: List[str] = []
+        for raw in lines:
+            if not raw.strip():
+                continue
+            kind, ts, rid = cls._parse(raw)
+            rec = data.setdefault(rid, _Req())
+            if kind == "start":
+                if rec.start is not None and rec.start != ts:
+                    errors.append(f"duplicate start for {rid}")
+                rec.start = ts
+                if rec.finish is not None and rec.finish < ts:
+                    errors.append(f"start after finish for {rid}")
+            else:
+                if rec.finish is not None:
+                    errors.append(f"duplicate finish for {rid}")
+                rec.finish = ts
+                if rec.start is not None and ts < rec.start:
+                    errors.append(f"finish before start for {rid}")
+
+        if errors:
+            return "Error: " + "; ".join(errors)
+
+        rows: List[Tuple[int, str, int, int]] = []
+        for rid, rec in data.items():
+            if rec.finish is None:
+                continue
+            s = rec.start if rec.start is not None else -1
+            rows.append((rec.finish, rid, s, rec.finish))
+        rows.sort(key=lambda x: x[0])
+
+        out_lines: List[str] = []
+        for _, rid, s, e in rows:
+            label = rid[:1].upper() + rid[1:] if rid else rid
+            ss = "unknown" if s < 0 else str(s)
+            out_lines.append(f"{label} started at {ss} and ended at {e}")
+        for rid, rec in sorted(data.items()):
+            if rec.finish is None and rec.start is not None:
+                label = rid[:1].upper() + rid[1:]
+                out_lines.append(f"{label} started at {rec.start} and ended at unknown")
+        return "\n".join(out_lines)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    g = GoogleDocAccessLog()
+    logs1 = [
+        "Start(1, req1)",
+        "Finish(2, req1)",
+        "Start(3, req2)",
+        "Start(4, req3)",
+        "Start(5, req4)",
+        "Finish(6, req4)",
+        "Finish(7, req3)",
+        "Finish(8, req2)",
+    ]
+    assert "Req1 started at 1 and ended at 2" in g.process(logs1).splitlines()[0]
+    assert g.process(logs1).splitlines()[1].startswith("Req4")
+
+    logs2 = ["Start(10, req5)", "Start(20, req6)", "Finish(30, req5)", "Finish(40, req6)"]
+    out2 = g.process(logs2)
+    assert "Req5 started at 10 and ended at 30" in out2
+
+    bad = g.process(["Start(10, req1)", "Finish(5, req1)"])
+    assert bad.startswith("Error:")
+
+    out_of_order = g.process(["Start(5, req4)", "Finish(6, req4)", "Start(1, req1)", "Finish(2, req1)"])
+    assert "Req4" in out_of_order and "Req1" in out_of_order
+
+    print("\nAll test cases passed!")
+````

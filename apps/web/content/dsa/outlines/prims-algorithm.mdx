@@ -31,3 +31,94 @@ Example 2:
 - 0 <= u, v < n, u != v
 - 1 <= weight <= 10^6
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Minimum Spanning Tree — Prim (priority-queue / lazy decrease-key style)
+
+1. Build an undirected adjacency list with edge weights.
+2. Start from vertex 0 (or any vertex); maintain min-heap of (edge\_weight, next\_vertex).
+3. Grow the MST: repeatedly pop the cheapest edge to an unvisited vertex; add its weight
+to the total and push all edges from that vertex.
+4. If fewer than n vertices are reached, the graph is disconnected.
+
+## Complexity
+
+**Time:** O((V + E) log V) — each vertex is extracted once; each edge is relaxed once
+in the heap-based formulation.
+
+**Space:** O(V + E) — adjacency list, visited array, and heap.
+
+## Solution
+
+````python
+from typing import List, Tuple
+import heapq
+
+
+class Solution:
+    # --- Original teaching notes (MST visualization) ---
+    # Imagine vertices as cities and edges as roads with tolls. Prim grows one tree from a seed:
+    #
+    #        (1)                    After picking cheapest frontier edge each time,
+    #      0-----1                  the set of chosen edges stays acyclic and connected.
+    #      |\    |                  Kruskal sorts all edges globally; Prim expands locally
+    #    3 | \ 2| 2                 from the current component using a min-heap "frontier".
+    #      |  \  |
+    #      2---3--3
+    #
+    # Trace (conceptual): start at 0, heap has (1,1), (3,2). Pop (1,1) -> visit 1, add 1.
+    # Push from 1: (2,3), (2,2). Pop (2,2) or (2,3) ... etc. Total MST weight sums popped
+    # light edges that lead to NEW vertices only.
+    # --- end visualization ---
+
+    def prim_mst_total_weight(self, n: int, edges: List[List[int]]) -> int:
+        adj: List[List[Tuple[int, int]]] = [[] for _ in range(n)]
+        for u, v, w in edges:
+            adj[u].append((v, w))
+            adj[v].append((u, w))
+
+        visited = [False] * n
+        heap: List[Tuple[int, int]] = [(0, 0)]  # (cost_to_enter, vertex)
+        total = 0
+        used = 0
+
+        while heap and used < n:
+            w, u = heapq.heappop(heap)
+            if visited[u]:
+                continue
+            visited[u] = True
+            total += w
+            used += 1
+            for v, wt in adj[u]:
+                if not visited[v]:
+                    heapq.heappush(heap, (wt, v))
+
+        return total if used == n else -1
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    n1, e1 = 4, [[0, 1, 1], [1, 2, 2], [0, 2, 3], [2, 3, 4]]
+    assert sol.prim_mst_total_weight(n1, e1) == 7, "Test 1 Failed"
+    print("Test 1 Passed: 4-node connected graph")
+
+    n2, e2 = 3, [[0, 1, 1]]
+    assert sol.prim_mst_total_weight(n2, e2) == -1, "Test 2 Failed"
+    print("Test 2 Passed: disconnected graph")
+
+    n3, e3 = 1, []
+    assert sol.prim_mst_total_weight(n3, e3) == 0, "Test 3 Failed"
+    print("Test 3 Passed: single vertex")
+
+    n4, e4 = 2, [[0, 1, 5]]
+    assert sol.prim_mst_total_weight(n4, e4) == 5, "Test 4 Failed"
+    print("Test 4 Passed: single edge")
+
+    print("\nAll tests passed!")
+````

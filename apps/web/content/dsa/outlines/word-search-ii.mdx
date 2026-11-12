@@ -31,3 +31,141 @@ Example 2:
 - 1 <= len(words) <= 3 * 10^4, 1 <= len(words[i]) <= 10
 - Letters are lowercase English; all words are unique
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Trie + DFS backtracking
+Put words in a trie so each step only follows valid next letters; mark found words in the trie to prune.
+
+1. Build a trie from words; store the full word at terminal nodes for collection.
+2. DFS from each cell with the root; match board letters to trie children.
+3. Temporarily mark visited cells; restore after exploring four directions.
+4. When a terminal node is hit, add the word and clear the terminal flag to avoid duplicates.
+
+## Complexity
+
+**Time:** O(M \* N \* 4^L) worst-case DFS exploration; trie pruning and removing found words improve typical performance — L is max word length.
+
+**Space:** O(S) for the trie — S is total characters in all words — plus O(L) recursion depth.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given an m x n board of characters and a list of strings words, return all words on the board.
+Each word must be constructed from letters of sequentially adjacent cells, where adjacent cells
+are horizontally or vertically neighboring. The same letter cell may not be used more than once in a word.
+
+Time Complexity: O(M \* N \* 4^L), where M and N are the dimensions of the board, and L is the maximum length of words.
+Space Complexity: O(K), where K is the total number of characters in all words.
+
+Approach:
+1. Build a Trie (prefix tree) from the given words for efficient prefix matching.
+2. Perform DFS on the board, simultaneously traversing the Trie.
+3. When a word is found, add it to the result set.
+4. Use a set to store results to automatically handle duplicates.
+
+Examples:
+1. Input: board = \[\["o","a","a","n"\],\["e","t","a","e"\],\["i","h","k","r"\],\["i","f","l","v"\]\], words = \["oath","pea","eat","rain"\]
+Output: \["eat","oath"\]
+
+2. Input: board = \[\["a","b"\],\["c","d"\]\], words = \["abcb"\]
+Output: \[\]
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List
+
+
+class TrieNode:
+    def __init__(self) -> None:
+        self.children: dict[str, TrieNode] = {}
+        self.is_word: bool = False
+        self.word: str = ""
+
+    def insert(self, word: str) -> None:
+        node = self
+        for char in word:
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            node = node.children[char]
+        node.is_word = True
+        node.word = word
+
+
+class Solution:
+    def find_words(self, board: List[List[str]], words: List[str]) -> List[str]:
+        root = TrieNode()
+        for w in words:
+            root.insert(w)
+
+        rows, cols = len(board), len(board[0])
+        result: set[str] = set()
+
+        def dfs(i: int, j: int, node: TrieNode) -> None:
+            if node.is_word:
+                result.add(node.word)
+                node.is_word = False
+
+            if i < 0 or i >= rows or j < 0 or j >= cols:
+                return
+            ch = board[i][j]
+            if ch not in node.children:
+                return
+
+            board[i][j] = "#"
+            nxt = node.children[ch]
+            for di, dj in ((0, 1), (1, 0), (0, -1), (-1, 0)):
+                dfs(i + di, j + dj, nxt)
+            board[i][j] = ch
+
+        for r in range(rows):
+            for c in range(cols):
+                dfs(r, c, root)
+
+        return list(result)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    board1 = [
+        ["o", "a", "a", "n"],
+        ["e", "t", "a", "e"],
+        ["i", "h", "k", "r"],
+        ["i", "f", "l", "v"],
+    ]
+    words1 = ["oath", "pea", "eat", "rain"]
+    out1 = sorted(sol.find_words(board1, words1))
+    assert out1 == ["eat", "oath"], "Test 1 Failed"
+    print("Test 1 Passed: LeetCode example 1")
+
+    board2 = [["a", "b"], ["c", "d"]]
+    words2 = ["abcb"]
+    assert sol.find_words(board2, words2) == [], "Test 2 Failed"
+    print("Test 2 Passed: cannot reuse same cell")
+
+    board3 = [["a"]]
+    words3 = ["a", "b"]
+    out3 = set(sol.find_words(board3, words3))
+    assert out3 == {"a"}, "Test 3 Failed"
+    print("Test 3 Passed: single cell single match")
+
+    board4 = [["a", "b"], ["c", "d"]]
+    words4 = ["acdb"]
+    out4 = set(sol.find_words(board4, words4))
+    assert out4 == {"acdb"}, "Test 4 Failed"
+    print("Test 4 Passed: simple snake path")
+
+    board5 = [["o", "a", "a", "n"], ["e", "t", "a", "e"], ["i", "h", "k", "r"], ["i", "f", "l", "v"]]
+    words5 = ["oath", "eat"]
+    out5 = set(sol.find_words(board5, words5))
+    assert out5 == {"oath", "eat"}, "Test 5 Failed"
+    print("Test 5 Passed: subset of words")
+
+    print("\nAll test cases passed!")
+````

@@ -26,3 +26,62 @@ Example 2:
 ````text
 - All coordinates are integers with absolute value <= 2000
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Compare six squared distances
+A square has four equal non-zero side lengths and two equal longer diagonals
+with diagonal^2 = 2 \* side^2.
+
+1. Compute squared distances between all six unordered pairs.
+2. Sort them; require d\[0..3\] equal, d\[4\]==d\[5\], d\[0\] &gt; 0, and d\[4\] == 2\*d\[0\].
+
+## Complexity
+
+**Time:** O(1) - six pairwise checks
+
+**Space:** O(1)
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def validSquare(
+        self, p1: List[int], p2: List[int], p3: List[int], p4: List[int]
+    ) -> bool:
+        pts = [p1, p2, p3, p4]
+        dists: List[int] = []
+        for i in range(4):
+            for j in range(i + 1, 4):
+                dx = pts[i][0] - pts[j][0]
+                dy = pts[i][1] - pts[j][1]
+                dists.append(dx * dx + dy * dy)
+        dists.sort()
+        return (
+            dists[0] > 0
+            and dists[0] == dists[1] == dists[2] == dists[3]
+            and dists[4] == dists[5]
+            and dists[4] == 2 * dists[0]
+        )
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.validSquare([0, 0], [1, 1], [1, 0], [0, 1]) is True, "Test 1 Failed"
+    print("Test 1 Passed: axis-aligned square")
+    assert sol.validSquare([0, 0], [1, 1], [1, 0], [0, 12]) is False, "Test 2 Failed"
+    print("Test 2 Passed: not a square")
+    assert sol.validSquare([1, 1], [1, 0], [0, 1], [0, 0]) is True, "Test 3 Failed"
+    print("Test 3 Passed: reordered vertices")
+    assert sol.validSquare([0, 0], [0, 0], [0, 0], [0, 0]) is False, "Test 4 Failed"
+    print("Test 4 Passed: degenerate point rejected")
+    print("\nAll test cases passed!")
+````

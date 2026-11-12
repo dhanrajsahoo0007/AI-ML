@@ -23,3 +23,145 @@ n=5, K=4, moves leading to four X in row 0 -> 'X'.
 ````text
 - 3 <= n, K <= n <= 100; moves are (player, row, col) with zero-based indices.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Incremental win check from last move
+After each placement, scan four directions from that cell counting consecutive same player.
+
+1. Maintain a grid; apply moves in order (later move overwrites a cell if the spec allows).
+2. After each move, from (r,c) count consecutive marks in four axis directions.
+3. If any run reaches K, return that player.
+
+## Complexity
+
+**Time:** O(K) per move after placement.
+
+**Space:** O(n^2) for the board.
+
+## Solution
+
+````python
+from typing import List, Optional, Tuple
+
+
+class TicTacToe:
+    def __init__(self, n: int, k: int) -> None:
+        self.n = n
+        self.k = k
+        self._board: List[List[Optional[str]]] = [[None] * n for _ in range(n)]
+
+    def play_moves(self, moves: List[Tuple[str, int, int]]) -> Optional[str]:
+        for player, r, c in moves:
+            self._board[r][c] = player
+            if self._wins_from(r, c, player):
+                return player
+        return None
+
+    def _wins_from(self, r: int, c: int, p: str) -> bool:
+        n, k = self.n, self.k
+        dirs = ((1, 0), (0, 1), (1, 1), (1, -1))
+        for dr, dc in dirs:
+            cnt = 1
+            for sign in (-1, 1):
+                rr, cc = r + sign * dr, c + sign * dc
+                while 0 <= rr < n and 0 <= cc < n and self._board[rr][cc] == p:
+                    cnt += 1
+                    rr += sign * dr
+                    cc += sign * dc
+            if cnt >= k:
+                return True
+        return False
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    def run_case(n: int, k: int, moves: List[Tuple[str, int, int]], expect: Optional[str]) -> None:
+        g = TicTacToe(n, k)
+        assert g.play_moves(moves) == expect
+
+    run_case(
+        5,
+        4,
+        [
+            ("X", 0, 0),
+            ("O", 1, 0),
+            ("X", 0, 1),
+            ("O", 1, 1),
+            ("X", 0, 2),
+            ("O", 1, 2),
+            ("X", 0, 3),
+        ],
+        "X",
+    )
+    run_case(
+        5,
+        3,
+        [
+            ("X", 0, 0),
+            ("O", 1, 0),
+            ("X", 2, 2),
+            ("O", 1, 1),
+            ("X", 3, 3),
+            ("O", 1, 2),
+        ],
+        "O",
+    )
+    run_case(
+        7,
+        5,
+        [
+            ("X", 0, 1),
+            ("O", 1, 1),
+            ("X", 1, 0),
+            ("O", 2, 2),
+            ("X", 2, 1),
+            ("O", 3, 3),
+            ("X", 3, 2),
+            ("O", 4, 4),
+            ("X", 4, 3),
+            ("O", 5, 5),
+            ("X", 5, 4),
+        ],
+        "O",
+    )
+    run_case(
+        10,
+        5,
+        [
+            ("X", 0, 0),
+            ("O", 1, 1),
+            ("X", 1, 1),
+            ("O", 2, 2),
+            ("X", 2, 2),
+            ("O", 3, 3),
+            ("X", 3, 3),
+            ("O", 4, 4),
+            ("X", 4, 4),
+        ],
+        "X",
+    )
+    run_case(
+        15,
+        5,
+        [
+            ("X", 14, 0),
+            ("O", 0, 14),
+            ("X", 13, 1),
+            ("O", 1, 13),
+            ("X", 12, 2),
+            ("O", 2, 12),
+            ("X", 11, 3),
+            ("O", 3, 11),
+            ("X", 10, 4),
+            ("O", 4, 10),
+        ],
+        "X",
+    )
+    run_case(5, 5, [("X", 0, 0), ("O", 1, 0), ("X", 0, 1), ("O", 1, 1)], None)
+    print("\nAll test cases passed!")
+````

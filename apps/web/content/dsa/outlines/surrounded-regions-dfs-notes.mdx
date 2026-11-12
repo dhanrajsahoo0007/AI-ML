@@ -1,0 +1,108 @@
+---
+title: "Surrounded Regions (DFS)"
+description: "Given an m x n board of 'X' and 'O', capture all regions of 'O' that are not connected to the border (4-directionally), by turning those 'O' cells into 'X'."
+topics: [graphs]
+group: "03. DFS Story Based › 05. Advanced Graph Problems"
+number: "01"
+order: 17003005001000
+status: outline
+---
+
+Given an m x n board of 'X' and 'O', capture all regions of 'O' that are not connected to the border
+(4-directionally), by turning those 'O' cells into 'X'. Modify the board in place.
+
+## Examples
+
+````text
+Example 1:
+Input: board = [["X","X","X","X"],["X","O","O","X"],["X","X","O","X"],["X","O","X","X"]]
+Output: [["X","X","X","X"],["X","X","X","X"],["X","X","X","X"],["X","O","X","X"]]
+````
+
+## Constraints
+
+````text
+- m == len(board), n == len(board[0])
+- 1 <= m, n <= 200
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS flood fill from border 'O'
+Any 'O' touching the border survives; DFS marks all connected 'O'; remaining 'O' become 'X'.
+
+1. DFS from every border 'O', temporarily mark visited cells (e.g. 'T').
+2. Flip remaining 'O' to 'X', restore 'T' back to 'O'.
+
+## Complexity
+
+**Time:** O(mn)
+
+**Space:** O(mn) for recursion stack in the worst case.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def solve(self, board: List[List[str]]) -> None:
+        if not board:
+            return
+        m, n = len(board), len(board[0])
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+        def dfs(r: int, c: int) -> None:
+            if r < 0 or c < 0 or r >= m or c >= n or board[r][c] != "O":
+                return
+            board[r][c] = "T"
+            for dr, dc in dirs:
+                dfs(r + dr, c + dc)
+
+        for r in range(m):
+            dfs(r, 0)
+            dfs(r, n - 1)
+        for c in range(n):
+            dfs(0, c)
+            dfs(m - 1, c)
+
+        for r in range(m):
+            for c in range(n):
+                if board[r][c] == "O":
+                    board[r][c] = "X"
+                elif board[r][c] == "T":
+                    board[r][c] = "O"
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    b1 = [["X", "X", "X", "X"], ["X", "O", "O", "X"], ["X", "X", "O", "X"], ["X", "O", "X", "X"]]
+    exp1 = [["X", "X", "X", "X"], ["X", "X", "X", "X"], ["X", "X", "X", "X"], ["X", "O", "X", "X"]]
+    sol.solve(b1)
+    assert b1 == exp1, "Test 1 Failed"
+    print("Test 1 Passed: capture interior")
+    b2 = [["X"]]
+    sol.solve(b2)
+    assert b2 == [["X"]], "Test 2 Failed"
+    print("Test 2 Passed: single cell")
+    b3 = [["O", "O"], ["O", "O"]]
+    sol.solve(b3)
+    assert b3 == [["O", "O"], ["O", "O"]], "Test 3 Failed"
+    print("Test 3 Passed: all touch border")
+    b4 = [["X", "O", "X"], ["O", "O", "O"], ["X", "O", "X"]]
+    sol.solve(b4)
+    assert b4 == [["X", "O", "X"], ["O", "O", "O"], ["X", "O", "X"]], "Test 4 Failed"
+    print("Test 4 Passed: cross touches border")
+    b5 = [["X", "X", "X"], ["X", "O", "X"], ["X", "X", "X"]]
+    exp5 = [["X", "X", "X"], ["X", "X", "X"], ["X", "X", "X"]]
+    sol.solve(b5)
+    assert b5 == exp5, "Test 5 Failed"
+    print("Test 5 Passed: fully surrounded center")
+    print("All tests passed!")
+````

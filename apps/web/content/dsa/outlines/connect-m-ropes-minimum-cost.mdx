@@ -32,3 +32,77 @@ Example 2:
 - 1 <= ropes.length <= 10^4
 - 1 <= ropes[i] <= 10^4
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy with Heap (Huffman Coding)
+Always connect the two shortest ropes first (greedy choice).
+This minimizes the total cost because shorter ropes contribute to
+fewer subsequent connection costs.
+
+1. Build a min-heap from all rope lengths.
+2. While more than one rope remains:
+a. Pop the two shortest ropes.
+b. Connect them (sum) and add the cost.
+c. Push the combined rope back.
+3. Return total cost.
+
+## Complexity
+
+**Time:** O(n log n)
+
+**Space:** O(n) for the heap
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def connectRopes(self, ropes: List[int]) -> int:
+        heapq.heapify(ropes)
+        total_cost = 0
+
+        while len(ropes) > 1:
+            first = heapq.heappop(ropes)
+            second = heapq.heappop(ropes)
+            # Pay now; push combined rope so it can participate in later merges.
+            cost = first + second
+            total_cost += cost
+            heapq.heappush(ropes, cost)
+
+        return total_cost
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Basic case
+    assert sol.connectRopes([4, 3, 2, 6]) == 29, "Test 1 Failed"
+    print("Test 1 Passed: [4,3,2,6] -> 29")
+
+    # Test Case 2: Three ropes
+    assert sol.connectRopes([1, 2, 3]) == 9, "Test 2 Failed"
+    print("Test 2 Passed: [1,2,3] -> 9")
+
+    # Test Case 3: Two ropes
+    assert sol.connectRopes([5, 10]) == 15, "Test 3 Failed"
+    print("Test 3 Passed: [5,10] -> 15")
+
+    # Test Case 4: Single rope (no connection needed)
+    assert sol.connectRopes([7]) == 0, "Test 4 Failed"
+    print("Test 4 Passed: [7] -> 0")
+
+    # Test Case 5: Equal lengths
+    assert sol.connectRopes([1, 1, 1, 1]) == 8, "Test 5 Failed"
+    print("Test 5 Passed: [1,1,1,1] -> 8")
+
+    print("\nAll test cases passed!")
+````

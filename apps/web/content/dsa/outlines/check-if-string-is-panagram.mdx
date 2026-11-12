@@ -29,3 +29,51 @@ Example 2:
 - 1 <= len(sentence) <= 1000
 - sentence consists of lowercase English letters.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Frequency / set
+Track which of the 26 letters appear; a pangram has all 26 present.
+
+1. Use a length-26 counter or a set of seen letters.
+2. Iterate characters and mark each letter seen.
+3. Return whether all 26 positions are non-zero (or set size is 26).
+
+## Complexity
+
+**Time:** O(n) - Single pass over the sentence.
+
+**Space:** O(1) - Fixed 26 counters regardless of n.
+
+## Solution
+
+````python
+class Solution:
+    def checkIfPangram(self, sentence: str) -> bool:
+        counts = [0] * 26  # one slot per letter a..z
+        for ch in sentence:
+            counts[ord(ch) - ord("a")] += 1
+        return all(c > 0 for c in counts)  # pangram iff every letter seen at least once
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert (
+        sol.checkIfPangram("thequickbrownfoxjumpsoverthelazydog") is True
+    ), "Test 1 Failed"
+    print("Test 1 Passed: classic pangram")
+    assert sol.checkIfPangram("leetcode") is False, "Test 2 Failed"
+    print("Test 2 Passed: not a pangram")
+    assert sol.checkIfPangram("abcdefghijklmnopqrstuvwxyz") is True, "Test 3 Failed"
+    print("Test 3 Passed: alphabet string")
+    assert sol.checkIfPangram("a") is False, "Test 4 Failed"
+    print("Test 4 Passed: single letter")
+    assert sol.checkIfPangram("a" * 1000) is False, "Test 5 Failed"
+    print("Test 5 Passed: repeated single letter")
+    print("\nAll test cases passed!")
+````

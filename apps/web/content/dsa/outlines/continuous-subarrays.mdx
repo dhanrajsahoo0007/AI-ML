@@ -28,3 +28,64 @@ Example 2:
 - 1 <= len(nums) <= 10^4
 - -10^9 <= nums[i] <= 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Linear scan with running streak length
+Extend a streak while the sequence stays strictly increasing; reset when it breaks.
+
+1. Track the current streak length starting from each new increasing segment.
+2. When nums\[i\] &gt; nums\[i - 1\], increment the streak; otherwise reset to 1.
+3. Keep the maximum streak observed.
+
+## Complexity
+
+**Time:** O(n) - Single pass through the array.
+
+**Space:** O(1) - Only counters are stored.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findLengthOfLCIS(self, nums: List[int]) -> int:
+        best = 1
+        cur = 1
+
+        for i in range(1, len(nums)):
+            if nums[i] > nums[i - 1]:
+                cur += 1
+            else:
+                cur = 1
+            best = max(best, cur)
+
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findLengthOfLCIS([1, 3, 5, 4, 7]) == 3, "Test 1 Failed"
+    print("Test 1 Passed: first increasing run")
+
+    assert sol.findLengthOfLCIS([2, 2, 2, 2, 2]) == 1, "Test 2 Failed"
+    print("Test 2 Passed: no strict increases")
+
+    assert sol.findLengthOfLCIS([1, 2, 3, 4, 5]) == 5, "Test 3 Failed"
+    print("Test 3 Passed: entire array increasing")
+
+    assert sol.findLengthOfLCIS([5, 4, 3, 2, 1]) == 1, "Test 4 Failed"
+    print("Test 4 Passed: strictly decreasing")
+
+    assert sol.findLengthOfLCIS([1, 3, 2, 4, 3, 5]) == 2, "Test 5 Failed"
+    print("Test 5 Passed: multiple short runs")
+
+    print("\nAll test cases passed!")
+````

@@ -25,3 +25,118 @@ Next: hit(300), getHits(300) -> 4, getHits(301) -> 3
 - 1 <= timestamp <= 2 * 10^9
 - Chronological order guaranteed
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Sparse Timeline
+Store aggregated (timestamp, count) sorted by time; bisect the 300-second window.
+
+1. On hit, binary-search insert position and merge same-second counts.
+2. On getHits, sum counts with timestamp in (t-299, t\].
+
+## Complexity
+
+**Time:** O(log n) per operation - n &lt;= distinct timestamps (&lt;= 300).
+
+**Space:** O(n) - List of pairs.
+Restored (original notes, diagrams, and walkthrough):
+362. Design Hit Counter
+Medium
+Topics
+Companies
+
+Design a hit counter which counts the number of hits received in the past 5 minutes (i.e., the past 300 seconds).
+
+Your system should accept a timestamp parameter (in seconds granularity), and you may assume that calls are being made to the system in chronological order (i.e., timestamp is monotonically increasing). Several hits may arrive roughly at the same time.
+
+Implement the HitCounter class:
+
+HitCounter() Initializes the object of the hit counter system.
+void hit(int timestamp) Records a hit that happened at timestamp (in seconds). Several hits may happen at the same timestamp.
+int getHits(int timestamp) Returns the number of hits in the past 5 minutes from timestamp (i.e., the past 300 seconds).
+
+Example 1:
+
+Input
+\["HitCounter", "hit", "hit", "hit", "getHits", "hit", "getHits", "getHits"\]
+\[\[\], \[1\], \[2\], \[3\], \[4\], \[300\], \[300\], \[301\]\]
+Output
+\[null, null, null, null, 3, null, 4, 3\]
+
+Explanation
+HitCounter hitCounter = new HitCounter();
+hitCounter.hit(1);       // hit at timestamp 1.
+hitCounter.hit(2);       // hit at timestamp 2.
+hitCounter.hit(3);       // hit at timestamp 3.
+hitCounter.getHits(4);   // get hits at timestamp 4, return 3.
+hitCounter.hit(300);     // hit at timestamp 300.
+hitCounter.getHits(300); // get hits at timestamp 300, return 4.
+hitCounter.getHits(301); // get hits at timestamp 301, return 3.
+
+Constraints:
+
+1 &lt;= timestamp &lt;= 2 \* 109
+All the calls are being made to the system in chronological order (i.e., timestamp is monotonically increasing).
+At most 300 calls will be made to hit and getHits.
+
+Follow up: What if the number of hits per second could be huge? Does your design scale?
+
+## Solution
+
+````python
+from bisect import bisect_left
+from typing import List, Tuple
+
+
+class HitCounter:
+    def __init__(self) -> None:
+        self.hits: List[Tuple[int, int]] = []
+
+    def hit(self, timestamp: int) -> None:
+        i = bisect_left(self.hits, (timestamp, 0))
+        if i < len(self.hits) and self.hits[i][0] == timestamp:
+            t, c = self.hits[i]
+            self.hits[i] = (t, c + 1)
+        else:
+            self.hits.insert(i, (timestamp, 1))
+
+    def getHits(self, timestamp: int) -> int:
+        lo = bisect_left(self.hits, (timestamp - 299, 0))
+        hi = bisect_left(self.hits, (timestamp + 1, 0))
+        return sum(c for _, c in self.hits[lo:hi])
+
+
+class Solution(HitCounter):
+    """LeetCode 362 wrapper."""
+
+    pass
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    hc = HitCounter()
+    hc.hit(1)
+    hc.hit(2)
+    hc.hit(3)
+    assert hc.getHits(4) == 3, "Test 1 Failed"
+    print("Test 1 Passed: three early hits")
+    hc.hit(300)
+    assert hc.getHits(300) == 4, "Test 2 Failed"
+    print("Test 2 Passed: window still includes 1..3")
+    assert hc.getHits(301) == 3, "Test 3 Failed"
+    print("Test 3 Passed: drop second 1")
+    hc2 = HitCounter()
+    for t in range(1, 301):
+        hc2.hit(t)
+    assert hc2.getHits(300) == 300, "Test 4 Failed"
+    print("Test 4 Passed: full window density")
+    hc3 = HitCounter()
+    hc3.hit(100)
+    assert hc3.getHits(100) == 1, "Test 5 Failed"
+    print("Test 5 Passed: single hit")
+    print("\nAll test cases passed!")
+````

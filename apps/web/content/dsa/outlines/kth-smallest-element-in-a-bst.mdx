@@ -28,3 +28,113 @@ Example 2:
 ````text
 - 1 <= k <= number of nodes <= 10^4.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Inorder early-stop
+Traverse left-root-right while decrementing k until the kth visit.
+
+1. Use iterative stack inorder or recursion with a counter.
+2. Each time a node is visited after processing its left subtree, decrement k.
+3. When k reaches zero, record that node's value and stop.
+
+## Complexity
+
+**Time:** O(h + k) - Left spine plus k pops in the typical case.
+
+**Space:** O(h) - Stack depth for iterative inorder.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given the root of a binary search tree and a positive integer k, find the k-th smallest element in the BST.
+
+Time Complexity:
+- BFS: O(k + log(n)), where n is the number of nodes in the tree
+- DFS (Inorder): O(h + k), where h is the height of the tree
+- Morris Traversal: O(n)
+
+Space Complexity:
+- BFS: O(log(n)), where n is the number of nodes in the tree (for the queue)
+- DFS (Inorder): O(h), where h is the height of the tree (for the recursion stack)
+- Morris Traversal: O(1)
+
+Explanation:
+1. BFS (Level Order Traversal):
+- Uses a priority queue to keep track of the smallest elements
+- Utilizes BST properties to prune unnecessary branches
+- Efficient for both small and large k values
+
+2. DFS (Inorder Traversal):
+- Utilizes BST property: inorder traversal gives nodes in ascending order
+- Can stop early once the k-th element is found
+- Efficient for small k values
+
+3. Morris Traversal:
+- Allows for inorder traversal without using extra space
+- Temporarily modifies the tree structure, but restores it before completion
+- Constant space complexity, but may not be as efficient for small k values
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: List[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+class Solution:
+    def kthSmallest(self, root: Optional[TreeNode], k: int) -> int:
+        stack: list[TreeNode] = []
+        cur = root
+        while cur or stack:
+            while cur:
+                stack.append(cur)
+                cur = cur.left
+            cur = stack.pop()
+            k -= 1
+            if k == 0:
+                return cur.val
+            cur = cur.right
+        raise ValueError("k out of range")
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    root = build_bst_insert([5, 3, 6, 2, 4, 1])
+    assert sol.kthSmallest(root, 1) == 1
+    assert sol.kthSmallest(root, 3) == 3
+    assert sol.kthSmallest(TreeNode(42), 1) == 42
+    r2 = build_bst_insert([10, 5, 15])
+    assert sol.kthSmallest(r2, 2) == 10
+    print("\nAll test cases passed!")
+````

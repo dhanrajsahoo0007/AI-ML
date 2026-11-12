@@ -9,3 +9,45 @@ status: outline
 ---
 
 Sell then must cooldown one day before buying again.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Three-state DP: hold, sold, rest.
+
+## Complexity
+
+**Time:** O(n).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxProfit(self, prices: List[int]) -> int:
+        hold = -10**9
+        sold = 0
+        rest = 0
+        for p in prices:
+            prev_hold = hold
+            hold = max(hold, rest - p)
+            rest = max(rest, sold)
+            sold = prev_hold + p
+        return max(sold, rest)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == '__main__':
+    sol = Solution()
+    assert sol.maxProfit([1, 2, 3, 0, 2]) == 3
+    assert sol.maxProfit([1]) == 0
+    assert sol.maxProfit([6, 1, 3, 2, 4, 7]) == 6
+    assert sol.maxProfit([1, 2, 3, 4, 5]) == 4
+    assert sol.maxProfit([2, 1, 4, 5, 2, 9, 7]) == 10
+    print('\nAll test cases passed!')
+````

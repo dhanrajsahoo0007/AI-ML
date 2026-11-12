@@ -29,3 +29,114 @@ Example 2:
 - The number of nodes is in the range [0, 10^4].
 - Values fit in 32-bit signed integers.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** BST insert
+Walk from the root following left/right comparisons until finding a None child, then attach a new node.
+
+1. If the tree is empty, return a new TreeNode as root.
+2. Otherwise traverse: if val is smaller, go left (insert recursively or iteratively); if larger, go right.
+3. If val equals the current node, return the unchanged subtree root (no duplicate insert).
+
+## Complexity
+
+**Time:** O(h) - One root-to-leaf path in the worst case.
+
+**Space:** O(h) - Recursion stack for recursive insert; O(1) auxiliary for iterative insert.
+Restored (original notes, diagrams, and walkthrough):
+Binary Search Tree (BST) Insertion Implementation
+
+Problem Statement:
+Implement a function to insert a given element into a Binary Search Tree.
+
+Time Complexity: O(h), where h is the height of the tree.
+- In a balanced BST, h = log(n), where n is the number of nodes.
+- In the worst case (skewed tree), h = n.
+
+Space Complexity:
+- O(h) for the recursive approach due to the call stack.
+- O(1) for the iterative approach.
+
+Explanation:
+The insertion algorithm works by traversing the BST to find the appropriate
+position for the new element, maintaining the BST property:
+- For each node, all elements in its left subtree are smaller.
+- For each node, all elements in its right subtree are larger.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def inorder_values(root: Optional[TreeNode]) -> list[int]:
+    if not root:
+        return []
+    return inorder_values(root.left) + [root.val] + inorder_values(root.right)
+
+
+class Solution:
+    def insertIntoBST(self, root: Optional[TreeNode], val: int) -> TreeNode:
+        if root is None:
+            return TreeNode(val)
+        if val < root.val:
+            root.left = self.insertIntoBST(root.left, val)
+        elif val > root.val:
+            root.right = self.insertIntoBST(root.right, val)
+        return root
+
+    def insertIntoBSTIterative(self, root: Optional[TreeNode], val: int) -> TreeNode:
+        if root is None:
+            return TreeNode(val)
+        cur = root
+        while True:
+            if val < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(val)
+                    break
+                cur = cur.left
+            elif val > cur.val:
+                if cur.right is None:
+                    cur.right = TreeNode(val)
+                    break
+                cur = cur.right
+            else:
+                break
+        return root
+
+
+def build_bst_insert(values: list[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    sol = Solution()
+    for v in values:
+        root = sol.insertIntoBST(root, v)
+    return root
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    r1 = build_bst_insert([5, 3, 7, 1, 4, 6, 8])
+    assert inorder_values(r1) == [1, 3, 4, 5, 6, 7, 8]
+    r2 = sol.insertIntoBST(None, 10)
+    assert inorder_values(r2) == [10]
+    r3 = build_bst_insert([2, 1, 3])
+    r3 = sol.insertIntoBST(r3, 4)
+    assert inorder_values(r3) == [1, 2, 3, 4]
+    r4 = TreeNode(1)
+    r4 = sol.insertIntoBSTIterative(r4, 2)
+    assert inorder_values(r4) == [1, 2]
+    print("\nAll test cases passed!")
+````

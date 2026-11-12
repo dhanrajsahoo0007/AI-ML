@@ -26,3 +26,48 @@ Example 2:
 ````text
 - -1000 <= a, b <= 1000 (LeetCode uses wider 32-bit range)
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** XOR with carry propagation
+XOR gives sum without carry; AND shifted left gives carry bits to add.
+
+1. While b != 0: carry = (a &amp; b) &lt;&lt; 1; a = a ^ b; b = carry.
+2. Mask to 32 bits if simulating fixed-width two's complement.
+
+## Complexity
+
+**Time:** O(1) - bounded by bit width
+
+**Space:** O(1)
+
+## Solution
+
+````python
+MASK = 0xFFFFFFFF
+MAX_INT = 0x7FFFFFFF
+
+
+class Solution:
+    def getSum(self, a: int, b: int) -> int:
+        while b & MASK:
+            carry = ((a & b) << 1) & MASK
+            a = (a ^ b) & MASK
+            b = carry
+        return a if a <= MAX_INT else ~(a ^ MASK)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.getSum(1, 2) == 3, "Test 1 Failed"
+    assert sol.getSum(2, 3) == 5, "Test 2 Failed"
+    assert sol.getSum(-1, 1) == 0, "Test 3 Failed"
+    assert sol.getSum(0, 0) == 0, "Test 4 Failed"
+    assert sol.getSum(-2, 5) == 3, "Test 5 Failed"
+    print("\nAll test cases passed!")
+````

@@ -31,3 +31,82 @@ Example 2:
 - 0 <= nums[i] <= 10^9
 - 1 <= k <= nums.length
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap with Other DS (Heap + Counter)
+Use a Counter for occurrences and a min-heap for ordering.
+Always try to form groups starting from the smallest available number.
+
+1. If len(nums) % k != 0, return False.
+2. Count occurrences. Build a min-heap of unique keys.
+3. While heap is non-empty: try to form a group of k consecutive from the smallest.
+4. Decrement counts; if any needed number is missing, return False.
+
+## Complexity
+
+**Time:** O(n log n)
+
+**Space:** O(n)
+
+## Solution
+
+````python
+import heapq
+from collections import Counter
+from typing import List
+
+
+class Solution:
+    def isPossibleDivide(self, nums: List[int], k: int) -> bool:
+        if len(nums) % k != 0:
+            return False
+
+        counts = Counter(nums)
+        heap = list(counts.keys())
+        heapq.heapify(heap)
+
+        while heap:
+            start = heap[0]
+            for num in range(start, start + k):
+                if num not in counts:
+                    return False
+                counts[num] -= 1
+                if counts[num] == 0:
+                    if num != heap[0]:
+                        return False
+                    heapq.heappop(heap)
+
+        return True
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Possible division
+    assert sol.isPossibleDivide([1, 2, 3, 3, 4, 4, 5, 6], 4) == True, "Test 1 Failed"
+    print("Test 1 Passed: k=4 -> True")
+
+    # Test Case 2: Not divisible by k
+    assert sol.isPossibleDivide([1, 2, 3, 4], 3) == False, "Test 2 Failed"
+    print("Test 2 Passed: k=3 -> False")
+
+    # Test Case 3: Single group
+    assert sol.isPossibleDivide([1, 2, 3], 3) == True, "Test 3 Failed"
+    print("Test 3 Passed: single group -> True")
+
+    # Test Case 4: Pairs
+    assert sol.isPossibleDivide([1, 2, 3, 4, 5, 6], 2) == True, "Test 4 Failed"
+    print("Test 4 Passed: pairs -> True")
+
+    # Test Case 5: Impossible due to gaps
+    assert sol.isPossibleDivide([1, 1, 3, 3, 5, 5], 3) == False, "Test 5 Failed"
+    print("Test 5 Passed: gaps -> False")
+
+    print("\nAll test cases passed!")
+````

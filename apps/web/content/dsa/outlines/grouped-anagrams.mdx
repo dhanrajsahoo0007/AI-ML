@@ -28,3 +28,66 @@ Example 2:
 - 0 <= len(strs[i]) <= 100
 - strs[i] consists of lowercase English letters.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hash map keyed by canonical form
+Use a 26-length frequency tuple (or sorted string) as key so anagrams share one bucket.
+
+1. For each string, build a length-26 count vector for a-z.
+2. Use tuple(counts) as key in a map from key to list of strings.
+3. Return all groups as a list of lists.
+
+## Complexity
+
+**Time:** O(n \* k) - n strings, each of length up to k for counting.
+
+**Space:** O(n \* k) - Store every character in grouped buckets plus keys.
+
+## Solution
+
+````python
+from collections import defaultdict
+from typing import List
+
+
+class Solution:
+    def groupAnagrams(self, strs: List[str]) -> List[List[str]]:
+        buckets: dict[tuple[int, ...], List[str]] = defaultdict(list)
+        for word in strs:
+            counts = [0] * 26
+            for ch in word:
+                counts[ord(ch) - ord("a")] += 1  # frequency signature for this word
+            buckets[tuple(counts)].append(word)  # all anagrams share the same tuple key
+        return list(buckets.values())
+
+
+def _normalize(groups: List[List[str]]) -> List[List[str]]:
+    return sorted([sorted(g) for g in groups])
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    g1 = sol.groupAnagrams(["eat", "tea", "tan", "ate", "nat", "bat"])
+    e1 = [["bat"], ["nat", "tan"], ["ate", "eat", "tea"]]
+    assert _normalize(g1) == _normalize(e1), "Test 1 Failed"
+    print("Test 1 Passed: classic grouping")
+    g2 = sol.groupAnagrams([""])
+    assert _normalize(g2) == _normalize([[""]]), "Test 2 Failed"
+    print("Test 2 Passed: empty string only")
+    g3 = sol.groupAnagrams(["a"])
+    assert _normalize(g3) == _normalize([["a"]]), "Test 3 Failed"
+    print("Test 3 Passed: single char")
+    g4 = sol.groupAnagrams(["act", "cat", "tac"])
+    assert _normalize(g4) == _normalize([["act", "cat", "tac"]]), "Test 4 Failed"
+    print("Test 4 Passed: one group of three")
+    g5 = sol.groupAnagrams(["abc", "def"])
+    assert _normalize(g5) == _normalize([["abc"], ["def"]]), "Test 5 Failed"
+    print("Test 5 Passed: no anagram pairs")
+    print("\nAll test cases passed!")
+````

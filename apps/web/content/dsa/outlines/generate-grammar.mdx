@@ -29,3 +29,60 @@ Example 2:
 ````text
 - 1 <= n <= 30 for row materialization tests; k fits grammar definitions (1-indexed)
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Recursion / self-similarity
+Row n splits into halves mirroring row n-1; k in the first half matches row n-1,
+while the second half is the bitwise complement of the mirrored index.
+
+1. Base: n == 1 returns symbol 0.
+2. Let half = 2 \*\* (n - 2). If k &lt;= half, recurse on (n-1, k); else return 1 - recurse(n-1, k-half).
+3. For full row, iteratively expand the previous row string from row 1.
+
+## Complexity
+
+**Time:** O(n) for kth symbol; O(2^n) time and space for full row n
+
+**Space:** O(n) recursion stack for kth; O(2^n) for materialized row
+
+## Solution
+
+````python
+class Solution:
+    def kth_symbol(self, n: int, k: int) -> int:
+        if n == 1:
+            return 0
+        half = 1 << (n - 2)
+        if k <= half:
+            return self.kth_symbol(n - 1, k)
+        return 1 - self.kth_symbol(n - 1, k - half)
+
+    def grammar_row(self, n: int) -> str:
+        row = "0"
+        if n < 1:
+            return ""
+        for _ in range(2, n + 1):
+            row = "".join("01" if ch == "0" else "10" for ch in row)
+        return row
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.kth_symbol(1, 1) == 0, "Test 1 Failed"
+    assert sol.kth_symbol(4, 3) == 1, "Test 2 Failed"
+    assert sol.grammar_row(1) == "0", "Test 3 Failed"
+    assert sol.grammar_row(3) == "0110", "Test 4 Failed"
+    assert sol.kth_symbol(3, 4) == int(sol.grammar_row(3)[3]), "Test 5 Failed"
+    print("Test 1 Passed: base row")
+    print("Test 2 Passed: kth symbol sample")
+    print("Test 3 Passed: first row string")
+    print("Test 4 Passed: row 3 string")
+    print("Test 5 Passed: kth matches row materialization")
+    print("\nAll test cases passed!")
+````

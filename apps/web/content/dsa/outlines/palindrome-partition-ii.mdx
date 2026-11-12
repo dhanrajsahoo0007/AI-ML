@@ -28,3 +28,63 @@ Example 2:
 - 1 <= len(s) <= 2000
 - s contains only lowercase English letters
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 1D DP with palindrome preprocessing
+Precompute is\_pal\[i\]\[j\], then dp\[i\] = min cuts for prefix ending at i.
+
+1. Build palindrome table is\_pal\[i\]\[j\] expanding centers.
+2. dp\[i\] = min over j&lt;=i with is\_pal\[j\]\[i\] of (dp\[j-1\]+1) or 0 if j==0.
+3. Return dp\[n-1\]-1 (cuts = pieces-1) or compute cuts directly.
+
+## Complexity
+
+**Time:** O(n^2) for palindrome table and DP.
+
+**Space:** O(n^2) for is\_pal (can optimize to O(n)).
+
+## Solution
+
+````python
+class Solution:
+    def minCut(self, s: str) -> int:
+        n = len(s)
+        is_pal = [[False] * n for _ in range(n)]
+        for i in range(n - 1, -1, -1):
+            for j in range(i, n):
+                if s[i] == s[j] and (j - i <= 2 or is_pal[i + 1][j - 1]):
+                    is_pal[i][j] = True
+
+        dp = [0] * n
+        for i in range(n):
+            if is_pal[0][i]:
+                dp[i] = 0
+                continue
+            best = i
+            for j in range(1, i + 1):
+                if is_pal[j][i]:
+                    best = min(best, dp[j - 1] + 1)
+            dp[i] = best
+        return dp[n - 1]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minCut("aab") == 1, "Test 1 Failed"
+    print("Test 1 Passed: aab -> 1 cut")
+    assert sol.minCut("a") == 0, "Test 2 Failed"
+    print("Test 2 Passed: single char")
+    assert sol.minCut("ab") == 1, "Test 3 Failed"
+    print("Test 3 Passed: ab needs one cut")
+    assert sol.minCut("racecar") == 0, "Test 4 Failed"
+    print("Test 4 Passed: already palindrome")
+    assert sol.minCut("leet") == 2, "Test 5 Failed"
+    print("Test 5 Passed: leet")
+    print("\nAll test cases passed!")
+````

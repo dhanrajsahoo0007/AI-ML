@@ -32,3 +32,91 @@ Example 3:
 ````text
 - queryIP consists only of digits, letters, and the characters '.' and ':'.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** String parsing / validation
+Apply disjoint IPv4 and IPv6 grammars: dotted decimal with strict digit rules, or
+colon-hex groups optionally using a single :: compression.
+
+1. Prefer IPv4 when the string contains a dot: split into four segments by '.'.
+2. Validate each IPv4 segment for non-empty digits, no illegal leading zeros, and 0..255.
+3. For IPv6, if '::' appears at most once, split left/right; otherwise split into eight groups.
+4. Each IPv6 piece must be 1-4 hexadecimal characters; compressed form must expand to eight groups.
+
+## Complexity
+
+**Time:** O(n) - Linear time in the length of queryIP.
+
+**Space:** O(n) - Storing split segments.
+
+## Solution
+
+````python
+class Solution:
+    def validIPAddress(self, queryIP: str) -> str:
+        if "." in queryIP:
+            parts = queryIP.split(".")
+            if len(parts) != 4:
+                return "Neither"
+            for p in parts:
+                if not p or not p.isdigit():
+                    return "Neither"
+                if len(p) > 1 and p[0] == "0":
+                    return "Neither"
+                val = int(p)
+                if val > 255:
+                    return "Neither"
+            return "IPv4"
+        if ":" not in queryIP:
+            return "Neither"
+
+        def is_hex_block(block: str) -> bool:
+            if not (1 <= len(block) <= 4):
+                return False
+            hex_digits = set("0123456789abcdefABCDEF")
+            return all(c in hex_digits for c in block)
+
+        if "::" in queryIP:
+            if queryIP.count("::") != 1:
+                return "Neither"
+            left, right = queryIP.split("::", 1)
+            left_parts = [x for x in left.split(":") if x] if left else []
+            right_parts = [x for x in right.split(":") if x] if right else []
+            if len(left_parts) + len(right_parts) > 7:
+                return "Neither"
+            for block in left_parts + right_parts:
+                if not is_hex_block(block):
+                    return "Neither"
+            return "IPv6"
+
+        parts = queryIP.split(":")
+        if len(parts) != 8:
+            return "Neither"
+        for block in parts:
+            if not is_hex_block(block):
+                return "Neither"
+        return "IPv6"
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.validIPAddress("172.16.254.1") == "IPv4", "Test 1 Failed"
+    print("Test 1 Passed: valid IPv4")
+    assert (
+        sol.validIPAddress("2001:0db8:85a3:0:0:8A2E:0370:7334") == "IPv6"
+    ), "Test 2 Failed"
+    print("Test 2 Passed: valid IPv6")
+    assert sol.validIPAddress("256.256.256.256") == "Neither", "Test 3 Failed"
+    print("Test 3 Passed: IPv4 out of range")
+    assert sol.validIPAddress("192.168.01.1") == "Neither", "Test 4 Failed"
+    print("Test 4 Passed: IPv4 leading zero")
+    assert sol.validIPAddress("2001:db8:85a3::8a2e:370:7334") == "IPv6", "Test 5 Failed"
+    print("Test 5 Passed: IPv6 with ::")
+    print("\nAll test cases passed!")
+````

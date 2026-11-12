@@ -1,0 +1,95 @@
+---
+title: "Template: Permutation Pattern"
+description: "Given a list of distinct integers, return all permutations (every ordering of all elements)."
+topics: [backtracking]
+group: "01. Permutation Pattern"
+number: "00"
+order: 12001000000000
+status: outline
+---
+
+Given a list of distinct integers, return all permutations (every ordering of all elements).
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [1, 2, 3]
+Output: [[1,2,3],[1,3,2],[2,1,3],[2,3,1],[3,1,2],[3,2,1]]
+````
+
+## Constraints
+
+````text
+- All values in nums are distinct.
+- 1 <= len(nums) <= 6 (small enough for factorial enumeration).
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Permutation / used-flag backtracking
+Build the path one index at a time; skip indices already chosen, then undo the choice.
+
+1. Track used\[i\] for each index in nums.
+2. When path length equals n, append a copy of path to the answer.
+3. Otherwise try every unused index: mark used, append nums\[i\], recurse, then backtrack.
+
+## Complexity
+
+**Time:** O(n \* n!) - n! permutations, each copied in O(n).
+
+**Space:** O(n) - recursion depth and auxiliary used/path storage excluding the output.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def permute(self, nums: List[int]) -> List[List[int]]:
+        n = len(nums)
+        result: List[List[int]] = []
+        used = [False] * n
+        path: List[int] = []
+
+        def backtrack() -> None:
+            if len(path) == n:
+                result.append(path[:])
+                return
+            for i in range(n):
+                if used[i]:
+                    continue
+                used[i] = True
+                path.append(nums[i])
+                backtrack()
+                path.pop()
+                used[i] = False
+
+        backtrack()
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sorted(map(tuple, sol.permute([1]))) == [(1,)], "Test 1 Failed"
+    print("Test 1 Passed: single element")
+
+    assert sorted(map(tuple, sol.permute([1, 2]))) == [(1, 2), (2, 1)], "Test 2 Failed"
+    print("Test 2 Passed: two elements")
+
+    p3 = sol.permute([1, 2, 3])
+    assert len(p3) == 6, "Test 3 Failed"
+    assert [1, 2, 3] in p3 and [3, 2, 1] in p3, "Test 3 Failed"
+    print("Test 3 Passed: three distinct integers")
+
+    assert sol.permute([7]) == [[7]], "Test 4 Failed"
+    print("Test 4 Passed: one value 7")
+
+    print("\nAll test cases passed!")
+````

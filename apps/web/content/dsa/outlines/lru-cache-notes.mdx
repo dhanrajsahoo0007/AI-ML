@@ -1,0 +1,130 @@
+---
+title: "LRU cache"
+description: "Design a Least Recently Used (LRU) cache with fixed capacity."
+topics: [stacks-and-queues]
+group: "09. Advanced Applications"
+number: "03"
+order: 9009003000000
+status: outline
+---
+
+Design a Least Recently Used (LRU) cache with fixed capacity. get(key) returns the value or -1
+if missing; put(key, value) inserts or updates while evicting the least recently used entry when
+full.
+
+## Examples
+
+````text
+Example 1:
+Input: ops = [construct(2), put(1,1), put(2,2), get(1), put(3,3), get(2), put(4,4), get(1), get(3), get(4)]
+Output: [null,null,null,1,null,-1,null,-1,3,4]
+````
+
+## Constraints
+
+````text
+- 1 <= capacity <= 3000
+- At most 10^4 calls to get and put
+- Keys are unique for active entries
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hash Map + Doubly Linked List
+A dictionary maps keys to nodes for O(1) access while a DLL maintains recency ordering.
+
+1. Maintain head/tail sentinels and link nodes as MRU near head and LRU near tail.
+2. get moves an existing node to the front after reading its value.
+3. put updates a node or inserts a new one at the front, evicting tail.prev when at capacity.
+
+## Complexity
+
+**Time:** O(1) for each get and put.
+
+**Space:** O(capacity) - Stores up to capacity key-node pairs.
+
+## Solution
+
+````python
+class _Node:
+    __slots__ = ("key", "val", "prev", "next")
+
+    def __init__(self, key: int = 0, val: int = 0) -> None:
+        self.key = key
+        self.val = val
+        self.prev = None
+        self.next = None
+
+
+class LRUCache:
+    def __init__(self, capacity: int) -> None:
+        self.capacity = capacity
+        self.cache: dict[int, _Node] = {}
+        self.head = _Node()
+        self.tail = _Node()
+        self.head.next = self.tail
+        self.tail.prev = self.head
+
+    def _remove(self, node: _Node) -> None:
+        prev_node = node.prev
+        next_node = node.next
+        assert prev_node is not None and next_node is not None
+        prev_node.next = next_node
+        next_node.prev = prev_node
+
+    def _add_to_head(self, node: _Node) -> None:
+        node.prev = self.head
+        first = self.head.next
+        assert first is not None
+        node.next = first
+        first.prev = node
+        self.head.next = node
+
+    def get(self, key: int) -> int:
+        if key not in self.cache:
+            return -1
+        node = self.cache[key]
+        self._remove(node)
+        self._add_to_head(node)
+        return node.val
+
+    def put(self, key: int, value: int) -> None:
+        if key in self.cache:
+            node = self.cache[key]
+            node.val = value
+            self._remove(node)
+            self._add_to_head(node)
+            return
+        node = _Node(key, value)
+        self.cache[key] = node
+        self._add_to_head(node)
+        if len(self.cache) > self.capacity:
+            lru = self.tail.prev
+            assert lru is not None
+            self._remove(lru)
+            del self.cache[lru.key]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    cache = LRUCache(2)
+    cache.put(1, 1)
+    cache.put(2, 2)
+    assert cache.get(1) == 1, "Test 1 Failed"
+    cache.put(3, 3)
+    assert cache.get(2) == -1, "Test 2 Failed"
+    cache.put(4, 4)
+    assert cache.get(1) == -1, "Test 3 Failed"
+    assert cache.get(3) == 3, "Test 4 Failed"
+    assert cache.get(4) == 4, "Test 5 Failed"
+    print("Test 1 Passed: hit updates recency")
+    print("Test 2 Passed: eviction removes stale key")
+    print("Test 3 Passed: oldest evicted on overflow")
+    print("Test 4 Passed: surviving MRU readable")
+    print("Test 5 Passed: latest insert retrievable")
+    print("\nAll test cases passed!")
+````

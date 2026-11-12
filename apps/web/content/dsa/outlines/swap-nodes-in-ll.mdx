@@ -25,3 +25,107 @@ Output: [1,4,3,2,5]
 - 1 <= k <= n <= 10^5
 - 0 <= Node.val <= 100
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two pointers (single pass)
+After moving a cursor k-1 steps, keep a left marker and advance both until the cursor hits the tail.
+
+1. Move cur k-1 steps from head.
+2. left = cur, right = head; while cur.next, advance cur and right.
+3. Swap left.val and right.val; return head.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1).
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+You are given the head of a linked list, and an integer k.
+Return the head of the linked list after swapping the values of the kth node from the beginning
+and the kth node from the end (the list is 1-indexed).
+
+Constraints:
+\* The number of nodes in the list is n.
+\* 1 &lt;= k &lt;= n &lt;= 10^5
+\* 0 &lt;= Node.val &lt;= 100
+
+Time Complexity: O(n), where n is the number of nodes in the linked list.
+- We traverse the list twice: once to find the length and kth node from start, and once to find the kth node from end.
+
+Space Complexity: O(1)
+- We only use a constant amount of extra space for pointers and variables.
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+def linked_list_to_list(head: Optional[ListNode]) -> List[int]:
+    out: List[int] = []
+    while head:
+        out.append(head.val)
+        head = head.next
+    return out
+
+
+class Solution:
+    def swapNodes(self, head: Optional[ListNode], k: int) -> Optional[ListNode]:
+        if not head:
+            return None
+        cur = head
+        for _ in range(k - 1):
+            cur = cur.next
+        left = cur
+        right = head
+        while cur.next:
+            cur = cur.next
+            right = right.next
+        left.val, right.val = right.val, left.val
+        return head
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    h1 = list_to_linked_list([1, 2, 3, 4, 5])
+    assert linked_list_to_list(sol.swapNodes(h1, 2)) == [1, 4, 3, 2, 5]
+
+    h2 = list_to_linked_list([7, 9, 6, 6, 7, 8, 3, 0, 9, 5])
+    assert linked_list_to_list(sol.swapNodes(h2, 5)) == [7, 9, 6, 6, 8, 7, 3, 0, 9, 5]
+
+    h3 = list_to_linked_list([1])
+    assert linked_list_to_list(sol.swapNodes(h3, 1)) == [1]
+
+    h4 = list_to_linked_list([1, 2])
+    assert linked_list_to_list(sol.swapNodes(h4, 1)) == [2, 1]
+
+    h5 = list_to_linked_list([1, 2, 3])
+    assert linked_list_to_list(sol.swapNodes(h5, 2)) == [1, 2, 3]
+
+    print("\nAll test cases passed!")
+````

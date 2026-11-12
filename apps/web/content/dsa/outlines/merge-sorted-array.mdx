@@ -32,3 +32,94 @@ Example 2:
 - 1 <= m + n <= 200
 - -10^9 <= nums1[i], nums2[j] <= 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Reverse two pointers
+Fill from the back so unused space in nums1 can hold comparisons without overwriting unmerged values.
+
+1. Start pointers at the last meaningful element of nums1 (m-1), last element of nums2 (n-1), and the merge slot (m+n-1).
+2. Repeatedly place the larger tail value into the merge slot and move the corresponding pointer backward.
+3. If nums2 still has values when nums1 is exhausted, copy the remainder of nums2 to the front of nums1.
+
+Restored notes (archived workbook):
+
+Problem: Merge Sorted Array
+You are given two integer arrays nums1 and nums2, sorted in non-decreasing order, and two integers m and n,
+representing the number of elements in nums1 and nums2 respectively.
+Merge nums1 and nums2 into a single array sorted in non-decreasing order.
+The final sorted array should not be returned by the function, but instead be stored inside the array nums1.
+
+Time Complexity: O(m + n), where m and n are the number of elements in nums1 and nums2 respectively.
+Space Complexity: O(1), as we're modifying nums1 in-place without using extra space.
+
+Explanation:
+1. This solution uses a two-pointer approach, starting from the end of both arrays.
+2. We compare elements from both arrays and place the larger one at the end of nums1.
+3. We continue this process until we've processed all elements from nums2 or nums1.
+4. If there are any elements left in nums2, we copy them to the beginning of nums1.
+
+Examples:
+1. Input: nums1 = \[1,2,3,0,0,0\], m = 3, nums2 = \[2,5,6\], n = 3
+Output: \[1,2,2,3,5,6\]
+
+2. Input: nums1 = \[1\], m = 1, nums2 = \[\], n = 0
+Output: \[1\]
+
+3. Input: nums1 = \[0\], m = 0, nums2 = \[1\], n = 1
+Output: \[1\]
+
+## Complexity
+
+**Time:** O(m + n) - Each element is placed exactly once.
+
+**Space:** O(1) - Merging happens in-place with constant extra variables.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def merge(self, nums1: List[int], m: int, nums2: List[int], n: int) -> None:
+        i, j, k = m - 1, n - 1, m + n - 1
+        while j >= 0:
+            if i >= 0 and nums1[i] > nums2[j]:
+                nums1[k] = nums1[i]
+                i -= 1
+            else:
+                nums1[k] = nums2[j]
+                j -= 1
+            k -= 1
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    nums1 = [1, 2, 3, 0, 0, 0]
+    sol.merge(nums1, 3, [2, 5, 6], 3)
+    assert nums1 == [1, 2, 2, 3, 5, 6], "Test 1 Failed"
+    print("Test 1 Passed: merge two non-empty arrays")
+    nums2 = [1]
+    sol.merge(nums2, 1, [], 0)
+    assert nums2 == [1], "Test 2 Failed"
+    print("Test 2 Passed: nums2 empty")
+    nums3 = [0]
+    sol.merge(nums3, 0, [1], 1)
+    assert nums3 == [1], "Test 3 Failed"
+    print("Test 3 Passed: nums1 empty prefix")
+    nums4 = [4, 5, 6, 0, 0, 0]
+    sol.merge(nums4, 3, [1, 2, 3], 3)
+    assert nums4 == [1, 2, 3, 4, 5, 6], "Test 4 Failed"
+    print("Test 4 Passed: nums2 entirely smaller")
+    nums5 = [0, 0, 0, 0, 0]
+    sol.merge(nums5, 0, [1, 2, 3, 4, 5], 5)
+    assert nums5 == [1, 2, 3, 4, 5], "Test 5 Failed"
+    print("Test 5 Passed: all elements from nums2")
+    print("\nAll test cases passed!")
+````

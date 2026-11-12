@@ -26,3 +26,61 @@ Output: ["king","andy","matthew","alex","asha"]
 - 1 <= len(names) <= 10^5
 - Names are unique strings of lowercase letters
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Tree preorder traversal with skip set
+
+1. Maintain adjacency children list in birth order for each parent.
+2. DFS from king; append name if not dead; recurse children left-to-right.
+
+## Complexity
+
+**Time:** O(n) per getInheritanceOrder over all people.
+
+**Space:** O(n) for tree and recursion stack.
+
+## Solution
+
+````python
+from typing import Dict, List, Set
+from collections import defaultdict, deque
+
+
+class Solution:
+    def inheritanceOrder(self, king: str, children: Dict[str, List[str]], dead: Set[str]) -> List[str]:
+        order: List[str] = []
+
+        def dfs(name: str) -> None:
+            if name not in dead:
+                order.append(name)
+            for ch in children.get(name, []):
+                dfs(ch)
+
+        dfs(king)
+        return order
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    kids = defaultdict(list)
+    for p, c in [
+        ("king", "andy"),
+        ("king", "bob"),
+        ("andy", "matthew"),
+        ("bob", "alex"),
+        ("bob", "asha"),
+    ]:
+        kids[p].append(c)
+    assert sol.inheritanceOrder("king", kids, {"bob"}) == ["king", "andy", "matthew", "alex", "asha"], "Test 1 Failed"
+    kids2 = defaultdict(list)
+    for p, c in [("king", "clyde")]:
+        kids2[p].append(c)
+    assert sol.inheritanceOrder("king", kids2, set()) == ["king", "clyde"], "Test 2 Failed"
+    print("All tests passed!")
+````

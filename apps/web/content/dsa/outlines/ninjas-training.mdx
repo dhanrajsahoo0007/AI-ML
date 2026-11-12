@@ -25,3 +25,55 @@ Output: 11
 - 1 <= days <= 10^5
 - len(points[i]) == 3
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 2D DP small state
+dp\[d\]\[a\] best up to day d ending with activity a.
+
+1. Initialize day 0 with points\[0\].
+2. For each next day, dp\[d\]\[a\]=points\[d\]\[a\]+max(dp\[d-1\]\[b\] for b!=a).
+
+## Complexity
+
+**Time:** O(days \* 9) = O(days).
+
+**Space:** O(1) with two rows of size 3.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maximumPoints(self, points: List[List[int]]) -> int:
+        a, b, c = points[0]
+        for i in range(1, len(points)):
+            x, y, z = points[i]
+            na = x + max(b, c)
+            nb = y + max(a, c)
+            nc = z + max(a, b)
+            a, b, c = na, nb, nc
+        return max(a, b, c)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.maximumPoints([[1, 2, 5], [3, 1, 1], [3, 3, 3]]) == 11, "Test 1 Failed"
+    print("Test 1 Passed: three-day sample")
+    assert sol.maximumPoints([[10, 40, 70]]) == 70, "Test 2 Failed"
+    print("Test 2 Passed: single day")
+    assert sol.maximumPoints([[1, 1, 1], [1, 1, 1]]) == 2, "Test 3 Failed"
+    print("Test 3 Passed: two days avoid repeat")
+    assert sol.maximumPoints([[1, 2, 3], [4, 5, 6]]) == 8, "Test 4 Failed"
+    print("Test 4 Passed: two days capped at eight")
+    assert sol.maximumPoints([[0, 0, 0], [1, 2, 3]]) == 3, "Test 5 Failed"
+    print("Test 5 Passed: start from zeros")
+    print("\nAll test cases passed!")
+````

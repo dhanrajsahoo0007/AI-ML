@@ -28,3 +28,61 @@ Example 2:
 - deadends[i] length 4
 - target length 4
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - BFS on implicit state graph (4-digit lock)
+
+1. BFS from "0000" with visited set including deadends.
+2. Each state tries eight neighbors (four positions, +/-1 with modulo wrap).
+
+## Complexity
+
+**Time:** O(10^4) states worst-case.
+
+**Space:** O(10^4).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def openLock(self, deadends: List[str], target: str) -> int:
+        dead = set(deadends)
+        if "0000" in dead:
+            return -1
+        q = deque([("0000", 0)])
+        seen = {"0000"}
+        while q:
+            s, d = q.popleft()
+            if s == target:
+                return d
+            arr = list(s)
+            for i in range(4):
+                ch = arr[i]
+                for delta in (-1, 1):
+                    nd = (int(ch) + delta) % 10
+                    arr[i] = str(nd)
+                    nxt = "".join(arr)
+                    arr[i] = ch
+                    if nxt not in seen and nxt not in dead:
+                        seen.add(nxt)
+                        q.append((nxt, d + 1))
+        return -1
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.openLock(["0201", "0101", "0102", "1212", "2002"], "0202") == 6, "Test 1 Failed"
+    assert sol.openLock(["8888"], "0009") == 1, "Test 2 Failed"
+    assert sol.openLock(["8887", "8889", "8878", "8898", "8788", "8988", "7888", "9888"], "8888") == -1, "Test 3 Failed"
+    print("All tests passed!")
+````

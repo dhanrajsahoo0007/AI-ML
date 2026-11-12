@@ -30,3 +30,148 @@ Example 2:
 - 1 <= m, n <= 500
 - grid[i][j] is 0 or 1
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph DFS (flood fill from boundary land)
+
+1. DFS from every boundary cell that is land; mark visited cells reachable from the edge.
+2. Count grid cells with value 1 that were never visited — these are enclaves.
+
+## Complexity
+
+**Time:** O(m \* n) — each cell visited a constant number of times.
+
+**Space:** O(m \* n) — visited matrix and recursion stack in worst case.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def numEnclaves(self, grid: List[List[int]]) -> int:
+        if not grid or not grid[0]:
+            return 0
+        row_len = len(grid)
+        col_len = len(grid[0])
+        DIRECTIONS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        visited = [[0 for _ in range(col_len)] for _ in range(row_len)]
+
+        def dfs(row: int, col: int) -> None:
+            for x, y in DIRECTIONS:
+                nrow = x + row
+                ncol = y + col
+                if nrow < 0 or ncol < 0 or nrow >= row_len or ncol >= col_len:
+                    continue
+                if grid[nrow][ncol] == 0 or visited[nrow][ncol] == 1:
+                    continue
+                visited[nrow][ncol] = 1
+                dfs(nrow, ncol)
+
+        # Boundary 1's
+        for row in range(row_len):
+            for col in range(col_len):
+                if (
+                    (row == 0 or row == row_len - 1 or col == 0 or col == col_len - 1)
+                    and grid[row][col] == 1
+                    and visited[row][col] == 0
+                ):
+                    visited[row][col] = 1
+                    dfs(row, col)
+
+        # Check the number of unvisited 1's
+        lands_surrounded = 0
+        for row in range(row_len):
+            for col in range(col_len):
+                if grid[row][col] == 1 and visited[row][col] == 0:
+                    lands_surrounded += 1
+        return lands_surrounded
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    g1 = [[0, 0, 0, 0], [1, 0, 1, 0], [0, 1, 1, 0], [0, 0, 0, 0]]
+    assert sol.numEnclaves(g1) == 3, "Test 1 Failed"
+    g2 = [[0, 1, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 0, 0]]
+    assert sol.numEnclaves(g2) == 0, "Test 2 Failed"
+    assert sol.numEnclaves([[1]]) == 0, "Test 3 Failed"
+    assert sol.numEnclaves([[0]]) == 0, "Test 4 Failed"
+    print("All tests passed!")
+````
+
+## Another version
+
+From 17. Graphs/13. Flood Fill.
+
+### Approach
+
+**Pattern:** Multi-source flood fill from border
+Remove every land cell connected to the border; remaining land cells are enclaves.
+
+1. DFS from every boundary land cell to mark reachable land as 0.
+2. Count remaining 1 cells in the interior.
+
+### Complexity
+
+**Time:** O(m \* n)
+
+**Space:** O(m \* n) for recursion stack.
+
+### Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def numEnclaves(self, grid: List[List[int]]) -> int:
+        m, n = len(grid), len(grid[0])
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+        def dfs(r: int, c: int) -> None:
+            grid[r][c] = 0
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < m and 0 <= nc < n and grid[nr][nc] == 1:
+                    dfs(nr, nc)
+
+        for i in range(m):
+            for j in (0, n - 1):
+                if grid[i][j] == 1:
+                    dfs(i, j)
+        for j in range(n):
+            for i in (0, m - 1):
+                if grid[i][j] == 1:
+                    dfs(i, j)
+
+        return sum(sum(row) for row in grid)
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def clone(g: List[List[int]]) -> List[List[int]]:
+        return [row[:] for row in g]
+
+    g1 = [[0, 0, 0, 0], [1, 0, 1, 0], [0, 1, 1, 0], [0, 0, 0, 0]]
+    assert sol.numEnclaves(clone(g1)) == 3, "Test 1 Failed"
+    print("Test 1 Passed: classic enclave count")
+    g2 = [[0, 1, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 0, 0]]
+    assert sol.numEnclaves(clone(g2)) == 0, "Test 2 Failed"
+    print("Test 2 Passed: all land touches border")
+    assert sol.numEnclaves(clone([[1]])) == 0, "Test 3 Failed"
+    print("Test 3 Passed: single land on border")
+    assert sol.numEnclaves(clone([[0]])) == 0, "Test 4 Failed"
+    print("Test 4 Passed: single water")
+    print("\nAll test cases passed!")
+````

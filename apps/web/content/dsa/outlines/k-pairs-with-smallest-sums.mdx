@@ -32,3 +32,81 @@ Example 2:
 - nums1 and nums2 are sorted in non-decreasing order.
 - 1 <= k <= 10^4
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** K-Way Merge
+We treat this as a BFS on a virtual grid where cell (i,j) has sum nums1\[i\]+nums2\[j\].
+We explore cells in order of their sums using a min-heap.
+
+1. Start with pair (0, 0) in the heap.
+2. Pop the smallest sum pair and add it to results.
+3. Push adjacent pairs (i+1, j) and (i, j+1) if not visited.
+4. Repeat until we have k pairs.
+
+## Complexity
+
+**Time:** O(k log k)
+- Each iteration pops and pushes at most 2 pairs.
+
+**Space:** O(k) for the heap and visited set
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def kSmallestPairs(self, nums1: List[int], nums2: List[int], k: int) -> List[List[int]]:
+        if not nums1 or not nums2:
+            return []
+
+        results = []
+        heap = [(nums1[0] + nums2[0], 0, 0)]
+        seen = {(0, 0)}
+
+        while len(results) < k and heap:
+            _, i, j = heapq.heappop(heap)
+            results.append([nums1[i], nums2[j]])
+
+            # Explore neighbors in the "sum matrix" without revisiting coordinates.
+            if i + 1 < len(nums1) and (i + 1, j) not in seen:
+                heapq.heappush(heap, (nums1[i + 1] + nums2[j], i + 1, j))
+                seen.add((i + 1, j))
+
+            if j + 1 < len(nums2) and (i, j + 1) not in seen:
+                heapq.heappush(heap, (nums1[i] + nums2[j + 1], i, j + 1))
+                seen.add((i, j + 1))
+
+        return results
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    # Test Case 1: Basic case
+    assert sol.kSmallestPairs([1, 7, 11], [2, 4, 6], 3) == [[1, 2], [1, 4], [1, 6]], "Test 1 Failed"
+    print("Test 1 Passed: k=3 -> [[1,2],[1,4],[1,6]]")
+
+    # Test Case 2: Duplicates
+    result = sol.kSmallestPairs([1, 1, 2], [1, 2, 3], 2)
+    assert result == [[1, 1], [1, 1]], "Test 2 Failed"
+    print(f"Test 2 Passed: duplicates -> {result}")
+
+    # Test Case 3: Single elements
+    assert sol.kSmallestPairs([1], [3], 1) == [[1, 3]], "Test 3 Failed"
+    print("Test 3 Passed: single elements -> [[1,3]]")
+
+    # Test Case 4: Empty input
+    assert sol.kSmallestPairs([], [1, 2], 1) == [], "Test 4 Failed"
+    print("Test 4 Passed: empty input -> []")
+
+    print("\nAll test cases passed!")
+````

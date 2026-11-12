@@ -28,3 +28,92 @@ Example 2:
 ````text
 - If t is empty or longer than s with no match, return "".
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Variable sliding window with need/match counters
+Expand until all required characters are satisfied, then shrink from the left while still valid to minimize length.
+
+1. Count characters required from t and track how many required groups are fully satisfied.
+2. Expand the right edge, updating satisfaction when counts hit targets.
+3. While satisfied, update the best window, then shrink from the left until satisfaction breaks.
+
+Restored notes (archived workbook):
+
+It is the shortest substring of s that includes all of the characters present in t.
+It must contain at least the same frequency of each character as in t.
+The order of the characters does not matter here.
+Time complexity O(nm)
+
+## Complexity
+
+**Time:** O(len(s) + len(t)) - Each pointer moves across s at most once; t is scanned once for counts.
+
+**Space:** O(alphabet) - Frequency maps are bounded by distinct characters.
+
+## Solution
+
+````python
+from collections import Counter
+from typing import Dict
+
+
+class Solution:
+    def minWindow(self, s: str, t: str) -> str:
+        if not s or not t:
+            return ""
+
+        need: Dict[str, int] = Counter(t)
+        window: Dict[str, int] = Counter()
+        required = len(need)
+        formed = 0
+
+        left = 0
+        best_len = float("inf")
+        best_l = best_r = 0
+
+        for right in range(len(s)):
+            ch = s[right]
+            window[ch] += 1
+
+            if ch in need and window[ch] == need[ch]:
+                formed += 1
+
+            while formed == required and left <= right:
+                if right - left + 1 < best_len:
+                    best_len = right - left + 1
+                    best_l, best_r = left, right
+
+                left_ch = s[left]
+                window[left_ch] -= 1
+                if left_ch in need and window[left_ch] < need[left_ch]:
+                    formed -= 1
+                left += 1
+
+        return "" if best_len == float("inf") else s[best_l : best_r + 1]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minWindow("ADOBECODEBANC", "ABC") == "BANC", "Test 1 Failed"
+    print("Test 1 Passed: classic minimum window")
+
+    assert sol.minWindow("a", "a") == "a", "Test 2 Failed"
+    print("Test 2 Passed: single-character match")
+
+    assert sol.minWindow("a", "aa") == "", "Test 3 Failed"
+    print("Test 3 Passed: impossible window")
+
+    assert sol.minWindow("cabwefgewcwaefgcf", "cae") == "cwae", "Test 4 Failed"
+    print("Test 4 Passed: duplicate letters in t")
+
+    assert sol.minWindow("bbaa", "aba") == "baa", "Test 5 Failed"
+    print("Test 5 Passed: permutations with repeats")
+
+    print("\nAll test cases passed!")
+````

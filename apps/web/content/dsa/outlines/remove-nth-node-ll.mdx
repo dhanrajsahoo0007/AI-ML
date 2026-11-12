@@ -24,3 +24,102 @@ Output: [1,2,3,5]
 - 1 <= n <= list length <= 30
 - 0 <= Node.val <= 100
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two pointers with gap
+Lead the fast pointer n steps ahead, then move both until fast reaches the last node; unlink after slow.
+
+1. Use dummy before head; slow = fast = dummy.
+2. Advance fast n times.
+3. While fast.next, move fast and slow.
+4. Set slow.next = slow.next.next.
+
+## Complexity
+
+**Time:** O(L) for list length L.
+
+**Space:** O(1).
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given the head of a linked list, remove the nth node from the end of the list and return its head.
+
+Example:
+Input: head = \[1,2,3,4,5\], n = 2
+Output: \[1,2,3,5\]
+
+Time Complexity: O(L), where L is the length of the linked list.
+- We traverse the list once with the fast pointer, and then once more with both pointers.
+
+Space Complexity: O(1)
+- We only use a constant amount of extra space for the two pointers.
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+def linked_list_to_list(head: Optional[ListNode]) -> List[int]:
+    out: List[int] = []
+    while head:
+        out.append(head.val)
+        head = head.next
+    return out
+
+
+class Solution:
+    def removeNthFromEnd(self, head: Optional[ListNode], n: int) -> Optional[ListNode]:
+        dummy = ListNode(0, head)
+        fast = slow = dummy
+        for _ in range(n):
+            fast = fast.next
+        while fast.next:
+            fast = fast.next
+            slow = slow.next
+        slow.next = slow.next.next if slow.next else None
+        return dummy.next
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    assert linked_list_to_list(sol.removeNthFromEnd(list_to_linked_list([1, 2, 3, 4, 5]), 2)) == [
+        1,
+        2,
+        3,
+        5,
+    ]
+
+    assert sol.removeNthFromEnd(list_to_linked_list([1]), 1) is None
+
+    assert linked_list_to_list(sol.removeNthFromEnd(list_to_linked_list([1, 2]), 1)) == [1]
+
+    assert linked_list_to_list(sol.removeNthFromEnd(list_to_linked_list([1, 2]), 2)) == [2]
+
+    assert linked_list_to_list(sol.removeNthFromEnd(list_to_linked_list([1, 2, 3]), 3)) == [2, 3]
+
+    print("\nAll test cases passed!")
+````

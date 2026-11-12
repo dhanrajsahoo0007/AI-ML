@@ -58,6 +58,8 @@ export interface DsaProblem extends Base {
 export interface DsaOutline extends Base {
   type: "outline";
   fm: OutlineFrontmatter | null;
+  /** True when the body has notes (approach, solution) after a <PremiumBreak/> marker. */
+  hasBreak: boolean;
 }
 
 export type DsaItem = DsaTopic | DsaProblem | DsaOutline;
@@ -146,7 +148,7 @@ export function loadDsaItems(section: Section): DsaItem[] {
     .map((name): DsaOutline => {
       const file = path.join(dir, OUTLINES_DIR, name);
       const slug = name.slice(0, -4);
-      const { data } = matter(fs.readFileSync(file, "utf8"));
+      const { data, content } = matter(fs.readFileSync(file, "utf8"));
       const parsed = outlineFrontmatterSchema.safeParse(data);
       return {
         type: "outline",
@@ -158,6 +160,7 @@ export function loadDsaItems(section: Section): DsaItem[] {
         fm: parsed.success ? parsed.data : null,
         title: typeof data.title === "string" ? data.title : slug,
         description: typeof data.description === "string" ? data.description : undefined,
+        hasBreak: PREMIUM_BREAK.test(content),
       };
     });
 

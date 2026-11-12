@@ -24,3 +24,93 @@ Output: '123_456'
 - Detect replacement cycles to avoid infinite recursion; leave unresolved or raise as needed.
 - Unmatched placeholders remain unchanged.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS / recursion with memoization
+Expand each placeholder depth-first, tracking the expansion stack for cycle detection.
+
+1. Scan the string left-to-right; on '%', read until next '%' to get a token.
+2. If token has a replacement, recursively expand it with a visiting set for the current chain.
+3. If a cycle is detected, leave the inner pattern as-is (or original token).
+
+## Complexity
+
+**Time:** O(output length \* depth) in typical cases.
+
+**Space:** O(recursion depth + dictionary size).
+
+## Solution
+
+````python
+from typing import Dict, Set
+
+
+class StringReplacementLibrary:
+    @staticmethod
+    def replace_string(input_string: str, replacements: Dict[str, str]) -> str:
+        def expand(token: str, expanding: Set[str]) -> str:
+            if token not in replacements:
+                return f"%{token}%"
+            if token in expanding:
+                return f"%{token}%"
+            expanding.add(token)
+            raw = replacements[token]
+            out_parts: list[str] = []
+            i = 0
+            while i < len(raw):
+                if raw[i] != "%":
+                    out_parts.append(raw[i])
+                    i += 1
+                    continue
+                j = raw.find("%", i + 1)
+                if j == -1:
+                    out_parts.append(raw[i:])
+                    break
+                inner = raw[i + 1 : j]
+                out_parts.append(expand(inner, expanding))
+                i = j + 1
+            expanding.remove(token)
+            return "".join(out_parts)
+
+        res: list[str] = []
+        k = 0
+        while k < len(input_string):
+            if input_string[k] != "%":
+                res.append(input_string[k])
+                k += 1
+                continue
+            m = input_string.find("%", k + 1)
+            if m == -1:
+                res.append(input_string[k:])
+                break
+            key = input_string[k + 1 : m]
+            res.append(expand(key, set()))
+            k = m + 1
+        return "".join(res)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    lib = StringReplacementLibrary()
+    assert lib.replace_string("%X%_%Y%", {"X": "123", "Y": "456"}) == "123_456"
+    s = lib.replace_string(
+        "I am %USER% My home is %HOME%",
+        {"USER": "admin", "HOME": "/%USER%/home"},
+    )
+    assert s == "I am admin My home is /admin/home"
+    assert (
+        lib.replace_string("Process: %A%", {"A": "%B%", "B": "%C%", "C": "success"})
+        == "Process: success"
+    )
+    assert (
+        lib.replace_string("Hello, %NAME%! Meet %UNKNOWN%.", {"NAME": "John"})
+        == "Hello, John! Meet %UNKNOWN%."
+    )
+    assert lib.replace_string("Hi %USER%", {"USER": "%PRONOUN% John", "PRONOUN": "Mr."}) == "Hi Mr. John"
+    print("\nAll test cases passed!")
+````

@@ -25,3 +25,73 @@ Output: [2, 3]
 - 3 <= len(s) <= 10^5
 - 1 <= len(queries) <= 10^5
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum + Nearest Index Arrays
+Precompute prefix plate counts and nearest candle to the left and right of each index.
+
+1. Prefix count plates before each index.
+2. nearest\_left\[i\] is last candle at or before i; nearest\_right\[i\] is first candle at or after i.
+3. For each query, clamp to inner candles and subtract prefix counts.
+
+## Complexity
+
+**Time:** O(n + q) for n = len(s) and q = len(queries).
+
+**Space:** O(n) auxiliary.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def platesBetweenCandles(self, s: str, queries: List[List[int]]) -> List[int]:
+        n = len(s)
+        plate_pref = [0] * (n + 1)
+        for i, ch in enumerate(s):
+            plate_pref[i + 1] = plate_pref[i] + (ch == "*")
+        nearest_left = [-1] * n
+        last = -1
+        for i, ch in enumerate(s):
+            if ch == "|":
+                last = i
+            nearest_left[i] = last
+        nearest_right = [n] * n
+        nxt = n
+        for i in range(n - 1, -1, -1):
+            if s[i] == "|":
+                nxt = i
+            nearest_right[i] = nxt
+        out: List[int] = []
+        for left, right in queries:
+            lc = nearest_right[left]
+            rc = nearest_left[right]
+            if lc == n or rc == -1 or lc > rc:
+                out.append(0)
+            else:
+                out.append(plate_pref[rc + 1] - plate_pref[lc + 1])
+        return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.platesBetweenCandles("**|**|***|", [[2, 5], [5, 9]]) == [2, 3], "Test 1 Failed"
+    print("Test 1 Passed: sample queries")
+    assert sol.platesBetweenCandles("***", [[0, 2]]) == [0], "Test 2 Failed"
+    print("Test 2 Passed: no candles")
+    assert sol.platesBetweenCandles("|*|", [[0, 2]]) == [1], "Test 3 Failed"
+    print("Test 3 Passed: single plate inside")
+    assert sol.platesBetweenCandles("*|*|", [[0, 3], [1, 3]]) == [1, 1], "Test 4 Failed"
+    print("Test 4 Passed: two windows")
+    assert sol.platesBetweenCandles("||**||**|*|**||", [[3, 8]]) == [2], "Test 5 Failed"
+    print("Test 5 Passed: interior segment")
+    print("\nAll test cases passed!")
+````

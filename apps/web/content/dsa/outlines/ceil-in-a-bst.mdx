@@ -28,3 +28,116 @@ Example 2:
 ````text
 - The tree follows BST ordering on distinct values.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** BST walk with candidate
+Track the best candidate when going left; go right when the current value is too small.
+
+1. Initialize ceiling as None and current at root.
+2. If current equals x, return x.
+3. If current is less than x, move right; else update ceiling and move left.
+4. Return ceiling after the walk.
+
+## Complexity
+
+**Time:** O(h) - One path from root toward a leaf.
+
+**Space:** O(1) - Iterative; O(h) if implemented recursively.
+Restored (original notes, diagrams, and walkthrough):
+Binary Search Tree (BST) Ceiling Implementation
+
+Problem Statement:
+Given a BST and a value X, find the ceiling of X in the BST.
+The ceiling of X is the smallest value in the BST that is greater than or equal to X.
+
+Time Complexity: O(h), where h is the height of the tree.
+- In a balanced BST, h = log(n), where n is the number of nodes.
+- In the worst case (skewed tree), h = n.
+
+Space Complexity:
+- O(h) for the recursive approach due to the call stack.
+- O(1) for the iterative approach.
+
+Explanation:
+The algorithm works by traversing the BST while keeping track of the potential ceiling value.
+- If the current node's value is equal to X, we've found the exact ceiling.
+- If X is greater than the current node's value, we move to the right subtree.
+- If X is less than the current node's value, we update our potential ceiling and move to the left subtree.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: list[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+class Solution:
+    def ceil(self, root: Optional[TreeNode], x: int) -> Optional[int]:
+        ceiling: Optional[int] = None
+        cur = root
+        while cur:
+            if cur.val == x:
+                return x
+            if cur.val < x:
+                cur = cur.right
+            else:
+                ceiling = cur.val
+                cur = cur.left
+        return ceiling
+
+    def ceilRecursive(self, root: Optional[TreeNode], x: int) -> Optional[int]:
+        def helper(node: Optional[TreeNode], best: Optional[int]) -> Optional[int]:
+            if node is None:
+                return best
+            if node.val == x:
+                return x
+            if node.val < x:
+                return helper(node.right, best)
+            return helper(node.left, node.val)
+
+        return helper(root, None)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    root = build_bst_insert([8, 4, 12, 2, 6, 10, 14])
+    assert sol.ceil(root, 5) == 6
+    assert sol.ceil(root, 14) == 14
+    assert sol.ceil(root, 20) is None
+    assert sol.ceilRecursive(root, 11) == 12
+    assert sol.ceil(None, 1) is None
+    print("\nAll test cases passed!")
+````

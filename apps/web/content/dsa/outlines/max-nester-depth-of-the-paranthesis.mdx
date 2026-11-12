@@ -33,3 +33,54 @@ Example 3:
 - 1 <= len(s) <= 100
 - s is a valid parentheses string with only digits, '+', '-', '*', '/', '(', and ')'
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Scan
+Treat '(' as depth +1 and ')' as depth -1 while tracking the maximum depth.
+
+1. Walk characters; ignore non-parenthesis symbols.
+2. Increment depth on '(' and decrement on ')'.
+3. Record the maximum depth after each '('.
+
+## Complexity
+
+**Time:** O(n) - One pass.
+
+**Space:** O(1) - Counters only.
+
+## Solution
+
+````python
+class Solution:
+    def maxDepth(self, s: str) -> int:
+        curr = 0
+        max_curr = 0
+        for char in s:
+            if char == "(":
+                curr += 1
+                max_curr = max(max_curr, curr)
+            elif char == ")":
+                curr -= 1
+        return max_curr
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.maxDepth("(1+(2*3)+((8)/4))+1") == 3, "Test 1 Failed"
+    print("Test 1 Passed: arithmetic nesting")
+    assert sol.maxDepth("(1)+((2))+(((3)))") == 3, "Test 2 Failed"
+    print("Test 2 Passed: stacked groups")
+    assert sol.maxDepth("()(())((()()))") == 3, "Test 3 Failed"
+    print("Test 3 Passed: mixed groups")
+    assert sol.maxDepth("()") == 1, "Test 4 Failed"
+    print("Test 4 Passed: single pair")
+    assert sol.maxDepth("(((())))") == 4, "Test 5 Failed"
+    print("Test 5 Passed: uniform depth four")
+    print("\nAll test cases passed!")
+````

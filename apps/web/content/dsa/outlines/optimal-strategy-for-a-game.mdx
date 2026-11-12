@@ -9,3 +9,46 @@ status: outline
 ---
 
 Two players pick from ends of array; first wants maximize own sum vs optimal opponent.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Minimax interval DP.
+
+## Complexity
+
+**Time:** O(n^2).
+
+## Solution
+
+````python
+from functools import lru_cache
+from typing import List
+
+
+class Solution:
+    def predictTheWinner(self, nums: List[int]) -> bool:
+        @lru_cache(None)
+        def score(i: int, j: int) -> int:
+            if i > j:
+                return 0
+            take_left = nums[i] - score(i + 1, j)
+            take_right = nums[j] - score(i, j - 1)
+            return max(take_left, take_right)
+
+        return score(0, len(nums) - 1) >= 0
+````
+
+## Tests from the notes
+
+````python
+if __name__ == '__main__':
+    sol = Solution()
+    assert sol.predictTheWinner([1, 5, 2]) is False
+    assert sol.predictTheWinner([1, 5, 233, 7]) is True
+    assert sol.predictTheWinner([1, 2]) is True
+    assert sol.predictTheWinner([1, 1, 1]) is True
+    assert sol.predictTheWinner([2, 4, 55, 6, 8]) is False
+    print('\nAll test cases passed!')
+````

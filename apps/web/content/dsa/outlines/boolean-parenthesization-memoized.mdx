@@ -9,3 +9,68 @@ status: outline
 ---
 
 Same as boolean parenthesization counting ways to get True, with memoization.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Interval DP memoized
+Identical recurrence to recursive version with lru\_cache on substrings.
+
+## Complexity
+
+**Time:** O(n^3). Space: O(n^2) states.
+
+## Solution
+
+````python
+from functools import lru_cache
+
+
+class Solution:
+    MOD = 1003
+
+    @staticmethod
+    def _apply(op: str, a: bool, b: bool) -> bool:
+        if op == "&":
+            return a and b
+        if op == "|":
+            return a or b
+        return a ^ b
+
+    def countTrueWays(self, s: str) -> int:
+        @lru_cache(maxsize=None)
+        def dfs(expr: str, want: bool) -> int:
+            if len(expr) == 1:
+                return int((expr == "T") == want)
+            ans = 0
+            for i in range(1, len(expr), 2):
+                op = expr[i]
+                left, right = expr[:i], expr[i + 1 :]
+                for wl in (False, True):
+                    for wr in (False, True):
+                        lt = dfs(left, wl)
+                        if lt == 0:
+                            continue
+                        rt = dfs(right, wr)
+                        if rt == 0:
+                            continue
+                        if Solution._apply(op, wl, wr) == want:
+                            ans = (ans + lt * rt) % Solution.MOD
+            return ans
+
+        return dfs(s, True)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.countTrueWays("T|F") == 1
+    assert sol.countTrueWays("T^T^T") == 2
+    assert sol.countTrueWays("T|F&T") == 2
+    assert sol.countTrueWays("T&T&T") == 2
+    assert sol.countTrueWays("T|F|T") == 2
+    print("\nAll test cases passed!")
+````

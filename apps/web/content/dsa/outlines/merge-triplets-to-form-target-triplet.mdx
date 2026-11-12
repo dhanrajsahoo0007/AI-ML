@@ -35,3 +35,58 @@ Example 3:
 - triplets[i].length == target.length == 3
 - 0 <= triplets[i][j], target[j] <= 1000
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Filtering
+Ignore triplets that overshoot target; for the rest, OR-track whether each target coordinate can be matched exactly.
+
+1. Initialize three booleans for whether each target coordinate has been seen in an allowed triplet.
+2. For each triplet, skip if any coordinate exceeds target.
+3. For each index, if triplet equals target on that axis, mark that axis satisfied.
+4. Return True only if all three axes were satisfied.
+
+## Complexity
+
+**Time:** O(n) over triplets.
+
+**Space:** O(1) - Three flags.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def mergeTriplets(self, triplets: List[List[int]], target: List[int]) -> bool:
+        a = b = c = False
+        t0, t1, t2 = target
+        for x, y, z in triplets:
+            if x > t0 or y > t1 or z > t2:
+                continue
+            a = a or x == t0
+            b = b or y == t1
+            c = c or z == t2
+        return a and b and c
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.mergeTriplets([[2, 5, 3], [1, 8, 4], [1, 7, 5]], [2, 7, 5]) is True, "Test 1 Failed"
+    print("Test 1 Passed: combine safe triplets")
+    assert sol.mergeTriplets([[3, 4, 5], [4, 5, 6]], [2, 5, 8]) is False, "Test 2 Failed"
+    print("Test 2 Passed: overshoot blocks")
+    assert sol.mergeTriplets([[2, 5, 3], [2, 3, 4], [1, 2, 5], [5, 2, 3]], [5, 5, 5]) is True, "Test 3 Failed"
+    print("Test 3 Passed: build fives gradually")
+    assert sol.mergeTriplets([[1, 1, 1]], [2, 2, 2]) is False, "Test 4 Failed"
+    print("Test 4 Passed: cannot exceed without overshoot triplet")
+    assert sol.mergeTriplets([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], [1, 1, 1]) is True, "Test 5 Failed"
+    print("Test 5 Passed: axis-wise assembly")
+    print("\nAll test cases passed!")
+````

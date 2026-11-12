@@ -28,3 +28,62 @@ Example 2:
 ````text
 - 1 <= len(s) <= 12 for exponential output in tests
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary choice between characters
+After each character except the last, either continue the token or insert a space
+before extending with the next character.
+
+1. DFS with index pointing at next character to place.
+2. At the last character, finalize the accumulated string.
+3. Otherwise branch without space and with space after the current append.
+
+## Complexity
+
+**Time:** O(2^(n-1)) strings for length n
+
+**Space:** O(n) recursion depth
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def permute_with_spaces(self, s: str) -> List[str]:
+        if not s:
+            return []
+        result: List[str] = []
+
+        def dfs(index: int, current: str) -> None:
+            if index == len(s) - 1:
+                result.append(current + s[index])
+                return
+            dfs(index + 1, current + s[index])
+            dfs(index + 1, current + s[index] + " ")
+
+        dfs(0, "")
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.permute_with_spaces("ABC") == ["ABC", "AB C", "A BC", "A B C"], "Test 1 Failed"
+    assert sol.permute_with_spaces("AB") == ["AB", "A B"], "Test 2 Failed"
+    assert sol.permute_with_spaces("X") == ["X"], "Test 3 Failed"
+    assert len(sol.permute_with_spaces("ABCD")) == 8, "Test 4 Failed"
+    assert sol.permute_with_spaces("AB")[0] == "AB", "Test 5 Failed"
+    print("Test 1 Passed: ABC variants")
+    print("Test 2 Passed: AB variants")
+    print("Test 3 Passed: single char")
+    print("Test 4 Passed: length four count")
+    print("Test 5 Passed: first variant stable")
+    print("\nAll test cases passed!")
+````

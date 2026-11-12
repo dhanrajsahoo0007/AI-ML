@@ -29,3 +29,71 @@ Example 2:
 - 1 <= len(nums) <= 1000
 - nums[i] != nums[i + 1] for valid peaks in the classic formulation
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search by Slope
+Move toward the side where nums\[mid\] &lt; nums\[mid+1\] (uphill) to reach a peak.
+
+1. Handle n == 1 and boundary peaks at 0 and n-1.
+2. Binary search on interior: if nums\[mid-1\] &lt; nums\[mid\] &gt; nums\[mid+1\], return mid.
+3. If ascending at mid, search right; else search left.
+
+## Complexity
+
+**Time:** O(log n) - Halving interior range.
+
+**Space:** O(1) - Constant indices only.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findPeakElement(self, nums: List[int]) -> int:
+        n = len(nums)
+        if n == 1:
+            return 0
+        if nums[0] > nums[1]:
+            return 0
+        if nums[n - 1] > nums[n - 2]:
+            return n - 1
+        lo, hi = 1, n - 2
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if nums[mid - 1] < nums[mid] > nums[mid + 1]:
+                return mid
+            if nums[mid] < nums[mid + 1]:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return lo
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    for arr in ([1, 2, 3, 1], [1, 2, 1, 3, 5, 6, 4], [1], [1, 2], [2, 1], [1, 2, 3]):
+        i = sol.findPeakElement(arr)
+        n = len(arr)
+        ok = arr[i] > (arr[i - 1] if i > 0 else float("-inf")) and arr[i] > (
+            arr[i + 1] if i + 1 < n else float("-inf")
+        )
+        assert ok, f"Test failed for {arr} peak index {i}"
+    print("Test 1 Passed: multiple arrays satisfy peak property")
+    assert sol.findPeakElement([1, 2, 3, 4, 5, 6, 7, 8, 5, 1]) == 7, "Test 2 Failed"
+    print("Test 2 Passed: single hill")
+    assert sol.findPeakElement([1, 3, 8, 12, 4, 2]) == 3, "Test 3 Failed"
+    print("Test 3 Passed: bitonic maximum index")
+    assert sol.findPeakElement([1, 2, 3, 4, 5]) == 4, "Test 4 Failed"
+    print("Test 4 Passed: strictly increasing")
+    assert sol.findPeakElement([5, 4, 3, 2, 1]) == 0, "Test 5 Failed"
+    print("Test 5 Passed: strictly decreasing")
+    print("\nAll test cases passed!")
+````

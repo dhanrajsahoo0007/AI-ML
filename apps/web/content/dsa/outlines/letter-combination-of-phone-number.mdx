@@ -28,3 +28,85 @@ Example 2:
 - 0 <= len(digits) <= 4
 - digits contains only '2'..'9'.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Cartesian backtracking over positions
+Map each digit to letters; DFS chooses one letter per digit index.
+
+1. If digits empty, return \[\].
+2. DFS(index, path): when index == len(digits), join path to string and store.
+3. For each letter mapped to digits\[index\], push, recurse, pop.
+
+## Complexity
+
+**Time:** O(4^n \* n) worst case for digits 7 and 9.
+
+**Space:** O(n) - depth.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def letterCombinations(self, digits: str) -> List[str]:
+        if not digits:
+            return []
+        letters = {
+            "2": "abc",
+            "3": "def",
+            "4": "ghi",
+            "5": "jkl",
+            "6": "mno",
+            "7": "pqrs",
+            "8": "tuv",
+            "9": "wxyz",
+        }
+        result: List[str] = []
+
+        def backtrack(index: int, path: List[str]) -> None:
+            if index == len(digits):
+                result.append("".join(path))
+                return
+            for ch in letters[digits[index]]:
+                path.append(ch)
+                backtrack(index + 1, path)
+                path.pop()
+
+        backtrack(0, [])
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert set(sol.letterCombinations("23")) == {
+        "ad",
+        "ae",
+        "af",
+        "bd",
+        "be",
+        "bf",
+        "cd",
+        "ce",
+        "cf",
+    }, "Test 1 Failed"
+    print("Test 1 Passed: digits 23")
+
+    assert sol.letterCombinations("") == [], "Test 2 Failed"
+    print("Test 2 Passed: empty input")
+
+    assert set(sol.letterCombinations("2")) == {"a", "b", "c"}, "Test 3 Failed"
+    print("Test 3 Passed: single digit")
+
+    assert len(sol.letterCombinations("79")) == 16, "Test 4 Failed"
+    print("Test 4 Passed: 4x4 combinations")
+
+    print("\nAll test cases passed!")
+````

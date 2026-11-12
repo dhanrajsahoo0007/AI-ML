@@ -28,3 +28,81 @@ Example 2:
 ````text
 - 1 <= m <= n <= 9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph DFS with jump rules
+Precompute skipped digit for each ordered pair; mark visited bits and count valid paths.
+
+1. Build skip\[a\]\[b\] as the key that must be visited before moving a-&gt;b, or 0 if adjacent/diagonal.
+2. DFS from each start digit with symmetry weights (corners 4, edges 4, center 1) or brute all 9.
+3. Count when path length in \[m, n\].
+
+## Complexity
+
+**Time:** O(9!) worst-case permutations bounded by pruning.
+
+**Space:** O(1) for visited bitmask.
+
+## Solution
+
+````python
+class Solution:
+    def numberOfPatterns(self, m: int, n: int) -> int:
+        skip = [[0] * 10 for _ in range(10)]
+        pairs = [
+            (1, 3, 2),
+            (1, 7, 4),
+            (1, 9, 5),
+            (2, 8, 5),
+            (3, 7, 5),
+            (3, 9, 6),
+            (4, 6, 5),
+            (7, 9, 8),
+        ]
+        for a, b, mid in pairs:
+            skip[a][b] = skip[b][a] = mid
+
+        def dfs(visited: int, last: int, count: int) -> int:
+            total = 0
+            if count >= m:
+                total += 1
+            if count == n:
+                return total
+            for nxt in range(1, 10):
+                bit = 1 << nxt
+                if visited & bit:
+                    continue
+                mid = skip[last][nxt]
+                if mid and not (visited & (1 << mid)):
+                    continue
+                total += dfs(visited | bit, nxt, count + 1)
+            return total
+
+        ans = 0
+        for start in range(1, 10):
+            ans += dfs(1 << start, start, 1)
+        return ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.numberOfPatterns(1, 1) == 9, "Test 1 Failed"
+    print("Test 1 Passed: single dot patterns")
+
+    assert sol.numberOfPatterns(1, 2) == 65, "Test 2 Failed"
+    print("Test 2 Passed: length one or two")
+
+    assert sol.numberOfPatterns(4, 4) == 1624, "Test 3 Failed"
+    print("Test 3 Passed: exactly four dots")
+
+    assert sol.numberOfPatterns(9, 9) == 140704, "Test 4 Failed"
+    print("Test 4 Passed: full nine-dot patterns")
+
+    print("\nAll test cases passed!")
+````

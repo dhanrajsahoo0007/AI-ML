@@ -28,3 +28,85 @@ Example 2:
 - 1 <= len(nums) <= 8
 - -10 <= nums[i] <= 10
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Permutation by swap with duplicate pruning
+Sort nums; at each recursion depth skip choosing the same value twice at the same swap level.
+
+1. Sort nums to group equal values.
+2. At index \`start\`, for each i &gt;= start, if nums\[i\] was already swapped into position \`start\` in this loop, skip.
+3. Swap nums\[start\] with nums\[i\], recurse on start + 1, then swap back.
+
+## Complexity
+
+**Time:** O(n \* n!) in the distinct case; less with many duplicates.
+
+**Space:** O(n) - recursion depth and auxiliary sets per level.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def permuteUnique(self, nums: List[int]) -> List[List[int]]:
+        nums.sort()
+        result: List[List[int]] = []
+
+        def swap(i: int, j: int) -> None:
+            nums[i], nums[j] = nums[j], nums[i]
+
+        def backtrack(start: int) -> None:
+            if start == len(nums):
+                result.append(nums[:])
+                return
+            # `seen` is local to this depth: skip duplicate values already tried at index `start`.
+            seen: set[int] = set()
+            for i in range(start, len(nums)):
+                if nums[i] in seen:
+                    continue
+                seen.add(nums[i])
+                swap(start, i)
+                backtrack(start + 1)
+                swap(start, i)  # restore array before trying the next swap partner
+
+        backtrack(0)
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def norm(rows: List[List[int]]) -> List[tuple]:
+        return sorted(tuple(r) for r in rows)
+
+    assert norm(sol.permuteUnique([1, 1, 2])) == [(1, 1, 2), (1, 2, 1), (2, 1, 1)], "Test 1 Failed"
+    print("Test 1 Passed: [1,1,2]")
+
+    assert len(sol.permuteUnique([1, 2, 3])) == 6, "Test 2 Failed"
+    print("Test 2 Passed: three distinct numbers")
+
+    assert norm(sol.permuteUnique([2, 2, 1, 1])) == norm(
+        [
+            [1, 1, 2, 2],
+            [1, 2, 1, 2],
+            [1, 2, 2, 1],
+            [2, 1, 1, 2],
+            [2, 1, 2, 1],
+            [2, 2, 1, 1],
+        ]
+    ), "Test 3 Failed"
+    print("Test 3 Passed: two pairs")
+
+    assert sol.permuteUnique([0]) == [[0]], "Test 4 Failed"
+    print("Test 4 Passed: single element")
+
+    print("\nAll test cases passed!")
+````

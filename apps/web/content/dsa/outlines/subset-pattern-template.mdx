@@ -1,0 +1,88 @@
+---
+title: "Template: Subset Pattern"
+description: "Given an integer array nums with distinct elements, return the power set: every subset, including the empty subset."
+topics: [backtracking]
+group: "02. Subset Pattern"
+number: "00"
+order: 12002000000000
+status: outline
+---
+
+Given an integer array nums with distinct elements, return the power set: every subset,
+including the empty subset.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [1, 2, 3]
+Output: [[],[1],[2],[1,2],[3],[1,3],[2,3],[1,2,3]] (order may vary)
+````
+
+## Constraints
+
+````text
+- Elements in nums are unique.
+- 1 <= len(nums) <= 10.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Subset / start-index backtracking
+At each step, optionally include nums\[i\] for i &gt;= start, then recurse with start = i + 1.
+
+1. Append a snapshot of the current path at every recursive entry (every node is a subset).
+2. For i from start to end - 1, push nums\[i\], recurse with start i + 1, then pop.
+
+## Complexity
+
+**Time:** O(n \* 2^n) - 2^n subsets, each copied up to length n.
+
+**Space:** O(n) - recursion depth and current path excluding output.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def subsets(self, nums: List[int]) -> List[List[int]]:
+        result: List[List[int]] = []
+
+        def backtrack(start: int, path: List[int]) -> None:
+            result.append(path[:])
+            for i in range(start, len(nums)):
+                path.append(nums[i])
+                backtrack(i + 1, path)
+                path.pop()
+
+        backtrack(0, [])
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def norm_subsets(ss: List[List[int]]) -> List[tuple]:
+        return sorted(tuple(sorted(t)) for t in ss)
+
+    assert norm_subsets(sol.subsets([1])) == [(), (1,)], "Test 1 Failed"
+    print("Test 1 Passed: nums [1]")
+
+    assert norm_subsets(sol.subsets([1, 2])) == [(), (1,), (1, 2), (2,)], "Test 2 Failed"
+    print("Test 2 Passed: nums [1,2]")
+
+    assert len(sol.subsets([1, 2, 3])) == 8, "Test 3 Failed"
+    print("Test 3 Passed: eight subsets for length 3")
+
+    assert sol.subsets([]) == [[]], "Test 4 Failed"
+    print("Test 4 Passed: empty nums -> [[]]")
+
+    print("\nAll test cases passed!")
+````

@@ -25,3 +25,124 @@ Output: the completed board satisfying Sudoku rules
 - board is 9 x 9 with characters in {'1'..'9', '.'}
 - The puzzle is assumed solvable
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Constraint backtracking
+Fill empty cells left-to-right trying digits 1-9; undo when a digit fails deeper recursion.
+
+1. Scan for '.'; try each digit that passes row, column, and box checks.
+2. Recurse; on success propagate True; otherwise reset to '.' and try next digit.
+3. Return True when no empty cells remain.
+
+## Complexity
+
+**Time:** Exponential in worst case; fine for standard puzzles.
+
+**Space:** O(1) aside from recursion depth O(81).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def _is_valid(self, board: List[List[str]], row: int, col: int, ch: str) -> bool:
+        for i in range(9):
+            if board[i][col] == ch:
+                return False
+            if board[row][i] == ch:
+                return False
+            br = 3 * (row // 3) + i // 3
+            bc = 3 * (col // 3) + i % 3
+            if board[br][bc] == ch:
+                return False
+        return True
+
+    def solveSudoku(self, board: List[List[str]]) -> bool:
+        for r in range(9):
+            for c in range(9):
+                if board[r][c] != ".":
+                    continue
+                for d in map(str, range(1, 10)):
+                    if not self._is_valid(board, r, c, d):
+                        continue
+                    board[r][c] = d
+                    if self.solveSudoku(board):
+                        return True
+                    board[r][c] = "."
+                return False
+        return True
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    board = [
+        ["5", "3", ".", ".", "7", ".", ".", ".", "."],
+        ["6", ".", ".", "1", "9", "5", ".", ".", "."],
+        [".", "9", "8", ".", ".", ".", ".", "6", "."],
+        ["8", ".", ".", ".", "6", ".", ".", ".", "3"],
+        ["4", ".", ".", "8", ".", "3", ".", ".", "1"],
+        ["7", ".", ".", ".", "2", ".", ".", ".", "6"],
+        [".", "6", ".", ".", ".", ".", "2", "8", "."],
+        [".", ".", ".", "4", "1", "9", ".", ".", "5"],
+        [".", ".", ".", ".", "8", ".", ".", "7", "9"],
+    ]
+    expected_first_row = ["5", "3", "4", "6", "7", "8", "9", "1", "2"]
+    assert sol.solveSudoku(board) is True, "Test 1 Failed"
+    assert board[0] == expected_first_row, "Test 1 Failed"
+    print("Test 1 Passed: classic puzzle solved")
+
+    def rows_valid(b: List[List[str]]) -> bool:
+        for row in b:
+            if sorted(row) != [str(x) for x in range(1, 10)]:
+                return False
+        return True
+
+    assert rows_valid(board), "Test 2 Failed"
+    print("Test 2 Passed: every row uses digits 1-9 exactly once")
+
+    board2 = [
+        ["9", "5", "7", ".", "1", "3", ".", "8", "4"],
+        ["4", "8", "3", ".", "5", "7", "1", ".", "6"],
+        [".", "1", "2", ".", "4", "9", "5", "3", "7"],
+        ["1", "7", ".", "3", ".", "4", "9", ".", "2"],
+        ["5", ".", "4", "9", "7", ".", "3", "6", "."],
+        ["3", ".", "9", "5", ".", "8", "7", ".", "1"],
+        ["8", "4", "5", "7", "9", ".", "6", "1", "3"],
+        [".", "9", "1", ".", "3", "6", ".", "7", "5"],
+        ["7", ".", "6", "1", "8", "5", "4", ".", "9"],
+    ]
+    assert sol.solveSudoku(board2) is True, "Test 3 Failed"
+    assert all(ch != "." for row in board2 for ch in row), "Test 3 Failed"
+    print("Test 3 Passed: second sample fully filled")
+
+    def cols_valid(b: List[List[str]]) -> bool:
+        for c in range(9):
+            col = [b[r][c] for r in range(9)]
+            if sorted(col) != [str(x) for x in range(1, 10)]:
+                return False
+        return True
+
+    assert cols_valid(board2), "Test 4 Failed"
+    print("Test 4 Passed: columns are valid permutations")
+
+    def boxes_valid(b: List[List[str]]) -> bool:
+        for br in range(0, 9, 3):
+            for bc in range(0, 9, 3):
+                vals = [b[r][c] for r in range(br, br + 3) for c in range(bc, bc + 3)]
+                if sorted(vals) != [str(x) for x in range(1, 10)]:
+                    return False
+        return True
+
+    assert boxes_valid(board2), "Test 5 Failed"
+    print("Test 5 Passed: all 3x3 boxes valid")
+
+    print("\nAll test cases passed!")
+````

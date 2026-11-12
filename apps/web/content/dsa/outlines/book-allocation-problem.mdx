@@ -25,3 +25,73 @@ Output: 113
 ````text
 - 1 <= m, len(arr) <= 10^3 (typical competitive bounds)
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer (minimize maximum load)
+Feasible if m or fewer students suffice when each is capped at mid pages (greedy partition).
+
+1. If m &gt; n return -1. Search cap in \[max(arr), sum(arr)\].
+2. Count students needed with greedy linear scan; compare to m.
+
+## Complexity
+
+**Time:** O(n log S) - S = total pages.
+
+**Space:** O(1) - Greedy only.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findPages(self, arr: List[int], n: int, m: int) -> int:
+        if m > n:
+            return -1
+
+        def students_needed(cap: int) -> int:
+            s = 1
+            load = 0
+            for pages in arr:
+                if pages > cap:
+                    return m + 1
+                if load + pages > cap:
+                    s += 1
+                    load = pages
+                else:
+                    load += pages
+                if s > m:
+                    return s
+            return s
+
+        lo, hi = max(arr), sum(arr)
+        while lo < hi:
+            mid = lo + (hi - lo) // 2
+            if students_needed(mid) <= m:
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findPages([12, 34, 67, 90], 4, 2) == 113, "Test 1 Failed"
+    print("Test 1 Passed: two students")
+    assert sol.findPages([25, 46, 28, 49, 24], 5, 4) == 71, "Test 2 Failed"
+    print("Test 2 Passed: four students")
+    assert sol.findPages([10, 20, 30], 3, 4) == -1, "Test 3 Failed"
+    print("Test 3 Passed: impossible split")
+    assert sol.findPages([7, 2, 5, 10, 8], 5, 2) == 18, "Test 4 Failed"
+    print("Test 4 Passed: minimize largest chunk")
+    assert sol.findPages([1, 1, 1], 3, 3) == 1, "Test 5 Failed"
+    print("Test 5 Passed: one page each")
+    print("\nAll test cases passed!")
+````

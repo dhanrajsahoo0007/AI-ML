@@ -27,3 +27,73 @@ Example 2:
 ````text
 - 1 <= k <= len(arr)
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Fixed-size sliding window with decreasing deque
+Keep indices in decreasing order of values so the front is always the current maximum.
+
+1. For the first window, pop smaller values from the deque tail, then push indices.
+2. For each new index, remove indices outside the window from the front.
+3. Maintain decreasing order at the tail; append the current window max to the answer.
+
+## Complexity
+
+**Time:** O(n) - Each index is pushed and popped at most once from the deque.
+
+**Space:** O(k) - The deque stores at most k indices.
+
+## Solution
+
+````python
+from collections import deque
+from typing import List
+
+
+class Solution:
+    def maxOfSubarrays(self, arr: List[int], k: int) -> List[int]:
+        n = len(arr)
+        if n == 0 or k <= 0 or k > n:
+            return []
+
+        dq: deque[int] = deque()
+        res: List[int] = []
+
+        for j in range(n):
+            while dq and arr[dq[-1]] <= arr[j]:
+                dq.pop()
+            dq.append(j)
+
+            if dq[0] <= j - k:
+                dq.popleft()
+
+            if j >= k - 1:
+                res.append(arr[dq[0]])
+
+        return res
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.maxOfSubarrays([1, 3, -1, -3, 5, 3, 6, 7], 3) == [3, 3, 5, 5, 6, 7], "Test 1 Failed"
+    print("Test 1 Passed: classic deque window maxima")
+
+    assert sol.maxOfSubarrays([9, 11], 2) == [11], "Test 2 Failed"
+    print("Test 2 Passed: single window")
+
+    assert sol.maxOfSubarrays([5], 1) == [5], "Test 3 Failed"
+    print("Test 3 Passed: one element")
+
+    assert sol.maxOfSubarrays([2, 1, 3, 4, 6, 2], 4) == [4, 6, 6], "Test 4 Failed"
+    print("Test 4 Passed: increasing then dip")
+
+    assert sol.maxOfSubarrays([7, 7, 7, 7], 2) == [7, 7, 7], "Test 5 Failed"
+    print("Test 5 Passed: ties")
+
+    print("\nAll test cases passed!")
+````

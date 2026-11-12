@@ -28,3 +28,55 @@ Example 2:
 - 1 <= n <= 100
 - 0 <= prices[i] <= 10^4
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Unbounded knapsack
+Each length i is an item of weight i and value prices\[i-1\], unlimited copies.
+
+1. dp\[w\] = max revenue for length w.
+2. For w from 1..n, dp\[w\] = max over i&lt;=w of prices\[i-1\] + dp\[w-i\].
+
+## Complexity
+
+**Time:** O(n^2).
+
+**Space:** O(n).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def cutRod(self, prices: List[int], n: int) -> int:
+        dp = [0] * (n + 1)
+        for w in range(1, n + 1):
+            best = 0
+            for i in range(1, w + 1):
+                best = max(best, prices[i - 1] + dp[w - i])
+            dp[w] = best
+        return dp[n]
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    p8 = [1, 5, 8, 9, 10, 17, 17, 20]
+    assert sol.cutRod(p8, 8) == 22, "Test 1 Failed"
+    print("Test 1 Passed: classic eight-inch rod")
+    assert sol.cutRod([2, 5, 9, 12, 13], 5) == 14, "Test 2 Failed"
+    print("Test 2 Passed: five-inch example -> 14")
+    assert sol.cutRod([5], 1) == 5, "Test 3 Failed"
+    print("Test 3 Passed: single length")
+    assert sol.cutRod([1, 1, 1], 3) == 3, "Test 4 Failed"
+    print("Test 4 Passed: no benefit splitting cheap pieces")
+    assert sol.cutRod([3, 5, 6, 7], 4) == 12, "Test 5 Failed"
+    print("Test 5 Passed: four pieces pricing")
+    print("\nAll test cases passed!")
+````

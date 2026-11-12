@@ -31,3 +31,66 @@ Example 2:
 - 1 <= dist[i] <= 10^5
 - 1 <= hour <= 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer
+Time decreases as speed increases; check feasibility with ceil for all but the last segment.
+
+1. If hour &lt;= n - 1, return -1 (not enough time slots for n trains).
+2. Binary search speed in \[1, 10^7\]; feasible if sum ceil(dist\[i\]/s) for i &lt; n-1 plus dist\[-1\]/s &lt;= hour.
+
+## Complexity
+
+**Time:** O(n log U) - U = 10^7 upper bound on speed.
+
+**Space:** O(1) - Only arithmetic state.
+
+## Solution
+
+````python
+import math
+from typing import List
+
+
+class Solution:
+    def minSpeedOnTime(self, dist: List[int], hour: float) -> int:
+        if hour <= len(dist) - 1:
+            return -1
+
+        def ok(speed: int) -> bool:
+            t = 0.0
+            for i in range(len(dist) - 1):
+                t += math.ceil(dist[i] / speed)
+            t += dist[-1] / speed
+            return t <= hour
+
+        lo, hi = 1, 10**7
+        while lo < hi:
+            mid = lo + (hi - lo) // 2
+            if ok(mid):
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minSpeedOnTime([1, 3, 2], 6) == 1, "Test 1 Failed"
+    print("Test 1 Passed: six hours generous")
+    assert sol.minSpeedOnTime([1, 3, 2], 2.7) == 3, "Test 2 Failed"
+    print("Test 2 Passed: fractional deadline")
+    assert sol.minSpeedOnTime([1, 3, 2], 1.9) == -1, "Test 3 Failed"
+    print("Test 3 Passed: impossible")
+    assert sol.minSpeedOnTime([5], 1.5) == 4, "Test 4 Failed"
+    print("Test 4 Passed: single last segment fractional")
+    assert sol.minSpeedOnTime([1, 1, 100000], 2.01) >= 1, "Test 5 Failed"
+    print("Test 5 Passed: stress shape")
+    print("\nAll test cases passed!")
+````

@@ -24,3 +24,73 @@ Example 2: s = "F&T^T" -> 3 (per GFG small cases)
 ````text
 - len(s) <= 100 and follows valid alternating pattern
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Interval DP / matrix-chain style
+Split at each operator and combine counts from left/right subexpressions.
+
+1. dfs(s, want) returns number of parenthesizations yielding want.
+2. Split at operators; combine with multiplication of independent counts.
+
+## Complexity
+
+**Time:** O(4^n) naive recursion (use memo for 06).
+
+**Space:** O(n) depth.
+
+## Solution
+
+````python
+from functools import lru_cache
+
+
+class Solution:
+    MOD = 1003
+
+    @staticmethod
+    def _apply(op: str, a: bool, b: bool) -> bool:
+        if op == "&":
+            return a and b
+        if op == "|":
+            return a or b
+        return a ^ b
+
+    def countTrueWays(self, s: str) -> int:
+        @lru_cache(maxsize=None)
+        def dfs(expr: str, want: bool) -> int:
+            if len(expr) == 1:
+                return int((expr == "T") == want)
+            ans = 0
+            for i in range(1, len(expr), 2):
+                op = expr[i]
+                left, right = expr[:i], expr[i + 1 :]
+                for wl in (False, True):
+                    for wr in (False, True):
+                        lt = dfs(left, wl)
+                        if lt == 0:
+                            continue
+                        rt = dfs(right, wr)
+                        if rt == 0:
+                            continue
+                        if self._apply(op, wl, wr) == want:
+                            ans = (ans + lt * rt) % self.MOD
+            return ans
+
+        return dfs(s, True)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.countTrueWays("T|F") == 1, "Test 1 Failed"
+    assert sol.countTrueWays("F|T") == 1, "Test 2 Failed"
+    assert sol.countTrueWays("T^T^T") == 2, "Test 3 Failed"
+    assert sol.countTrueWays("T&T&T") == 2, "Test 4 Failed"
+    assert sol.countTrueWays("T|F&T") == 2, "Test 5 Failed"
+    print("\nAll test cases passed!")
+````

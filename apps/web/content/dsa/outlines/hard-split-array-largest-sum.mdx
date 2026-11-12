@@ -24,3 +24,99 @@ Output: 18
 - 1 <= len(nums) <= 1000
 - 1 <= k <= min(50, len(nums))
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer
+Feasible cap C if greedy segmentation needs at most k parts.
+
+1. Search in \[max(nums), sum(nums)\].
+2. Greedy accumulate until exceeding cap, then start new segment.
+
+## Complexity
+
+**Time:** O(n log S) - S = sum(nums).
+
+**Space:** O(1) - Greedy scan only.
+Restored (original notes, diagrams, and walkthrough):
+410. Split Array Largest Sum
+Hard
+Topics
+Companies
+Given an integer array nums and an integer k, split nums into k non-empty subarrays such that the largest sum of any subarray is minimized.
+
+Return the minimized largest sum of the split.
+
+A subarray is a contiguous part of the array.
+
+Example 1:
+
+Input: nums = \[7,2,5,10,8\], k = 2
+Output: 18
+Explanation: There are four ways to split nums into two subarrays.
+The best way is to split it into \[7,2,5\] and \[10,8\], where the largest sum among the two subarrays is only 18.
+Example 2:
+
+Input: nums = \[1,2,3,4,5\], k = 2
+Output: 9
+Explanation: There are four ways to split nums into two subarrays.
+The best way is to split it into \[1,2,3\] and \[4,5\], where the largest sum among the two subarrays is only 9.
+
+Constraints:
+
+1 &lt;= nums.length &lt;= 1000
+0 &lt;= nums\[i\] &lt;= 106
+1 &lt;= k &lt;= min(50, nums.length)
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def splitArray(self, nums: List[int], k: int) -> int:
+        def parts_needed(cap: int) -> int:
+            s = 1
+            cur = 0
+            for x in nums:
+                if x > cap:
+                    return k + 1
+                if cur + x > cap:
+                    s += 1
+                    cur = x
+                else:
+                    cur += x
+                if s > k:
+                    return s
+            return s
+
+        lo, hi = max(nums), sum(nums)
+        while lo < hi:
+            mid = lo + (hi - lo) // 2
+            if parts_needed(mid) <= k:
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.splitArray([7, 2, 5, 10, 8], 2) == 18, "Test 1 Failed"
+    print("Test 1 Passed: two segments")
+    assert sol.splitArray([1, 2, 3, 4, 5], 2) == 9, "Test 2 Failed"
+    print("Test 2 Passed: five numbers two parts")
+    assert sol.splitArray([1, 4, 4], 3) == 4, "Test 3 Failed"
+    print("Test 3 Passed: three singletons")
+    assert sol.splitArray([10], 1) == 10, "Test 4 Failed"
+    print("Test 4 Passed: single block")
+    assert sol.splitArray([2, 16, 14, 15], 2) == 29, "Test 5 Failed"
+    print("Test 5 Passed: balanced halves beat skewed cut")
+    print("\nAll test cases passed!")
+````

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { sectionOfKind } from "../sections/registry";
-import { outlineStatement, problemEditorial, problemStatement } from "./mdx";
+import { outlineNotes, outlineStatement, problemEditorial, problemStatement } from "./mdx";
 import { loadDsaItems, validOutlines, validProblems } from "./source";
 
 // Every problem's statement AND editorial compile and render with the components mdx.tsx provides. Pages compile
@@ -28,6 +28,8 @@ describe("outline MDX compiles", () => {
     for (const o of outlines) {
       try {
         if (renderToStaticMarkup(await outlineStatement(o.file)).length === 0) failed.push(`${o.slug}: empty`);
+        const notes = await outlineNotes(o.file);
+        if (o.hasBreak && (!notes || renderToStaticMarkup(notes).length === 0)) failed.push(`${o.slug}: no notes`);
       } catch (e) {
         failed.push(`${o.slug}: ${(e as Error).message.split("\n")[0]}`);
       }

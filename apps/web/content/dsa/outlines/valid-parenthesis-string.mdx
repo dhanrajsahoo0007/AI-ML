@@ -33,3 +33,60 @@ Example 3:
 - 1 <= len(s) <= 100
 - s[i] is '(', ')', or '*'
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Balance Range
+Track the minimum and maximum possible unmatched '(' count after each character; feasibility holds if the range ever stays valid.
+
+1. Maintain low and high bounds for how many unmatched '(' could exist.
+2. On '(', increase both; on ')', decrease both; on '\*', decrease low, increase high (all interpretations).
+3. Clamp low at zero; if high &lt; 0, impossible; at end require low == 0.
+
+## Complexity
+
+**Time:** O(n) - Single pass.
+
+**Space:** O(1) - Two integers.
+
+## Solution
+
+````python
+class Solution:
+    def checkValidString(self, s: str) -> bool:
+        low = high = 0
+        for ch in s:
+            if ch == "(":
+                low += 1
+                high += 1
+            elif ch == ")":
+                low -= 1
+                high -= 1
+            else:
+                low -= 1
+                high += 1
+            low = max(low, 0)
+            if high < 0:
+                return False
+        return low == 0
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.checkValidString("()") is True, "Test 1 Failed"
+    print("Test 1 Passed: simple valid")
+    assert sol.checkValidString("(*)") is True, "Test 2 Failed"
+    print("Test 2 Passed: star flexibility")
+    assert sol.checkValidString("(*))") is True, "Test 3 Failed"
+    print("Test 3 Passed: extra close balanced by star")
+    assert sol.checkValidString("(") is False, "Test 4 Failed"
+    print("Test 4 Passed: unmatched open")
+    assert sol.checkValidString(")(") is False, "Test 5 Failed"
+    print("Test 5 Passed: wrong order")
+    print("\nAll test cases passed!")
+````

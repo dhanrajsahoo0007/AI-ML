@@ -25,3 +25,59 @@ Output: 8
 - len(nums) == len(cost) <= 10^5
 - 1 <= nums[i], cost[i] <= 10^6
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Weighted Median
+Cost(t) = sum cost\[i\] \* abs(nums\[i\] - t) is convex; minimizer is any weighted median of pairs (nums\[i\], cost\[i\]).
+
+1. Sort pairs by nums.
+2. Accumulate cost until running sum &gt;= total\_cost / 2; that nums value is optimal t.
+3. Evaluate cost at t.
+
+## Complexity
+
+**Time:** O(n log n) - Sort dominates.
+
+**Space:** O(n) - Pairs array.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def minCost(self, nums: List[int], cost: List[int]) -> int:
+        pairs = sorted(zip(nums, cost), key=lambda x: x[0])
+        total_w = sum(c for _, c in pairs)
+        half = (total_w + 1) // 2
+        run = 0
+        target = pairs[0][0]
+        for x, w in pairs:
+            run += w
+            if run >= half:
+                target = x
+                break
+        return sum(c * abs(x - target) for x, c in zip(nums, cost))
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.minCost([1, 3, 5, 2], [2, 3, 1, 14]) == 8, "Test 1 Failed"
+    print("Test 1 Passed: weighted pulls to two")
+    assert sol.minCost([2, 2, 2, 2, 2], [4, 2, 8, 1, 3]) == 0, "Test 2 Failed"
+    print("Test 2 Passed: already equal")
+    assert sol.minCost([1, 2, 3], [1, 1, 1]) == 2, "Test 3 Failed"
+    print("Test 3 Passed: move to middle")
+    assert sol.minCost([10, 20], [1, 100]) == 10, "Test 4 Failed"
+    print("Test 4 Passed: weighted median favors heavy index")
+    assert sol.minCost([4, 4], [1, 2]) == 0, "Test 5 Failed"
+    print("Test 5 Passed: duplicate values zero cost")
+    print("\nAll test cases passed!")
+````

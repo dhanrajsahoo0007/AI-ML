@@ -29,3 +29,111 @@ Example 2:
 - len(nums[i]) == n
 - All strings in nums are distinct.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Diagonal / Cantor argument
+Flip the i-th diagonal bit relative to nums\[i\] so the constructed string differs from every row.
+
+1. For each index i from 0 to n - 1, set answer bit i to the opposite of nums\[i\]\[i\].
+2. Join bits into a string of length n.
+
+## Complexity
+
+**Time:** O(n^2) - n rows, each row accessed at one index (still O(n) string indexing overall O(n^2) if building char by char - actually O(n) total characters read).
+
+**Space:** O(n) - Output string.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findDifferentBinaryString(self, nums: List[str]) -> str:
+        return "".join("1" if nums[i][i] == "0" else "0" for i in range(len(nums)))
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    out1 = sol.findDifferentBinaryString(["01", "10"])
+    assert out1 not in {"01", "10"} and len(out1) == 2, "Test 1 Failed"
+    print("Test 1 Passed: length two instance")
+    out2 = sol.findDifferentBinaryString(["00", "01"])
+    assert out2 not in {"00", "01"} and len(out2) == 2, "Test 2 Failed"
+    print("Test 2 Passed: second sample")
+    out3 = sol.findDifferentBinaryString(["0"])
+    assert out3 == "1", "Test 3 Failed"
+    print("Test 3 Passed: single bit flip")
+    nums4 = ["0000", "0001", "0010", "0011"]
+    out4 = sol.findDifferentBinaryString(nums4)
+    assert out4 not in nums4 and len(out4) == 4, "Test 4 Failed"
+    print("Test 4 Passed: four-bit diagonal")
+    out5 = sol.findDifferentBinaryString(["111", "011", "001"])
+    assert out5 not in {"111", "011", "001"} and len(out5) == 3, "Test 5 Failed"
+    print("Test 5 Passed: length three")
+    print("\nAll test cases passed!")
+````
+
+## Another version
+
+From 12. Backtracking/05. String Pattern.
+
+### Approach
+
+**Pattern:** Cantor / diagonal construction
+Greedy diagonal: at position i choose the bit opposite nums\[i\]\[i\] so the candidate differs from nums\[i\].
+
+1. For each index i from 0 to n-1, set answer bit to complement of nums\[i\]\[i\].
+2. Join bits into a string; diagonal argument guarantees it differs from every nums\[i\].
+
+### Complexity
+
+**Time:** O(n^2) to read inputs when building character by character.
+
+**Space:** O(n) for the output string.
+
+### Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findDifferentBinaryString(self, nums: List[str]) -> str:
+        return "".join("1" if nums[i][i] == "0" else "0" for i in range(len(nums)))
+````
+
+### Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    samples = ["01", "10"]
+    ans = sol.findDifferentBinaryString(samples)
+    assert ans not in samples, "Test 1 Failed"
+    assert len(ans) == 2, "Test 1 Failed"
+    print("Test 1 Passed: length-two diagonal string")
+
+    samples2 = ["00", "01"]
+    ans2 = sol.findDifferentBinaryString(samples2)
+    assert ans2 not in samples2, "Test 2 Failed"
+    print("Test 2 Passed: avoids given pair")
+
+    samples3 = ["111"]
+    ans3 = sol.findDifferentBinaryString(samples3)
+    assert ans3 not in samples3, "Test 3 Failed"
+    print("Test 3 Passed: single forbidden triple")
+
+    samples4 = ["0"]
+    assert sol.findDifferentBinaryString(samples4) == "1", "Test 4 Failed"
+    print("Test 4 Passed: n=1 flip")
+
+    print("\nAll test cases passed!")
+````

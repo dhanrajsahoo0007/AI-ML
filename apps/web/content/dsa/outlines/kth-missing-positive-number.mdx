@@ -24,3 +24,92 @@ Output: 9
 - 1 <= len(arr) <= 10^5
 - 1 <= arr[i], k <= 10^9
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on arr Index
+Missing count before index i is arr\[i\] - (i + 1).
+
+1. Binary search largest i with missing count &lt; k.
+2. Answer is left + k after classic reduction.
+
+## Complexity
+
+**Time:** O(log n) - Search on indices.
+
+**Space:** O(1) - Constant extra variables.
+Restored (original notes, diagrams, and walkthrough):
+Problem: Kth Missing Positive Number
+
+Given an array arr of positive integers sorted in a strictly increasing order, and an integer k.
+Return the kth positive integer that is missing from this array.
+
+Example 1:
+Input: arr = \[2,3,4,7,11\], k = 5
+Output: 9
+Explanation: The missing positive integers are \[1,5,6,8,9,10,12,13,...\]. The 5th missing positive integer is 9.
+
+Example 2:
+Input: arr = \[1,2,3,4\], k = 2
+Output: 6
+Explanation: The missing positive integers are \[5,6,7,...\]. The 2nd missing positive integer is 6.
+
+Constraints:
+1 &lt;= arr.length &lt;= 1000
+1 &lt;= arr\[i\] &lt;= 1000
+1 &lt;= k &lt;= 1000
+arr\[i\] &lt; arr\[j\] for 1 &lt;= i &lt; j &lt;= arr.length
+
+Time Complexity: O(log n), where n is the length of the array
+Space Complexity: O(1)
+
+Explanation:
+This solution uses a binary search approach to efficiently find the kth missing positive number.
+The key insight is that for each index i, the number of missing positives up to arr\[i\] is arr\[i\] - (i + 1).
+
+We perform a binary search on the array:
+1. If the number of missing positives at the middle element is less than k,
+we know the kth missing positive is in the right half of the array.
+2. Otherwise, it's in the left half (including the current middle element).
+
+After the binary search, 'left' will be the index where the kth missing positive would be
+if it were inserted into the array. The actual kth missing positive is then left + k.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findKthPositive(self, arr: List[int], k: int) -> int:
+        lo, hi = 0, len(arr) - 1
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            missing = arr[mid] - (mid + 1)
+            if missing < k:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return lo + k
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.findKthPositive([2, 3, 4, 7, 11], 5) == 9, "Test 1 Failed"
+    print("Test 1 Passed: fifth missing")
+    assert sol.findKthPositive([1, 2, 3, 4], 2) == 6, "Test 2 Failed"
+    print("Test 2 Passed: tail missing")
+    assert sol.findKthPositive([1], 10) == 11, "Test 3 Failed"
+    print("Test 3 Passed: single block shift")
+    assert sol.findKthPositive([3, 10], 2) == 2, "Test 4 Failed"
+    print("Test 4 Passed: gap at start")
+    assert sol.findKthPositive(list(range(2, 2000, 2)), 1) == 1, "Test 5 Failed"
+    print("Test 5 Passed: first missing before positives")
+    print("\nAll test cases passed!")
+````

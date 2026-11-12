@@ -25,3 +25,79 @@ Output: ["cats and dog","cat sand dog"] (order may vary)
 - 1 <= len(s) <= 20
 - Dictionary words are unique lowercase strings
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix DFS with dictionary checks
+Try every dictionary word as the next token if it matches a prefix of the remaining string.
+
+1. DFS(start): if start == len(s), push joined path.
+2. For each word in wordDict, if s starts with word at start, append and recurse.
+
+## Complexity
+
+**Time:** O(2^n \* n) worst case.
+
+**Space:** O(n) for recursion and path storage excluding outputs.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def wordBreak(self, s: str, wordDict: List[str]) -> List[str]:
+        words = set(wordDict)
+        result: List[str] = []
+
+        def dfs(start: int, path: List[str]) -> None:
+            if start == len(s):
+                result.append(" ".join(path))
+                return
+            for end in range(start + 1, len(s) + 1):
+                token = s[start:end]
+                if token in words:
+                    path.append(token)
+                    dfs(end, path)
+                    path.pop()
+
+        dfs(0, [])
+        return result
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def norm(sentences: List[str]) -> List[str]:
+        return sorted(sentences)
+
+    s1 = "catsanddog"
+    w1 = ["cat", "cats", "and", "sand", "dog"]
+    assert norm(sol.wordBreak(s1, w1)) == norm(["cats and dog", "cat sand dog"]), "Test 1 Failed"
+    print("Test 1 Passed: catsanddog")
+
+    s2 = "pineapplepenapple"
+    w2 = ["apple", "pen", "applepen", "pine", "pineapple"]
+    out2 = sol.wordBreak(s2, w2)
+    assert len(out2) == 3, "Test 2 Failed"
+    print("Test 2 Passed: pineapplepenapple")
+
+    assert sol.wordBreak("catsandog", ["cats", "dog", "sand", "and", "cat"]) == [], "Test 3 Failed"
+    print("Test 3 Passed: impossible segmentation")
+
+    assert sol.wordBreak("a", ["a"]) == ["a"], "Test 4 Failed"
+    print("Test 4 Passed: single-letter string")
+
+    assert norm(sol.wordBreak("aaaa", ["a", "aa", "aaa"])) == norm(
+        ["a a a a", "a a aa", "a aa a", "aa a a", "aa aa", "aaa a", "a aaa"]
+    ), "Test 5 Failed"
+    print("Test 5 Passed: repeated a splits")
+
+    print("\nAll test cases passed!")
+````

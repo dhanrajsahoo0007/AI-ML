@@ -24,3 +24,78 @@ Output: ["()()()", "(())()"] (order may vary)
 ````text
 - 1 <= len(s) <= 25 in exhaustive tests
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Level-order search on removal states
+Repeatedly delete one parenthesis from frontier strings until some valid strings appear; that
+entire frontier is an optimal set.
+
+1. Start with &#123;s&#125;; if any member is valid, return all valid members in the set.
+2. Otherwise build the next frontier by removing one parenthesis from each string at each index.
+3. Deduplicate with a set and continue until valid strings exist.
+
+## Complexity
+
+**Time:** Exponential in worst case; fine for typical interview sizes.
+
+**Space:** Exponential frontier size in worst case.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def removeInvalidParentheses(self, s: str) -> List[str]:
+        def is_valid(st: str) -> bool:
+            balance = 0
+            for ch in st:
+                if ch == "(":
+                    balance += 1
+                elif ch == ")":
+                    balance -= 1
+                    if balance < 0:
+                        return False
+            return balance == 0
+
+        frontier = {s}
+        while True:
+            valid = [x for x in frontier if is_valid(x)]
+            if valid:
+                return valid
+            nxt: set[str] = set()
+            for word in frontier:
+                for i, ch in enumerate(word):
+                    if ch not in "()":
+                        continue
+                    nxt.add(word[:i] + word[i + 1 :])
+            frontier = nxt
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def norm(vals: List[str]) -> List[str]:
+        return sorted(vals)
+
+    assert norm(sol.removeInvalidParentheses("()())()")) == norm(["()()()", "(())()"]), "Test 1 Failed"
+    print("Test 1 Passed: ()())()")
+
+    assert norm(sol.removeInvalidParentheses("(a)())()")) == norm(["(a)()()", "(a())()"]), "Test 2 Failed"
+    print("Test 2 Passed: letters preserved")
+
+    assert sol.removeInvalidParentheses(")(") == [""], "Test 3 Failed"
+    print("Test 3 Passed: only empty valid")
+
+    assert norm(sol.removeInvalidParentheses("((())")) == norm(["(())"]), "Test 4 Failed"
+    print("Test 4 Passed: one removal yields (())")
+
+    print("\nAll test cases passed!")
+````

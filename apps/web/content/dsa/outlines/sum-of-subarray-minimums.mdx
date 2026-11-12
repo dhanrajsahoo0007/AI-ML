@@ -25,3 +25,96 @@ Output: 17
 - 1 <= len(arr) <= 3 * 10^4
 - 1 <= arr[i] <= 3 * 10^4
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Monotonic Stack + Contribution Counting
+Count how many subarrays treat each index as the minimum using next-smaller boundaries.
+
+1. Build arrays for previous strictly smaller index and next smaller-or-equal index.
+2. For each index i, multiply arr\[i\] by left span times right span of subarrays where it wins.
+3. Accumulate modulo 1\_000\_000\_007.
+
+Restored notes (archived workbook):
+
+Problem Statement:
+Given an array of integers arr, find the sum of min(b), where b ranges over every (contiguous) subarray of arr.
+Since the answer may be large, return the answer modulo 10^9 + 7.
+
+Time Complexity:
+Approach 1 (Brute Force): O(n^2)
+Approach 2 (Monotonic Stack): O(n)
+
+Space Complexity:
+Approach 1: O(1)
+Approach 2: O(n)
+
+\# Approach 1: Simple Brute Force (May result in TLE for large inputs)
+Explanation for Approach 1 (Brute Force):
+1. We use two nested loops to generate all possible subarrays.
+2. For each subarray, we keep track of the minimum element.
+3. We add the minimum element of each subarray to the result.
+4. The final result is the sum of all these minimums, modulo 10^9 + 7.
+
+Time Complexity: O(n^2) due to the nested loops.
+Space Complexity: O(1) as we only use a constant amount of extra space.
+
+## Complexity
+
+**Time:** O(n) - Two monotonic passes plus one accumulation.
+
+**Space:** O(n) - Boundary arrays and stack storage.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def sumSubarrayMins(self, arr: List[int]) -> int:
+        mod = 10**9 + 7
+        n = len(arr)
+        prev_smaller = [-1] * n
+        stack: List[int] = []
+        for i in range(n):
+            while stack and arr[stack[-1]] > arr[i]:
+                stack.pop()
+            prev_smaller[i] = stack[-1] if stack else -1
+            stack.append(i)
+
+        next_smaller = [n] * n
+        stack.clear()
+        for i in range(n - 1, -1, -1):
+            while stack and arr[stack[-1]] >= arr[i]:
+                stack.pop()
+            next_smaller[i] = stack[-1] if stack else n
+            stack.append(i)
+
+        total = 0
+        for i in range(n):
+            left = i - prev_smaller[i]
+            right = next_smaller[i] - i
+            total = (total + arr[i] * left * right) % mod
+        return total
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.sumSubarrayMins([3, 1, 2, 4]) == 17, "Test 1 Failed"
+    assert sol.sumSubarrayMins([11, 81, 94, 43, 3]) == 444, "Test 2 Failed"
+    assert sol.sumSubarrayMins([5]) == 5, "Test 3 Failed"
+    assert sol.sumSubarrayMins([1, 1, 1]) == 6, "Test 4 Failed"
+    assert sol.sumSubarrayMins([2, 3, 1]) == 10, "Test 5 Failed"
+    print("Test 1 Passed: classic sample")
+    print("Test 2 Passed: larger values")
+    print("Test 3 Passed: single element")
+    print("Test 4 Passed: ties")
+    print("Test 5 Passed: mixed order")
+    print("\nAll test cases passed!")
+````

@@ -7,6 +7,7 @@ import {
   Tags,
   problemListHref,
   findOutline,
+  outlineNotes,
   outlineStatement,
   problemEditorial,
   problemStatement,
@@ -128,6 +129,9 @@ async function OutlinePage({
   section,
   outline,
 }: Pick<NonNullable<ReturnType<typeof findOutline>>, "section" | "outline">) {
+  // The notes hold the solution, so they follow the editorial rule: compiled only for the owner's local review
+  // (features/dsa/local-view.ts) until Pro delivery exists; every other build shows the Pro placeholder.
+  const notes = outline.hasBreak && (await showsPremiumEditorialLocally()) ? await outlineNotes(outline.file) : null;
   return (
     <div className="mx-auto w-full max-w-4xl px-4 pt-6 pb-20 md:px-8">
       <Breadcrumb
@@ -150,6 +154,22 @@ async function OutlinePage({
       <article className="prose-editorial" data-dsa-statement>
         {await outlineStatement(outline.file)}
       </article>
+      {outline.hasBreak && (
+        <section aria-labelledby="notes-heading" className="mt-12">
+          <h2 id="notes-heading" className="font-display text-2xl font-semibold text-ink">
+            Notes and solution
+          </h2>
+          {notes ? (
+            <article className="prose-editorial mt-6" data-dsa-outline-notes>
+              {notes}
+            </article>
+          ) : (
+            <div className="mt-6">
+              <ProEditorial />
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

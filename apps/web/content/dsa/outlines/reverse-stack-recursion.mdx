@@ -24,3 +24,68 @@ Output: [3, 2, 1]
 ````text
 - Stack elements are arbitrary; tests use integers
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Reverse via insert-at-bottom
+Pop the top, reverse the remainder, then recursively push the saved element to the
+bottom of the smaller stack.
+
+1. Base: size &lt;= 1 is already reversed.
+2. Pop top, reverse the rest.
+3. Insert the popped value at the bottom using a second recursion.
+
+## Complexity
+
+**Time:** O(n^2) - each insert-at-bottom scans the stack
+
+**Space:** O(n) - recursion depth
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def reverse_stack(self, stack: List[int]) -> List[int]:
+        if len(stack) <= 1:
+            return stack
+        top = stack.pop()
+        self.reverse_stack(stack)
+        self._insert_at_bottom(stack, top)
+        return stack
+
+    def _insert_at_bottom(self, stack: List[int], value: int) -> None:
+        if not stack:
+            stack.append(value)
+            return
+        temp = stack.pop()
+        self._insert_at_bottom(stack, value)
+        stack.append(temp)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    s1 = [1, 2, 3]
+    assert sol.reverse_stack(s1) == [3, 2, 1], "Test 1 Failed"
+    s2 = [9]
+    assert sol.reverse_stack(s2) == [9], "Test 2 Failed"
+    s3: List[int] = []
+    assert sol.reverse_stack(s3) == [], "Test 3 Failed"
+    s4 = [4, 5, 6, 7]
+    assert sol.reverse_stack(s4) == [7, 6, 5, 4], "Test 4 Failed"
+    s5 = [0, 0, 1]
+    assert sol.reverse_stack(s5) == [1, 0, 0], "Test 5 Failed"
+    print("Test 1 Passed: length three")
+    print("Test 2 Passed: singleton")
+    print("Test 3 Passed: empty")
+    print("Test 4 Passed: length four")
+    print("Test 5 Passed: duplicates")
+    print("\nAll test cases passed!")
+````

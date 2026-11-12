@@ -28,3 +28,63 @@ Example 2:
 ````text
 - Length modest for exponential branching in tests
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Include / exclude on letter casing
+DFS from each index; branch twice for letters, once for digits.
+
+1. Walk index i; if i == len(s), record the built string.
+2. If s\[i\] is alphabetic, recurse with lower and upper variants.
+3. Else recurse once appending the digit unchanged.
+
+## Complexity
+
+**Time:** O(2^k \* n) where k is the number of letters
+
+**Space:** O(n) stack plus output
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def letter_case_permutation(self, s: str) -> List[str]:
+        result: List[str] = []
+
+        def dfs(index: int, built: str) -> None:
+            if index == len(s):
+                result.append(built)
+                return
+            ch = s[index]
+            if ch.isalpha():
+                dfs(index + 1, built + ch.lower())
+                dfs(index + 1, built + ch.upper())
+            else:
+                dfs(index + 1, built + ch)
+
+        dfs(0, "")
+        return sorted(result)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.letter_case_permutation("a1") == ["A1", "a1"], "Test 1 Failed"
+    assert sol.letter_case_permutation("C") == ["C", "c"], "Test 2 Failed"
+    assert sol.letter_case_permutation("123") == ["123"], "Test 3 Failed"
+    assert sol.letter_case_permutation("0") == ["0"], "Test 4 Failed"
+    assert len(sol.letter_case_permutation("ab")) == 4, "Test 5 Failed"
+    print("Test 1 Passed: letter+digit")
+    print("Test 2 Passed: single letter")
+    print("Test 3 Passed: digits only")
+    print("Test 4 Passed: single digit")
+    print("Test 5 Passed: two letters branch count")
+    print("\nAll test cases passed!")
+````

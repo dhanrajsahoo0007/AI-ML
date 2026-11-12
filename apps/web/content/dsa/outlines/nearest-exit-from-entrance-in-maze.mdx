@@ -28,3 +28,59 @@ Example 2:
 - 1 <= m, n <= 100
 - maze[i][j] is '+', '.', or entrance is on '.'
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Multi-source / BFS on grid
+
+1. BFS from entrance over '.' cells.
+2. First time we dequeue a border empty cell that is not the entrance, return its distance.
+
+## Complexity
+
+**Time:** O(m \* n).
+
+**Space:** O(m \* n).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def nearestExit(self, maze: List[List[str]], entrance: List[int]) -> int:
+        m, n = len(maze), len(maze[0])
+        er, ec = entrance
+        q = deque([(er, ec, 0)])
+        vis = {(er, ec)}
+        dirs = ((-1, 0), (1, 0), (0, -1), (0, 1))
+
+        while q:
+            r, c, d = q.popleft()
+            if (r in (0, m - 1) or c in (0, n - 1)) and (r, c) != (er, ec):
+                return d
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < m and 0 <= nc < n and maze[nr][nc] == "." and (nr, nc) not in vis:
+                    vis.add((nr, nc))
+                    q.append((nr, nc, d + 1))
+        return -1
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    m1 = [["+", "+", ".", "+"], [".", ".", ".", "+"], ["+", "+", "+", "."]]
+    assert sol.nearestExit(m1, [1, 2]) == 1, "Test 1 Failed"
+    m2 = [["+", "+", "+"], [".", ".", "."], ["+", "+", "+"]]
+    assert sol.nearestExit(m2, [1, 0]) == 2, "Test 2 Failed"
+    m3 = [[".", "+"]]
+    assert sol.nearestExit(m3, [0, 0]) == -1, "Test 3 Failed"
+    print("All tests passed!")
+````

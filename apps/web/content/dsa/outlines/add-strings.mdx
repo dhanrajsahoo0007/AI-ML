@@ -29,3 +29,59 @@ Example 2:
 - 1 <= len(num1), len(num2) <= 10^4
 - num1 and num2 contain only digits and have no leading zeros except the single "0".
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Schoolbook addition with carry
+Add digits from least significant to most significant while propagating carry.
+
+1. Point indices at the ends of both strings and initialize carry to 0.
+2. While either string has digits or carry remains, add the two digits and carry.
+3. Append (sum % 10) to the result and set carry to sum // 10.
+4. Reverse the collected digits and return as a string.
+
+## Complexity
+
+**Time:** O(max(m, n)) - One pass over the longer operand.
+
+**Space:** O(max(m, n)) - Output length is at most max(m, n) + 1.
+
+## Solution
+
+````python
+class Solution:
+    def addStrings(self, num1: str, num2: str) -> str:
+        i = len(num1) - 1
+        j = len(num2) - 1
+        carry = 0
+        out: list[str] = []
+        while i >= 0 or j >= 0 or carry:
+            d1 = ord(num1[i]) - ord("0") if i >= 0 else 0
+            d2 = ord(num2[j]) - ord("0") if j >= 0 else 0
+            total = d1 + d2 + carry
+            out.append(str(total % 10))
+            carry = total // 10
+            i -= 1
+            j -= 1
+        return "".join(reversed(out))
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.addStrings("11", "123") == "134", "Test 1 Failed"
+    print("Test 1 Passed: 11 + 123")
+    assert sol.addStrings("4567", "7890") == "12457", "Test 2 Failed"
+    print("Test 2 Passed: larger operands")
+    assert sol.addStrings("0", "0") == "0", "Test 3 Failed"
+    print("Test 3 Passed: zeros")
+    assert sol.addStrings("1", "9") == "10", "Test 4 Failed"
+    print("Test 4 Passed: carry to new digit")
+    assert sol.addStrings("999", "1") == "1000", "Test 5 Failed"
+    print("Test 5 Passed: cascading carry")
+    print("\nAll test cases passed!")
+````

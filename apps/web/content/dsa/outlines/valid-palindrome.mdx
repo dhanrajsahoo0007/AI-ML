@@ -28,3 +28,77 @@ Example 2:
 - 1 <= len(s) <= 2 * 10^5
 - s consists only of printable ASCII characters.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two pointers
+Walk inward from both ends, skipping non-alphanumeric characters and comparing letters case-insensitively.
+
+1. Place pointers at the start and end of the string.
+2. Advance each pointer inward until it lands on an alphanumeric character.
+3. Compare the two characters in lowercase; on mismatch return false.
+4. Move both pointers toward the center and repeat until they cross.
+
+Restored notes (archived workbook):
+
+Problem: Valid Palindrome
+
+Given a string s, return true if the s can be palindrome after deleting at most one character from it.
+
+A palindrome is a word, phrase, number, or other sequence of characters that reads the same backward as forward.
+
+Example 1:
+Input: s = "aba"
+Output: true
+
+Example 2:
+Input: s = "abca"
+Output: true
+Explanation: You could delete the character 'c'.
+
+Time Complexity: O(n), where n is the length of the string.
+Space Complexity: O(1), as we're using constant extra space.
+
+## Complexity
+
+**Time:** O(n) - Each index is moved at most once across the string.
+
+**Space:** O(1) - Only a constant number of indices and comparisons are stored.
+
+## Solution
+
+````python
+class Solution:
+    def isPalindrome(self, s: str) -> bool:
+        left, right = 0, len(s) - 1
+        while left < right:
+            while left < right and not s[left].isalnum():
+                left += 1
+            while left < right and not s[right].isalnum():
+                right -= 1
+            if s[left].lower() != s[right].lower():
+                return False
+            left += 1
+            right -= 1
+        return True
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.isPalindrome("A man, a plan, a canal: Panama") is True, "Test 1 Failed"
+    print("Test 1 Passed: phrase with punctuation")
+    assert sol.isPalindrome("race a car") is False, "Test 2 Failed"
+    print("Test 2 Passed: non-palindrome phrase")
+    assert sol.isPalindrome("") is True, "Test 3 Failed"
+    print("Test 3 Passed: empty string")
+    assert sol.isPalindrome("., ") is True, "Test 4 Failed"
+    print("Test 4 Passed: only non-alphanumeric")
+    assert sol.isPalindrome("0P") is False, "Test 5 Failed"
+    print("Test 5 Passed: mixed digit and letter")
+    print("\nAll test cases passed!")
+````

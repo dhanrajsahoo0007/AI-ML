@@ -29,3 +29,93 @@ addNum(3) -> findMedian() = 2.0
 - There will be at least one element before calling findMedian.
 - At most 5 * 10^4 calls to addNum and findMedian.
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two Heaps
+We split the stream into two halves: a max-heap for the lower half and a
+min-heap for the upper half. The median is derived from the tops of both heaps.
+
+1. Maintain two heaps:
+- lower\_half: max-heap (stores negated values) for the smaller half.
+- upper\_half: min-heap for the larger half.
+2. On addNum: push to lower\_half, then rebalance so that lower\_half has
+equal or one more element than upper\_half.
+3. On findMedian: if odd count, return top of lower\_half; if even, average tops.
+
+## Complexity
+
+**Time:** - addNum: O(log n) for heap operations.
+- findMedian: O(1).
+
+**Space:** O(n) to store all elements.
+
+## Solution
+
+````python
+import heapq
+
+
+class MedianFinder:
+    def __init__(self):
+        self.lower_half = []
+        self.upper_half = []
+
+    def addNum(self, num: int) -> None:
+        # Push to small side, promote its max to the large side, then fix size imbalance.
+        heapq.heappush(self.lower_half, -num)
+        heapq.heappush(self.upper_half, -heapq.heappop(self.lower_half))
+
+        if len(self.upper_half) > len(self.lower_half):
+            heapq.heappush(self.lower_half, -heapq.heappop(self.upper_half))
+
+    def findMedian(self) -> float:
+        if len(self.lower_half) > len(self.upper_half):
+            return -self.lower_half[0]
+        return (self.upper_half[0] + (-self.lower_half[0])) / 2
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    # Test Case 1: Odd number of elements
+    mf = MedianFinder()
+    mf.addNum(1)
+    mf.addNum(2)
+    mf.addNum(3)
+    assert mf.findMedian() == 2.0, "Test 1 Failed"
+    print("Test 1 Passed: [1,2,3] -> median = 2.0")
+
+    # Test Case 2: Even number of elements
+    mf = MedianFinder()
+    mf.addNum(1)
+    mf.addNum(2)
+    assert mf.findMedian() == 1.5, "Test 2 Failed"
+    print("Test 2 Passed: [1,2] -> median = 1.5")
+
+    # Test Case 3: Single element
+    mf = MedianFinder()
+    mf.addNum(5)
+    assert mf.findMedian() == 5.0, "Test 3 Failed"
+    print("Test 3 Passed: [5] -> median = 5.0")
+
+    # Test Case 4: Larger stream
+    mf = MedianFinder()
+    for num in [1, 2, 4, 6, 9, 4, 30]:
+        mf.addNum(num)
+    assert mf.findMedian() == 4.0, "Test 4 Failed"
+    print("Test 4 Passed: [1,2,4,6,9,4,30] -> median = 4.0")
+
+    # Test Case 5: Negative numbers
+    mf = MedianFinder()
+    mf.addNum(-1)
+    mf.addNum(-2)
+    mf.addNum(-3)
+    assert mf.findMedian() == -2.0, "Test 5 Failed"
+    print("Test 5 Passed: [-1,-2,-3] -> median = -2.0")
+
+    print("\nAll test cases passed!")
+````

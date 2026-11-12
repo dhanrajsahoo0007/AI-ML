@@ -36,3 +36,117 @@ Output: [
 - start_timestamp <= end_timestamp for queries
 - frequency is either "minutes" or "hours"
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Time bucketing with binary search on sorted events
+Keep a sorted multiset of activity seconds per user so each query bucket can be
+counted in logarithmic time via bisect.
+
+1. On add\_user\_activity, insert the timestamp into the user's sorted list (duplicates
+kept so repeated calls increase counts).
+2. On calculate\_activity, set width from frequency and walk bucket index i.
+3. For each bucket, compute display start/end and map them to inclusive count bounds
+that avoid double-counting boundary seconds.
+4. Use bisect\_left and bisect\_right to count events in each bucket.
+
+## Complexity
+
+**Time:** O(k + log n) per add where k is list size; O(B log n) per query for B buckets.
+
+**Space:** O(total activities) across users.
+
+## Solution
+
+````python
+from bisect import bisect_left, bisect_right
+from collections import defaultdict
+from typing import Dict, List, Literal
+
+
+class Solution:
+    def __init__(self) -> None:
+        self._user_times: Dict[str, List[int]] = defaultdict(list)
+
+    def add_user_activity(self, user_id: str, timestamp: int) -> None:
+        times = self._user_times[user_id]
+        idx = bisect_left(times, timestamp)
+        times.insert(idx, timestamp)
+
+    def calculate_activity(
+        self,
+        user_id: str,
+        start_timestamp: int,
+        end_timestamp: int,
+        frequency: Literal["minutes", "hours"],
+    ) -> List[Dict[str, int]]:
+        if start_timestamp > end_timestamp:
+            return []
+
+        width = 60 if frequency == "minutes" else 3600
+        times = self._user_times[user_id]
+        out: List[Dict[str, int]] = []
+
+        i = 0
+        while True:
+            display_low = start_timestamp + i * width
+            if display_low > end_timestamp:
+                break
+            if i > 0 and display_low == end_timestamp:
+                break
+            display_high = min(start_timestamp + (i + 1) * width, end_timestamp)
+            low_count = display_low if i == 0 else display_low + 1
+            high_count = display_high
+            left = bisect_left(times, low_count)
+            right = bisect_right(times, high_count)
+            out.append({"start": display_low, "end": display_high, "count": right - left})
+            i += 1
+
+        return out
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    for t in (10, 12, 17, 18, 60, 65, 90, 121, 150):
+        sol.add_user_activity("user_1", t)
+
+    assert sol.calculate_activity("user_1", 5, 130, "minutes") == [
+        {"start": 5, "end": 65, "count": 6},
+        {"start": 65, "end": 125, "count": 2},
+        {"start": 125, "end": 130, "count": 0},
+    ], "Test 1 Failed"
+    print("Test 1 Passed: minute buckets match specification example")
+
+    sol2 = Solution()
+    sol2.add_user_activity("a", 0)
+    sol2.add_user_activity("a", 3599)
+    sol2.add_user_activity("a", 3600)
+    assert sol2.calculate_activity("a", 0, 3600, "hours") == [
+        {"start": 0, "end": 3600, "count": 3},
+    ], "Test 2 Failed"
+    print("Test 2 Passed: hour-sized window counts boundary activities")
+
+    sol3 = Solution()
+    assert sol3.calculate_activity("nobody", 0, 59, "minutes") == [
+        {"start": 0, "end": 59, "count": 0},
+    ], "Test 3 Failed"
+    print("Test 3 Passed: unknown user yields zero counts")
+
+    sol4 = Solution()
+    sol4.add_user_activity("b", 5)
+    sol4.add_user_activity("b", 5)
+    assert sol4.calculate_activity("b", 5, 5, "minutes") == [{"start": 5, "end": 5, "count": 2}], "Test 4 Failed"
+    print("Test 4 Passed: duplicate timestamps are counted separately")
+
+    sol5 = Solution()
+    sol5.add_user_activity("c", 10)
+    assert sol5.calculate_activity("c", 0, 9, "minutes") == [{"start": 0, "end": 9, "count": 0}], "Test 5 Failed"
+    print("Test 5 Passed: query range before any activity")
+
+    print("\nAll test cases passed!")
+````

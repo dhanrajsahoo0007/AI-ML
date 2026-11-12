@@ -21,3 +21,60 @@ Example 1: tree [1,2,3,4,5] -> 3
 ````text
 - nodes <= 10^4
 ````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Post-order DP
+For each node, combine best heights from two children.
+
+## Complexity
+
+**Time:** O(n). Space: O(h) recursion.
+
+## Solution
+
+````python
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass
+class TreeNode:
+    val: int = 0
+    left: Optional['TreeNode'] = None
+    right: Optional['TreeNode'] = None
+
+
+class Solution:
+    def diameterOfBinaryTree(self, root: Optional[TreeNode]) -> int:
+        self.ans = 0
+
+        def dfs(node: Optional[TreeNode]) -> int:
+            if not node:
+                return 0
+            l = dfs(node.left)
+            r = dfs(node.right)
+            self.ans = max(self.ans, l + r)
+            return 1 + max(l, r)
+
+        dfs(root)
+        return self.ans
+````
+
+## Tests from the notes
+
+````python
+if __name__ == '__main__':
+    sol = Solution()
+    root = TreeNode(1, TreeNode(2, TreeNode(4), TreeNode(5)), TreeNode(3))
+    assert sol.diameterOfBinaryTree(root) == 3
+    assert sol.diameterOfBinaryTree(TreeNode(1)) == 0
+    assert sol.diameterOfBinaryTree(None) == 0
+    r2 = TreeNode(2, TreeNode(1), TreeNode(3))
+    assert sol.diameterOfBinaryTree(r2) == 2
+    r3 = TreeNode(1, TreeNode(2), None)
+    assert sol.diameterOfBinaryTree(r3) == 1
+    print('\nAll test cases passed!')
+````
