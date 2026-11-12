@@ -1,13 +1,135 @@
 ---
 title: "Bias for Action & Deliver Results"
 description: "Two-way vs. one-way door decisions, shipping under uncertainty, and recovering milestones when dependencies slip."
-status: outline
+icon: zap
+order: 3
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** how to distinguish reversible two-way doors from irreversible one-way doors and deliver core value when scope or dependencies shift.
+<KeyIdea>
+**Bias for Action** is the skill of turning slow, high-risk "one-way doors" into fast, reversible "two-way doors" using feature flags, canaries, and adapters, while **Deliver Results** is how you route around broken dependencies without sacrificing core invariants.
+</KeyIdea>
 
-**Related reading on this site:** [Insist on the Highest Standards](/behavioral/amazon-leadership-principles/highest-standards-vs-speed) · [Tight Deadlines, Scope Cuts & Paying Down Tech Debt](/behavioral/competencies/tight-deadlines-and-tech-debt)
+## The story
 
-<AnimatedDiagram spec="animated/behavioral/one-way-vs-two-way-door" stepper caption="Converting irreversible one-way doors into reversible two-way doors." />
+Two engineering teams face the same crisis: three weeks before a committed launch, the data-platform team announces that the new real-time Kafka cluster they promised won't be ready for another month.
+
+Team A treats the external slip as an excuse: they halt development, mark their OKR "Blocked by Data Platform," and wait four weeks.
+Team B practices **Bias for Action + Deliver Results**: their tech lead spends two hours defining a 3-method `EventPublisher` interface, backs it with a 150-line Postgres `FOR UPDATE SKIP LOCKED` outbox table using their existing database, and ships the product feature on the original deadline at 500 events/sec. When the Kafka cluster finally lands a month later, swapping the implementation behind `EventPublisher` takes a single afternoon.
+
+Amazon interviewers don't want stories where everything went smoothly according to a Gantt chart; they want to know what you did when the Gantt chart caught fire.
+
+## What interviewers are really testing
+
+<AnimatedDiagram spec="animated/behavioral/one-way-vs-two-way-door" stepper caption="Senior engineers rarely wait for 100% certainty; they add a reversibility shim (flag, adapter, shadow path) to turn a one-way door into a fast two-way door." />
+
+| Principle | Core Engineering Mechanism | Bar Raiser Follow-Up Probe |
+| --- | --- | --- |
+| **Bias for Action** | Classifying **One-Way vs. Two-Way Doors**; making decisions at ~70% information; bounding blast radius with canaries and kill switches | *"What was the cost of waiting another 2 weeks for 95% certainty, and how fast could you roll back if your 70% bet was wrong?"* |
+| **Deliver Results** | Decoupling blocked dependencies via shims/interfaces; ruthless scope triage (must-have invariants vs. deferrable nice-to-haves) | *"What did you cut to hit that date, and how did you ensure the cut didn't leave behind silent operational debt?"* |
+
+<PremiumBreak />
+
+## How the bar changes by level
+
+<Compare
+  columns={["Signal", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
+  rows={[
+    ["Handling Uncertainty", "Builds a quick prototype or spike to unblock a task instead of spinning for days", "Ships behind a feature flag / dark-read path to validate a design in production with bounded risk", "Unblocks a stalled multi-team program by cutting through analysis paralysis with a reversible phase-1 architecture"],
+    ["Handling Dependency Slips", "Flags the blocker early and mocks the interface to keep coding", "Builds a production-safe fallback or adapter so the service ships on time without the upstream dependency", "Re-sequences cross-org milestones and negotiates a pragmatic MVP across Product, Security, and Legal"],
+  ]}
+  caption="Speed at L5+ comes from architectural decoupling and scope discipline, never from skipping tests or working 90-hour weeks."
+/>
+
+## Interactive diagnostic: test your story
+
+<DecisionTree
+  title="Is your Bias for Action story calculated speed or reckless rushing?"
+  tree={{
+    q: "In your story, what was the missing 30% of information you didn't have when you made the call?",
+    yes: {
+      q: "Did you put an explicit safety net in place (feature flag, canary cohort, shadow comparison, or rate cap) so a wrong bet could be reversed in minutes?",
+      yes: {
+        answer: "Textbook Bias for Action! Next: compare how this balances against Insist on the Highest Standards.",
+        href: "/behavioral/amazon-leadership-principles/highest-standards-vs-speed",
+      },
+      no: "Add the safety net to your narrative: explain how you bounded the blast radius and what metric would have triggered an immediate rollback.",
+    },
+    no: "Name the exact unknown (e.g., 'we didn't know peak payload distribution for enterprise tenants') and why waiting 3 weeks to measure it was worse than shipping a guarded canary.",
+  }}
+/>
+
+## Worked engineering example (STAR+L)
+
+<Tabs title="Two-Way Door vs. Dependency Rescue">
+  <Tab label="Bias for Action (Converting a 1-Way Door)">
+    **Prompt:** *"Tell me about a time you made a critical decision without having all the data."*
+
+    - **Situation & Task:** *"We needed to choose a partitioning key for a new multi-tenant audit-log store in DynamoDB 10 days before launch. We had traffic profiles for SMB tenants, but zero production traces for the 5 Fortune-500 tenants onboarding in Q3—giving us ~65% certainty on hot-partition risk."*
+    - **Action:** *"Waiting 6 weeks for enterprise load traces would delay the launch, but picking a static `tenant_id` partition key was a **one-way door** if a large tenant spiked above 1,000 WCU/sec. I converted it into a **two-way door** by adding a write-sharding suffix (`tenant_id#bucket_0..N`) controlled by a dynamic per-tenant config map, defaulting N=1 for SMBs and allowing us to widen any noisy tenant to N=16 buckets live with zero data migration while an async scatter-gather reader merged queries."*
+    - **Result:** *"We launched on schedule. When our largest enterprise tenant ran an unannounced 4,500 writes/sec backfill in month two, I bumped their shard factor from 1 to 16 via config in 30 seconds with zero throttling."*
+    - **Learning:** *"We standardized configurable write-sharding suffixes across all new multi-tenant DynamoDB tables."*
+  </Tab>
+  <Tab label="Deliver Results (Rescuing a Blocked Launch)">
+    **Prompt:** *"Tell me about a time a project you owned hit a major roadblock and how you delivered anyway."*
+
+    - **Situation & Task:** *"Four weeks before a contractual enterprise launch for our document-classification pipeline, the GPU cluster quota our inference service depended on was frozen by cloud capacity shortages."*
+    - **Action:** *"Rather than slipping the contract date, I profiled our traffic and found 78% of documents matched 12 standard templates that didn't need a 7B parameter LLM. I built a two-tier cascade in 6 days: a fast CPU-based ONNX embedding + linear classifier handled high-confidence (over 0.92) standard docs in 18 ms on standard EC2 instances, routing only the ambiguous 22% tail to our existing small GPU pool."*
+    - **Result:** *"We hit the contractual launch date on zero new GPUs, cut average inference cost by 71%, and reduced p50 latency from 640 ms to 24 ms while holding overall F1 score at 96.4%."*
+    - **Learning:** *"We made CPU baseline cascades a prerequisite before any team requests new GPU quota."*
+  </Tab>
+</Tabs>
+
+## Introspect your own work
+
+<Quiz title="Audit your relationship with speed and uncertainty">
+  <QuizItem
+    question="1. Think of a decision your team debated in meetings for more than two weeks. Was it actually a one-way door, or a disguised two-way door?"
+    hint="Could a 4-hour prototype or a feature flag have settled the debate in 2 days?"
+  >
+    Most internal service boundaries, caching layers, and internal schemas are two-way doors if wrapped behind a clean interface. Spotting when a team is treating a two-way door like a constitutional amendment is a core L5/L6 skill.
+  </QuizItem>
+  <QuizItem
+    question="2. When you are under a tight deadline, what is your personal tell—do you over-cut quality, or do you freeze trying to ship 100% of the original scope?"
+    hint="Knowing your default failure mode helps you self-correct early."
+  >
+    The sweet spot for *Deliver Results* is **cutting surface area (fewer features/endpoints in v1) while holding quality invariants (idempotency, observability, security) at 100%**.
+  </QuizItem>
+</Quiz>
+
+## Common red flags & how to recover
+
+- **"We worked nights and weekends to hit the date":** Working 80-hour weeks is a weak *Deliver Results* signal because it doesn't scale and leads to burnout/bugs. Interviewers want to hear how you used **engineering judgment** (scope cuts, adapters, simpler architectures) to hit the date sustainably.
+- **Treating one-way doors like two-way doors:** Never use a story where you shipped an irreversible public API change or security auth bypass without review.
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What is a concrete example of a One-Way Door vs. a Two-Way Door in software engineering?"
+    level="Mid"
+    companies={["Amazon"]}
+  >
+    | One-Way Doors (Slow down, review deeply) | Two-Way Doors (Move at 70% certainty) |
+    | --- | --- |
+    | External public API contracts & webhook schemas consumed by third parties | Internal microservice RPC methods behind a monorepo or versioned gateway |
+    | Dropping or destructively mutating a production database column | Adding a nullable column or shadow index (`CONCURRENTLY`) |
+    | Cryptographic key hierarchy & tenant data-residency boundaries | Caching TTLs, worker concurrency limits, or UI layout behind a feature flag |
+  </InterviewQuestion>
+
+  <InterviewQuestion
+    question="What if I took a calculated risk (Bias for Action) and the hypothesis turned out to be wrong?"
+    level="Senior"
+    companies={["Amazon", "Meta"]}
+  >
+    That can still be an **outstanding** *Bias for Action* story—provided your reversibility mechanism worked! Show that:
+    1. Waiting for 100% certainty would have cost 4 weeks.
+    2. You shipped a guarded 2% canary in 2 days to get real production ground truth.
+    3. The canary disproved the hypothesis within 3 hours, auto-rolled back with zero user harm, and saved the team 3.5 weeks of building the wrong thing.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Insist on the Highest Standards vs. Speed](/behavioral/amazon-leadership-principles/highest-standards-vs-speed)
+- [How Amazon Evaluates the 16 LPs](/behavioral/amazon-leadership-principles/how-amazon-evaluates-lps)
+- [Tight Deadlines & Tech Debt](/behavioral/competencies/tight-deadlines-and-tech-debt)

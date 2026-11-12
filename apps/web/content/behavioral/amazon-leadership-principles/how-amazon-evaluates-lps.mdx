@@ -1,13 +1,148 @@
 ---
 title: "How Amazon & the Bar Raiser Evaluate the 16 LPs"
 description: "How Amazon assigns LPs across rounds, what the Bar Raiser looks for, and how tension pairs separate L5 from L6."
-status: outline
+icon: scale
+order: 1
+access: free
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** how Amazon structures its loop around the 16 Leadership Principles, the Bar Raiser's veto power, and how principles pull against one another.
+<KeyIdea>
+Amazon does not test all 16 Leadership Principles in every round; each interviewer is assigned 2–3 specific principles, and the **Bar Raiser** probes whether you can resolve the natural tension when two principles pull in opposite directions.
+</KeyIdea>
 
-**Related reading on this site:** [Surviving Bar Raiser & Follow-Up Probes](/behavioral/foundations/handling-follow-up-probes) · [Customer Obsession & Ownership](/behavioral/amazon-leadership-principles/customer-obsession-and-ownership)
+## The story
 
-<AnimatedDiagram spec="animated/behavioral/amazon-lp-tensions" stepper caption="How Amazon Bar Raisers probe the tension between competing Leadership Principles." />
+Most engineers prepare for an Amazon loop by treating the 16 Leadership Principles like vocabulary flashcards—memorizing one isolated story for *Bias for Action* and another for *Insist on the Highest Standards*.
+
+Then they enter the fourth round with the **Bar Raiser**—an independent interviewer from outside the hiring org who holds veto power over the Hiring Manager. The candidate tells a story about shipping a service in four days (*Bias for Action*). Instead of applauding, the Bar Raiser asks: *"You shipped in four days without load testing—how did you make sure you weren't violating Insist on the Highest Standards and putting customer data at risk?"*
+
+Ten minutes later, the candidate tells a story about spending three weeks refactoring a module for clean architecture (*Highest Standards*). The Bar Raiser immediately probes the opposite pole: *"Why wasn't that gold-plating when the customer needed a fix that week (Deliver Results)?"*
+
+This is the secret to Amazon's behavioral loop: **principles are easy in isolation; seniority is proven when two Leadership Principles collide**.
+
+## What interviewers are really testing
+
+<AnimatedDiagram spec="animated/behavioral/amazon-lp-tensions" stepper caption="How Amazon Bar Raisers probe the four classic tension pairs across the 16 Leadership Principles." />
+
+Before your onsite loop begins, the Hiring Manager and Bar Raiser run a **Pre-Brief** to divide the 16 LPs across the 4–5 interviewers so there are no blind spots:
+
+<Numbers
+  items={[
+    { value: "2–3 LPs", label: "Assigned to each interviewer", hint: "Tested in the first 15–25 minutes of every coding & design round" },
+    { value: "50%+", label: "Target bar: better than 50% of current peers", hint: "The literal definition of 'raising the bar' at that level" },
+    { value: "Max 2x", label: "Safe limit for reusing any single story", hint: "Interviewers compare verbatim notes in the live debrief" },
+    { value: "1 Veto", label: "Bar Raiser holds independent veto power", hint: "Even if the Hiring Manager urgently needs headcount" },
+  ]}
+/>
+
+<PremiumBreak />
+
+## How the bar changes by level
+
+At Amazon, your level (SDE I `L4`, SDE II `L5`, Senior SDE `L6`, Principal `L7`) is calibrated directly from the scope and mechanism depth of your LP stories:
+
+<Compare
+  columns={["LP Signal", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
+  rows={[
+    ["Scope of Ownership", "Owns tasks and components within one service", "Owns a full service end-to-end plus its on-call and SLAs", "Owns multi-service / multi-team architecture across a 1–2 year horizon"],
+    ["Mechanism vs. Heroics", "Fixes the immediate bug cleanly", "Adds automated tests, alarms, and runbooks to prevent repeats", "Invents org-wide mechanisms (COE templates, linters, paved roads)"],
+    ["Navigating LP Tensions", "Escalates when speed and quality conflict", "Frames explicit trade-offs (two-way door canary) to satisfy both", "Sets team standards for when to trade speed for durability"],
+  ]}
+  caption="Notice that Amazon L5 corresponds to Mid-Level II and Amazon L6 is Senior SDE (equivalent to L5 at Google/Meta)."
+/>
+
+## Interactive diagnostic: test your story
+
+Check whether your Amazon LP preparation is ready for the Bar Raiser debrief:
+
+<DecisionTree
+  title="Will your LP portfolio survive an Amazon 5-round loop?"
+  tree={{
+    q: "Do you have at least 7–8 distinct engineering episodes prepared so you never repeat the same story more than twice across 5 interviewers?",
+    yes: {
+      q: "For every story, can you name the competing LP you had to balance (e.g., how you protected 'Highest Standards' during a 'Bias for Action' story)?",
+      yes: {
+        q: "Does every failure or incident story end with a concrete 'Mechanism' (an automated guardrail or process change) rather than 'we tried harder'?",
+        yes: {
+          answer: "You are calibrated for the Bar Raiser! Dive into Customer Obsession & Ownership next.",
+          href: "/behavioral/amazon-leadership-principles/customer-obsession-and-ownership",
+        },
+        no: "Amazon culture rejects 'good intentions'. Replace every 'we were more careful' ending with a concrete mechanism (CI gate, canary alarm, COE action item).",
+      },
+      no: "Add 1 sentence to every story naming the competing constraint you protected.",
+    },
+    no: {
+      answer: "Build your 8-Story Matrix first so you don't run out of distinct episodes by Round 4.",
+      href: "/behavioral/foundations/building-your-story-matrix",
+    },
+  }}
+/>
+
+## Worked engineering example (STAR+L)
+
+<Tabs title="Balancing opposing LPs in a single story">
+  <Tab label="One-Dimensional Story (Fails Tension Probe)">
+    **Prompt:** *"Tell me about a time you took a calculated risk to move fast (Bias for Action)."*
+    > "We needed to launch a new recommendations widget before Prime Day, so I skipped writing the shadow evaluation pipeline and deployed the model directly to production. It increased clicks by 4%."
+    - **Why the Bar Raiser flags this:** This shows *recklessness*, not *Bias for Action*. There was no blast-radius cap or guardrail protecting *Customer Obsession* or *Highest Standards*.
+  </Tab>
+  <Tab label="Tension-Aware Story (Clears L6 Bar)">
+    **Prompt:** *"Tell me about a time you took a calculated risk to move fast (Bias for Action)."*
+    > **Situation & Task:** "Two weeks before our Q4 peak freeze, we discovered our checkout address-autocomplete API was timing out for 6% of rural postal codes, costing ~\$18k/day in abandoned carts. A full index rebuild would take 4 weeks."
+    > **Action:** "I classified this as a **two-way door** if we could isolate the blast radius. Instead of touching the primary Lucene index, I built a read-only prefix-tree fallback cache populated from the top 50,000 validated rural postal codes in 48 hours. To uphold *Highest Standards* while moving fast, I wrapped the fallback behind a circuit breaker that only triggered when primary <Term id="p99" /> exceeded 150 ms, and logged any address mismatch for asynchronous reconciliation."
+    > **Result:** "We shipped in 3 days. Timeout rate dropped from 6% to 0.08%, recovering ~\$350k in Q4 GMV with zero bad shipping labels."
+    > **Learning:** "I turned that circuit-breaker + static-fallback pattern into a reusable library now used by 4 checkout dependencies."
+  </Tab>
+</Tabs>
+
+## Introspect your own work
+
+<Quiz title="Audit your stories through the Amazon lens">
+  <QuizItem
+    question="1. The 'Good Intentions' Purge: Where in your stories do you say 'I made sure to communicate better next time'?"
+    hint="Jeff Bezos famously asked: 'If you don't create a mechanism, how do you expect a different result?'"
+  >
+    Rewrite that ending around a **Mechanism**: a tool, a checklist, an automated test, a schema constraint, or a recurring audit that works even after you leave the team.
+  </QuizItem>
+  <QuizItem
+    question="2. Which of the 4 tension pairs (Speed vs. Quality, Customer vs. Cost, Details vs. Vision, Disagree vs. Commit) have you experienced most vividly in the last year?"
+    hint="Real friction is where L6 stories live."
+  >
+    Pick the moment where two good engineering values collided and write down the exact number or threshold you used to balance them.
+  </QuizItem>
+</Quiz>
+
+## Common red flags & how to recover
+
+- **Trying to guess which LP the interviewer is asking and reciting the LP name:** You don't get extra points for saying *"I am very Customer Obsessed"* out loud. Show the behavior through concrete actions and metrics.
+- **Repeating the same flagship story in Rounds 1, 2, 3, and 4:** Keep a tally on your scratchpad of which story you used with each interviewer.
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="How can I tell which interviewer in my Amazon loop is the Bar Raiser?"
+    level="Mid"
+    companies={["Amazon"]}
+  >
+    Look for two clues on your interview schedule:
+    1. **Different organization:** Their LinkedIn or job title belongs to a completely different AWS or retail org than the team you are applying to.
+    2. **Heavy probing on tensions and mechanisms:** They spend more time asking *"Why?"*, *"What was the alternative?"*, and *"What mechanism prevented this from happening again?"* than any other interviewer.
+    Regardless, treat **every** interviewer as if they are the Bar Raiser.
+  </InterviewQuestion>
+
+  <InterviewQuestion
+    question="Does Amazon really care about LPs for coding and system design rounds, or only in a behavioral round?"
+    level="Senior"
+    companies={["Amazon"]}
+  >
+    Every single Amazon round—including Coding and System Design—devotes **15 to 25 minutes** to 2–3 assigned Leadership Principles. A candidate who aces LeetCode Hards but gives shallow, "we"-heavy LP answers in the first 20 minutes of each round will be rejected in the debrief.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Customer Obsession & Ownership](/behavioral/amazon-leadership-principles/customer-obsession-and-ownership)
+- [Bias for Action & Deliver Results](/behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results)
+- [Insist on the Highest Standards vs. Speed](/behavioral/amazon-leadership-principles/highest-standards-vs-speed)
+- [Amazon Leadership Principles Question Bank](/interviews/amazon-leadership-principles)
