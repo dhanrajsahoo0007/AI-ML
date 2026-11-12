@@ -19,9 +19,9 @@ const spec: LayoutSpec = {
     { id: "l4", type: "box", x: 251, y: 78, w: 185, h: 165, label: "L4 · Mid-Level SWE", sub: "Given a feature spec; designs API, coordinates rollout & alerts", tone: "teal", step: 2 },
     { id: "l5", type: "box", x: 466, y: 78, w: 190, h: 165, label: "L5 · Senior SWE", sub: "Given a messy problem; aligns stakeholders, prevents bug classes", tone: "orange", highlight: true, step: 3 },
     { id: "l6", type: "box", x: 686, y: 78, w: 180, h: 165, label: "L6+ · Staff / EM", sub: "Finds the problem nobody asked about; multiplies 3+ teams", tone: "green", step: 4 },
-    { id: "s1", type: "arrow", from: "l3", to: "l4", packet: true, step: 2 },
-    { id: "s2", type: "arrow", from: "l4", to: "l5", packet: true, step: 3 },
-    { id: "s3", type: "arrow", from: "l5", to: "l6", packet: true, step: 4 },
+    { id: "s1", type: "arrow", x: 0, y: 0, from: "l3", to: "l4", packet: true, step: 2 },
+    { id: "s2", type: "arrow", x: 0, y: 0, from: "l4", to: "l5", packet: true, step: 3 },
+    { id: "s3", type: "arrow", x: 0, y: 0, from: "l5", to: "l6", packet: true, step: 4 },
   ],
 };
 

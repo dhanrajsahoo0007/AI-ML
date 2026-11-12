@@ -19,9 +19,9 @@ const spec: LayoutSpec = {
     { id: "act", type: "box", x: 236, y: 72, w: 280, h: 150, label: "Action (60%)", sub: "70s: 'I' decisions, trade-offs & execution", tone: "orange", highlight: true, step: 2 },
     { id: "res", type: "box", x: 546, y: 72, w: 160, h: 150, label: "Result (15%)", sub: "20s: Before/after numbers & business win", tone: "green", step: 3 },
     { id: "lrn", type: "box", x: 736, y: 72, w: 130, h: 150, label: "Learning (10%)", sub: "10s: Guardrail that prevented repeats", tone: "violet", step: 4 },
-    { id: "a1", type: "arrow", from: "st", to: "act", packet: true, step: 2 },
-    { id: "a2", type: "arrow", from: "act", to: "res", packet: true, step: 3 },
-    { id: "a3", type: "arrow", from: "res", to: "lrn", packet: true, step: 4 },
+    { id: "a1", type: "arrow", x: 0, y: 0, from: "st", to: "act", packet: true, step: 2 },
+    { id: "a2", type: "arrow", x: 0, y: 0, from: "act", to: "res", packet: true, step: 3 },
+    { id: "a3", type: "arrow", x: 0, y: 0, from: "res", to: "lrn", packet: true, step: 4 },
   ],
 };
 

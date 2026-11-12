@@ -21,7 +21,7 @@ tables and prose tidy by hand.
 | `pages/`                                   | Legal, contact, security and pricing FAQ, with `{{KEY}}` placeholders      |
 
 Docs sections today: `ai-system-design/` (hubs `genai-system-design` and `ml-system-design`, the latter parked
-with `hubRelease`: on in local only), `system-design/`, `cloud/`.
+with `hubRelease`: on in local only), `system-design/`, `behavioral/`, `cloud/`.
 
 ## Docs frontmatter
 

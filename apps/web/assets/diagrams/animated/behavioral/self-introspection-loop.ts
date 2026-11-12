@@ -19,9 +19,9 @@ const spec: LayoutSpec = {
     { id: "audit", type: "box", x: 251, y: 80, w: 195, h: 140, label: "2. Honest Audit", sub: "What did I miss early? Where was the other person right?", tone: "orange", step: 2 },
     { id: "mech", type: "box", x: 476, y: 80, w: 190, h: 140, label: "3. New Mechanism", sub: "Checklist, guardrail, or habit built afterward", tone: "violet", highlight: true, step: 3 },
     { id: "growth", type: "box", x: 696, y: 80, w: 168, h: 140, label: "4. Next-Level Bar", sub: "Calm under 3-level Bar Raiser probing", tone: "green", step: 4 },
-    { id: "e1", type: "arrow", from: "raw", to: "audit", packet: true, step: 2 },
-    { id: "e2", type: "arrow", from: "audit", to: "mech", packet: true, step: 3 },
-    { id: "e3", type: "arrow", from: "mech", to: "growth", packet: true, step: 4 },
+    { id: "e1", type: "arrow", x: 0, y: 0, from: "raw", to: "audit", packet: true, step: 2 },
+    { id: "e2", type: "arrow", x: 0, y: 0, from: "audit", to: "mech", packet: true, step: 3 },
+    { id: "e3", type: "arrow", x: 0, y: 0, from: "mech", to: "growth", packet: true, step: 4 },
   ],
 };
 

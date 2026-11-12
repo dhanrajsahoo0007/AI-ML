@@ -19,10 +19,10 @@ const spec: LayoutSpec = {
     { id: "oneway", type: "box", x: 266, y: 55, w: 250, h: 95, label: "One-Way Door (Slow)", sub: "Public API break, drop column, hard cutover", tone: "red", step: 2 },
     { id: "converter", type: "box", x: 266, y: 175, w: 250, h: 95, label: "Reversibility Shim", sub: "Adapter layer, dual-write, dark read, flag", tone: "orange", highlight: true, step: 3 },
     { id: "twoway", type: "box", x: 576, y: 110, w: 280, h: 110, label: "Two-Way Door (Fast)", sub: "1% canary + 60s rollback if p99 or error rate spikes", tone: "green", step: 4 },
-    { id: "a1", type: "arrow", from: "decision", to: "oneway", dashed: true, step: 2 },
-    { id: "a2", type: "arrow", from: "decision", to: "converter", packet: true, step: 3 },
-    { id: "a3", type: "arrow", from: "oneway", to: "converter", dashed: true, step: 3 },
-    { id: "a4", type: "arrow", from: "converter", to: "twoway", packet: true, step: 4 },
+    { id: "a1", type: "arrow", x: 0, y: 0, from: "decision", to: "oneway", dashed: true, step: 2 },
+    { id: "a2", type: "arrow", x: 0, y: 0, from: "decision", to: "converter", packet: true, step: 3 },
+    { id: "a3", type: "arrow", x: 0, y: 0, from: "oneway", to: "converter", dashed: true, step: 3 },
+    { id: "a4", type: "arrow", x: 0, y: 0, from: "converter", to: "twoway", packet: true, step: 4 },
   ],
 };
 

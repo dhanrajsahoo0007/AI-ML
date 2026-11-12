@@ -22,6 +22,7 @@ the primary source of income**.
 | ---------------------------------------- | --------------- | ------------------------------------------------------------------------------------------ |
 | GenAI & LLM Systems (`ai-system-design`) | `docs`          | GenAI hub (LLMs, RAG, agents, AI case studies) + ML System Design hub (parked: local only) |
 | Classic System Design (`system-design`)  | `docs`          | Fundamentals, databases, patterns and case studies                                         |
+| Behavioral & Leadership (`behavioral`)   | `docs`          | STAR+L, Amazon LPs, FAANG & frontier AI loops, core competencies and leveling tracks       |
 | Cloud (`cloud`)                          | `docs`          | AWS / Google Cloud / Azure services by job, mapped across clouds                           |
 | Interview Practice (`interviews`)        | `question-bank` | Question library by category, answers, company tags                                        |
 | Company Questions (`companies`)          | `directory`     | Aggregates company tags from Interview Practice and DSA                                    |
