@@ -1,0 +1,91 @@
+---
+title: "Max Area of Island"
+description: "Given an m x n binary matrix, return the maximum area of an island (4-directionally connected 1s)."
+topics: [graphs]
+group: "13. Flood Fill"
+number: "06"
+order: 17013006000000
+status: outline
+---
+
+Given an m x n binary matrix, return the maximum area of an island (4-directionally connected 1s).
+If there is no land, return 0.
+
+## Examples
+
+````text
+Example 1:
+Input: grid = [[0,0,1,0,0,0,0,1,0,0,0,0,0],[0,0,0,0,0,0,0,1,1,1,0,0,0],...]
+Output: 6 (for the classic sample with largest area six)
+````
+
+## Constraints
+
+````text
+- m == len(grid), n == len(grid[0])
+- 1 <= m, n <= 50
+````
+
+**Also in the notes under:** [17. Graphs/06. Disjoint Union Sets/03. Connected Components and Islands](/dsa/problems/max-area-of-island).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS area on grid components
+For each unvisited land cell, DFS to count its component size and track the maximum.
+
+1. Scan grid; when encountering a 1, DFS to count reachable 1 cells while marking them 0.
+
+## Complexity
+
+**Time:** O(m \* n)
+
+**Space:** O(m \* n) recursion stack worst case.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxAreaOfIsland(self, grid: List[List[int]]) -> int:
+        m, n = len(grid), len(grid[0])
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+        def dfs(r: int, c: int) -> int:
+            if r < 0 or c < 0 or r >= m or c >= n or grid[r][c] == 0:
+                return 0
+            grid[r][c] = 0
+            return 1 + sum(dfs(r + dr, c + dc) for dr, dc in dirs)
+
+        best = 0
+        for i in range(m):
+            for j in range(n):
+                if grid[i][j] == 1:
+                    best = max(best, dfs(i, j))
+        return best
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+
+    def clone(g: List[List[int]]) -> List[List[int]]:
+        return [row[:] for row in g]
+
+    g1 = [[0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0], [0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0], [0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0]]
+    assert sol.maxAreaOfIsland(clone(g1)) == 6, "Test 1 Failed"
+    print("Test 1 Passed: LeetCode sample max area")
+    assert sol.maxAreaOfIsland(clone([[0, 0, 0], [0, 0, 0]])) == 0, "Test 2 Failed"
+    print("Test 2 Passed: no land")
+    assert sol.maxAreaOfIsland(clone([[1]])) == 1, "Test 3 Failed"
+    print("Test 3 Passed: single land")
+    g4 = [[1, 1], [1, 0]]
+    assert sol.maxAreaOfIsland(clone(g4)) == 3, "Test 4 Failed"
+    print("Test 4 Passed: L-shaped island")
+    print("\nAll test cases passed!")
+````

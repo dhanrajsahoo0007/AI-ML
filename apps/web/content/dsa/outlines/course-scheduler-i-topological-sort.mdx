@@ -1,0 +1,99 @@
+---
+title: "Course Scheduler I"
+description: "There are numCourses labeled 0..numCourses-1."
+topics: [graphs]
+group: "05. Topological Sort"
+number: "03"
+order: 17005003000000
+status: outline
+---
+
+There are numCourses labeled 0..numCourses-1. prerequisites\[i\] = \[a, b\] means you must take course b
+before course a. Return true if all courses can be finished; false if a prerequisite cycle exists.
+
+## Examples
+
+````text
+Example 1:
+    Input: numCourses = 2, prerequisites = [[1,0]]
+    Output: True
+Example 2:
+    Input: numCourses = 2, prerequisites = [[1,0],[0,1]]
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= numCourses <= 2000
+- 0 <= len(prerequisites) <= 5000
+````
+
+**Also in the notes under:** [17. Graphs/03. DFS Story Based/04. Scheduling and Planning](/dsa/problems/course-scheduler-i).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Cycle detection via Kahn's algorithm
+Model b -&gt; a edges; if topological peel processes all n nodes, the graph is a DAG.
+
+1. Build adjacency list for edges b -&gt; a and indegree counts for each course.
+2. BFS from indegree-zero nodes, counting processed nodes.
+3. Return whether processed count equals numCourses.
+
+## Complexity
+
+**Time:** O(V + E)
+
+**Space:** O(V + E)
+
+## Original notes
+
+````text
+See also: DFS version in `03. DFS Story Based/04. Scheduling and Planning/01. Course Scheduler I.py`
+````
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def canFinish(self, numCourses: int, prerequisites: List[List[int]]) -> bool:
+        adj = defaultdict(list)
+        indegree = [0] * numCourses
+        for a, b in prerequisites:
+            adj[b].append(a)
+            indegree[a] += 1
+        q: deque[int] = deque(i for i in range(numCourses) if indegree[i] == 0)
+        count = 0
+        while q:
+            u = q.popleft()
+            count += 1
+            for v in adj[u]:
+                indegree[v] -= 1
+                if indegree[v] == 0:
+                    q.append(v)
+        return count == numCourses
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.canFinish(2, [[1, 0]]) is True, "Test 1 Failed"
+    print("Test 1 Passed: simple chain")
+    assert sol.canFinish(2, [[1, 0], [0, 1]]) is False, "Test 2 Failed"
+    print("Test 2 Passed: two-node cycle")
+    assert sol.canFinish(5, [[1, 4], [2, 4], [3, 1], [3, 2]]) is True, "Test 3 Failed"
+    print("Test 3 Passed: tree-like prereqs")
+    assert sol.canFinish(1, []) is True, "Test 4 Failed"
+    print("Test 4 Passed: no prerequisites")
+    assert sol.canFinish(3, [[0, 1], [0, 2], [1, 2]]) is True, "Test 5 Failed"
+    print("Test 5 Passed: linear prereq chain")
+    print("\nAll test cases passed!")
+````

@@ -32,6 +32,8 @@ Example 2:
 - 0 <= ladders <= heights.length
 ````
 
+**Also in the notes under:** [18. Greedy/08. Complex Problem Solving with Greedy Approach](/dsa/problems/furthest-building-you-can-reach-complex-problem-solving-with-greedy-approach).
+
 <PremiumBreak />
 
 ## Approach
@@ -109,64 +111,5 @@ if __name__ == "__main__":
     assert sol.furthestBuilding([1, 5, 1, 5, 1], 0, 10) == 4, "Test 4 Failed"
     print("Test 4 Passed: enough ladders -> last index")
 
-    print("\nAll test cases passed!")
-````
-
-## Another version
-
-From 18. Greedy/08. Complex Problem Solving with Greedy Approach.
-
-### Approach
-
-**Pattern:** Greedy Resource Allocation
-Use ladders on the largest climbs encountered so far by tracking climbs in a min-heap and refunding bricks from the smallest ladder-assigned climb when out of bricks.
-
-1. Iterate consecutive climbs; push positive climbs onto a min-heap of size at most ladders.
-2. When heap size exceeds ladders, pop the smallest climb and pay it with bricks.
-3. If bricks go negative, stop before that edge; else finish at last index.
-
-### Complexity
-
-**Time:** O(n log L) with L ladders (heap size bounded by ladders).
-
-**Space:** O(L) - Heap storage.
-
-### Solution
-
-````python
-import heapq
-from typing import List
-
-
-class Solution:
-    def furthestBuilding(self, heights: List[int], bricks: int, ladders: int) -> int:
-        heap: List[int] = []
-        for i in range(len(heights) - 1):
-            diff = heights[i + 1] - heights[i]
-            if diff <= 0:
-                continue
-            heapq.heappush(heap, diff)
-            if len(heap) > ladders:
-                bricks -= heapq.heappop(heap)
-            if bricks < 0:
-                return i
-        return len(heights) - 1
-````
-
-### Tests from the notes
-
-````python
-if __name__ == "__main__":
-    sol = Solution()
-    assert sol.furthestBuilding([4, 2, 7, 6, 9, 14, 12], 5, 1) == 4, "Test 1 Failed"
-    print("Test 1 Passed: ladder saves large climb")
-    assert sol.furthestBuilding([4, 12, 11, 7, 3], 7, 1) == 4, "Test 2 Failed"
-    print("Test 2 Passed: bricks cover smaller gaps")
-    assert sol.furthestBuilding([14, 3, 19, 3], 17, 0) == 3, "Test 3 Failed"
-    print("Test 3 Passed: bricks only path")
-    assert sol.furthestBuilding([1, 1, 1], 0, 0) == 2, "Test 4 Failed"
-    print("Test 4 Passed: flat rooftops")
-    assert sol.furthestBuilding([5, 10], 4, 1) == 1, "Test 5 Failed"
-    print("Test 5 Passed: one climb ladder covers")
     print("\nAll test cases passed!")
 ````

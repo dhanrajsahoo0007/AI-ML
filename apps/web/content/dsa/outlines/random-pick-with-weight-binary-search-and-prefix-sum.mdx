@@ -1,0 +1,89 @@
+---
+title: "Random Pick with Weight"
+description: "You are given positive weights w."
+topics: [prefix-sum]
+group: "06. Binary Search and Prefix Sum"
+number: "02"
+order: 2006002000000
+status: outline
+---
+
+You are given positive weights w. Implement pickIndex that returns a random index
+i with probability w\[i\] / sum(w). Calls use a uniform random integer generator.
+
+## Examples
+
+````text
+Example 1:
+Input: w = [1, 3]
+Repeated picks yield index 0 about 25% and index 1 about 75% of the time.
+````
+
+## Constraints
+
+````text
+- 1 <= len(w) <= 10^4
+- 1 <= w[i] <= 10^5
+````
+
+**Also in the notes under:** [08. Binary Search/10. Maths](/dsa/problems/random-pick-with-weight).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum + Binary Search
+Build cumulative weights and map a uniform draw in \[1, total\] to the first bucket.
+
+1. Store prefix sums of w.
+2. Draw target uniformly from 1..total inclusive.
+3. Return bisect\_left(prefix, target).
+
+## Complexity
+
+**Time:** O(n) preprocessing, O(log n) per pick.
+
+**Space:** O(n) for prefix sums.
+
+## Solution
+
+````python
+import bisect
+import random
+from typing import List
+
+
+class Solution:
+    def __init__(self, w: List[int]) -> None:
+        self._prefix: List[int] = []
+        s = 0
+        for x in w:
+            s += x
+            self._prefix.append(s)
+
+    def index_for_target(self, target: int) -> int:
+        return bisect.bisect_left(self._prefix, target)
+
+    def pickIndex(self) -> int:
+        return self.index_for_target(random.randint(1, self._prefix[-1]))
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution([1, 3])
+    assert sol.index_for_target(1) == 0, "Test 1 Failed"
+    print("Test 1 Passed: low roll maps to first weight")
+    assert sol.index_for_target(2) == 1, "Test 2 Failed"
+    print("Test 2 Passed: boundary into second bucket")
+    assert sol.index_for_target(4) == 1, "Test 3 Failed"
+    print("Test 3 Passed: top of range")
+    sol2 = Solution([3])
+    assert sol2.index_for_target(1) == 0 and sol2.index_for_target(3) == 0, "Test 4 Failed"
+    print("Test 4 Passed: single bucket")
+    sol3 = Solution([2, 2, 2])
+    assert sol3.index_for_target(2) == 0 and sol3.index_for_target(3) == 1 and sol3.index_for_target(6) == 2, "Test 5 Failed"
+    print("Test 5 Passed: equal weights boundaries")
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,82 @@
+---
+title: "Remove All Adjacent Duplicates in String II"
+description: "Remove groups of exactly k identical adjacent characters repeatedly until no group remains."
+topics: [stacks-and-queues]
+group: "03. String Manipulation with Stack"
+number: "02"
+order: 9003002000000
+status: outline
+---
+
+Remove groups of exactly k identical adjacent characters repeatedly until no group remains.
+
+## Examples
+
+````text
+Example 1:
+Input: s = "deeedbbcccbdaa", k = 3
+Output: "aa"
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 10^5
+- 2 <= k <= 10^4
+````
+
+**Also in the notes under:** [05. String/05. String Recursion and Pattern Matching](/dsa/problems/remove-all-adjacent-duplicates-in-string-ii).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Run-Length Stack
+Track consecutive counts on the stack and pop when a run reaches length k.
+
+1. Maintain stack entries as \[character, count\].
+2. Increment the top run when characters match; otherwise push a fresh run.
+3. Pop when a run hits k; expand survivors into the final string.
+
+## Complexity
+
+**Time:** O(n) - Each character causes O(1) amortized work.
+
+**Space:** O(n) - Stack stores compressed runs.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def removeDuplicates(self, s: str, k: int) -> str:
+        stack: List[List] = []
+        for ch in s:
+            if stack and stack[-1][0] == ch:
+                stack[-1][1] += 1
+                if stack[-1][1] == k:
+                    stack.pop()
+            else:
+                stack.append([ch, 1])
+        return "".join(ch * cnt for ch, cnt in stack)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert sol.removeDuplicates("abcd", 2) == "abcd", "Test 1 Failed"
+    assert sol.removeDuplicates("deeedbbcccbdaa", 3) == "aa", "Test 2 Failed"
+    assert sol.removeDuplicates("pbbcggttciiippooaais", 2) == "ps", "Test 3 Failed"
+    assert sol.removeDuplicates("aaaaaa", 3) == "", "Test 4 Failed"
+    assert sol.removeDuplicates("aabbaabbaa", 2) == "", "Test 5 Failed"
+    print("Test 1 Passed: no removals")
+    print("Test 2 Passed: multi-round collapse")
+    print("Test 3 Passed: pair removals")
+    print("Test 4 Passed: entire wipe")
+    print("Test 5 Passed: staggered triples")
+    print("\nAll test cases passed!")
+````

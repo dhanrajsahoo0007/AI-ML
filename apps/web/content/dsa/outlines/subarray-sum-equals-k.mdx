@@ -28,6 +28,8 @@ Example 2:
 - nums may contain negative numbers and zeros.
 ````
 
+**Also in the notes under:** [02. Prefix Sum/04. Subarray Sum Problems](/dsa/problems/subarray-sum-equals-k-subarray-sum-problems).
+
 <PremiumBreak />
 
 ## Approach
@@ -116,62 +118,5 @@ if __name__ == "__main__":
     assert sol.subarraySum([3, 4, 7, 2, -3, 1, 4, 2], 7) == 4, "Test 5 Failed"
     print("Test 5 Passed: multiple matches")
 
-    print("\nAll test cases passed!")
-````
-
-## Another version
-
-From 02. Prefix Sum/04. Subarray Sum Problems.
-
-### Approach
-
-**Pattern:** Prefix Sum + Hash Map
-If prefix\[j\] - prefix\[i\] = k, count prior prefix sums equal to current - k.
-
-1. Walk nums while tracking cumulative sum cur.
-2. ans += freq\[cur - k\]; increment freq\[cur\].
-3. Return ans.
-
-### Complexity
-
-**Time:** O(n).
-
-**Space:** O(n) - frequency map of prefix sums.
-
-### Solution
-
-````python
-from collections import defaultdict
-from typing import List
-
-
-class Solution:
-    def subarraySum(self, nums: List[int], k: int) -> int:
-        freq: defaultdict[int, int] = defaultdict(int)
-        freq[0] = 1
-        cur = 0
-        ans = 0
-        for x in nums:
-            cur += x
-            ans += freq[cur - k]
-            freq[cur] += 1
-        return ans
-````
-
-### Tests from the notes
-
-````python
-if __name__ == "__main__":
-    sol = Solution()
-    assert sol.subarraySum([1, 1, 1], 2) == 2, "Test 1 Failed"
-    print("Test 1 Passed: simple counts")
-    assert sol.subarraySum([1, 2, 3], 3) == 2, "Test 2 Failed"
-    print("Test 2 Passed: multiple ways")
-    assert sol.subarraySum([1], 0) == 0, "Test 3 Failed"
-    print("Test 3 Passed: no match")
-    assert sol.subarraySum([1, -1, 0], 0) == 3, "Test 4 Failed"
-    print("Test 4 Passed: zeros and negatives")
-    assert sol.subarraySum([3, 4, 7, 2, -3, 1, 4, 2], 7) == 4, "Test 5 Failed"
-    print("Test 5 Passed: mixed array")
     print("\nAll test cases passed!")
 ````

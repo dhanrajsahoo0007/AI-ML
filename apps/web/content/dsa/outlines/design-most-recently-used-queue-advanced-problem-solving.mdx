@@ -1,0 +1,81 @@
+---
+title: "Design Most Recently Used Queue"
+description: "Design a queue of integers 1..n."
+topics: [arrays]
+group: "12. Advanced Problem Solving"
+number: "02"
+order: 1012002000000
+status: outline
+---
+
+Design a queue of integers 1..n. fetch(k) removes the k-th smallest element (1-indexed) from
+the queue, appends it to the end, and returns that value.
+
+## Examples
+
+````text
+Example 1:
+MRUQueue(8); fetch(3) -> 3, queue becomes [1,2,4,5,6,7,8,3]
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 2000
+- 1 <= k <= n
+- At most 2000 calls to fetch
+````
+
+**Also in the notes under:** [09. Stack and Queue/07. Queue Applications](/dsa/problems/design-most-recently-used-queue).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Dynamic list simulation
+Represent the queue as a Python list and physically move the element for each fetch.
+
+1. Initialize list with values 1 through n.
+2. On fetch(k), pop index k-1 and append to the end, return popped value.
+
+## Complexity
+
+**Time:** O(n) per fetch due to list pop shifting.
+
+**Space:** O(n) - The queue storage.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def __init__(self, n: int) -> None:
+        self._queue: List[int] = list(range(1, n + 1))
+
+    def fetch(self, k: int) -> int:
+        value = self._queue.pop(k - 1)
+        self._queue.append(value)
+        return value
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    q = Solution(8)
+    assert q.fetch(3) == 3, "Test 1 Failed"
+    print("Test 1 Passed: first fetch on eight")
+    assert q._queue == [1, 2, 4, 5, 6, 7, 8, 3], "Test 2 Failed"
+    print("Test 2 Passed: queue state after first fetch")
+    assert q.fetch(5) == 6, "Test 3 Failed"
+    print("Test 3 Passed: second fetch")
+    q2 = Solution(1)
+    assert q2.fetch(1) == 1, "Test 4 Failed"
+    print("Test 4 Passed: singleton queue")
+    q3 = Solution(3)
+    assert q3.fetch(1) == 1 and q3.fetch(2) == 3, "Test 5 Failed"
+    print("Test 5 Passed: two fetches on three")
+    print("\nAll test cases passed!")
+````

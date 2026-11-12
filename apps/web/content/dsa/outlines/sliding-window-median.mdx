@@ -30,6 +30,8 @@ Example 2:
 - -2^31 <= nums[i] <= 2^31 - 1
 ````
 
+**Also in the notes under:** [07. Sliding Window/05. Heap](/dsa/problems/sliding-window-median-heap).
+
 <PremiumBreak />
 
 ## Approach
@@ -142,92 +144,6 @@ if __name__ == "__main__":
     result = sol.medianSlidingWindow([1, 2, 3], 3)
     assert result == [2.0], "Test 3 Failed"
     print(f"Test 3 Passed: k=n -> {result}")
-
-    print("\nAll test cases passed!")
-````
-
-## Another version
-
-From 07. Sliding Window/05. Heap.
-
-### Approach
-
-**Pattern:** Sliding window with ordered multiset view
-Maintain the multiset of values inside the window; extract the median from its sorted order.
-
-1. Build the sorted window for indices \[0, k - 1\].
-2. Slide: remove the outgoing value with bisect, insert the incoming value with bisect.
-3. Read the median from the middle of the sorted window list.
-
-### Complexity
-
-**Time:** O(n \* k) - Each slide may shift O(k) elements when using a plain sorted list.
-
-**Space:** O(k) - The sorted window stores k numbers.
-
-### Solution
-
-````python
-import bisect
-from typing import List
-
-
-class Solution:
-    def medianSlidingWindow(self, nums: List[int], k: int) -> List[float]:
-        window = sorted(nums[:k])
-        out: List[float] = []
-
-        def median(values: List[int]) -> float:
-            mid = k // 2
-            if k % 2:
-                return float(values[mid])
-            return (values[mid - 1] + values[mid]) / 2.0
-
-        out.append(median(window))
-
-        for i in range(k, len(nums)):
-            left_val = nums[i - k]
-            window.pop(bisect.bisect_left(window, left_val))
-            bisect.insort(window, nums[i])
-            out.append(median(window))
-
-        return out
-````
-
-### Tests from the notes
-
-````python
-if __name__ == "__main__":
-    sol = Solution()
-    assert sol.medianSlidingWindow([1, 3, -1, -3, 5, 3, 6, 7], 3) == [
-        1.0,
-        -1.0,
-        -1.0,
-        3.0,
-        5.0,
-        6.0,
-    ], "Test 1 Failed"
-    print("Test 1 Passed: classic sliding medians")
-
-    assert sol.medianSlidingWindow([1, 2], 2) == [1.5], "Test 2 Failed"
-    print("Test 2 Passed: even-length window")
-
-    assert sol.medianSlidingWindow([5], 1) == [5.0], "Test 3 Failed"
-    print("Test 3 Passed: single-element window")
-
-    assert sol.medianSlidingWindow([1, 2, 3, 4, 2, 3, 1, 4, 2], 3) == [
-        2.0,
-        3.0,
-        3.0,
-        3.0,
-        2.0,
-        3.0,
-        2.0,
-    ], "Test 4 Failed"
-    print("Test 4 Passed: duplicates inside windows")
-
-    assert sol.medianSlidingWindow([0, 0, 0, 0], 2) == [0.0, 0.0, 0.0], "Test 5 Failed"
-    print("Test 5 Passed: all zeros")
 
     print("\nAll test cases passed!")
 ````

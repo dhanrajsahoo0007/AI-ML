@@ -29,6 +29,8 @@ Output: 6
 - m == len(grid), n == len(grid[0])
 ````
 
+**Also in the notes under:** [17. Graphs/13. Flood Fill](/dsa/problems/max-area-of-island-flood-fill).
+
 <PremiumBreak />
 
 ## Approach
@@ -135,68 +137,4 @@ if __name__ == "__main__":
     assert sol.maxAreaOfIsland([[1, 0], [0, 1]]) == 1, "Test 5 Failed"
     print("Test 5 Passed: two single cells")
     print("All tests passed!")
-````
-
-## Another version
-
-From 17. Graphs/13. Flood Fill.
-
-### Approach
-
-**Pattern:** DFS area on grid components
-For each unvisited land cell, DFS to count its component size and track the maximum.
-
-1. Scan grid; when encountering a 1, DFS to count reachable 1 cells while marking them 0.
-
-### Complexity
-
-**Time:** O(m \* n)
-
-**Space:** O(m \* n) recursion stack worst case.
-
-### Solution
-
-````python
-from typing import List
-
-
-class Solution:
-    def maxAreaOfIsland(self, grid: List[List[int]]) -> int:
-        m, n = len(grid), len(grid[0])
-        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
-
-        def dfs(r: int, c: int) -> int:
-            if r < 0 or c < 0 or r >= m or c >= n or grid[r][c] == 0:
-                return 0
-            grid[r][c] = 0
-            return 1 + sum(dfs(r + dr, c + dc) for dr, dc in dirs)
-
-        best = 0
-        for i in range(m):
-            for j in range(n):
-                if grid[i][j] == 1:
-                    best = max(best, dfs(i, j))
-        return best
-````
-
-### Tests from the notes
-
-````python
-if __name__ == "__main__":
-    sol = Solution()
-
-    def clone(g: List[List[int]]) -> List[List[int]]:
-        return [row[:] for row in g]
-
-    g1 = [[0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0], [0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0], [0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0], [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0]]
-    assert sol.maxAreaOfIsland(clone(g1)) == 6, "Test 1 Failed"
-    print("Test 1 Passed: LeetCode sample max area")
-    assert sol.maxAreaOfIsland(clone([[0, 0, 0], [0, 0, 0]])) == 0, "Test 2 Failed"
-    print("Test 2 Passed: no land")
-    assert sol.maxAreaOfIsland(clone([[1]])) == 1, "Test 3 Failed"
-    print("Test 3 Passed: single land")
-    g4 = [[1, 1], [1, 0]]
-    assert sol.maxAreaOfIsland(clone(g4)) == 3, "Test 4 Failed"
-    print("Test 4 Passed: L-shaped island")
-    print("\nAll test cases passed!")
 ````

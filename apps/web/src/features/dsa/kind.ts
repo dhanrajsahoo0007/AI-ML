@@ -327,9 +327,14 @@ export function topicLabel(topic: { title: string; fm: { order?: number } | null
   return n === undefined ? topic.title : `${String(Math.floor(n)).padStart(2, "0")}. ${topic.title}`;
 }
 
-/** An outline's title with its number inside its group ("01. Kth Largest Element"); other items as they are. */
+/**
+ * An outline's title with its number inside its group ("01. Kth Largest Element"), marked "(to write)" when it is
+ * a placeholder; other items as they are.
+ */
 export function numberedTitle(item: DsaItem): string {
-  return item.type === "outline" && item.fm?.number ? `${item.fm.number}. ${item.title}` : item.title;
+  if (item.type !== "outline" || !item.fm) return item.title;
+  const numbered = item.fm.number ? `${item.fm.number}. ${item.title}` : item.title;
+  return item.fm.placeholder ? `${numbered} (to write)` : numbered;
 }
 
 /** A topic's statement-only outlines, in content order. */

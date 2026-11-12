@@ -1,0 +1,82 @@
+---
+title: "Numbers With Same Consecutive Differences"
+description: "Return all integers of length n such that the absolute difference between every two consecutive digits is k."
+topics: [graphs]
+group: "11. Others"
+order: 17011999000000
+status: outline
+---
+
+Return all integers of length n such that the absolute difference between every two
+consecutive digits is k. Answers may be returned in any order.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 3, k = 7
+    Output: [181,292,707,818,929]
+Example 2:
+    Input: n = 2, k = 1
+    Output: [10,12,21,23,32,34,43,45,54,56,65,67,76,78,87,89,98]
+````
+
+## Constraints
+
+````text
+- 2 <= n <= 9
+- 0 <= k <= 9
+````
+
+**Also in the notes under:** [12. Backtracking/06. Decision Making Problems](/dsa/problems/numbers-with-same-consecutive-differences).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - BFS from valid first digits
+
+1. Start from digits 1..9 as seeds (length-1 numbers).
+2. Append a next digit if abs(last - next) == k and total length reaches n.
+3. Collect all length-n numbers.
+
+## Complexity
+
+**Time:** O(9 \* 2^(n-1)) in worst case branching.
+
+**Space:** O(output size).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def numsSameConsecDiff(self, n: int, k: int) -> List[int]:
+        if n == 1:
+            return list(range(10))
+        cur = list(range(1, 10))
+        for _ in range(n - 1):
+            nxt = []
+            for num in cur:
+                d = num % 10
+                for nd in {d - k, d + k}:
+                    if 0 <= nd <= 9:
+                        nxt.append(num * 10 + nd)
+            cur = nxt
+        return cur
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    out1 = set(sol.numsSameConsecDiff(3, 7))
+    assert out1 == {181, 292, 707, 818, 929}, "Test 1 Failed"
+    assert len(sol.numsSameConsecDiff(2, 1)) == 17, "Test 2 Failed"
+    assert sol.numsSameConsecDiff(1, 0) == list(range(10)), "Test 3 Failed"
+    print("All tests passed!")
+````

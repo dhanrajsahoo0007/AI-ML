@@ -134,6 +134,8 @@ export const outlineFrontmatterSchema = z
       .string()
       .regex(/^\d{2,3}$/)
       .optional(),
+    /** True for a question whose statement and answer are not written yet (an empty file in the owner's notes). */
+    placeholder: z.boolean().optional(),
     order: z.number().optional(),
     status: z.literal("outline"),
   })
