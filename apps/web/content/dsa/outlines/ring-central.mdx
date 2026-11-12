@@ -58,6 +58,21 @@ that avoid double-counting boundary seconds.
 
 **Space:** O(total activities) across users.
 
+## Original notes
+
+````text
+API recap (from original design spec):
+- `add_user_activity(user_id, timestamp)` records one activity at the given second.
+- `calculate_activity(user_id, start_timestamp, end_timestamp, frequency)` aggregates
+  counts inside consecutive windows of width 60 seconds (`"minutes"`) or 3600 seconds
+  (`"hours"`), returning dictionaries shaped as `{start, end, count}` clipped to the
+  inclusive query range.
+Example trace:
+    After logging seconds [10, 12, 17, 18, 60, 65, 90, 121, 150] for `user_1`,
+    `calculate_activity("user_1", 5, 130, "minutes")` should yield the three buckets
+    shown in the Examples section below.
+````
+
 ## Solution
 
 ````python
