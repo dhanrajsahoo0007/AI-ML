@@ -49,9 +49,13 @@ which spawns a Web Worker per run and compares results with `runner/compare.ts`.
 - **Scale:** the nav lists topics and one link to the problem list, never every problem (the header menu's
   nav-items.json would carry them all); the hub shows topics only; the list renders 50 rows per page and its
   links don't prefetch.
-- **Hidden tests never ship.** Only their path sits on the item; `readHiddenTestsForValidation()` is the one reader,
-  used by content-check. No page may import it. `leak.test.ts` and the E2E "hidden tests are never served" test
-  check props, the index, bundles and HTML. They exist for the future Stage C server-side judge.
+- **Hidden tests are served by the judge route only.** "Submit" fetches a problem's hidden cases from
+  `apps/web/src/app/dsa/problems/[slug]/judge/route.ts` (data from `judge.ts`: arguments and expected values, no names)
+  and runs them in the browser, in the same worker as "Run tests"; only each case's outcome is shown. They never
+  appear in a page, its RSC payload, the problem index or a client bundle. `readHiddenTestsForJudge()` has one caller
+  (`judge.ts`), `judge.ts` has one importer (the route), and `readHiddenTestsForValidation()` stays for content-check
+  and the tests. `leak.test.ts` and `judge.test.ts` enforce all of this; the E2E "hidden tests are never served" test
+  covers the pages. A server-side judge (Stage C) is still possible later and would use the same files.
 - **Premium editorials are never compiled for public pages**: `mdx.tsx` splits at `<PremiumBreak/>` and the page
   shows `ProEditorial` (container class `PAYWALL_CONTAINER_CLASS` from `apps/web/src/features/seo/site.ts`).
   Topics and easy problems are always free (`alwaysFree` in the registry). `mdx.test.tsx` still compiles every

@@ -225,6 +225,14 @@ export function readHiddenTestsForValidation(section: Pick<SectionDef, "key">, p
   return readTestFile(testFilePath(section, problem.fm.tests.hidden));
 }
 
+/**
+ * The hidden cases for the submit judge. The only caller is features/dsa/judge.ts, which serves them from the
+ * judge route for "Submit" to run in the browser; no page, layout or client module may read them.
+ */
+export function readHiddenTestsForJudge(section: Pick<SectionDef, "key">, problem: ValidProblem): TestCase[] {
+  return readTestFile(testFilePath(section, problem.fm.tests.hidden));
+}
+
 /** Where a problem's Python reference solution lives (whether or not it exists). */
 export function referenceSolutionPath(section: Pick<SectionDef, "key">, slug: string) {
   return path.join(dsaDir(section), SOLUTIONS_DIR, `${slug}.py`);

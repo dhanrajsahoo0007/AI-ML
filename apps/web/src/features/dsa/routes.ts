@@ -125,7 +125,10 @@ export function problemLabels(section: SectionDef, problem: ValidProblem) {
   };
 }
 
-/** What the in-browser workspace needs: starters, entry points and the PUBLIC tests. Never hidden tests. */
+/**
+ * What the in-browser workspace needs: starters, entry points, the PUBLIC tests and the address of the judge
+ * route. Never the hidden tests themselves.
+ */
 export function workspaceProps(section: SectionDef, problem: ValidProblem) {
   const { fm } = problem;
   return {
@@ -135,6 +138,8 @@ export function workspaceProps(section: SectionDef, problem: ValidProblem) {
     entry: fm.entry,
     mode: fm.mode,
     tests: readPublicTests(section, problem),
+    /** Where "Submit" fetches the hidden cases (app/<section>/problems/<slug>/judge). */
+    judgeHref: `${problem.href}/judge`,
   };
 }
 

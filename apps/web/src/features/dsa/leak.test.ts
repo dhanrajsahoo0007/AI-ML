@@ -179,3 +179,26 @@ describe("outline notes stay out of built pages", () => {
     expect(pages.filter((f) => fs.readFileSync(f, "utf8").includes("data-dsa-outline-notes"))).toEqual([]);
   });
 });
+
+// Submit runs the hidden cases in the browser, so they are served, but from one place only: the judge route
+// (features/dsa/judge.ts and app/<section>/problems/[slug]/judge/route.ts). Nothing else may reach them.
+describe("the judge route is the only way hidden cases are served", () => {
+  const srcDir = path.join(webRoot, "src");
+  const sources = walk(srcDir, (f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f));
+  const text = (f: string) => fs.readFileSync(f, "utf8");
+
+  it("only the judge route imports the judge module", () => {
+    const importers = sources.filter((f) => /from "(@\/features\/dsa|\.)\/judge"/.test(text(f))).map(rel);
+    expect(importers).toEqual(["src/app/dsa/problems/[slug]/judge/route.ts"]);
+  });
+
+  it("only the judge module uses the judge's reader", () => {
+    const users = sources.filter((f) => text(f).includes("readHiddenTestsForJudge")).map(rel);
+    expect(users.sort()).toEqual(["src/features/dsa/judge.ts", "src/features/dsa/source.ts"]);
+  });
+
+  it("the built judge files carry no case names", () => {
+    const bodies = walk(pagesDir, (f) => /[\\/]judge\.body$/.test(f));
+    expect(bodies.filter((f) => HIDDEN_NAME_SENTINEL.test(text(f))).map(rel)).toEqual([]);
+  });
+});

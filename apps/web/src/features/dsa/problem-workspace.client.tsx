@@ -10,7 +10,8 @@ import type { RunHandle } from "./runner/run";
 // The code area of a problem page (plan §15.1 stage B). First load ships only this small island: the
 // starter code is shown as plain text, and the editor (CodeMirror) is imported the first time the visitor
 // focuses, clicks or presses "Edit code". "Run tests" imports the runner and runs the PUBLIC cases in a
-// Web Worker in the browser; nothing is sent to the server. Hidden tests are not part of the props.
+// Web Worker in the browser; nothing is sent to the server. Hidden tests are not part of the props: "Submit"
+// fetches them from the judge route and runs them the same way, showing only each one's outcome.
 
 interface WorkspaceProps {
   title: string;
@@ -19,6 +20,8 @@ interface WorkspaceProps {
   entry: Partial<Record<Language, string>>;
   mode: HarnessMode;
   tests: RunnerCase[];
+  /** Address of the judge route: the hidden cases, fetched only when the reader presses Submit. */
+  judgeHref: string;
 }
 
 const STATUS_TEXT: Record<CaseResult["status"], string> = {
@@ -45,7 +48,7 @@ function argsText(args: unknown[], mode: HarnessMode) {
   return args.map((a) => formatValue(a, 200)).join("\n");
 }
 
-export function ProblemWorkspace({ title, languages, starter, entry, mode, tests }: WorkspaceProps) {
+export function ProblemWorkspace({ title, languages, starter, entry, mode, tests, judgeHref }: WorkspaceProps) {
   const [language, setLanguage] = useState<Language>(languages[0]);
   const codes = useRef<Partial<Record<Language, string>>>({ ...starter });
   // The editor is requested on first interaction; `version` remounts it after "Reset code".
@@ -60,6 +63,8 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
   const [results, setResults] = useState<(CaseResult | null)[] | null>(null);
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState("");
+  // A submission runs the public cases and then the hidden ones; `hiddenFrom` is where the hidden ones start.
+  const [submission, setSubmission] = useState<{ results: (CaseResult | null)[]; hiddenFrom: number } | null>(null);
 
   const loadEditor = useCallback(() => {
     wantFocus.current = true;
@@ -125,6 +130,7 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
     if (editor.current) codes.current[language] = editor.current.getValue();
     run.current?.cancel();
     setResults(null);
+    setSubmission(null);
     setStatus("");
     setLanguage(next);
   };
@@ -133,12 +139,14 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
     codes.current[language] = starter[language];
     setVersion((v) => v + 1);
     setResults(null);
+    setSubmission(null);
   };
 
   const runTests = async () => {
     run.current?.cancel();
     const code = editor.current?.getValue() ?? codes.current[language] ?? "";
     codes.current[language] = code;
+    setSubmission(null);
     setResults(tests.map(() => null));
     setRunning(true);
     setStatus("Starting…");
@@ -160,6 +168,45 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
       setStatus("The test runner could not be loaded. Check your connection and try again.");
     }
   };
+
+  // Submit: fetch the hidden cases, then run the public and the hidden ones in the same worker as "Run tests".
+  // Only the outcome of a hidden case is shown (its number, status and any error), never its input.
+  const submit = async () => {
+    run.current?.cancel();
+    const code = editor.current?.getValue() ?? codes.current[language] ?? "";
+    codes.current[language] = code;
+    setResults(null);
+    setSubmission(null);
+    setRunning(true);
+    setStatus("Loading the hidden tests…");
+    try {
+      const response = await fetch(judgeHref);
+      if (!response.ok) throw new Error(String(response.status));
+      const hidden = (await response.json()) as RunnerCase[];
+      const cases = [...tests, ...hidden];
+      setSubmission({ results: cases.map(() => null), hiddenFrom: tests.length });
+      const { startRun } = await import("./runner/run");
+      run.current = startRun(
+        { type: "run", language, code, entry: entry[language] ?? "", mode, cases },
+        {
+          onStatus: setStatus,
+          onCase: (index, result) =>
+            setSubmission((s) => (s ? { ...s, results: s.results.map((x, i) => (i === index ? result : x)) } : s)),
+          onDone: () => {
+            setRunning(false);
+            setStatus("");
+          },
+        }
+      );
+    } catch {
+      setRunning(false);
+      setStatus("The hidden tests could not be loaded. Check your connection and try again.");
+    }
+  };
+
+  const submitted = submission?.results.filter((r): r is CaseResult => r !== null) ?? [];
+  const submittedAll = submission !== null && submitted.length === submission.results.length;
+  const submitPassed = submitted.filter((r) => r.status === "pass").length;
 
   const done = results?.filter((r): r is CaseResult => r !== null) ?? [];
   const passed = done.filter((r) => r.status === "pass").length;
@@ -214,6 +261,15 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
         >
           {running ? "Running…" : "Run tests"}
         </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={running}
+          className="rounded-lg border border-ink px-4 py-2 text-sm font-semibold text-ink disabled:opacity-60"
+          data-submit
+        >
+          Submit
+        </button>
         {!ready && (
           <button
             type="button"
@@ -231,7 +287,8 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
           Reset code
         </button>
         <p className="text-xs text-muted-foreground">
-          Runs the {tests.length} public tests in your browser. Your code never leaves this page.
+          Runs the {tests.length} public tests in your browser. Submit also runs the hidden tests. Your code never
+          leaves this page.
         </p>
         <p id="editor-keys" className="sr-only">
           Tab indents code. Press Escape, then Tab, to move out of the editor.
@@ -251,6 +308,47 @@ export function ProblemWorkspace({ title, languages, starter, entry, mode, tests
           </p>
         )}
       </div>
+
+      {submission && (
+        <div className="mt-3" data-submission={submittedAll && !running ? "done" : "running"}>
+          {submittedAll && !running && (
+            <p className="text-sm font-semibold text-ink" data-submit-summary>
+              {submitPassed === submission.results.length
+                ? `Accepted: all ${submission.results.length} tests passed`
+                : `${submitPassed} of ${submission.results.length} tests passed`}
+            </p>
+          )}
+          <ol className="mt-3 space-y-2" aria-label="Submission results">
+            {submission.results.map((r, i) => {
+              if (!r || r.status === "pass") return null;
+              const hidden = i >= submission.hiddenFrom;
+              return (
+                <li
+                  key={i}
+                  className="rounded-lg border border-hairline bg-paper p-3 text-sm"
+                  data-case-status={r.status}
+                >
+                  <p className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="font-semibold text-ink">
+                      {hidden ? `Hidden test ${i - submission.hiddenFrom + 1}` : `Case ${i + 1}`}
+                    </span>
+                    {!hidden && tests[i]?.name && <span className="text-muted-foreground">{tests[i].name}</span>}
+                    <span className={`ml-auto font-semibold ${STATUS_CLASS[r.status]}`}>
+                      {STATUS_TEXT[r.status]}
+                      {r.ms !== undefined && <span className="ml-1 font-normal text-muted-foreground">{r.ms} ms</span>}
+                    </span>
+                  </p>
+                  {r.error && (
+                    <p className="mt-2 whitespace-pre-wrap break-all font-mono text-xs text-rose-700 dark:text-rose-400">
+                      {r.error}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
 
       {results && (
         <ol className="mt-3 space-y-3" aria-label="Test results">
