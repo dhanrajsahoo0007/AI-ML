@@ -99,7 +99,7 @@ placeholder, and `leak.test.ts` fails if a built page carries `data-dsa-outline-
 
 ## Tests
 
-`kind.test.ts`, `schema.test.ts`, `problem-index.test.ts`, `routes.test.ts`, `runner.test.ts` (JavaScript
+`kind.test.ts`, `schema.test.ts`, `problem-index.test.ts`, `judge.test.ts`, `runner.test.ts` (JavaScript
 references), `reference.test.ts` (Python references in Pyodide under Node, the `pyodide` dev dependency pinned to
 `PYODIDE_VERSION`; every public and hidden case, and the starter must fail public case 1), `mdx.test.tsx`,
 `leak.test.ts` (reads `.next` when a build exists: run it after `npm run build`, not after `next dev`),
