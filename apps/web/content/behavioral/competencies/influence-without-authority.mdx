@@ -1,13 +1,137 @@
 ---
 title: "Influencing Without Authority Across Teams"
 description: "Get another team to adopt your RFC, migration or reliability standard when it is not on their roadmap."
-status: outline
+icon: network
+order: 2
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** how to align incentives, reduce adoption friction with adapters and tooling, and build cross-team coalitions without escalating to directors.
+<KeyIdea>
+You cannot influence a sibling or platform team by telling them why **your** OKRs need their help; you influence without authority by **aligning your proposal with their pain points**, **lowering their adoption cost to near zero** (codemods, PRs, shadow harnesses), and building a **coalition of early adopters**.
+</KeyIdea>
 
-**Related reading on this site:** [Staff & Principal Engineer Behavioral Loops](/behavioral/leveling-and-tracks/staff-and-principal-behavioral) · [Resolving Technical Disagreements & Design Deadlocks](/behavioral/competencies/technical-conflict-and-alignment)
+## The story
 
-<AnimatedDiagram spec="animated/behavioral/influence-coalition" stepper caption="Winning cross-team RFC adoption by aligning incentives and paying the migration tax." />
+The transition from Mid-Level (L4) to Senior (L5) and Staff (L6) engineering is defined by a simple mathematical fact: the biggest bottlenecks in any company sit **between** teams, where nobody has direct reporting authority over everyone else.
+
+When a Senior/Staff candidate complains in an interview, *"The platform team refused to prioritize our API changes for two quarters, so we were blocked,"* the hiring committee hears: *"This candidate only knows how to operate inside their manager's ticket queue."* Conversely, candidates who show how they turned an unaligned external team into an enthusiastic partner—by reducing the partner team's toil and doing the heavy lifting—score at the top of the rubric.
+
+## What interviewers are really testing
+
+<AnimatedDiagram spec="animated/behavioral/influence-coalition" stepper caption="The 4-stage coalition and friction-reduction playbook for influencing across organizational boundaries without authority." />
+
+Interviewers evaluate four mechanisms of **Influence Without Authority**:
+
+| Mechanism | High-Leverage Senior / Staff Action | Low-Leverage Action (Stalls Out) |
+| --- | --- | --- |
+| **1. Incentive Mapping** | Discovering what metrics, pages, or tech debt the partner team is *already* stressed about and framing your RFC as relief for them | Sending a demand list of features you need them to build for your deadline |
+| **2. Lowering Activation Energy** | Shipping an automated codemod, self-serve migration CLI, or upstream PR + test suite so adoption takes them 30 minutes instead of 3 sprints | Publishing a 20-page mandate doc and expecting 12 teams to rewrite their services manually |
+| **3. Lighthouse / Wedge Adopter** | Partnering deeply with 1 friendly team first to prove a 40% latency/cost win, then using their success story to create pull from skeptics | Calling a 30-person all-hands meeting on Day 1 where every skeptic piles on |
+| **4. Shared Credit** | Highlighting the partner team's engineers in launch demos and leadership updates | Taking solo credit for a cross-team migration |
+
+<PremiumBreak />
+
+## How the bar changes by level
+
+<Compare
+  columns={["Dimension", "L4 (Mid-Level SWE)", "L5 (Senior SWE)", "L6+ (Staff / Principal SWE)"]}
+  rows={[
+    ["Influence Radius", "Influences code health and design choices within immediate squad (5–8 engineers)", "Influences 2–4 sibling or partner teams to adopt an API contract, migration, or reliability fix", "Influences org-wide or company-wide engineering standards across 10+ teams and multiple Directors"],
+    ["How Adoption Happens", "Writes clear PRs, docs, and helper libraries for teammates", "Co-develops in partner repos; builds migration automation and aligns with partner TLs/PMs", "Uses Lighthouse teams, golden-path paved roads, and executive-aligned telemetry scorecards"],
+    ["Handling Pushback", "Escalates cross-team roadmap blocks to EM/TL early", "Diagnoses partner bandwidth constraints and negotiates phased or co-developed solutions directly", "Restructures architectural boundaries and incentives so teams naturally do the right thing by default"],
+  ]}
+  caption="At Staff+ (L6+), 'Influence Without Authority' is your primary job description: you have L6 scope but zero direct reports."
+/>
+
+## Interactive diagnostic: test your story
+
+<DecisionTree
+  title="Will your 'Influence Without Authority' story pass a Senior/Staff bar?"
+  tree={{
+    q: "Did the people you influenced sit OUTSIDE your direct reporting chain (e.g., a sibling squad, platform org, security team, or senior leadership)?",
+    yes: {
+      q: "Did you overcome initial resistance or roadmap friction by understanding THEIR incentives AND reducing their engineering effort (e.g., via automation, codemods, or upstream PRs)?",
+      yes: {
+        q: "Did the adoption stick durably (measured by % of services migrated, incident reduction, or velocity gain) without requiring your manager to force compliance?",
+        yes: {
+          answer: "Staff-caliber influence story! Next: master Giving & Receiving Critical Feedback.",
+          href: "/behavioral/competencies/feedback-and-difficult-conversations",
+        },
+        no: "Quantify the adoption funnel (e.g., '14 of 14 tier-1 services migrated within 6 weeks') and the durable guardrail that kept it green.",
+      },
+      no: "If they agreed immediately with zero friction, the story lacks signal. Highlight why they pushed back initially and how you lowered their adoption cost.",
+    },
+    no: "Pick a story where you could not rely on your team's internal sprint planning—cross-team or org-wide alignment carries 3x more weight.",
+  }}
+/>
+
+## Worked engineering example (STAR+L)
+
+<Tabs title="Influence Without Authority: Platform Migration vs. Roadmap Alignment">
+  <Tab label="Driving a 14-Team Zero-Downtime Migration (Staff Bar)">
+    **Prompt:** *"Tell me about a time you convinced multiple teams to adopt a standard or migration that wasn't on their roadmap."*
+
+    - **Situation & Task:** *"After two cascading retry-storm outages, I saw that 14 downstream microservices were calling our core inventory tier with uncalibrated retries and no circuit breakers. None of those 14 teams had 'client resilience refactoring' on their Q3 roadmap."*
+    - **Action:** *"When I first sent an RFC asking teams to adopt a new resilience SDK, only 1 team replied—everyone else cited sprint capacity. I pivoted my strategy across three steps:
+      1. **Incentive Discovery:** I interviewed 4 lead engineers on the noisy teams and learned they hated getting paged at 2 AM for downstream timeouts just as much as we did, but dreaded spending a week rewriting HTTP clients and tests.
+      2. **Zero-Toil Paved Road:** I built an AST codemod (`jscodeshift` / OpenRewrite) that automatically wrapped their existing client calls with hedged timeouts, adaptive concurrency limits, and pre-configured Prometheus dashboards—turning a 5-day manual refactor into a 15-minute reviewable PR.
+      3. **Lighthouse Wedge + Scorecard:** I paired with the Checkout team (our most vocal skeptic) first, merged their auto-generated PR, and showed in the weekly eng sync that their tail 5xx errors dropped by 81% during a downstream blip. Then I published a friendly weekly 'Resilience Readiness' leaderboard and opened pre-tested PRs directly against the remaining 13 repos."*
+    - **Result:** *"All 14 tier-1 services merged the migration within 5 weeks with zero manager escalation; retry-amplified Sev-1 outages dropped from 3 per quarter to zero over the next year."*
+    - **Learning:** *"When teams resist a best practice, they rarely disagree with the goal—they are protecting their sprint bandwidth. Make the right path the easiest path through automation."*
+  </Tab>
+  <Tab label="Unblocking a Partner Team Dependency (Senior Bar)">
+    **Prompt:** *"Tell me about a time you needed work from another team whose priorities didn't align with yours."*
+
+    - **Situation & Task:** *"To launch our real-time notification preferences center, we needed the Identity team to expose a batch token-introspection endpoint. Their PM told us their backlog was full for the next two months due to a compliance audit."*
+    - **Action:** *"Instead of escalating to our directors, I sat down with the Identity Tech Lead to understand their compliance audit workload. I noticed that 30% of their database CPU saturation—one of their audit risk items—was actually caused by internal services (including ours!) making N+1 single-token introspection calls. I built a quick query log breakdown proving that a batch endpoint with a 30-second Redis cache would cut their primary DB load by 28%, directly solving their #1 compliance scaling risk. I then offered to write the implementation and load tests inside their repo following their PR checklist if their TL could commit to two 30-minute code reviews."*
+    - **Result:** *"The Identity team enthusiastically approved the co-development plan; we shipped the endpoint in 9 days, unblocked our launch 6 weeks early, and reduced Identity DB CPU utilization by 31%."*
+    - **Learning:** *"Reframing your feature request as a solution to the partner team's #1 operational headache turns a 'No' into a fast-track partnership."*
+  </Tab>
+</Tabs>
+
+## Introspect your own work
+
+<Quiz title="Audit your cross-team influence habits">
+  <QuizItem
+    question="1. Think of an RFC or architectural proposal you wrote that got slow or lukewarm adoption. How much engineering work did adopting it require from the other teams?"
+    hint="High activation energy kills 90% of good architectural ideas."
+  >
+    In your next cross-team initiative (and in your interview stories), pair every RFC with a **migration script, template PR, or self-serve CLI** that cuts adoption effort by 80%+.
+  </QuizItem>
+  <QuizItem
+    question="2. When you persuade another team to help you, how do you make sure their manager and leadership know about their contribution?"
+    hint="Publicly amplifying partner engineers builds 'social capital' so they say yes twice as fast next time."
+  >
+    Always mention in your **Result** how you sent a praise note to their EM/Director or invited their engineer to co-present the win.
+  </QuizItem>
+</Quiz>
+
+## Common red flags & how to recover
+
+- **Weaponizing executive escalation first:** Going straight to a VP or Director to force a peer team to comply destroys long-term trust and signals you cannot build technical consensus.
+- **"I wrote a doc and told them to follow it":** Documentation without a paved road (tooling, codemods, CI checks) is wishful thinking at scale.
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="How do I show 'Influence Without Authority' if I work at a small startup with only one engineering team?"
+    level="Mid"
+    companies={["Meta", "Google", "Stripe"]}
+  >
+    At a smaller company, your influence without authority happens across **founders, product, sales/customer-success, external customers/vendors, or peer engineers** when introducing a new testing, observability, or architecture standard that nobody mandated. Show how you proved ROI with a prototype and got the whole team to adopt it voluntarily.
+  </InterviewQuestion>
+
+  <InterviewQuestion
+    question="What is the 'Lighthouse Team' pattern that Staff Engineers use to drive org-wide change?"
+    level="Staff"
+    companies={["Google", "Netflix", "Uber"]}
+  >
+    Instead of trying to boil the ocean by migrating 20 teams at once, you pick **one high-visibility, cooperative team ("the Lighthouse")**, embed closely with them to iron out every sharp edge of your new platform/standard, and deliver an undeniable metric win (e.g., 50% faster builds or 70% fewer pages). Once other teams see the Lighthouse team shipping faster with less pain, adoption flips from **push** to **pull**.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Resolving Technical Disagreements & Design Deadlocks](/behavioral/competencies/technical-conflict-and-alignment)
+- [Staff, Principal & Distinguished Engineer Behavioral Rubric](/behavioral/leveling-and-tracks/staff-and-principal-behavioral)
+- [Working with PMs, Designers, Legal, Security & Customers](/behavioral/competencies/cross-functional-collaboration)
