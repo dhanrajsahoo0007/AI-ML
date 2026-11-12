@@ -1,13 +1,143 @@
 ---
 title: "How the Same Question Is Graded at Junior, Mid & Senior"
 description: "Side-by-side rubrics across autonomy, ambiguity, conflict, scope and systemic impact from L3/E3 to L5/E5."
-status: outline
+icon: columns
+order: 1
+access: free
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the exact signals interviewers use to calibrate whether a candidate operates at Junior (task), Mid (feature) or Senior (system & team multiplier) level.
+<KeyIdea>
+Interviewers ask the exact same behavioral prompts from Junior (L3) to Staff (L6)—what changes is **who spotted the problem**, **how big the ambiguity radius was**, **whether you resolved friction without manager air-cover**, and **how many engineers your solution multiplied**.
+</KeyIdea>
 
-**Related reading on this site:** [How Behavioral Rounds Decide Hire and Level](/behavioral/foundations/how-behavioral-interviews-work) · [Staff & Principal Engineer Behavioral Loops](/behavioral/leveling-and-tracks/staff-and-principal-behavioral)
+## The story
 
-<AnimatedDiagram spec="animated/behavioral/leveling-ladder" stepper caption="How behavioral scope, autonomy, and leverage scale from L3 to L6+." />
+Why do experienced engineers with 7+ years of tenure get down-leveled from Senior (L5/E5) to Mid-Level (L4/E4) in hiring committee every single week?
+
+Rarely is it because their coding round was slow. Most L5→L4 down-levels happen because the candidate tells **L4-scoped stories**:
+- *"My manager assigned me the checkout caching epic..."* (Problem was handed to you, not discovered or scoped by you.)
+- *"...when the payments team pushed back on our schema, I flagged it to my EM who worked it out with their EM..."* (Escalated a cross-team conflict instead of aligning 1:1.)
+- *"...I shipped the service in 4 weeks with 95% test coverage."* (Stopped at individual code delivery instead of team-wide operational leverage.)
+
+Once you see the exact **4-Axis Leveling Ladder** hiring committees use during debriefs, you can audit and re-anchor every story in your matrix so you never accidentally pitch yourself one level below your true capability.
+
+## What interviewers are really testing
+
+<AnimatedDiagram spec="animated/behavioral/leveling-ladder" stepper caption="Step through how Problem Origin, Ambiguity, Influence Radius, and Systemic Leverage scale from L3 to L6+." />
+
+Across Google, Meta, Amazon, Apple, Microsoft, and Stripe, leveling rubrics map onto **four universal axes**:
+
+| Axis | L3 / E3 (Junior / New Grad) | L4 / E4 (Mid-Level SWE) | L5 / E5 (Senior SWE — Terminal IC) |
+| --- | --- | --- | --- |
+| **1. Problem Origin** | Given a well-specified task and how to implement it | Given a feature/component problem; designs and delivers the implementation | **Discovers** team-level problems or turns a vague business goal into a multi-sprint technical roadmap |
+| **2. Ambiguity & Risk** | Clarifies edge cases on assigned tickets; asks for help within 30–60 minutes when blocked | Resolves feature-level edge cases across PRs and staging; owns component deploys | Bounds ambiguous specs with Goals/Non-Goals; de-risks unknown dependencies with spikes before coding |
+| **3. Conflict & Alignment** | Receives code review feedback with humility; collaborates smoothly inside the pod | Resolves peer technical debates 1:1; coordinates with PM/Design on feature scope | Aligns sibling teams, PMs, and Security **without escalating to managers**; drives consensus via data |
+| **4. Systemic Leverage ("+L")** | Writes clean tests and updates docs for the next person | Improves local module health and on-call runbooks | Multiplies the whole 6–10 person squad via shared abstractions, CI guardrails, and mentoring L3/L4s |
+
+<PremiumBreak />
+
+## Side-by-side: The exact same story told at L3, L4, and L5
+
+<Compare
+  columns={["STAR+L Element", "L3 Framing (Task Executor)", "L4 Framing (Feature Owner)", "L5 Framing (Self-Directed Multiplier)"]}
+  rows={[
+    ["Situation & Task", "'My tech lead gave me a ticket to add Redis caching to the user profile endpoint because latency was high.'", "'Product needed profile latency under 50 ms for a launch; I owned designing and shipping the Redis caching layer.'", "'While auditing our Q2 checkout drop-off, I discovered profile RPC tail latency (320 ms p99) was our #1 bottleneck and proposed a read-through cache RFC.'"],
+    ["Action (Technical & Social)", "'I implemented the Redis client wrapper, wrote unit tests, and fixed the TTL bug pointed out in code review.'", "'I benchmarked TTL policies, handled cache-stampede locking with singleflight, and rolled it out behind a feature flag.'", "'I ran a shadow replay proving a 12% hot-key skew, aligned the Auth team 1:1 on invalidation webhooks, and built a reusable cache-aside decorator for 4 endpoints.'"],
+    ["Result & Learning (+L)", "'Merged the PR on time and latency dropped to 20 ms.'", "'Cut endpoint p99 from 320 ms to 28 ms with zero launch regressions.'", "'Cut p99 from 320 ms to 28 ms (+1.4% checkout conversion), eliminated 60% of DB read load (\$4k/mo saved), and 3 other squads adopted our decorator.'"],
+  ]}
+  caption="Notice that in many cases, the L5 engineer and the L4 engineer worked on the exact same codebase—the L5 framing surfaces problem discovery, cross-team alignment, and reusable leverage."
+/>
+
+## Interactive diagnostic: check your story's level
+
+<DecisionTree
+  title="What level does your current story signal?"
+  tree={{
+    q: "In the opening 30 seconds of your story, did YOU identify the problem or shape the technical direction (rather than executing a spec handed to you)?",
+    yes: {
+      q: "Did your actions require aligning people outside your immediate code-review pair (e.g., PM, Design, sibling service owners) directly 1:1 without manager escalation?",
+      yes: {
+        q: "Did your solution leave behind a reusable mechanism, library, CI guardrail, or mentorship outcome that made the rest of your team faster/safer?",
+        yes: {
+          answer: "Strong L5 (Senior) / L6 (Staff) signal! Next: explore the Staff & Principal Engineer Behavioral Rubric.",
+          href: "/behavioral/leveling-and-tracks/staff-and-principal-behavioral",
+        },
+        no: "Currently signaling High-L4 / Borderline-L5. Add the '+L' systemic multiplier: how your work raised the bar for the whole squad.",
+      },
+      no: "Currently signaling Solid L4 (Mid-Level). To clear L5, highlight the cross-functional or cross-team alignment you drove yourself.",
+    },
+    no: "Currently signaling L3 / Early L4. Zoom out one level: explain how you diagnosed the root problem or shaped the RFC before writing code.",
+  }}
+/>
+
+## Worked engineering example (STAR+L)
+
+<Tabs title="Up-Leveling a Real Story from L4 to L5 (Without Exaggerating)">
+  <Tab label="Before: Accidental L4 Framing (Gets Down-Leveled)">
+    **Prompt:** *"Tell me about a challenging project you delivered recently."*
+
+    - **Candidate Answer:** *"Last quarter my manager asked me to migrate our payment webhook processor from a synchronous HTTP handler to Kafka because it was timing out during flash sales. I designed the Kafka producer and consumer in Go, configured dead-letter queues, wrote integration tests, and deployed it over three sprints. It worked really well and we didn't have any timeouts during Black Friday."*
+    - **Why Hiring Committee Grades This L4:**
+      1. The manager identified the problem and picked the solution ("migrate to Kafka").
+      2. Zero mention of trade-offs considered or partner teams aligned.
+      3. No quantified before/after metrics or team-wide leverage.
+  </Tab>
+  <Tab label="After: True L5 Framing (Same Project, Full Context)">
+    **Prompt:** *"Tell me about a challenging project you delivered recently."*
+
+    - **Candidate Answer:** *"Heading into Q4 peak, I analyzed our previous flash-sale postmortems and noticed that synchronous third-party webhook fan-out was saturating our checkout worker pool at 3,500 RPS. Although my manager initially suggested simply doubling our worker auto-scaling ceiling, I ran a quick cost/latency model showing auto-scaling wouldn't survive downstream bank brownouts. I authored a 2-page RFC comparing SQS vs. Kafka vs. Postgres outbox, aligned the Merchant Portal team 1:1 on transitioning from synchronous receipts to idempotent event polling, and built an outbox-backed Kafka pipeline with exponential-backoff DLQ replay and a self-serve merchant webhook debugger. During Black Friday (9,200 RPS peak—2.6x prior year), checkout p99 stayed flat at 45 ms with 99.998% webhook delivery and zero pages, and two sibling teams adopted our outbox library."*
+    - **Why Hiring Committee Grades This Strong L5:**
+      1. **Problem Discovery & Pushback:** Diagnosed the root bottleneck and showed why naive auto-scaling would fail.
+      2. **Trade-Off Ownership:** Evaluated SQS vs. Kafka vs. Outbox.
+      3. **Cross-Team Alignment:** Aligned the Merchant Portal team directly.
+      4. **Quantified Impact + Multiplier:** 9,200 RPS, 45 ms p99, plus reusable library adoption.
+  </Tab>
+</Tabs>
+
+## Introspect your own work
+
+<Quiz title="Audit your Story Matrix for accidental down-leveling">
+  <QuizItem
+    question="1. Count how many of your 8 Story Matrix stories start with 'My manager / PM asked me to...' vs. 'I noticed / When we saw metric X drop, I proposed...'"
+    hint="Starting 4+ stories with 'I was assigned...' is the #1 linguistic trigger for an L4 down-level."
+  >
+    Even when a project came from top-down quarterly planning, anchor your opening in **the ambiguous gap you diagnosed and the architectural direction you proposed**.
+  </QuizItem>
+  <QuizItem
+    question="2. If you are interviewing for Junior (L3) or Mid-Level (L4), what is the #1 behavioral signal that beats other L3/L4 candidates?"
+    hint="At L3/L4, nobody expects you to have led a 50-person org migration."
+  >
+    At L3/L4, interviewers prize **coachability, extreme ownership of component quality/testing, time-boxed unblocking** (struggling productively for 45 minutes, then asking a crisp question with 3 things you already tried), and **intellectual curiosity** about how your service fits into the wider system.
+  </QuizItem>
+</Quiz>
+
+## Common red flags & how to recover
+
+- **Inflating a minor role into fake L6 ownership:** Never claim you designed a system you didn't—3-level follow-up probes will expose it in 90 seconds. Instead, claim 100% ownership of the **exact subsystem** you led and show L5 depth inside that boundary.
+- **Forgetting mentorship & team health:** At L5+, every loop checks whether you make junior engineers around you better through code reviews, pairing, and onboarding docs.
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What does it mean that Senior Engineer (L5 / E5) is a 'terminal level' at FAANG?"
+    level="Senior"
+    companies={["Google", "Meta", "Apple", "Microsoft"]}
+  >
+    At Google, Meta, and Microsoft, L3 and L4 have an "up-or-out" expectation over 2–5 years because engineers at those levels require net mentorship and scoping support. **L5 (Senior SWE)** is the first **terminal level**: an L5 engineer is fully autonomous, scopes and delivers complex systems end-to-end, mentors juniors, and produces net surplus leverage for the company indefinitely. That is why the L4→L5 hiring bar is so fiercely guarded.
+  </InterviewQuestion>
+
+  <InterviewQuestion
+    question="If a recruiter tells me I'm interviewing for 'L4/L5 flexible' (or 'E4/E5'), how is the final level decided?"
+    level="Senior"
+    companies={["Meta", "Google", "Stripe", "Uber"]}
+  >
+    In a flexible loop, coding rounds set the floor (pass/fail), while **System Design + Behavioral rounds determine whether the offer is L4 or L5**. If your behavioral stories only show component execution inside a pre-defined spec, the committee will issue an L4 offer even if you aced System Design.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Staff & Principal Engineer Behavioral Loops](/behavioral/leveling-and-tracks/staff-and-principal-behavioral)
+- [Engineering Manager & Tech Lead Behavioral Loops](/behavioral/leveling-and-tracks/engineering-manager-behavioral)
+- [Building Your Behavioral Story Matrix](/behavioral/foundations/building-your-story-matrix)
