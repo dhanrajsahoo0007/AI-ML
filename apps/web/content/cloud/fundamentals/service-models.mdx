@@ -7,12 +7,12 @@ updated: 2026-11-12
 ## In one sentence
 
 <KeyIdea>
-  Running an app takes a stack of jobs, from keeping the power on to updating the code; the more of those jobs you hand to someone else, the less you run and the less you control.
+  Running an app takes a stack of jobs, from keeping the power on to updating the code. The more of them you hand to someone else, the less you run and the less you control.
 </KeyIdea>
 
 ## The story
 
-Brightpost's shop app and its orders database share one rented virtual machine (VM): a slice of a big computer in the provider's building that acts like a computer of its own. Asha installed the database, Postgres, herself. She updates it, takes the backups and watches the disk, about 6 hours a month. One Saturday at 3:10 a.m. the database's disk fills up. Postgres stops saving anything, so every checkout fails. An alert goes to Asha's phone, but she is asleep. She wakes at 7:40, clears space, and the shop takes orders again at 8:30. In those 5 hours and 20 minutes, about 40 customers could not pay.
+Brightpost's shop app and its orders database share one rented virtual machine (VM). A VM is a slice of a big computer in the provider's building that acts like a computer of its own. Asha installed the database, Postgres, herself. She updates it, takes the backups and watches the disk, about 6 hours a month. One Saturday at 3:10 a.m. the database's disk fills up. Postgres stops saving anything, so every checkout fails. An alert goes to Asha's phone, but she is asleep. She wakes at 7:40, clears space, and the shop takes orders again at 8:30. In those 5 hours and 20 minutes, about 40 customers could not pay.
 
 The question for the rest of this page: which of those jobs should Brightpost be doing at all?
 
@@ -132,7 +132,7 @@ The ladder is the same on all three clouds: virtual machines at the bottom, then
     - **Managed database:** Amazon RDS, including RDS for PostgreSQL, and Amazon Aurora.
     - **Functions:** AWS Lambda.
 
-    **The difference that changes a design.** Fargate is not a product on its own. You run it under a container service, ECS or EKS, so even the "no servers" option asks you to define a cluster, tasks and services. Lambda stops any single run after 15 minutes. So a long job on AWS goes to Fargate or EC2, and the step from a function to a container is a bigger move than on the other two clouds.
+    **The difference that changes a design.** Fargate is not a product on its own. You run it under a container service, ECS or EKS, so even the "no servers" option asks you to define a cluster, tasks and services. Lambda stops any single run after 15 minutes. So a long job on AWS goes to Fargate or EC2. Moving from a function to a container is a bigger step here than on the other two clouds.
 
     <ResponsibilityGrid set="aws-compute" />
   </Tab>
@@ -279,7 +279,7 @@ Each column to the right buys back hours and sleep, and costs a choice. The cost
   <InterviewQuestion question="How do you decide where each part of a new system runs, from virtual machines to SaaS?" level="Senior" category="Cloud">
     **Short answer.** Part by part. I start at the top of the ladder and step down only when a requirement forces it. For each part I ask three questions: is there a product to rent, is it a short task started by an event, does it need a full machine? I take the most managed rung that passes, and I write down what that rung takes away.
 
-    **Why.** Every layer you run costs hours and can page you at night, so the default is to hand it over. The limits are the reasons to step down: a cold start on a path a person waits on, a time limit shorter than the job, a missing driver or extension. Team size counts too, because 3 engineers cannot run many layers well. At Brightpost this gives four rungs at once: the help desk on SaaS, the resize job on a function, the database on a managed engine, and the shop app on a VM until it moves to a container platform.
+    **Why.** Every layer you run costs hours and can page you at night, so the default is to hand it over. The limits are the reasons to step down: a cold start where a person waits, a time limit shorter than the job, a missing driver or extension. Team size counts too, because 3 engineers cannot run many layers well. At Brightpost this gives four rungs at once. The help desk is on SaaS, the resize job on a function and the database on a managed engine. The shop app stays on a VM until it moves to a container platform.
 
     <AnimatedDiagram spec="animated/cloud/service-model-ladder" step={6} caption="Each rung takes something away. The requirement decides which loss is acceptable." />
 

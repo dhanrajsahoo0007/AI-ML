@@ -26,7 +26,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Why this order: on a phone the figure scrolls sideways and opens on the left ~470 units. Steps 1 to 3 happen in
 // the home region (x 15-475), so the free preview and the failure are visible without scrolling. Canvas 790 wide.
 // Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Sized for the
-// longest name the Services toggle shows: "Application Gateway" (lb, w 196), "Virtual Machines" (servers, w 170+),
+// longest name the Services toggle shows: "Cloud Load Balancing" (lb, w 210), "Virtual Machines" (servers, w 170+),
 // "Azure PostgreSQL" (database copy, w 176).
 const compute = { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" } as const;
 const database = {
@@ -98,7 +98,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 245,
       y: 205,
-      w: 196,
+      w: 210,
       h: 54,
       cloud: { aws: "aws-elb", gcp: "gcp-cloud-load-balancing", azure: "azure-app-gateway" },
     },
