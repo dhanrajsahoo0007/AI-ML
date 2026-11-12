@@ -36,7 +36,11 @@ const Y: Owner = "you";
 const S: Owner = "shared";
 const P: Owner = "provider";
 
-const CELL = { you: { label: "You", tone: "orange" }, shared: { label: "You set, it runs", tone: "teal" }, provider: { label: "Provider", tone: "neutral" } } as const;
+const CELL = {
+  you: { label: "You", tone: "orange" },
+  shared: { label: "You set, it runs", tone: "teal" },
+  provider: { label: "Provider", tone: "neutral" },
+} as const;
 
 // Owners per column, top layer first, and the layers that move to the provider at that column's step.
 const OWNERS: Record<(typeof COLS)[number]["id"], { owners: Owner[]; moved: string[] }> = {
@@ -59,9 +63,16 @@ const ROW_Y = (i: number) => 84 + i * 44;
 
 const shapes: LayoutShape[] = [
   { id: "layer-head", type: "text", x: 12, y: 40, w: 180, h: 22, label: "Layer", tone: "neutral" },
-  ...LAYERS.map(
-    (l, i): LayoutShape => ({ id: `row-${l.id}`, type: "text", x: 12, y: ROW_Y(i), w: 180, h: 40, label: l.label, tone: "neutral" })
-  ),
+  ...LAYERS.map((l, i): LayoutShape => ({
+    id: `row-${l.id}`,
+    type: "text",
+    x: 12,
+    y: ROW_Y(i),
+    w: 180,
+    h: 40,
+    label: l.label,
+    tone: "neutral",
+  })),
   ...COLS.flatMap((c, ci): LayoutShape[] => {
     const step = ci + 1;
     const { owners, moved } = OWNERS[c.id];
@@ -100,20 +111,18 @@ const shapes: LayoutShape[] = [
 
   // Step 6: what each rung takes away.
   { id: "row-giveup", type: "text", x: 12, y: 402, w: 180, h: 56, label: "What you give up", tone: "red", step: 6 },
-  ...COLS.map(
-    (c): LayoutShape => ({
-      id: `giveup-${c.id}`,
-      type: "box",
-      x: c.x,
-      y: 402,
-      w: 112,
-      h: 56,
-      label: GIVE_UP[c.id].label,
-      sub: GIVE_UP[c.id].sub,
-      tone: "red",
-      step: 6,
-    })
-  ),
+  ...COLS.map((c): LayoutShape => ({
+    id: `giveup-${c.id}`,
+    type: "box",
+    x: c.x,
+    y: 402,
+    w: 112,
+    h: 56,
+    label: GIVE_UP[c.id].label,
+    sub: GIVE_UP[c.id].sub,
+    tone: "red",
+    step: 6,
+  })),
 ];
 
 const spec: LayoutSpec = {

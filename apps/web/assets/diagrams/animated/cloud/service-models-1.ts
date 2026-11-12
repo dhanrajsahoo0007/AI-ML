@@ -199,7 +199,15 @@ const spec: DiagramSpec = {
 
     // Step 4: each new photo starts the function, which writes the thumbnail back. The provider runs and scales it.
     { from: "app", to: "photos", label: "product photos", packet: true, step: 4 },
-    { from: "photos", to: "fn", label: "new photo, thumbnail", bidirectional: true, packet: true, labelAt: 0.45, step: 4 },
+    {
+      from: "photos",
+      to: "fn",
+      label: "new photo, thumbnail",
+      bidirectional: true,
+      packet: true,
+      labelAt: 0.45,
+      step: 4,
+    },
     { from: "provider", to: "fn", label: "runs, scales", dashed: true, step: 4 },
 
     // Step 5: a finished product; Brightpost only uses it and chooses its settings.
