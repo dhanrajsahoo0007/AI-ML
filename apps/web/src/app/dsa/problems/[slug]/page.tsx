@@ -3,6 +3,7 @@ import type { ResolvingMetadata } from "next";
 import { Breadcrumb } from "@/components/breadcrumb";
 import {
   DifficultyLabel,
+  LeetCodeLink,
   ProEditorial,
   Tags,
   problemListHref,
@@ -69,6 +70,7 @@ export default async function ProblemPage({ params }: { params: ProblemParams })
           <span className="text-sm text-muted-foreground">
             {access === "free" ? "Free editorial" : "Pro editorial"}
           </span>
+          <LeetCodeLink slug={fm.leetcode} id={fm.leetcodeId} />
         </div>
         <Tags label="Patterns" items={labels.patterns} />
         <Tags label="Asked at" items={labels.companies} />
@@ -150,6 +152,7 @@ async function OutlinePage({
           {outline.fm.number ? ` · problem ${outline.fm.number}` : ""} · the editor, tests and editorial are still to
           come
         </p>
+        <LeetCodeLink slug={outline.fm.leetcode} id={outline.fm.leetcodeId} />
       </header>
       <article className="prose-editorial" data-dsa-statement>
         {await outlineStatement(outline.file)}

@@ -59,6 +59,9 @@ export const problemFrontmatterSchema = z
     related: z
       .array(z.string().regex(/^\/[a-z0-9/-]+$/, "must be a site path such as /system-design/patterns/caching"))
       .default([]),
+    /** The problem's URL slug on LeetCode (leetcode.com/problems/<slug>/) and its number there, when it has one. */
+    leetcode: kebab.optional(),
+    leetcodeId: z.number().int().positive().optional(),
     status: z.enum(["draft", "published"]).default("published"),
     order: z.number().optional(),
   })
@@ -136,6 +139,9 @@ export const outlineFrontmatterSchema = z
       .optional(),
     /** True for a question whose statement and answer are not written yet (an empty file in the owner's notes). */
     placeholder: z.boolean().optional(),
+    /** The problem's URL slug on LeetCode (leetcode.com/problems/<slug>/) and its number there, when it has one. */
+    leetcode: kebab.optional(),
+    leetcodeId: z.number().int().positive().optional(),
     order: z.number().optional(),
     status: z.literal("outline"),
   })
