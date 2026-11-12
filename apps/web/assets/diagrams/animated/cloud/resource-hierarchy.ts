@@ -16,10 +16,11 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   Left (x 130), the non-production branch: guardrail on top, then folder, test account, test copy, script.
 //   Middle (x 400), the production branch: organisation root, folder, shop account, workload group, orders database.
 //   Right (x 672), the security branch and the tools that hang on the tree: budget, folder, audit account, tags, lock.
-// Rows (centres): 60 | 170 | 285 | 395 | 520 | 650.
-// guardrail 130,60 | org 400,60 | budget 672,60 | nonprod 130,170 | prod 400,170 | security 672,170 |
-// testacct 130,285 | shop 400,285 | audit 672,285 | rg 400,395 | tags 672,395 |
-// testdb 130,520 | ordersdb 400,520 | lock 672,520 | script 130,650.
+// Rows (centres): 90 | 200 | 315 | 425 | 550 | 705. The top row starts 30 units down so a NEW badge on the
+// budget alert (top right) clears the figure's pause button.
+// guardrail 130,90 | org 400,90 | budget 672,90 | nonprod 130,200 | prod 400,200 | security 672,200 |
+// testacct 130,315 | shop 400,315 | audit 672,315 | rg 400,425 | tags 672,425 |
+// testdb 130,550 | ordersdb 400,550 | lock 672,550 | script 130,705.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 use only the
 // left and middle columns (shop account, both databases, the script), so the free preview and the failure are seen
@@ -34,7 +35,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 const spec: DiagramSpec = {
   title: "From one account for everything to a tree with rules on it",
   width: 795,
-  height: 700,
+  height: 750,
   steps: [
     { title: "One account holds the shop and the tests" },
     { title: "A test script deletes the live database" },
@@ -53,7 +54,7 @@ const spec: DiagramSpec = {
       icon: "package",
       tone: "neutral",
       x: 400,
-      y: 285,
+      y: 315,
       w: 180,
       cloud: {
         aws: { label: "AWS account" },
@@ -69,7 +70,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       variant: "glyph",
       x: 400,
-      y: 520,
+      y: 550,
       cloud: { aws: "aws-rds", gcp: "gcp-cloud-sql", azure: { id: "azure-postgresql", label: "Azure Postgres" } },
     },
     {
@@ -80,7 +81,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       variant: "glyph",
       x: 130,
-      y: 520,
+      y: 550,
       cloud: { aws: "aws-rds", gcp: "gcp-cloud-sql", azure: { id: "azure-postgresql", label: "Azure Postgres" } },
     },
     {
@@ -90,7 +91,7 @@ const spec: DiagramSpec = {
       icon: "workers",
       tone: "teal",
       x: 130,
-      y: 650,
+      y: 705,
       w: 180,
     },
 
@@ -103,7 +104,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 3,
       x: 400,
-      y: 60,
+      y: 90,
       w: 190,
       cloud: {
         aws: { id: "aws-organizations", label: "Organization root" },
@@ -119,7 +120,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 3,
       x: 130,
-      y: 170,
+      y: 200,
       w: 200,
       cloud: {
         aws: { id: "aws-organizations", label: "Organizational unit" },
@@ -135,7 +136,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 3,
       x: 400,
-      y: 170,
+      y: 200,
       w: 200,
       cloud: {
         aws: { id: "aws-organizations", label: "Organizational unit" },
@@ -151,7 +152,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 3,
       x: 672,
-      y: 170,
+      y: 200,
       w: 200,
       cloud: {
         aws: { id: "aws-organizations", label: "Organizational unit" },
@@ -167,7 +168,7 @@ const spec: DiagramSpec = {
       tone: "neutral",
       step: 3,
       x: 130,
-      y: 285,
+      y: 315,
       w: 180,
       cloud: {
         aws: { label: "AWS account" },
@@ -183,7 +184,7 @@ const spec: DiagramSpec = {
       tone: "neutral",
       step: 3,
       x: 672,
-      y: 285,
+      y: 315,
       w: 180,
       cloud: {
         aws: { label: "AWS account" },
@@ -199,7 +200,7 @@ const spec: DiagramSpec = {
       tone: "neutral",
       step: 3,
       x: 400,
-      y: 395,
+      y: 425,
       w: 180,
       cloud: {
         aws: { label: "No extra level" },
@@ -217,7 +218,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 4,
       x: 130,
-      y: 60,
+      y: 90,
       w: 184,
       cloud: {
         aws: { id: "aws-organizations", label: "Organizations SCP" },
@@ -235,12 +236,12 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 5,
       x: 672,
-      y: 395,
+      y: 425,
       w: 180,
       cloud: {
-        aws: { label: "Tags" },
+        aws: { label: "Resource tags" },
         gcp: { label: "Labels" },
-        azure: { label: "Tags" },
+        azure: { label: "Resource tags" },
       },
     },
     {
@@ -251,8 +252,8 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 5,
       x: 672,
-      y: 60,
-      w: 180,
+      y: 90,
+      w: 190,
       cloud: {
         aws: "aws-budgets",
         gcp: { id: "gcp-cloud-billing", label: "Billing budget" },
@@ -269,7 +270,7 @@ const spec: DiagramSpec = {
       tone: "red",
       step: 6,
       x: 672,
-      y: 520,
+      y: 550,
       w: 196,
       cloud: {
         aws: { label: "Deletion protection" },
@@ -305,9 +306,18 @@ const spec: DiagramSpec = {
     { from: "testacct", to: "testdb", label: "holds" },
     { from: "shop", to: "rg" },
     { from: "rg", to: "ordersdb", label: "holds" },
-    { from: "script", to: "ordersdb", label: "other account: refused", tone: "red", dashed: true, step: 3 },
+    {
+      from: "script",
+      to: "ordersdb",
+      label: "wall: refused",
+      tone: "red",
+      dashed: true,
+      step: 3,
+    },
 
-    // Step 4: the guardrail is set on the root; the shop account's admin cannot switch it off.
+    // Step 4: the guardrail is set on the root; the shop account's admin cannot switch it off. The refused edge
+    // runs up the gutter between the left and middle columns (x 265) and turns in under the guardrail (y 142), so it
+    // crosses no box; its label sits in the gap between the folder row and the account row.
     { from: "guardrail", to: "org", label: "set on", dashed: true },
     {
       from: "shop",
@@ -315,6 +325,11 @@ const spec: DiagramSpec = {
       label: "switch off: refused",
       tone: "red",
       dashed: true,
+      via: [
+        [265, 315],
+        [265, 142],
+        [150, 142],
+      ],
       labelAt: 0.3,
       step: 4,
     },

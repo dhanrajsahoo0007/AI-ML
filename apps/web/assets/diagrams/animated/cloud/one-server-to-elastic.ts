@@ -14,16 +14,17 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   Left (x 110), "the outside world": shoppers and the orders that were lost.
 //   Middle (x 390), "what Brightpost runs first": load balancer, app server, usage meter.
 //   Right (x 650), "what the cloud adds": extra servers, the scaling rule and the provider's API.
-// Rows (centres): 110 | 260 | 420 | 570.
-// lb 390,110 | shoppers 110,170 | server 390,260 | extra 650,260 | lost 110,400 | meter 390,420 |
-// autoscaler 650,420 | api 650,570.
+// Rows (centres): 100 | 200 | 290 | 450-470 | 630.
+// lb 390,100 | shoppers 110,200 | server 390,290 | extra 650,290 | lost 110,450 | meter 390,470 |
+// autoscaler 650,470 | api 650,630.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 (the free
 // preview and the failure) use only the left and middle columns. The canvas stays under 800 wide so labels are
 // readable in the 660 px article column.
 //
-// Zone tabs sit on the top-left corner of each zone. The shoppers sit at y 170, so their edge to the server enters
-// the Compute zone below its tab, and the vertical edges into Compute and Billing run at x 390, right of the tabs.
+// Zone tabs sit on the top-left corner of each zone. The shoppers sit at y 200, so their edge to the server enters
+// the Compute zone below its tab. Rows are 60 units apart between zones, so the pills of the vertical edges at x 390
+// and x 650 sit in the gap between two zones, clear of the Compute, Billing and Control tabs.
 // The resize edge (api to server) shows only in step 3, so it never crosses the step 6 edge from the extra servers
 // to the meter.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. Nodes
@@ -32,7 +33,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 const spec: DiagramSpec = {
   title: "From one rented server to capacity that follows demand",
   width: 790,
-  height: 650,
+  height: 710,
   steps: [
     { title: "One rented server" },
     { title: "Sale day: ten times the shoppers" },
@@ -42,11 +43,11 @@ const spec: DiagramSpec = {
     { title: "Pay for the minutes that ran" },
   ],
   zones: [
-    { id: "internet", title: "Internet", tone: "neutral", x: 10, y: 40, w: 200, h: 420 },
-    { id: "network", title: "Network", tone: "blue", x: 280, y: 40, w: 220, h: 125 },
-    { id: "compute", title: "Compute", tone: "teal", x: 280, y: 200, w: 500, h: 120 },
-    { id: "billing", title: "Billing", tone: "orange", x: 280, y: 360, w: 220, h: 100 },
-    { id: "control", title: "Control", tone: "orange", x: 540, y: 360, w: 240, h: 270 },
+    { id: "internet", title: "Internet", tone: "neutral", x: 10, y: 40, w: 200, h: 480 },
+    { id: "network", title: "Network", tone: "blue", x: 280, y: 40, w: 220, h: 120 },
+    { id: "compute", title: "Compute", tone: "teal", x: 280, y: 230, w: 500, h: 120 },
+    { id: "billing", title: "Billing", tone: "orange", x: 280, y: 410, w: 220, h: 100 },
+    { id: "control", title: "Control", tone: "orange", x: 530, y: 410, w: 250, h: 280 },
   ],
   nodes: [
     // Step 1
@@ -58,7 +59,7 @@ const spec: DiagramSpec = {
       tone: "neutral",
       variant: "glyph",
       x: 110,
-      y: 170,
+      y: 200,
     },
     {
       id: "server",
@@ -67,7 +68,7 @@ const spec: DiagramSpec = {
       icon: "server",
       tone: "teal",
       x: 390,
-      y: 260,
+      y: 290,
       w: 176,
       cloud: { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" },
     },
@@ -81,7 +82,7 @@ const spec: DiagramSpec = {
       tone: "red",
       step: 2,
       x: 110,
-      y: 400,
+      y: 450,
       w: 170,
     },
 
@@ -94,7 +95,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 3,
       x: 650,
-      y: 570,
+      y: 630,
       w: 196,
       cloud: {
         aws: { label: "AWS APIs" },
@@ -112,7 +113,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       step: 4,
       x: 390,
-      y: 110,
+      y: 100,
       w: 200,
       cloud: { aws: "aws-elb", gcp: "gcp-cloud-load-balancing", azure: "azure-load-balancer" },
     },
@@ -124,8 +125,8 @@ const spec: DiagramSpec = {
       tone: "teal",
       step: 4,
       x: 650,
-      y: 260,
-      w: 212,
+      y: 290,
+      w: 232,
       cloud: {
         aws: { label: "Auto Scaling group" },
         gcp: { label: "Managed instance group" },
@@ -142,7 +143,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 5,
       x: 650,
-      y: 420,
+      y: 470,
       w: 180,
       cloud: {
         aws: { label: "Scaling policy" },
@@ -160,7 +161,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 6,
       x: 390,
-      y: 420,
+      y: 470,
       w: 176,
       cloud: {
         aws: { label: "AWS Billing" },
@@ -171,7 +172,7 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: an ordinary day fits one server.
-    { from: "shoppers", to: "server", label: "ordinary day", packet: true, until: 1 },
+    { from: "shoppers", to: "server", label: "ordinary day", packet: true, labelAt: 0.62, until: 1 },
 
     // Step 2: ten times the shoppers; the server cannot answer them all.
     {
@@ -180,6 +181,7 @@ const spec: DiagramSpec = {
       label: "2,000 at once",
       tone: "red",
       packet: true,
+      labelAt: 0.62,
       step: 2,
       until: 2,
     },
@@ -187,10 +189,19 @@ const spec: DiagramSpec = {
 
     // Step 3: one request to the provider's API swaps the server for a bigger size. It helps, up to a ceiling.
     { from: "api", to: "server", label: "resize: 4x", packet: true, labelAt: 0.4, step: 3, until: 3 },
-    { from: "shoppers", to: "server", label: "800 of 2,000 served", tone: "orange", packet: true, step: 3, until: 3 },
+    {
+      from: "shoppers",
+      to: "server",
+      label: "800 of 2,000",
+      tone: "orange",
+      packet: true,
+      labelAt: 0.62,
+      step: 3,
+      until: 3,
+    },
 
     // Step 4: one front door shares the traffic between the server and the extra servers.
-    { from: "shoppers", to: "lb", label: "every shopper", packet: true, step: 4 },
+    { from: "shoppers", to: "lb", label: "every shopper", packet: true, labelAt: 0.62, step: 4 },
     { from: "lb", to: "server", label: "share", packet: true, delay: 1, step: 4 },
     { from: "lb", to: "extra", label: "share", packet: true, delay: 1, step: 4 },
 
@@ -200,7 +211,7 @@ const spec: DiagramSpec = {
 
     // Step 6: every server reports the minutes it ran; nothing is billed for a server that is not running.
     { from: "server", to: "meter", label: "minutes ran", dashed: true, flow: true, step: 6 },
-    { from: "extra", to: "meter", label: "only while on", dashed: true, flow: true, step: 6 },
+    { from: "extra", to: "meter", label: "while on", dashed: true, flow: true, step: 6 },
   ],
 };
 

@@ -1,11 +1,289 @@
 ---
 title: "What the Cloud Is"
-description: "Why renting computers by the minute changed how systems are built, and what public, private, hybrid and multicloud mean."
-status: outline
+description: "Why renting computers by the minute changed how systems are built: capacity that follows demand, paying for use, and the four deployment models."
+updated: 2026-11-12
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** why renting computers by the minute from a provider changed how systems are built: elasticity, paying for use, and the four deployment models (public, private, hybrid and multicloud). It defines provider, tenant, elastic and the move from buying hardware to paying for use, in plain words.
+<KeyIdea>
+  The cloud is computers you rent over the internet by the minute, so you can have more of them when you are busy and fewer when you are not.
+</KeyIdea>
 
-**Related reading on this site:** [Cloud Basics](/cloud/start-here/cloud-basics) · [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+## The story
+
+Brightpost is a small online shop that sells posters and greeting cards. It began on one rented server: a single computer in another company's building, sized for an ordinary day of about 400 orders. The server could serve about 200 shoppers at once, and on most days it never came close. Then came the first big sale. At 9 a.m., 2,000 shoppers arrived at once, ten times what the server could take. Pages took 30 seconds to load, then stopped loading at all. Asha, the first developer, found out at 9:40 from angry emails. Nobody had planned for a busy day, so the shop stayed broken until noon. Shoppers wanted to place about 4,000 orders that day. About 1,200 of them never happened.
+
+Every step below shows what Brightpost could have rented instead, and why renting that way is possible at all.
+
+## How it works
+
+Four words first. A **provider** is a company that owns huge buildings full of computers and rents them out. Those buildings are **data centres**. A **virtual machine (VM)** is a slice of one big physical computer that behaves like a whole computer of its own. On this page, "server" means one VM. A <Term id="tenant">tenant</Term> is one customer of the provider, kept apart from every other customer.
+
+### Step 1: Renting, not owning
+
+<AnimatedDiagram spec="animated/cloud/one-server-to-elastic" step={1} minWidth={620} caption="Brightpost's first setup: every shopper reaches one rented server, sized for an ordinary day." />
+
+Brightpost owns no computers. It rents one VM in a provider's data centre and reaches it over the internet. The provider buys the machines, powers and cools them, and replaces broken parts. Brightpost pays for the time its VM runs.
+
+That is the whole idea of the cloud. The machine is real, but it belongs to someone else, and many tenants share it. Your VM may sit on the same physical computer as a stranger's, and keeping the two apart is the provider's job. What changed how systems are built is how fast and how finely you can rent. One more server arrives in minutes, is paid by the minute, and is gone again when you stop it. The rest of this page is about using that well.
+
+<PremiumBreak />
+
+### Step 2: A fixed size meets a busy day
+
+<AnimatedDiagram spec="animated/cloud/one-server-to-elastic" step={2} minWidth={620} caption="The failure: 2,000 shoppers arrive at once at a server built for 200, and about 1,200 orders are lost." />
+
+**Capacity** is how much work a system can do at once. Brightpost's server has room for about 200 shoppers. On an ordinary day about 40 are online at the busiest moment, so the server is mostly idle.
+
+Demand is not steady. It swings by the hour, by the day of the week, and on a sale day by ten times. A server sized for the average fails at the peak. A server sized for the peak sits nearly empty almost all year.
+
+<Callout tone="red" title="What breaks">
+  At 9 a.m., 2,000 shoppers ask the one server for pages. It can work on about 200 at a time, so the rest wait in line. After 30 seconds their browsers give up, and by noon about 1,200 orders are lost. The server was rented, but Brightpost used it like a machine it had bought: one fixed size, and no plan to change it.
+</Callout>
+
+### Step 3: Ask, and it arrives in minutes
+
+<AnimatedDiagram spec="animated/cloud/one-server-to-elastic" step={3} minWidth={620} caption="One request to the provider's API swaps the server for one 4 times bigger. It serves 800 of the 2,000 shoppers, not all of them." />
+
+Everything a provider rents is controlled through its **API**: a door that programs and people use to send requests such as "start a server" or "make this one bigger". The provider's website, its command-line tools and your own scripts all call that same API. No person at the provider reads your request. Machines answer it in seconds, which is called **self-service**.
+
+So on sale morning, Asha could have asked for a bigger size. The provider stops the server, moves it to a bigger slot and starts it again, in about 5 minutes. Making one server bigger is **scaling up**, also called vertical scaling. It has a ceiling. Brightpost's server became 4 times bigger and served 800 shoppers at once, not 2,000.
+
+Buying a bigger physical server would have taken weeks: choose it, order it, wait for delivery, then install it.
+
+### Step 4: More servers, not a bigger one
+
+<AnimatedDiagram spec="animated/cloud/one-server-to-elastic" step={4} minWidth={620} caption="A load balancer becomes the one front door and shares every shopper between the server and up to 9 extra copies." />
+
+The other way to grow is **scaling out**, also called horizontal scaling: run more servers side by side. Each extra server is a copy of the first, started from the same saved setup. Each copy takes 200 shoppers, so 2,000 shoppers need 10 copies.
+
+Shoppers should not need to know which copy they reach. A <Term id="load-balancer">load balancer</Term> is the one address they use, and it shares their requests among the copies. It stops sending work to a copy that fails its health check. [Load balancing basics](/system-design/fundamentals/load-balancing-basics) shows how it picks a server. The cloud's part is that the extra copies exist only while you rent them.
+
+Scaling out works only if a copy keeps nothing the others need. A shopper's basket must live in a shared database, not in one copy's memory.
+
+### Step 5: Elastic: capacity that follows demand
+
+<AnimatedDiagram spec="animated/cloud/one-server-to-elastic" step={5} minWidth={620} caption="A scaling rule watches how busy the servers are. It asks the API for more copies when they are busy and removes them when it is quiet." />
+
+Nobody should have to stay awake pressing buttons. An <Term id="autoscaling">autoscaling</Term> rule does it instead. Brightpost's rule says: keep the servers' average processor use near 60%. Above that, the rule asks the API for another copy. Well below it, the rule removes one. A new copy is ready in about 3 minutes.
+
+This is what **elastic** means. Capacity stretches when demand grows and shrinks back when demand falls, with no person in the loop. On sale morning Brightpost goes from 1 server to 10 by about 9:15. After 10 p.m. shoppers thin out, and the rule removes copies until only the first server is left. For a sale it knows about, Brightpost also books 6 servers from 8:45, because 3 minutes is a long time when 2,000 people arrive at once.
+
+Two limits keep the rule safe. A **minimum**, 1 for Brightpost, keeps the shop open. A **maximum**, 10, stops a bug or a flood of fake traffic from renting servers without end. [Autoscaling: The Control Loop](/cloud/compute/autoscaling) covers the details.
+
+### Step 6: Paying for use instead of buying ahead
+
+<AnimatedDiagram spec="animated/cloud/one-server-to-elastic" step={6} minWidth={620} caption="The usage meter counts the minutes each server ran. An extra copy that is not running adds no server-minutes." />
+
+There are two kinds of spending. **Capital expense (CapEx)** is money paid up front for things you own, such as servers you buy. **Operating expense (OpEx)** is money paid as you go for things you use, such as rent or electricity. Buying servers is CapEx: you pay before the first shopper arrives, and you guess your needs for years ahead. Renting from a cloud is OpEx: the bill follows what ran.
+
+Brightpost counts in **server-hours**: one server running for one hour.
+
+<Numbers
+  items={[
+    { value: "87,600", label: "server-hours a year with 10 servers always on", hint: "sized for the sale-day peak" },
+    { value: "about 10,000", label: "server-hours a year with the scaling rule", hint: "1 server always, copies only when busy" },
+    { value: "almost 9x", label: "more hours paid for when sized for the peak" },
+  ]}
+/>
+
+Paying for use is not always cheaper. An hour of rented capacity usually costs more than an hour of a machine you own and keep busy. The cloud wins when demand swings, as Brightpost's does. For load that stays flat all year, providers sell a lower rate in return for a promise to run for one or three years, called <Term id="reserved-capacity">reserved capacity</Term>. [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics) explains the meters a bill is made of.
+
+### Step 7: Public, private, hybrid and multicloud
+
+Not every company rents everything from one provider. A **deployment model** says where the computers are and who uses them.
+
+<Compare
+  columns={["Model", "Where the computers are", "Who uses them", "Brightpost would pick it if…"]}
+  rows={[
+    ["Public cloud", "A provider's data centres", "Many tenants, kept apart", "It wants to rent everything, as it does today"],
+    ["Private cloud", "Your own data centre, or one a host runs only for you", "One organisation", "A law said order data must stay in a building it controls"],
+    ["Hybrid cloud", "Some in your building, some at a provider, joined by a private link", "One organisation, across both", "A printing partner's machines had to stay in its factory and still take jobs from the shop"],
+    ["Multicloud", "Two or more public providers", "One organisation, on each", "It needed a service that only a second provider sells"],
+  ]}
+  caption="The four deployment models. A company can be hybrid and multicloud at the same time."
+/>
+
+A **private cloud** works like a public one, with self-service and an API, but only one organisation uses the hardware. It still has to buy the machines ahead, so it keeps the CapEx problem from Step 6. **Hybrid** joins your own building and a public provider into one system, over a private network link. **Multicloud** means using more than one public provider. Each extra provider adds its own tools, bills and skills, so it needs a reason you can name.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds. You rent servers through an API, a rule changes how many run, and you pay for what ran.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Rent a server:** an Amazon EC2 instance, started from a saved machine image.
+    - **Copies that scale:** an Auto Scaling group. A launch template says what each new copy looks like, and scaling policies and scheduled actions change the count.
+    - **Front door:** Elastic Load Balancing. An Application Load Balancer is the usual choice for web traffic.
+    - **See the bill:** AWS Billing and Cost Management, with Cost Explorer for usage over time.
+    - **Reach your own building:** AWS Direct Connect or a VPN for the link. AWS Outposts puts racks of AWS hardware inside your data centre.
+
+    **The difference that changes a design.** On AWS, hybrid can mean bringing the cloud to you. An Outpost is AWS hardware in your building that runs a set of AWS services through the same API. AWS owns and maintains it, and it is managed from a home region over a network link. If that link drops, workloads already running keep going, but you cannot start or change anything until it returns. So the link is part of the design.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Rent a server:** a Compute Engine VM, started from an image or an instance template.
+    - **Copies that scale:** a managed instance group with an autoscaler. A regional group spreads its copies across the zones of a region.
+    - **Front door:** Cloud Load Balancing. The external Application Load Balancer can be global, with one IP address for every region.
+    - **See the bill:** Cloud Billing reports and budgets.
+    - **Reach your own building:** Cloud Interconnect or Cloud VPN for the link. Google Distributed Cloud brings Google Cloud services to hardware in your own building.
+
+    **The difference that changes a design.** One global load balancer address can front copies in many regions. Each shopper reaches the nearest region that has healthy copies. The network itself is global too, with subnets in each region. So Brightpost could add a second region behind the address it already has, and shoppers would never see a new one.
+  </Tab>
+  <Tab label="Azure">
+    - **Rent a server:** an Azure virtual machine, created inside a resource group.
+    - **Copies that scale:** Virtual Machine Scale Sets, with an autoscale setting in Azure Monitor that follows a metric or a schedule.
+    - **Front door:** Azure Load Balancer for network traffic, or Application Gateway for web traffic.
+    - **See the bill:** Microsoft Cost Management.
+    - **Reach your own building:** ExpressRoute or a VPN gateway for the link. Azure Local runs Azure services on hardware in your own building.
+
+    **The difference that changes a design.** Every request to create or change anything passes through Azure Resource Manager, whatever tool sends it. Azure Arc stretches that same layer to servers and Kubernetes clusters outside Azure, in your building or on another cloud. They then appear as Azure resources, with the same tags, policies and access rules. So a hybrid or multicloud estate can be governed from one place.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/one-server-to-elastic" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/one-server-to-elastic" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which deployment model fits?"
+  tree={{
+    q: "Must some systems or data stay in a building you control?",
+    yes: {
+      q: "Do you also want to rent capacity from a public provider?",
+      yes: {
+        answer: "Hybrid cloud: keep what must stay on site, rent the rest, and join the two with a private link.",
+        href: "/cloud/networking/hybrid-connectivity",
+      },
+      no: "Private cloud: one organisation's hardware, run with self-service and an API. You still buy the machines ahead.",
+    },
+    no: {
+      q: "Do you need a service or a place that only a second provider offers?",
+      yes: "Multicloud, for that one part. Keep the rest on your main provider, and count the cost of moving data between them.",
+      no: "Public cloud on one provider. This is where most new systems start.",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Each Brightpost server takes 200 shoppers at once. How many servers does the 9 a.m. rush of 2,000 need, and for how long are the extra ones paid for?" hint="Divide, then think about what the scaling rule does at night.">
+    10 servers: the first one plus 9 copies. The 9 copies are paid for only while they run, from the morning rush until the rule removes them as the shoppers leave.
+  </QuizItem>
+  <QuizItem question="Brightpost resizes its one server to 4 times the size. Why does the sale still go wrong?" hint="How many shoppers can the bigger server take?">
+    A server 4 times bigger takes about 800 shoppers at once, not 2,000. Scaling up has a ceiling and needs a restart. Ten copies behind a load balancer take all 2,000.
+  </QuizItem>
+  <QuizItem question="A company buys racks for its own data centre and runs them with self-service and an API. Nobody else uses them. Which deployment model is that, and which cost problem does it keep?">
+    A private cloud. It still buys its machines ahead, so it pays up front (CapEx) and must guess its peak years in advance.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Buy your own servers", "Rent one fixed server", "Elastic cloud"]}
+  rows={[
+    ["Money before the first order", "The whole cost of the machines", "None", "None"],
+    ["Time to add capacity", "Weeks: order, ship, install", "About 5 minutes to resize, with a restart", "About 3 minutes a copy, automatic"],
+    ["Server-hours paid for in a year", "87,600 if sized for the peak", "8,760, and the sale fails", "About 10,000"],
+    ["Who replaces a broken part", "You", "The provider", "The provider"],
+    ["Survives a day at 10 times the load", "Only if bought ahead", false, true],
+    ["Best for", "Flat, full load you can predict for years", "Small, steady load with no peaks", "Load that swings"],
+  ]}
+  caption="Brightpost's numbers. A server-hour is one server running for one hour."
+/>
+
+Elastic wins whenever demand swings. For load that is flat and full all year, owning or a commitment can cost less per hour, so look at the shape of the demand first.
+
+## Common pitfalls
+
+- **Using a rented server like a bought one.** Brightpost had one fixed size and no plan, and lost about 1,200 orders. Put even a single server in a scaling group from day one, with a minimum and maximum of 1. Raising the maximum later is one setting.
+- **Sizing for the peak "to be safe".** Ten servers all year means paying for 87,600 server-hours to use about 10,000. Size for the ordinary day and let the rule add the rest.
+- **No maximum on the scaling rule.** A bug, a retry loop or a flood of fake traffic can rent servers without end. Set a maximum, and an alert when the bill passes a budget.
+- **Copies that keep state.** A copy that holds a shopper's basket in its own memory loses it when the rule removes that copy. Keep baskets and sessions in a shared store.
+- **Multicloud by default.** Each provider adds its own tools, bills and skills. Data moving between providers is usually charged as <Term id="egress">egress</Term>. Add a second provider only for a reason you can name.
+
+## How to say it in an interview
+
+"The cloud is renting computers from a provider over the internet, through an API, and paying for what runs. What changed design is speed and granularity: I can add a server in minutes and remove it an hour later. So I size for the ordinary load and let an autoscaling rule add copies behind a load balancer, with a minimum and a maximum. That turns an up-front purchase into a running cost that follows demand, which wins when load swings. For flat load I would look at commitments. I default to one public provider, and choose hybrid or multicloud only for a named requirement, such as data that must stay on site."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does it mean that the cloud is elastic?" level="Junior" category="Cloud">
+    **Short answer.** Capacity grows when demand grows and shrinks when demand falls, automatically, and you pay only for what ran. Elastic means both halves: up for the rush, and back down after it.
+
+    **Why.** Brightpost needs 1 server on an ordinary day and 10 for a few hours of a sale. A scaling rule watches processor use and adds or removes copies behind a load balancer, each in about 3 minutes. Sized for the peak, the shop would pay for 87,600 server-hours a year. Elastic, it pays for about 10,000. Without the shrinking half you can scale, but you keep paying for idle servers.
+
+    <AnimatedDiagram spec="animated/cloud/one-server-to-elastic" step={5} highlight={["autoscaler", "extra", "api"]} caption="The rule asks the provider's API to add copies when busy and remove them when quiet." />
+
+    **Follow-ups the interviewer may ask.**
+    - A sale starts at 9 a.m. sharp. How do you have capacity ready in time?
+    - What stops the rule from adding servers forever?
+
+    **Watch out for.** Saying elastic means "unlimited". Every rule needs a maximum, and every provider caps how much one customer may run at once.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is the difference between scaling up and scaling out, and which one does elasticity rely on?" level="Mid" category="Cloud">
+    **Short answer.** Scaling up makes one server bigger. Scaling out adds more servers side by side. Elasticity relies on scaling out, because copies can be added and removed while the system keeps running.
+
+    **Why.** Resizing Brightpost's server took about 5 minutes with a restart. At 4 times the size it still served only 800 of 2,000 shoppers. Ten copies behind a load balancer serve all 2,000, and the rule removes them at night without anyone noticing. Scaling out needs copies that keep no state, with baskets and sessions in a shared store. Scaling up still has a place: a database that cannot be split is often made bigger first.
+
+    <AnimatedDiagram spec="animated/cloud/one-server-to-elastic" step={4} path="shoppers>lb>extra" caption="Scaling out: one front door, many copies behind it." />
+
+    **Follow-ups the interviewer may ask.**
+    - What has to change in an app before it can scale out?
+    - Why is a database harder to scale out than a web server?
+
+    **Watch out for.** Treating "a bigger server" as the cloud answer. It is a one-time fix with a ceiling and a restart.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost's finance lead says the cloud costs more than buying servers would. What would you check?" level="Mid" category="Cloud">
+    **Short answer.** Check the shape of the demand and how many server-hours the shop really uses. Then compare the full cost of owning servers, not only their price, with what the elastic setup actually ran.
+
+    **Why.** Per hour, rented capacity usually costs more than a machine you own and keep busy. But Brightpost's demand swings by ten times. Owning enough for the peak means paying for 87,600 server-hours to use about 10,000. Owning also brings costs the price tag hides: space, power, spare parts and people to fix them. Next, check the bill for waste: copies left running after a sale, oversized servers, no maximum on the rule. If the base load is flat, a one- or three-year commitment lowers its rate.
+
+    <AnimatedDiagram spec="animated/cloud/one-server-to-elastic" step={6} highlight={["meter", "server", "extra"]} caption="The bill counts the minutes each server ran, so idle copies that were never removed show up there." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which part of Brightpost's load is steady enough for a commitment?
+    - What would make buying servers the cheaper choice?
+
+    **Watch out for.** Comparing one rented server's hourly rate with one bought server's price. That ignores idle peak capacity and everything around the machine.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When is hybrid cloud a real requirement rather than a habit?" level="Senior" category="Cloud">
+    **Short answer.** When something must stay in a building you control and must still work with systems in the cloud. Typical reasons are a law or contract on where data lives, machines that cannot move, or a response time a distant region cannot meet. "We already own servers" is a reason to plan a move, not a requirement.
+
+    **Why.** Hybrid is expensive to run well. It needs a private network link, two sets of tools, two security setups, and people who know both. So ask for the reason in concrete terms: which data, which law, how many milliseconds. Brightpost's printing partner is a fair case. Its print machines stay in its factory, so a small system there takes jobs from the shop's cloud servers over a private link. A company that keeps servers only because they are paid for should set a date to leave them.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens in the factory when the link to the cloud goes down?
+    - How do you keep sign-in and logging the same on both sides?
+
+    **Watch out for.** Calling any company with an office server "hybrid". Hybrid means the two sides work as one system, not two systems that happen to exist.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Service Models: How Much Do You Run?](/cloud/fundamentals/service-models)
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics)
+- [Shared Responsibility](/cloud/fundamentals/shared-responsibility)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity)
+- [Migration and Modernization](/cloud/operations/migration-and-modernization)
+- [Compute on AWS](/cloud/aws/compute)
+- [Compute on Google Cloud](/cloud/gcp/compute)
+- [Compute on Azure](/cloud/azure/compute)
+- [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+- [Non-Functional Requirements](/system-design/fundamentals/non-functional-requirements)
+
+## Further reading
+
+- [NIST SP 800-145](https://csrc.nist.gov/pubs/sp/800/145/final): the short standard definition of cloud computing.
+- [Overview of Amazon Web Services](https://docs.aws.amazon.com/whitepapers/latest/aws-overview/introduction.html): what AWS offers, in one paper.
+- [Google Cloud overview](https://cloud.google.com/docs/overview): resources, regions and how projects hold them.
+- [Azure fundamental concepts](https://learn.microsoft.com/azure/cloud-adoption-framework/ready/considerations/fundamental-concepts): the words Azure uses for accounts, subscriptions and resources.

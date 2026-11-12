@@ -13,23 +13,25 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Layout: three columns.
 //   Left (x 130): CDN, buckets, budget alert, cost reports.
-//   Middle (x 390): customers, app servers, database, test copy (the request path runs down this column).
+//   Middle (x 380, nodes 172 wide so they end at x 466): customers, app servers, database, test copy (the
+//   request path runs down this column).
 //   Right (x 660): resize worker on spot, commitment, logs, switch-off schedule.
 // Rows (centres): 95 | 255 | 430 | 600.
-// cdn 130,95 | customers 390,95 | spot 660,95 | buckets 130,255 | servers 390,255 | commit 660,255 |
-// alert 130,430 | db 390,430 | logs 660,430 | reports 130,600 | test 390,600 | schedule 660,600.
+// cdn 130,95 | customers 380,95 | spot 660,95 | buckets 130,255 | servers 380,255 | commit 660,255 |
+// alert 130,430 | db 380,430 | logs 660,430 | reports 130,600 | test 380,600 | schedule 660,600.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 to 3 and the
 // failure (step 5) happen in the left and middle columns; only the logs (step 4) and the fixes need the right one.
 // The canvas stays under 800 wide so labels are readable in the 660 px article column.
 //
-// Zone tabs sit on the top-left corner of a zone. Vertical edges at x 130 and x 390 enter zones right of their
+// Zone tabs sit on the top-left corner of a zone. Vertical edges at x 130 and x 380 enter zones right of their
 // tabs. The edge from the servers to the logs runs down the gutter at x 530 and enters the Operations zone from
-// the side, below its tab. The test environment uses the subnet kind (inline label, no tab), because the copy
-// edge enters it through the top at x 390.
+// the side, below its tab. The test zone uses the subnet kind (inline label, no tab), because the copy edge
+// enters it through the top at x 380; its label is kept to one short word so the edge clears it.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon.
 // Nodes are sized for the longest name the Services toggle puts in them ("Virtual Machines", "Azure PostgreSQL",
 // "CloudWatch Logs", "Cost Management", "Billing budgets", "Spot Instances"), not only for the generic label.
+// The switch-off schedule is 196 wide because its generic label is the longest on the canvas.
 const spec: DiagramSpec = {
   title: "Brightpost's cloud bill, built meter by meter",
   width: 795,
@@ -45,14 +47,14 @@ const spec: DiagramSpec = {
   ],
   zones: [
     { id: "edge", title: "Edge", tone: "blue", x: 10, y: 40, w: 240, h: 100 },
-    { id: "clients", title: "Customers", tone: "neutral", x: 295, y: 40, w: 190, h: 100 },
+    { id: "clients", title: "Internet", tone: "neutral", x: 285, y: 40, w: 190, h: 100 },
     { id: "buying", title: "Buying compute", tone: "teal", x: 555, y: 40, w: 230, h: 260 },
     { id: "storage", title: "Storage", tone: "violet", x: 10, y: 200, w: 240, h: 100 },
-    { id: "shop", title: "Shop", tone: "teal", x: 295, y: 200, w: 190, h: 100 },
+    { id: "shop", title: "Shop", tone: "teal", x: 285, y: 200, w: 190, h: 100 },
     { id: "billing", title: "Billing", tone: "orange", x: 10, y: 375, w: 240, h: 275 },
-    { id: "data", title: "Database", tone: "violet", x: 295, y: 375, w: 190, h: 100 },
+    { id: "data", title: "Data", tone: "violet", x: 285, y: 375, w: 190, h: 100 },
     { id: "ops", title: "Operations", tone: "orange", x: 555, y: 375, w: 230, h: 275 },
-    { id: "test", title: "Test environment", tone: "neutral", kind: "subnet", x: 295, y: 545, w: 190, h: 105 },
+    { id: "test", title: "Test", tone: "neutral", kind: "subnet", x: 285, y: 533, w: 190, h: 117 },
   ],
   nodes: [
     // Step 1: time
@@ -62,9 +64,9 @@ const spec: DiagramSpec = {
       sub: "400 orders a day",
       icon: "users",
       tone: "neutral",
-      x: 390,
+      x: 380,
       y: 95,
-      w: 176,
+      w: 172,
     },
     {
       id: "servers",
@@ -72,9 +74,9 @@ const spec: DiagramSpec = {
       sub: "2 servers, per hour",
       icon: "server",
       tone: "teal",
-      x: 390,
+      x: 380,
       y: 255,
-      w: 176,
+      w: 172,
       cloud: { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" },
     },
 
@@ -88,7 +90,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 130,
       y: 255,
-      w: 176,
+      w: 172,
       cloud: { aws: "aws-s3", gcp: "gcp-cloud-storage", azure: "azure-blob" },
     },
     {
@@ -98,9 +100,9 @@ const spec: DiagramSpec = {
       icon: "database",
       tone: "violet",
       step: 2,
-      x: 390,
+      x: 380,
       y: 430,
-      w: 176,
+      w: 172,
       cloud: {
         aws: "aws-rds",
         gcp: "gcp-cloud-sql",
@@ -148,7 +150,7 @@ const spec: DiagramSpec = {
       icon: "server",
       tone: "red",
       step: 5,
-      x: 390,
+      x: 380,
       y: 600,
       w: 176,
     },
@@ -195,7 +197,7 @@ const spec: DiagramSpec = {
       step: 6,
       x: 660,
       y: 600,
-      w: 176,
+      w: 196,
     },
 
     // Step 7: buy the steady base and the batch job differently
@@ -248,14 +250,14 @@ const spec: DiagramSpec = {
     {
       from: "servers",
       to: "logs",
-      label: "every request",
+      label: "log lines",
       dashed: true,
       flow: true,
       via: [
         [530, 300],
         [530, 430],
       ],
-      labelAt: 0.55,
+      labelAt: 0.68,
     },
 
     // Step 5: the copy is made for one load test and never switched off; it logs every call in full.
@@ -263,7 +265,7 @@ const spec: DiagramSpec = {
     { from: "test", to: "logs", label: "debug logs", tone: "red", flow: true, until: 5 },
 
     // Step 6: tags make the copy visible, the budget warns, the schedule switches it off.
-    { from: "test", to: "reports", label: "tag: test", dashed: true },
+    { from: "test", to: "reports", label: "tagged", dashed: true },
     { from: "reports", to: "alert", label: "spend so far", packet: true },
     { from: "schedule", to: "test", label: "off nights", tone: "green", dashed: true },
 

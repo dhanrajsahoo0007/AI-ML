@@ -1,11 +1,300 @@
 ---
 title: "Accounts, Projects and Governance"
-description: "The containers a cloud gives you for resources, the tree above them, and the policies, tags, quotas and budgets that hang on it."
-status: outline
+description: "The containers a cloud gives you for resources, the tree above them, and the guardrails, tags, quotas, budgets and locks that hang on it."
+updated: 2026-11-12
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the containers a cloud gives you to hold resources (accounts, projects and subscriptions), the tree above them, and the four governance tools that hang on the tree: policies that forbid, tags that label, quotas that cap and budgets that warn. It also covers resource locks.
+<KeyIdea>
+  A cloud keeps your things in walled boxes, arranges the boxes in a tree, and applies each rule hung on the tree to every box below it.
+</KeyIdea>
 
-**Related reading on this site:** [Identity & Security on AWS](/cloud/aws/security) · [Identity & Security on Google Cloud](/cloud/gcp/security) · [Identity & Security on Azure](/cloud/azure/security)
+## The story
+
+Brightpost, the small shop that sells posters and greeting cards, now has two accounts. The audit account holds the log archive. Everything else lives in the shop account: the live orders database, and a test copy that Asha fills for load tests. After each test she runs a clean-up script that deletes every database whose name starts with "orders". One Tuesday at 14:10 it deleted the test copy, then the live database, because the shop account let an admin delete anything. The shop was down for 3 hours. About 180 orders placed since the 03:00 backup had to be rebuilt by hand from payment records. At the end of the month the finance lead asked what the load tests had cost. Nobody could say, because the bill was one number.
+
+Every step below puts a wall or a rule where that Tuesday needed one.
+
+## How it works
+
+Three words first. A **resource** is one thing you rent, such as a server, a database or a bucket. A **container** is the box a cloud makes you keep resources in. Each cloud has its own name for it: account, project or subscription. This page says **account**. **Governance** means the rules a company sets for all its accounts, and the tools that make those rules stick.
+
+### Step 1: A container for resources
+
+<AnimatedDiagram spec="animated/cloud/resource-hierarchy" step={1} minWidth={620} caption="Brightpost's first setup: one shop account holds the live orders database and the test copy, and the clean-up script deletes the test copy." />
+
+Every resource lives in exactly one account. An account is more than a folder. It is a wall in four ways:
+
+- **Access.** A permission granted inside one account does not reach the next one.
+- **Bill.** Spend is counted per account, so each account is its own line on the bill.
+- **Quotas.** The provider's limits, such as how many servers you may run, count per account.
+- **Blast radius.** A mistake made with one account's rights stays inside that account.
+
+In the picture, everything shares one wall. The live database and the test copy sit side by side, and one set of admin rights reaches both. Keeping one mistake from spreading is an old security idea; the [Security overview](/system-design/fundamentals/security) covers it.
+
+<PremiumBreak />
+
+### Step 2: One wall, one blast radius
+
+<AnimatedDiagram spec="animated/cloud/resource-hierarchy" step={2} minWidth={620} caption="The failure: the script's name filter also matches the live database, and the shop account lets an admin delete it." />
+
+The script had one job: delete the test copy. It asked for databases whose names start with "orders" and got two answers. Both sat in the same account. Asha's rights covered the whole account, so the cloud deleted both.
+
+<Callout tone="red" title="What breaks">
+  At 14:10 the live orders database disappears. The shop shows errors for 3 hours while Asha restores the 03:00 backup. About 180 orders placed after the backup are gone, and staff rebuild them from payment records. The cloud did exactly what it was told: an admin asked, inside the account that owns both databases.
+</Callout>
+
+Two things went wrong. Test and production shared a wall, so a test mistake reached production. And nothing marked the live database as one that must never be deleted. The next steps fix both, and the bill on the way.
+
+### Step 3: Separate accounts under one tree
+
+<AnimatedDiagram spec="animated/cloud/resource-hierarchy" step={3} minWidth={620} caption="Three folders under one root, one account in each. The script now runs in the test account and is refused at the wall." />
+
+Brightpost gives the tests their own account. To run several accounts as one company, it creates an <Term id="organization">organisation</Term>: a tree with one root at the top, accounts as leaves, and **folders** in between. A folder groups accounts that should follow the same rules. Some clouds add one more level under the account, a group for one app's resources. The picture calls it a workload group.
+
+Brightpost's tree has three folders. Non-production holds the test account, production holds the shop account, and security holds the audit account. The script now runs with the test account's rights. It deletes the test copy. When it reaches for the live database, the request must cross an account wall, and it is refused. The standard layout for a bigger company is on [Landing Zones](/cloud/fundamentals/landing-zones).
+
+### Step 4: Six things that hang on the tree
+
+Once accounts sit in a tree, some rules can be set once, high up, and flow down to every account below. Six kinds of thing hang on the tree. Some stop a mistake; others only tell you about it.
+
+<Compare
+  columns={["Tool", "What it does", "Stops or warns?", "Brightpost example"]}
+  rows={[
+    ["Guardrail", "Sets a ceiling on what anyone below may do", "Stops", "2 regions only; no public buckets"],
+    ["Access grant", "Gives a person or workload a role", "Allows", "Developers may change the test account"],
+    ["Tag", "Labels a resource with a key and a value", "Neither: it records", "env: prod, team: shop"],
+    ["Quota", "Caps how much one account may run", "Stops", "The test account's server limit"],
+    ["Budget alert", "Sends an email when spend passes a line", "Warns only", "Email at 80% of the month's plan"],
+    ["Lock", "Blocks deleting or changing one resource", "Stops", "No delete on the live database"],
+  ]}
+  caption="What hangs on the tree, and whether it stops a mistake or only tells you."
+/>
+
+Access grants belong to [Identity and Access](/cloud/fundamentals/identity-and-access). The next steps place the other five. Which ones flow down the tree differs by cloud; the tabs below say how.
+
+### Step 5: Guardrails: a ceiling no account can raise
+
+<AnimatedDiagram spec="animated/cloud/resource-hierarchy" step={4} minWidth={620} caption="A guardrail set on the root reaches every account. An admin of the shop account tries to switch it off and is refused." />
+
+A **guardrail** is a rule set on the tree that no account below can override. It never gives anyone a permission. It only takes possibilities away, like a ceiling. Inside an account you can grant anything up to the ceiling, never above it.
+
+Brightpost sets one guardrail on the root with two rules. Resources may run in 2 <Term id="region">regions</Term> only, the ones near its customers. And no bucket may be public, the rule from the identity page. Because it sits on the root, it reaches the test, shop and audit accounts, and every account created later. In the picture, an admin of the shop account tries to switch it off. The request is refused, because even an admin works below the root.
+
+### Step 6: Tags and budgets: who owns it, and an early warning
+
+<AnimatedDiagram spec="animated/cloud/resource-hierarchy" step={5} minWidth={620} caption="Tags mark the shop's resources with env, team and owner. A budget alert watches the whole organisation's spend." />
+
+A <Term id="tag">tag</Term> is a label on a resource, written as a key and a value, such as `env: prod`. Brightpost agrees on three keys for every resource: `env`, `team` and `owner`. The finance lead's question now has an answer: the bill splits by account, then by tag.
+
+A **budget alert** watches spend and sends an email when it passes a line. Brightpost sets one on the whole organisation, with emails at 50%, 80% and 100% of the month's plan. A load test left running over a weekend now shows up on Saturday, not at the end of the month. A budget warns; by itself it stops nothing. Prices are on [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics), cost reports on [FinOps and the Cost Tools](/cloud/operations/finops-and-cost-tools).
+
+### Step 7: Quotas: the limit you meet on launch day
+
+A <Term id="quota">quota</Term> is a limit the provider sets per account, usually per region. It caps things such as servers or database instances, and it also stops a runaway script from starting servers in a loop.
+
+New accounts often start with low quotas. Asha's load test in the new test account needs 6 servers for one hour, and the quota allows 4. The fifth request is refused, and the test stops halfway. Three habits avoid this:
+
+1. List the quotas a launch depends on, per account and region.
+2. Ask for increases weeks ahead, because a person at the provider may review the request.
+3. Alert at about 80% of each quota, as you would for a budget.
+
+Limits at run time, and how to retry, are on [Quotas, Throttling, Retries and Backoff](/cloud/resilience/quotas-and-retries).
+
+### Step 8: Locks: no delete, even for an admin
+
+<AnimatedDiagram spec="animated/cloud/resource-hierarchy" step={6} minWidth={620} caption="A delete lock sits on the live orders database. Nobody can delete it until someone removes the lock on purpose." />
+
+A **lock** is a setting on one resource that blocks deleting or changing it, even for someone with permission. An admin must first remove the lock, and that removal shows up in the audit trail.
+
+Brightpost locks the live orders database. Replay the Tuesday with every fix in place. The script runs in the test account and cannot reach the shop account. Run with shop rights, it would meet the lock. Two separate protections must now both fail.
+
+A lock guards the resource itself, not the data inside it. A lock on a database server does not stop a bad query from deleting rows. Backups cover that; see [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults).
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a container for resources, a tree above it, and rules that hang on the tree. What differs is which box is the hard wall, and which rules flow down.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Container:** the AWS account. Its resources, permissions and quotas are its own, and it is one line on the bill.
+    - **Tree above it:** AWS Organizations. A management account sits at the root and pays one combined bill. Organizational units (OUs) group member accounts and can nest.
+    - **Guardrail:** service control policies (SCPs) attached to the root, an OU or an account. They set the most that identities in member accounts may do.
+    - **Grants:** IAM policies live inside each account and do not flow down the tree. People reach accounts through IAM Identity Center, assigned account by account.
+    - **Tags, budgets, quotas, locks:** tags, which reach cost reports once activated as cost allocation tags. AWS Budgets for alerts. Service Quotas per account and region. No general lock: services such as RDS and EC2 offer their own deletion or termination protection.
+
+    **The difference that changes a design.** The account is the hard wall for access, quotas, blast radius and the bill. So on AWS you separate work by creating more accounts. SCPs only cap and never grant; an action still needs an IAM policy that allows it. SCPs do not apply to the management account, so run no workloads there.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Container:** the project. Every resource belongs to one project, and each service's API is switched on per project.
+    - **Tree above it:** the organization node, tied to the company's Google Workspace or Cloud Identity domain. Under it, folders that can nest, then projects.
+    - **Guardrail:** organization policies. Each one constrains a setting, such as allowed resource locations or public access to buckets, and is inherited down the tree. IAM deny policies can also block permissions.
+    - **Grants:** IAM allow policies on the organization, a folder, a project or a resource. They flow down, and a lower level cannot remove a grant it inherits.
+    - **Tags, budgets, quotas, locks:** labels for cost reports, and separate tags that policies can test. Budgets live on a billing account and can be scoped to projects. Quotas count per project. A lien blocks deleting a project, and some services offer deletion protection.
+
+    **The difference that changes a design.** Billing is a separate object. A billing account pays for projects anywhere in the tree, so the folder layout follows access and policy, not invoices. Allow policies and organization policies both inherit. A role granted on a folder reaches every project under it, so keep broad grants off high folders.
+  </Tab>
+  <Tab label="Azure">
+    - **Container:** the subscription, the unit of billing and quotas. Inside it, every resource sits in exactly one resource group.
+    - **Tree above it:** a Microsoft Entra tenant with its tenant root group at the top. Under it, management groups that can nest, then subscriptions, then resource groups.
+    - **Guardrail:** Azure Policy, assigned to a management group, a subscription or a resource group. Effects include deny, audit and modify, for rules such as allowed locations or required tags.
+    - **Grants:** Azure role-based access control (RBAC) role assignments at any scope. They flow down from management group to subscription to resource group to resource.
+    - **Tags, budgets, quotas, locks:** tags on resources and resource groups; a resource does not copy its group's tags unless a policy does it. Budgets in Cost Management at several scopes. Quotas per subscription and region. Resource locks, delete or read-only, on a subscription, resource group or resource.
+
+    **The difference that changes a design.** Azure has one more level, the resource group, and it is a lifecycle unit: delete the group and everything in it goes too. So group the resources that are born and retired together. Role assignments, policies and locks all inherit down the scopes, and a lock binds even an Owner until it is removed. Locks act on the resource, not its data: a delete lock on a storage account does not stop someone deleting the files inside.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/resource-hierarchy" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every level of the tree." />
+
+<CloudMapping diagram="cloud/resource-hierarchy" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which tool stops this mistake?"
+  tree={{
+    q: "Should the action be impossible for everyone below one point in the tree, admins included?",
+    yes: "A guardrail on that folder or on the root. Try it on a non-production folder first.",
+    no: {
+      q: "Is it about one resource that must never be deleted by mistake?",
+      yes: "A lock on that resource. Pair it with backups, because a lock does not protect the data inside.",
+      no: {
+        q: "Is it about money?",
+        yes: "Tags to see who spends, and a budget alert to hear about it early. Neither one stops spending by itself.",
+        no: {
+          q: "Is it about who may do something?",
+          yes: {
+            answer: "An access grant: a role for one person or workload, given at the lowest level that works.",
+            href: "/cloud/fundamentals/identity-and-access",
+          },
+          no: {
+            answer: "Probably a quota. Check the provider's limit per account and region, and raise it before you need it.",
+            href: "/cloud/resilience/quotas-and-retries",
+          },
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The clean-up script runs again, now with the test account's rights. It asks to delete every database whose name starts with 'orders'. What happens?" hint="Where does each database live?">
+    It deletes the test copy. The live database is in the shop account, so the request must cross an account wall, and it is refused. Even with shop rights, the delete lock would refuse it.
+  </QuizItem>
+  <QuizItem question="An admin of the shop account wants servers in a third region for one week. The guardrail on the root allows 2 regions. Can the admin allow it inside the shop account?" hint="Who owns the ceiling?">
+    No. A guardrail on the root reaches every account, and no account below can override it. Whoever owns the root must make the change on the tree, ideally as a narrow exception with an end date.
+  </QuizItem>
+  <QuizItem question="Brightpost's budget alert fires at 80% on the 20th of the month. What has it done to the servers?">
+    Nothing. A budget alert warns; it stops nothing by itself. Someone reads the cost report, finds the tag that grew, asks that owner and acts.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "One account for everything", "Separate accounts in a tree"]}
+  rows={[
+    ["Containers to look after", "1", "3 accounts, 3 folders and a root"],
+    ["Production safe from a test mistake", false, true],
+    ["Bill split by environment", "Only with perfect tags", "By account, then by tag"],
+    ["Quotas", "Tests and the shop share one limit", "Each account has its own"],
+    ["Rules set once for every account", false, true],
+    ["First setup", "None", "About a day for Brightpost's 3 accounts"],
+    ["Daily sign-in", "One place", "Single sign-on, then pick an account"],
+  ]}
+  caption="Brightpost before and after its Tuesday. The day of setup is what a small team should expect the first time."
+/>
+
+One account wins only while one person does everything. A first accident like Brightpost's is when most teams switch.
+
+## Common pitfalls
+
+- **Trying a new guardrail on the root first.** A wrong rule at the root breaks every account at once. Attach it to a non-production folder, watch it for a week, then move it up.
+- **Tagging later.** Tags added after a year never cover everything, and untagged spend has no owner. Require the keys from day one, and refuse untagged resources where the cloud supports it.
+- **Treating a budget as a brake.** A budget alert sends an email while the servers keep running. Name a person for every alert, and set the first alert well below 100%.
+- **Meeting a quota on launch day.** Quotas count per account and region, and new accounts start low. List what the launch needs and raise the limits weeks ahead.
+- **Running workloads in the top account.** The account that pays the bill and owns the tree has the most power. On some clouds it even sits outside the guardrails. Keep it for billing and the tree only.
+
+## How to say it in an interview
+
+"A cloud puts every resource in a container: an account, a project or a subscription. That container is a wall for access, quotas, cost and blast radius, so I keep production and non-production in separate ones. Above the containers sits the organisation tree: a root, folders, then accounts. I hang rules on the tree so they flow down, such as a guardrail for 'two regions only' on the root. Tags and budget alerts handle cost, and locks guard the few resources that must never be deleted. Guardrails only cap what is possible; access still comes from grants at the lowest level that works. I try every new guardrail on a non-production folder before I attach it to the root."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why does a company have more than one account or project?" level="Junior" category="Cloud">
+    **Short answer.** Each account is a wall for access, cost, quotas and mistakes. Separate accounts keep a test mistake out of production, split the bill by environment, and give each environment its own limits.
+
+    **Why.** Brightpost ran everything in one shop account. A clean-up script meant for a test copy ran with that account's admin rights and deleted the live orders database. The shop was down for 3 hours, and about 180 orders were rebuilt by hand. With a separate test account, the same script is refused at the wall. The single bill also hid what the load tests cost; with separate accounts, it splits by account.
+
+    <AnimatedDiagram spec="animated/cloud/resource-hierarchy" step={3} highlight={["script", "testacct", "testdb", "ordersdb"]} caption="The script runs with the test account's rights, so the live database is out of reach." />
+
+    **Follow-ups the interviewer may ask.**
+    - How many accounts does a three-person team need?
+    - How do the accounts share anything, such as logs?
+
+    **Watch out for.** Saying "for security" and stopping there. Name the walls: access, blast radius, quotas and the bill.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where do you place a rule that nobody may create resources outside two regions?" level="Mid" category="Cloud">
+    **Short answer.** As a guardrail on the root of the organisation tree, or on the highest folder it must cover. Every account below inherits it, and no account admin can switch it off.
+
+    **Why.** Inside one account, the rule depends on that account's admins and misses every account created later. On the root, it reaches Brightpost's shop, test and audit accounts and any new one. Some services are global rather than regional, so the rule usually needs exceptions for them. Try it on the non-production folder for a week before you move it to the root.
+
+    <AnimatedDiagram spec="animated/cloud/resource-hierarchy" step={4} highlight={["guardrail", "org", "nonprod", "prod", "security"]} caption="Set once on the root, the rule reaches every folder and account below it." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does this rule look like on each of the three clouds?
+    - How would you let one team use a third region for a month?
+
+    **Watch out for.** Writing the rule into each account's own policies. A new account starts without it, and any admin there can remove it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A developer hits a VM quota during a launch. What should have happened earlier?" level="Mid" category="Cloud">
+    **Short answer.** The quota should have been on the launch checklist. Someone lists the limits the launch needs per account and region, asks for increases weeks ahead, and alerts at about 80%.
+
+    **Why.** Quotas count per account and usually per region, and new accounts start low. Brightpost's load test needed 6 servers, the test account allowed 4, and the test stopped halfway. In production the same refusal looks like an outage: autoscaling asks for one more server and is refused. An increase may need a review by the provider, which takes time. A load test in an account with production's quotas finds the limit before customers do.
+
+    **Follow-ups the interviewer may ask.**
+    - Why do providers set quotas at all?
+    - Should the test account have the same quotas as production?
+
+    **Watch out for.** Treating the quota as a fault in the provider. It is a documented limit, and checking it is part of [capacity planning](/system-design/fundamentals/capacity-planning).
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A guardrail on the root blocks something one team really needs. How do you handle the exception?" level="Senior" category="Cloud">
+    **Short answer.** Keep the guardrail and make the exception as small as possible, where the guardrail lives. Either move that one rule a level down and leave one folder out, or write a named exception into the rule. Give the exception an owner and an end date.
+
+    **Why.** A guardrail works because no account admin can change it, so the exception must be made on the tree by whoever owns the root. Say Brightpost wants a 4-week trial of a service that runs only in a third region. It creates a trial account in its own folder. The region rule moves from the root to the three existing folders, and the trial folder gets a version that allows the third region. "No public buckets" stays on the root. After 4 weeks the trial account is closed and the folder removed.
+
+    <AnimatedDiagram spec="animated/cloud/resource-hierarchy" step={4} path="guardrail>org>prod>shop" caption="Only the owners of the root can change what flows down this path; an admin inside the account cannot." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you make sure the exception really ends?
+    - Who should be allowed to edit the guardrails on the root?
+
+    **Watch out for.** Giving the team admin rights in their account and expecting that to help. Admin rights inside an account are still under the guardrail.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Identity and Access](/cloud/fundamentals/identity-and-access)
+- [Landing Zones: Setting Up an Estate](/cloud/fundamentals/landing-zones)
+- [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics)
+- [FinOps and the Cost Tools](/cloud/operations/finops-and-cost-tools)
+- [Quotas, Throttling, Retries and Backoff on the Cloud](/cloud/resilience/quotas-and-retries)
+- [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults)
+- [Identity & Security on AWS](/cloud/aws/security)
+- [Identity & Security on Google Cloud](/cloud/gcp/security)
+- [Identity & Security on Azure](/cloud/azure/security)
+- [Security overview](/system-design/fundamentals/security)
+
+## Further reading
+
+- [AWS Organizations User Guide](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_introduction.html): accounts, OUs and service control policies.
+- [Google Cloud resource hierarchy](https://cloud.google.com/resource-manager/docs/cloud-platform-resource-hierarchy): organization, folders and projects.
+- [Azure management groups overview](https://learn.microsoft.com/azure/governance/management-groups/overview): the scope tree above subscriptions.
+- [Azure resource locks](https://learn.microsoft.com/azure/azure-resource-manager/management/lock-resources): delete and read-only locks.
