@@ -15,16 +15,17 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Layout: three columns.
 //   Left (x 130), the shop account: local snapshots, review disk, orders database.
 //   Middle (x 390): the attacker at the top (outside), then the vault and its lock in the audit account.
-//   Right (x 672): the backup policy (organisation), the region-2 copy and the restore drill (test account).
-// Rows (centres): 95 | 250 | 325 | 400 | 470-480.
-// snaps 130,95 | attacker 390,95 | policy 672,95 | disk 130,250 | vault 390,325 | copy2 672,325 |
-// orders 130,400 | lock 390,470 | drill 672,480.
+//   Right (x 682): the backup policy (organisation), the region-2 copy and the restore drill (test account).
+// Rows (centres): 95 | 250 | 325 | 400 | 470-505.
+// snaps 130,95 | attacker 390,95 | policy 682,95 | disk 130,250 | vault 390,325 | copy2 682,325 |
+// orders 130,400 | lock 390,470 | drill 682,505.
 //
 // Why this order: on a phone the figure opens on the left 480 units. Steps 1 and 2 (the free preview and the
 // failure) happen in the left and middle columns. The two backup edges reach the vault from above-left and
 // below-left at the same slope, so their labels sit apart. The attacker's refused delete runs straight down into
 // the vault, with its label placed in the gap between the Outside band and the audit account's tab.
-// The Outside zone is a subnet band (inline label, no tab) because two edges leave through its bottom and side.
+// The audit zone is titled "Audit" so its tab ends left of the refused edge at x 390. The Outside and Test zones are
+// subnet bands (inline label, no tab) because edges cross their tops; the right column sits at x 682 to clear the label.
 // Nodes are sized for the longest name the Services toggle shows ("Enforced retention", "Paired-region copy",
 // "Persistent Disk", "RDS PostgreSQL").
 const spec: DiagramSpec = {

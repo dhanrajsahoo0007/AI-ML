@@ -26,7 +26,7 @@ Four words first. A **backup** is a copy of data as it was at one moment, kept s
 
 A <Term id="read-replica">replica</Term> copies every change within seconds, and that includes a delete. A backup stays frozen at its moment, so it can undo a mistake. [Managed relational databases](/cloud/data/managed-relational) shows that difference for one database, and [block storage](/cloud/data/block-storage) shows how snapshots store only changed blocks.
 
-This page asks a different question: what can reach each copy? A copy is safe only from the things that cannot touch it. The review disk's 34 snapshots live in the shop account, next to the disk. Anyone who may delete the disk may delete them. The orders copy lives in another account, with other admins. So count copies by what could destroy them, not by how many there are.
+This page asks a different question: what can reach each copy? The review disk's 34 snapshots live in the shop account, next to the disk, so anyone who may delete the disk may delete them. The orders copy lives in another account, with other admins. Count copies by what could destroy them, not by how many there are.
 
 <PremiumBreak />
 
@@ -74,7 +74,7 @@ The choice that matters is opt-in or opt-out. With opt-in, only stores tagged `b
 
 <AnimatedDiagram spec="animated/cloud/backup-chain" step={4} minWidth={620} caption="A vault lock refuses any delete before 35 days, from the shop account or from the audit account's own admins." />
 
-The vault in the audit account stopped this attacker. The next one might steal a login for the audit account itself. So the vault gets two more defences.
+The next attacker might steal a login for the audit account itself. So the vault gets two more defences.
 
 First, its access <Term id="policy">policy</Term> denies deletes to everyone except one backup-admin role. Two people hold that role, neither works in the shop account day to day, and both sign in with <Term id="mfa">MFA</Term>.
 
@@ -86,15 +86,15 @@ Brightpost uses the strict lock for 35 days. Attackers often wait inside for wee
 
 <AnimatedDiagram spec="animated/cloud/backup-chain" step={5} minWidth={620} caption="Each backup in the vault is copied to a second region, still inside the audit account and locked for the same 35 days." />
 
-Now the far copy must survive a whole region failing. The backup service copies each backup from the vault to a vault in Brightpost's second allowed region. That vault sits in the audit account too, with the same lock.
+The far copy must survive a whole region failing. Each day the backup service copies every backup to a vault in Brightpost's second allowed region. That vault sits in the audit account too, with the same lock.
 
-Two details catch teams out. Backups are encrypted with a key from the key service, the <Term id="kms" />. A copy in region 2 needs a key that works there, so plan the keys before the first copy. And a copy across regions is billed twice: once to move the data, once to store it. Brightpost copies every backup daily, because the orders database changes every day.
+Two details catch teams out. Backups are encrypted with a key from the key service, the <Term id="kms" />, and a copy in region 2 needs a key that works there. And a copy across regions is billed twice: once to move the data, once to store it.
 
-This copy is also the base of the cheapest recovery plan, restoring into region 2. [Disaster recovery](/cloud/resilience/dr-strategies) builds the faster tiers on top of it.
+This copy is also the cheapest recovery plan: restore into region 2. [Disaster recovery](/cloud/resilience/dr-strategies) builds faster tiers on top of it.
 
 ### Step 7: Retention and cost
 
-How long to keep each backup is a business question with a storage bill attached. Brightpost asks it once and writes the answer into the policy.
+How long to keep each backup is a business question with a storage bill attached. Brightpost writes its answer into the policy.
 
 <Compare
   columns={["Backup", "Kept for", "Copies at any time", "Where it lives"]}
@@ -132,7 +132,7 @@ The idea is the same on all three clouds: a central service, a policy, a vault, 
 
 <Tabs title="On each cloud">
   <Tab label="AWS">
-    - **Central service:** AWS Backup, one place for the backups of EBS volumes, EC2 instances, RDS and Aurora databases, DynamoDB tables, EFS file systems, S3 buckets and more.
+    - **Central service:** AWS Backup, for EBS volumes, EC2 instances, RDS and Aurora, DynamoDB, EFS, S3 and more.
     - **Policy:** a backup plan holds rules: a schedule, a retention and copy actions. Resources are assigned by tag or by resource id. In AWS Organizations, a backup policy pushes plans to every account.
     - **Vault:** a backup vault, encrypted with a KMS key, with its own access policy that can deny deletes.
     - **Lock:** AWS Backup Vault Lock. Governance mode can be removed by users with a special permission. Compliance mode cannot be changed by anyone, the root user included, once its grace time ends.
@@ -229,7 +229,7 @@ Each column protects against more people and places. Keep the local snapshots fo
 
 ## How to say it in an interview
 
-"I treat a backup as safe only from the things that cannot reach it. So I run one central backup policy that covers every data store by default, and skipping a store needs an explicit tag and an owner. Backups are copied to a vault in a separate account with different admins, so one stolen login cannot delete both. The vault is locked so nobody can delete a backup early, and each backup is copied to a second region. Retention follows a ladder, such as daily for 35 days, monthly for a year and yearly for seven. Every month I restore the far copy into a test account and check the data, because a backup nobody has restored is not proof of anything."
+"A backup is safe only from the things that cannot reach it. So I run one central backup policy that covers every data store by default, and skipping a store needs an explicit tag and an owner. Backups are copied to a vault in a separate account with different admins, so one stolen login cannot delete both. The vault is locked so nobody can delete a backup early, and each backup is copied to a second region. Retention follows a ladder, such as daily for 35 days, monthly for a year and yearly for seven. Every month I restore the far copy into a test account and check the data, because a backup nobody has restored is not proof of anything."
 
 ## Interview questions
 
