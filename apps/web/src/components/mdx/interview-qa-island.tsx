@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
 import type { CompanyTag } from "@/components/company-logo";
+
+// Practice mode (timer, self-rating, follow-up drill) in its own chunk: only lists that offer it load it.
+export const PracticeController = dynamic(() =>
+  import("./interview-practice.client").then((m) => m.PracticeController)
+);
 
 export type Level = "Junior" | "Mid" | "Senior";
 
@@ -15,6 +21,8 @@ export interface FollowUpItem {
 }
 
 export interface InterviewQuestionProps {
+  /** The question's id in the library. Practice mode keeps the learner's rating under it. */
+  id?: string;
   question: string;
   category?: string;
   /** The area the question's topic belongs to (LLM, GenAI, System Design); a list with several gets an Area filter. */

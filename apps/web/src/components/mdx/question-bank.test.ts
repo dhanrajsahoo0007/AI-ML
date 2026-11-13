@@ -1,3 +1,4 @@
+import type React from "react";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderHtml } from "../../../tests/unit/render-html";
 import { createElement } from "react";
@@ -136,5 +137,35 @@ describe("TopicQuestions", () => {
     expect(locked).toContain("Design a chat app");
     expect(locked).not.toContain(SECRET);
     expect(locked).not.toContain(FOLLOW_SECRET);
+  });
+});
+
+describe("practice mode", () => {
+  const html = (practice: boolean) =>
+    renderHtml(
+      createElement(
+        InterviewQuestions,
+        { practice } as React.ComponentProps<typeof InterviewQuestions>,
+        questionItems([parent, followUp])
+      )
+    );
+
+  it("gives a practice list its toggle, toolbar and a timer slot per question", async () => {
+    const out = await html(true);
+    expect(out).toContain("data-qa-practice=");
+    expect(out).toContain("data-qa-practice-bar=");
+    expect(out).toContain('data-qa-id="design-chat"');
+    expect(out.match(/data-qa-practice-slot/g)).toHaveLength(1);
+    expect(out.match(/data-qa-answer/g)).toHaveLength(1);
+    // The toggle stays hidden until its island loads, so the page never shows a button that does nothing.
+    expect(out).toMatch(
+      /<button[^>]*data-qa-practice="true"[^>]*hidden|<button[^>]*hidden[^>]*data-qa-practice="true"/
+    );
+  });
+
+  it("leaves other lists without the toggle", async () => {
+    const out = await html(false);
+    expect(out).not.toContain("data-qa-practice=");
+    expect(out).not.toContain("data-qa-practice-bar");
   });
 });

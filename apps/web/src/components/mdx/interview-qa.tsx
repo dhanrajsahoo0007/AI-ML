@@ -1,11 +1,12 @@
 import React from "react";
 import Link from "next/link";
-import { ArrowUpRight, CornerDownRight, ListCollapse, Plus, Search } from "lucide-react";
+import { ArrowUpRight, CornerDownRight, ListCollapse, Plus, Search, Timer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CompanyChip, type CompanyTag } from "@/components/company-logo";
 import { interviewArea } from "@/lib/interview-areas";
 import {
   InterviewQuestion,
+  PracticeController,
   QaController,
   type FollowUpItem,
   type InterviewQuestionProps,
@@ -157,11 +158,17 @@ interface InterviewQuestionsProps {
   company?: string;
   /** Icons of the areas and topics in the list (questionIcons()). */
   icons?: QuestionIcons;
+  /**
+   * Offers practice mode: a two-minute answer timer, a self-rating and a follow-up drill on each question
+   * (interview-practice.client.tsx). For behavioural lists, where the answer is spoken, not recalled.
+   */
+  practice?: boolean;
   children: React.ReactNode;
 }
 
 function QuestionItem({
   index,
+  id,
   question,
   category,
   area,
@@ -179,6 +186,7 @@ function QuestionItem({
   return (
     <details
       data-qa-item
+      data-qa-id={id}
       data-cat={category ?? ""}
       data-area={area ?? ""}
       data-level={level ?? ""}
@@ -220,6 +228,8 @@ function QuestionItem({
                   {followUps.length} follow-up{followUps.length > 1 ? "s" : ""}
                 </span>
               )}
+              {/* Filled in by practice mode once the learner has rated this question. */}
+              {id && <span data-qa-practised hidden className="text-xs font-medium text-success" />}
             </span>
           )}
           {companies && companies.length > 0 && (
@@ -243,9 +253,13 @@ function QuestionItem({
       </summary>
 
       <div className="pr-4 pb-6 pl-11 sm:pr-14 sm:pl-[3.75rem]">
-        <div className="text-[15px] leading-relaxed text-ink-2 [&>*+*]:mt-3">{children}</div>
+        {/* Practice mode draws its timer here and hides the answer below until the learner asks for it. */}
+        {id && <div data-qa-practice-slot />}
+        <div data-qa-answer className="text-[15px] leading-relaxed text-ink-2 [&>*+*]:mt-3">
+          {children}
+        </div>
         {(related || hasTopics || (refs && refs.length > 0)) && (
-          <div className="mt-4 space-y-1.5 border-t border-hairline pt-3 text-[13px]">
+          <div data-qa-links className="mt-4 space-y-1.5 border-t border-hairline pt-3 text-[13px]">
             {hasTopics && <TopicLinks label={topics.length > 1 ? "Topics" : "Topic"} links={topics} />}
             {!hasTopics && related && (
               <p>
@@ -308,7 +322,7 @@ function FilterChip({
   );
 }
 
-export function InterviewQuestions({ title, footer, company, icons, children }: InterviewQuestionsProps) {
+export function InterviewQuestions({ title, footer, company, icons, practice, children }: InterviewQuestionsProps) {
   const questions = React.Children.toArray(children).filter(
     (child): child is React.ReactElement<InterviewQuestionProps> => React.isValidElement(child)
   );
@@ -352,6 +366,7 @@ export function InterviewQuestions({ title, footer, company, icons, children }: 
   return (
     <section className="mt-10" data-qa>
       <QaController company={company} />
+      {practice && <PracticeController />}
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4 border-b border-ink pb-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
@@ -366,15 +381,33 @@ export function InterviewQuestions({ title, footer, company, icons, children }: 
             <span className="text-muted-foreground">questions</span>
           </p>
         </div>
-        <button
-          type="button"
-          data-qa-expand
-          className="inline-flex items-center gap-1.5 rounded-full border border-ink/20 px-3.5 py-1.5 text-xs font-medium text-ink transition-colors hover:border-ink hover:bg-ink hover:text-paper"
-        >
-          <ListCollapse className="size-3.5" />
-          <span data-qa-expand-label>Expand all</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Hidden until the practice island has loaded, so there is never a button that does nothing. */}
+          {practice && (
+            <button
+              type="button"
+              data-qa-practice
+              hidden
+              aria-pressed={false}
+              className="inline-flex items-center gap-1.5 rounded-full border border-ink/20 px-3.5 py-1.5 text-xs font-medium text-ink transition-colors hover:border-ink aria-pressed:border-ink aria-pressed:bg-ink aria-pressed:text-paper"
+            >
+              <Timer className="size-3.5" />
+              Practice mode
+            </button>
+          )}
+          <button
+            type="button"
+            data-qa-expand
+            className="inline-flex items-center gap-1.5 rounded-full border border-ink/20 px-3.5 py-1.5 text-xs font-medium text-ink transition-colors hover:border-ink hover:bg-ink hover:text-paper"
+          >
+            <ListCollapse className="size-3.5" />
+            <span data-qa-expand-label>Expand all</span>
+          </button>
+        </div>
       </div>
+      {practice && (
+        <div data-qa-practice-bar hidden className="mb-4 rounded-xl border border-hairline bg-paper-2/40 p-4" />
+      )}
 
       {questions.length >= SEARCH_THRESHOLD && (
         <label className="mb-4 flex items-center gap-2.5 rounded-full border border-hairline bg-paper px-4 py-2.5 focus-within:border-ink">
