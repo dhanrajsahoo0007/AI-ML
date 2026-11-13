@@ -18,7 +18,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   Right (x 672), "automation and records": audit trail, rotation job, orders database.
 // Rows (centres): 95 | 245 | 400.
 // svcid 130,95 | store 390,95 | trail 672,95 | server 130,245 | provider 390,245 | rotator 672,245 |
-// stale 130,400 | asha 390,400 | db 672,400.
+// stale 130,400 | asha 390,412 (lower, so its NEW ring clears the People label) | db 672,400.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 happen in the
 // left and middle columns, so the free preview and the failure show without scrolling.
@@ -26,7 +26,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Zone tabs sit on a zone's top-left corner and reach about 145 units to the right. The service identity sits inside
 // the Application zone, so "attached" never crosses a tab. "Outside" and "People" are subnet bands (inline label, no
 // tab) because edges enter them from above and from the side. The rotation job's edge to the store leaves its box
-// right of the Automation tab (x 740), runs left in the gap between rows (y 160) and turns up into the store.
+// right of the Automation tab (x 705), runs left in the gap between rows (y 160) and turns up into the store.
 // Text room: up to 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Nodes are sized
 // for the longest name the Services toggle shows ("Cloud Run function", "Virtual Machines", "Managed identity",
 // "Cloud Audit Logs", "Azure PostgreSQL", "Secrets Manager").
@@ -45,7 +45,7 @@ const spec: DiagramSpec = {
   zones: [
     { id: "app", title: "Application", tone: "teal", x: 10, y: 40, w: 240, h: 425 },
     { id: "secrets", title: "Secret store", tone: "red", x: 295, y: 40, w: 190, h: 100 },
-    { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 295, y: 190, w: 190, h: 110 },
+    { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 295, y: 180, w: 190, h: 120 },
     { id: "people", title: "People", tone: "neutral", kind: "subnet", x: 295, y: 345, w: 190, h: 120 },
     { id: "audit", title: "Audit", tone: "orange", x: 560, y: 40, w: 225, h: 100 },
     { id: "automation", title: "Automation", tone: "teal", x: 560, y: 190, w: 225, h: 110 },
@@ -122,7 +122,7 @@ const spec: DiagramSpec = {
       tone: "neutral",
       step: 2,
       x: 390,
-      y: 400,
+      y: 412,
       w: 166,
     },
 
@@ -201,8 +201,8 @@ const spec: DiagramSpec = {
       packet: true,
       delay: 1.2,
       via: [
-        [740, 200],
-        [740, 160],
+        [705, 200],
+        [705, 160],
         [525, 160],
       ],
       step: 3,
