@@ -3,7 +3,9 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Queue, topic and stream, told as Brightpost's order events (cloud/start-here/queues-vs-streams).
 // Step 1: the shop puts one message per order on an email queue; two workers share the messages, one each.
 // Step 2 (the failure step): worker A crashes before it confirms order 1042; the queue hands 1042 to worker B,
-// which sends the same email a second time. Step 3: every worker checks a sent-email table before it sends, so the
+// which sends the same email a second time. The two red edges of step 2 take side routes (up the left of worker A,
+// and out of the queue's right side and down into worker B), so their labels never sit on the step 1 labels. The
+// right-hand route passes where the dead-letter queue appears in step 4; the two never show together. Step 3: every worker checks a sent-email table before it sends, so the
 // second email is blocked. Step 4: a message that fails 5 times goes to a dead-letter queue. Step 5: the shop
 // publishes "order placed" once to a topic, which copies it to the email queue and to the stock worker. Step 6: the
 // shop also appends every order event to a stream, which two readers read at their own places, one from the start.
@@ -20,8 +22,8 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   Top: shop 240,66 in its own zone.
 //   Topic band (y 122-262, full width): topic 240,180 | stock worker 560,180.
 //   Queue zone (x 10-475): email queue 240,340 | dead-letter queue (glyph) 405,340 | worker A 100,480 |
-//   worker B 380,480 | sent-email table (glyph) 215,590 | 2nd email 380,595.
-//   Stream zone (x 490-785): stream 637,340 | analytics 565,500 | new report 712,500.
+//   worker B 372,480 | sent-email table (glyph) 215,588 | 2nd email 372,595.
+//   Stream zone (x 490-785): stream 637,340 | analytics 565,470 | new report 714,595 (lower, so the two NEW rings never touch).
 // The shop's edge to the stream runs along the top (y 66) and down the right margin (x 772), so it crosses no node
 // and no other edge; its label sits on the top run. Vertical edges enter each zone right of its tab.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. The
@@ -89,7 +91,7 @@ const spec: DiagramSpec = {
       sub: "sends the email",
       icon: "workers",
       tone: "teal",
-      x: 380,
+      x: 372,
       y: 480,
       w: 150,
     },
@@ -98,13 +100,13 @@ const spec: DiagramSpec = {
     {
       id: "dup",
       label: "2nd email",
-      sub: "same order, again",
+      sub: "1042 sent twice",
       icon: "bell",
       tone: "red",
       step: 2,
-      x: 380,
+      x: 372,
       y: 595,
-      w: 150,
+      w: 160,
       h: 50,
     },
 
@@ -192,31 +194,31 @@ const spec: DiagramSpec = {
     {
       id: "analytics",
       label: "Analytics",
-      sub: "reads at #4,180",
+      sub: "at event 4,180",
       icon: "chart",
       tone: "teal",
       step: 6,
       x: 565,
-      y: 500,
+      y: 470,
       w: 140,
     },
     {
       id: "report",
       label: "New report",
-      sub: "replays from #1",
+      sub: "replays from 1",
       icon: "history",
       tone: "teal",
       step: 6,
-      x: 712,
-      y: 500,
-      w: 136,
+      x: 714,
+      y: 595,
+      w: 140,
     },
   ],
   edges: [
     // Step 1: one message per order; each message goes to one worker.
     { from: "shop", to: "queue", label: "1 message per order", packet: true, until: 4 },
-    { from: "queue", to: "workerA", label: "order 1042", packet: true, delay: 1.2 },
-    { from: "queue", to: "workerB", label: "order 1043", packet: true, delay: 1.8 },
+    { from: "queue", to: "workerA", label: "order 1042", packet: true, delay: 1.2, labelAt: 0.7 },
+    { from: "queue", to: "workerB", label: "order 1043", packet: true, delay: 1.8, labelAt: 0.7 },
 
     // Step 2: worker A sent the email but crashed before it confirmed; after the lock runs out, 1042 goes to B.
     {
@@ -225,7 +227,8 @@ const spec: DiagramSpec = {
       label: "crashed, no ack",
       tone: "red",
       dashed: true,
-      labelAt: 0.3,
+      via: [[100, 340]],
+      labelAt: 0.35,
       step: 2,
       until: 2,
     },
@@ -236,7 +239,8 @@ const spec: DiagramSpec = {
       tone: "red",
       packet: true,
       delay: 1.2,
-      labelAt: 0.72,
+      via: [[372, 340]],
+      labelAt: 0.62,
       step: 2,
       until: 2,
     },
