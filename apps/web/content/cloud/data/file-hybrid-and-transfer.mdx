@@ -1,11 +1,332 @@
 ---
 title: "File Shares, Hybrid Storage and Moving Bulk Data"
-description: "When a managed file share beats a bucket, how a gateway links office storage to the cloud, and three ways to move huge data sets."
-status: outline
+description: "Managed file shares, gateways that keep an office share backed by the cloud, and how to move terabytes: online, by courier, or by SFTP."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** managed file shares and when they beat object storage, gateways that make a bucket look like a share on-premises, managed file-transfer endpoints, and the three ways to move terabytes to petabytes: online transfer services, physical appliances, and the maths that decides between them.
+<KeyIdea>
+  Before you move a pile of data, divide its size by your line's speed. The answer tells you whether to send it, ship it on a device, or keep part of it on site.
+</KeyIdea>
 
-**Related reading on this site:** [Files, blocks and objects](/system-design/fundamentals/storage-types) · [Storage on AWS](/cloud/aws/storage) · [Storage on Azure](/cloud/azure/storage)
+## The story
+
+In June, Brightpost signs a deal with a landscape photographer: his pictures become posters, and he sends about 200 new photos a month. His archive arrives on a NAS, a small file server, plugged into Brightpost's office network. It holds 12 TB of finished photos, about 600,000 files, and 100 TB of raw camera files. On a Friday evening Asha starts a copy script to send the finished photos to a bucket. The office has one 100 Mbit/s internet line for all 6 staff, and the script fills it day and night. For 3 weeks the support agent's help desk times out from 9 to 5, and replies to customers slip from about 4 hours to 2 days. On day 21 the script prints "done". Two weeks later a poster order fails: its photo is not in the bucket. A count finds 4,000 files missing. Their names held accents, colons or trailing spaces, and the script had logged each error where nobody looked.
+
+Every step below follows the archive, from that script to a move that leaves the line usable and proves every file arrived.
+
+## How it works
+
+Three words first. **Bandwidth** is how many bits a line can carry each second: 100 Mbit/s is 100 million bits a second. A **NAS**, short for network-attached storage, is a file server on a local network that computers mount as a shared drive. An **online transfer** sends data over a network; an **offline transfer** carries it on a device.
+
+### Step 1: The line sets the speed
+
+<AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" step={1} minWidth={620} caption="Brightpost's first try: a copy script sends 12 TB from the office NAS to the bucket over the same line the staff use." />
+
+In the picture, every byte the office sends goes through one line: the staff's web pages and mail, and the script's photos. No software makes that line wider, so work out the time first.
+
+Data is counted in bytes and lines in bits, and 1 byte is 8 bits. One terabyte is 8 million megabits. At 100 Mbit/s that takes 80,000 seconds, about 22 hours. That gives a rule of thumb: **at 100 Mbit/s, a terabyte takes about a day.** Ten times the bandwidth takes a tenth of the time. A handy form is: days ≈ TB × 93 ÷ Mbit/s.
+
+On Brightpost's line, 12 TB takes 11 days at full speed with nothing else on it. Real copies reach about 70–80% of a line's speed. Asha's script used one connection and averaged about 55 Mbit/s, so it took about 20 days. [Back-of-the-envelope estimation](/system-design/fundamentals/estimation) practises this kind of sum.
+
+<PremiumBreak />
+
+### Step 2: A copy script fails quietly
+
+<AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" step={2} minWidth={620} caption="The failure: the full line makes the help desk time out, and 4,000 files never reach the bucket." />
+
+A homemade script lacks the controls a long copy needs. It sends as fast as it can, against everyone else on the line. It treats an error as one more log line. And it cannot tell whether the bytes that arrived are the bytes that left.
+
+<Callout tone="red" title="What breaks">
+  On weekdays the script and the staff share 100 Mbit/s. The script keeps the line full, so each help desk page waits behind photo data and gives up after 30 seconds. Meanwhile 4,000 files with unusual names fail to upload. The script logs each failure, carries on and ends with "done". Nobody checks the bucket until an order fails 2 weeks later.
+</Callout>
+
+Three controls were missing: a speed limit, a schedule, and a check of every file.
+
+### Step 3: A transfer service: capped, scheduled, checked
+
+<AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" step={3} minWidth={620} caption="A transfer agent beside the NAS copies at 30 Mbit/s in working hours and checks every file against a checksum." />
+
+A managed **transfer service** runs copy jobs for you. For data in your own building it needs an **agent**: a small program, usually a VM, next to the source storage, that reads the files over the network. The service in the cloud holds the job: what to copy, when, how fast, and what it found.
+
+- **A schedule.** A job runs at set times. Each later run copies only new and changed files.
+- **A bandwidth limit.** Brightpost caps the agent at 30 Mbit/s from 8 a.m. to 6 p.m. on weekdays, with no cap at other times.
+- **Checksums.** A **checksum** is a short fingerprint computed from a file's bytes; one changed bit changes it. The agent computes it before sending, the service checks it on arrival, and a mismatch means a retry.
+- **A report.** Every failed file is listed with its reason, and the job shows as failed, not "done".
+
+The agent's first run finds the 4,000 missing files, about 80 GB, and copies them in one night. With the cap, a full 12 TB copy takes about 15 days, and the help desk works all day.
+
+### Step 4: When shipping beats the network
+
+<AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" step={4} minWidth={620} caption="The 100 TB of raw files are copied onto an appliance in the office and sent by courier to be loaded into the bucket." />
+
+The raw files are 100 TB. On the capped schedule the line moves about 5.4 TB a week, so 100 TB would take about 4 months.
+
+A **transfer appliance** is a rugged storage device the provider ships to you. You copy data onto it and send it back by courier; the provider loads it into your bucket, then wipes it. The data is encrypted, and the key never travels with the box.
+
+Brightpost's device took 19 days door to door: 5 days to arrive, 3 days of copying, 4 days by courier and 7 days to load and check. The local copy has its own sum. Copying 100 TB in 3 days needs about 3 Gbit/s, so the device sits on the NAS's 10 Gbit/s port, not on the office Wi-Fi.
+
+<Compare
+  columns={["Data", "100 Mbit/s", "1 Gbit/s", "10 Gbit/s"]}
+  rows={[
+    ["1 TB", "22 hours", "2.2 hours", "13 minutes"],
+    ["12 TB", "11 days", "27 hours", "2.7 hours"],
+    ["100 TB", "93 days", "9.3 days", "22 hours"],
+    ["1 PB", "About 2.5 years", "93 days", "9.3 days"],
+  ]}
+  caption="Time to send at full line speed with nothing else on the line. Plan for 70–80% of the speed, and only the share of the line you can spare."
+/>
+
+Compare the network time, at the share of the line you can spare, with a device's round trip of usually 2 to 4 weeks. Network time grows with every terabyte; the round trip barely does. Changes made meanwhile follow online.
+
+### Step 5: Prove it arrived, then cut over
+
+A copy is finished when you can show every file arrived intact. Check five things.
+
+1. **Counts.** Files and bytes per folder, on both sides. "600,000 here, 596,000 there" would have caught the script on day 21.
+2. **Checksums.** Every file's fingerprint matched, according to the service's report.
+3. **Errors.** Zero failures in the report, or a short list with a reason for each.
+4. **Samples.** Open files in the program that uses them. Brightpost turns 50 random photos into print files.
+5. **What is not bytes.** Timestamps, owners and permissions survive only between systems that store them the same way.
+
+Then **cut over**: switch readers to the new copy. Make the source read-only, run one last pass for the final changes, and point every reader at the cloud. Brightpost keeps the NAS read-only for 30 days, then hands it back.
+
+### Step 6: Managed file shares: protocol, speed and copies
+
+Not every file belongs in a bucket. Two office staff prepare new posters in folders all day, and their editing tools expect a drive. That is the job of a managed <Term id="file-storage">file share</Term>, which [Object, Block and File](/cloud/data/storage-types) introduced. A share asks three questions.
+
+**Which protocol?** **NFS**, the Network File System, comes from Linux and Unix and checks permissions by user and group numbers. **SMB**, Server Message Block, comes from Windows: it takes users from a company directory and gives Windows apps the file locks they expect. Brightpost's `/print` share for its Linux print servers is NFS; the office's Windows laptops need SMB. Permissions do not translate cleanly between the two, so pick the one your clients speak.
+
+**How is speed sold?**
+
+<Compare
+  columns={["Shape", "How it works", "Watch out for"]}
+  rows={[
+    ["Speed grows with size", "More data stored gives more throughput", "A small share is slow, so some teams store filler to go faster"],
+    ["Provisioned capacity", "You pick a size and a tier, and get speed for that size", "You pay for the size, full or empty"],
+    ["Speed bought apart", "You set the throughput separately from the size", "A second number to watch and to pay for"],
+  ]}
+  caption="The three shapes clouds use to sell share speed. Each product uses one or more of them."
+/>
+
+SSD tiers suit many small files; hard-disk tiers suit large files read in order. Each file operation crosses the network, so listing a folder of 600,000 files takes minutes.
+
+**What copies?** A share <Term id="snapshot">snapshot</Term> is a read-only picture of the share at one moment, so a user can open yesterday's version unaided. It lives with the share, and deleting the share deletes it. A backup is a copy kept outside, in a [vault](/cloud/resilience/backups-and-vaults). Compute clusters use a parallel file system instead, covered in [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus).
+
+### Step 7: A gateway keeps the office share
+
+<AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" step={5} minWidth={620} caption="The staff open files on a gateway in the office. It caches recent files and syncs every change to a share in the cloud." />
+
+Once the NAS goes back, the staff still need a drive for the 2 TB of photos they are preparing. A **storage gateway** is a small server in the office that serves an NFS or SMB share, while the full copy lives in the cloud. It keeps recently used files on a local disk, its **cache**.
+
+A save lands in the cache and uploads in the background, under the gateway's own speed cap. A cached file opens at office speed; any other waits for the line. So size the cache for the working set, the files used in a normal week. Brightpost gives its gateway 4 TB, twice its 2 TB working set.
+
+If the gateway dies, only changes waiting to upload are at risk. A gateway is not a migration tool: it is for people on site who keep working with the files.
+
+### Step 8: An SFTP door for partners
+
+<AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" step={6} minWidth={620} caption="The photographer uploads new photos to a managed SFTP endpoint, which writes each file into the bucket." />
+
+The photographer's tools speak only **SFTP**, a file transfer protocol that runs over SSH. Running an SFTP server on a VM means patching it, watching its disk and copying each file on.
+
+A **managed SFTP endpoint** does that job for you. A partner logs in with a user name and an SSH key and sees only its own folder. Each upload lands straight in the bucket as an object, or in a share. It can raise an event, so the resize worker makes thumbnails within minutes.
+
+## On AWS, Google Cloud and Azure
+
+The ideas are the same on all three clouds. The managed pieces differ more here than on most pages.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **File shares:** Amazon EFS for NFS, which grows with the files in it. Amazon FSx for Windows File Server for SMB, plus FSx for Lustre, NetApp ONTAP and OpenZFS.
+    - **Online transfer:** AWS DataSync. An agent near the source copies into S3, EFS or FSx, with schedules, a bandwidth limit and verification.
+    - **Offline transfer:** AWS Snowball devices, now closed to new customers. New projects use DataSync, or carry their own drives to an AWS Data Transfer Terminal, a site with a fast link into AWS.
+    - **Hybrid gateway:** AWS Storage Gateway. Its S3 File Gateway runs as a VM on site and serves NFS or SMB shares backed by S3, with a local cache.
+    - **SFTP endpoint:** AWS Transfer Family, with SFTP, FTPS and FTP endpoints that write to S3 or EFS.
+
+    **The difference that changes a design.** S3 File Gateway stores each file as one object under the same name, so cloud programs can read the office's files straight from S3. The other direction is slower: an object changed in the bucket reaches the gateway only after a cache refresh. Write through one side only.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **File shares:** Filestore, managed NFS, in tiers that differ in speed and in being zonal or regional. NetApp Volumes adds SMB; Managed Lustre serves clusters.
+    - **Online transfer:** Storage Transfer Service. Agents on your machines copy file systems into Cloud Storage, with schedules, a bandwidth limit and checksums. It also copies from other clouds.
+    - **Offline transfer:** Transfer Appliance, filled on site and loaded into Cloud Storage.
+    - **Hybrid gateway:** no first-party gateway; partner products fill the gap. Cloud Storage FUSE mounts a bucket as a folder on Linux, but lacks some file system behaviour, such as file locks.
+    - **SFTP endpoint:** no managed service of its own: a partner product, or your own SFTP server on a VM.
+
+    **The difference that changes a design.** Google Cloud's managed pieces stop at the bucket: online transfer and an appliance, but no gateway or SFTP endpoint of its own. A hybrid share or a partner's SFTP drop is a product you choose, then patch and monitor like any server.
+  </Tab>
+  <Tab label="Azure">
+    - **File shares:** Azure Files: SMB and NFS shares in a storage account, on HDD-backed standard or SSD-backed premium storage, with share snapshots. Azure NetApp Files for demanding work.
+    - **Online transfer:** AzCopy, a command-line tool that can cap its own speed. Azure Storage Mover, a managed service with agents on site, for migrating file shares.
+    - **Offline transfer:** Azure Data Box devices, loaded into Blob Storage or Azure Files.
+    - **Hybrid gateway:** Azure File Sync. An agent on a Windows Server keeps it in step with an Azure file share; cloud tiering leaves rarely used files in the cloud only.
+    - **SFTP endpoint:** SFTP support in Blob Storage, for a storage account with a hierarchical namespace. Its users and keys belong to that account.
+
+    **The difference that changes a design.** File Sync syncs with Azure Files, not Blob Storage, and its agent runs only on Windows Server. So the office share's cloud home is a file share, while the shop's archive sits in Blob Storage. AWS would use two S3 buckets.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/hybrid-transfer-paths" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="How should this data reach the cloud?"
+  tree={{
+    q: "Is a partner sending files again and again over SFTP or FTPS?",
+    yes: "A managed SFTP endpoint that writes into a bucket or a share. No server for you to patch.",
+    no: {
+      q: "Is it a live database that keeps changing?",
+      yes: {
+        answer: "A database migration service that copies the data, then streams each change. A file copy would catch it half-written.",
+        href: "/cloud/data/database-migration",
+      },
+      no: {
+        q: "Must people or programs on site keep using the files after the move?",
+        yes: "A gateway or sync service: a local share with a cache, backed by cloud storage. Move the bulk first with a transfer service.",
+        no: {
+          q: "At the bandwidth you can spare, does the copy finish within about 2 weeks?",
+          yes: "An online transfer service: an agent, a schedule, a speed cap and checksums.",
+          no: "Ship a transfer appliance for the bulk, then run an online job for the changes since.",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The office line is upgraded to 1 Gbit/s. About how long would the 12 TB copy take at full speed?" hint="Days ≈ TB × 93 ÷ Mbit/s.">
+    About 1.1 days, or 27 hours: 12 × 93 ÷ 1,000. At a realistic 75% of the line, plan for about a day and a half.
+  </QuizItem>
+  <QuizItem question="The capped schedule moves about 5.4 TB a week. Should the 100 TB of raw files go over the line or on a device?" hint="Compare weeks on the line with the device's round trip.">
+    On a device. The line would need about 18 weeks, over 4 months. The appliance took 19 days door to door, and the line stayed free for the staff.
+  </QuizItem>
+  <QuizItem question='The script printed "done" and the bucket held 596,000 of 600,000 files. Which check would have caught it on day 21?'>
+    A count of files per folder on both sides. Checksums and a report of failed files would have prevented it, because the job would have shown as failed with 4,000 names listed.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Copy script", "Transfer service", "Transfer appliance", "Storage gateway"]}
+  rows={[
+    ["Best for", "A few gigabytes, once", "A move or a nightly copy the line can carry", "A bulk load the line would take months to carry", "People on site who keep using the files"],
+    ["Brightpost's job", "12 TB of photos: about 20 days", "12 TB of photos: about 15 days, capped", "100 TB of raw files: 19 days door to door", "The 2 TB office share, every day"],
+    ["Office line used", "All of it, all day", "Up to the cap you set", "None", "Changes only, up to its cap"],
+    ["Checks every file", false, true, true, "Not its job"],
+    ["Changes made during the move", "Missed unless rerun", "Copied by the next run", "Need an online job afterwards", "Synced as they happen"],
+    ["Cost shape", "Free, plus your time", "Usually per gigabyte copied, plus storage", "Per device job and days kept, plus shipping", "The storage behind it, plus a gateway or sync fee"],
+  ]}
+  caption="Brightpost's numbers. Real speeds, lead times and fees differ by cloud, by carrier and by device."
+/>
+
+The script wins only on the first evening. The other three cost a little setup and leave the line, and the help desk, working.
+
+## Common pitfalls
+
+- **Starting before doing the sum.** A copy that needs 4 months will not finish in a weekend. Divide terabytes by bandwidth, then pick the network or a device.
+- **No cap in working hours.** An uncapped copy takes the whole line, and everyone else's work stops. Cap the transfer by day and let it run at full speed at night.
+- **Trusting "done".** A script's exit message proves nothing about the files. Compare counts and checksums, and read the failure report.
+- **Forgetting changes during the move.** Data keeps changing during a copy that takes weeks. Make the source read-only, run a last pass, then switch readers.
+- **A gateway cache smaller than the working set.** Every open then waits on the line. Tools that read every file, such as antivirus scans, can also pull the whole share back through the cache.
+
+## How to say it in an interview
+
+"Before moving bulk data I do the sum: at 100 Mbit/s a terabyte takes about a day. If the copy fits in two weeks at the bandwidth I can spare, I use a managed transfer service. It runs an agent by the source, with a schedule, a daytime speed cap and a checksum per file. If it would take months, I ship an appliance and copy the changes online afterwards. I prove the move with counts, checksums and the failure report, then cut over from a read-only source. People on site who still need the files get a gateway, and SFTP-only partners get a managed endpoint into the bucket."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="How long does it take to copy 12 TB over a 100 Mbit/s line, and how do you work it out?" level="Junior" category="Cloud">
+    **Short answer.** About 11 days at full speed, and nearer 15 in practice. Convert bytes to bits, then divide by the line speed: 12 TB is 96 million megabits, and 96 million ÷ 100 is 960,000 seconds.
+
+    **Why.** A line moves bits and storage counts bytes, so multiply by 8 first. Real copies reach about 70–80% of a line, and other traffic shares it. Brightpost's script averaged 55 Mbit/s and took about 20 days. The rule of thumb: a terabyte a day at 100 Mbit/s.
+
+    <AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" step={1} highlight={["nas", "line", "bucket"]} caption="All 12 TB has to fit through one 100 Mbit/s line." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does the answer change at 1 Gbit/s?
+    - Why might the copy run slower than the line, even with nothing else on it?
+
+    **Watch out for.** Dividing terabytes by megabits per second without converting bytes to bits. The answer comes out 8 times too fast.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You have 300 TB to move and a 1 Gbit/s link. Online transfer or an appliance?" level="Mid" category="Cloud">
+    **Short answer.** Probably an appliance for the bulk, with an online job for the changes afterwards. At full speed the link needs about 28 days, and more like 5 weeks at a realistic rate. That assumes nobody else uses the link.
+
+    **Why.** 300 × 93 ÷ 1,000 is about 28 days; leave room for daytime traffic and it becomes 6 or 7 weeks. A device's round trip is usually 2 to 4 weeks, and several can be filled in parallel. The choice flips if the link can be given to the copy for a month. Count the local copy too: 300 TB onto devices in a week needs about 4 Gbit/s inside the building.
+
+    <AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" step={4} path="nas>appliance>bucket" caption="The bulk goes by courier; only later changes need the line." />
+
+    **Follow-ups the interviewer may ask.**
+    - The data changes by 1% a day. How do you handle the weeks the devices are in transit?
+    - How would you check that the devices' contents arrived complete?
+
+    **Watch out for.** Comparing the link's full speed with the device. The fair comparison uses the share of the link you can really spare.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you prove that a large file migration copied everything?" level="Mid" category="Cloud">
+    **Short answer.** Compare file counts and bytes per folder on both sides, and check a checksum for every file. Read the transfer report until it shows zero unexplained errors, then open samples in the program that uses the files.
+
+    **Why.** Brightpost's script said "done" with 4,000 of 600,000 files missing. A count per folder finds missing files quickly. Checksums find files that changed on the way. Samples catch what neither sees, such as photos the print tool cannot open. Check timestamps and permissions too.
+
+    <AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" step={3} path="nas>agent>line>bucket" caption="The agent fingerprints each file before sending; the service checks the fingerprint on arrival." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you cut over without losing changes made during the copy?
+    - What do you do with file names the destination cannot store?
+
+    **Watch out for.** Comparing only total size. Two trees can match in bytes while missing different files.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="NFS or SMB for a managed file share: what decides it?" level="Mid" category="Cloud">
+    **Short answer.** The clients decide. Linux and Unix machines speak NFS; Windows machines and apps speak SMB. Pick the protocol your clients already use, because permissions do not translate cleanly between the two.
+
+    **Why.** NFS checks permissions by numeric user and group ids. SMB takes users from a company directory and gives Windows apps the file locks they expect. Brightpost's Linux print servers use NFS; the office's Windows laptops use SMB through the gateway. A share served over both works, but its permissions get hard to reason about.
+
+    <AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" step={5} highlight={["staff", "gateway", "cloudshare"]} caption="Windows laptops in the office open files over SMB on the gateway." />
+
+    **Follow-ups the interviewer may ask.**
+    - How is share speed sold, and what does that mean for a small share?
+    - How would you back the share up?
+
+    **Watch out for.** Choosing a share when the files are written once and read whole. That job belongs in a bucket, which costs less per gigabyte.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you keep an office reading and writing its files during a six-week move to the cloud?" level="Senior" category="Cloud">
+    **Short answer.** Copy the bulk in the background with a capped, scheduled transfer service, or a device if the line is too slow. Then put a gateway or sync service in the office, serving the same share from a local cache backed by the cloud. Cut over at a quiet hour after a final pass, with the old server read-only.
+
+    **Why.** People keep working while the copy runs, so it must not take their line: Brightpost caps it at 30 Mbit/s in working hours. A gateway keeps their drive after the old server leaves, with the full copy in the cloud. Size its cache for the working set, here 4 TB for 2 TB in daily use. At cutover, block writes to the old server, run one last pass, point the drive at the gateway, and keep the old server read-only for 30 days.
+
+    <AnimatedDiagram spec="animated/cloud/hybrid-transfer-paths" step={5} highlight={["staff", "gateway", "line", "cloudshare"]} caption="The office keeps a drive; the line carries only changes, under a cap." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to the office if the line goes down after cutover?
+    - How do you stop a program in the cloud and a person in the office editing the same file?
+
+    **Watch out for.** Using the gateway as the migration tool. Pushing the whole archive through a cache is slower and harder to verify than a transfer job.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Object, Block and File: Which One for Which Job](/cloud/data/storage-types)
+- [Database Migration: Full Load, Change Data Capture and Cutover](/cloud/data/database-migration)
+- [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity)
+- [Migration and Modernization](/cloud/operations/migration-and-modernization)
+- [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults)
+- [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus)
+- [Storage on AWS](/cloud/aws/storage)
+- [Storage on Google Cloud](/cloud/gcp/storage)
+- [Storage on Azure](/cloud/azure/storage)
+- [Files, blocks and objects](/system-design/fundamentals/storage-types)
+
+## Further reading
+
+- [AWS DataSync User Guide](https://docs.aws.amazon.com/datasync/latest/userguide/what-is-datasync.html): agents, tasks and verification.
+- [Storage Transfer Service overview](https://cloud.google.com/storage-transfer/docs/overview): transfers into Cloud Storage.
+- [Introduction to Azure Files](https://learn.microsoft.com/azure/storage/files/storage-files-introduction): managed SMB and NFS shares.
+- [Azure Data Box overview](https://learn.microsoft.com/azure/databox/data-box-overview): moving data by device.
