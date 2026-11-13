@@ -7,7 +7,7 @@ updated: 2026-11-13
 ## In one sentence
 
 <KeyIdea>
-  When many services share one front door, the door can do the jobs they all need, such as checking who is calling, so each job is done once and done the same way.
+  When many services share one front door, that door can do the jobs they all need, such as checking who is calling. Then each job is done once, the same way.
 </KeyIdea>
 
 ## The story
@@ -24,7 +24,7 @@ Three words first. A **token** is a short-lived, signed note that says who the c
 
 <AnimatedDiagram spec="animated/cloud/api-gateway-request" step={1} minWidth={620} caption="Every till call passes one gateway, but each service checks the sign-in token in its own code." />
 
-Brightpost's gateway already knows which shop sends each call, because every shop has its own key. It also caps each shop's rate, as [Hosting REST and GraphQL APIs](/cloud/networking/hosting-apis) showed. But a key only names the shop. It is a fixed string, saved in every till's settings, and it never expires.
+Brightpost's gateway already knows which shop sends each call, because every shop has its own key, as [Hosting REST and GraphQL APIs](/cloud/networking/hosting-apis) showed. But a key only names the shop. It is a fixed string in every till's settings, and it never expires.
 
 The proof that this caller is a signed-in till, right now, is the token. Here, three services each check it alone, with checks A, B and C. A gateway shared by many services, and why that helps, is taught in [API gateways and backends for frontends](/system-design/fundamentals/api-gateway). This page covers what managed gateways add on the cloud.
 
@@ -61,7 +61,7 @@ A failed check stops the call at the door. A good call goes on with the checked 
 
 The order API needs a breaking change. Version 2 sends prices in pence as whole numbers, so 4.50 becomes 450. A till that reads v2 as if it were v1 would show prices 100 times too high. So the two versions run side by side, and the version is part of the address: `/v1/orders` and `/v2/orders`.
 
-The gateway routes each path to its service. On every `/v1` answer, it adds two response headers: one says the version is deprecated, which means it will be retired, and one gives the end date. Brightpost gives shops 6 months. A gateway can also send a share of calls, such as 10 in 100, to a new build first. That is a <Term id="canary">canary</Term>. [API design](/system-design/fundamentals/api-design) covers versioning styles.
+The gateway routes each path to its service. On every `/v1` answer, it adds two headers. One says the version is deprecated, which means it will be retired. The other gives the end date. Brightpost gives shops 6 months. A gateway can also send a share of calls, such as 10 in 100, to a new build first. That is a <Term id="canary">canary</Term>. [API design](/system-design/fundamentals/api-design) covers versioning styles.
 
 ### Step 5: Small changes on the way through
 
@@ -78,7 +78,7 @@ Keep these small. A rule such as "shops in Wales get free delivery" belongs in a
 
 <AnimatedDiagram spec="animated/cloud/api-gateway-request" step={5} minWidth={620} caption="Partner apps sign up on the developer portal, get a key, and call the gateway on a plan of their own." />
 
-Two marketplace apps want to show Brightpost's cards and stock. Brightpost does not want to email keys by hand. A **developer portal** is a website for outside developers. It shows the API documentation, built from the API's description file, and lets them try calls and sign up for a key.
+Two marketplace apps want to show Brightpost's cards and stock, and nobody wants to email keys by hand. A **developer portal** is a website for outside developers. It shows the API documentation, built from the API's description file, and lets them try calls and sign up for a key.
 
 Each key is tied to a **plan**: which APIs it may call, how fast, and how many calls a day. Some clouds call a bundle of APIs with its plan a "product".
 
@@ -112,7 +112,7 @@ Three weeks before the `/v1` end date, one query shows 23 shops still on `/v1`, 
 
 A call from a till can pass up to five layers, and each one owns one question. The edge cache owns copies of public answers. The <Term id="waf">WAF</Term> (web application firewall) owns traffic that looks like an attack. The <Term id="load-balancer">load balancer</Term> owns healthy servers. The gateway owns who is calling and what they may call. The service owns the business rule: may shop 64 open invoice 9031?
 
-Do not move a question to the wrong layer. A gateway that checks the token cannot know which invoices belong to which shop. [CDN, edge and WAF](/cloud/networking/cdn-edge-and-waf) and [Load balancing](/cloud/networking/load-balancing) cover those layers. Calls between Brightpost's own services skip the public gateway; [Service-to-service calls](/cloud/networking/service-to-service) covers that path.
+Keep each question in its layer: the gateway cannot know which invoices belong to which shop. [CDN, edge and WAF](/cloud/networking/cdn-edge-and-waf) and [Load balancing](/cloud/networking/load-balancing) cover those layers. Calls between Brightpost's own services skip the public gateway; [Service-to-service calls](/cloud/networking/service-to-service) covers that path.
 
 ## On AWS, Google Cloud and Azure
 
@@ -201,7 +201,7 @@ The idea is the same on all three clouds: one gateway checks tokens, routes vers
   caption="Brightpost moved from the first column to the second, and uses the third for its partners."
 />
 
-A gateway adds a few milliseconds and a bill. It removes copies of the same rule, and copies are where rules go wrong.
+A gateway adds a few milliseconds and a bill. It removes copies of a rule, and copies are where rules go wrong.
 
 ## Common pitfalls
 
@@ -261,7 +261,7 @@ A gateway adds a few milliseconds and a bill. It removes copies of the same rule
   </InterviewQuestion>
 
   <InterviewQuestion question="How do you ship a breaking change to an API that outside tills depend on?" level="Mid" category="Cloud">
-    **Short answer.** Never change the live version in place. Run the new version beside the old one on its own path, send an end date on every old-version answer, and retire it only when the logs show nobody still calls it.
+    **Short answer.** Never change the live version in place. Run the new version beside the old one on its own path, and send an end date on every old-version answer. Retire the old one only when the logs show nobody calls it.
 
     **Why.** Brightpost's v2 sends prices in pence, so a till reading it as v1 would show prices 100 times too high. The gateway routes `/v1` and `/v2` to different services and adds the end date, 6 months out. Three weeks before it, the per-caller view shows 23 shops still on v1, and the team emails them.
 
@@ -275,7 +275,7 @@ A gateway adds a few milliseconds and a bill. It removes copies of the same rule
   </InterviewQuestion>
 
   <InterviewQuestion question="Design a public API for 500 partners with versioning, keys, plans and a developer portal, and pick a service on each cloud." level="Senior" category="Cloud">
-    **Short answer.** Put a full API management service in front: a portal for sign-up and docs, a key per partner app, plans with rates and quotas, versions in the path, and analytics per partner. On AWS, API Gateway REST APIs with usage plans, plus a portal. On Google Cloud, Apigee. On Azure, API Management.
+    **Short answer.** Put a full API management service in front. It gives a portal for sign-up and docs, a key per partner app, plans with rates and quotas, and analytics per partner. On AWS, API Gateway REST APIs with usage plans, plus a portal. On Google Cloud, Apigee. On Azure, API Management.
 
     **Why.** With 500 partners, sign-up and keys must be self-service, or an engineer spends days on emails. Plans let you offer a free tier and paid tiers, and the analytics feed billing. Tokens from a sign-in service prove who calls; the gateway checks them once. Behind it, services accept calls only from the gateway.
 
