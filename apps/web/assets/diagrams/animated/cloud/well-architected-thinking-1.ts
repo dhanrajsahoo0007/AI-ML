@@ -257,19 +257,24 @@ const spec: DiagramSpec = {
       labelAt: 0.3,
       until: 7,
     },
-    // The failure itself: the bucket gets no file. Drawn over the normal edge with its label lower down.
+    // The failure itself: the bucket gets no file. It runs at x 208, and its label sits
+    // low (labelAt 0.66), below the normal edge's label pill.
     {
       from: "export",
       to: "bucket",
       label: "no file, 3 nights",
       tone: "red",
       dashed: true,
-      labelAt: 0.72,
+      via: [
+        [208, 428],
+        [208, 492],
+      ],
+      labelAt: 0.66,
       step: 2,
       until: 2,
     },
     { from: "sec", to: "partner", label: "reads all 730", tone: "red", dashed: true, until: 7 },
-    { from: "rel", to: "db", label: "never restored", tone: "red", dashed: true, until: 7 },
+    { from: "rel", to: "db", label: "never tested", tone: "red", dashed: true, until: 7 },
     { from: "perf", to: "app", label: "new server: 4 min", tone: "red", dashed: true, until: 7 },
     { from: "cost", to: "db", label: "10% busy all year", tone: "red", dashed: true, until: 7 },
     { from: "sus", to: "resize", label: "redoes 3,600 a night", tone: "red", dashed: true, labelAt: 0.3, until: 7 },
