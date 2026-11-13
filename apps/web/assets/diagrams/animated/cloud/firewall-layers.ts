@@ -16,11 +16,11 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Layout: three columns.
 //   Left (x 160), the shop's own path: shoppers, load balancer, app servers, orders database, subnet list.
-//   Middle (x 400), the stranger's path and the rules: stranger's script, admin server, app rules, database rules.
+//   Middle (x 385), the stranger's path and the rules: stranger's script, admin server, app rules, database rules.
 //   Right (x 660), what the repair adds outside the network: contractor, remote access, org firewall policy.
 // Rows (centres): 80 internet | 274 public subnet | 418 app subnet | 566 and 708 data subnet | 492 org policy.
-// shoppers 160,80 | stranger 400,80 | contractor 660,80 | lb 160,274 | admin 400,274 | remote 660,274 |
-// app 160,418 | apprules 400,418 | orgpol 660,492 | db 160,566 | dbrules 400,566 | nacl 160,708.
+// shoppers 160,80 | stranger 385,80 | contractor 660,80 | lb 160,274 | admin 385,274 | remote 660,274 |
+// app 160,418 | apprules 385,418 | orgpol 660,492 | db 160,566 | dbrules 385,566 | nacl 160,708.
 // The gaps between the internet zone and the network, and between the subnets, hold the edge labels.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 to 5 happen in
@@ -112,7 +112,7 @@ const spec: DiagramSpec = {
       icon: "robot",
       tone: "red",
       step: 2,
-      x: 400,
+      x: 385,
       y: 80,
       w: 176,
     },
@@ -123,7 +123,7 @@ const spec: DiagramSpec = {
       icon: "server",
       tone: "teal",
       step: 2,
-      x: 400,
+      x: 385,
       y: 274,
       w: 176,
       cloud: { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" },
@@ -137,7 +137,7 @@ const spec: DiagramSpec = {
       icon: "firewall",
       tone: "red",
       step: 3,
-      x: 400,
+      x: 385,
       y: 418,
       w: 176,
       cloud: {
@@ -153,7 +153,7 @@ const spec: DiagramSpec = {
       icon: "firewall",
       tone: "red",
       step: 3,
-      x: 400,
+      x: 385,
       y: 566,
       w: 176,
       cloud: {
@@ -253,7 +253,7 @@ const spec: DiagramSpec = {
       packet: true,
       delay: 1.2,
       via: [
-        [400, 338],
+        [385, 338],
         [280, 338],
         [280, 566],
       ],
@@ -281,7 +281,7 @@ const spec: DiagramSpec = {
       tone: "red",
       dashed: true,
       via: [
-        [400, 338],
+        [385, 338],
         [280, 338],
         [280, 566],
       ],
