@@ -136,7 +136,6 @@ A third answer is fewer networks. In a **shared network**, one central team owns
   caption="Many estates use both: one shared network per environment, joined through a hub."
 />
 
-
 ## On AWS, Google Cloud and Azure
 
 The idea is the same on all three clouds: peering joins two networks and does not chain, a hub passes traffic between many, and ranges must never overlap.
@@ -146,7 +145,7 @@ The idea is the same on all three clouds: peering joins two networks and does no
     - **Two networks:** VPC peering, within an account or across accounts and regions. Each side adds a route to the peering connection. It is not transitive, and a VPC cannot use its peer's internet gateway, NAT gateway or VPN either.
     - **Many networks:** AWS Transit Gateway, a regional router. VPCs, Site-to-Site VPN connections and Direct Connect gateways attach to it. It can be shared with other accounts through AWS Resource Access Manager.
     - **Hub route tables:** each attachment is associated with one transit gateway route table. Propagation decides which attachments' ranges a table learns.
-    - **Inspection:** an inspection VPC attached to the transit gateway, running AWS Network Firewall or partner appliances. Appliance mode on that attachment keeps both directions of a flow on the same path.
+    - **Inspection:** an inspection VPC attached to the transit gateway, running AWS Network Firewall or third-party appliances. Appliance mode on that attachment keeps both directions of a flow on the same path.
     - **Sharing one network:** VPC sharing, also through Resource Access Manager: the owner account shares subnets with other accounts in the same organization.
 
     **The difference that changes a design.** Spoke VPCs keep their own route tables, so each must send the other ranges, often one summary such as 10.0.0.0/8, to the transit gateway. Segmentation lives in the transit gateway's route tables. Across regions, transit gateways peer with each other, and AWS Cloud WAN runs such a global network from one central policy.

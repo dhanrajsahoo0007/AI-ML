@@ -13,17 +13,18 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // replace them without anything moving; the refused hop of step 2 ends at step 2.
 //
 // Layout: three columns and three rows, a plus sign around the hub.
-//   Left (x 130): shop 130,330 | test 130,560.
-//   Middle (x 425): partner 425,95 | hub 425,330 | wholesale 425,560.
-//   Right (x 680): firewall 680,330 | tools 680,560.
-// Every spoke reaches the hub on a straight line. The partner's link drops down x 425, right of the "Network account"
-// tab (which ends near x 402), and the diagonal attachments from test and tools enter the zone through its bottom
-// edge, where there is no tab. Peering 5 runs under the bottom row (y 622): the gap between wholesale and tools
-// is too narrow for its label. Step 2's refused hop leaves the shop upwards along x 130 and turns right along y 95
-// into the partner, so it never lies on top of the diagonal peering 1.
+//   Left (x 110): shop 110,330 | test 110,560.
+//   Middle (x 370): partner 370,95 | hub 370,330 | wholesale 370,560.
+//   Right (x 650): firewall 650,330 | tools 650,560.
+// Every spoke reaches the hub on a straight line. The "Network account" zone uses the region kind, whose tab is
+// narrower than a group's: it ends near x 354, so the partner's link drops down x 370 clear of it. The diagonal
+// attachments from test and tools enter the zone through its bottom edge, where there is no tab. Peering 5 runs
+// under the bottom row (y 622): the gap between wholesale and tools is too narrow for its label. Step 2's refused
+// hop leaves the shop upwards along x 110 and turns right along y 95 into the partner, so it never lies on top of
+// the diagonal peering 1.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 (the free
-// preview and the failure) use only the shop, the partner and the wholesale network, all left of x 520. The right
+// preview and the failure) use only the shop, the partner and the wholesale network, all left of x 466. The right
 // column is first needed in step 3. The canvas stays under 800 wide so labels are readable in the 660 px column.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. Nodes
 // are sized for the longest name the Services toggle puts in them ("VNet 172.16.0.0/16", "Firewall appliance",
@@ -46,7 +47,7 @@ const spec: DiagramSpec = {
     { title: "Inspection in the hub" },
     { title: "Route tables keep test away from live" },
   ],
-  zones: [{ id: "netacct", title: "Network account", tone: "blue", x: 235, y: 262, w: 550, h: 136 }],
+  zones: [{ id: "netacct", title: "Network account", tone: "blue", kind: "region", x: 202, y: 262, w: 583, h: 136 }],
   nodes: [
     // Step 1
     {
@@ -55,9 +56,9 @@ const spec: DiagramSpec = {
       sub: "10.0.0.0/16",
       icon: "network",
       tone: "blue",
-      x: 130,
+      x: 110,
       y: 330,
-      w: 180,
+      w: 170,
       cloud: network("10.0.0.0/16"),
     },
     {
@@ -66,7 +67,7 @@ const spec: DiagramSpec = {
       sub: "172.16.0.0/16",
       icon: "building",
       tone: "neutral",
-      x: 425,
+      x: 370,
       y: 95,
       w: 190,
       cloud: network("172.16.0.0/16"),
@@ -80,7 +81,7 @@ const spec: DiagramSpec = {
       icon: "network",
       tone: "blue",
       step: 2,
-      x: 425,
+      x: 370,
       y: 560,
       w: 190,
       cloud: network("10.2.0.0/16"),
@@ -94,7 +95,7 @@ const spec: DiagramSpec = {
       icon: "network",
       tone: "blue",
       step: 3,
-      x: 680,
+      x: 650,
       y: 560,
       w: 180,
       cloud: network("10.3.0.0/16"),
@@ -109,7 +110,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       accent: true,
       step: 4,
-      x: 425,
+      x: 370,
       y: 330,
       w: 176,
       cloud: {
@@ -127,7 +128,7 @@ const spec: DiagramSpec = {
       icon: "firewall",
       tone: "red",
       step: 5,
-      x: 680,
+      x: 650,
       y: 330,
       w: 190,
       cloud: {
@@ -145,9 +146,9 @@ const spec: DiagramSpec = {
       icon: "network",
       tone: "blue",
       step: 6,
-      x: 130,
+      x: 110,
       y: 560,
-      w: 180,
+      w: 170,
       cloud: network("10.1.0.0/16"),
     },
   ],
@@ -163,7 +164,7 @@ const spec: DiagramSpec = {
       label: "wholesale job: dropped",
       tone: "red",
       dashed: true,
-      via: [[130, 95]],
+      via: [[110, 95]],
       labelAt: 0.62,
       step: 2,
       until: 2,
@@ -177,8 +178,8 @@ const spec: DiagramSpec = {
       to: "tools",
       label: "peering 5",
       via: [
-        [425, 622],
-        [680, 622],
+        [370, 622],
+        [650, 622],
       ],
       step: 3,
       until: 3,
