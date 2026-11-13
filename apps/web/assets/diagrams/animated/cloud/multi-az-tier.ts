@@ -24,7 +24,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   Zone columns (y 160-635): A x 10-258 | B x 270-518 | C x 530-785; tabs end near x 85 / 350 / 605 and reach from y 146 to 174.
 //   App row y 245: server-a 134 | server-b 394 | server-c 654. Data row y 415: db 134 | standby 394.
 //   fault 370,535 in zone B, under the standby.
-//   Bottom strip (y 660-760): flags 394,715 | partner 654,715.
+//   Bottom strip (y 660-775): flags 410,738 | partner 654,738 (low enough that the NEW ring clears the inline labels).
 // Edge routes: the load balancer reaches server A and server C along the corridor at y 125, between the top strip
 // and the zone tabs, and drops into each server's top at its centre x (right of the zone tabs). Server B is straight
 // below it. Servers B and C reach the database on diagonals that pass between the app row and the data row. The
@@ -52,7 +52,7 @@ const toServerC: [number, number][] = [
 const spec: DiagramSpec = {
   title: "From one copy of everything to a tier that can lose a zone",
   width: 795,
-  height: 775,
+  height: 790,
   steps: [
     { title: "One copy of everything" },
     { title: "Stateless copies in three zones" },
@@ -68,8 +68,8 @@ const spec: DiagramSpec = {
     { id: "zone-a", title: "Zone A", tone: "neutral", x: 10, y: 160, w: 248, h: 475 },
     { id: "zone-b", title: "Zone B", tone: "neutral", x: 270, y: 160, w: 248, h: 475 },
     { id: "zone-c", title: "Zone C", tone: "neutral", x: 530, y: 160, w: 255, h: 475 },
-    { id: "config", title: "Regional service", tone: "orange", kind: "subnet", x: 270, y: 660, w: 248, h: 100 },
-    { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 530, y: 660, w: 255, h: 100 },
+    { id: "config", title: "Regional service", tone: "orange", kind: "subnet", x: 270, y: 660, w: 248, h: 115 },
+    { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 530, y: 660, w: 255, h: 115 },
   ],
   nodes: [
     // Step 1
@@ -191,8 +191,8 @@ const spec: DiagramSpec = {
       icon: "flag",
       tone: "orange",
       step: 7,
-      x: 394,
-      y: 715,
+      x: 410,
+      y: 738,
       w: 182,
       cloud: {
         aws: { label: "AppConfig" },
@@ -207,7 +207,7 @@ const spec: DiagramSpec = {
       tone: "neutral",
       step: 7,
       x: 654,
-      y: 715,
+      y: 738,
       w: 166,
     },
   ],
@@ -295,7 +295,7 @@ const spec: DiagramSpec = {
 
     // Step 7: a timeout on the partner's API, and a switch that turns the extras off.
     { from: "server-c", to: "partner", label: "800 ms timeout", packet: true, step: 7 },
-    { from: "flags", to: "server-c", label: "extras off", dashed: true, flow: true, labelAt: 0.2, step: 7 },
+    { from: "flags", to: "server-c", label: "extras off", dashed: true, flow: true, labelAt: 0.27, step: 7 },
   ],
 };
 
