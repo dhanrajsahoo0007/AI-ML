@@ -16,7 +16,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   Row B (y 250), in between: the public internet (left, inside the Internet zone) | the meeting site (right).
 //   Row C (y 420), the cloud's edge: NAT gateway | VPN gateway | private line.
 //   Row D (y 570), inside the cloud: print API | network hub | DNS resolver.
-// Columns (centres): left x 130 | middle x 390 | right x 665.
+// Columns (centres): left x 130 | middle x 375 | right x 665. The middle column ends at x 465, so a phone shows it.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 to 4 use only the
 // left and middle columns; the private line (step 5) and DNS (step 6) live in the right column.
@@ -102,7 +102,7 @@ const spec: DiagramSpec = {
       icon: "router",
       tone: "neutral",
       step: 2,
-      x: 390,
+      x: 375,
       y: 100,
       w: 180,
     },
@@ -113,7 +113,7 @@ const spec: DiagramSpec = {
       icon: "tunnel",
       tone: "blue",
       step: 2,
-      x: 390,
+      x: 375,
       y: 420,
       w: 180,
       cloud: {
@@ -129,7 +129,7 @@ const spec: DiagramSpec = {
       icon: "router",
       tone: "blue",
       step: 2,
-      x: 390,
+      x: 375,
       y: 570,
       w: 180,
       cloud: {
@@ -149,7 +149,7 @@ const spec: DiagramSpec = {
       step: 5,
       x: 665,
       y: 250,
-      w: 210,
+      w: 224,
       cloud: {
         aws: { label: "Direct Connect location" },
         gcp: { label: "Colocation facility" },
@@ -202,13 +202,13 @@ const spec: DiagramSpec = {
     // Step 1: print orders go out through the NAT and across the internet; the factory checks the address and the key.
     { from: "api", to: "nat", label: "print orders", packet: true, until: 1 },
     { from: "nat", to: "internet", packet: true, delay: 0.8, until: 1 },
-    { from: "internet", to: "printsrv", label: "allow-list + key", packet: true, delay: 1.6, until: 1 },
+    { from: "internet", to: "printsrv", label: "allow-list + key", packet: true, delay: 1.6, labelAt: 0.68, until: 1 },
 
     // Step 2: the hub sends the factory's range to the VPN gateway, and one tunnel carries it over the internet.
-    { from: "api", to: "hub", label: "print jobs", packet: true, step: 2 },
+    { from: "api", to: "hub", label: "jobs", packet: true, step: 2 },
     { from: "hub", to: "vpngw", label: "to 10.50.0.0/16", packet: true, delay: 0.8, step: 2, until: 2 },
     { from: "vpngw", to: "router", label: "encrypted tunnel", packet: true, delay: 1.6, step: 2, until: 2 },
-    { from: "router", to: "printsrv", label: "print jobs", packet: true, delay: 2.4, step: 2, until: 2 },
+    { from: "router", to: "printsrv", label: "jobs", packet: true, delay: 2.4, step: 2, until: 2 },
 
     // Step 3: the one tunnel is down, there is no other path, and jobs wait in the shop.
     { from: "vpngw", to: "router", label: "tunnel down 2 h 15 min", tone: "red", dashed: true, step: 3, until: 3 },
@@ -223,10 +223,10 @@ const spec: DiagramSpec = {
       packet: true,
       delay: 1.6,
       via: [
-        [362, 370],
-        [362, 150],
+        [347, 370],
+        [347, 150],
       ],
-      labelAt: 0.3,
+      labelAt: 0.42,
       step: 4,
       until: 4,
     },
@@ -237,14 +237,14 @@ const spec: DiagramSpec = {
       packet: true,
       delay: 2,
       via: [
-        [418, 370],
-        [418, 150],
+        [403, 370],
+        [403, 150],
       ],
       labelAt: 0.7,
       step: 4,
       until: 4,
     },
-    { from: "router", to: "printsrv", label: "print jobs", packet: true, delay: 2.8, step: 4 },
+    { from: "router", to: "printsrv", label: "jobs", packet: true, delay: 2.8, step: 4 },
 
     // Step 5: the hub prefers the private line; the tunnels stay up, idle, as the backup path.
     { from: "hub", to: "linkgw", label: "preferred path", packet: true, delay: 0.8, step: 5 },
@@ -257,8 +257,8 @@ const spec: DiagramSpec = {
       label: "VPN standby",
       dashed: true,
       via: [
-        [362, 370],
-        [362, 150],
+        [347, 370],
+        [347, 150],
       ],
       step: 5,
     },
@@ -267,8 +267,8 @@ const spec: DiagramSpec = {
       to: "router",
       dashed: true,
       via: [
-        [418, 370],
-        [418, 150],
+        [403, 370],
+        [403, 150],
       ],
       step: 5,
     },
