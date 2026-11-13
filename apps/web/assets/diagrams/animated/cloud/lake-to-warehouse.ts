@@ -19,9 +19,11 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   Right:  access rules 670,110 | warehouse 670,260 | curated tables 670,410.
 // Why this order: on a phone the figure scrolls sideways and opens on the left ~480 units. Steps 1 to 4 (the free
 // preview, the lake, the engine and the failure) use only the left and middle columns.
-// The three diagonals (engine to catalog, dashboard to warehouse, engine to curated) all pass through the gutter
-// crossings between zones, so they cross no box and no other edge. The rule-to-catalog edge runs above every zone
-// (y 25), entering both zones right of their tabs.
+// Edges stay out of the zone tabs: the engine-to-catalog edge leaves the engine's left side and climbs the gutter at
+// x 267; the dashboard-to-warehouse edge runs down the gutter at x 535 and enters the warehouse from the left. The one
+// diagonal (engine to curated) crosses only plain zone borders. The rule-to-catalog edge runs above every zone (y 25),
+// entering both zones right of their tabs. Right-column zones have short titles ("Rules", "Serving") so the vertical
+// edges at x 670 pass right of their tabs.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon.
 // Nodes are sized for the longest name the Services toggle puts in them ("Fabric SQL endpoint", "BigQuery (BigLake)",
 // "AWS Lake Formation", "Glue Data Catalog").
@@ -52,8 +54,8 @@ const spec: DiagramSpec = {
     { id: "query", title: "Query", tone: "teal", x: 285, y: 205, w: 230, h: 110 },
     { id: "lake", title: "Lake", tone: "violet", x: 285, y: 355, w: 500, h: 110 },
     { id: "events", title: "Events", tone: "orange", x: 285, y: 505, w: 230, h: 110 },
-    { id: "governance", title: "Governance", tone: "red", x: 555, y: 55, w: 230, h: 110 },
-    { id: "dw", title: "Warehouse", tone: "violet", x: 555, y: 205, w: 230, h: 110 },
+    { id: "governance", title: "Rules", tone: "red", x: 555, y: 55, w: 230, h: 110 },
+    { id: "dw", title: "Serving", tone: "violet", x: 555, y: 205, w: 230, h: 110 },
   ],
   nodes: [
     // Step 1
@@ -149,7 +151,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 130,
       y: 110,
-      w: 180,
+      w: 196,
       cloud: {
         aws: { id: "aws-glue", label: "Glue Data Catalog" },
         gcp: { id: "gcp-dataplex", label: "Knowledge Catalog" },
@@ -230,7 +232,18 @@ const spec: DiagramSpec = {
 
     // Step 3: the dashboard asks the query engine, which looks up the catalog and reads the files where they sit.
     { from: "dashboard", to: "engine", label: "6 charts", packet: true, step: 3, until: 3 },
-    { from: "engine", to: "catalog", label: "which files?", dashed: true, step: 3 },
+    {
+      from: "engine",
+      to: "catalog",
+      label: "which files?",
+      dashed: true,
+      via: [
+        [267, 232],
+        [267, 110],
+      ],
+      labelAt: 0.62,
+      step: 3,
+    },
     { from: "engine", to: "raw", label: "reads in place", packet: true, delay: 1.2, step: 3, until: 3 },
 
     // Step 4: the failure. Every 15 minutes, day and night, each chart reads all 18 GB.
@@ -253,7 +266,18 @@ const spec: DiagramSpec = {
 
     // Step 6: the warehouse loads the curated tables; the dashboard reads a summary; the engine stays for one-offs.
     { from: "curated", to: "warehouse", label: "nightly load", flow: true, dashed: true, step: 6 },
-    { from: "dashboard", to: "warehouse", label: "summary table", packet: true, step: 6 },
+    {
+      from: "dashboard",
+      to: "warehouse",
+      label: "summary table",
+      packet: true,
+      via: [
+        [535, 110],
+        [535, 260],
+      ],
+      labelAt: 0.5,
+      step: 6,
+    },
     { from: "finance", to: "engine", label: "ad-hoc SQL", packet: true, delay: 1.2, step: 6 },
 
     // Step 7: one set of column rules, kept with the catalog and applied by the warehouse too.
