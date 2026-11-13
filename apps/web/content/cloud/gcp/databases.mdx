@@ -31,11 +31,11 @@ A managed database runs the engine, the backups and a standby in a second zone, 
 
 ## How it fits together on Google Cloud
 
-Step 1 is a Cloud SQL for PostgreSQL instance with high availability switched on. Google keeps a standby in a second zone of the same region and writes to both before a commit returns. The standby serves no queries. Automated backups run at 03:00, and the saved change log allows a point-in-time restore.
+Step 1 is a Cloud SQL for PostgreSQL instance with high availability on: a standby in a second zone, written before each commit returns, that serves no queries. Backups run at 03:00, and the change log allows a point-in-time restore.
 
-In step 2 a Cloud SQL read replica, built for the finance lead's monthly report, also takes the order page. It copies changes asynchronously, which means the primary does not wait for it, and it has its own address. Step 3 is the failure: on sale day the replica falls 40 seconds behind and about 130 shoppers pay twice. High availability does not help, because the standby never served that page. Step 4 sends a shopper's reads to the primary for 60 seconds after a write, and a Cloud Monitoring alert watches replica lag.
+In step 2 a Cloud SQL read replica, built for the finance lead's report, also takes the order page. It copies changes asynchronously: the primary does not wait for it. In step 3 it falls 40 seconds behind and about 130 shoppers pay twice; the standby cannot help, because it serves no reads. Step 4 sends a shopper's reads to the primary for 60 seconds after a write, and Cloud Monitoring alerts on lag.
 
-Step 5 differs most here. The Cloud SQL Auth Proxy and the language connectors encrypt and authorise connections, but they do not pool them. So the pooler is one you run, such as PgBouncer, or a pool inside the app. In step 6 a failover drill promotes the standby. The instance keeps its IP address, so the app reconnects to the same place after about 2 minutes.
+Step 5 differs most here. The Cloud SQL Auth Proxy secures connections but does not pool them, so you run the pooler, such as PgBouncer. In step 6 the standby is promoted, and the instance keeps its IP address.
 
 | The idea | On Google Cloud | What to know |
 |---|---|---|
@@ -59,7 +59,7 @@ Step 5 differs most here. The Cloud SQL Auth Proxy and the language connectors e
 
 **Pick it when** a PostgreSQL database needs more read capacity, less replica lag or fast analytical queries, and the team accepts a migration.
 
-AlloyDB keeps compute apart from a regional storage layer. Its primary has a standby node in a second zone, and read pool nodes share the same storage, so adding one copies no data.
+Compute sits apart from a regional storage layer, so a new read pool node copies no data.
 
 ### Spanner
 
@@ -67,7 +67,7 @@ AlloyDB keeps compute apart from a regional storage layer. Its primary has a sta
 
 **Pick it when** relational data outgrows one primary, or must keep taking writes through a zone or region failure without losing any.
 
-Spanner splits each table into ranges of its primary key and moves ranges between servers as load shifts. Transactions across ranges stay strongly consistent, helped by clocks kept in step across Google's data centres. The design rule that matters most is the key. A timestamp or counting order number sends every new write to the last range, so use a random id or a bit-reversed sequence. [NewSQL Databases](/system-design/databases/newsql-databases) explains the theory.
+Spanner splits each table into ranges of its primary key, spread over servers, and keeps transactions across ranges strongly consistent. A counting key sends every new write to the last range, so use a random id or a bit-reversed sequence. [NewSQL Databases](/system-design/databases/newsql-databases) explains the theory.
 
 ### Firestore
 
@@ -75,7 +75,7 @@ Spanner splits each table into ranges of its primary key and moves ranges betwee
 
 **Pick it when** a mobile or web app reads and writes documents, wants live updates, and should have no servers to size.
 
-Each Firestore database runs in one of two modes, chosen when you create it: Native mode, with live listeners and mobile sync, or Datastore mode for server apps. Firestore picks partitions itself, so hot spots move to single documents. Brightpost's sale counter would hit the same wall here as on any NoSQL table, because one document accepts only a low, steady write rate. Split it into ten documents and add them up on read.
+A database runs in Native mode, with live listeners and mobile sync, or Datastore mode for server apps, chosen at creation. Firestore picks partitions itself, so hot spots move to single documents: one document accepts only a low, steady write rate. Split a sale counter into ten documents and add them up on read.
 
 <AnimatedDiagram spec="animated/cloud/nosql-partitions" step={2} cloud="gcp" minWidth={620} caption="One hot key: every page view writes the same counter, so one partition takes every write and refuses the excess." />
 
@@ -91,19 +91,19 @@ Bigtable sorts rows by one row key and indexes nothing else. Put a spread-out fi
 
 <CloudServiceProfile id="gcp-database-migration-service" />
 
-**Pick it when** you move MySQL, PostgreSQL or SQL Server into Cloud SQL or AlloyDB with only minutes of downtime. The cutover is a promotion of the target, and it is one-way. [Database Migration](/cloud/data/database-migration) walks through the whole move.
+**Pick it when** you move MySQL, PostgreSQL or SQL Server into Cloud SQL or AlloyDB with minutes of downtime. Cutover is a one-way promotion; see [Database Migration](/cloud/data/database-migration).
 
 ## Common mistakes
 
-- **Counting the high-availability standby as read capacity.** It serves no queries. Reads that may be stale go to a replica; reads that must be fresh go to the primary.
-- **One connection per function copy.** The Auth Proxy does not pool, so a burst of functions can use every connection. Put a pooler in front, or let one Cloud Run instance serve many requests at once.
-- **Counting keys in Spanner or Bigtable.** Every new row lands in the same range, and one server does all the work while the rest sit idle.
+- **Counting the high-availability standby as read capacity.** It serves no queries until a failover.
+- **One connection per function copy.** The Auth Proxy does not pool, so a burst of functions can use every connection. Put a pooler in front.
+- **Counting keys in Spanner or Bigtable.** Every new row lands in the same range, and one server does all the work.
 
 ## Where this shows up in system design
 
-- **Orders and payments:** Cloud SQL with high availability, a replica for reports, and reads after a write sent to the primary, as in [Single-Leader Replication](/system-design/databases/single-leader-replication).
-- **Global inventory and ledgers:** Spanner in a multi-region configuration, when writes must continue through a region failure.
-- **Events and time series:** Bigtable with a row key that spreads writes, as in [Wide-Column Stores](/system-design/databases/wide-column-stores).
+- **Orders and payments:** Cloud SQL with high availability and a replica for reports, as in [Single-Leader Replication](/system-design/databases/single-leader-replication).
+- **Global inventory and ledgers:** Spanner across regions, when writes must survive a region failure.
+- **Events and time series:** Bigtable with a spreading row key, as in [Wide-Column Stores](/system-design/databases/wide-column-stores).
 
 ## Related
 
@@ -113,7 +113,7 @@ Bigtable sorts rows by one row key and indexes nothing else. Put a spread-out fi
   <InterviewQuestion question="What does a Cloud SQL high-availability instance protect against, and what does it not?" category="Cloud" level="Mid">
     **Short answer.** It protects against losing the primary's machine or zone. A standby in a second zone, written synchronously, takes over in about 2 minutes with no committed write lost. It does not protect against a region outage, a bad delete, or stale reads from a read replica.
 
-    **Why.** Every write waits for the standby, so it holds every committed order. It copies mistakes just as faithfully: a bad delete is gone on both, and only a point-in-time restore undoes it. The standby serves no reads, so it cannot help a replica that falls 40 seconds behind. That is how about 130 Brightpost shoppers paid twice. A region outage needs a cross-region replica and a written recovery plan.
+    **Why.** Every write waits for the standby, so it holds every committed order. It copies mistakes as faithfully: a bad delete is gone on both, and only a point-in-time restore undoes it. The standby serves no reads, so it cannot help a replica that falls 40 seconds behind. That is how about 130 Brightpost shoppers paid twice. A region outage needs a cross-region replica and a written recovery plan.
 
     <AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={3} cloud="gcp" highlight={["primary", "standby", "replica", "paid"]} caption="On sale day the replica falls behind. The standby holds every write but serves no reads, so it cannot help." />
 

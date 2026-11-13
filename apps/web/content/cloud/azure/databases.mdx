@@ -31,11 +31,11 @@ A managed database runs the engine, the backups and a standby in a second zone, 
 
 ## How it fits together on Azure
 
-Step 1 is a flexible server with zone-redundant high availability. Azure keeps a standby in another zone and writes to it before a commit returns; the standby serves no reads. Backups run at 03:00 and keep the change log, so you can restore to any second. A restore builds a new server, so write down how the app moves to it.
+Step 1 is a flexible server with zone-redundant high availability: a standby in another zone, written before each commit returns, that serves no reads. Backups run at 03:00 with the change log, so you can restore to any second, onto a new server.
 
-In step 2 a read replica, built for the finance lead's monthly report, also takes the order page. It copies changes asynchronously, which means the primary does not wait for it, and it has its own server name. Step 3 is the failure: on sale day the replica falls 40 seconds behind and about 130 shoppers pay twice. Step 4 sends a shopper's reads to the primary for 60 seconds after a write, and an Azure Monitor alert watches replica lag.
+In step 2 a read replica, built for the finance lead's report, also takes the order page. It copies changes asynchronously: the primary does not wait for it. In step 3 it falls 40 seconds behind and about 130 shoppers pay twice. Step 4 sends a shopper's reads to the primary for 60 seconds after a write, and Azure Monitor alerts on lag.
 
-Step 5 is shortest on Azure. PgBouncer, a connection pooler, is built into flexible server: you switch it on and connect to its port instead of the database's. The resize function on Azure Functions then borrows connections instead of opening its own. In step 6 a failover drill promotes the standby, and the server name points at the new primary after about 2 minutes.
+Step 5 is shortest on Azure. PgBouncer, a connection pooler, is built in: you switch it on and connect to its port. In step 6 the standby is promoted, and the server name points at it after about 2 minutes.
 
 | The idea | On Azure | What to know |
 |---|---|---|
@@ -51,9 +51,7 @@ Step 5 is shortest on Azure. PgBouncer, a connection pooler, is built into flexi
 
 <CloudServiceProfile id="azure-postgresql" />
 
-**Pick it when** your engine is PostgreSQL and the data fits on one primary. It is the default home for Brightpost's orders on Azure.
-
-Flexible server comes in three compute tiers. **Burstable** suits small or test servers that idle most of the day. **General Purpose** suits most production work, and **Memory Optimized** suits databases whose busy data needs more memory.
+**Pick it when** your engine is PostgreSQL and the data fits on one primary, as Brightpost's orders do. Small test servers can use the cheaper **Burstable** tier.
 
 ### Azure SQL Database
 
@@ -61,7 +59,7 @@ Flexible server comes in three compute tiers. **Burstable** suits small or test 
 
 **Pick it when** the app uses the SQL Server engine, such as a .NET app, or a SaaS product that gives each customer its own database.
 
-Azure SQL Database is sold by vCore, a unit of processor, in three service tiers. **General Purpose** keeps data on remote storage and starts fresh compute when a machine fails; it is the budget choice for most apps. **Business Critical** keeps several copies on fast local disks in different machines, so failover is quicker, and one copy can answer read-only queries. **Hyperscale** keeps compute apart from shared storage, so a very large database grows and adds read copies without copying data. The **serverless** option scales between a minimum and a maximum and can pause when idle. **Elastic pools** share one budget among many small databases. An older DTU model bundles processor, memory and disk into one number.
+It is sold by vCore, a unit of processor, in three tiers. **General Purpose** keeps data on remote storage and starts fresh compute when a machine fails: the budget choice. **Business Critical** keeps several copies on fast local disks, so failover is quicker and one copy can answer read-only queries. **Hyperscale** keeps compute apart from shared storage, so a very large database adds read copies without copying data. **Serverless** compute scales within a range and can pause when idle, and **elastic pools** share one budget among many small databases.
 
 ### Azure Cosmos DB
 
@@ -69,9 +67,9 @@ Azure SQL Database is sold by vCore, a unit of processor, in three service tiers
 
 **Pick it when** key-value or document data needs fast reads by key at any scale, or copies in several regions.
 
-Cosmos DB makes consistency a setting. **Strong** means every read sees the latest write. **Bounded staleness** lets reads trail by at most a set time or number of changes. **Session**, the default, shows each client its own writes in order, while others may see them a moment later. **Consistent prefix** never shows writes out of order but may be behind, and **eventual** promises only that reads catch up. You set one level for the account and can relax it per request. Weaker levels cost fewer request units per read. Strong needs a single write region, so an account that writes in several regions is never strongly consistent.
+Cosmos DB makes consistency a setting. **Strong** means every read sees the latest write. **Bounded staleness** lets reads trail by at most a set time or number of changes. **Session**, the default, shows each client its own writes in order; others may see them a moment later. **Consistent prefix** never shows writes out of order but may be behind, and **eventual** promises only that reads catch up. You set a level for the account and can relax it per request; weaker levels cost fewer request units per read. Strong needs a single write region.
 
-The partition key is fixed when a container is created. Provisioned throughput is divided across the physical partitions, so one hot key throttles at a fraction of what you pay for.
+Throughput is divided across physical partitions, so one hot key throttles at a fraction of what you pay for.
 
 <AnimatedDiagram spec="animated/cloud/nosql-partitions" step={2} cloud="azure" minWidth={620} caption="One hot key: every page view writes the same counter, so one partition takes every write and refuses the excess." />
 
@@ -85,24 +83,24 @@ The partition key is fixed when a container is created. Provisioned throughput i
 
 <CloudServiceProfile id="azure-ai-search" />
 
-**Pick it when** you need product search, document search or the retrieval step of a chatbot that answers from your own documents. Feed it from the main database; never treat it as the source of truth.
+**Pick it when** you need product search, or retrieval for a chatbot that answers from your own documents. Feed it from the main database.
 
 ### Azure Database Migration Service
 
 <CloudServiceProfile id="azure-dms" />
 
-**Pick it when** you move SQL Server into Azure SQL, or MySQL into Azure Database for MySQL, with a short cutover. PostgreSQL sources use flexible server's own migration service. [Database Migration](/cloud/data/database-migration) walks through the whole move.
+**Pick it when** you move SQL Server into Azure SQL, or MySQL into Azure Database for MySQL, with a short cutover. PostgreSQL uses flexible server's own migration service; see [Database Migration](/cloud/data/database-migration).
 
 ## Common mistakes
 
-- **Picking the product before the engine.** Pausing and Hyperscale exist only in Azure SQL Database. A PostgreSQL team gets neither, so plan with flexible server's features.
-- **A Cosmos DB partition key chosen in a hurry.** It cannot be changed later; changing it means copying the data to a new container. Choose it from the reads you will make.
-- **Strong consistency everywhere.** Each read costs more request units, and it rules out writes in several regions. Session is enough for most reads a user makes.
+- **Picking the product before the engine.** Pausing and Hyperscale exist only in Azure SQL Database; a PostgreSQL team gets neither.
+- **A Cosmos DB partition key chosen in a hurry.** It is fixed when the container is created; changing it means copying the data to a new one.
+- **Strong consistency everywhere.** Each read costs more, and it rules out writes in several regions. Session suits most reads a user makes.
 
 ## Where this shows up in system design
 
-- **Orders and payments:** flexible server with zone-redundant high availability, a replica for reports, and reads after a write sent to the primary, as in [Single-Leader Replication](/system-design/databases/single-leader-replication).
-- **Multi-tenant SaaS:** Azure SQL Database elastic pools, one small database per customer sharing one budget.
+- **Orders and payments:** flexible server with zone-redundant high availability and a replica for reports, as in [Single-Leader Replication](/system-design/databases/single-leader-replication).
+- **Multi-tenant SaaS:** Azure SQL Database elastic pools, one small database per customer.
 - **Global user data:** Cosmos DB with session consistency and a home region per user, as in [Consistency Models](/system-design/patterns/consistency-models).
 
 ## Related
@@ -127,7 +125,7 @@ The partition key is fixed when a container is created. Provisioned throughput i
   <InterviewQuestion question="Which Cosmos DB consistency level would you choose for a chat app?" category="Cloud" level="Mid">
     **Short answer.** Session. Each user always sees their own messages, in order, right after sending them. Other users may see a new message a moment later, which a chat can live with, and reads stay fast and cheap.
 
-    **Why.** Strong consistency costs more request units per read, adds latency, and rules out writes in several regions. Eventual could hide a message from its own sender just after sending, which looks like a lost message. Consistent prefix keeps order but still may not show the sender's own write. Session gives exactly the promise users notice, at about the cost of the weaker levels.
+    **Why.** Strong consistency costs more request units per read, adds latency, and rules out writes in several regions. Eventual could hide a message from its own sender right after sending, which looks like a lost message. Consistent prefix keeps order but still may not show the sender's own write. Session gives exactly the promise users notice, at about the cost of the weaker levels.
 
     **Follow-ups the interviewer may ask.**
     - What must the client keep so that session consistency works across app servers?
