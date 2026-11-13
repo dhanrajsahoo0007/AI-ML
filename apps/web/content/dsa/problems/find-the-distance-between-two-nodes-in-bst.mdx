@@ -1,0 +1,162 @@
+---
+title: "Find the distance between two nodes in BST"
+description: "Given the root of a binary search tree with unique values and two integers p and q representing node values, return the number of edges on the shortest path…"
+difficulty: medium
+patterns: [tree-ancestor-problems]
+topics: [binary-search-trees]
+companies: []
+languages: [python]
+entry: { python: distance_between_values_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class TreeNode:
+        def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _build_tree(values):
+        if not values:
+            return None
+        nodes = [None if v is None else TreeNode(v) for v in values]
+        queue, i = [nodes[0]], 1
+        for node in queue:
+            if node is None:
+                continue
+            for side in ("left", "right"):
+                if i < len(values):
+                    setattr(node, side, nodes[i])
+                    queue.append(nodes[i])
+                    i += 1
+            if i >= len(values):
+                break
+        return nodes[0]
+
+
+    def _tree_values(root):
+        out, queue = [], [root] if root else []
+        for node in queue:
+            if node is None:
+                out.append(None)
+            else:
+                out.append(node.val)
+                queue += [node.left, node.right]
+        while out and out[-1] is None:
+            out.pop()
+        return out
+
+
+    def distance_between_values_tests(a0, a1, a2):  # the entry the tests call
+        result = distance_between_values(_build_tree(a0), a1, a2)
+        return result
+
+
+    # --- Your code ---
+    def distance_between_values(root: TreeNode | None, p: int, q: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/find-the-distance-between-two-nodes-in-bst.public.json, hidden: tests/find-the-distance-between-two-nodes-in-bst.hidden.json }
+complexity: { time: "O(h) - Two root-to-node traversals plus O(h) scan.", space: "O(h) - Path storage lists." }
+group: "06. Tree Ancestor Problems"
+number: "02"
+order: 15006002000000
+---
+
+Given the root of a binary search tree with unique values and two integers p and q representing
+node values, return the number of edges on the shortest path between those two nodes.
+
+## Examples
+
+````text
+Example 1:
+    Input: BST [6,2,8,0,4,7,9,3,5], p = 2, q = 8
+    Output: 2 (path 2-6-8)
+
+Example 2:
+    Input: same tree, p = 2, q = 4
+    Output: 1 (one edge between parent and child)
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [2, 10^5].
+- p and q exist and are distinct values in the tree.
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Paths through LCA
+Record the path from root to each value; trim the common prefix; remaining lengths sum to the distance.
+
+1. Walk from root to p while recording visited nodes or their values.
+2. Walk from root to q similarly.
+3. Advance an index while both paths share the same node at that depth.
+4. Return (len(path\_p) - i) + (len(path\_q) - i).
+
+## Complexity
+
+**Time:** O(h) - Two root-to-node traversals plus O(h) scan.
+
+**Space:** O(h) - Path storage lists.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: List[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+class Solution:
+    def distanceBetweenValues(self, root: Optional[TreeNode], p: int, q: int) -> int:
+        def path_to(target: int) -> List[TreeNode]:
+            cur = root
+            out: List[TreeNode] = []
+            while cur:
+                out.append(cur)
+                if cur.val == target:
+                    return out
+                cur = cur.left if target < cur.val else cur.right
+            raise ValueError("value not in BST")
+
+        pa = path_to(p)
+        pb = path_to(q)
+        i = 0
+        while i < len(pa) and i < len(pb) and pa[i] is pb[i]:
+            i += 1
+        return len(pa) + len(pb) - 2 * i
+````

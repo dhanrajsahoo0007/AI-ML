@@ -1,0 +1,94 @@
+---
+title: "Kth Largest Element in Stream"
+description: "Design a class to find the kth largest element in a stream."
+difficulty: medium
+patterns: [heap-with-lazy-deletion-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: KthLargest }
+mode: class
+starter:
+  python: |
+    class KthLargest:
+        def __init__(self, k: int, nums: list[int]):
+            pass
+
+        def add(self, val: int) -> int:
+            # Your code here
+            pass
+tests: { public: tests/kth-largest-element-in-stream.public.json, hidden: tests/kth-largest-element-in-stream.hidden.json }
+complexity: { time: "O(n log k) for init, O(log k) per add", space: "O(k) for the heap" }
+group: "06. Heap with Lazy Deletion Pattern"
+number: "01"
+order: 10006001000000
+---
+
+Design a class to find the kth largest element in a stream.
+KthLargest(int k, int\[\] nums) initializes with k and initial stream.
+int add(int val) appends val and returns the kth largest element.
+
+## Examples
+
+````text
+Example 1:
+Input: k=3, nums=[4,5,8,2], add(3)=4, add(5)=5, add(10)=5, add(9)=8
+````
+
+## Constraints
+
+````text
+- 1 <= k <= 10^4
+- 0 <= nums.length <= 10^4
+- -10^4 <= nums[i], val <= 10^4
+- At most 10^4 calls to add.
+- At least k elements when add is called.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap with Lazy Deletion / Streaming
+Maintain a min-heap of exactly k elements. The root is always the kth largest.
+New elements only enter the heap if they're larger than the current kth largest.
+
+1. Initialize a min-heap. Add initial elements via the add method.
+2. On add: if heap size &lt; k, push val. Else if val &gt; root, replace root.
+3. Return the root (kth largest).
+
+## Complexity
+
+**Time:** O(n log k) for init, O(log k) per add
+
+**Space:** O(k) for the heap
+
+## Original notes
+
+````text
+Original notes (restored):
+Streaming variant of static kth largest: `add` mirrors the old `KthLargest` class — maintain size-k
+min-heap, replace root only when the newcomer beats the current kth-largest threshold. Constructor
+simply drains `nums` through `add` so duplicate logic stays centralized.
+````
+
+## Solution
+
+````python
+import heapq
+
+
+class KthLargest:
+    def __init__(self, k: int, nums: list[int]):
+        self.k = k
+        self.heap = []
+        for num in nums:
+            self.add(num)
+
+    def add(self, val: int) -> int:
+        if len(self.heap) < self.k:
+            heapq.heappush(self.heap, val)
+        elif val > self.heap[0]:
+            heapq.heapreplace(self.heap, val)
+        return self.heap[0]
+````

@@ -42,12 +42,19 @@ const CODE_LINE = /^[\w\s.,:;()[\]=+\-*/%]+$/;
 const PROSE_LINE = /^[A-Za-z0-9 .,:;()-]+$/;
 
 /** The longest line of `source` of that kind, at least 20 characters, that is not in `except`. */
+/** A name of four or more letters that is not a Python keyword or builtin: what makes a code line this problem's own. */
+const OWN_NAME =
+  /\b(?!(?:return|while|range|print|False|True|None|self|lambda|elif|else|import|from|with|yield|break|continue|pass|class|sorted|reversed|enumerate|append|float|tuple|isinstance)\b)[A-Za-z_][A-Za-z0-9_]{3,}\b/;
+
 function distinctiveLine(source: string, plain: RegExp, except = ""): string | undefined {
+  // Code lines with a name of the problem's own come first: a bare formula such as a cross product can also
+  // occur in an unrelated library bundle.
+  const own = (l: string) => (plain === CODE_LINE && OWN_NAME.test(l) ? 1 : 0);
   return source
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length >= 20 && plain.test(l) && !except.includes(l))
-    .sort((a, b) => b.length - a.length)[0];
+    .sort((a, b) => own(b) - own(a) || b.length - a.length)[0];
 }
 
 function walk(dir: string, keep: (f: string) => boolean): string[] {

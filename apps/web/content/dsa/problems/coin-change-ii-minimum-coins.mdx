@@ -1,0 +1,89 @@
+---
+title: "Coin Change II (Minimum Coins)"
+description: "Given coins (distinct positive integers) and amount, find the fewest coins to make amount with unlimited supply of each coin."
+difficulty: medium
+patterns: [unbounded-knapsack]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: coin_change_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def coin_change_tests(a0, a1):  # the entry the tests call
+        result = coin_change(a0, a1)
+        result = sorted(result, key=repr) if isinstance(result, list) else result
+        return result
+
+
+    # --- Your code ---
+    def coin_change(coins: list[int], amount: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/coin-change-ii-minimum-coins.public.json, hidden: tests/coin-change-ii-minimum-coins.hidden.json }
+complexity: { time: "O(amount * len(coins)).", space: "O(amount)." }
+group: "03. Unbounded Knapsack"
+number: "03"
+leetcode: coin-change-ii
+leetcodeId: 518
+order: 20003003000000
+---
+
+Given coins (distinct positive integers) and amount, find the fewest coins to
+make amount with unlimited supply of each coin. Return -1 if impossible.
+
+## Examples
+
+````text
+Example 1:
+    Input: coins = [1, 2, 5], amount = 11
+    Output: 3
+Example 2:
+    Input: coins = [2], amount = 3
+    Output: -1
+````
+
+## Constraints
+
+````text
+- 1 <= len(coins) <= 12
+- 1 <= coins[i] <= 2^31 - 1
+- 0 <= amount <= 10^4
+````
+
+**Order.** Any order is accepted: the tests sort your result before comparing it.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Unbounded knapsack minimization
+Relax dp\[v\] with every coin in any order (unbounded uses forward scan per coin).
+
+1. Initialize dp\[0\]=0, others infinity.
+2. For each coin, for v from coin..amount, dp\[v\] = min(dp\[v\], dp\[v-coin\]+1).
+3. Return dp\[amount\] if finite else -1.
+
+## Complexity
+
+**Time:** O(amount \* len(coins)).
+
+**Space:** O(amount).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def coinChange(self, coins: List[int], amount: int) -> int:
+        inf = amount + 1
+        dp = [inf] * (amount + 1)
+        dp[0] = 0
+        for c in coins:
+            for v in range(c, amount + 1):
+                dp[v] = min(dp[v], dp[v - c] + 1)
+        return dp[amount] if dp[amount] <= amount else -1
+````

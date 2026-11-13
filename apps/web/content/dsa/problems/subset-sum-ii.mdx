@@ -1,0 +1,144 @@
+---
+title: "Subset Sum II"
+description: "Given nums that may contain duplicates, return all subsets without duplicate subsets."
+difficulty: medium
+patterns: [subset-pattern]
+topics: [backtracking]
+companies: []
+languages: [python]
+entry: { python: subsets_with_dup_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def subsets_with_dup_tests(a0):  # the entry the tests call
+        result = subsets_with_dup(a0)
+        result = sorted(result, key=repr) if isinstance(result, list) else result
+        return result
+
+
+    # --- Your code ---
+    def subsets_with_dup(nums: list[int]) -> list[list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/subset-sum-ii.public.json, hidden: tests/subset-sum-ii.hidden.json }
+complexity: { time: "O(n * 2^n) worst case; duplicate skipping reduces work.", space: "O(n) - recursion depth." }
+group: "02. Subset Pattern"
+number: "02"
+order: 12002002000000
+---
+
+Given nums that may contain duplicates, return all subsets without duplicate subsets.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 2, 2]
+    Output: [[],[1],[1,2],[1,2,2],[2],[2,2]]
+
+Example 2:
+    Input: nums = [0]
+    Output: [[],[0]]
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 10
+- -10 <= nums[i] <= 10
+````
+
+**Order.** Any order is accepted: the tests sort your result before comparing it.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Subset backtracking with duplicate skipping
+Sort nums; skip nums\[i\] when it equals nums\[i-1\] at the same recursion depth.
+
+1. Sort the array so equal values are adjacent.
+2. At each level, skip index i if i &gt; start and nums\[i\] == nums\[i - 1\].
+3. Otherwise include nums\[i\] and recurse with start = i + 1.
+
+## Complexity
+
+**Time:** O(n \* 2^n) worst case; duplicate skipping reduces work.
+
+**Space:** O(n) - recursion depth.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem Statement:
+    Given an integer array `nums` that may contain duplicates, return all possible subsets (the power set).
+    The solution set must not contain duplicate subsets. Return the solution in any order.
+
+    Example 1:
+        Input: nums = [1,2,2]
+        Output: [[],[1],[1,2],[1,2,2],[2],[2,2]]
+
+    Example 2:
+        Input: nums = [0]
+        Output: [[],[0]]
+
+    Time Complexity: O(2^n), where n is the number of elements in nums.
+    In the worst case, we generate all possible subsets.
+
+    Space Complexity: O(2^n) to store all the subsets in the result list.
+    The recursion stack also uses space, but it's limited to O(n) in the worst case.
+
+Explanation:
+    This problem is solved using a backtracking approach. The key challenges are:
+    1. Generating all possible subsets
+    2. Handling duplicates to avoid duplicate subsets
+
+    The solution sorts the input array first, which allows us to easily skip duplicates.
+    We use a recursive backtracking function to generate subsets, adding each valid subset to our result.
+
+
+
+The backtracking algorithm works as follows:
+
+    1. We start with an empty subset and progressively build larger subsets.
+    2. At each step, we have two choices for each element: include it or not.
+    3. We use the start parameter to keep track of which elements we've considered.
+    4. To handle duplicates, we skip elements that are the same as the previous one (when they're not the first element we're considering in a particular recursive call).
+    5. We add each valid subset to our result list.
+    6. After exploring with an element included, we backtrack by removing it, allowing us to explore options without it.
+
+    Recursion Tree (for input [1,2,2]):
+                            []
+                    /                              [1]            []
+                /    \         /                [1,2]    [1]     [2]     []
+            /    \                   /
+        [1,2,2]  [1,2]              [2,2]
+
+    Note: The second [2] is skipped in the actual execution to avoid duplicates.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def subsetsWithDup(self, nums: List[int]) -> List[List[int]]:
+        nums.sort()
+        result: List[List[int]] = []
+
+        def backtrack(start: int, path: List[int]) -> None:
+            result.append(path[:])
+            for i in range(start, len(nums)):
+                if i > start and nums[i] == nums[i - 1]:
+                    continue
+                path.append(nums[i])
+                backtrack(i + 1, path)
+                path.pop()
+
+        backtrack(0, [])
+        return result
+````

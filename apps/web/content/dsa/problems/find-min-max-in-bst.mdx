@@ -1,0 +1,175 @@
+---
+title: "Find Min-Max in BST"
+description: "Given the root of a binary search tree, return the minimum and maximum values stored in the tree."
+difficulty: medium
+patterns: [bst-properties-and-traversal]
+topics: [binary-search-trees]
+companies: []
+languages: [python]
+entry: { python: find_min_max_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class TreeNode:
+        def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _build_tree(values):
+        if not values:
+            return None
+        nodes = [None if v is None else TreeNode(v) for v in values]
+        queue, i = [nodes[0]], 1
+        for node in queue:
+            if node is None:
+                continue
+            for side in ("left", "right"):
+                if i < len(values):
+                    setattr(node, side, nodes[i])
+                    queue.append(nodes[i])
+                    i += 1
+            if i >= len(values):
+                break
+        return nodes[0]
+
+
+    def _tree_values(root):
+        out, queue = [], [root] if root else []
+        for node in queue:
+            if node is None:
+                out.append(None)
+            else:
+                out.append(node.val)
+                queue += [node.left, node.right]
+        while out and out[-1] is None:
+            out.pop()
+        return out
+
+
+    def find_min_max_tests(a0):  # the entry the tests call
+        result = find_min_max(_build_tree(a0))
+        return result
+
+
+    # --- Your code ---
+    def find_min_max(root: TreeNode | None) -> tuple[int | None, int | None]:
+        # Your code here
+        pass
+tests: { public: tests/find-min-max-in-bst.public.json, hidden: tests/find-min-max-in-bst.hidden.json }
+complexity: { time: "O(h) - Height-bound path to each extreme.", space: "O(1) - Iterative pointers only." }
+group: "02. BST Properties and Traversal"
+number: "01"
+order: 15002001000000
+---
+
+Given the root of a binary search tree, return the minimum and maximum values stored in the tree.
+For an empty tree, both results are undefined and represented as None.
+
+## Examples
+
+````text
+Example 1:
+    Input: BST with values [5,3,7,1,4,6,8]
+    Output: min = 1, max = 8
+
+Example 2:
+    Input: single node with val 10
+    Output: min = 10, max = 10
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 10^4].
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** BST extreme navigation
+The minimum is the leftmost node; the maximum is the rightmost node.
+
+1. If root is None, return (None, None).
+2. Walk left pointers until None to find the minimum node value.
+3. Walk right pointers until None to find the maximum node value.
+
+## Complexity
+
+**Time:** O(h) - Height-bound path to each extreme.
+
+**Space:** O(1) - Iterative pointers only.
+Restored (original notes, diagrams, and walkthrough):
+Binary Search Tree (BST) Implementation
+
+This implementation includes the following operations:
+1. Insert a value
+2. Search for a value
+3. Find the minimum value
+4. Find the maximum value
+
+Time Complexity:
+- Insert: O(h) where h is the height of the tree
+- Search: O(h)
+- Find Min/Max: O(h)
+
+Space Complexity:
+- For all operations: O(h) in the worst case due to recursion
+- O(1) for iterative versions of find min/max
+
+In a balanced BST, h = log(n) where n is the number of nodes.
+In the worst case (skewed tree), h = n.
+
+## Solution
+
+````python
+from typing import List, Optional, Tuple
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: list[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            elif v > cur.val:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+            else:
+                break
+    return root
+
+
+class Solution:
+    def findMinMax(self, root: Optional[TreeNode]) -> Tuple[Optional[int], Optional[int]]:
+        if root is None:
+            return None, None
+        lo = root
+        while lo.left:
+            lo = lo.left
+        hi = root
+        while hi.right:
+            hi = hi.right
+        return lo.val, hi.val
+````

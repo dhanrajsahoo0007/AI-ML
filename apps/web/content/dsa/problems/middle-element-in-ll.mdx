@@ -1,0 +1,153 @@
+---
+title: "Middle Element in LL"
+description: "Given the head of a singly linked list, return the middle node."
+difficulty: medium
+patterns: [fundamental-operations]
+topics: [linked-lists]
+companies: []
+languages: [python]
+entry: { python: middle_node_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class ListNode:
+        def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+            self.val = val
+            self.next = next
+
+
+    def _build_list(values):
+        head = None
+        for v in reversed(values or []):
+            node = ListNode(v)
+            node.next = head
+            head = node
+        return head
+
+
+    def _list_values(node):
+        out = []
+        while node is not None:
+            out.append(node.val)
+            node = node.next
+        return out
+
+
+    def middle_node_tests(a0):  # the entry the tests call
+        result = _list_values(middle_node(_build_list(a0)))
+        return result
+
+
+    # --- Your code ---
+    def middle_node(head: ListNode | None) -> ListNode | None:
+        # Your code here
+        pass
+tests: { public: tests/middle-element-in-ll.public.json, hidden: tests/middle-element-in-ll.hidden.json }
+complexity: { time: "O(n).", space: "O(1)." }
+group: "01. Fundamental Operations"
+number: "03"
+order: 13001003000000
+---
+
+Given the head of a singly linked list, return the middle node.
+If there are two middle nodes, return the second middle node.
+
+## Examples
+
+````text
+Example 1:
+    Input: head = [1,2,3,4,5]
+    Output: sublist starting at node 3 -> [3,4,5]
+
+Example 2:
+    Input: head = [1,2,3,4,5,6]
+    Output: sublist starting at node 4
+````
+
+## Constraints
+
+````text
+- The number of nodes n satisfies 1 <= n <= 100.
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Fast / slow pointers
+Move fast two steps per slow step; when fast ends, slow is at the (second) middle.
+
+1. Initialize slow = fast = head.
+2. While fast and fast.next, advance slow once and fast twice.
+3. Return slow.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1).
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given the head of a singly linked list, return the middle node of the linked list.
+If there are two middle nodes, return the second middle node.
+
+Solution Steps:
+1. Use two pointers: slow and fast.
+2. Move slow one step at a time and fast two steps at a time.
+3. When fast reaches the end or goes beyond, slow will be at the middle.
+
+Time Complexity: O(n), where n is the number of nodes in the linked list.
+Space Complexity: O(1), as we only use a constant amount of extra space.
+
+Examples:
+1. Input: 1 -&gt; 2 -&gt; 3 -&gt; 4 -&gt; 5
+Output: 3 -&gt; 4 -&gt; 5 (Node with value 3)
+2. Input: 1 -&gt; 2 -&gt; 3 -&gt; 4 -&gt; 5 -&gt; 6
+Output: 4 -&gt; 5 -&gt; 6 (Node with value 4)
+3. Input: 1
+Output: 1 (Node with value 1)
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+def linked_list_to_list(head: Optional[ListNode]) -> List[int]:
+    out: List[int] = []
+    while head:
+        out.append(head.val)
+        head = head.next
+    return out
+
+
+class Solution:
+    def middleNode(self, head: Optional[ListNode]) -> Optional[ListNode]:
+        if not head:
+            return None
+        slow = fast = head
+        while fast and fast.next:
+            slow = slow.next
+            fast = fast.next.next
+        return slow
+````

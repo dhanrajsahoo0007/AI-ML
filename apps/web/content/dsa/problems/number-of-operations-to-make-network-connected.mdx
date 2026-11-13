@@ -1,0 +1,138 @@
+---
+title: "Number of Operations to Make Network Connected"
+description: "There are n computers numbered from 0 to n - 1 connected by ethernet cables connections forming a network where connections[i] = [ai, bi] represents a connec…"
+difficulty: medium
+patterns: [introduction-to-disjoint-set-union-dsu]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: Solution }
+mode: class
+starter:
+  python: |
+    class Solution:
+        def __init__(self) -> None:
+            pass
+
+        def find(self, x: int) -> int:
+            # Your code here
+            pass
+
+        def union(self, x: int, y: int) -> None:
+            # Your code here
+            pass
+
+        def makeConnected(self, n: int, connections: list[list[int]]) -> int:
+            # Your code here
+            pass
+tests: { public: tests/number-of-operations-to-make-network-connected.public.json, hidden: tests/number-of-operations-to-make-network-connected.hidden.json }
+complexity: { time: "O(N + M), where N is the number of computers and M is the number of connections.", space: "O(N) for the parent and rank arrays." }
+group: "06. Disjoint Union Sets › 01. Introduction to Disjoint Set Union (DSU)"
+number: "03"
+leetcode: number-of-operations-to-make-network-connected
+leetcodeId: 1319
+order: 17006001003000
+---
+
+There are n computers numbered from 0 to n - 1 connected by ethernet cables connections forming a network where
+connections\[i\] = \[ai, bi\] represents a connection between computers ai and bi. Any computer can reach any other
+computer directly or indirectly through the network.
+
+You are given an initial computer network connections. You can extract certain cables between two directly connected
+computers, and place them between any pair of disconnected computers to make them directly connected.
+
+Return the minimum number of times you need to do this in order to make all the computers connected.
+If it is not possible, return -1.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 4, connections = [[0,1],[0,2],[1,2]]
+    Output: 1
+Example 2:
+    Input: n = 6, connections = [[0,1],[0,2],[0,3],[1,2],[1,3]]
+    Output: 2
+Example 3:
+    Input: n = 6, connections = [[0,1],[0,2],[0,3],[1,2]]
+    Output: -1
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 10^5
+- 1 <= connections.length <= min(n * (n - 1) / 2, 10^5)
+- connections[i].length == 2
+- 0 <= ai, bi < n
+- ai != bi
+- There are no repeated connections.
+- No two computers are connected by more than one cable.
+````
+
+**Also in the notes under:** [17. Graphs/12. Alphabet150](/dsa/problems/number-of-operations-to-make-network-connected-alphabet150).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Union-Find / Disjoint Set Union
+
+1. If fewer than n - 1 cables exist, spanning connectivity is impossible — return -1.
+2. Union all edges; track the number of connected components.
+3. Need (components - 1) rewirings to connect components into one.
+
+## Complexity
+
+**Time:** O(N + M), where N is the number of computers and M is the number of connections.
+
+**Space:** O(N) for the parent and rank arrays.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def __init__(self) -> None:
+        self.parent: List[int] = []
+        self.rank: List[int] = []
+
+    def find(self, x: int) -> int:
+        if x == self.parent[x]:
+            return x
+        self.parent[x] = self.find(self.parent[x])  # Path compression
+        return self.parent[x]
+
+    def union(self, x: int, y: int) -> None:
+        x_parent = self.find(x)
+        y_parent = self.find(y)
+
+        if x_parent == y_parent:
+            return
+
+        # Union by rank
+        if self.rank[x_parent] > self.rank[y_parent]:
+            self.parent[y_parent] = x_parent
+        elif self.rank[x_parent] < self.rank[y_parent]:
+            self.parent[x_parent] = y_parent
+        else:
+            self.parent[x_parent] = y_parent
+            self.rank[y_parent] += 1
+
+    def makeConnected(self, n: int, connections: List[List[int]]) -> int:
+        if len(connections) < n - 1:
+            return -1
+
+        self.parent = list(range(n))
+        self.rank = [0] * n
+
+        components = n
+        for u, v in connections:
+            if self.find(u) != self.find(v):
+                components -= 1
+                self.union(u, v)
+
+        return components - 1
+````

@@ -1,0 +1,210 @@
+---
+title: "Implement Trie-2 (Prefix Tree)"
+description: "Implement a trie that supports insert, counting words equal to a string, counting words whose prefix matches a string, and erasing one instance of a word."
+difficulty: medium
+patterns: [basic-trie-operations]
+topics: [tries]
+companies: []
+languages: [python]
+entry: { python: Solution }
+mode: class
+starter:
+  python: |
+    class Solution:
+        def __init__(self) -> None:
+            pass
+
+        def insert(self, word: str) -> None:
+            # Your code here
+            pass
+
+        def count_words_equal_to(self, word: str) -> int:
+            # Your code here
+            pass
+
+        def count_words_starting_with(self, prefix: str) -> int:
+            # Your code here
+            pass
+
+        def erase(self, word: str) -> None:
+            # Your code here
+            pass
+tests: { public: tests/implement-trie-2-prefix-tree.public.json, hidden: tests/implement-trie-2-prefix-tree.hidden.json }
+complexity: { time: "O(L) per operation — L is the length of the word or prefix.", space: "O(total characters inserted) in the worst case for trie nodes." }
+group: "01. Basic Trie Operations"
+number: "02"
+order: 16001002000000
+---
+
+Implement a trie that supports insert, counting words equal to a string, counting words
+whose prefix matches a string, and erasing one instance of a word.
+
+## Examples
+
+````text
+Example 1:
+Input: insert "apple", insert "apple", countWordsEqualTo "apple",
+       countWordsStartingWith "app", erase "apple", countWordsEqualTo "apple"
+Output: 2, 2, 1
+````
+
+## Constraints
+
+````text
+- 1 <= word.length <= 2000
+- 1 <= words.length <= 3 * 10^4
+- All strings are lowercase English letters
+- erase is only called when the word exists at least once
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Trie with counts
+Each node stores how many words pass through (prefix) and end (full word) to support counts and erase.
+
+1. insert: increment prefix\_count on each node along the path; increment word\_count at the terminal node.
+2. count\_words\_equal\_to: walk to the word node; return its word\_count (or 0 if missing).
+3. count\_words\_starting\_with: walk to the prefix node; return prefix\_count (or 0).
+4. erase: verify the word exists, decrement word\_count and all prefix\_count on the path, then prune empty leaves.
+
+## Complexity
+
+**Time:** O(L) per operation — L is the length of the word or prefix.
+
+**Space:** O(total characters inserted) in the worst case for trie nodes.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Implement a Trie (Prefix Tree) data structure that supports the following operations:
+1. Initialize the Trie object.
+2. Insert a word into the Trie.
+3. Count the number of instances of a word in the Trie.
+4. Count the number of words in the Trie that have a given prefix.
+5. Erase a word from the Trie.
+
+Space Complexity:
+- O(N \* M), where N is the total number of characters in all inserted words, and M is the size of the character set (26 in this case).
+- In the worst case, when there are no common prefixes, each character of each word requires a new TrieNode.
+
+Time Complexity:
+- Insert: O(L), where L is the length of the word being inserted.
+- CountWordsEqualTo: O(L), where L is the length of the word being counted.
+- CountWordsStartingWith: O(L), where L is the length of the prefix.
+- Erase: O(L), where L is the length of the word being erased.
+
+Explanation:
+1. The Trie is implemented using a tree-like structure where each node represents a character.
+2. Each TrieNode contains a dictionary 'children' to store its child nodes, a 'word\_count' to track complete words, and a 'prefix\_count' to track prefixes.
+3. The Trie class has a root node initialized in the constructor.
+4. The insert method adds a word to the Trie, incrementing prefix counts along the way and the word count at the end.
+5. The countWordsEqualTo method traverses the Trie to find the node corresponding to the word and returns its word count.
+6. The countWordsStartingWith method traverses the Trie to find the node corresponding to the prefix and returns its prefix count.
+7. The erase method removes a word from the Trie, decrementing counts and potentially removing unused nodes.
+
+Examples:
+1. Inserting "apple" twice:
+- Create nodes for 'a', 'p', 'p', 'l', 'e'
+- Increment prefix\_count for each node along the path
+- Increment word\_count for the last 'e' node to 2
+
+2. Counting words equal to "apple":
+- Traverse nodes for 'a', 'p', 'p', 'l', 'e'
+- Return the word\_count of the last 'e' node (2)
+
+3. Counting words starting with "app":
+- Traverse nodes for 'a', 'p', 'p'
+- Return the prefix\_count of the last 'p' node (2)
+
+4. Erasing "apple":
+- Traverse nodes for 'a', 'p', 'p', 'l', 'e'
+- Decrement prefix\_count for each node along the path
+- Decrement word\_count for the last 'e' node
+- Remove any nodes that become unused (no words passing through and no children)
+
+## Solution
+
+````python
+from __future__ import annotations
+
+
+class TrieNode:
+    def __init__(self) -> None:
+        self.children: dict[str, TrieNode] = {}
+        self.word_count: int = 0
+        self.prefix_count: int = 0
+
+
+class Trie:
+    def __init__(self) -> None:
+        self.root = TrieNode()
+
+    def insert(self, word: str) -> None:
+        node = self.root
+        for char in word:
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            node = node.children[char]
+            node.prefix_count += 1
+        node.word_count += 1
+
+    def count_words_equal_to(self, word: str) -> int:
+        node = self.root
+        for char in word:
+            if char not in node.children:
+                return 0
+            node = node.children[char]
+        return node.word_count
+
+    def count_words_starting_with(self, prefix: str) -> int:
+        node = self.root
+        for char in prefix:
+            if char not in node.children:
+                return 0
+            node = node.children[char]
+        return node.prefix_count
+
+    def erase(self, word: str) -> None:
+        node = self.root
+        for char in word:
+            if char not in node.children:
+                return
+            node = node.children[char]
+        if node.word_count == 0:
+            return
+
+        node.word_count -= 1
+        path: list[tuple[TrieNode, str]] = []
+        cur = self.root
+        for char in word:
+            path.append((cur, char))
+            cur = cur.children[char]
+            cur.prefix_count -= 1
+
+        if node.word_count == 0 and not node.children:
+            for parent, ch in reversed(path):
+                child = parent.children.get(ch)
+                if child is None:
+                    break
+                if child.prefix_count == 0 and child.word_count == 0 and not child.children:
+                    del parent.children[ch]
+                else:
+                    break
+
+
+class Solution:
+    def __init__(self) -> None:
+        self._trie = Trie()
+
+    def insert(self, word: str) -> None:
+        self._trie.insert(word)
+
+    def count_words_equal_to(self, word: str) -> int:
+        return self._trie.count_words_equal_to(word)
+
+    def count_words_starting_with(self, prefix: str) -> int:
+        return self._trie.count_words_starting_with(prefix)
+
+    def erase(self, word: str) -> None:
+        self._trie.erase(word)
+````

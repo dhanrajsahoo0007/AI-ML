@@ -1,0 +1,151 @@
+---
+title: "Swap Nodes in LL"
+description: "Given the head of a linked list and integer k (1-indexed), swap the values of the kth node from the start and the kth node from the end."
+difficulty: medium
+patterns: [list-modifications]
+topics: [linked-lists]
+companies: []
+languages: [python]
+entry: { python: swap_nodes_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class ListNode:
+        def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+            self.val = val
+            self.next = next
+
+
+    def _build_list(values):
+        head = None
+        for v in reversed(values or []):
+            node = ListNode(v)
+            node.next = head
+            head = node
+        return head
+
+
+    def _list_values(node):
+        out = []
+        while node is not None:
+            out.append(node.val)
+            node = node.next
+        return out
+
+
+    def swap_nodes_tests(a0, a1):  # the entry the tests call
+        result = _list_values(swap_nodes(_build_list(a0), a1))
+        return result
+
+
+    # --- Your code ---
+    def swap_nodes(head: ListNode | None, k: int) -> ListNode | None:
+        # Your code here
+        pass
+tests: { public: tests/swap-nodes-in-ll.public.json, hidden: tests/swap-nodes-in-ll.hidden.json }
+complexity: { time: "O(n).", space: "O(1)." }
+group: "02. List Modifications"
+number: "02"
+order: 13002002000000
+---
+
+Given the head of a linked list and integer k (1-indexed), swap the values of the kth node
+from the start and the kth node from the end.
+
+## Examples
+
+````text
+Example 1:
+Input: head = [1,2,3,4,5], k = 2
+Output: [1,4,3,2,5]
+````
+
+## Constraints
+
+````text
+- 1 <= k <= n <= 10^5
+- 0 <= Node.val <= 100
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two pointers (single pass)
+After moving a cursor k-1 steps, keep a left marker and advance both until the cursor hits the tail.
+
+1. Move cur k-1 steps from head.
+2. left = cur, right = head; while cur.next, advance cur and right.
+3. Swap left.val and right.val; return head.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1).
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+You are given the head of a linked list, and an integer k.
+Return the head of the linked list after swapping the values of the kth node from the beginning
+and the kth node from the end (the list is 1-indexed).
+
+Constraints:
+\* The number of nodes in the list is n.
+\* 1 &lt;= k &lt;= n &lt;= 10^5
+\* 0 &lt;= Node.val &lt;= 100
+
+Time Complexity: O(n), where n is the number of nodes in the linked list.
+- We traverse the list twice: once to find the length and kth node from start, and once to find the kth node from end.
+
+Space Complexity: O(1)
+- We only use a constant amount of extra space for pointers and variables.
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+def linked_list_to_list(head: Optional[ListNode]) -> List[int]:
+    out: List[int] = []
+    while head:
+        out.append(head.val)
+        head = head.next
+    return out
+
+
+class Solution:
+    def swapNodes(self, head: Optional[ListNode], k: int) -> Optional[ListNode]:
+        if not head:
+            return None
+        cur = head
+        for _ in range(k - 1):
+            cur = cur.next
+        left = cur
+        right = head
+        while cur.next:
+            cur = cur.next
+            right = right.next
+        left.val, right.val = right.val, left.val
+        return head
+````

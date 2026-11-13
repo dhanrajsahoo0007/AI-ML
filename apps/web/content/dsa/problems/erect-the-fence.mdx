@@ -1,0 +1,108 @@
+---
+title: "Erect the Fence"
+description: "Given integer coordinate trees, return all trees that lie on the boundary of the convex hull (outer trees), including collinear points on edges."
+difficulty: hard
+patterns: [leetcode-and-alphabet-150]
+topics: [math-and-geometry]
+companies: []
+languages: [python]
+entry: { python: outer_trees_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def outer_trees_tests(a0):  # the entry the tests call
+        result = outer_trees(a0)
+        result = sorted(result, key=repr) if isinstance(result, list) else result
+        return result
+
+
+    # --- Your code ---
+    def outer_trees(trees: list[list[int]]) -> list[list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/erect-the-fence.public.json, hidden: tests/erect-the-fence.hidden.json }
+complexity: { time: "O(n log n)", space: "O(n)" }
+group: "02. Leetcode and Alphabet 150"
+number: "12"
+leetcode: erect-the-fence
+leetcodeId: 587
+order: 21002012000000
+---
+
+Given integer coordinate trees, return all trees that lie on the boundary of
+the convex hull (outer trees), including collinear points on edges.
+
+## Examples
+
+````text
+Example 1:
+    Input: trees = [[1,1],[2,2],[2,0],[2,4],[3,3],[4,2]]
+    Output: includes all hull boundary trees (any order acceptable for set)
+Example 2:
+    Input: trees = [[1,2],[2,2],[4,2]]
+    Output: [[1,2],[2,2],[4,2]]
+````
+
+## Constraints
+
+````text
+- 1 <= len(trees) <= 1000
+- Coordinates fit in 32-bit signed integers
+````
+
+**Order.** Any order is accepted: the tests sort your result before comparing it.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Monotone chain convex hull
+Andrew's scan builds lower and upper hulls; use cross product to pop right turns.
+
+1. Sort points by (x, y).
+2. Build lower hull left-to-right removing clockwise turns.
+3. Build upper hull right-to-left similarly.
+4. Concatenate without duplicating the endpoints.
+
+## Complexity
+
+**Time:** O(n log n)
+
+**Space:** O(n)
+
+## Solution
+
+````python
+from typing import List, Set, Tuple
+
+
+class Solution:
+    def outerTrees(self, trees: List[List[int]]) -> List[List[int]]:
+        if len(trees) <= 2:
+            return trees
+        trees = sorted(trees, key=lambda p: (p[0], p[1]))
+
+        def orient(a: List[int], b: List[int], c: List[int]) -> int:
+            return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+        lower: List[List[int]] = []
+        for t in trees:
+            while len(lower) >= 2 and orient(lower[-2], lower[-1], t) < 0:
+                lower.pop()
+            lower.append(t)
+        upper: List[List[int]] = []
+        for t in reversed(trees):
+            while len(upper) >= 2 and orient(upper[-2], upper[-1], t) < 0:
+                upper.pop()
+            upper.append(t)
+        merged = lower[:-1] + upper[:-1]
+        seen: Set[Tuple[int, int]] = set()
+        out: List[List[int]] = []
+        for p in merged:
+            key = (p[0], p[1])
+            if key not in seen:
+                seen.add(key)
+                out.append(p)
+        return out
+````

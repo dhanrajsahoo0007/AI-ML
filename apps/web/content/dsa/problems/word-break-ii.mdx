@@ -1,0 +1,140 @@
+---
+title: "Word Break II"
+description: "Given string s and dictionary wordDict, return every sentence formed by inserting spaces so each token is in the dictionary; dictionary words may repeat."
+difficulty: hard
+patterns: [string-pattern]
+topics: [backtracking]
+companies: []
+languages: [python]
+entry: { python: word_break_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def word_break_tests(a0, a1):  # the entry the tests call
+        result = word_break(a0, a1)
+        result = sorted(result, key=repr) if isinstance(result, list) else result
+        return result
+
+
+    # --- Your code ---
+    def word_break(s: str, wordDict: list[str]) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/word-break-ii.public.json, hidden: tests/word-break-ii.hidden.json }
+complexity: { time: "O(2^n * n) worst case.", space: "O(n) for recursion and path storage excluding outputs." }
+group: "05. String Pattern"
+number: "02"
+leetcode: word-break-ii
+leetcodeId: 140
+order: 12005002000000
+---
+
+Given string s and dictionary wordDict, return every sentence formed by inserting spaces so
+each token is in the dictionary; dictionary words may repeat.
+
+## Examples
+
+````text
+Example 1:
+Input: s = "catsanddog", wordDict = ["cat","cats","and","sand","dog"]
+Output: ["cats and dog","cat sand dog"] (order may vary)
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 20
+- Dictionary words are unique lowercase strings
+````
+
+**Order.** Any order is accepted: the tests sort your result before comparing it.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix DFS with dictionary checks
+Try every dictionary word as the next token if it matches a prefix of the remaining string.
+
+1. DFS(start): if start == len(s), push joined path.
+2. For each word in wordDict, if s starts with word at start, append and recurse.
+
+## Complexity
+
+**Time:** O(2^n \* n) worst case.
+
+**Space:** O(n) for recursion and path storage excluding outputs.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+140. Word Break II
+
+    Given a string s and a dictionary of strings wordDict, add spaces in s to construct a sentence where each word is a valid dictionary word.
+    Return all such possible sentences in any order.
+
+    Note that the same word in the dictionary may be reused multiple times in the segmentation.
+
+Example 1:
+
+    Input: s = "catsanddog", wordDict = ["cat","cats","and","sand","dog"]
+    Output: ["cats and dog","cat sand dog"]
+    
+Example 2:
+
+    Input: s = "pineapplepenapple", wordDict = ["apple","pen","applepen","pine","pineapple"]
+    Output: ["pine apple pen apple","pineapple pen apple","pine applepen apple"]
+    Explanation: Note that you are allowed to reuse a dictionary word.
+    
+Example 3:
+
+    Input: s = "catsandog", wordDict = ["cats","dog","sand","and","cat"]
+    Output: []
+    
+
+Constraints:
+
+    1 <= s.length <= 20
+    1 <= wordDict.length <= 1000
+    1 <= wordDict[i].length <= 10
+    s and wordDict[i] consist of only lowercase English letters.
+    All the strings of wordDict are unique.
+    Input is generated in a way that the length of the answer doesn't exceed 105.
+
+
+Time Complexity: O(2^n * n), where n is the length of the string s.
+    - In the worst case, we may need to generate all possible substrings (2^n)
+    - For each substring, we perform a substring operation which takes O(n) time
+
+Space Complexity: O(n + m), where n is the length of the string and m is the total length of wordDict
+    - We store the dictionary in a set, which takes O(m) space
+    - The recursion stack can go up to O(n) in the worst case
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def wordBreak(self, s: str, wordDict: List[str]) -> List[str]:
+        words = set(wordDict)
+        result: List[str] = []
+
+        def dfs(start: int, path: List[str]) -> None:
+            if start == len(s):
+                result.append(" ".join(path))
+                return
+            for end in range(start + 1, len(s) + 1):
+                token = s[start:end]
+                if token in words:
+                    path.append(token)
+                    dfs(end, path)
+                    path.pop()
+
+        dfs(0, [])
+        return result
+````

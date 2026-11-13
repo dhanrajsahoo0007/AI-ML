@@ -1,0 +1,166 @@
+---
+title: "Largest BST in Binary Tree"
+description: "Given a binary tree (not necessarily a BST), return the number of nodes in the largest subtree that is a binary search tree."
+difficulty: medium
+patterns: [advanced-bst-problems]
+topics: [binary-search-trees]
+companies: []
+languages: [python]
+entry: { python: largest_bst_subtree_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class TreeNode:
+        def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _build_tree(values):
+        if not values:
+            return None
+        nodes = [None if v is None else TreeNode(v) for v in values]
+        queue, i = [nodes[0]], 1
+        for node in queue:
+            if node is None:
+                continue
+            for side in ("left", "right"):
+                if i < len(values):
+                    setattr(node, side, nodes[i])
+                    queue.append(nodes[i])
+                    i += 1
+            if i >= len(values):
+                break
+        return nodes[0]
+
+
+    def _tree_values(root):
+        out, queue = [], [root] if root else []
+        for node in queue:
+            if node is None:
+                out.append(None)
+            else:
+                out.append(node.val)
+                queue += [node.left, node.right]
+        while out and out[-1] is None:
+            out.pop()
+        return out
+
+
+    def largest_bst_subtree_tests(a0):  # the entry the tests call
+        result = largest_bst_subtree(_build_tree(a0))
+        return result
+
+
+    # --- Your code ---
+    def largest_bst_subtree(root: TreeNode | None) -> int:
+        # Your code here
+        pass
+tests: { public: tests/largest-bst-in-binary-tree.public.json, hidden: tests/largest-bst-in-binary-tree.hidden.json }
+complexity: { time: "O(n) - Each node processed once.", space: "O(h) - Recursion stack depth." }
+group: "05. Advanced BST Problems"
+number: "01"
+order: 15005001000000
+---
+
+Given a binary tree (not necessarily a BST), return the number of nodes in the largest subtree
+that is a binary search tree.
+
+## Examples
+
+````text
+Example 1:
+    Input: [10,5,15,1,8,6,20]
+    Output: 3 (largest BST subtree size)
+
+Example 2:
+    Input: full BST on seven nodes
+    Output: 7
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 2 * 10^4].
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Postorder BST statistics
+For each node, combine child min/max bounds and sizes to decide whether the whole subtree is a BST.
+
+1. DFS returns size, min value, max value, and whether the subtree is a BST.
+2. Empty children use (+inf, -inf) sentinels so comparisons remain valid at leaves.
+3. If both children are BSTs and left.max &lt; node.val &lt; right.min, merge sizes; else bubble max child BST size with invalidating bounds.
+
+## Complexity
+
+**Time:** O(n) - Each node processed once.
+
+**Space:** O(h) - Recursion stack depth.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given a binary tree, find the largest subtree which is a Binary Search Tree (BST),
+where the largest means subtree with maximum number of nodes in it.
+
+Time Complexity: O(n), where n is the number of nodes in the binary tree
+Space Complexity: O(h), where h is the height of the tree (due to recursive call stack)
+
+Approach:
+1. Perform a post-order traversal of the binary tree.
+2. For each node, check if the subtree rooted at that node is a BST.
+3. Keep track of the size of the BST, as well as the minimum and maximum values in the subtree.
+4. Update the largest BST found so far if the current subtree is a BST and larger than the previous largest.
+
+## Solution
+
+````python
+from typing import List, Optional, Tuple
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    root = TreeNode(values[0])
+    queue: List[TreeNode] = [root]
+    i = 1
+    while queue and i < len(values):
+        node = queue.pop(0)
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            queue.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            queue.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def largestBSTSubtree(self, root: Optional[TreeNode]) -> int:
+        def dfs(node: Optional[TreeNode]) -> Tuple[int, float, float, bool]:
+            if node is None:
+                return 0, float("inf"), float("-inf"), True
+            left = dfs(node.left)
+            right = dfs(node.right)
+            if left[3] and right[3] and left[2] < node.val < right[1]:
+                size = left[0] + right[0] + 1
+                return size, min(left[1], node.val), max(right[2], node.val), True
+            return max(left[0], right[0]), float("-inf"), float("inf"), False
+
+        return dfs(root)[0]
+````

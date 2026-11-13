@@ -1,0 +1,151 @@
+---
+title: "Remove greater node to right"
+description: "Remove every node that has a strictly larger value somewhere to its right."
+difficulty: medium
+patterns: [list-modifications]
+topics: [linked-lists]
+companies: []
+languages: [python]
+entry: { python: remove_nodes_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class ListNode:
+        def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+            self.val = val
+            self.next = next
+
+
+    def _build_list(values):
+        head = None
+        for v in reversed(values or []):
+            node = ListNode(v)
+            node.next = head
+            head = node
+        return head
+
+
+    def _list_values(node):
+        out = []
+        while node is not None:
+            out.append(node.val)
+            node = node.next
+        return out
+
+
+    def remove_nodes_tests(a0):  # the entry the tests call
+        result = _list_values(remove_nodes(_build_list(a0)))
+        return result
+
+
+    # --- Your code ---
+    def remove_nodes(head: ListNode | None) -> ListNode | None:
+        # Your code here
+        pass
+tests: { public: tests/remove-greater-node-to-right.public.json, hidden: tests/remove-greater-node-to-right.hidden.json }
+complexity: { time: "O(n).", space: "O(1) for the iterative version." }
+group: "02. List Modifications"
+number: "06"
+order: 13002006000000
+---
+
+Remove every node that has a strictly larger value somewhere to its right.
+
+## Examples
+
+````text
+Example 1:
+    Input: head = [5,2,13,3,8]
+    Output: [13,8]
+
+Example 2:
+    Input: head = [1,1,1,1]
+    Output: [1,1,1,1]
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 10^5
+- 1 <= Node.val <= 10^5
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Reverse scan
+Reverse the list, keep running maximum while filtering, then reverse back.
+
+1. Reverse list.
+2. Walk with cur\_max; drop nodes smaller than cur\_max.
+3. Reverse again and return head.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1) for the iterative version.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+You are given the head of a linked list.
+Remove every node which has a node with a strictly greater value anywhere to the right side of it.
+Return the head of the modified linked list.
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+def linked_list_to_list(head: Optional[ListNode]) -> List[int]:
+    out: List[int] = []
+    while head:
+        out.append(head.val)
+        head = head.next
+    return out
+
+
+class Solution:
+    def removeNodes(self, head: Optional[ListNode]) -> Optional[ListNode]:
+        def reverse(h: Optional[ListNode]) -> Optional[ListNode]:
+            prev, cur = None, h
+            while cur:
+                nxt = cur.next
+                cur.next = prev
+                prev, cur = cur, nxt
+            return prev
+
+        head = reverse(head)
+        if not head:
+            return None
+        cur = head
+        cur_max = cur.val
+        while cur.next:
+            if cur.next.val < cur_max:
+                cur.next = cur.next.next
+            else:
+                cur_max = cur.next.val
+                cur = cur.next
+        return reverse(head)
+````

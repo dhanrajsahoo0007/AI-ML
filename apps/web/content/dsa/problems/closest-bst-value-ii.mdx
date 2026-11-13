@@ -1,0 +1,164 @@
+---
+title: "Closest BST Value II| Kth closest values"
+description: "Given the root of a binary search tree, a target value, and an integer k, return the k values in the tree whose distance to target is smallest (LeetCode 658…"
+difficulty: medium
+patterns: [range-based-problems]
+topics: [binary-search-trees]
+companies: []
+languages: [python]
+entry: { python: closest_k_values_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class TreeNode:
+        def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _build_tree(values):
+        if not values:
+            return None
+        nodes = [None if v is None else TreeNode(v) for v in values]
+        queue, i = [nodes[0]], 1
+        for node in queue:
+            if node is None:
+                continue
+            for side in ("left", "right"):
+                if i < len(values):
+                    setattr(node, side, nodes[i])
+                    queue.append(nodes[i])
+                    i += 1
+            if i >= len(values):
+                break
+        return nodes[0]
+
+
+    def _tree_values(root):
+        out, queue = [], [root] if root else []
+        for node in queue:
+            if node is None:
+                out.append(None)
+            else:
+                out.append(node.val)
+                queue += [node.left, node.right]
+        while out and out[-1] is None:
+            out.pop()
+        return out
+
+
+    def closest_k_values_tests(a0, a1, a2):  # the entry the tests call
+        result = closest_k_values(_build_tree(a0), a1, a2)
+        return result
+
+
+    # --- Your code ---
+    def closest_k_values(root: TreeNode | None, target: float, k: int) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/closest-bst-value-ii.public.json, hidden: tests/closest-bst-value-ii.hidden.json }
+complexity: { time: "O(n) - Inorder may scan the whole tree in the worst case.", space: "O(k) - Deque storage plus O(h) recursion stack." }
+group: "03. Range-Based Problems"
+number: "03"
+order: 15003003000000
+---
+
+Given the root of a binary search tree, a target value, and an integer k, return the k
+values in the tree whose distance to target is smallest (LeetCode 658 style on BST values).
+
+## Examples
+
+````text
+Example 1:
+    Input: BST [4,2,5,1,3], target = 3.714286, k = 2
+    Output: [3, 4] (order may vary by implementation; values are the two closest)
+
+Example 2:
+    Input: BST [2,1], target = 1.0, k = 2
+    Output: [1, 2]
+````
+
+## Constraints
+
+````text
+- 1 <= k <= number of nodes.
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sliding window on sorted order
+Inorder yields sorted values; keep a deque of size k of the running closest window to target.
+
+1. Perform inorder DFS to visit nodes in ascending order.
+2. Until deque length reaches k, append values.
+3. Once full, if the farthest stored value is farther than the current node from target, pop left and append.
+4. If the farthest stored value is closer or equal in a way that implies all future nodes are farther, stop early.
+
+## Complexity
+
+**Time:** O(n) - Inorder may scan the whole tree in the worst case.
+
+**Space:** O(k) - Deque storage plus O(h) recursion stack.
+
+## Solution
+
+````python
+from collections import deque
+from typing import Deque, List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: List[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+class Solution:
+    def closestKValues(self, root: Optional[TreeNode], target: float, k: int) -> List[int]:
+        window: Deque[int] = deque()
+
+        def dfs(node: Optional[TreeNode]) -> None:
+            if node is None:
+                return
+            dfs(node.left)
+            if len(window) < k:
+                window.append(node.val)
+            else:
+                if abs(window[0] - target) > abs(node.val - target):
+                    window.popleft()
+                    window.append(node.val)
+                else:
+                    return
+            dfs(node.right)
+
+        dfs(root)
+        return list(window)
+````

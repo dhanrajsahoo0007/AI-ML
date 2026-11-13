@@ -1,0 +1,83 @@
+---
+title: "Letter Case Combinations"
+description: "Return all strings obtainable by toggling any subset of letter positions to upper or lower case while leaving digits untouched."
+difficulty: medium
+patterns: [permutation-problems]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: letter_case_combinations }
+starter:
+  python: |
+    def letter_case_combinations(s: str) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/letter-case-combinations.public.json, hidden: tests/letter-case-combinations.hidden.json }
+complexity: { time: "O(2^k * n) for k letters", space: "O(n) recursion depth" }
+group: "05. Permutation Problems"
+number: "03"
+order: 11005003000000
+---
+
+Return all strings obtainable by toggling any subset of letter positions to upper
+or lower case while leaving digits untouched.
+
+## Examples
+
+````text
+Example 1:
+    Input: "Jw"
+    Output sorted includes "JW", "Jw", "jW", "jw"
+
+Example 2:
+    Input: ""
+    Output: [""]
+````
+
+## Constraints
+
+````text
+- Input length small enough for 2^k combinations in tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS with letter forks
+Each alphabetic character doubles the branching factor; digits are linear.
+
+1. If at end of string, push accumulated value.
+2. For letters, recurse with both cases.
+3. For non-letters, recurse once.
+
+## Complexity
+
+**Time:** O(2^k \* n) for k letters
+
+**Space:** O(n) recursion depth
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def letter_case_combinations(self, s: str) -> List[str]:
+        result: List[str] = []
+
+        def dfs(index: int, built: str) -> None:
+            if index == len(s):
+                result.append(built)
+                return
+            ch = s[index]
+            if ch.isalpha():
+                dfs(index + 1, built + ch.lower())
+                dfs(index + 1, built + ch.upper())
+            else:
+                dfs(index + 1, built + ch)
+
+        dfs(0, "")
+        return sorted(result)
+````

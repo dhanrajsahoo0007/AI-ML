@@ -1,0 +1,111 @@
+---
+title: "Find Median from Data Stream"
+description: "Design a data structure that supports adding integers from a data stream and finding the median of all elements added so far."
+difficulty: hard
+patterns: [two-heaps-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: MedianFinder }
+mode: class
+starter:
+  python: |
+    class MedianFinder:
+        def __init__(self):
+            pass
+
+        def addNum(self, num: int) -> None:
+            # Your code here
+            pass
+
+        def findMedian(self) -> float:
+            # Your code here
+            pass
+tests: { public: tests/find-median-from-data-stream.public.json, hidden: tests/find-median-from-data-stream.hidden.json }
+complexity: { time: "addNum: O(log n) for heap operations.", space: "O(n) to store all elements." }
+group: "03. Two Heaps Pattern"
+number: "01"
+leetcode: find-median-from-data-stream
+leetcodeId: 295
+order: 10003001000000
+---
+
+Design a data structure that supports adding integers from a data stream and
+finding the median of all elements added so far.
+
+The median is the middle value in an ordered list. If the list size is even,
+the median is the average of the two middle values.
+
+## Examples
+
+````text
+Example 1:
+addNum(1), addNum(2) -> findMedian() = 1.5
+addNum(3) -> findMedian() = 2.0
+````
+
+## Constraints
+
+````text
+- -10^5 <= num <= 10^5
+- There will be at least one element before calling findMedian.
+- At most 5 * 10^4 calls to addNum and findMedian.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two Heaps
+We split the stream into two halves: a max-heap for the lower half and a
+min-heap for the upper half. The median is derived from the tops of both heaps.
+
+1. Maintain two heaps:
+- lower\_half: max-heap (stores negated values) for the smaller half.
+- upper\_half: min-heap for the larger half.
+2. On addNum: push to lower\_half, then rebalance so that lower\_half has
+equal or one more element than upper\_half.
+3. On findMedian: if odd count, return top of lower\_half; if even, average tops.
+
+## Complexity
+
+**Time:** - addNum: O(log n) for heap operations.
+- findMedian: O(1).
+
+**Space:** O(n) to store all elements.
+
+## Original notes
+
+````text
+Original notes (restored):
+Two heaps partition the multiset: `lower_half` is a max-heap (negate values) for the smaller
+half, `upper_half` min-heap for the larger half. Invariant: sizes differ by at most 1 with
+`lower_half` having the extra element when odd — median is either its top or average of both tops.
+Rebalancing trick from the old file: always push to `lower_half`, move top to `upper_half`, then
+if `upper_half` grew too large, move one element back — keeps ordering without manual compares.
+````
+
+## Solution
+
+````python
+import heapq
+
+
+class MedianFinder:
+    def __init__(self):
+        self.lower_half = []
+        self.upper_half = []
+
+    def addNum(self, num: int) -> None:
+        # Push to small side, promote its max to the large side, then fix size imbalance.
+        heapq.heappush(self.lower_half, -num)
+        heapq.heappush(self.upper_half, -heapq.heappop(self.lower_half))
+
+        if len(self.upper_half) > len(self.lower_half):
+            heapq.heappush(self.lower_half, -heapq.heappop(self.upper_half))
+
+    def findMedian(self) -> float:
+        if len(self.lower_half) > len(self.upper_half):
+            return -self.lower_half[0]
+        return (self.upper_half[0] + (-self.lower_half[0])) / 2
+````

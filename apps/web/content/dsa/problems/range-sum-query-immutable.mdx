@@ -1,0 +1,81 @@
+---
+title: "Range Sum Query - Immutable"
+description: "Design a structure that is given an integer array nums once and can answer many queries sum(nums[left..right]) inclusive in O(1) time per query."
+difficulty: easy
+patterns: [basic-prefix-sum]
+topics: [prefix-sum]
+companies: []
+languages: [python]
+entry: { python: Solution }
+mode: class
+starter:
+  python: |
+    class Solution:
+        def __init__(self, nums: list[int]) -> None:
+            pass
+
+        def sumRange(self, left: int, right: int) -> int:
+            # Your code here
+            pass
+tests: { public: tests/range-sum-query-immutable.public.json, hidden: tests/range-sum-query-immutable.hidden.json }
+complexity: { time: "O(n) preprocessing, O(1) per sumRange; n = len(nums).", space: "O(n) - the prefix array." }
+group: "01. Basic Prefix Sum"
+number: "02"
+leetcode: range-sum-query-immutable
+leetcodeId: 303
+order: 2001002000000
+---
+
+Design a structure that is given an integer array nums once and can answer
+many queries sum(nums\[left..right\]) inclusive in O(1) time per query.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [-2, 0, 3, -5, 2, -1]
+After construction, sumRange(0, 2) -> 1, sumRange(2, 5) -> -1, sumRange(0, 5) -> -3
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 10^4
+- -10^5 <= nums[i] <= 10^5
+- 0 <= left <= right < len(nums)
+- At most 10^4 calls to sumRange
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum
+Store cumulative sums so any range sum is a difference of two prefix totals.
+
+1. Build prefix where prefix\[i\] is sum of nums\[0..i-1\] (prefix\[0\] = 0).
+2. sumRange(left, right) = prefix\[right + 1\] - prefix\[left\].
+
+## Complexity
+
+**Time:** O(n) preprocessing, O(1) per sumRange; n = len(nums).
+
+**Space:** O(n) - the prefix array.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def __init__(self, nums: List[int]) -> None:
+        self._prefix: List[int] = [0]
+        s = 0
+        for x in nums:
+            s += x
+            self._prefix.append(s)
+
+    def sumRange(self, left: int, right: int) -> int:
+        return self._prefix[right + 1] - self._prefix[left]
+````

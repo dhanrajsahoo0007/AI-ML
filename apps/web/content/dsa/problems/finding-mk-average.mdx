@@ -1,0 +1,156 @@
+---
+title: "Finding MK Average"
+description: "Given m and k, maintain a stream where MKAverage uses the last m elements, removes the k smallest and k largest, and averages the rest (rounded down)."
+difficulty: hard
+patterns: [heap-with-lazy-deletion-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: MKAverage }
+mode: class
+starter:
+  python: |
+    class MKAverage:
+        def __init__(self, m: int, k: int):
+            pass
+
+        def addElement(self, num: int) -> None:
+            # Your code here
+            pass
+
+        def calculateMKAverage(self) -> int:
+            # Your code here
+            pass
+tests: { public: tests/finding-mk-average.public.json, hidden: tests/finding-mk-average.hidden.json }
+complexity: { time: "O(log m) amortized per operation", space: "O(m)" }
+group: "06. Heap with Lazy Deletion Pattern"
+number: "03"
+leetcode: finding-mk-average
+leetcodeId: 1825
+order: 10006003000000
+---
+
+Given m and k, maintain a stream where MKAverage uses the last m elements,
+removes the k smallest and k largest, and averages the rest (rounded down).
+Return -1 if fewer than m elements exist.
+
+## Examples
+
+````text
+Example 1:
+Input: m=3, k=1, addElement(3), addElement(1), calculateMKAverage()=-1,
+       addElement(10), calculateMKAverage()=3
+````
+
+## Constraints
+
+````text
+- 3 <= m <= 10^5
+- 1 <= k*2 < m
+- 1 <= num <= 10^5
+- At most 10^5 calls total.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap with Lazy Deletion
+Use three heaps (small, middle, large) to partition the last m elements.
+Lazy deletion handles element removal when the window slides.
+
+1. Maintain a deque of the last m elements.
+2. Three heaps: small (k smallest), large (k largest), middle (rest).
+3. On addElement: insert into appropriate heap, rebalance, handle overflow.
+4. On calculateMKAverage: return middle\_sum / (m - 2k) if enough elements.
+
+## Complexity
+
+**Time:** O(log m) amortized per operation
+
+**Space:** O(m)
+
+## Original notes
+
+````text
+Original notes (restored):
+LC 1825 hard-mode: maintain three partitions of the sliding window — `small` (k smallest, max-heap
+via negatives), `large` (k largest), `middle` holding the remainder whose sum we track explicitly.
+`_remove` uses linear `list.remove` + `heapify` in this educational version (same as the archived draft);
+production systems often swap in lazy heaps or balanced trees for amortized guarantees. The old file
+also contrasted this with a sorted-list + prefix-sum sketch for clarity.
+````
+
+## Solution
+
+````python
+import heapq
+from collections import deque
+
+
+class MKAverage:
+    def __init__(self, m: int, k: int):
+        self.m = m
+        self.k = k
+        self.small = []
+        self.middle = []
+        self.large = []
+        self.queue = deque()
+        self.middle_sum = 0
+
+    def addElement(self, num: int) -> None:
+        self.queue.append(num)
+
+        if not self.small or -num >= self.small[0]:
+            heapq.heappush(self.small, -num)
+        elif not self.large or num > self.large[0]:
+            heapq.heappush(self.large, num)
+        else:
+            heapq.heappush(self.middle, num)
+            self.middle_sum += num
+
+        if len(self.queue) > self.m:
+            old = self.queue.popleft()
+            self._remove(old)
+
+        self._rebalance()
+
+    def _rebalance(self):
+        while len(self.small) > self.k:
+            val = -heapq.heappop(self.small)
+            heapq.heappush(self.middle, val)
+            self.middle_sum += val
+        while len(self.small) < self.k and self.middle:
+            val = heapq.heappop(self.middle)
+            heapq.heappush(self.small, -val)
+            self.middle_sum -= val
+
+        while len(self.large) > self.k:
+            val = heapq.heappop(self.large)
+            heapq.heappush(self.middle, val)
+            self.middle_sum += val
+        while len(self.large) < self.k and self.middle:
+            val = heapq.heappop(self.middle)
+            heapq.heappush(self.large, val)
+            self.middle_sum -= val
+
+    def _remove(self, num: int) -> None:
+        neg = -num
+        if self.small and neg in self.small:
+            self.small.remove(neg)
+            heapq.heapify(self.small)
+        elif self.large and num in self.large:
+            self.large.remove(num)
+            heapq.heapify(self.large)
+        else:
+            self.middle.remove(num)
+            self.middle_sum -= num
+            heapq.heapify(self.middle)
+
+    def calculateMKAverage(self) -> int:
+        if len(self.queue) < self.m:
+            return -1
+        if self.middle:
+            return self.middle_sum // (self.m - 2 * self.k)
+        return 0
+````

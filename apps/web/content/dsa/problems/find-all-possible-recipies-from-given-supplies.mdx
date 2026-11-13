@@ -1,0 +1,88 @@
+---
+title: "Find all Possible Recipies from Given Supplies"
+description: "You are given recipe names, their ingredient lists, and starting supplies (infinite quantities)."
+difficulty: medium
+patterns: [topological-sort]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: find_all_recipes }
+starter:
+  python: |
+    def find_all_recipes(recipes: list[str], ingredients: list[list[str]], supplies: list[str]) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/find-all-possible-recipies-from-given-supplies.public.json, hidden: tests/find-all-possible-recipies-from-given-supplies.hidden.json }
+complexity: { time: "O(R + total ingredient strings) — linear in input size.", space: "O(R + ingredient mentions)." }
+group: "05. Topological Sort"
+number: "10"
+order: 17005010000000
+---
+
+You are given recipe names, their ingredient lists, and starting supplies (infinite quantities). An
+ingredient may itself be a recipe. Return every recipe you can eventually craft.
+
+## Examples
+
+````text
+Example 1:
+    Input: recipes = ["bread"], ingredients = [["yeast","flour"]], supplies = ["yeast","flour","corn"]
+    Output: ["bread"]
+Example 2:
+    Input: recipes = ["bread","sandwich"], ingredients = [["yeast","flour"],["bread","meat"]],
+           supplies = ["yeast","flour","meat"]
+    Output: ["bread","sandwich"]
+````
+
+## Constraints
+
+````text
+- 1 <= len(recipes), len(ingredients), len(supplies) <= 100
+- ingredients[i] lists distinct strings
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Topological / indegree reduction on recipe dependency graph
+Treat unknown crafts as nodes with indegree equal to ingredient count; peel as supplies grow.
+
+1. Map each recipe to its remaining indegree (ingredient count) and reverse edges from ingredient to recipes.
+2. BFS from initial supplies; when indegree hits zero, enqueue the recipe as newly available.
+3. Collect recipes popped from the queue.
+
+## Complexity
+
+**Time:** O(R + total ingredient strings) — linear in input size.
+
+**Space:** O(R + ingredient mentions).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def findAllRecipes(self, recipes: List[str], ingredients: List[List[str]], supplies: List[str]) -> List[str]:
+        recipe_set = set(recipes)
+        indegree: dict[str, int] = {}
+        graph: dict[str, List[str]] = defaultdict(list)
+        for r, ing in zip(recipes, ingredients):
+            indegree[r] = len(ing)
+            for x in ing:
+                graph[x].append(r)
+        q: deque[str] = deque(supplies)
+        result: List[str] = []
+        while q:
+            item = q.popleft()
+            if item in recipe_set:
+                result.append(item)
+            for r in graph.get(item, []):
+                indegree[r] -= 1
+                if indegree[r] == 0:
+                    q.append(r)
+        return result
+````

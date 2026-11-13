@@ -1,0 +1,158 @@
+---
+title: "Balanced Binary Tree"
+description: "Given a binary tree, determine if it is height-balanced: for every node, the left and right subtree heights differ by at most one."
+difficulty: easy
+patterns: [tree-properties-and-characteristics]
+topics: [trees]
+companies: []
+languages: [python]
+entry: { python: is_balanced_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class TreeNode:
+        def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _build_tree(values):
+        if not values:
+            return None
+        nodes = [None if v is None else TreeNode(v) for v in values]
+        queue, i = [nodes[0]], 1
+        for node in queue:
+            if node is None:
+                continue
+            for side in ("left", "right"):
+                if i < len(values):
+                    setattr(node, side, nodes[i])
+                    queue.append(nodes[i])
+                    i += 1
+            if i >= len(values):
+                break
+        return nodes[0]
+
+
+    def _tree_values(root):
+        out, queue = [], [root] if root else []
+        for node in queue:
+            if node is None:
+                out.append(None)
+            else:
+                out.append(node.val)
+                queue += [node.left, node.right]
+        while out and out[-1] is None:
+            out.pop()
+        return out
+
+
+    def is_balanced_tests(a0):  # the entry the tests call
+        result = is_balanced(_build_tree(a0))
+        return result
+
+
+    # --- Your code ---
+    def is_balanced(root: TreeNode | None) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/balanced-binary-tree.public.json, hidden: tests/balanced-binary-tree.hidden.json }
+complexity: { time: "O(n)", space: "O(h) recursion stack." }
+group: "01. Binary Tree › 03. Tree Properties and Characteristics"
+number: "05"
+leetcode: balanced-binary-tree
+leetcodeId: 110
+order: 14001003005000
+---
+
+Given a binary tree, determine if it is height-balanced: for every node, the left and right subtree heights
+differ by at most one.
+
+## Examples
+
+````text
+Example 1:
+    Input: root = [3,9,20,None,None,15,7]
+    Output: True
+Example 2:
+    Input: root = [1,2,2,3,3,None,None,4,4]
+    Output: False
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 5000].
+- Node values fit in 32-bit signed integers.
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Bottom-up DFS with sentinel height
+Return -1 if unbalanced; otherwise return height so parents can check in O(1) time per edge.
+
+1. Post-order: compute left and right heights.
+2. If either is -1 or \|left-right\|&gt;1, return -1.
+3. Else return 1 + max(left, right).
+
+## Complexity
+
+**Time:** O(n)
+
+**Space:** O(h) recursion stack.
+Restored (original notes, diagrams, and walkthrough):
+Problem statement : Check if the Binary Tree is Height balanced or not
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    from collections import deque
+
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def isBalanced(self, root: Optional[TreeNode]) -> bool:
+        def dfs(node: Optional[TreeNode]) -> int:
+            if not node:
+                return 0
+            left = dfs(node.left)
+            right = dfs(node.right)
+            if left < 0 or right < 0 or abs(left - right) > 1:
+                return -1
+            return max(left, right) + 1
+
+        return dfs(root) >= 0
+````

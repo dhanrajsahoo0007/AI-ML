@@ -1,0 +1,165 @@
+---
+title: "Add 2 numbers"
+description: "Two non-empty linked lists represent non-negative integers with digits stored in reverse order."
+difficulty: medium
+patterns: [fundamental-operations]
+topics: [linked-lists]
+companies: []
+languages: [python]
+entry: { python: add_two_numbers_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class ListNode:
+        def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+            self.val = val
+            self.next = next
+
+
+    def _build_list(values):
+        head = None
+        for v in reversed(values or []):
+            node = ListNode(v)
+            node.next = head
+            head = node
+        return head
+
+
+    def _list_values(node):
+        out = []
+        while node is not None:
+            out.append(node.val)
+            node = node.next
+        return out
+
+
+    def add_two_numbers_tests(a0, a1):  # the entry the tests call
+        result = _list_values(add_two_numbers(_build_list(a0), _build_list(a1)))
+        return result
+
+
+    # --- Your code ---
+    def add_two_numbers(l1: ListNode | None, l2: ListNode | None) -> ListNode | None:
+        # Your code here
+        pass
+tests: { public: tests/add-2-numbers.public.json, hidden: tests/add-2-numbers.hidden.json }
+complexity: { time: "O(max(m,n)).", space: "O(max(m,n)) for the result list." }
+group: "01. Fundamental Operations"
+number: "06"
+order: 13001006000000
+---
+
+Two non-empty linked lists represent non-negative integers with digits stored in reverse order.
+Add the numbers and return the sum as a linked list.
+
+## Examples
+
+````text
+Example 1:
+Input: l1 = [2,4,3], l2 = [5,6,4]
+Output: [7,0,8]
+(342 + 465 = 807)
+````
+
+## Constraints
+
+````text
+- Number of nodes per list in [1, 100]
+- 0 <= Node.val <= 9
+- No leading zeros except the number 0 itself.
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Digit-by-digit carry
+Walk both lists and a carry bit, appending sum mod 10.
+
+1. dummy tail; carry = 0.
+2. While l1, l2, or carry: sum digits and carry; push sum % 10; carry = sum // 10.
+3. Return dummy.next.
+
+## Complexity
+
+**Time:** O(max(m,n)).
+
+**Space:** O(max(m,n)) for the result list.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given the heads of two non-empty linked lists representing two non-negative integers.
+The digits are stored in reverse order, and each of their nodes contains a single digit.
+Add the two numbers and return the sum as a linked list.
+
+Example:
+Input: l1 = \[2,4,3\], l2 = \[5,6,4\]
+Output: \[7,0,8\]
+Explanation: 342 + 465 = 807
+
+Solution Steps:
+1. Initialize a dummy head node for the result linked list
+\* do this in any case where you create a new list
+\* dummy node helps to get rid of the edge case of inserting in to an empty list
+2. Initialize a temporary pointer and a carry variable.
+3. Traverse both input lists and the carry:
+a. Calculate the sum of current digits and carry.
+b. Update the carry for the next iteration.
+c. Create a new node with the ones digit of the sum.
+d. Move to the next nodes in both input lists.
+4. Return the next node of the dummy head (the actual head of the result list).
+
+Time Complexity: O(max(n, m)), where n and m are the lengths of l1 and l2 respectively.
+Space Complexity: O(max(n, m)) for the new linked list to store the result.
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+def linked_list_to_list(head: Optional[ListNode]) -> List[int]:
+    out: List[int] = []
+    while head:
+        out.append(head.val)
+        head = head.next
+    return out
+
+
+class Solution:
+    def addTwoNumbers(self, l1: Optional[ListNode], l2: Optional[ListNode]) -> Optional[ListNode]:
+        dummy = ListNode(0)
+        tail = dummy
+        carry = 0
+        while l1 or l2 or carry:
+            s = carry
+            if l1:
+                s += l1.val
+                l1 = l1.next
+            if l2:
+                s += l2.val
+                l2 = l2.next
+            carry, digit = divmod(s, 10)
+            tail.next = ListNode(digit)
+            tail = tail.next
+        return dummy.next
+````

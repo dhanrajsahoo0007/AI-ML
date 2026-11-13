@@ -1,0 +1,112 @@
+---
+title: "Average of last K numbers"
+description: "Maintain a stream of integers with parameters k and x."
+difficulty: medium
+patterns: [design-questions]
+topics: [design-questions]
+companies: []
+languages: [python]
+entry: { python: MovingAverageExcludingLargest }
+mode: class
+starter:
+  python: |
+    class MovingAverageExcludingLargest:
+        def __init__(self, k: int) -> None:
+            pass
+
+        def add(self, value: int) -> None:
+            # Your code here
+            pass
+
+        def get_average(self, x: int) -> int:
+            # Your code here
+            pass
+tests: { public: tests/average-of-last-k-numbers.public.json, hidden: tests/average-of-last-k-numbers.hidden.json }
+complexity: { time: "O(k log k) per query; O(1) amortized per add with deque.", space: "O(k)." }
+number: "14"
+order: 25014000000000
+---
+
+Maintain a stream of integers with parameters k and x. Implement GetAverage(x) returning the
+integer average (floor division) of the last k numbers after removing the x largest values
+among those k (k &gt; x &gt; 0).
+
+## Examples
+
+````text
+Example 1:
+k=5, stream tail [1,2,3,4,5], x=2 -> drop 4 and 5 -> average(1,2,3)=2.
+````
+
+## Constraints
+
+````text
+- k > 0, x >= 0, x < k; enough elements in the window when queried.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sliding window + order statistics
+Keep the last k values in a deque; to average, copy, sort descending, drop first x, mean rest.
+
+1. On add, append and pop left if length exceeds k.
+2. GetAverage: sort window descending, take elements\[x:\], sum // len.
+
+## Complexity
+
+**Time:** O(k log k) per query; O(1) amortized per add with deque.
+
+**Space:** O(k).
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Finding average of last K numbers.
+Given a stream of numbers, k and x, calculate the average of the last k numbers excluding x largest numbers from it.
+Objective:
+        Return average of numbers with above condition. Implement function GetAverage(int x).
+Output format:
+        Return integer value.
+Constraints:
+        k > 0, k > x
+````
+
+## Solution
+
+````python
+import bisect
+from collections import deque
+from typing import Deque, List
+
+
+class MovingAverageExcludingLargest:
+    def __init__(self, k: int) -> None:
+        if k <= 0:
+            raise ValueError("k must be positive")
+        self._k = k
+        self._dq: Deque[int] = deque()
+        self._sorted: List[int] = []
+
+    def add(self, value: int) -> None:
+        if len(self._dq) == self._k:
+            old = self._dq.popleft()
+            idx = bisect.bisect_left(self._sorted, old)
+            self._sorted.pop(idx)
+        self._dq.append(value)
+        bisect.insort(self._sorted, value)
+
+    def get_average(self, x: int) -> int:
+        if not (0 <= x < self._k):
+            raise ValueError("need 0 <= x < k")
+        if len(self._dq) < self._k:
+            raise ValueError("window not full")
+        # largest x elements are at the right end of sorted list
+        use = self._sorted[: len(self._sorted) - x]
+        if not use:
+            raise ValueError("nothing left after removing x largest")
+        return sum(use) // len(use)
+````

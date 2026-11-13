@@ -1,0 +1,160 @@
+---
+title: "Morris Preorder Traversal of a Binary Tree"
+description: "Return the preorder traversal of a binary tree using Morris traversal without stack or recursion."
+difficulty: medium
+patterns: [advanced-tree-problems]
+topics: [trees]
+companies: []
+languages: [python]
+entry: { python: morris_preorder_traversal_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class TreeNode:
+        def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _build_tree(values):
+        if not values:
+            return None
+        nodes = [None if v is None else TreeNode(v) for v in values]
+        queue, i = [nodes[0]], 1
+        for node in queue:
+            if node is None:
+                continue
+            for side in ("left", "right"):
+                if i < len(values):
+                    setattr(node, side, nodes[i])
+                    queue.append(nodes[i])
+                    i += 1
+            if i >= len(values):
+                break
+        return nodes[0]
+
+
+    def _tree_values(root):
+        out, queue = [], [root] if root else []
+        for node in queue:
+            if node is None:
+                out.append(None)
+            else:
+                out.append(node.val)
+                queue += [node.left, node.right]
+        while out and out[-1] is None:
+            out.pop()
+        return out
+
+
+    def morris_preorder_traversal_tests(a0):  # the entry the tests call
+        result = morris_preorder_traversal(_build_tree(a0))
+        return result
+
+
+    # --- Your code ---
+    def morris_preorder_traversal(root: TreeNode | None) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/morris-preorder-traversal-of-a-binary-tree.public.json, hidden: tests/morris-preorder-traversal-of-a-binary-tree.hidden.json }
+complexity: { time: "O(n)", space: "O(1)" }
+group: "01. Binary Tree › 08. Advanced Tree Problems"
+number: "12"
+order: 14001008012000
+---
+
+Return the preorder traversal of a binary tree using Morris traversal without stack or recursion.
+
+## Examples
+
+````text
+Example 1:
+Input: root = [1,2,3,4,5]
+Output: [1,2,4,5,3]
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 10^4].
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Morris threading
+Visit current before threading left subtree; when second time reaching via thread, skip re-visit.
+
+1. If no left, record current, go right.
+2. Else find predecessor; if thread absent, record current, thread, go left; else remove thread, go right.
+
+## Complexity
+
+**Time:** O(n)
+
+**Space:** O(1)
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Implement Morris Traversal algorithms in-order traversal of a binary tree.
+These algorithms should traverse the tree without using extra space for recursion or an explicit stack.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    from collections import deque
+
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def morrisPreorderTraversal(self, root: Optional[TreeNode]) -> List[int]:
+        result: List[int] = []
+        cur = root
+        while cur:
+            if not cur.left:
+                result.append(cur.val)
+                cur = cur.right
+            else:
+                pred = cur.left
+                while pred.right and pred.right is not cur:
+                    pred = pred.right
+                if not pred.right:
+                    result.append(cur.val)
+                    pred.right = cur
+                    cur = cur.left
+                else:
+                    pred.right = None
+                    cur = cur.right
+        return result
+````

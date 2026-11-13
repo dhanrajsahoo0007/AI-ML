@@ -1,0 +1,105 @@
+---
+title: "Design Conference Room System"
+description: "Manage a single conference room."
+difficulty: medium
+patterns: [design-questions]
+topics: [design-questions]
+companies: []
+languages: [python]
+entry: { python: ConferenceRoom }
+mode: class
+starter:
+  python: |
+    class ConferenceRoom:
+        def __init__(self) -> None:
+            pass
+
+        def book(self, start: int, end: int) -> bool:
+            # Your code here
+            pass
+tests: { public: tests/design-conference-room-system.public.json, hidden: tests/design-conference-room-system.hidden.json }
+complexity: { time: "O(k) per book with k existing bookings; can be O(log k) with interval tree.", space: "O(k) for k stored intervals." }
+number: "06"
+order: 25006000000000
+---
+
+Manage a single conference room. book(start, end) tries to reserve the closed interval
+\[start, end\]. Touching at an endpoint is allowed (e.g. \[10, 20\] and \[20, 30\] do not overlap).
+Return True if booked, False if the new interval overlaps any existing booking.
+
+## Examples
+
+````text
+Example 1:
+book(10, 20) -> True; book(20, 30) -> True; book(5, 15) -> False (overlaps [10,20]).
+````
+
+## Constraints
+
+````text
+- Intervals are on a 1D time axis; treat overlap as max(s1, s2) < min(e1, e2) for [s,e].
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Merge / ordered storage
+Keep sorted intervals or check overlap against stored bookings in O(n) or tree structure.
+
+1. Store booked intervals in a list (small n) or sorted structure.
+2. For each new \[s, e\], if it overlaps any stored \[a, b\], return False.
+3. Otherwise append and return True.
+
+## Complexity
+
+**Time:** O(k) per book with k existing bookings; can be O(log k) with interval tree.
+
+**Space:** O(k) for k stored intervals.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Design a Conference Room Booking System
+Create a system to manage the booking of a single conference room.
+The system should include a method book(start, end) which is called with a time interval,
+ represented by its start and end times.
+ The book method should check if the room is available during the specified interval. If the room is available (i.e., the requested interval does not overlap with any previously booked intervals), the method should book the room for that time, store the interval, and return true. If the room is not available (i.e., there is an overlap with a previously booked interval), the method should return false.
+Example:
+book(10, 20) returns true (The room is booked from time 10 to 20)
+book(20, 30) returns true (The room is booked from time 20 to 30, 
+note that booking at the exact end time of another booking is allowed)
+book(5, 15) returns false (This request overlaps with the first booking from 10 to 20)
+Additional Test Cases:
+book(15, 25) returns false (This interval overlaps with the time interval from 10 to 20)
+book(25, 35) returns false (There is no overlap with any existing booking)
+book(1, 5) returns true (This booking is before the first booking and does not overlap)
+book(30, 40) returns true (This booking starts exactly at the end of the second booking and does not overlap)
+Each booking is determined solely on the availability of the room during 
+the specified time interval without considering other factors such as setup or cleanup times.
+````
+
+## Solution
+
+````python
+from typing import List, Tuple
+
+
+class ConferenceRoom:
+    def __init__(self) -> None:
+        self._bookings: List[Tuple[int, int]] = []
+
+    @staticmethod
+    def _overlaps(a: int, b: int, c: int, d: int) -> bool:
+        """True iff closed intervals [a,b] and [c,d] overlap with positive length."""
+        return max(a, c) < min(b, d)
+
+    def book(self, start: int, end: int) -> bool:
+        for s, e in self._bookings:
+            if self._overlaps(start, end, s, e):
+                return False
+        self._bookings.append((start, end))
+        return True
+````

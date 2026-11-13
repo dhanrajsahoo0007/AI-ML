@@ -1,0 +1,149 @@
+---
+title: "Letter combination of Phone number"
+description: "Given a string of digits 2-9, return all letter combinations as on a phone keypad (digit 1 maps to nothing)."
+difficulty: medium
+patterns: [combination-pattern]
+topics: [backtracking]
+companies: []
+languages: [python]
+entry: { python: letter_combinations_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def letter_combinations_tests(a0):  # the entry the tests call
+        result = letter_combinations(a0)
+        result = sorted(result, key=repr) if isinstance(result, list) else result
+        return result
+
+
+    # --- Your code ---
+    def letter_combinations(digits: str) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/letter-combination-of-phone-number.public.json, hidden: tests/letter-combination-of-phone-number.hidden.json }
+complexity: { time: "O(4^n * n) worst case for digits 7 and 9.", space: "O(n) - depth." }
+group: "03. Combination Pattern"
+number: "06"
+order: 12003006000000
+---
+
+Given a string of digits 2-9, return all letter combinations as on a phone keypad (digit 1 maps to nothing).
+
+## Examples
+
+````text
+Example 1:
+    Input: digits = "23"
+    Output: ["ad","ae","af","bd","be","bf","cd","ce","cf"]
+
+Example 2:
+    Input: digits = ""
+    Output: []
+````
+
+## Constraints
+
+````text
+- 0 <= len(digits) <= 4
+- digits contains only '2'..'9'.
+````
+
+**Order.** Any order is accepted: the tests sort your result before comparing it.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Cartesian backtracking over positions
+Map each digit to letters; DFS chooses one letter per digit index.
+
+1. If digits empty, return \[\].
+2. DFS(index, path): when index == len(digits), join path to string and store.
+3. For each letter mapped to digits\[index\], push, recurse, pop.
+
+## Complexity
+
+**Time:** O(4^n \* n) worst case for digits 7 and 9.
+
+**Space:** O(n) - depth.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem Statement:
+    Given a string containing digits from 2-9 inclusive, return all possible letter combinations that the number could represent. Return the answer in any order.
+    A mapping of digits to letters (just like on the telephone buttons) is given below.
+    Note that 1 does not map to any letters.
+
+    2 -> abc
+    3 -> def
+    4 -> ghi
+    5 -> jkl
+    6 -> mno
+    7 -> pqrs
+    8 -> tuv
+    9 -> wxyz
+
+Time Complexity: O(4^n * n), where n is the number of digits in the input.
+    - In the worst case (when the input consists of 7s and 9s), each digit can map to 4 letters.
+    - The depth of the recursion tree is n.
+    - At each step, we're doing O(1) work and potentially adding a combination of length n to our result.
+
+Space Complexity: O(n), where n is the number of digits in the input.
+    - The space used by the output array doesn't count towards space complexity.
+    - The recursion stack can go up to n levels deep.
+    - We're also using a path array of at most length n.
+
+Explanation:
+    1. We start with an empty path and recursively build up the combinations by adding
+    2. one letter at a time for each digit. When we've processed all digits, we add the
+    3. current combination to our result. Then we backtrack by removing the last letter
+       and try the next possibility.
+
+Examples:
+    Input: digits = "23"
+    Output: ["ad","ae","af","bd","be","bf","cd","ce","cf"]
+
+Input: digits = ""
+    Output: []
+
+Input: digits = "2"
+    Output: ["a","b","c"]
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def letterCombinations(self, digits: str) -> List[str]:
+        if not digits:
+            return []
+        letters = {
+            "2": "abc",
+            "3": "def",
+            "4": "ghi",
+            "5": "jkl",
+            "6": "mno",
+            "7": "pqrs",
+            "8": "tuv",
+            "9": "wxyz",
+        }
+        result: List[str] = []
+
+        def backtrack(index: int, path: List[str]) -> None:
+            if index == len(digits):
+                result.append("".join(path))
+                return
+            for ch in letters[digits[index]]:
+                path.append(ch)
+                backtrack(index + 1, path)
+                path.pop()
+
+        backtrack(0, [])
+        return result
+````

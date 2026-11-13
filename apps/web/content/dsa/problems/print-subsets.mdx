@@ -1,0 +1,141 @@
+---
+title: "Print Subsets | PowerSets | Subsequences"
+description: "Given a string, generate all non-empty subsequences (same relative order, any subset of characters)."
+difficulty: medium
+patterns: [subset-generation-problems]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: subsequences }
+starter:
+  python: |
+    def subsequences(s: str) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/print-subsets.public.json, hidden: tests/print-subsets.hidden.json }
+complexity: { time: "O(n * 2^n) - 2^n leaves, each string up to length n", space: "O(n) call stack plus O(n * 2^n) for collected strings" }
+group: "04. Subset Generation Problems"
+number: "01"
+order: 11004001000000
+---
+
+Given a string, generate all non-empty subsequences (same relative order, any
+subset of characters). Distinct positions count separately (e.g. "aa" yields two
+single-letter subsequences).
+
+## Examples
+
+````text
+Example 1:
+    Input: "abc"
+    Output: sorted multiset of 7 non-empty strings
+
+Example 2:
+    Input: "aa"
+    Output: ["a", "a", "aa"]
+````
+
+## Constraints
+
+````text
+- Length modest for exponential output (tests use n <= 4)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Include / exclude recursion (binary recursion tree)
+At each index either append the character to the running subsequence or skip it,
+recording a leaf string when the index walks off the end.
+
+1. Depth-first recurse on index + 1 with include branch (output + ch).
+2. Recurse exclude branch without extending output.
+3. At base (index == len), collect non-empty output strings.
+
+Restored notes (archived workbook):
+
+Problem Statement:
+Given a string, find all possible subsequences of the string.
+A subsequence is a sequence that can be derived from another sequence by deleting some or no elements without changing the order of the remaining elements.
+
+Examples:
+
+Input: str = "abc"
+Output: a, ab, abc, ac, b, bc, c
+Explanation: These are all 7 subsequences for the string "abc".
+
+Input: str = "aa"
+Output: a, a, aa
+Explanation: These are all 3 subsequences for the string "aa".
+
+The solution uses a recursive approach with backtracking to generate all possible subsequences. Here's how it works:
+
+We define a recursive function generate\_subsequences that takes four parameters:
+
+index: The current index in the input string
+input\_str: The original input string
+output: The current subsequence being built
+result: A list to store all subsequences
+
+The base case: When index reaches the end of the input string, we add the current output to the result list if it's not empty.
+
+For each character, we have two choices:
+
+Include the character: We add it to the output and make a recursive call
+Exclude the character: We make a recursive call without adding it to the output
+
+We use a wrapper function get\_subsequences to initialize the result list and start the recursion.
+The recursion builds all possible subsequences by including and excluding each character.
+
+Space Complexity:
+
+O(2^n), where n is the length of the input string. In the worst case, we generate 2^n subsequences (for a string with all distinct characters).
+The recursion depth is O(n), which contributes to the space complexity on the call stack.
+
+Time Complexity:
+
+O(n \* 2^n), where n is the length of the input string.
+We have 2^n subsequences, and for each, we may perform O(n) work to create and add the subsequence to the result list.
+
+("abc", "")
+/                          ("bc", "a")          ("bc", "")
+/         \\          /                 ("c", "ab")  ("c", "a")  ("c", "b")  ("c", "")
+/       \\    /       \\    /       \\    /         ("", "abc")("", "ab")("", "ac")("", "a")("", "bc")("", "b")("", "c")("")
+
+("abc", "")
+/                                  Include 'a'    Not Include 'a'
+/                                  ("bc", "a")          ("bc", "")
+/         \\          /                     Include 'b'  Not Include 'b'  Include 'b'  Not Include 'b'
+/                \\          /                      ("c", "ab")          ("c", "a")  ("c", "b")        ("c", "")
+/       \\           /       \\    /       \\        /             Inc 'c' Not Inc 'c' Inc 'c' Not Inc 'c' Inc 'c' Not Inc 'c' Inc 'c' Not Inc 'c'
+\|         \|         \|         \|         \|         \|         \|         \|
+("", "abc")("", "ab")("", "ac")("", "a")("", "bc")("", "b")("", "c")   ("")
+
+## Complexity
+
+**Time:** O(n \* 2^n) - 2^n leaves, each string up to length n
+
+**Space:** O(n) call stack plus O(n \* 2^n) for collected strings
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def subsequences(self, s: str) -> List[str]:
+        result: List[str] = []
+
+        def dfs(index: int, built: str) -> None:
+            if index == len(s):
+                if built:
+                    result.append(built)
+                return
+            dfs(index + 1, built + s[index])
+            dfs(index + 1, built)
+
+        dfs(0, "")
+        return result
+````

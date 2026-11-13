@@ -1,0 +1,95 @@
+---
+title: "Find All Possible Recipes from Given Supplies"
+description: "You have information about recipes (ingredient lists) and a list of supplies you already have."
+difficulty: medium
+patterns: [alphabet150]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: find_all_recipes }
+starter:
+  python: |
+    def find_all_recipes(recipes: list[str], ingredients: list[list[str]], supplies: list[str]) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/find-all-possible-recipes-from-given-supplies-alphabet150.public.json, hidden: tests/find-all-possible-recipes-from-given-supplies-alphabet150.hidden.json }
+complexity: { time: "O(total string lengths + edges).", space: "O(total sizes)." }
+group: "12. Alphabet150"
+number: "06"
+leetcode: find-all-possible-recipes-from-given-supplies
+leetcodeId: 2115
+order: 17012006000000
+---
+
+You have information about recipes (ingredient lists) and a list of supplies you already have.
+A recipe can be made if you have all its ingredients (including recipes produced earlier).
+Return all recipes you can eventually make.
+
+## Examples
+
+````text
+Example 1:
+    Input: recipes = ["bread"], ingredients = [["yeast","flour"]],
+           supplies = ["yeast","flour","corn"]
+    Output: ["bread"]
+Example 2:
+    Input: recipes = ["bread","sandwich"], ingredients = [["yeast","flour"],["bread","meat"]],
+           supplies = ["yeast","flour","meat"]
+    Output: ["bread","sandwich"]
+````
+
+## Constraints
+
+````text
+- 1 <= len(recipes) <= 100
+- ingredients[i] lists are non-empty
+````
+
+**Also in the notes under:** [01. Array/12. Advanced Problem Solving](/dsa/problems/find-all-possible-recipes-from-given-supplies).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Topological sort (Kahn) on recipe dependency DAG
+
+1. Map recipe name to index; count missing ingredients per recipe; build adjacency from
+ingredient to recipes waiting on it.
+2. Start queue with supplies; when an ingredient becomes available, decrement indegree of
+waiting recipes; output recipe when indegree hits 0.
+
+## Complexity
+
+**Time:** O(total string lengths + edges).
+
+**Space:** O(total sizes).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def findAllRecipes(self, recipes: List[str], ingredients: List[List[str]], supplies: List[str]) -> List[str]:
+        need = defaultdict(list)
+        indeg = {}
+        for r, ing in zip(recipes, ingredients):
+            indeg[r] = len(ing)
+            for x in ing:
+                need[x].append(r)
+
+        q = deque(supplies)
+        recipes_set = set(recipes)
+        made = []
+
+        while q:
+            x = q.popleft()
+            for r in need[x]:
+                indeg[r] -= 1
+                if indeg[r] == 0:
+                    made.append(r)
+                    q.append(r)
+        return made
+````

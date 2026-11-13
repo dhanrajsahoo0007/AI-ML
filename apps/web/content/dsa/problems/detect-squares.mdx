@@ -1,0 +1,97 @@
+---
+title: "Detect Squares"
+description: "Maintain a multiset of integer lattice points."
+difficulty: medium
+patterns: [geometry-problems]
+topics: [arrays]
+companies: []
+languages: [python]
+entry: { python: Solution }
+mode: class
+starter:
+  python: |
+    class Solution:
+        def __init__(self) -> None:
+            pass
+
+        def add(self, point: list[int]) -> None:
+            # Your code here
+            pass
+
+        def count(self, point: list[int]) -> int:
+            # Your code here
+            pass
+tests: { public: tests/detect-squares.public.json, hidden: tests/detect-squares.hidden.json }
+complexity: { time: "O(n) per count where n is number of distinct stored points (<= 3000).", space: "O(n) - Counter size." }
+group: "10. Geometry Problems"
+number: "01"
+leetcode: detect-squares
+leetcodeId: 2013
+order: 1010001000000
+---
+
+Maintain a multiset of integer lattice points. Support adding a point and counting how many
+different axis-aligned squares can be formed with a given query point as one vertex and the
+other three vertices all present in the multiset (each use of a point respects its remaining count).
+
+## Examples
+
+````text
+Example 1:
+After adding the four corners of a unit axis-aligned square, counting at any corner returns
+the number of distinct squares that include that corner with all vertices present.
+````
+
+## Constraints
+
+````text
+- At most 3000 calls total to add and count.
+- Coordinates are integers with absolute value up to 1000.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Diagonal enumeration with frequency product
+For a fixed query corner, pair it with another point as diagonal; if side lengths match, multiply
+counts at the other two corners.
+
+1. Store point multiplicities in a Counter keyed by (x, y).
+2. add increments count for that tuple.
+3. count iterates all existing points as opposite diagonal corner; if \|dx\| == \|dy\| and dx, dy != 0,
+multiply frequencies at the two other corners (excluding the double counting of the pair).
+
+## Complexity
+
+**Time:** O(n) per count where n is number of distinct stored points (&lt;= 3000).
+
+**Space:** O(n) - Counter size.
+
+## Solution
+
+````python
+from collections import Counter
+from typing import List
+
+
+class Solution:
+    def __init__(self) -> None:
+        self._cnt: Counter = Counter()
+
+    def add(self, point: List[int]) -> None:
+        self._cnt[tuple(point)] += 1
+
+    def count(self, point: List[int]) -> int:
+        x1, y1 = point[0], point[1]
+        ans = 0
+        for (x3, y3), c in self._cnt.items():
+            if x3 == x1 or y3 == y1:
+                continue
+            if abs(x1 - x3) != abs(y1 - y3):
+                continue
+            x2, y2 = x1, y3
+            x4, y4 = x3, y1
+            ans += c * self._cnt[(x2, y2)] * self._cnt[(x4, y4)]
+        return ans
+````
