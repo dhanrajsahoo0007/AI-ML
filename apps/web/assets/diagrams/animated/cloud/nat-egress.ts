@@ -14,23 +14,24 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // step 2 (`until: 2`), their red step-3 versions end at step 3, and the NAT-to-storage edge of step 5 ends at step 5.
 //
 // Layout: the network is three zone columns side by side (A x 18-204, B x 207-393, C x 396-582). Inside each
-// column a private subnet holds the app server (row y 230) and, below it, a public subnet holds the NAT (row y 360).
-// Leaving the network goes DOWN, into the Internet band at the bottom (y 555-680), so no outbound edge crosses the
+// column a private subnet holds the app server (row y 230) and, below it, a public subnet holds the NAT (row y 370).
+// Leaving the network goes DOWN, into the Internet band at the bottom (y 560-685), so no outbound edge crosses the
 // zone and subnet labels, which sit at the top-left of their bands. The cross-zone calls of steps 2 and 3 run along
 // the corridor between the two subnet rows (y 290). The private endpoint sits above the zone columns, inside the
 // network (480,85); every server's edge to it runs up and to the right, and server A's edge goes straight up first,
-// so it clears the zone B labels. The right column, outside the network, holds the cloud's storage service (700,240)
-// and the egress filter (700,360).
-//   serverA 111,230 | serverB 300,230 | serverC 489,230 | natA 111,360 | natB 300,360 | natC 489,360 |
-//   fault 64,440 (glyph, zone A, left of NAT A's edges) | endpoint 480,85 | storage 700,240 | rules 700,360 |
-//   stranger 160,620 | payment 330,620 | partner 560,620 | unknown 718,620.
+// so it clears the zone B labels. The endpoint-to-storage edge runs right along y 85, then down at x 765, right of
+// the "Cloud services" label. The right column, outside the network, holds the cloud's storage service (700,240)
+// and the egress filter (700,370). The NAT-to-storage edge of step 5 runs along y 370 and then up.
+//   serverA 111,230 | serverB 300,230 | serverC 489,230 | natA 111,370 | natB 300,370 | natC 489,370 |
+//   fault 64,455 (glyph, zone A, left of NAT A's edges) | endpoint 480,85 | storage 700,240 | rules 700,370 |
+//   stranger 160,625 | payment 330,625 | partner 553,625 | unknown 716,625.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left ~480 units. Steps 1 to 4 happen in
 // zones A and B and most of zone C, with the stranger and the payment provider under them, so the free preview and
 // the failure are visible without scrolling. Canvas 795 wide.
 //
 // Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Sized for the longest
-// name the Services toggle shows: "Compute Engine" (servers, w 156), "Private Google Access" (endpoint, w 210),
+// name the Services toggle shows: "Compute Engine" (servers and NATs, w 168, in subnets 180 wide), "Private Google Access" (endpoint, w 210),
 // "Network Firewall" (filter, w 176). The Azure server name is shortened to "Azure VM" so the server fits its subnet.
 const servers = { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: { id: "azure-vm", label: "Azure VM" } };
 const nat = { aws: { label: "NAT gateway" }, gcp: { label: "Cloud NAT" }, azure: { label: "NAT Gateway" } };
@@ -38,7 +39,7 @@ const nat = { aws: { label: "NAT gateway" }, gcp: { label: "Cloud NAT" }, azure:
 const spec: DiagramSpec = {
   title: "From one shared NAT to a way out in every zone, a private path to storage and an egress allow-list",
   width: 795,
-  height: 695,
+  height: 700,
   steps: [
     { title: "One NAT gateway: out yes, in no" },
     { title: "Three zones share one NAT" },
@@ -49,18 +50,18 @@ const spec: DiagramSpec = {
     { title: "Fixed addresses and an egress allow-list" },
   ],
   zones: [
-    { id: "network", title: "Network", tone: "blue", kind: "vpc", x: 10, y: 30, w: 590, h: 500 },
-    { id: "zone-a", title: "Zone A", tone: "neutral", kind: "subnet", x: 18, y: 140, w: 186, h: 375 },
-    { id: "zone-b", title: "Zone B", tone: "neutral", kind: "subnet", x: 207, y: 140, w: 186, h: 375 },
-    { id: "zone-c", title: "Zone C", tone: "neutral", kind: "subnet", x: 396, y: 140, w: 186, h: 375 },
-    { id: "priv-a", title: "Private", tone: "teal", kind: "subnet", x: 24, y: 170, w: 174, h: 105 },
-    { id: "priv-b", title: "Private", tone: "teal", kind: "subnet", x: 213, y: 170, w: 174, h: 105 },
-    { id: "priv-c", title: "Private", tone: "teal", kind: "subnet", x: 402, y: 170, w: 174, h: 105 },
-    { id: "pub-a", title: "Public", tone: "blue", kind: "subnet", x: 24, y: 305, w: 174, h: 105 },
-    { id: "pub-b", title: "Public", tone: "blue", kind: "subnet", x: 213, y: 305, w: 174, h: 105 },
-    { id: "pub-c", title: "Public", tone: "blue", kind: "subnet", x: 402, y: 305, w: 174, h: 105 },
+    { id: "network", title: "Network", tone: "blue", kind: "vpc", x: 10, y: 30, w: 590, h: 515 },
+    { id: "zone-a", title: "Zone A", tone: "neutral", kind: "subnet", x: 18, y: 140, w: 186, h: 390 },
+    { id: "zone-b", title: "Zone B", tone: "neutral", kind: "subnet", x: 207, y: 140, w: 186, h: 390 },
+    { id: "zone-c", title: "Zone C", tone: "neutral", kind: "subnet", x: 396, y: 140, w: 186, h: 390 },
+    { id: "priv-a", title: "Private", tone: "teal", kind: "subnet", x: 21, y: 170, w: 180, h: 105 },
+    { id: "priv-b", title: "Private", tone: "teal", kind: "subnet", x: 210, y: 170, w: 180, h: 105 },
+    { id: "priv-c", title: "Private", tone: "teal", kind: "subnet", x: 399, y: 170, w: 180, h: 105 },
+    { id: "pub-a", title: "Public", tone: "blue", kind: "subnet", x: 21, y: 305, w: 180, h: 115 },
+    { id: "pub-b", title: "Public", tone: "blue", kind: "subnet", x: 210, y: 305, w: 180, h: 115 },
+    { id: "pub-c", title: "Public", tone: "blue", kind: "subnet", x: 399, y: 305, w: 180, h: 115 },
     { id: "services", title: "Cloud services", tone: "violet", kind: "subnet", x: 612, y: 150, w: 173, h: 140 },
-    { id: "internet", title: "Internet", tone: "neutral", kind: "subnet", x: 10, y: 555, w: 780, h: 125 },
+    { id: "internet", title: "Internet", tone: "neutral", kind: "subnet", x: 10, y: 560, w: 780, h: 125 },
   ],
   nodes: [
     // Step 1
@@ -72,18 +73,18 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 111,
       y: 230,
-      w: 156,
+      w: 168,
       cloud: servers,
     },
     {
       id: "natA",
       label: "NAT gateway",
-      sub: "one public address",
+      sub: "public address",
       icon: "nat",
       tone: "blue",
       x: 111,
-      y: 360,
-      w: 156,
+      y: 370,
+      w: 168,
       cloud: nat,
     },
     {
@@ -93,7 +94,7 @@ const spec: DiagramSpec = {
       icon: "card",
       tone: "neutral",
       x: 330,
-      y: 620,
+      y: 625,
       w: 176,
     },
     {
@@ -103,7 +104,7 @@ const spec: DiagramSpec = {
       icon: "robot",
       tone: "red",
       x: 160,
-      y: 620,
+      y: 625,
       w: 144,
     },
 
@@ -117,7 +118,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 300,
       y: 230,
-      w: 156,
+      w: 168,
       cloud: servers,
     },
     {
@@ -129,7 +130,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 489,
       y: 230,
-      w: 156,
+      w: 168,
       cloud: servers,
     },
 
@@ -143,32 +144,32 @@ const spec: DiagramSpec = {
       variant: "glyph",
       step: 3,
       x: 64,
-      y: 440,
+      y: 455,
     },
 
     // Step 4
     {
       id: "natB",
       label: "NAT gateway",
-      sub: "one public address",
+      sub: "public address",
       icon: "nat",
       tone: "blue",
       step: 4,
       x: 300,
-      y: 360,
-      w: 156,
+      y: 370,
+      w: 168,
       cloud: nat,
     },
     {
       id: "natC",
       label: "NAT gateway",
-      sub: "one public address",
+      sub: "public address",
       icon: "nat",
       tone: "blue",
       step: 4,
       x: 489,
-      y: 360,
-      w: 156,
+      y: 370,
+      w: 168,
       cloud: nat,
     },
 
@@ -208,12 +209,12 @@ const spec: DiagramSpec = {
     {
       id: "rules",
       label: "Egress filter",
-      sub: "3 destinations allowed",
+      sub: "3 sites allowed",
       icon: "firewall",
       tone: "red",
       step: 7,
       x: 700,
-      y: 360,
+      y: 370,
       w: 176,
       cloud: {
         aws: { label: "Network Firewall" },
@@ -228,8 +229,8 @@ const spec: DiagramSpec = {
       icon: "building",
       tone: "neutral",
       step: 7,
-      x: 560,
-      y: 620,
+      x: 553,
+      y: 625,
       w: 170,
     },
     {
@@ -239,16 +240,16 @@ const spec: DiagramSpec = {
       icon: "globe",
       tone: "red",
       step: 7,
-      x: 718,
-      y: 620,
-      w: 140,
+      x: 716,
+      y: 625,
+      w: 150,
     },
   ],
   edges: [
     // Step 1: the server calls out through the NAT; a call that starts outside has nowhere to go.
     { from: "serverA", to: "natA", label: "outbound", packet: true },
     { from: "natA", to: "payment", label: "card check", packet: true, delay: 1.2, until: 2 },
-    { from: "stranger", to: "natA", label: "start a call in: refused", tone: "red", dashed: true, labelAt: 0.3 },
+    { from: "stranger", to: "natA", label: "inbound: refused", tone: "red", dashed: true, labelAt: 0.3 },
 
     // Step 2: zones B and C have no NAT of their own; their route sends them across to zone A.
     // Both run along the corridor between the subnet rows (y 290), then up into NAT A.
@@ -318,7 +319,8 @@ const spec: DiagramSpec = {
       tone: "orange",
       packet: true,
       delay: 1.2,
-      labelAt: 0.5,
+      via: [[700, 370]],
+      labelAt: 0.8,
       until: 5,
     },
 
@@ -334,12 +336,24 @@ const spec: DiagramSpec = {
     },
     { from: "serverB", to: "endpoint", packet: true, step: 6 },
     { from: "serverC", to: "endpoint", packet: true, step: 6 },
-    { from: "endpoint", to: "storage", label: "private path", packet: true, delay: 1.2, step: 6 },
+    {
+      from: "endpoint",
+      to: "storage",
+      label: "private path",
+      packet: true,
+      delay: 1.2,
+      via: [
+        [765, 85],
+        [765, 200],
+      ],
+      labelAt: 0.42,
+      step: 6,
+    },
 
     // Step 7: every outbound call passes the filter. The partner sees a fixed address; an unknown site is refused.
     { from: "natC", to: "rules", packet: true, step: 7 },
     { from: "rules", to: "partner", label: "listed address", packet: true, delay: 1.2, step: 7 },
-    { from: "rules", to: "unknown", label: "blocked", tone: "red", dashed: true, step: 7 },
+    { from: "rules", to: "unknown", label: "blocked", tone: "red", dashed: true, labelAt: 0.3, step: 7 },
   ],
 };
 

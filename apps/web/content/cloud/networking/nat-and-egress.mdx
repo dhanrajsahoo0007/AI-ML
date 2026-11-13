@@ -34,7 +34,7 @@ A packet with no matching entry is dropped. That is the stranger's fate: nobody 
 
 <AnimatedDiagram spec="animated/cloud/nat-egress" step={2} minWidth={620} caption="Zones B and C have no NAT of their own. Their routes send every outbound call across to the one in zone A." />
 
-A server does not choose the NAT. Its subnet's <Term id="route-table">route table</Term> does, with one rule: anything not inside the network goes to the NAT gateway. The gateway itself needs a way to the internet. On some clouds it sits in a **public subnet**, one whose routes lead to the internet. On others it is a managed setting on the network, with no subnet of its own.
+A server does not choose the NAT. Its subnet's <Term id="route-table">route table</Term> does, with one rule: anything not inside the network goes to the NAT gateway, which needs its own way to the internet. On some clouds it sits in a **public subnet**, one whose routes lead to the internet. On others it is a managed setting on the network, with no subnet of its own.
 
 Brightpost's three private subnets all pointed at the one gateway in zone A. So every call from zones B and C crossed a zone boundary before it left, which some clouds charge for by the gigabyte. [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets) covers routes in full.
 
@@ -48,7 +48,7 @@ Brightpost spread its servers across three <Term id="availability-zone">zones</T
   Zone A's network fails at 10:20 a.m. Pages keep loading from zones B and C, but every checkout calls the payment provider, and every call is routed to the gateway in zone A. For 50 minutes, 31 checkouts wait 30 seconds and fail. The health checks only load the home page, so they stay green throughout.
 </Callout>
 
-The incoming path had been built for three zones. The outgoing path had been built for one.
+The way in was built for three zones. The way out was built for one.
 
 ### Step 4: One NAT gateway per zone
 
@@ -86,7 +86,7 @@ A <Term id="private-endpoint">private endpoint</Term> is a way to reach a provid
 1. **The route kind.** A route-table entry sends storage traffic straight onto the provider's own network. Nothing new appears in your subnet.
 2. **The address kind.** A private address appears in your subnet, and that address leads to the service.
 
-Brightpost adds one for storage. The 160 GB a month leave the NAT bill, and the gateways carry about 40 GB. Checkout calls and patches still go through the NATs, because they really do go to the internet. [Private Endpoints](/cloud/networking/private-endpoints) covers both kinds and the DNS work they need.
+Brightpost adds one for storage. The 160 GB a month leave the NAT bill, and the gateways carry about 40 GB. Checkout calls and patches still use the NATs, because they do go to the internet. [Private Endpoints](/cloud/networking/private-endpoints) covers both kinds and the DNS work they need.
 
 ### Step 7: A fixed address a partner can trust
 
@@ -112,7 +112,7 @@ This is a security control. Malware calls home for orders, and an intruder who c
 
 ## On AWS, Google Cloud and Azure
 
-The idea is the same on all three clouds: private servers leave through a shared public address, and the cloud's own services can be reached without it.
+The idea is the same on all three clouds: private servers share a public address on the way out, and provider services need none.
 
 <Tabs title="On each cloud">
   <Tab label="AWS">
@@ -236,7 +236,7 @@ The shared gateway wins only on the hourly line. The endpoint then removes the l
     <AnimatedDiagram spec="animated/cloud/nat-egress" step={3} highlight={["serverB", "serverC", "natA", "fault"]} caption="Zones B and C are healthy, but their only way out was in zone A." />
 
     **Follow-ups the interviewer may ask.**
-    - How would you have caught this before the outage?
+    - How would you catch this before an outage?
     - Does this apply on Google Cloud, where Cloud NAT is regional?
 
     **Watch out for.** Adding gateways without changing the routes. Three gateways with every route still pointing at zone A's gateway fail the same way.
