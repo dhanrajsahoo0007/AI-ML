@@ -14,8 +14,9 @@ import type { LayoutShape, LayoutSpec, Tone } from "@/components/diagrams/types"
 // the reason the team chose it.
 //
 // Geometry: row labels are text in x 12-152. Columns start at x 160, 286, 412, 538, 664 and are 120 wide with a gap
-// of 6, so the last one ends at 784 (canvas 790). Heads are boxes at y 26-72. Rows start at y 84 and are 48 apart
-// (boxes 44 tall), so the eight rows end at 464. The direction arrow sits at y 486.
+// of 6, so the last one ends at 784 (canvas 790). Heads are boxes at y 26-72. Rows start at y 84 and are 58 apart
+// (boxes 44 tall), so the eight rows end at 534. The 14-unit gap keeps each step's NEW badges and dashed step
+// outline clear of the sub line in the row above. The direction arrow sits at y 556.
 // Box labels fit 120 - 8 = 112 px at 6.2 px per character: "Under 1 s to a few" (18 characters) is the longest.
 
 const COLS = [
@@ -132,7 +133,7 @@ const ROWS: { id: string; label: string; step: number; cells: Record<ColId, Cell
   },
 ];
 
-const ROW_Y = (i: number) => 84 + i * 48;
+const ROW_Y = (i: number) => 84 + i * 58;
 
 const shapes: LayoutShape[] = [
   ...COLS.map((c): LayoutShape => ({
@@ -181,7 +182,7 @@ const shapes: LayoutShape[] = [
     id: "direction",
     type: "arrow",
     x: 160,
-    y: 486,
+    y: 556,
     w: 624,
     h: 0,
     label: "Rightward: less to run, less control",
@@ -193,7 +194,7 @@ const spec: LayoutSpec = {
   kind: "layout",
   title: "The compute spectrum: what each place gives and takes",
   width: 790,
-  height: 506,
+  height: 578,
   steps: [
     { title: "Five places: what you hand over, what you still run" },
     { title: "Time: how fast a copy starts, how long it may run" },
