@@ -1,11 +1,336 @@
 ---
 title: "Peering, Hub-and-Spoke & Transit"
-description: "What to do when one company has many networks: direct peering, why it does not chain, and a hub that routes between them all."
-status: outline
+description: "How many cloud networks reach each other: peering for a pair, why it never chains, and a transit hub that every network attaches to once."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** what to do when a company has five networks (production, staging, shared tools, data and a partner): direct peering and its non-transitive trap, then a hub that routes between every spoke and the on-premises network.
+<KeyIdea>
+  A link between two networks carries traffic only between those two. With many networks, you either link every pair or join each one to a hub that passes traffic on.
+</KeyIdea>
 
-**Related reading on this site:** [Networking on AWS](/cloud/aws/networking) · [Networking on Google Cloud](/cloud/gcp/networking) · [Networking on Azure](/cloud/azure/networking)
+## The story
+
+Brightpost, the small shop that sells posters and greeting cards, has a printing partner that runs its order system on the same cloud. For a year the shop's network has had one private link to the partner's network, and every print job crosses it. The wholesale shop, where about 300 gift shops order cards in bulk, has a network of its own. In April Asha linked it to the shop network so the wholesale app could check stock. The wholesale team then sent its bulk print jobs to the partner's address, expecting them to travel on through the shop network. On Monday at 08:00 the first job left, and none arrived. The job runner retried every hour and raised no alarm. On Thursday a gift shop phoned about 600 cards it needed for a weekend fair. By then 52 bulk orders, about 9,000 cards, were stuck, and 14 shops got their cards late.
+
+Each network had a working link. The missing piece was a path through the middle, and every step below is about that path.
+
+## How it works
+
+Three words first. A **network** here is a <Term id="vpc">private network</Term> in the cloud, with its own address range; [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets) builds Brightpost's. A **route** is one line of a <Term id="route-table" />: packets for this range go there. A link is **transitive** when traffic can cross it and then carry on over another link, the way a train passenger changes at a station.
+
+### Step 1: Peering: a private link between two networks
+
+<AnimatedDiagram spec="animated/cloud/hub-spoke" step={1} minWidth={620} caption="The shop network and the printing partner's network are peered, and print jobs cross that one link." />
+
+<Term id="peering">Peering</Term> joins two networks so that machines in each can reach the other by private address. The traffic stays on the provider's own network and never touches the internet. There is no box in the middle to run: the cloud carries the packets itself.
+
+Both owners must agree, because each network belongs to someone. Then each side needs a route for the other's range. The shop's table says "172.16.0.0/16 goes to peering 1", and the partner's says the same for 10.0.0.0/16. Some clouds add these routes for you; on others you write them. Routing itself is covered in [Networking basics](/system-design/fundamentals/networking).
+
+<PremiumBreak />
+
+### Step 2: Peering does not chain
+
+<AnimatedDiagram spec="animated/cloud/hub-spoke" step={2} minWidth={620} caption="The failure: the wholesale network reaches the shop network, but the shop network will not pass its print jobs on to the partner." />
+
+A peering shares only the ranges of the two networks it joins. Peering 2 tells the wholesale network about 10.0.0.0/16, the shop. It says nothing about 172.16.0.0/16, the partner. And the shop network never forwards a packet that arrived on one peering out over another. So peering is not transitive, on every cloud.
+
+<Callout tone="red" title="What breaks">
+  Each wholesale print job looks for a route to 172.16.0.0/16 and finds none. The job runner waits, marks it "retry", and tries again an hour later. Stock checks to the shop keep working, so every dashboard stays green. Nothing reports a fault for 4 days, until a customer phones. By then 52 orders, about 9,000 cards, are waiting.
+</Callout>
+
+The wholesale team's picture was "we are connected to the shop, and the shop is connected to the printer". Networks do not work like that. Each pair that must talk needs its own path.
+
+### Step 3: Address ranges must never overlap
+
+Before any of this, the wholesale network had a worse problem. The team built it by hand in March and took the range the setup screen offered: 10.0.0.0/16, the shop's own range. The cloud refused the peering. A packet for 10.0.11.7 could have meant a machine in either network, so no route could be right. Rebuilding the network as 10.2.0.0/16 took 2 days.
+
+The fix is a written plan, made before the first network exists. Every network, partner and office gets its own block.
+
+<Compare
+  columns={["Network", "Range", "Owner"]}
+  rows={[
+    ["Shop", "10.0.0.0/16", "Shop team"],
+    ["Test", "10.1.0.0/16", "Shop team"],
+    ["Wholesale", "10.2.0.0/16", "Wholesale team"],
+    ["Shared tools: build server, monitoring", "10.3.0.0/16", "Platform admins"],
+    ["Printing partner", "172.16.0.0/16", "The partner, written down so nobody reuses it"],
+  ]}
+  caption="Brightpost's address plan. The ranges 10.4.0.0 to 10.255.0.0 stay free for future networks."
+/>
+
+Renumbering a live network means moving every machine in it. A plan costs an hour.
+
+### Step 4: Peering every pair: the mesh
+
+<AnimatedDiagram spec="animated/cloud/hub-spoke" step={3} minWidth={620} caption="Four networks that must all reach each other need six peerings, one for each pair." />
+
+The quick fix was a direct peering from wholesale to the partner. Then a shared tools network arrived, with a build server and monitoring that must reach every network. That took three more peerings.
+
+When every network peers with every other, the result is a **mesh**. For n networks it needs n × (n − 1) ÷ 2 peerings.
+
+<Compare
+  columns={["Networks", "Peerings in a full mesh", "Routes to keep, one per peer on each side"]}
+  rows={[
+    ["2", "1", "2"],
+    ["4 (Brightpost now)", "6", "12"],
+    ["6", "15", "30"],
+    ["10", "45", "90"],
+    ["20", "190", "380"],
+  ]}
+  caption="The peerings grow with the square of the networks. Every one of those routes is a place to make a mistake."
+/>
+
+Each new network adds a peering to every existing one. One missing route breaks one pair silently, as Step 2 showed.
+
+### Step 5: A transit hub: each network attaches once
+
+<AnimatedDiagram spec="animated/cloud/hub-spoke" step={4} minWidth={620} caption="The six peerings are gone. Each network attaches once to the hub in the network account, and the partner link hangs off the hub." />
+
+A <Term id="transit-hub">transit hub</Term> is a router that the cloud runs for you. Each network connects to it once, and that connection is called an **attachment**. The networks around the hub are its **spokes**, so the layout is called **hub-and-spoke**. Unlike a peering, the hub passes traffic on: that is its whole job.
+
+The hub keeps its own route table. When a spoke attaches, the hub learns its range. A wholesale print job now goes to the hub, which looks up 172.16.0.0/16 and sends it down the partner link. Four networks need 4 attachments, not 6 peerings, and a tenth network adds one.
+
+Brightpost keeps the hub in its network account, run by the platform admins, as its [landing zone](/cloud/fundamentals/landing-zones) planned. Office links attach here too, such as a <Term id="vpn" />; see [Hybrid Connectivity](/cloud/networking/hybrid-connectivity). The price is one more hop, a bill for attachments and traffic, and route tables someone must own.
+
+### Step 6: Inspection in the hub
+
+<AnimatedDiagram spec="animated/cloud/hub-spoke" step={5} minWidth={620} caption="Traffic between spokes turns through the hub firewall before it leaves the hub." />
+
+Every packet between two spokes now crosses the hub, so the hub is the one place to check them. Brightpost places a firewall there and points the hub's routes through it. A wholesale print job goes spoke, hub, firewall, hub, partner.
+
+The firewall allows the wholesale network to reach the partner's print service on port 443, and nothing else. It logs each connection, so a stuck job shows up within minutes, not on day 4. [Firewalls](/cloud/networking/firewalls) covers the rules.
+
+A firewall that tracks connections must see both directions of each one. If the reply takes another path, the firewall never saw the connection start, and it drops the reply.
+
+### Step 7: Route tables decide who reaches whom
+
+<AnimatedDiagram spec="animated/cloud/hub-spoke" step={6} minWidth={620} caption="The test network attaches to its own route table in the hub. It reaches the shared tools, and it has no route to the live shop." />
+
+A hub can hold several route tables. Each attachment uses exactly one, and that table decides where its packets may go. Brightpost keeps two.
+
+<Compare
+  columns={["Hub route table", "Used by", "Routes to"]}
+  rows={[
+    ["Live", "Shop, wholesale, shared tools, partner link", "Each other, through the firewall"],
+    ["Test", "Test network", "Shared tools only"],
+  ]}
+  caption="A test server can download builds from the tools network. A packet for the shop's database at 10.0.21.5 meets no route and is dropped."
+/>
+
+This is the landing zone's first rule, test apart from live, written as routes. The spokes need their side too. Each spoke's own routes must send the other ranges to the hub, or its packets never get there.
+
+### Step 8: Or share one network
+
+A third answer is fewer networks. In a **shared network**, one central team owns a network and its routes, and other accounts place their servers in its subnets. Two teams in one shared network need no link at all.
+
+<Compare
+  columns={["", "Many networks on a hub", "One shared network"]}
+  rows={[
+    ["Links to build", "One attachment per network", "None between teams"],
+    ["Who controls routes and firewall rules", "Each team in its network, the network team in the hub", "The network team, for everyone"],
+    ["A team's mistake reaches", "Its own network", "The whole shared network"],
+    ["Teams can pick their own ranges", "From the plan", "No: subnets are handed out"],
+  ]}
+  caption="Many estates use both: one shared network per environment, joined through a hub."
+/>
+
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: peering joins two networks and does not chain, a hub passes traffic between many, and ranges must never overlap.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Two networks:** VPC peering, within an account or across accounts and regions. Each side adds a route to the peering connection. It is not transitive, and a VPC cannot use its peer's internet gateway, NAT gateway or VPN either.
+    - **Many networks:** AWS Transit Gateway, a regional router. VPCs, Site-to-Site VPN connections and Direct Connect gateways attach to it. It can be shared with other accounts through AWS Resource Access Manager.
+    - **Hub route tables:** each attachment is associated with one transit gateway route table. Propagation decides which attachments' ranges a table learns.
+    - **Inspection:** an inspection VPC attached to the transit gateway, running AWS Network Firewall or partner appliances. Appliance mode on that attachment keeps both directions of a flow on the same path.
+    - **Sharing one network:** VPC sharing, also through Resource Access Manager: the owner account shares subnets with other accounts in the same organization.
+
+    **The difference that changes a design.** Spoke VPCs keep their own route tables, so each must send the other ranges, often one summary such as 10.0.0.0/8, to the transit gateway. Segmentation lives in the transit gateway's route tables. Across regions, transit gateways peer with each other, and AWS Cloud WAN runs such a global network from one central policy.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Two networks:** VPC Network Peering, between VPC networks in the same or different projects and organizations. Both sides create the peering, and it exchanges subnet routes. It is not transitive.
+    - **Many networks:** Network Connectivity Center. A hub that VPC networks join as VPC spokes, exchanging subnet routes through it. VPN tunnels, Interconnect attachments and router appliances can join as hybrid spokes.
+    - **Hub route tables:** the hub keeps a route table of the subnet ranges its spokes share. A spoke can be set to leave some of its ranges out.
+    - **Inspection:** firewall rules and policies apply inside each network. For one inspection point between networks, teams run firewall appliance VMs in a hub network and route traffic through them.
+    - **Sharing one network:** Shared VPC. A host project owns the network, and service projects place their resources in its subnets.
+
+    **The difference that changes a design.** A VPC network is global: one network can hold subnets in every region, with no link between regions to build. With Shared VPC as well, many companies need very few networks, often one per environment. Connecting them becomes a small problem.
+  </Tab>
+  <Tab label="Azure">
+    - **Two networks:** virtual network peering, in one region or across regions (global peering), and across subscriptions. It is not transitive. Gateway transit lets a peered spoke use the hub's VPN or ExpressRoute gateway.
+    - **Many networks:** Azure Virtual WAN, hubs that Microsoft runs. Virtual networks connect to a hub, and a Standard hub routes between them and to branches. The other way is a hub virtual network you build yourself, peered with each spoke.
+    - **Hub route tables:** Virtual WAN hubs have route tables with associations and propagations. In a self-built hub, route tables on the spokes' subnets (user-defined routes) do the job.
+    - **Inspection:** Azure Firewall in the hub. In Virtual WAN, a secured virtual hub with routing intent sends traffic through it.
+    - **Sharing one network:** a virtual network belongs to one subscription. Many subscriptions get one design through hub and spoke, and Azure Virtual Network Manager can create and keep those peerings from one configuration.
+
+    **The difference that changes a design.** A self-built hub is not a router. Its peerings are still not transitive, so spoke-to-spoke traffic works only because each spoke's routes send it to the firewall's private address, and the firewall forwards it. A new subnet without that route skips the firewall or fails. Virtual WAN takes that routing work off your hands.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/hub-spoke" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/hub-spoke" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="How should these networks connect?"
+  tree={{
+    q: "Does one network need only a single service in the other, such as one API?",
+    yes: {
+      answer: "A private endpoint for that service. It exposes one service, not the whole network, and it works even when the ranges overlap.",
+      href: "/cloud/networking/private-endpoints",
+    },
+    no: {
+      q: "Do the two networks' address ranges overlap?",
+      yes: "Renumber one network from the company plan before you join them. No peering or hub can route between two copies of the same range.",
+      no: {
+        q: "Will more than three networks need to reach each other, or will outside links be shared?",
+        no: "Peering. One link per pair and a route on each side. Remember that it does not chain.",
+        yes: {
+          q: "Can the teams live in one network run by a central team, with a subnet each?",
+          yes: "A shared network per environment. No links between teams; the network team owns routes and firewall rules.",
+          no: "A transit hub, with each network as a spoke. Put inspection, outside links and separate route tables for test and live in the hub.",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost grows to 6 networks that must all reach each other. How many links does a mesh of peerings need, and how many with a hub?" hint="One per pair, or one per network.">
+    A mesh needs 6 × 5 ÷ 2 = 15 peerings. A hub needs 6 attachments, and a seventh network adds one more, not six.
+  </QuizItem>
+  <QuizItem question="The wholesale network (10.2.0.0/16) is peered with the shop (10.0.0.0/16), and the shop is peered with the partner (172.16.0.0/16). Can a wholesale server reach 172.16.0.9?" hint="Which ranges does peering 2 share?">
+    No. Peering 2 shares only the shop's range, so the wholesale network has no route to 172.16.0.0/16. The shop network would not pass the packet on anyway, because peering is not transitive.
+  </QuizItem>
+  <QuizItem question="A test server sends a packet to the shop database at 10.0.21.5. The test network's hub route table lists only the shared tools. What happens?">
+    The hub finds no route for 10.0.21.5 in the test table and drops the packet. The test network can reach the tools, never the live shop.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Peering each pair", "Transit hub", "One shared network"]}
+  rows={[
+    ["Links for Brightpost's 4 networks", "6 peerings", "4 attachments", "None between teams"],
+    ["Links for 10 networks", "45", "10", "None between teams"],
+    ["Passes traffic on", false, true, "Not needed"],
+    ["One place to inspect traffic", false, true, "Rules inside the one network"],
+    ["Extra hop and running cost", "None", "One hop; bills per attachment and traffic", "None"],
+    ["Who owns the routes", "Both teams of every pair", "The network team", "The network team"],
+    ["Fits", "2 or 3 networks that stay that way", "Many accounts, outside links, inspection", "Teams that accept one central network"],
+  ]}
+  caption="Brightpost's numbers. Each cloud bills these differently; the shape of the cost is what matters here."
+/>
+
+Peering is cheapest for two networks and stays cheapest only while the count stays small. A hub costs a hop and a bill from the first day, and saves a peering for every network after the third.
+
+## Common pitfalls
+
+- **Expecting peering to chain.** That was the story's mistake. Each pair that must talk needs its own peering, or both must attach to a hub.
+- **Taking the default range.** Setup screens offer the same range to everyone, and two networks with the same range can never be joined. Hand out every range from one plan, at the moment the network is created.
+- **Forgetting the spoke's routes.** The hub knows where 10.2.0.0/16 is, but each spoke must also send other ranges to the hub. Write both sides in one code change.
+- **One flat hub route table.** If test and live share a table, a test script can reach the live database through the hub. Give test its own table that lists only what it needs.
+- **A firewall that sees one direction.** When a reply returns by another path, a firewall that tracks connections drops it. Route both directions of every flow through the same firewall.
+
+## How to say it in an interview
+
+"Peering joins two networks privately, but it only carries traffic between those two: it never passes traffic on to a third network. A full mesh of peerings grows with the square of the networks. Beyond three or four, I attach every network once to a managed transit hub in a network account. The hub holds inspection, outside links and separate route tables, so test never reaches live. Where teams can share, one shared network per environment removes most links. And none of it works without one address plan, because overlapping ranges can never be joined."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Network A is peered with B, and B with C. Why can A not reach C?" level="Junior" category="Cloud">
+    **Short answer.** Peering is not transitive. A peering shares only the ranges of the two networks it joins. The middle network never forwards traffic from one peering into another, so A needs its own link to C, or a hub.
+
+    **Why.** At Brightpost the wholesale network was peered with the shop, and the shop with the printing partner. The wholesale network learned the shop's range and nothing about the partner's 172.16.0.0/16. Its print jobs had no route, and 52 orders waited 4 days. The design is deliberate: peering with one network never quietly opens a path to its other neighbours.
+
+    <AnimatedDiagram spec="animated/cloud/hub-spoke" step={2} highlight={["wholesale", "shop", "partner"]} caption="The wholesale network reaches the shop, and the shop does not pass its jobs on to the partner." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you have detected the missing path in minutes instead of days?
+    - What would you change first: the links, or the job runner's alerts?
+
+    **Watch out for.** Saying "add a route on A for C's range through B". There is no route that makes the middle network forward peered traffic.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Two teams built networks that both use 10.0.0.0/16, and now they must talk. What are your options?" level="Mid" category="Cloud">
+    **Short answer.** The real fix is to renumber one network from a company-wide plan. If only a few services must be reached in the meantime, a private endpoint can expose each one across the overlap. Address translation in the middle works too, but it is a last resort.
+
+    **Why.** A packet for 10.0.11.7 could mean a machine in either network, so no peering or hub can route between them, and clouds refuse such a peering. Brightpost's wholesale network had this problem in March and was rebuilt as 10.2.0.0/16 in 2 days, while it was still small. A private endpoint gives one service an address inside the caller's own network, so the overlap does not matter for that service. Translation hides the clash but makes logs and firewall rules harder to read.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you renumber a network that is already in production?
+    - How do you stop this from happening again for the next 20 networks?
+
+    **Watch out for.** Proposing a peering with "more specific routes". The two ranges are the same, so there is nothing more specific to pick.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When would you move from peering to a transit hub?" level="Mid" category="Cloud">
+    **Short answer.** When more than three or four networks must reach each other. Also when many networks share outside links such as VPNs, or when traffic between them must be inspected in one place. Below that, peering is simpler.
+
+    **Why.** A mesh needs n × (n − 1) ÷ 2 peerings: 6 for Brightpost's four networks, 45 for ten, each with a route on both sides. A hub needs one attachment per network, and it passes traffic on, so the partner link is built once. The cost is one more hop, a bill for attachments and traffic, and route tables a team must own.
+
+    <AnimatedDiagram spec="animated/cloud/hub-spoke" step={4} highlight={["hub", "shop", "wholesale", "tools", "partner"]} caption="Each network attaches once, and the hub passes traffic between them." />
+
+    **Follow-ups the interviewer may ask.**
+    - Would you keep any direct peerings once the hub exists?
+    - Where does the hub live, and who may change it?
+
+    **Watch out for.** Choosing a hub only because it is "the enterprise pattern". For two networks that will stay two, it adds cost and a hop for nothing.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design the network for 40 teams, each with a test and a live environment, with all traffic between them inspected." level="Senior" category="Cloud">
+    **Short answer.** Hub-and-spoke from a network account. Each team gets a live and a test network with ranges from one plan, attached to a managed hub. The hub sends traffic through a central firewall and keeps separate route tables for live, test and shared services.
+
+    **Why.** Forty teams with two environments make 80 networks. A full mesh would need 3,160 peerings; the hub needs 80 attachments. Account vending creates each network with its range and attaches it. The live table reaches live spokes and shared tools through the firewall, and the test table reaches only test spokes and tools. Outside links attach once, at the hub.
+
+    <AnimatedDiagram spec="animated/cloud/hub-spoke" step={6} highlight={["hub", "firewall", "test", "shop", "tools"]} caption="One hub, one firewall, and a separate route table that keeps test away from live." />
+
+    **Follow-ups the interviewer may ask.**
+    - Would some teams share one network instead, and which ones?
+    - How do you add a second region without doubling every rule?
+
+    **Watch out for.** Leaving out the address plan. With 80 networks, one overlapping range blocks a team from the hub on its first day.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Traffic from one spoke to another passes the hub firewall, but the replies are dropped. What is going on?" level="Senior" category="Cloud">
+    **Short answer.** Asymmetric routing. The request went through the firewall, but the reply came back by another path, or through a second copy of the firewall. A firewall that tracks connections drops a reply for a connection it never saw start.
+
+    **Why.** A stateful firewall remembers each connection it lets through and allows its replies. If one direction is routed through the firewall and the other straight across the hub, the two split. The same happens when the firewall runs in several zones and each direction lands on a different copy. The fix is routing that sends both directions through the same copy, on every subnet.
+
+    <AnimatedDiagram spec="animated/cloud/hub-spoke" step={5} path="shop>hub>firewall" caption="Both directions of every flow must turn through the same firewall." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you prove it from the logs?
+    - Why does the problem often appear only after a firewall is added in a second zone?
+
+    **Watch out for.** Opening the firewall rules wider. The rules were never the problem, and wider rules leave the path broken.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets)
+- [Firewalls: Security Groups, NACLs, NSGs & Firewall Policies](/cloud/networking/firewalls)
+- [Private Endpoints: PrivateLink, Private Service Connect & Private Link](/cloud/networking/private-endpoints)
+- [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity)
+- [Landing Zones: Setting Up an Estate](/cloud/fundamentals/landing-zones)
+- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
+- [Networking on AWS](/cloud/aws/networking)
+- [Networking on Google Cloud](/cloud/gcp/networking)
+- [Networking on Azure](/cloud/azure/networking)
+- [Networking basics](/system-design/fundamentals/networking)
+
+## Further reading
+
+- [AWS Transit Gateway guide](https://docs.aws.amazon.com/vpc/latest/tgw/what-is-transit-gateway.html): attachments, route tables and sharing.
+- [Google Cloud VPC Network Peering](https://cloud.google.com/vpc/docs/vpc-peering): route exchange between two networks.
+- [Network Connectivity Center overview](https://cloud.google.com/network-connectivity/docs/network-connectivity-center/concepts/overview): hubs and spokes on Google Cloud.
+- [Azure virtual network peering](https://learn.microsoft.com/azure/virtual-network/virtual-network-peering-overview): regional and global peering, gateway transit.
