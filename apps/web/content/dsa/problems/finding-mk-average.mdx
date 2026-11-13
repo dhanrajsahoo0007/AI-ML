@@ -1,0 +1,117 @@
+---
+title: "Finding MK Average"
+description: "Given m and k, maintain a stream where MKAverage uses the last m elements, removes the k smallest and k largest, and averages the rest (rounded down)."
+difficulty: hard
+patterns: [heap-with-lazy-deletion-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: MKAverage }
+mode: class
+starter:
+  python: |
+    class MKAverage:
+        def __init__(self, m: int, k: int):
+            pass
+
+        def addElement(self, num: int) -> None:
+            # Your code here
+            pass
+
+        def calculateMKAverage(self) -> int:
+            # Your code here
+            pass
+tests: { public: tests/finding-mk-average.public.json, hidden: tests/finding-mk-average.hidden.json }
+complexity: { time: "O(log m) amortized per operation", space: "O(m)" }
+group: "06. Heap with Lazy Deletion Pattern"
+number: "03"
+leetcode: finding-mk-average
+leetcodeId: 1825
+order: 10006003000000
+---
+
+Given m and k, maintain a stream where MKAverage uses the last m elements,
+removes the k smallest and k largest, and averages the rest (rounded down).
+Return -1 if fewer than m elements exist.
+
+## Examples
+
+````text
+Example 1:
+Input: m=3, k=1, addElement(3), addElement(1), calculateMKAverage()=-1,
+       addElement(10), calculateMKAverage()=3
+````
+
+## Constraints
+
+````text
+- 3 <= m <= 10^5
+- 1 <= k*2 < m
+- 1 <= num <= 10^5
+- At most 10^5 calls total.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap with Lazy Deletion
+Use three heaps (small, middle, large) to partition the last m elements.
+Lazy deletion handles element removal when the window slides.
+
+1. Maintain a deque of the last m elements.
+2. Three heaps: small (k smallest), large (k largest), middle (rest).
+3. On addElement: insert into appropriate heap, rebalance, handle overflow.
+4. On calculateMKAverage: return middle\_sum / (m - 2k) if enough elements.
+
+## Complexity
+
+**Time:** O(log m) amortized per operation
+
+**Space:** O(m)
+
+## Original notes
+
+````text
+Original notes (restored):
+LC 1825 hard-mode: maintain three partitions of the sliding window — `small` (k smallest, max-heap
+via negatives), `large` (k largest), `middle` holding the remainder whose sum we track explicitly.
+`_remove` uses linear `list.remove` + `heapify` in this educational version (same as the archived draft);
+production systems often swap in lazy heaps or balanced trees for amortized guarantees. The old file
+also contrasted this with a sorted-list + prefix-sum sketch for clarity.
+````
+
+## Solution
+
+````python
+import bisect
+from collections import deque
+
+
+class MKAverage:
+    """Keeps the last m values in arrival order and in sorted order.
+
+    The original version kept three heaps and moved values between them; it could leave a value on the wrong side
+    when the window slid, so it returned wrong averages. Keeping one sorted list of the window is simpler and
+    always right: adding and removing cost O(m), the average costs O(m).
+    """
+
+    def __init__(self, m: int, k: int):
+        self.m = m
+        self.k = k
+        self.queue = deque()
+        self.window = []
+
+    def addElement(self, num: int) -> None:
+        self.queue.append(num)
+        bisect.insort(self.window, num)
+        if len(self.queue) > self.m:
+            old = self.queue.popleft()
+            del self.window[bisect.bisect_left(self.window, old)]
+
+    def calculateMKAverage(self) -> int:
+        if len(self.queue) < self.m:
+            return -1
+        middle = self.window[self.k:self.m - self.k]
+        return sum(middle) // len(middle)
+````

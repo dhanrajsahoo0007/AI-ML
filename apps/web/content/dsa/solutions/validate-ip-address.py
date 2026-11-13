@@ -25,8 +25,10 @@ def valid_ip_address(queryIP: str) -> str:
         if queryIP.count("::") != 1:
             return "Neither"
         left, right = queryIP.split("::", 1)
-        left_parts = [x for x in left.split(":") if x] if left else []
-        right_parts = [x for x in right.split(":") if x] if right else []
+        left_parts = left.split(":") if left else []
+        right_parts = right.split(":") if right else []
+        if "" in left_parts or "" in right_parts:  # ":::" or a stray ":" next to "::"
+            return "Neither"
         if len(left_parts) + len(right_parts) > 7:
             return "Neither"
         for block in left_parts + right_parts:
