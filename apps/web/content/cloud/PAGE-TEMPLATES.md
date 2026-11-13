@@ -86,6 +86,23 @@ contradict these, and list anything new in your report so it can be added here.
 Rules: the story has a concrete failure with numbers (files, minutes, orders lost); every later section refers back
 to it; quiz items, the trade-off table and the answers reuse the same numbers.
 
+### Facts already used on written pages (do not contradict; reuse where they fit)
+
+Each page has its own incident. Do not reuse another page's incident as yours; pick a new failure for your topic.
+
+| Topic | Facts |
+|---|---|
+| Location and customers | Most customers are in the UK; the shop runs in a region near London. It also ships to Australia, about 30 orders a day; a product page takes about 3 s in Sydney against under 1 s in the UK. |
+| The shop app | Runs on rented virtual machines: two app servers normally, a third on the 30 busiest days, up to 10 on a sale day (autoscaling rule: minimum 1, maximum 10, aims for about 60% processor use). One server serves about 200 shoppers at once; on a normal day about 40 are online at the busiest moment. Baskets live in a shared database, so any server can serve any shopper. |
+| First sale day (what-is-cloud) | 2,000 shoppers at 9 a.m.; the single server failed; about 1,200 of about 4,000 wanted orders were lost before noon. |
+| Orders database | PostgreSQL. First installed by Asha on the same VM as the app; its disk filled at 3:10 a.m. one Saturday (about 40 orders lost; service-models). Moved to a managed database engine with a standby in a second zone. A bot locked an earlier self-run copy through an open port and a 38-day-old OS flaw (7 hours down, about 250 orders lost; shared-responsibility). Nightly backup at 03:00. Carries a delete lock. |
+| Zones | After a 3-hour power cut in one zone (a Thursday at 7 p.m., about 70 orders lost; regions-zones-edge) the shop runs across three zones. Health checks drop a dead server in about 30 s; database failover takes about 2 minutes. No second region yet. |
+| Photos | About 300 new product photos a week; the resize worker is a function (about 2 s per photo, cold start about 1 s); it runs about 2 hours a night on spare capacity. An edge cache serves photos to far-away customers. |
+| Accounts and governance | One organisation with three folders (non-production, production, security) holding the test account, the shop account and the audit account. A test clean-up script once deleted the live database from a shared account (a Tuesday at 14:10, 3 hours down, about 180 orders rebuilt by hand; accounts-and-governance). Guardrail at the root: 2 allowed regions, no public buckets. Tag keys on every resource: `env`, `team`, `owner`. Organisation budget alerts at 50%, 80% and 100%. The test account's quota allows 4 servers. |
+| Identity | Asha once pasted a storage key into the code; the leak copied all 730 export files (identity-and-access). Since then: no long-lived keys, roles through groups, single sign-on with MFA, short-lived tokens (1 hour). |
+| Money | The bill has five lines: servers, database, storage, data leaving, logs; servers and database are most of it, storage the smallest. A forgotten 4-server test copy ran 30 days and doubled the bill (pricing-basics). Test machines run 8 a.m. to 7 p.m. on weekdays. Steady base on a commitment, batch work on spare capacity. |
+| People | Asha is the only named person. Others are roles: a support agent (uses a rented help desk), a contractor, the finance lead. A printing partner prints the posters in its own factory. |
+
 ## 3. Theory lives in system-design: link, do not re-teach
 
 A cloud page recaps an idea that system-design already teaches in at most one short paragraph with a link, then

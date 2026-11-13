@@ -9,7 +9,9 @@ interface BreadcrumbProps {
 
 export function Breadcrumb({ items, className }: BreadcrumbProps) {
   return (
-    <div className={cn("text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", className)}>
+    <div
+      className={cn("text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground break-words", className)}
+    >
       {items.map((item, i) => {
         const isLast = i === items.length - 1;
         return (
