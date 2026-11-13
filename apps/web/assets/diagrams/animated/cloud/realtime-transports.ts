@@ -27,7 +27,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // group", "Azure Managed Redis").
 const spec: DiagramSpec = {
   title: "Live updates on the cloud: from polling to sockets that survive a deploy",
-  width: 520,
+  width: 525,
   height: 680,
   steps: [
     { title: "Every page asks every 5 seconds" },
@@ -40,10 +40,10 @@ const spec: DiagramSpec = {
   zones: [
     { id: "shoppers", title: "Shoppers", tone: "neutral", x: 10, y: 40, w: 240, h: 120 },
     { id: "edge", title: "Edge", tone: "blue", x: 10, y: 200, w: 240, h: 120 },
-    { id: "ops", title: "Monitoring", tone: "orange", x: 275, y: 40, w: 235, h: 280 },
-    { id: "app", title: "App servers", tone: "teal", x: 10, y: 360, w: 500, h: 120 },
+    { id: "ops", title: "Monitoring", tone: "orange", x: 265, y: 40, w: 250, h: 280 },
+    { id: "app", title: "Servers", tone: "teal", x: 10, y: 360, w: 505, h: 120 },
     { id: "messages", title: "Messages", tone: "orange", x: 10, y: 530, w: 240, h: 120 },
-    { id: "data", title: "Data", tone: "violet", x: 275, y: 530, w: 235, h: 120 },
+    { id: "data", title: "Data", tone: "violet", x: 265, y: 530, w: 250, h: 120 },
   ],
   nodes: [
     // Step 1
@@ -146,7 +146,7 @@ const spec: DiagramSpec = {
       step: 6,
       x: 390,
       y: 100,
-      w: 214,
+      w: 232,
       cloud: {
         aws: { label: "Auto Scaling group" },
         gcp: { label: "Managed instance group" },
@@ -155,11 +155,12 @@ const spec: DiagramSpec = {
     },
   ],
   edges: [
+    // Label positions are staggered (labelAt) so the pills between two rows never touch each other or a zone tab.
     // Step 1: polling. 1,600 pages ask every 5 s; most answers are "no change".
-    { from: "browsers", to: "lb", label: "ask every 5 s", packet: true, until: 1 },
-    { from: "lb", to: "s12", label: "160 a second", packet: true, delay: 0.6, until: 1 },
-    { from: "lb", to: "s34", label: "160 a second", packet: true, delay: 0.6, until: 1 },
-    { from: "s34", to: "db", label: "mostly: no change", packet: true, delay: 1.2, until: 1 },
+    { from: "browsers", to: "lb", label: "ask every 5 s", packet: true, labelAt: 0.4, until: 1 },
+    { from: "lb", to: "s12", label: "160 a second", packet: true, delay: 0.6, labelAt: 0.25, until: 1 },
+    { from: "lb", to: "s34", label: "160 a second", packet: true, delay: 0.6, labelAt: 0.62, until: 1 },
+    { from: "s34", to: "db", label: "mostly: no change", packet: true, delay: 1.2, labelAt: 0.2, until: 1 },
 
     // Step 2: one socket per shopper, held open; a ping keeps it under the idle limit.
     {
@@ -168,31 +169,70 @@ const spec: DiagramSpec = {
       label: "1 socket each, ping 25 s",
       bidirectional: true,
       flow: true,
+      labelAt: 0.4,
       step: 2,
       until: 3,
     },
-    { from: "lb", to: "s12", label: "800 sockets", bidirectional: true, flow: true, step: 2, until: 3 },
-    { from: "lb", to: "s34", label: "800 sockets", bidirectional: true, flow: true, step: 2, until: 3 },
+    { from: "lb", to: "s12", label: "800 sockets", bidirectional: true, flow: true, labelAt: 0.25, step: 2, until: 3 },
+    { from: "lb", to: "s34", label: "800 sockets", bidirectional: true, flow: true, labelAt: 0.62, step: 2, until: 3 },
 
     // Step 3: a buy on servers 3-4 is published; every server hears it and pushes to the shoppers it holds.
-    { from: "s34", to: "db", label: "buy: stock −1", packet: true, step: 3, until: 3 },
-    { from: "s34", to: "pubsub", label: "publish: 13 left", packet: true, delay: 0.8, step: 3 },
-    { from: "pubsub", to: "s12", label: "to every server", packet: true, delay: 1.6, step: 3 },
+    { from: "s34", to: "db", label: "buy: stock −1", packet: true, labelAt: 0.2, step: 3, until: 3 },
+    { from: "s34", to: "pubsub", label: "publish: 13 left", packet: true, delay: 0.8, labelAt: 0.45, step: 3 },
+    { from: "pubsub", to: "s12", label: "to every server", packet: true, delay: 1.6, labelAt: 0.72, step: 3 },
 
     // Step 4: the failure. The drain ends, 800 sockets are cut together and come back in the same second.
-    { from: "s12", to: "lb", label: "drain ends: 800 cut", tone: "red", dashed: true, step: 4, until: 4 },
-    { from: "browsers", to: "lb", label: "800 reconnect in 1 s", tone: "red", packet: true, step: 4, until: 4 },
-    { from: "lb", to: "s34", label: "800 at once", tone: "red", packet: true, delay: 0.6, step: 4, until: 4 },
-    { from: "s34", to: "db", label: "800 reads: pool full", tone: "red", packet: true, delay: 1.2, step: 4, until: 4 },
+    {
+      from: "s12",
+      to: "lb",
+      label: "drain ends: 800 cut",
+      tone: "red",
+      dashed: true,
+      labelAt: 0.75,
+      step: 4,
+      until: 4,
+    },
+    {
+      from: "browsers",
+      to: "lb",
+      label: "800 reconnect in 1 s",
+      tone: "red",
+      packet: true,
+      labelAt: 0.4,
+      step: 4,
+      until: 4,
+    },
+    {
+      from: "lb",
+      to: "s34",
+      label: "800 at once",
+      tone: "red",
+      packet: true,
+      delay: 0.6,
+      labelAt: 0.62,
+      step: 4,
+      until: 4,
+    },
+    {
+      from: "s34",
+      to: "db",
+      label: "800 reads: pool full",
+      tone: "red",
+      packet: true,
+      delay: 1.2,
+      labelAt: 0.2,
+      step: 4,
+      until: 4,
+    },
 
     // Step 5: close slowly, return at random. About 27 reconnects a second instead of 800 in one.
-    { from: "browsers", to: "lb", label: "return after random 1–30 s", packet: true, step: 5 },
-    { from: "lb", to: "s12", label: "drain: close over 60 s", dashed: true, flow: true, step: 5 },
-    { from: "lb", to: "s34", label: "about 27 a second", packet: true, delay: 0.6, step: 5 },
-    { from: "s34", to: "db", label: "resume from last count", packet: true, delay: 1.2, step: 5 },
+    { from: "browsers", to: "lb", label: "return after random 1–30 s", packet: true, labelAt: 0.4, step: 5 },
+    { from: "lb", to: "s12", label: "drain: close over 60 s", dashed: true, flow: true, labelAt: 0.25, step: 5 },
+    { from: "lb", to: "s34", label: "about 27 a second", packet: true, delay: 0.6, labelAt: 0.62, step: 5 },
+    { from: "s34", to: "db", label: "resume from last count", packet: true, delay: 1.2, labelAt: 0.2, step: 5 },
 
     // Step 6: the autoscaler watches open connections per server, which processor use does not show.
-    { from: "s34", to: "metric", label: "sockets per server", dashed: true, flow: true, step: 6 },
+    { from: "s34", to: "metric", label: "sockets per server", dashed: true, flow: true, labelAt: 0.75, step: 6 },
     { from: "metric", to: "autoscale", label: "over 600: add one", packet: true, step: 6 },
   ],
 };

@@ -7,7 +7,7 @@ updated: 2026-11-13
 ## In one sentence
 
 <KeyIdea>
-  A live update needs a line to each user that stays open for minutes or hours, and every part of a cloud built for short requests must be told how to hold it, share it and lose it gently.
+  Live updates need an open line to every user, and the cloud must be set up to hold those lines, share news across them and lose them gently.
 </KeyIdea>
 
 ## The story
@@ -22,9 +22,9 @@ Three words first. A **long-lived connection** is an open line between a browser
 
 ### Step 1: Four ways to hear about news
 
-<AnimatedDiagram spec="animated/cloud/realtime-transports" step={1} minWidth={620} caption="Polling: 1,600 pages ask every 5 seconds, 320 requests a second, and most answers are 'no change'." />
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={1} minWidth={420} caption="Polling: 1,600 pages ask every 5 seconds, 320 requests a second, and most answers are 'no change'." />
 
-A browser can learn about news in four ways. The system design pages teach each one; here is the short version.
+A browser can hear about news in four ways.
 
 <Compare
   columns={["Method", "How it works", "Direction", "What the cloud holds"]}
@@ -37,13 +37,13 @@ A browser can learn about news in four ways. The system design pages teach each 
   caption="The four methods. Full lessons: polling, long polling, server-sent events, WebSockets."
 />
 
-Brightpost's first counter used short polling. 1,600 pages asking every 5 seconds make 320 requests a second, and almost every answer is "no change". The other three methods trade those requests for connections that stay open. That is the cloud's real job on this page: holding thousands of open lines. Read [WebSockets](/system-design/fundamentals/websockets), [server-sent events](/system-design/fundamentals/server-sent-events), [long polling](/system-design/fundamentals/long-polling) and [choosing a method](/system-design/fundamentals/choosing-realtime) for the theory.
+Brightpost's first counter used short polling: 1,600 pages asking every 5 seconds make 320 requests a second, nearly all answered "no change". The other three methods trade those requests for open connections, and holding thousands of them is the cloud's job on this page. Read [WebSockets](/system-design/fundamentals/websockets), [server-sent events](/system-design/fundamentals/server-sent-events), [long polling](/system-design/fundamentals/long-polling) and [choosing a method](/system-design/fundamentals/choosing-realtime) for the theory.
 
 <PremiumBreak />
 
 ### Step 2: Keep a quiet connection alive
 
-<AnimatedDiagram spec="animated/cloud/realtime-transports" step={2} minWidth={620} caption="Each page holds one socket through the load balancer and sends a small ping every 25 seconds." />
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={2} minWidth={420} caption="Each page holds one socket through the load balancer and sends a small ping every 25 seconds." />
 
 The counter now uses a <Term id="websocket">WebSocket</Term>. Each page opens one, and the server pushes "13 left" whenever a poster sells. The [load balancer](/cloud/networking/load-balancing) in front keeps each socket on the server it first reached, for the socket's whole life.
 
@@ -53,7 +53,7 @@ The fix is a **keep-alive ping**: a tiny message sent on a timer. Brightpost's p
 
 ### Step 3: Which server holds the shopper?
 
-<AnimatedDiagram spec="animated/cloud/realtime-transports" step={3} minWidth={620} caption="A sale on servers 3–4 is published on a shared channel, and servers 1–2 push it to the shoppers they hold." />
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={3} minWidth={420} caption="A sale on servers 3–4 is published on a shared channel, and servers 1–2 push it to the shoppers they hold." />
 
 A shopper on servers 3–4 buys a poster. Servers 3–4 save the sale. But half the watchers are connected to servers 1–2, and those servers know nothing about it. There are two ways out.
 
@@ -64,7 +64,7 @@ Brightpost picks the channel. Any server can hold any shopper, the same rule its
 
 ### Step 4: A deploy cuts every socket at once
 
-<AnimatedDiagram spec="animated/cloud/realtime-transports" step={4} minWidth={620} caption="The failure: the drain ends, 800 sockets close in one second, and all 800 come back in the next." />
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={4} minWidth={420} caption="The failure: the drain ends, 800 sockets close in one second, and all 800 come back in the next." />
 
 **Connection draining** is how a deploy retires a server: it gets no new connections, and open ones may finish, up to a timeout. A request finishes. A socket does not. So the drain runs its full 60 seconds, and then the server closes every socket it still holds, at the same moment.
 
@@ -76,7 +76,7 @@ Many clients retrying in the same instant is called a **thundering herd**. A ser
 
 ### Step 5: Close slowly, come back at random
 
-<AnimatedDiagram spec="animated/cloud/realtime-transports" step={5} minWidth={620} caption="The drain closes sockets over 60 seconds, and pages wait a random 1 to 30 seconds, about 27 reconnects a second." />
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={5} minWidth={420} caption="The drain closes sockets over 60 seconds, and pages wait a random 1 to 30 seconds, about 27 reconnects a second." />
 
 The repair has three parts, one at each end and one in the middle.
 
@@ -88,17 +88,15 @@ The repair has three parts, one at each end and one in the middle.
 
 ### Step 6: Count connections, not processor use
 
-<AnimatedDiagram spec="animated/cloud/realtime-transports" step={6} minWidth={620} caption="The autoscaler watches open sockets per server and adds a server above 600." />
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={6} minWidth={420} caption="The autoscaler watches open sockets per server and adds a server above 600." />
 
 Brightpost's <Term id="autoscaling">autoscaling</Term> rule aims for about 60% processor use. A quiet socket uses almost no processor. It does hold memory and one operating-system handle, a slot in the table of open files and connections. So a server can sit at 10% processor while it runs out of room for sockets. The rule never fires.
 
 Brightpost load-tested one server: it stays fast up to about 1,000 sockets. So the team publishes the open socket count as a custom metric, and the autoscaler adds a server above 600 per server. After a drain, 1,600 sockets on two servers is 800 each, and a fifth server starts.
 
-New servers fill slowly, because sockets stay where they landed. Scale out early, before a sale, not during it.
-
 ### Step 7: Let a managed service hold the sockets
 
-<AnimatedDiagram spec="animated/cloud/managed-websockets" stepper minWidth={620} caption="The managed service holds every socket. Your code is called with a connection id and sends to that id." />
+<AnimatedDiagram spec="animated/cloud/managed-websockets" stepper minWidth={420} caption="The managed service holds every socket. Your code is called with a connection id and sends to that id." />
 
 Some clouds offer a **managed connection service**. It holds the sockets and answers the pings. It calls your code only when something happens: a page connected, a message arrived, a page left. Each call carries a **connection id**, a short name for one socket, such as 7f3. To push, your code asks the service to send to that id.
 
@@ -106,7 +104,7 @@ Your code can now be a short-lived function, a <Term id="serverless">serverless<
 
 ## On AWS, Google Cloud and Azure
 
-The idea is the same on all three clouds: hold sockets behind a balancer or in a managed service, share news through a channel, and plan for every connection to end.
+The idea is the same on all three clouds: hold sockets on servers or in a managed service, share news through a channel, and expect every connection to end.
 
 <Tabs title="On each cloud">
   <Tab label="AWS">
@@ -138,7 +136,7 @@ The idea is the same on all three clouds: hold sockets behind a balancer or in a
   </Tab>
 </Tabs>
 
-<AnimatedDiagram spec="animated/cloud/realtime-transports" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+<AnimatedDiagram spec="animated/cloud/realtime-transports" stepper minWidth={420} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
 
 <CloudMapping diagram="cloud/realtime-transports" lead="aws" />
 
@@ -214,7 +212,7 @@ Polling is fine for news that can wait. For news within a second, a managed serv
   <InterviewQuestion question="A WebSocket works on a laptop, but behind a cloud load balancer it drops about once a minute. Why?" level="Junior" category="Cloud">
     **Short answer.** The load balancer has an idle timeout. It closes any connection that carries nothing for a set time. A quiet socket hits that limit and is cut. Send a small ping on a timer, well under the timeout.
 
-    **Why.** On a laptop nothing sits between the browser and the server, so nothing times out. In the cloud, a balancer, a CDN or a proxy sits in the middle, and each has its own limit. Brightpost's balancer cuts after 60 quiet seconds, and a slow-selling poster can stay silent for 3 minutes. A ping every 25 seconds keeps the socket busy enough. The shortest timeout on the path is the one that counts.
+    **Why.** On a laptop nothing sits between the browser and the server, so nothing times out. In the cloud, a balancer, a CDN or a proxy sits in the middle, and each has its own limit. Brightpost's balancer cuts after 60 quiet seconds, and a slow-selling poster can stay silent for 3 minutes. A ping every 25 seconds keeps the socket busy enough.
 
     <AnimatedDiagram spec="animated/cloud/realtime-transports" step={2} path="browsers>lb>s12" caption="Every hop between the page and the server has its own idle timeout." />
 
@@ -228,7 +226,7 @@ Polling is fine for news that can wait. For news within a second, a managed serv
   <InterviewQuestion question="Server-sent events or WebSockets for a one-way live stock counter?" level="Mid" category="Cloud">
     **Short answer.** Server-sent events, if the browser only listens. They run over plain HTTP, the browser reconnects by itself, and every HTTP load balancer carries them. Choose WebSockets when the browser also sends a stream of messages.
 
-    **Why.** A stock counter only flows from server to browser. Server-sent events give that with one long response and a built-in retry. The cloud work is the same for both: pings under every idle timeout, a shared channel between servers, and slow drains. One extra check for server-sent events: a proxy or CDN that buffers responses stalls the stream, so switch buffering off on that path.
+    **Why.** A stock counter only flows from server to browser. The cloud work is the same for both: pings under every idle timeout, a shared channel between servers, and slow drains. One extra check for server-sent events: a proxy or CDN that buffers responses stalls the stream, so switch buffering off on that path.
 
     **Follow-ups the interviewer may ask.**
     - How does a server-sent events client resume after a reconnect without missing a sale?
@@ -240,7 +238,7 @@ Polling is fine for news that can wait. For news within a second, a managed serv
   <InterviewQuestion question="A sale is saved on server A, but the shopper's socket is on server B. How does the news reach them?" level="Mid" category="Cloud">
     **Short answer.** Through a shared pub/sub channel. Server A publishes "poster 18: 13 left", every server listens, and server B pushes it to the shoppers it holds. Any server can then hold any shopper.
 
-    **Why.** A socket stays on the server it first reached, so news must travel between servers. Sticky routing, all watchers of one poster on one server, avoids the channel but builds a hot spot: a busy poster overloads one server, and its restart drops every watcher. A channel spreads the load and survives one server's loss. At Brightpost's size, one managed in-memory pub/sub channel is enough.
+    **Why.** A socket stays on the server it first reached, so news must travel between servers. Sticky routing puts all watchers of one poster on one server. It needs no channel, but a busy poster overloads that server, and its restart drops every watcher. A channel spreads the load and survives one server's loss.
 
     <AnimatedDiagram spec="animated/cloud/realtime-transports" step={3} path="s34>pubsub>s12" caption="Servers 3–4 publish the sale; servers 1–2 hear it and push it to their shoppers." />
 
@@ -268,7 +266,7 @@ Polling is fine for news that can wait. For news within a second, a managed serv
   <InterviewQuestion question="A deploy drops 100,000 WebSocket clients at once. What happens next, and how do you prevent it?" level="Senior" category="Cloud">
     **Short answer.** They all reconnect in the same second, a thundering herd. Each reconnect costs a handshake, a sign-in check and a read, so the servers and the database behind them fall over. Prevent it at both ends: close sockets slowly, and reconnect after exponential backoff with jitter.
 
-    **Why.** A drain waits for open requests, but a socket never finishes, so the drain ends by cutting everything together. At Brightpost, 800 sockets became 800 database reads in 1 second, and checkout failed for 6 minutes. With a random wait of 1 to 30 seconds, that is about 27 a second. At 100,000 clients the same wait gives about 3,300 a second, so also make the reconnect cheap: the client sends its last version and the server answers from a cache.
+    **Why.** A drain waits for open requests, but a socket never finishes, so the drain ends by cutting everything together. At Brightpost, 800 sockets became 800 database reads in 1 second, and checkout failed for 6 minutes. With a random wait of 1 to 30 seconds, that is about 27 a second. At 100,000 clients the same wait still gives about 3,300 a second. So also make the reconnect cheap: the client sends its last version, and the server answers from a cache.
 
     <AnimatedDiagram spec="animated/cloud/realtime-transports" step={4} caption="The drain ends, 800 sockets close together, and all 800 come back in the next second." />
 
@@ -307,7 +305,6 @@ Polling is fine for news that can wait. For news within a second, a managed serv
 - [Networking on Google Cloud](/cloud/gcp/networking)
 - [Networking on Azure](/cloud/azure/networking)
 - [Choosing a real-time method](/system-design/fundamentals/choosing-realtime)
-- [Push notifications](/system-design/fundamentals/push-notifications)
 - [Case study: Facebook Messenger](/system-design/case-studies/facebook-messenger)
 
 ## Further reading

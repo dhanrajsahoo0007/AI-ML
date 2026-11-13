@@ -11,12 +11,12 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // (`until: 2`), so the full view shows one line: events in, sends out.
 //
 // Layout: two columns that fit the left 480 units a phone shows first.
-//   Left (x 120), the path of one connection: pages, the managed service, your function.
-//   Right (x 400), what the function reads and writes: the connection list and the orders database.
+//   Left (x 140), the path of one connection: pages, the managed service, your function.
+//   Right (x 410), what the function reads and writes: the connection list and the orders database.
 // Rows (centres): 100 | 270 | 440.
-// browsers 120,100 | service 120,270 | list 400,270 | fn 120,440 | db 400,440.
+// browsers 140,100 | service 140,270 | list 410,270 | fn 140,440 | db 410,440.
 //
-// Zone tabs sit on the top-left corner of each zone; the vertical edges run at x 120, right of every tab. The
+// Zone tabs sit on the top-left corner of each zone; the vertical edges run at x 140, right of every tab. The
 // diagonal from the function to the list enters the data zone through its left side, below the tab.
 // The service has no Google Cloud name: Google Cloud has no managed service of this kind, so that toggle shows
 // the generic label.
@@ -30,10 +30,10 @@ const spec: DiagramSpec = {
     { title: "Your code sends to an id" },
   ],
   zones: [
-    { id: "shoppers", title: "Shoppers", tone: "neutral", x: 10, y: 40, w: 230, h: 120 },
-    { id: "managed", title: "Managed service", tone: "blue", x: 10, y: 210, w: 230, h: 120 },
-    { id: "code", title: "Your code", tone: "teal", x: 10, y: 380, w: 230, h: 120 },
-    { id: "data", title: "Data", tone: "violet", x: 290, y: 210, w: 220, h: 290 },
+    { id: "shoppers", title: "Shoppers", tone: "neutral", x: 10, y: 40, w: 250, h: 120 },
+    { id: "managed", title: "Managed", tone: "blue", x: 10, y: 210, w: 250, h: 120 },
+    { id: "code", title: "Your code", tone: "teal", x: 10, y: 380, w: 250, h: 120 },
+    { id: "data", title: "Data", tone: "violet", x: 300, y: 210, w: 210, h: 290 },
   ],
   nodes: [
     // Step 1
@@ -43,7 +43,7 @@ const spec: DiagramSpec = {
       sub: "1,600 open",
       icon: "browser",
       tone: "neutral",
-      x: 120,
+      x: 140,
       y: 100,
       w: 180,
     },
@@ -53,7 +53,7 @@ const spec: DiagramSpec = {
       sub: "holds every socket",
       icon: "proxy",
       tone: "blue",
-      x: 120,
+      x: 140,
       y: 270,
       w: 200,
       cloud: {
@@ -70,7 +70,7 @@ const spec: DiagramSpec = {
       icon: "function",
       tone: "teal",
       step: 2,
-      x: 120,
+      x: 140,
       y: 440,
       w: 200,
       cloud: { aws: "aws-lambda", gcp: "gcp-cloud-run-functions", azure: "azure-functions" },
@@ -82,7 +82,7 @@ const spec: DiagramSpec = {
       icon: "registry",
       tone: "violet",
       step: 2,
-      x: 400,
+      x: 410,
       y: 270,
       w: 190,
       cloud: { aws: "aws-dynamodb", gcp: "gcp-firestore", azure: "azure-cosmos-db" },
@@ -96,7 +96,7 @@ const spec: DiagramSpec = {
       icon: "database",
       tone: "violet",
       step: 3,
-      x: 400,
+      x: 410,
       y: 440,
       w: 190,
       cloud: {
@@ -108,10 +108,10 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: the provider holds the connections and answers the pings.
-    { from: "browsers", to: "service", label: "1,600 sockets", bidirectional: true, flow: true },
+    { from: "browsers", to: "service", label: "1,600 sockets", bidirectional: true, flow: true, labelAt: 0.4 },
 
     // Step 2: a connect event arrives with an id; the function writes down who is watching what.
-    { from: "service", to: "fn", label: "connect: id 7f3", packet: true, step: 2, until: 2 },
+    { from: "service", to: "fn", label: "connect: id 7f3", packet: true, labelAt: 0.35, step: 2, until: 2 },
     { from: "fn", to: "list", label: "7f3 → poster 18", packet: true, delay: 1.2, step: 2 },
 
     // Step 3: stock changes; the function asks the service to send to the ids that watch that poster.
@@ -123,6 +123,7 @@ const spec: DiagramSpec = {
       bidirectional: true,
       packet: true,
       delay: 1.2,
+      labelAt: 0.65,
       step: 3,
     },
   ],
