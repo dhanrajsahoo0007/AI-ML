@@ -29,8 +29,8 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // database along y 408, between region B's servers and its replica, and enter it from the left at x 540, clear of
 // the "Both regions" tab; region B's writes leave right along y 350 and drop into the database at x 740.
 // Text room: a label takes about 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. Nodes
-// are sized for the longest name the Services toggle shows: "Application Gateway" (load balancers, w 190),
-// "Automated backups" and "Cloud SQL replica" (w 182), "Traffic Manager" (DNS, w 196).
+// are sized for the longest name the Services toggle shows: "Application Gateway" (load balancers, w 204),
+// "Geo-redundant copy" and "Cloud SQL replica" (w 196), "Traffic Manager" (DNS, w 196).
 const LB = {
   aws: "aws-elb",
   gcp: { id: "gcp-cloud-load-balancing", label: "Load Balancing" },
@@ -70,7 +70,7 @@ const spec: DiagramSpec = {
       tone: "neutral",
       x: 125,
       y: 78,
-      w: 182,
+      w: 196,
     },
     {
       id: "lbA",
@@ -80,7 +80,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       x: 125,
       y: 235,
-      w: 190,
+      w: 204,
       cloud: LB,
     },
     {
@@ -91,7 +91,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 125,
       y: 350,
-      w: 182,
+      w: 196,
       cloud: VMS,
     },
     {
@@ -102,7 +102,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       x: 125,
       y: 465,
-      w: 182,
+      w: 196,
       cloud: {
         aws: { id: "aws-rds", label: "RDS primary" },
         gcp: { id: "gcp-cloud-sql", label: "Cloud SQL" },
@@ -117,7 +117,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       x: 125,
       y: 580,
-      w: 182,
+      w: 196,
       cloud: {
         aws: { id: "aws-rds", label: "Automated backups" },
         gcp: { id: "gcp-cloud-sql", label: "Cloud SQL backups" },
@@ -132,7 +132,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       x: 125,
       y: 695,
-      w: 182,
+      w: 196,
       cloud: BUCKET,
     },
     {
@@ -143,7 +143,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       x: 405,
       y: 695,
-      w: 182,
+      w: 196,
       cloud: BUCKET,
     },
 
@@ -157,7 +157,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 405,
       y: 78,
-      w: 182,
+      w: 196,
     },
 
     // Step 3: backup and restore, done properly.
@@ -170,7 +170,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 405,
       y: 580,
-      w: 182,
+      w: 196,
       cloud: {
         aws: { id: "aws-rds", label: "Cross-Region copy" },
         gcp: { id: "gcp-cloud-sql", label: "Cloud SQL backups" },
@@ -186,7 +186,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 405,
       y: 350,
-      w: 182,
+      w: 196,
       cloud: VMS,
     },
     {
@@ -223,7 +223,7 @@ const spec: DiagramSpec = {
       step: 4,
       x: 405,
       y: 465,
-      w: 182,
+      w: 196,
       cloud: {
         aws: { id: "aws-rds", label: "RDS read replica" },
         gcp: { id: "gcp-cloud-sql", label: "Cloud SQL replica" },
@@ -241,7 +241,7 @@ const spec: DiagramSpec = {
       step: 5,
       x: 405,
       y: 235,
-      w: 190,
+      w: 204,
       cloud: LB,
     },
 
@@ -347,8 +347,11 @@ const spec: DiagramSpec = {
       label: "writes",
       packet: true,
       delay: 1.2,
-      via: [[740, 350]],
-      labelAt: 0.85,
+      via: [
+        [740, 350],
+        [740, 425],
+      ],
+      labelAt: 0.82,
       step: 6,
     },
   ],
