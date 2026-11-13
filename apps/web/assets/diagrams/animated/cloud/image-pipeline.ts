@@ -23,7 +23,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Why this order: on a phone the figure opens on the left ~480 units. Steps 1 to 4 happen in the left and middle
 // columns, so the free preview and the failure show without scrolling; only steps 5 and 6 need the right column.
-// Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Left nodes are 182
+// Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Left nodes are 190
 // wide for "Defender for Cloud" and "Maintenance config"; the shop node is 224 wide for "Managed instance group".
 // The Operations and Drift checks zones use the subnet kind (inline label, no tab), because edges leave them
 // through the top: the inventory edge at x 120 and the rules edge at x 385.
@@ -117,7 +117,7 @@ const spec: DiagramSpec = {
       step: 2,
       x: 120,
       y: 255,
-      w: 182,
+      w: 190,
       h: 54,
       cloud: {
         aws: "aws-inspector",
@@ -136,7 +136,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 120,
       y: 390,
-      w: 182,
+      w: 190,
       h: 54,
       cloud: {
         aws: { id: "aws-systems-manager", label: "Systems Manager" },
@@ -155,7 +155,7 @@ const spec: DiagramSpec = {
       step: 4,
       x: 120,
       y: 525,
-      w: 182,
+      w: 190,
       h: 54,
       cloud: {
         aws: { label: "Patch baseline" },
