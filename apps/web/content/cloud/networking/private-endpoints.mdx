@@ -1,11 +1,304 @@
 ---
 title: "Private Endpoints: PrivateLink, Private Service Connect & Private Link"
-description: "Reach a managed service or another team's service through a private address in your own network, not over the public internet."
-status: outline
+description: "Reach a managed service or a partner's service through a private address in your own network, and make DNS send your calls there."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** reaching a managed service, or another team's service, through a private address inside your own network instead of over the public internet. It explains the producer and consumer model and why it beats peering when you need one service.
+<KeyIdea>
+  A private endpoint gives a service that lives outside your network an address inside it, so your calls reach that service without ever touching the internet.
+</KeyIdea>
 
-**Related reading on this site:** [Networking on AWS](/cloud/aws/networking) · [Networking on Google Cloud](/cloud/gcp/networking) · [Networking on Azure](/cloud/azure/networking)
+## The story
+
+Brightpost's checkout calls its payment provider on every order, and since the NAT outage those calls worried Asha. The provider runs on the same cloud, in the same region, and offers a private connection. Asha creates it on a Wednesday: a private address, 10.0.31.10, inside Brightpost's own network. She sends a test request straight to that address, and the provider answers. So she asks the provider to stop accepting Brightpost's three public NAT addresses. At 9:00 the next Tuesday it removes them. Every card check is refused at once, and the Pay button shows an error. At 9:25 Asha finds the cause: the app still looks up the payment API by its name, and the name still gives the public address. The private connection has carried 0 bytes in 6 days. The provider puts the addresses back at 9:40. By then, 16 checkouts have failed.
+
+The endpoint was built correctly. Nobody told the app's lookups about it. Every step below follows one card check, from the public path to the private one.
+
+## How it works
+
+Four words first. A **managed service** is one the cloud or another company runs for you, such as storage or a payment API. Every service answers on an **endpoint**: a name and an address where calls arrive. The side that runs a service is the **producer**. The side that calls it is the **consumer**. Brightpost is the consumer here; the payment provider is the producer.
+
+### Step 1: The service lives outside your network
+
+<AnimatedDiagram spec="animated/cloud/private-endpoint" step={1} minWidth={620} caption="Brightpost's first setup: the name gives a public address, so the card check leaves through the NAT gateway and crosses the internet." />
+
+Brightpost's app servers sit in a private <Term id="subnet">subnet</Term>, with no public address. The payment API sits in the provider's own network. Its public address is the only door Brightpost can use. So each card check takes three hops: the <Term id="nat-gateway">NAT gateway</Term>, the internet, then the provider's front door.
+
+First, the app asks <Term id="dns" /> for the API's name and gets the public address back. The call is encrypted with <Term id="tls" />, so nobody on the way can read it. The problems are elsewhere. Checkout depends on the NAT, which failed with its zone on the [NAT page](/cloud/networking/nat-and-egress). And the provider must keep Brightpost's three NAT addresses on a list to tell its calls from everyone else's. [A request's journey](/system-design/fundamentals/anatomy-of-a-request) shows the hops in general.
+
+<PremiumBreak />
+
+### Step 2: An address in your own subnet
+
+<AnimatedDiagram spec="animated/cloud/private-endpoint" step={2} minWidth={620} caption="The failure: the endpoint exists and works, but the app still sends every card check to the public address, which now refuses it." />
+
+A <Term id="private-endpoint" /> is a network address that the consumer creates in its own subnet. Brightpost's is 10.0.31.10, in a small subnet kept for endpoints. A packet sent there does not leave through the NAT. The cloud carries it on its own network to the producer's service. It never crosses the internet, and the producer never needs Brightpost's public addresses.
+
+Three rules come with it:
+
+1. **One way.** The consumer starts every conversation. The producer can answer, but it cannot use the endpoint to reach anything else in Brightpost's network.
+2. **The producer agrees.** Creating the endpoint sends a request, and the provider accepts it for Brightpost's account. Unknown accounts wait or are refused.
+3. **One address per zone.** Brightpost puts the endpoint in all three zones, so losing one zone leaves two addresses working.
+
+<Callout tone="red" title="What breaks">
+  At 9:00 the provider stops accepting Brightpost's NAT addresses. The app asks DNS for the payment API's name and still gets the public address. So every card check still goes out through the NAT and is refused at the provider's front door. For 40 minutes, 16 checkouts fail while the endpoint sits idle.
+</Callout>
+
+Asha's test sent a request to 10.0.31.10 by hand. The app never uses that address. It uses the name.
+
+### Step 3: DNS is half the job
+
+<AnimatedDiagram spec="animated/cloud/private-endpoint" step={3} minWidth={620} caption="A private DNS zone answers the payment API's name with 10.0.31.10, so the same code now sends card checks down the private path." />
+
+Every network has a **DNS resolver**: the service that answers its machines' lookups. A **private DNS zone** is a set of name records that only the networks you link it to can see. When the resolver gets a lookup, it checks the linked private zones first. Brightpost's zone says: the payment API's name → 10.0.31.10. Lookups from the internet still get the public address. One name, two answers, depending on who asks.
+
+Why not type 10.0.31.10 into the app's settings instead? Three reasons:
+
+1. **The certificate.** The provider's TLS certificate names the API, not an address. A call to a bare address fails the check.
+2. **Zones.** The endpoint has a different address in each zone. A name can return the right ones; a fixed address cannot.
+3. **Code.** With the zone in place, the same code works on either path. Nothing in the app changes.
+
+Brightpost adds the zone and tests by name from an app server. Two days later the provider removes the public addresses again, and nothing fails. [DNS on the Cloud](/cloud/networking/dns) covers private zones in full.
+
+### Step 4: The producer side
+
+<AnimatedDiagram spec="animated/cloud/private-endpoint" step={4} minWidth={620} caption="Behind the endpoint, the provider publishes its payment API through a service in front of an internal load balancer. Its network uses 10.0.0.0/16 too." />
+
+The provider does three things to offer a private connection:
+
+1. It puts its payment servers behind an **internal <Term id="load-balancer" />**, one with only private addresses.
+2. It **publishes** that load balancer as a service that consumers can connect endpoints to.
+3. It keeps a list of consumer accounts it accepts. Brightpost's is on it.
+
+The provider's network also uses the range 10.0.0.0/16, the same <Term id="cidr" /> as Brightpost's. That would block a direct join between the two networks. Here it does not matter, because the cloud rewrites the addresses on the way. Brightpost's server sees only 10.0.31.10. The provider sees calls arriving from an address in its own range.
+
+### Step 5: The cloud's own services, with a policy
+
+<AnimatedDiagram spec="animated/cloud/private-endpoint" step={5} minWidth={620} caption="Storage traffic takes its own endpoint. Its policy lets calls reach Brightpost's buckets and refuses a bucket in any other account." />
+
+The cloud's own services, such as storage, are managed services too. Brightpost already sends storage traffic through an endpoint, which took 160 GB a month off the NAT. These endpoints come in two kinds:
+
+1. **The route kind.** A route-table entry sends the service's traffic onto the cloud's network. No address appears, and DNS needs no change. It works only for machines inside that network.
+2. **The address kind.** An address appears in your subnet, as with the payment API. It needs a private DNS zone, and it can be reached from networks and offices joined to yours.
+
+An **endpoint policy** is a <Term id="policy" /> attached to the endpoint itself. It says which resources calls through it may reach. Brightpost's names its four buckets. Suppose an intruder on an app server tries to copy the 730 order files into a bucket in their own account. The server may write to storage, but the endpoint policy refuses the call: that bucket is not Brightpost's.
+
+### Step 6: One service, not a whole network
+
+A month later, an analytics firm Brightpost hires asks to join networks so its reports can read the shop's orders API. That join is called <Term id="peering" />. The firm's network also uses 10.0.0.0/16, so peering is impossible without renumbering one side.
+
+<Compare
+  columns={["", "Through NAT and the internet", "Peering the two networks", "A private endpoint"]}
+  rows={[
+    ["What the caller can reach", "One public API", "Every address in the other network, about 65,000", "One service"],
+    ["Who can start a connection", "The caller", "Either side", "The consumer only"],
+    ["Overlapping ranges allowed", true, false, true],
+    ["Crosses the internet", true, false, false],
+    ["Addresses the producer must list", "3", "0", "0"],
+    ["DNS work", "None", "None", "A private zone"],
+  ]}
+  caption="Three ways to reach one service in someone else's network, with Brightpost's numbers."
+/>
+
+So Brightpost turns producer. It puts the orders API behind an internal load balancer and publishes it, accepting only the firm's account. The firm creates an endpoint in its own network. It can call one API, read-only, and nothing else of Brightpost's. [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks) covers joining whole networks.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: an endpoint in your subnet, a published service behind it, and DNS that points the name at it.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Provider services:** gateway endpoints, the route kind, exist for Amazon S3 and DynamoDB. Interface endpoints, the address kind built on AWS PrivateLink, exist for many AWS services.
+    - **Partner and own services:** an interface endpoint connected to an endpoint service in another account.
+    - **Producer side:** an endpoint service in front of a Network Load Balancer. The producer lists the accounts allowed to connect and can accept each request by hand.
+    - **Private DNS:** for AWS services, the endpoint's private DNS option makes the service's usual name answer with the endpoint's addresses inside the VPC. For an endpoint service, the producer can offer a verified private name; otherwise use a Route 53 private hosted zone.
+    - **Endpoint policy:** gateway endpoints and the interface endpoints of many AWS services accept a policy that limits the principals, actions and resources reachable through them.
+
+    **The difference that changes a design.** A gateway endpoint is a route in one VPC's route tables. Traffic from an office over a VPN, or from a peered VPC, does not use it. If anything outside the VPC must reach S3 privately, add an interface endpoint for S3 and a private DNS answer for it.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Provider services:** Private Google Access, a subnet setting, lets VMs without external addresses reach Google APIs over Google's network. A Private Service Connect endpoint for Google APIs puts one internal address in your VPC for them.
+    - **Partner and own services:** a Private Service Connect endpoint, an internal address in your VPC, connected to a producer's service attachment.
+    - **Producer side:** a service attachment in front of an internal load balancer. A subnet set aside in the producer's network gives the addresses its servers see. The producer accepts projects automatically or from a list.
+    - **Private DNS:** Cloud DNS private zones, attached to the VPC networks that may see them, answer the service's name with the endpoint's address.
+    - **Endpoint policy:** VPC Service Controls draws a perimeter around projects, so calls to Google APIs from inside cannot reach resources in projects outside it.
+
+    **The difference that changes a design.** The VPC network is global, but an endpoint for a published service is regional, like the service attachment it connects to. For Google's own APIs, often no endpoint is needed: Private Google Access on the subnet is enough.
+  </Tab>
+  <Tab label="Azure">
+    - **Provider services:** a service endpoint, a subnet setting, sends traffic to a service's public address over Azure's network. A private endpoint (Azure Private Link) puts a private address in your subnet for one resource, such as one storage account.
+    - **Partner and own services:** a private endpoint connected to a Private Link service in another subscription or tenant.
+    - **Producer side:** a Private Link service in front of a Standard Load Balancer. It translates callers' addresses into its own subnet's range, and approves connections by hand or from a list of subscriptions.
+    - **Private DNS:** an Azure Private DNS zone such as `privatelink.blob.core.windows.net`, linked to the virtual network. The public name points at that private name, which answers with the endpoint's address inside linked networks.
+    - **Endpoint policy:** a private endpoint reaches one resource, so it cannot reach other accounts. Service endpoint policies limit which storage accounts a subnet may reach over service endpoints.
+
+    **The difference that changes a design.** A private endpoint maps to one resource, not to a whole service. Each storage account or database needs its own endpoint and its own DNS record. A service endpoint keeps the public address, so without a policy, traffic can still reach any storage account in Azure.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/private-endpoint" stepper minWidth={620} caption="The whole story in five steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/private-endpoint" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="How should we reach that service?"
+  tree={{
+    q: "Do you need one service, or many machines in the other network?",
+    yes: {
+      q: "Is the service one of the cloud's own, such as storage?",
+      yes: {
+        answer: "A private endpoint for that service, with an endpoint policy that names only your resources. Use the address kind if offices or other networks must use it too.",
+        href: "/cloud/networking/nat-and-egress",
+      },
+      no: "A private endpoint to the producer's published service, plus a private DNS zone so the service's normal name gives the endpoint's address.",
+    },
+    no: {
+      q: "Do the two networks use separate address ranges?",
+      yes: {
+        answer: "Peering, or a transit hub if more than two networks must talk. Add firewall rules so each side reaches only what it needs.",
+        href: "/cloud/networking/connecting-networks",
+      },
+      no: "Renumber one network first, or publish each needed service through private endpoints instead of joining the networks.",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost's endpoint works when Asha sends a request to 10.0.31.10. Why did checkouts still fail?" hint="Which does the app use, the address or the name?">
+    The app uses the payment API's name, and the name still gave the public address. Every card check went out through the NAT to the public door, which the provider had closed.
+  </QuizItem>
+  <QuizItem question="The analytics firm's network and Brightpost's both use 10.0.0.0/16. Can the firm still reach the orders API, and how?" hint="Which addresses does each side see?">
+    Yes, through a private endpoint. The firm sees only its endpoint's address in its own range, and Brightpost sees calls from an address in its own range. The two ranges never meet.
+  </QuizItem>
+  <QuizItem question="An intruder on an app server tries to copy the 730 order files to their own bucket through the storage endpoint. What stops it?">
+    The endpoint policy. It allows only Brightpost's four buckets, so a write to a bucket in another account is refused, even though the server may write to storage.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Public path through NAT", "Private endpoint, no DNS change", "Private endpoint + private DNS zone"]}
+  rows={[
+    ["Card checks that cross the internet", "All", "All", "None"],
+    ["Checkout depends on the NAT", true, true, false],
+    ["Public addresses the provider lists", "3", "3, or every checkout fails", "0"],
+    ["Checkouts lost when the provider closes the public door", "All of them", "16 in 40 minutes", "0"],
+    ["Pieces to run", "NAT per zone", "NAT per zone, endpoint", "Endpoint, private zone"],
+    ["Code changes in the app", "None", "None", "None"],
+  ]}
+  caption="Brightpost's numbers for the payment API. Endpoints bill by the hour and by the gigabyte on most clouds; real rates differ."
+/>
+
+The middle column costs an endpoint and buys nothing. The DNS zone is what turns the endpoint on.
+
+## Common pitfalls
+
+- **An endpoint with no DNS change.** The app keeps resolving the public address, and the endpoint carries nothing. Add a private DNS zone, or the endpoint's private DNS option, before anything depends on it.
+- **Testing by address.** A request to the endpoint's address proves the link works, not that the app uses it. Test by name, from the same kind of machine the app runs on, and watch the endpoint's traffic graph.
+- **One zone only.** An endpoint address in one zone fails with that zone. Give it an address in every zone the app runs in.
+- **Allow-all endpoint policies.** An endpoint for storage that allows any bucket is a private road for stolen data. Name your own buckets or accounts in the policy.
+- **Peering for one service.** Joining whole networks gives both sides about 65,000 addresses to reach, and fails if the ranges overlap. Publish the one service through an endpoint instead.
+
+## How to say it in an interview
+
+"A private endpoint puts a service that lives outside my network at a private address inside it. The consumer creates the endpoint; the producer publishes its service behind an internal load balancer and accepts the consumer. Traffic stays on the cloud's network, and only the consumer can start a connection. DNS is half the job: a private zone makes the service's usual name answer with the endpoint's address, so code and certificates stay the same. For the cloud's own services I add an endpoint policy that names only my resources. When another team needs one service, I publish it through an endpoint instead of peering whole networks, and overlapping ranges stop mattering."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a private endpoint, and how is it different from reaching a service through NAT?" level="Junior" category="Cloud">
+    **Short answer.** A private endpoint is a private address in your own subnet that leads to a service outside your network. Calls to it stay on the cloud's network. Through NAT, the same call leaves with a public address and crosses the internet to the service's public door.
+
+    **Why.** At Brightpost, a card check through NAT depends on the NAT gateway, crosses the internet, and needs the provider to list three public addresses. Through the endpoint, the app calls 10.0.31.10 and the cloud carries the call to the provider's published service. Only Brightpost can start a connection, and the provider lists no addresses at all.
+
+    <AnimatedDiagram spec="animated/cloud/private-endpoint" step={3} path="server>endpointPay>payment" caption="The private path: the app server, its endpoint, and the payment API, with no NAT and no internet." />
+
+    **Follow-ups the interviewer may ask.**
+    - Can the producer use the endpoint to reach your servers?
+    - What does the endpoint cost compared with NAT?
+
+    **Watch out for.** Saying a private endpoint encrypts the traffic. TLS does that on both paths; the endpoint changes the route, not the encryption.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You created a private endpoint, but traffic still goes over the internet. Why, and how do you fix it?" level="Mid" category="Cloud">
+    **Short answer.** The service's name still resolves to its public address, so clients never send anything to the endpoint. Add a private DNS zone, or the endpoint's private DNS option, so the same name answers with the endpoint's address inside your network.
+
+    **Why.** Clients call names, not addresses. Brightpost's endpoint carried 0 bytes in 6 days because the payment API's name still gave the public address. When the provider closed the public door, 16 checkouts failed in 40 minutes. A private zone linked to the network makes the resolver answer 10.0.31.10 instead. Check it from an app server: look up the name, then watch the endpoint's traffic grow.
+
+    <AnimatedDiagram spec="animated/cloud/private-endpoint" step={2} highlight={["server", "resolver", "nat", "endpointPay"]} caption="The lookup returns the public address, so the endpoint sits idle while the card checks leave through the NAT." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do machines in an office reach the same private name?
+    - Why not put the endpoint's address in the app's config?
+
+    **Watch out for.** Hard-coding the endpoint's address. The certificate names the service, not the address, and each zone has a different address.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="On AWS, when do you use a gateway endpoint and when an interface endpoint?" level="Mid" category="Cloud">
+    **Short answer.** A gateway endpoint is a route-table entry for S3 or DynamoDB: no address and no DNS change, but only for traffic from inside that VPC. An interface endpoint puts private addresses in your subnets for many AWS services and for other accounts' endpoint services.
+
+    **Why.** For Brightpost's app servers in one VPC, a gateway endpoint for S3 is the simple choice: add a route and a policy. An office joined over a VPN, or another VPC, cannot use that route. They need an interface endpoint, with a private DNS answer for the service's name. Both kinds accept an endpoint policy for S3, which is where Brightpost names its four buckets.
+
+    <AnimatedDiagram spec="animated/cloud/private-endpoint" step={5} cloud="aws" highlight={["server", "endpointSto", "storage", "other"]} caption="On AWS the storage endpoint is a gateway endpoint, and its policy refuses buckets in other accounts." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which of the two works for a payment provider's service?
+    - How would you check that S3 traffic really uses the endpoint?
+
+    **Watch out for.** Assuming a gateway endpoint covers on-premises clients. Their traffic arrives over a VPN or a dedicated link and does not follow the VPC's route to S3.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why can an Azure service endpoint let traffic reach storage accounts that a private endpoint cannot?" level="Mid" category="Cloud">
+    **Short answer.** A service endpoint is a subnet setting that sends traffic to the service's public addresses over Azure's network. It covers the whole service, so without a policy the subnet can reach any storage account. A private endpoint maps to one storage account, so it cannot reach any other.
+
+    **Why.** Suppose an intruder on Brightpost's app server tries to copy the 730 order files to a storage account they own. With only a service endpoint, the copy goes to that account's public address and works. A service endpoint policy that lists Brightpost's accounts stops it. A private endpoint gives the server one address for one account, so there is no route to the intruder's account through it.
+
+    <AnimatedDiagram spec="animated/cloud/private-endpoint" step={5} cloud="azure" highlight={["endpointSto", "storage", "other"]} caption="On Azure the storage endpoint leads to one storage account; another account is not reachable through it." />
+
+    **Follow-ups the interviewer may ask.**
+    - What DNS records does a private endpoint for blob storage need?
+    - Can a private endpoint and a service endpoint exist in the same subnet?
+
+    **Watch out for.** Calling service endpoints and private endpoints the same thing. One keeps the public address; the other gives a private one.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="An analytics firm needs to read Brightpost's orders API. Its network uses the same 10.0.0.0/16 range. Design the connection without peering." level="Senior" category="Cloud">
+    **Short answer.** Make Brightpost the producer. Put the orders API behind an internal load balancer, publish it as an endpoint service, and accept only the firm's account. The firm creates an endpoint in its own network and a private DNS name for it.
+
+    **Why.** Peering would fail on the overlapping ranges, and would expose every address in the shop's network. With an endpoint, the cloud translates addresses on both sides, so the overlap never shows. The firm can only start calls to one API. Brightpost adds a read-only API key and a rate limit, and logs every connection. To end the contract, Brightpost rejects the firm's endpoint connection.
+
+    <AnimatedDiagram spec="animated/cloud/private-endpoint" step={4} highlight={["endpointPay", "published", "payment"]} caption="The same shape with the roles swapped: the firm's endpoint, Brightpost's published service and the orders API behind it." />
+
+    **Follow-ups the interviewer may ask.**
+    - The firm is on another cloud. What changes?
+    - How do you keep one noisy consumer from hurting the shop?
+
+    **Watch out for.** Renumbering a live network to make peering possible. It takes weeks, and still gives the firm far more than one API.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets)
+- [NAT & Leaving the Network](/cloud/networking/nat-and-egress)
+- [DNS on the Cloud](/cloud/networking/dns)
+- [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks)
+- [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity)
+- [Object Storage](/cloud/data/object-storage)
+- [Networking on AWS](/cloud/aws/networking)
+- [Networking on Google Cloud](/cloud/gcp/networking)
+- [Networking on Azure](/cloud/azure/networking)
+- [DNS](/system-design/fundamentals/dns)
+- [A request's journey](/system-design/fundamentals/anatomy-of-a-request)
+
+## Further reading
+
+- [AWS PrivateLink guide](https://docs.aws.amazon.com/vpc/latest/privatelink/what-is-privatelink.html): interface endpoints, gateway endpoints and endpoint services.
+- [Private Service Connect overview](https://cloud.google.com/vpc/docs/private-service-connect): endpoints, service attachments and Google APIs.
+- [Azure Private Link overview](https://learn.microsoft.com/azure/private-link/private-link-overview): private endpoints and Private Link services.
+- [Azure private endpoint DNS](https://learn.microsoft.com/azure/private-link/private-endpoint-dns): the private DNS zones each service needs.

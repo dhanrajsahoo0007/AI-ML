@@ -1,11 +1,316 @@
 ---
 title: "CDN, Edge, DDoS & WAF"
-description: "How static content and the first line of defence move to the provider's edge, and how absorbing a flood differs from inspecting a request."
-status: outline
+description: "The managed edge on each cloud: a CDN in front of a bucket and an app, a locked origin, signed links, DDoS protection and a WAF with rate rules."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** moving static content and the first line of defence to the provider's edge: how a cache miss travels, what an edge function can change, and the difference between absorbing a flood (DDoS protection) and inspecting a request (a web application firewall).
+<KeyIdea>
+  Put the provider's edge in front of everything you serve, so copies come from near the customer and bad traffic is stopped before it reaches your own servers.
+</KeyIdea>
 
-**Related reading on this site:** [CDNs and edge](/system-design/fundamentals/cdn) · [Caching](/system-design/patterns/caching) · [Edge, DNS & CDN on AWS](/cloud/aws/edge)
+## The story
+
+Brightpost's biggest sale day opens at 9:00. At 9:20 a competitor's scraper starts copying every price on the shop: 900 product-page requests a second, from about 400 addresses. Product pages carry prices, so the edge does not keep copies of them, and every request reaches the app servers. By 9:30 autoscaling has reached its maximum of 10 servers, and all 10 are busy. Checkout takes 9 seconds instead of under 1. At 10:35 Asha adds a rate rule at the edge, and the flood stops within 2 minutes. At 10:55 the scraper returns through the load balancer's own address, which the rule never sees. That door closes at 11:20. By then about 350 shoppers have left without paying.
+
+Every step below closes one of the gaps that morning found.
+
+## How it works
+
+Three words first. An **origin** is the place that holds the real copy of what you serve: here, a storage bucket for photos and the app behind a <Term id="load-balancer" />. An <Term id="edge-location">edge site</Term> is a small site of the provider's, close to customers. A <Term id="cdn" /> is the set of edge sites that keep copies of files and answer for the origin.
+
+### Step 1: One edge in front of a bucket and an app
+
+<AnimatedDiagram spec="animated/cloud/cdn-request-path" step={1} minWidth={620} caption="Brightpost's first setup: photos come from the private bucket on a miss, and pages and checkout pass through to the app." />
+
+The edge that cut a photo's trip in Sydney from 250 ms to 10 ms now stands in front of the whole shop. Customers see one address. Path rules pick the origin: `/photos/` goes to the photos bucket, and everything else to the load balancer.
+
+The bucket stays private, as Brightpost's guardrail demands. The edge reads it with its own identity, and the bucket's policy allows that identity and nobody else. Hits, misses and expiry are covered in [CDNs and edge](/system-design/fundamentals/cdn). An edge acting for your servers is a [reverse proxy](/system-design/fundamentals/proxies).
+
+<PremiumBreak />
+
+### Step 2: What the edge keeps, and for how long
+
+Each path rule has its own cache settings. The <Term id="ttl">TTL</Term> is how long the edge keeps a copy. The **cache key** is the part of a request that picks the stored copy, usually the host name and the path.
+
+<Compare
+  columns={["Path", "Kept at the edge", "Why"]}
+  rows={[
+    ["/photos/*", "1 year", "Each file name carries a version number, so a new photo gets a new name"],
+    ["/products/*", "Not kept", "Prices change during a sale; the page must be fresh"],
+    ["/basket, /checkout, /account", "Never", "Each answer belongs to one shopper"],
+  ]}
+  caption="Brightpost's three path rules on its sale day."
+/>
+
+To replace a file early, you send the edge a **purge** for that path, which reaches every edge site within seconds to minutes. Versioned names make purges rare. Add a header or cookie to the cache key only when the answer changes with it; each extra part splits one copy into many.
+
+### Step 3: Sale day: valid requests, far too many
+
+<AnimatedDiagram spec="animated/cloud/cdn-request-path" step={2} minWidth={620} caption="The failure: every scraper request is a valid page view, nothing caches it, and all 10 app servers fill up." />
+
+The edge passed every request, because each one asked for a real page, correctly, over HTTPS.
+
+<Callout tone="red" title="What breaks">
+  Each of the 400 addresses sends about 2 requests a second, far more than a person reads. Product pages are not cached, so all 900 a second reach the load balancer. Autoscaling adds servers until it hits 10, its maximum, and the queue still grows. Checkout shares those servers, so a payment waits 9 seconds, and about 350 shoppers give up before 11:20.
+</Callout>
+
+A cache protects an origin only for what it is allowed to keep. The parts that cannot be cached need a different kind of guard.
+
+### Step 4: Floods of packets: absorbed for you
+
+<AnimatedDiagram spec="animated/cloud/cdn-request-path" step={3} minWidth={620} caption="The edge drops a burst of junk packets with no rule from Brightpost. The scraper's page requests still pass." />
+
+A <Term id="ddos">DDoS</Term> attack, a distributed denial of service, sends traffic from many machines at once to drown a target. The crudest kind is a flood of junk packets or half-opened connections. At 9:40 the same addresses send such a burst. The edge drops it, and nobody at Brightpost notices until the next day's report.
+
+Every provider runs this layer at its edge, always on, at no extra charge. The edge has far more capacity than any one customer, so it can soak up the flood. It does nothing about the scraper, whose requests were complete and polite. The attacks themselves are covered in [Common attacks and defences](/system-design/fundamentals/common-attacks).
+
+Each cloud also sells a paid advanced tier. It adds a response team, help with floods of web requests, and credit for servers an attack made you run.
+
+### Step 5: A web firewall reads each request
+
+<AnimatedDiagram spec="animated/cloud/cdn-request-path" step={4} minWidth={620} caption="A web firewall attached to the edge checks every request; any address over 300 requests in 5 minutes is blocked." />
+
+A <Term id="waf">WAF</Term>, a web application firewall, reads each web request before the cache or the origin sees it. Its rules run in order, and each one matches something about the request, then allows, blocks or counts it.
+
+- **Managed rule sets** are lists the provider writes and updates: known attack patterns, such as code hidden in a form field, and addresses with a bad record.
+- **Custom rules** are yours: block a path, a country or a header.
+- **Rate-based rules** count requests per address over a time window and act above a limit.
+
+Start every new rule in **count mode**: it logs what it would block and blocks nothing. After a few days of real traffic, read the log and switch it on.
+
+### Step 6: Brightpost's rate rule
+
+The rule Asha wrote at 10:35 has four parts.
+
+<Compare
+  columns={["Part", "Brightpost's choice"]}
+  rows={[
+    ["Count by", "The caller's address"],
+    ["On paths", "/products/* only"],
+    ["Limit", "300 requests in 5 minutes"],
+    ["Action", "Block that address until it falls back under the limit"],
+  ]}
+  caption="A busy shopper opens about 40 product pages in 5 minutes. Each scraper address sent about 600."
+/>
+
+The limit sits far above any person and far below the scraper. Scoping it to product pages means a blocked address can never stop a payment. Window lengths differ by cloud; 5 minutes is offered on all three. The counting itself is explained in [Rate limiting and abuse basics](/system-design/fundamentals/abuse-protection).
+
+### Step 7: When bots spread out
+
+A smarter scraper spreads over 5,000 addresses and stays under 300 each, so a per-address rule never fires. **Bot control** is a managed rule set that looks at more than counts. It checks whether the caller behaves like a real browser and verifies search-engine crawlers, so those can be allowed by name. A suspect caller gets a **challenge**, a small test that a browser passes and most scripts fail. Put challenges on the pages bots want, never inside checkout.
+
+### Step 8: Lock the origin to the edge
+
+<AnimatedDiagram spec="animated/cloud/cdn-request-path" step={5} minWidth={620} caption="The scraper tries the load balancer's own address. The origin lock lets in only traffic from the edge, so the request is refused." />
+
+Every rule so far lives at the edge. At 10:55 the scraper found the load balancer's public address and went around them all. An **origin lock** makes the edge the only way in.
+
+- **The bucket** already had one: a policy that names the edge's identity as its only reader.
+- **The load balancer** accepts only the provider's published list of edge addresses, plus a secret header that only your edge adds. Or the edge reaches it over a private connection, and it has no public address at all.
+
+At 11:20 the direct path closes, and the scraper's requests get no answer. One way in and no side door is also the idea behind [Zero Trust, Defence in Depth and Identity-Aware Access](/cloud/resilience/zero-trust).
+
+### Step 9: Signed links and code at the edge
+
+Brightpost's printing partner downloads full-size originals from the private uploads bucket, through the edge. Each download uses a **signed URL**: a link carrying an expiry time and a signature made with Brightpost's private key. The edge checks both before it serves the file. The links last 1 hour, so a forwarded link soon dies. A **signed cookie** does the same for many files.
+
+**Edge functions** are small pieces of your code that run at the edge on each request. They redirect old links, add security headers or check a token before the origin sees anything. They must finish in milliseconds, so they are no place for database calls.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a cache at the edge, a locked origin, always-on flood protection, and a web firewall you configure.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Edge cache:** Amazon CloudFront. A distribution has one behaviour per path pattern, each with its own origin and cache policy.
+    - **Origin lock:** origin access control (OAC) for an S3 bucket. A load balancer allows only CloudFront's managed list of origin-facing addresses plus a secret header, or sits in a private subnet as a VPC origin.
+    - **Signed links and edge code:** signed URLs and signed cookies. CloudFront Functions for light work on every request; Lambda@Edge for heavier code.
+    - **Flood protection:** AWS Shield Standard, on for every account at no extra charge. Shield Advanced is the paid tier.
+    - **Web firewall and bots:** AWS WAF web ACLs with managed rule groups, rate-based rules and the Bot Control rule group. Rules can run in count mode.
+
+    **The difference that changes a design.** CloudFront is a separate service in front of regional origins. AWS WAF attaches to each resource: a distribution, a load balancer, an API. So a load balancer with a public address works around every rule on the distribution until you lock it. A web ACL for CloudFront is created in the global scope, shown in the console under US East (N. Virginia).
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Edge cache:** Cloud CDN, switched on per backend of the global external Application Load Balancer. Media CDN for large video and downloads.
+    - **Origin lock:** backends need no public address; a firewall rule admits only Google's load balancer and health-check ranges. A private bucket grants read access to Cloud CDN's own service account.
+    - **Signed links and edge code:** signed URLs and signed cookies. Service Extensions run your plugins in the load balancer and Media CDN path.
+    - **Flood protection:** network DDoS protection is always on for the global load balancer, under Cloud Armor Standard. Cloud Armor Enterprise is the paid tier, with Adaptive Protection, which learns normal traffic and suggests rules.
+    - **Web firewall and bots:** Cloud Armor security policies: preconfigured WAF rules based on the OWASP Core Rule Set, rate-limiting rules, and bot management with reCAPTCHA. Preview mode logs without acting.
+
+    **The difference that changes a design.** The edge and the load balancer are one product. Traffic enters at Google's edge on one anycast address, an address announced from many places at once. Cloud CDN and Cloud Armor are settings on that load balancer, so Brightpost's servers have no second public address for a scraper to find.
+  </Tab>
+  <Tab label="Azure">
+    - **Edge cache:** Azure Front Door, Standard or Premium: caching, global layer 7 load balancing and routing rules in one service.
+    - **Origin lock:** Premium reaches the origin over Private Link, with no public address. Otherwise allow only the AzureFrontDoor.Backend service tag, and check the header carrying your Front Door's ID.
+    - **Signed links and edge code:** the rules engine redirects, rewrites and sets headers, with no custom code. For signed links, Blob Storage issues a shared access signature (SAS) with an expiry.
+    - **Flood protection:** Front Door is covered by Azure DDoS infrastructure protection at no extra charge. Azure DDoS Protection is the paid tier.
+    - **Web firewall and bots:** Azure Web Application Firewall policies on Front Door, with custom and rate-limit rules. Managed and bot manager rule sets need Premium. Detection mode logs; prevention mode blocks.
+
+    **The difference that changes a design.** One service does the cache, the global routing and the firewall, so a Front Door design has fewer parts. The paid DDoS tier protects public IP addresses in your own virtual networks, such as an Application Gateway's, not Front Door itself. The same WAF can also run regionally on Application Gateway, so decide which layer owns which rules.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/cdn-request-path" stepper minWidth={620} caption="The whole sale day in five steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/cdn-request-path" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which edge defence fits?"
+  tree={{
+    q: "Does the traffic reach your origin without passing the edge?",
+    yes: "Lock the origin first. Every rule at the edge is skipped by a request that never goes through it.",
+    no: {
+      q: "Is it made of complete web requests, such as page views or API calls?",
+      no: "A flood of packets or connections. The always-on DDoS layer at the edge absorbs it with no rule from you.",
+      yes: {
+        q: "Does one request carry something harmful, such as code in a form field?",
+        yes: "A managed WAF rule set. Run it in count mode for a few days, then block.",
+        no: {
+          q: "Does each sender make far more requests than a person could?",
+          yes: {
+            answer: "A rate-based rule per address, on the paths being hit. Keep checkout out of its scope.",
+            href: "/system-design/fundamentals/abuse-protection",
+          },
+          no: "Bot control: browser checks, verified good crawlers, and a challenge for suspect callers on the pages they want.",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="One address opens 2 product pages a second for 5 minutes. Brightpost's rule blocks more than 300 in 5 minutes. Is it blocked?" hint="Multiply first.">
+    Yes. 2 a second for 300 seconds is 600 requests, twice the limit. A busy shopper opens about 40 in that time and is never near it.
+  </QuizItem>
+  <QuizItem question="The rate rule works at the edge, but the load balancer still accepts anyone at its public address. What does the scraper do next?" hint="Which requests does the edge's rule see?">
+    It sends its requests to the load balancer's own address, as it did at 10:55. The rule never sees them. An origin lock fixes it: only traffic from the edge gets in.
+  </QuizItem>
+  <QuizItem question="A flood of junk packets hits Brightpost's edge. What must the team do to stay up?">
+    Nothing during the flood: the always-on layer at the edge absorbs it. What they must do beforehand is put every public address behind the edge, so there is nothing else to hit.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Always-on DDoS layer", "WAF and rate rules", "Bot control", "Paid DDoS tier"]}
+  rows={[
+    ["Stops", "Floods of packets and connections", "Known attack patterns; senders over a limit", "Scripts that spread out and stay under limits", "Large floods of web requests, with experts on call"],
+    ["Would have stopped Brightpost's scraper", false, true, true, "Partly"],
+    ["Setup", "None: on by default", "About 1 hour, then a week in count mode", "About 1 hour, then tuning", "A subscription and a list of protected resources"],
+    ["Can block real customers", false, "Yes, if a limit is too low", "Yes, if challenges reach checkout", "Rarely"],
+    ["Cost shape", "Included", "Per rule and per million requests", "Usually extra, on top of the WAF", "A monthly fee, the largest of the four"],
+  ]}
+  caption="Brightpost's view. Setup times are for a small team doing it the first time."
+/>
+
+For Brightpost, the always-on layer, one rate rule and a locked origin cover the sale-day risk. Bot control comes next if scrapers spread out.
+
+## Common pitfalls
+
+- **Leaving the origin open.** A public way in to the load balancer or bucket skips every edge rule. Lock both, then try the direct address yourself and expect a refusal.
+- **Blocking on day one.** A new managed rule set can match a real form field and block payments. Run it in count mode, read what it would block, then switch.
+- **One rate limit for the whole site.** A limit that stops scrapers can also block an office of shoppers sharing one address at checkout. Scope each rule to the paths it protects.
+- **Caching a page that belongs to one person.** A basket or account page cached at the edge is served to the next customer who asks. Mark those paths as never cached.
+- **A cache key that includes everything.** With every cookie in the key, each copy is unique and nothing is ever a hit. Key only on what changes the answer.
+
+## How to say it in an interview
+
+"I put the provider's edge in front of everything public, with path rules: long TTLs on versioned static files, no caching for anything personal. The origins accept traffic only from the edge, so nobody can go around it. The always-on DDoS layer absorbs floods of packets; I add the paid tier only if an hour of downtime costs more than it. Every request passes a WAF with managed rules and rate rules scoped to the paths under attack, each started in count mode. If scrapers spread out, I add bot control, with challenges kept away from checkout."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does putting a CDN in front of a storage bucket change, and why keep the bucket private?" level="Junior" category="Cloud">
+    **Short answer.** Customers get files from an edge site near them, and the bucket sees only the misses. The bucket stays private and lets in only the edge's own identity, so nobody can skip the edge.
+
+    **Why.** Brightpost's photos take about 10 ms from the Sydney edge instead of 250 ms from London. Each photo leaves the bucket about once per edge site, not once per customer. A public bucket could be read directly, around the edge's rules and logs. A policy naming the edge's identity as the only reader closes that door and keeps the guardrail against public buckets intact.
+
+    <AnimatedDiagram spec="animated/cloud/cdn-request-path" step={1} path="customers>cdn>bucket" caption="Customers reach the edge; only a miss travels to the private bucket." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you replace a photo the edge has already cached?
+    - What does the edge do when the bucket is down?
+
+    **Watch out for.** Making the bucket public "because the CDN needs to read it". On all three clouds the edge can read a private bucket.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is the difference between DDoS protection and a web application firewall?" level="Mid" category="Cloud">
+    **Short answer.** DDoS protection absorbs volume: floods of packets and connections too big for one target. A WAF reads each web request and judges its content and its rate.
+
+    **Why.** Brightpost met both on one morning. The always-on layer dropped a burst of junk packets at 9:40, and nobody noticed. The scraper's 900 requests a second were complete page views, so that layer let them through. A WAF rate rule, 300 requests in 5 minutes per address on product pages, stopped them.
+
+    <AnimatedDiagram spec="animated/cloud/cdn-request-path" step={4} highlight={["bots", "ddos", "waf"]} caption="Junk packets are dropped by the flood absorber; the scraper's requests are blocked by the firewall's rate rule." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which of the two is included at no extra charge on each cloud?
+    - What does the paid DDoS tier add?
+
+    **Watch out for.** Saying "we have DDoS protection, so bots are handled". A scraper sends valid requests, and flood absorption does not judge them.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A new firewall rule blocked real customers at checkout. How should you roll out edge rules?" level="Mid" category="Cloud">
+    **Short answer.** Start every rule in count mode, scope it to the paths it protects, and switch to block only after reading what it would have stopped. Alert on blocks at checkout separately.
+
+    **Why.** A managed rule can match a real form field, such as an address line. A low rate limit can catch an office of shoppers behind one address. Brightpost scopes its rate rule to product pages, so checkout is never in reach. Its limit of 300 sits far above a busy shopper's 40. A few days in count mode shows the false matches before a customer meets one.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you let one partner's addresses past a rule?
+    - Who is paged when blocks on checkout rise?
+
+    **Watch out for.** Turning off the whole managed rule set after one false match. Narrow the one rule that matched, and keep the rest.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A shop serves its pages, photos and API through one CDN. What do you cache, and what must never be cached?" level="Senior" category="Cloud">
+    **Short answer.** Cache static files for a long time under versioned names. Cache public pages briefly, or not at all, when they carry fast-changing data such as prices. Never cache anything that belongs to one person: baskets, accounts, checkout and most API answers.
+
+    **Why.** Brightpost keeps photos for a year, because a new photo gets a new name, and product pages not at all during a sale. A personal page cached by mistake is served to the next customer: a data leak, not a slow page. The cache key holds only what changes the answer. With every cookie in it, each copy is unique and nothing is a hit.
+
+    <AnimatedDiagram spec="animated/cloud/cdn-request-path" step={1} highlight={["cdn", "bucket", "lb"]} caption="One edge, two origins: path rules decide what is kept and what always passes through." />
+
+    **Follow-ups the interviewer may ask.**
+    - Prices change every few minutes on sale day. Could product pages still be cached?
+    - How do you prove no personal page is ever cached?
+
+    **Watch out for.** Trusting the origin's headers alone. Set "never cache" in the edge's own path rule too, so one wrong header cannot leak a basket.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You have a WAF at the edge, but attack traffic still reaches your servers. What do you check?" level="Senior" category="Cloud">
+    **Short answer.** First, whether the traffic came through the edge at all. An origin that accepts anyone lets attackers skip every edge rule, so lock it to the edge. Then check the rules: count mode left on, a scope that misses the path, or a limit the attacker stays under.
+
+    **Why.** At 10:55 Brightpost's scraper went to the load balancer's own address, and the edge's rate rule never saw it. The lock depends on the cloud: the provider's list of edge addresses plus a secret header, a private connection, or no public address at all. Afterwards the origin's logs should show no request that skipped the edge.
+
+    <AnimatedDiagram spec="animated/cloud/cdn-request-path" step={5} highlight={["bots", "lb", "lock"]} caption="The scraper's direct request to the load balancer is refused by the origin lock." />
+
+    **Follow-ups the interviewer may ask.**
+    - The attacker spreads over 5,000 addresses and stays under every limit. What next?
+    - How would you notice a bypass before customers do?
+
+    **Watch out for.** Adding more rules at the edge. No edge rule can stop a request that never passes through it.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [DNS on the Cloud](/cloud/networking/dns)
+- [Object Storage](/cloud/data/object-storage)
+- [Zero Trust, Defence in Depth and Identity-Aware Access](/cloud/resilience/zero-trust)
+- [Edge, DNS & CDN on AWS](/cloud/aws/edge)
+- [Edge, DNS & CDN on Google Cloud](/cloud/gcp/edge)
+- [Edge, DNS & CDN on Azure](/cloud/azure/edge)
+- [CDNs and edge](/system-design/fundamentals/cdn)
+- [Common attacks and defences](/system-design/fundamentals/common-attacks)
+- [Rate limiting and abuse basics](/system-design/fundamentals/abuse-protection)
+
+## Further reading
+
+- [Amazon CloudFront Developer Guide](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html): distributions, origins and origin access control.
+- [AWS WAF, Shield and Firewall Manager guide](https://docs.aws.amazon.com/waf/latest/developerguide/what-is-aws-waf.html): rules, rate-based rules and Shield tiers.
+- [Google Cloud Armor overview](https://cloud.google.com/armor/docs/cloud-armor-overview): security policies, DDoS protection and tiers.
+- [Azure Front Door overview](https://learn.microsoft.com/azure/frontdoor/front-door-overview): caching, routing and the WAF on Front Door.
