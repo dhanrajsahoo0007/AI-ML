@@ -22,7 +22,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 use only the
 // left and middle columns. The red step-2 edges lie on the normal path at x 390; labels sit at different points.
-// The "Data" zone starts at x 262 so its tab (278-339) clears the "full access" label below the admin tool.
+// The red export label covers the faded "full access" label in step 2; both sit in the gap between the zones.
 //
 // Zone tabs sit centred on a zone's top edge, from x + 16 to x + 16 + 8.2 per character + 28. The "Access" zone
 // starts at y 175, so the contractor's refused edge (step 4) enters it through its left side at y 197, below the tab.
@@ -207,7 +207,7 @@ const spec: DiagramSpec = {
     // Step 1: one sign-in at the VPN, then the network itself is the permission.
     { from: "staff", to: "vpn", label: "sign in once", packet: true, until: 2 },
     { from: "vpn", to: "admin", label: "any VPN address", packet: true, delay: 1.2, labelAt: 0.3, until: 2 },
-    { from: "admin", to: "db", label: "full access", packet: true, delay: 2.4, labelAt: 0.75, until: 5 },
+    { from: "admin", to: "db", label: "full access", packet: true, delay: 2.4, until: 5 },
 
     // Step 2: the malware rides the contractor's VPN session. The red edges lie on top of the normal path, with their
     // labels at other points along it, so the whole figure stays inside the left 480 units on a phone.
@@ -230,7 +230,7 @@ const spec: DiagramSpec = {
       tone: "red",
       packet: true,
       delay: 2.4,
-      labelAt: 0.3,
+      labelAt: 0.5,
       step: 2,
       until: 2,
     },
