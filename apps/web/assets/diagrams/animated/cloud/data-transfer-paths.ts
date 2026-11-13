@@ -12,7 +12,8 @@ import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 // free arrows at y 110 and y 136, so the two pills sit one above the other between the app server and customers.
 // The cross-zone arrow runs diagonally from the zone B server to the zone A database; its pill sits in the gutter
 // between the zones (x 276), clear of every box. The NAT path is a dashed diagonal from the zone B server to the
-// storage box; it bends at (745, 196), right of the Provider services tab, and enters the storage box from above.
+// storage box; it runs along y 190, between the Internet group and the Provider services tab, and drops at x 750,
+// right of that tab, into the storage box. Its pill sits on that level stretch.
 // Box labels fit 160 - 8 = 152 px at 6.2 px per character ("Private endpoint" is 16 characters, 99 px).
 // The canvas is 790 wide so labels stay readable in the 660 px article column.
 
@@ -89,7 +90,11 @@ const shapes: LayoutShape[] = [
     label: "via NAT: per GB",
     tone: "orange",
     dashed: true,
-    via: [[745, 196]],
+    via: [
+      [543, 190],
+      [750, 190],
+      [750, 246],
+    ],
     step: 4,
   },
 

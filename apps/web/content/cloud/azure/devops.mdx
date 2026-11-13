@@ -1,20 +1,47 @@
 ---
 title: "DevOps & IaC on Azure"
 description: "Bicep, ARM, Azure Pipelines, GitHub Actions and App Configuration, with the AWS and Google Cloud equivalents."
+updated: 2026-11-14
 ---
 
-On Azure, infrastructure as code is **Bicep** (which compiles to ARM templates) or Terraform. Pipelines run in **Azure Pipelines** or, increasingly, **GitHub Actions** with OIDC federation to Entra ID. **App Configuration** provides feature flags and central settings.
+Brightpost ships a new version of its shop most working days, and its servers and networks change too. On Azure the pipeline runs in **Azure Pipelines** or **GitHub Actions** and pushes one image to Azure Container Registry. Infrastructure is written in **Bicep**, which compiles to ARM templates. Two facts shape a design here. Azure Resource Manager keeps no state file: it compares the template with what is live on every run. And an App Service **deployment slot** is a second copy of the app on the same plan, so blue/green needs no new servers.
+
+## The idea
+
+A delivery pipeline builds each change once and sends that exact build through every check, and a deployment strategy decides how shoppers move from the old version to the new one. <Term id="infrastructure-as-code">Infrastructure as code</Term> does the same for the servers and networks: a reviewed file, a plan, then an apply from the pipeline.
+
+<Callout tone="blue" title="Learn the idea">
+  The cloud-neutral version, with Brightpost's column rename that failed 18 checkouts in 12 minutes, is in [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies). Templates, plans and state are in [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code); patching and agents are in [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management).
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/deployment-strategies" stepper cloud="azure" minWidth={620} caption="Brightpost's releases on Azure: Azure Pipelines builds one image into Container Registry, then rolling, blue/green and a 5% canary behind Application Gateway, with a Monitor alert and App Configuration flags." />
+
+<CloudMapping diagram="cloud/deployment-strategies" lead="azure" />
 
 ## TL;DR
 
-- **Bicep** (or Terraform) for every resource, deployed with **deployment stacks** to manage them as a unit.
-- **GitHub Actions or Azure Pipelines** with workload identity federation; no stored service principal secrets.
-- **Deployment slots** (App Service) or **revisions** (Container Apps) for safe rollouts.
+- **Bicep** (or Terraform) for every resource; **what-if** shows the change before it runs, and **deployment stacks** manage a set of resources as a unit.
+- **GitHub Actions or Azure Pipelines** sign in through workload identity federation, with no stored secret.
+- **Deployment slots** (App Service) or **revisions** (Container Apps) for blue/green and canary releases.
 - **App Configuration** for feature flags and settings, with Key Vault references for secrets.
 
 ## At a glance
 
 <CloudGroupTable group="devops" lead="azure" />
+
+## How it fits together on Azure
+
+Step 1: a merge starts the pipeline. It builds the shop's image once and pushes it to **Azure Container Registry**, which gives it a digest. Step 2: a **VM scale set** with a rolling upgrade policy moves its instances to the new image in batches.
+
+Steps 3 and 4 are the rename and its fix: the migration becomes its own stage that only expands the PostgreSQL schema. Step 5: on App Service, the new version warms up in a **staging slot** and is **swapped** with production; swapping back is the rollback. Step 6: a slot can take a set share of production traffic, and Container Apps weights traffic between revisions. An **Azure Monitor alert** watches checkout errors, and a pipeline check can stop the next stage while it fires. Step 7: **App Configuration** serves the feature flag.
+
+| The concept says | On Azure | What to know |
+|---|---|---|
+| Environments and approvals | Azure Pipelines environments, or GitHub environments | Approvals and checks, such as business hours, enforce Brightpost's sale-week freeze |
+| Blue/green | A deployment slot swap on App Service | Settings marked as slot settings stay with the slot, so production keeps its database address |
+| Canary at 5% | Slot traffic routing, or Container Apps revision weights | On a VM scale set, a precise split is harder; slots and revisions make it a setting |
+| The plan | Bicep what-if | Shows what a deployment would create, change or delete |
+| State | None: Resource Manager compares with what is live | By default a deployment leaves alone resources the template does not mention |
 
 ## Services
 
@@ -22,23 +49,90 @@ On Azure, infrastructure as code is **Bicep** (which compiles to ARM templates) 
 
 <CloudServiceProfile id="azure-bicep" />
 
+Pick it when the estate is Azure only and you want new resource types the day they ship, with no state file to look after.
+
 ### Azure Pipelines
 
 <CloudServiceProfile id="azure-pipelines" />
+
+Pick it when the team already uses Azure DevOps. Pick **GitHub Actions** when the code lives on GitHub; it signs in to Azure through a federated credential in Entra ID.
 
 ### Azure App Configuration
 
 <CloudServiceProfile id="azure-app-configuration" />
 
-## Coming from AWS
+Pick it when a setting or a feature flag must change without a redeploy, such as turning the new checkout on for 10% of shoppers.
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| CloudFormation / CDK | Bicep / ARM | Day-one support for new Azure resource types |
-| CodePipeline | Azure Pipelines / GitHub Actions | GitHub is Microsoft's strategic CI/CD |
-| AppConfig | App Configuration | Feature flags with targeting filters |
-| Systems Manager | Azure Update Manager + Azure Arc | Also manages servers outside Azure |
+### Cost and migration tools in this group
+
+These answer other questions: what the bill is, and what moves from a data centre. See [FinOps and Cost Tools](/cloud/operations/finops-and-cost-tools) and [Migration and Modernization](/cloud/operations/migration-and-modernization).
+
+<CloudServiceProfile id="azure-cost-management" />
+
+Pick it when each subscription or resource group needs a budget and alerts, and teams need to see their own spend.
+
+<CloudServiceProfile id="azure-advisor" />
+
+Pick it for a monthly review of idle and oversized resources.
+
+<CloudServiceProfile id="azure-migrate" />
+
+Pick it when you are planning a move from your own servers and need an inventory, a readiness check and a cost estimate.
+
+## Common mistakes
+
+- **Expecting a deleted Bicep block to delete the resource.** The default incremental mode leaves it running. Use a deployment stack, or a mode that removes what the template no longer names.
+- **Storing a service principal secret in CI.** Use workload identity federation, so each run gets a short-lived token.
+- **Forgetting slot settings.** A connection string that is not marked as a slot setting moves with the code in a swap, so staging can end up writing to production.
+
+## Where this shows up in system design
+
+- **Zero-downtime releases:** slot swaps or revision weights for the rollout, plus expand and contract for every schema change.
+- **Many environments from one definition:** one Bicep file with a parameter file per environment, applied from the pipeline.
+- **Release gates:** approvals and checks on the production environment carry the freeze and the second engineer's sign-off.
 
 ## Related
 
-[DevOps & IaC on AWS](/cloud/aws/devops) · [DevOps & IaC on Google Cloud](/cloud/gcp/devops) · [DevOps & IaC on AWS](/cloud/aws/devops) · [Containers on Azure](/cloud/azure/containers)
+[CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies) · [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code) · [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management) · [DevOps & IaC on AWS](/cloud/aws/devops) · [DevOps & IaC on Google Cloud](/cloud/gcp/devops) · [Containers on Azure](/cloud/azure/containers) · [System design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is an App Service deployment slot, and how does a swap give Brightpost a fast rollback?" category="Cloud" level="Junior">
+    **Short answer.** A slot is a second, live copy of the app with its own address, on the same App Service plan. You deploy the new version to the staging slot, warm and test it, then swap. The swap is the release; swapping back is the rollback.
+
+    **Why.** The swap changes which copy production traffic reaches, so it takes seconds and drops no requests once the copy is warm. The old version stays in the staging slot, ready. Because the slot shares the plan, blue/green needs no new servers, only room on the plan.
+
+    <AnimatedDiagram spec="animated/cloud/deployment-strategies" step={5} highlight={["lb", "current", "next"]} minWidth={620} caption="Blue/green: all traffic flips to the new copy while the old one stays warm. A slot swap does this on App Service." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which settings should stay with the slot instead of moving in a swap?
+    - Does a swap help if the release renamed a database column?
+
+    **Watch out for.** Thinking the swap makes the database safe. Both slots share one database, so schema changes still need expand and contract.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost deleted a storage account from its Bicep file, but the account is still there. Why, and how do you see this coming?" category="Cloud" level="Mid">
+    **Short answer.** Resource Manager keeps no state file and, in its default incremental mode, leaves alone anything the template does not name. Run what-if before each deployment to see the changes. Use a deployment stack to have removed resources deleted or detached on purpose.
+
+    **Why.** With no state file, nothing can go stale or get lost, but Azure cannot know that a missing block means "delete". A deployment stack remembers what it created, so a resource dropped from the file can be deleted. Its deny settings can also block hand changes to managed resources.
+
+    <AnimatedDiagram spec="animated/cloud/iac-pipeline" step={4} cloud="azure" highlight={["repo", "engine", "plan", "api"]} minWidth={620} caption="The Bicep deployment compares the file with what is live; what-if lists the difference before anything runs." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why not use complete mode on the whole resource group?
+    - How would you stop someone deleting the orders database by editing the file?
+
+    **Watch out for.** Assuming Bicep behaves like Terraform. Terraform deletes what leaves its state; plain Bicep deployments do not.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does a GitHub Actions workflow deploy to Azure with no stored secret, and where do the approval and the sale-week freeze live?" category="Cloud" level="Mid">
+    **Short answer.** The workflow presents a short-lived GitHub token to Entra ID, which trusts it through a federated credential and returns an Azure token. The approval and the freeze are protection rules on the production environment, not habits.
+
+    **Why.** No secret is stored, so none can leak or expire unnoticed. The federated credential names one repository and branch or environment, so a fork cannot use it. A required reviewer on the production environment is the second engineer's sign-off. In Azure Pipelines, an approval plus a business-hours check on the environment does the same job.
+
+    **Follow-ups the interviewer may ask.**
+    - What role should the deploy identity have, and at which scope?
+    - How do you ship an urgent fix during the freeze?
+
+    **Watch out for.** Giving the deploy identity Owner on the subscription. Contributor on the shop's resource group is enough for most deployments.
+  </InterviewQuestion>
+</InterviewQuestions>

@@ -1,20 +1,49 @@
 ---
 title: "AI & ML on Azure"
 description: "Microsoft Foundry, Foundry Agent Service, Azure AI Search and Azure Machine Learning, with the AWS and Google Cloud equivalents."
+updated: 2026-11-14
 ---
 
-Azure's AI platform is **Microsoft Foundry** (formerly Azure AI Foundry). It deploys OpenAI models, **Claude** and many others, runs agents through **Foundry Agent Service**, and evaluates and filters them. **Azure AI Search** is the usual retrieval layer for RAG, and **Azure Machine Learning** trains and serves your own models.
+Brightpost uses AI in three places. A drafter writes replies to about 60 support emails a day, a support chatbot answers customers, and a tagger labels product photos with style words. On Azure the hosted models live in **Microsoft Foundry** (formerly Azure AI Foundry), with Azure OpenAI and many other models. Retrieval runs on **Azure AI Search**, and the one model Brightpost owns trains in **Azure Machine Learning**. One thing changes a design here: your app calls a **deployment**, not a model. Each deployment has its own region, type and token quota.
+
+## The idea
+
+Clouds sell AI as a ladder, from a finished service you call to a model you train and run yourself. Use the lowest rung that passes your tests: keep facts that change in a search index, and own a model only where nothing hosted does the job.
+
+<Callout tone="blue" title="Learn the idea">
+  New to cloud AI? [AI/ML Platforms on the Cloud](/cloud/operations/ai-ml-platforms-on-the-cloud) tells how Brightpost's tuned reply drafter wrote an old Christmas date into 70 emails, and [AI Security on the Cloud](/cloud/resilience/ai-security) secures its support chatbot. The theory of models, retrieval and agents is in [GenAI & LLM Systems](/ai-system-design). This page names the Azure pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" stepper cloud="azure" minWidth={620} caption="Brightpost's reply drafter on Azure in seven steps: a tuned model on its own GPU, the date it could not learn, a Foundry deployment, an AI Search index, evaluations, token monitoring and Azure Machine Learning for the one model it owns." />
+
+<CloudMapping diagram="cloud/ai-platform-building-blocks" lead="azure" />
 
 ## TL;DR
 
-- **Microsoft Foundry** for LLM features, with Entra ID auth, private networking and content safety.
-- **Foundry Agent Service** to run agents with tools, memory and tracing.
-- **Azure AI Search** for hybrid keyword and vector retrieval.
-- **Provisioned throughput units** when token quotas on standard deployments are not enough.
+- **Microsoft Foundry** hosts Azure OpenAI, Claude and many other models as deployments, paid per token or by provisioned throughput units.
+- **Azure AI Search** indexes your documents for keyword and vector search; an indexer keeps it current.
+- **Azure Machine Learning** trains, registers and serves your own models on compute that scales to zero.
+- **Azure AI Content Safety** filters prompts and replies; Azure OpenAI deployments carry a content filter by default.
 
 ## At a glance
 
 <CloudGroupTable group="ai-ml" lead="azure" />
+
+## How it fits together on Azure
+
+In steps 1 and 2 Asha's tuned model ran on an N-series GPU virtual machine, switched on all day. It never saw the edited help article, so drafts kept the old Christmas date. Step 3 deletes that machine, and the drafter calls a model deployment in Foundry, paid per token.
+
+In step 4 the help articles sit in Blob Storage. An AI Search indexer reads them, splits and embeds each one, and writes the vectors to an index. It runs on a short schedule, so an edit reaches the index within minutes. Step 5 runs Brightpost's 80 test questions as a Foundry evaluation before any change ships.
+
+Step 6 differs most here. The deployment type decides where a prompt may be processed. Global types may use any region, Data Zone types stay inside a named group of regions, and regional types stay in one. Brightpost picks the type its data rules allow and reaches it through a private endpoint. Azure Monitor counts the tokens. Step 7 trains the photo style tagger in an Azure Machine Learning pipeline and keeps approved versions in its registry.
+
+| The idea | On Azure | What to know |
+|---|---|---|
+| Hosted model | A model deployment in Foundry | Each has a name, a region, a type and its own tokens-per-minute quota |
+| Where a call is processed | Global, Data Zone or regional deployment type | Choose before you build; the type is part of the deployment |
+| Credentials | Entra ID with a managed identity | No API key to leak; grant the app a role on the Foundry resource |
+| Retrieval | Azure AI Search index and indexer | Hybrid search mixes keyword and vector matches |
+| Guardrail | Content filter, Content Safety and Prompt Shields | Prompt Shields takes the user's prompt and documents as separate inputs |
 
 ## Services
 
@@ -22,23 +51,78 @@ Azure's AI platform is **Microsoft Foundry** (formerly Azure AI Foundry). It dep
 
 <CloudServiceProfile id="azure-foundry" />
 
+**Pick it when** a feature needs a foundation model or an agent. Use Foundry Agent Service when an agent calls tools for many users.
+
 ### Azure AI Search
 
 <CloudServiceProfile id="azure-ai-search" />
+
+**Pick it when** a model must answer from your own documents. It is the usual retrieval layer for Foundry.
 
 ### Azure Machine Learning
 
 <CloudServiceProfile id="azure-ml" />
 
-## Coming from AWS
+**Pick it when** you own the model. Use batch endpoints or clusters that scale to zero, so no GPU waits all day.
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| Bedrock | Microsoft Foundry | OpenAI models are first-party; Claude available on both |
-| Bedrock AgentCore | Foundry Agent Service | Managed agent runtime |
-| Bedrock Knowledge Bases | Azure AI Search | Index, vectorise and retrieve with built-in skills |
-| SageMaker AI | Azure Machine Learning | Training, registries and managed endpoints |
+The ready-made services, now offered through Foundry, have no profiles here. Vision, Speech, Language, Translator and Document Intelligence each do one job, paid per item. Brightpost reads about 40 printing-partner invoices a month with Document Intelligence.
+
+## Common mistakes
+
+- **Picking a deployment type for its quota alone.** A global type can process prompts in any region. Check your data rules first.
+- **API keys in app settings.** Use Entra ID and a managed identity, then disable key access where you can.
+- **Trusting the default content filter as the whole defence.** It catches harmful text, not a tool that can do too much. Scope the tools and keep refunds over £30 waiting for a person.
+
+## Where this shows up in system design
+
+- **Support assistants and RAG:** a Foundry deployment with AI Search, as in [RAG fundamentals](/ai-system-design/genai-system-design/rag-fundamentals).
+- **Agents that act:** Foundry Agent Service with tools under managed identities, as in [Agent architectures](/ai-system-design/genai-system-design/agent-architectures).
+- **Custom models:** Azure Machine Learning pipelines and batch endpoints, as in [Model Registry and Governance](/ai-system-design/ml-system-design/model-registry-governance).
 
 ## Related
 
-[AI & ML on AWS](/cloud/aws/ai-ml) · [AI & ML on Google Cloud](/cloud/gcp/ai-ml) · [AI & ML on AWS](/cloud/aws/ai-ml) · [Vector Databases](/system-design/databases/vector-databases)
+[AI/ML Platforms on the Cloud](/cloud/operations/ai-ml-platforms-on-the-cloud) · [AI Security on the Cloud](/cloud/resilience/ai-security) · [AI & ML on AWS](/cloud/aws/ai-ml) · [AI & ML on Google Cloud](/cloud/gcp/ai-ml) · [Databases on Azure](/cloud/azure/databases) · [Vector Databases](/system-design/databases/vector-databases) · [GenAI & LLM Systems](/ai-system-design) · [System Design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Foundry or Azure Machine Learning for a new AI feature?" category="Cloud" level="Junior">
+    **Short answer.** Foundry when a hosted model can do the job: chat, summaries, extraction, agents. Azure Machine Learning when you must train or fully control your own model.
+
+    **Why.** Brightpost's drafter first ran a tuned model on a GPU machine that billed 720 hours a month for about 60 hours of work. A Foundry deployment bills per token and nothing at night, and retrieval supplies the facts. The photo style tagger stays in Azure Machine Learning, because no hosted model knows Brightpost's style words. It retrains monthly and serves as batch jobs.
+
+    <AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={7} cloud="azure" highlight={["trainpipe", "gpu", "registry", "eval"]} caption="The one model Brightpost owns trains in an Azure ML pipeline and is registered only if it passes its tests." />
+
+    **Follow-ups the interviewer may ask.**
+    - Can you tune a model in Foundry instead of training one?
+    - Why serve the tagger as batch jobs rather than an online endpoint?
+
+    **Watch out for.** Starting in Azure Machine Learning "for control". It adds GPU hours and a pipeline to run, for a job a hosted model may already do.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How should Brightpost's app call an Azure OpenAI deployment without storing a key, and keep prompts in the right place?" category="Cloud" level="Mid">
+    **Short answer.** Give the app a managed identity and grant it a role on the Foundry resource, so Entra ID issues short-lived tokens. Reach the resource through a private endpoint, and choose a deployment type whose processing stays where the data rules allow.
+
+    **Why.** Prompts carry customer emails. A key in a config file can leak, as one did on Brightpost's identity page; a managed identity has no key to copy. The private endpoint keeps calls off the public internet. The deployment type matters as much: a global type may process a prompt in any region, which Brightpost's rules forbid.
+
+    <AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={6} cloud="azure" highlight={["app", "modelapi", "monitor"]} caption="Private calls to a Foundry deployment, with Azure Monitor counting every token." />
+
+    **Follow-ups the interviewer may ask.**
+    - The model you want is offered only as a global deployment. What do you do?
+    - How do you stop one team using up the deployment's whole token quota?
+
+    **Watch out for.** Securing the call and forgetting the index. AI Search holds a copy of every document, so it needs the same region, private access and roles.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does an edited help article reach the next answer when you use Azure AI Search?" category="Cloud" level="Mid">
+    **Short answer.** An indexer reads the articles from Blob Storage, splits and embeds them with a skillset, and updates the index. Run it on a short schedule or on demand when an article is saved. The app can also push the changed article to the index itself.
+
+    **Why.** A tuned model kept the old Christmas date after the article changed: 70 wrong drafts and 23 refunds. With retrieval, the edit is in the index within minutes, and the drafter asks AI Search for the 3 closest passages before each call. Hybrid search helps with exact words such as order numbers and dates.
+
+    <AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={4} cloud="azure" path="data>indexjob>vector>app" caption="An AI Search indexer turns each edited article into vectors, and the drafter searches the index first." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does the indexer notice an article was deleted?
+    - When is pushing documents better than running an indexer?
+
+    **Watch out for.** A daily indexer schedule. The date would stay wrong for up to a day, which is a day of wrong drafts.
+  </InterviewQuestion>
+</InterviewQuestions>

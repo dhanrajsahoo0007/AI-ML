@@ -1,20 +1,49 @@
 ---
 title: "Identity & Security on Google Cloud"
 description: "Cloud IAM, Identity Platform, Cloud KMS, Secret Manager, Cloud Armor and Security Command Center, with the AWS and Azure equivalents."
+updated: 2026-11-14
 ---
 
-Google Cloud permissions follow the **resource hierarchy**: roles granted on the organisation or a folder are inherited by every project and resource below. Workloads act as **service accounts**, and **Workload Identity** lets GKE pods and external CI use them without key files. **Cloud Armor** protects the edge, and **Security Command Center** watches the whole organisation.
+Brightpost's shop app reads customer export files, its engineers deploy changes, and its logs must survive a break-in. Each of those needs an answer to "who is calling, and may they do this?" On Google Cloud one fact shapes every answer: **access is inherited down the resource tree**. A role granted on the organisation or a folder reaches every project and resource below it, and a lower level cannot take it away.
+
+## The idea
+
+Every request to a cloud is checked twice: who is calling, and whether that caller may do exactly this. Workloads and people should prove who they are with short-lived tokens from the identity service, never with a key file pasted into code.
+
+<Callout tone="blue" title="Learn the idea">
+  New to this? [Identity and Access](/cloud/fundamentals/identity-and-access) tells the story of Brightpost's leaked storage key step by step. [Threat Detection](/cloud/resilience/threat-detection) shows what watches for the next leak, and [Encryption and Keys](/cloud/resilience/encryption-and-keys) and [Secrets Management](/cloud/resilience/secrets-management) protect the data and passwords. This page names the Google Cloud pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" stepper cloud="gcp" minWidth={620} caption="Brightpost's storage key on Google Cloud in seven steps: a leaked key file, an attached service account, a narrow allow policy, Cloud Identity, an audit project and Cloud Audit Logs." />
+
+<CloudMapping diagram="cloud/iam-role-chain" lead="gcp" />
 
 ## TL;DR
 
-- Grant **roles to groups and service accounts** at the right level of the hierarchy; avoid Owner and Editor.
-- **No service account keys**: use Workload Identity and attached service accounts.
-- **Identity Platform** for customer sign-in; **Secret Manager** and **Cloud KMS** for secrets and keys.
-- **Cloud Armor** on the load balancer; **Security Command Center** for posture and threats.
+- Grant **roles to groups and service accounts** at the lowest level of the tree that works; avoid the basic Owner and Editor roles.
+- **No service account keys.** Attach service accounts to workloads, and use **Workload Identity Federation** for build pipelines and other clouds.
+- **Organization Policy** constraints and **VPC Service Controls** set limits that no project can override, even with valid credentials.
+- **Secret Manager** and **Cloud KMS** hold secrets and keys; **Cloud Armor** guards the load balancer; **Security Command Center** watches the organisation.
 
 ## At a glance
 
 <CloudGroupTable group="security" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+Brightpost's organisation has three folders: non-production, production and security. They hold the test project, the shop project and the audit project. In step 1 the Compute Engine VM reads the orders bucket in Cloud Storage with a service account key: a JSON file pasted into the code. Step 2 is the leak. The file works for anyone who holds it.
+
+In step 3 Brightpost deletes the key and attaches the service account to the VM instead. The VM's metadata server hands the app a short-lived access token, and the client library renews it. Step 4 is an **allow policy** on the bucket. It grants the service account the Storage Object Viewer role, so a write is refused. In step 5 the 6 staff sign in through **Cloud Identity** with 2-step verification, and their Google groups hold the roles.
+
+Step 6 adds the audit project. Its log bucket grants the shop's service account Storage Object Creator, which adds files but cannot read or replace them. Above both projects, an organisation policy enforces public access prevention on every bucket. In step 7, **Cloud Audit Logs** record each call. Admin Activity logs are always on, but Cloud Storage reads appear only after you turn on Data Access logs. An organisation-level log sink copies every project's logs to the audit project.
+
+| The idea | On Google Cloud | What to know |
+|---|---|---|
+| Service identity | Service account, attached to a VM, Cloud Run service or GKE workload | It is also a resource: its own policy says who may act as it |
+| Policy | Allow policy: role bindings on an organisation, folder, project or resource | A role is only a bundle of permissions; grants inherit downward |
+| Org guardrail | Organization Policy constraints, plus IAM deny policies | Constraints limit settings, such as no key creation; deny policies limit permissions |
+| Callers outside Google Cloud | Workload Identity Federation | The pipeline swaps its own token for a Google one; no key file |
+| Data that must stay inside | VPC Service Controls perimeter | Blocks copies to outside projects even with a valid token |
 
 ## Services
 
@@ -22,36 +51,116 @@ Google Cloud permissions follow the **resource hierarchy**: roles granted on the
 
 <CloudServiceProfile id="gcp-iam" />
 
+**Pick it when** anything calls Google Cloud: every workload gets its own service account, and every person a group.
+
+### Resource Manager
+
+<CloudServiceProfile id="gcp-resource-manager" />
+
+**Pick it when** you lay out folders and projects, which decides where access and policies are inherited from.
+
 ### Identity Platform
 
 <CloudServiceProfile id="gcp-identity-platform" />
+
+**Pick it when** your app's own customers need sign-up and sign-in, with social or enterprise providers and MFA.
+
+### Identity-Aware Proxy
+
+<CloudServiceProfile id="gcp-iap" />
+
+**Pick it when** staff reach an internal tool or a VM's SSH port and you want a sign-in check instead of a VPN; see [Zero Trust](/cloud/resilience/zero-trust).
+
+### VPC Service Controls
+
+<CloudServiceProfile id="gcp-vpc-service-controls" />
+
+**Pick it when** a stolen but valid credential must still be unable to copy data out of your projects.
 
 ### Cloud KMS
 
 <CloudServiceProfile id="gcp-kms" />
 
+**Pick it when** data must be encrypted under a key you control, rotate and can disable.
+
 ### Secret Manager
 
 <CloudServiceProfile id="gcp-secret-manager" />
+
+**Pick it when** a workload still needs a password or third-party API key; the rotation job is yours to write.
 
 ### Cloud Armor
 
 <CloudServiceProfile id="gcp-cloud-armor" />
 
+**Pick it when** an internet-facing load balancer needs WAF rules, rate limits or protection from floods.
+
+### Sensitive Data Protection
+
+<CloudServiceProfile id="gcp-sensitive-data-protection" />
+
+**Pick it when** you must find or mask personal data, such as customer addresses, across storage and BigQuery.
+
 ### Security Command Center
 
 <CloudServiceProfile id="gcp-scc" />
 
-## Coming from AWS
+**Pick it when** you run an organisation at all: activate it at the top, so every new project is watched from day one.
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| Accounts in an Organization | Projects in folders | Policies inherit down the folder tree |
-| IAM role for a task or function | Service account | Attached to the workload; Workload Identity for GKE |
-| SCPs | Organization policies | Constraints on what can be created or configured |
-| WAF + Shield | Cloud Armor | One service on the load balancer |
-| Security Hub + GuardDuty | Security Command Center | Tiers from free to Enterprise |
+## Common mistakes
+
+- **Granting roles on a folder "to save time".** Every project below inherits them, including ones created next year. Grant on the project or the resource instead.
+- **Creating service account keys for convenience.** A key file is a password that never expires. Enforce the constraint that disables key creation, and attach or federate instead.
+- **Letting anyone use the default compute service account.** It often holds a broad role on the project. Give each workload its own service account with only the roles it needs.
+
+## Where this shows up in system design
+
+- **Every service-to-service call:** each Cloud Run service or GKE workload runs as its own service account, and callers present Google-signed tokens, as in [Security fundamentals](/system-design/fundamentals/security).
+- **Analytics on personal data:** BigQuery and Cloud Storage inside a VPC Service Controls perimeter, with Sensitive Data Protection masking fields before analysts see them.
+- **Public APIs:** Cloud Armor on the load balancer for abuse, with per-user limits in the app, as in [Rate Limiting](/system-design/patterns/rate-limiting).
 
 ## Related
 
-[Identity & Security on AWS](/cloud/aws/security) · [Identity & Security on Azure](/cloud/azure/security) · [Security fundamentals](/system-design/fundamentals/security) · [Rate Limiting](/system-design/patterns/rate-limiting)
+[Identity and Access](/cloud/fundamentals/identity-and-access) · [Threat Detection](/cloud/resilience/threat-detection) · [Encryption and Keys](/cloud/resilience/encryption-and-keys) · [Secrets Management](/cloud/resilience/secrets-management) · [Identity & Security on AWS](/cloud/aws/security) · [Identity & Security on Azure](/cloud/azure/security) · [System Design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="A contractor was given a role on Brightpost's production folder and can now read the orders bucket. Why, and how do you fix it?" category="Cloud" level="Mid">
+    **Short answer.** Grants inherit down the tree. A role on the production folder applies to every project in it, including the shop project and its bucket. Remove the folder grant and give the contractor's group a role on the one project or resource the job needs.
+
+    **Why.** An allow policy on a lower level can only add access; it cannot take back what a parent granted. The only ways to block an inherited grant are to remove it at the top, or to add an IAM deny policy. So the safe habit is to grant at the lowest level that works, to groups rather than to single people, and with an end date in an IAM condition for temporary work.
+
+    <AnimatedDiagram spec="animated/cloud/iam-role-chain" step={4} cloud="gcp" highlight={["svcid", "policy", "bucket"]} minWidth={620} caption="A narrow allow policy grants one role on one bucket. Anything wider is inherited by everything below it." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you find every grant that reaches the orders bucket?
+    - When would you use a deny policy instead of removing the grant?
+
+    **Watch out for.** Fixing it with a lower-level allow policy that "removes" the role. No such thing exists; the folder grant still applies.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost's build pipeline runs outside Google Cloud. How does it deploy without a service account key?" category="Cloud" level="Mid">
+    **Short answer.** With Workload Identity Federation. The pipeline already gets a signed token from its own platform. Google Cloud trusts that issuer through a workload identity pool and provider, swaps the token for a short-lived Google token, and the pipeline acts as a deploy service account.
+
+    **Why.** A key file stored in the pipeline's settings never expires, and anyone who can read those settings can copy it. A federated token lasts minutes to an hour and is tied to one run. Attribute conditions on the provider limit which repository and branch may use it, and the deploy service account holds only the roles a deploy needs.
+
+    <AnimatedDiagram spec="animated/cloud/iam-role-chain" step={3} cloud="gcp" highlight={["iam", "svcid", "server"]} minWidth={620} caption="The identity service hands out short-lived tokens; no key file exists to copy." />
+
+    **Follow-ups the interviewer may ask.**
+    - What should the attribute condition check?
+    - How do you stop a pull request from a fork from deploying?
+
+    **Watch out for.** A provider with no attribute condition. Then any repository on the same platform that can mint a token may be able to act as your deploy account.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A valid Brightpost credential is stolen and used from outside to copy BigQuery data. What on Google Cloud would have stopped it?" category="Cloud" level="Senior">
+    **Short answer.** A VPC Service Controls perimeter around the projects that hold the data. Inside it, calls to BigQuery and Cloud Storage from outside the perimeter fail, and copies to projects outside it fail, even with a valid token. IAM still decides who may act; the perimeter decides from where and to where.
+
+    **Why.** IAM answers "is this caller allowed?" A stolen token passes that check. The perimeter adds a second question about the request's origin and destination, which a thief abroad cannot fake. Security Command Center's threat detection can flag the unusual use, but it reports after the fact. Roll a perimeter out in dry-run mode first, read what it would block, then add ingress and egress rules for each real flow.
+
+    **Follow-ups the interviewer may ask.**
+    - How do engineers reach the console for those projects from home?
+    - Which flows across the perimeter would Brightpost need rules for?
+
+    **Watch out for.** Enforcing a perimeter blind. It breaks pipelines, dashboards and third-party tools at once, and each legitimate flow then needs a rule with an owner.
+  </InterviewQuestion>
+</InterviewQuestions>

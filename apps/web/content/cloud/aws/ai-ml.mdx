@@ -1,9 +1,24 @@
 ---
 title: "AI & ML on AWS"
 description: "Bedrock, Bedrock AgentCore, Knowledge Bases, SageMaker AI and Trainium: building AI features and agents on AWS, with the Google Cloud and Azure equivalents."
+updated: 2026-11-14
 ---
 
 AI on AWS splits into two jobs. **Using foundation models** (Claude and others) goes through **Amazon Bedrock**, with **Knowledge Bases** for RAG, **Guardrails** for safety and **AgentCore** to run agents in production. **Building your own models** goes through **SageMaker AI** on GPUs or **Trainium**. Most product teams only need the first.
+
+## The idea
+
+Clouds sell AI as a ladder, from a finished service you call to a model you train and run yourself. Use the lowest rung that passes your tests: keep facts that change in a search index, and own a model only where nothing hosted does the job.
+
+<Callout tone="blue" title="Learn the idea">
+  New to cloud AI? [AI/ML Platforms on the Cloud](/cloud/operations/ai-ml-platforms-on-the-cloud) tells how Brightpost's tuned reply drafter wrote an old Christmas date into 70 emails, and [AI Security on the Cloud](/cloud/resilience/ai-security) secures its support chatbot. The theory of models, retrieval and agents is in [GenAI & LLM Systems](/ai-system-design). This page names the AWS pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" stepper cloud="aws" minWidth={620} caption="Brightpost's reply drafter on AWS in seven steps: a tuned model on its own GPU, the date it could not learn, Bedrock, a Knowledge Base, evaluations, token monitoring and SageMaker AI for the one model it owns." />
+
+<CloudMapping diagram="cloud/ai-platform-building-blocks" lead="aws" />
+
+On AWS the two halves of the picture are two services, each with its own API, quotas and bill. In steps 1 and 2 Asha's tuned model ran on a GPU instance all day. In step 3 the drafter calls Bedrock's Converse API, one request shape for every model in the catalog, paid per token. Step 4 is a Bedrock Knowledge Base: it reads the help articles from S3, splits and embeds them, and stores the vectors in OpenSearch Serverless. In step 6 the calls go through a PrivateLink endpoint in the London Region, and CloudWatch counts tokens and throttled calls. Step 7, the photo style tagger, is the only part that lives in SageMaker AI.
 
 ## TL;DR
 
@@ -17,18 +32,28 @@ AI on AWS splits into two jobs. **Using foundation models** (Claude and others) 
 
 <CloudGroupTable group="ai-ml" lead="aws" />
 
-## A RAG assistant on AWS
+## Four rungs, four AWS answers
 
-```mermaid
-flowchart LR
-    U["User"] --> API["API (ECS / Lambda)"]
-    API -->|"retrieve"| KB["Bedrock Knowledge Base"]
-    KB --> VS[("Vector store: OpenSearch / S3 Vectors")]
-    DOCS[("S3 documents")] -->|"sync, chunk, embed"| KB
-    API -->|"prompt + context"| BR["Bedrock: Claude"]
-    BR -->|"Guardrails"| API
-    API -->|"stream tokens"| U
-```
+<AnimatedDiagram spec="animated/cloud/ai-adoption-ladder" stepper cloud="aws" minWidth={520} caption="The four ways to use AI, with the AWS service on each rung." />
+
+| Rung | On AWS | At Brightpost |
+|---|---|---|
+| A ready-made service | Rekognition (images, video), Textract (documents), Transcribe (speech), Translate, Comprehend (text) | Textract turns about 40 printing-partner invoices a month into rows |
+| A hosted model | Bedrock, paid per token or by Provisioned Throughput | The reply drafter and the support chatbot |
+| Your data, their model | Bedrock Knowledge Bases for retrieval; model customization for tuning | 120 help articles in a Knowledge Base |
+| Your own model | SageMaker AI on GPU instances or Trainium | The photo style tagger |
+
+The ready-made services have no catalog profiles here: each is one API with one job, paid per image, page or minute. None of them knows Brightpost's own style words, such as "retro", which is why the tagger sits on the bottom rung.
+
+## Beyond the stepper: guardrails and agents
+
+The stepper stops at the model call. The support chatbot adds what happens around it: a filter on both sides, tools that act for one customer, and a person for big refunds.
+
+<AnimatedDiagram spec="animated/cloud/ai-guardrail-path" step={6} cloud="aws" minWidth={620} caption="The support chatbot on AWS: Bedrock Guardrails on the way in and out, tools under an IAM role, and a Step Functions workflow that holds refunds over £30 for the support agent." />
+
+- **Bedrock Guardrails** is its own resource, with versions. It filters prompt attacks, denied topics and personal data, and checks replies against the passages they came from. Its standalone check works on text from any model.
+- **Bedrock Agents** is the older, built-in way to let a model call your APIs. **AgentCore** runs agents written in any framework, with a session per user, memory, a tool gateway and an identity service for acting on a signed-in user's behalf.
+- **Money still moves only through Step Functions.** The refund tool runs under an IAM role scoped to one customer, and refunds over £30 wait for the support agent. A guardrail is a smoke alarm, not a lock.
 
 ## Services
 
@@ -36,13 +61,19 @@ flowchart LR
 
 <CloudServiceProfile id="aws-bedrock" />
 
+**Pick it when** a feature needs a foundation model and you do not want to run GPUs. Start every chat, summary or extraction feature here.
+
 ### Amazon Bedrock AgentCore
 
 <CloudServiceProfile id="aws-agentcore" />
 
+**Pick it when** an agent calls tools for many users and needs per-user isolation, memory and tracing that you would otherwise build.
+
 ### Amazon SageMaker AI
 
 <CloudServiceProfile id="aws-sagemaker" />
+
+**Pick it when** you own the model: you train it, or need control over the serving machines. Prefer batch transform or serverless inference, which bill only while they work.
 
 ## Where this shows up in system design
 
@@ -53,20 +84,56 @@ flowchart LR
 
 ## Common mistakes
 
-- **Ignoring token quotas.** A launch fails on throttling, not on CPU. Request quota increases and use cross-Region inference.
+- **Ignoring token quotas.** A launch fails on throttling, not on CPU. Request quota increases weeks ahead, and use cross-Region inference only where your data rules allow it.
 - **No streaming.** Users wait for the full answer. Stream tokens to the client.
 - **Calling the model for everything.** Cache answers to repeated questions and use small models for simple steps.
 - **Agents with broad credentials.** Give each tool the user's own scoped identity and log every call.
+- **Turning on invocation logging before masking.** Model invocation logging is off until you enable it, and then it stores whole prompts. Mask personal data first.
 
 ## Related
 
-[Vector Databases](/system-design/databases/vector-databases) · [Databases on AWS](/cloud/aws/databases) · [Server-Sent Events](/system-design/fundamentals/server-sent-events) · [GenAI & LLM Systems](/ai-system-design)
+[AI/ML Platforms on the Cloud](/cloud/operations/ai-ml-platforms-on-the-cloud) · [AI Security on the Cloud](/cloud/resilience/ai-security) · [AI & ML on Google Cloud](/cloud/gcp/ai-ml) · [AI & ML on Azure](/cloud/azure/ai-ml) · [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus) · [Vector Databases](/system-design/databases/vector-databases) · [Databases on AWS](/cloud/aws/databases) · [Server-Sent Events](/system-design/fundamentals/server-sent-events) · [GenAI & LLM Systems](/ai-system-design)
 
 <InterviewQuestions>
   <InterviewQuestion question="Bedrock or SageMaker AI for a document Q&A feature?" category="Cloud" level="Mid">
-    Bedrock with a Knowledge Base: a foundation model plus managed retrieval covers it without training anything. SageMaker AI is for training or fine-tuning your own models, or hosting open models with full control over the serving stack.
+    **Short answer.** Bedrock with a Knowledge Base. A hosted foundation model plus managed retrieval answers questions about documents without training anything. SageMaker AI is for training or tuning your own model, or hosting an open model with full control over the machines.
+
+    **Why.** Brightpost first tuned a model and served it from a GPU instance that billed 720 hours a month for about 60 hours of work. Worse, the tuned model kept an old Christmas date after the help article changed. On Bedrock it pays per token, nothing at night, and the facts come from the articles at question time. SageMaker AI still trains the photo style tagger, because no hosted model knows Brightpost's style words.
+
+    <AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={3} cloud="aws" highlight={["app", "modelapi", "gpu"]} caption="The tuned endpoint is deleted, and the drafter calls Bedrock and pays per token." />
+
+    **Follow-ups the interviewer may ask.**
+    - When would you tune a model in Bedrock rather than in SageMaker AI?
+    - What would make you host an open model yourself?
+
+    **Watch out for.** Choosing SageMaker AI "to keep data private". Bedrock calls stay in your Region and can run through a private endpoint; owning the endpoint adds GPU hours, not privacy.
   </InterviewQuestion>
+
+  <InterviewQuestion question="How does an edited help article reach the next answer when you use a Bedrock Knowledge Base?" category="Cloud" level="Mid">
+    **Short answer.** The articles live in S3, the Knowledge Base's data source. A sync, also called an ingestion job, re-reads the changed files, splits and embeds them, and updates the vector store. Run the sync from an S3 event on each edit, not once a night.
+
+    **Why.** A sync only happens when something starts it. Brightpost has an S3 event start one when an article is saved, so the moved Christmas date is in the index about 5 minutes later. The drafter calls Retrieve for the 3 closest passages, then calls the model with them. A deleted article is removed from the store on the next sync.
+
+    <AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={4} cloud="aws" path="data>indexjob>vector>app" caption="An edit in S3 starts a Knowledge Base sync, and the drafter searches the fresh vectors first." />
+
+    **Follow-ups the interviewer may ask.**
+    - Retrieve or RetrieveAndGenerate: when would you use each?
+    - What happens if you change the embedding model?
+
+    **Watch out for.** Assuming the Knowledge Base watches the bucket by itself. Without a trigger or a schedule, the index keeps the old date as surely as the tuned model did.
+  </InterviewQuestion>
+
   <InterviewQuestion question="How do you handle Bedrock throttling during a traffic spike?" category="Reliability" level="Senior">
-    Retry with exponential backoff and jitter, spread load with cross-Region inference, queue non-interactive work (batch inference is cheaper), cache repeated prompts and answers, and shed or degrade low-priority requests (a smaller model, a shorter answer) before interactive ones. For steady high load, buy provisioned throughput.
+    **Short answer.** Retry with exponential backoff and jitter, and protect interactive calls first. Move work that can wait to batch inference, cache repeated prompts, and fall back to a smaller model or shorter answer. For steady, heavy load, buy Provisioned Throughput.
+
+    **Why.** Bedrock's capacity is a quota of tokens and requests per minute per model and Region, and CloudWatch shows the throttled calls. Cross-Region inference spreads load over several Regions, but it also processes prompts there. Brightpost's prompts carry customer emails and its rules keep them in the UK, so it raises its London quota instead. Prompt caching cuts the cost of the long, repeated instructions in every call.
+
+    <AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={6} cloud="aws" highlight={["app", "modelapi", "monitor"]} caption="Private calls in the London Region, with CloudWatch counting tokens and throttled calls." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which requests would you shed first, and how would the user see it?
+    - When does Provisioned Throughput cost less than paying per token?
+
+    **Watch out for.** Retrying at once in a tight loop. Every client does the same, and the retries become the spike.
   </InterviewQuestion>
 </InterviewQuestions>

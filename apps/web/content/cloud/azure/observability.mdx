@@ -1,20 +1,47 @@
 ---
 title: "Observability on Azure"
 description: "Azure Monitor, Log Analytics, Application Insights, managed Prometheus and Grafana, and the Activity Log, with the AWS and Google Cloud equivalents."
+updated: 2026-11-14
 ---
 
-**Azure Monitor** is the umbrella for metrics, logs and alerts on Azure. Logs land in **Log Analytics** workspaces and are queried with **KQL**; **Application Insights** adds application performance monitoring and distributed tracing through OpenTelemetry; and **managed Prometheus and Grafana** serve Kubernetes-heavy teams.
+When Pay gets slow, Brightpost needs to know within minutes, find the service holding the time, and read the line that says why. On Azure that job belongs to **Azure Monitor**: metrics and alerts, logs in a **Log Analytics workspace** queried with KQL, the Kusto Query Language, and **Application Insights** for traces. One fact shapes the design. The workspace is the unit: one KQL query can read across every resource that sends to it. But a resource sends its own logs there only once you add a diagnostic setting.
+
+## The idea
+
+A running system sends out three signals: metrics say whether something is wrong, logs say what happened, and traces say where the time went. An agent on each workload ships them to managed stores, and an alert watches the number users feel.
+
+<Callout tone="blue" title="Learn the idea">
+  The cloud-neutral version, with Brightpost's slow Pay button in July, is in [Observability on the Cloud](/cloud/operations/observability-on-the-cloud). Choosing what to alert on, and who gets woken, is in [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call).
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/telemetry-pipeline" stepper cloud="azure" minWidth={620} caption="Brightpost's telemetry on Azure: the Azure Monitor Agent ships metrics and logs from its VMs, Application Insights holds the traces, and an alert rule on p99 Pay time pages Asha." />
+
+<CloudMapping diagram="cloud/telemetry-pipeline" lead="azure" />
 
 ## TL;DR
 
-- **One Log Analytics workspace** per environment (or per team) with retention and table plans set deliberately.
-- **Application Insights** with the Azure Monitor OpenTelemetry distro for traces and dependencies.
-- **Alerts** on symptoms: failed requests, latency, queue length and dead-letter counts.
-- **Activity Log** for control-plane changes; export it to a workspace.
+- **One Log Analytics workspace** per environment, with retention and table plans chosen on purpose.
+- **Diagnostic settings** on every resource whose logs you need; without one, those logs are not kept.
+- **Application Insights** with the Azure Monitor OpenTelemetry Distro for requests, dependencies and traces.
+- **Alert rules on symptoms**, sharing a few **action groups** that decide who is told.
 
 ## At a glance
 
 <CloudGroupTable group="observability" lead="azure" />
+
+## How it fits together on Azure
+
+In steps 1 and 2, Brightpost's three services run on six Azure VMs, and each writes its own log file. In step 3 the **Azure Monitor Agent** goes on every VM, told what to collect by a **data collection rule**. Azure already reports processor and network metrics; memory needs the agent, because it lives inside the operating system. A Monitor workbook charts it all.
+
+In step 4 the agent sends the log files to the Log Analytics workspace, where each kind of data gets its own table and Brightpost keeps 30 days. In step 5 the OpenTelemetry Distro inside each service passes the `traceparent` header on every call. It sends spans straight to **Application Insights**, not through the agent. In step 6 an **alert rule** watches p99 Pay time and calls an **action group**, which reaches Asha's paging tool.
+
+| The concept says | On Azure | What to know |
+|---|---|---|
+| Collector | Azure Monitor Agent plus a data collection rule | The rule says what to collect and which workspace receives it |
+| Log store | Log Analytics workspace, one table per kind of data | Retention is set per workspace and per table |
+| Platform logs | A diagnostic setting on each resource | No setting, no resource logs |
+| Trace store | Application Insights, backed by the workspace | Traces and logs share a workspace, so one KQL query can join them |
+| Alert route | Alert rule → action group | Change who is called in one action group, not in every rule |
 
 ## Services
 
@@ -22,19 +49,66 @@ description: "Azure Monitor, Log Analytics, Application Insights, managed Promet
 
 <CloudServiceProfile id="azure-monitor" />
 
+Pick it for all monitoring on Azure: platform metrics, the Activity Log of control-plane changes, workspaces, alert rules and workbooks. **Managed Prometheus** stores its metrics in an **Azure Monitor workspace**, a different thing from a Log Analytics workspace, and **Azure Managed Grafana** draws dashboards over both.
+
 ### Application Insights
 
 <CloudServiceProfile id="azure-app-insights" />
 
-## Coming from AWS
+Pick it when a request crosses several services and you need the slow hop. The application map shows which service calls which, and each request's transaction view lines up its spans with its log lines.
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| CloudWatch metrics and alarms | Azure Monitor metrics and alerts | Alert rules can query logs with KQL |
-| CloudWatch Logs + Logs Insights | Log Analytics + KQL | One workspace across many resources |
-| X-Ray | Application Insights | Both use OpenTelemetry |
-| CloudTrail | Activity Log | Control-plane events per subscription |
+## Common mistakes
+
+- **No diagnostic settings.** A database or load balancer keeps its logs out of the workspace until one is added. Add them in the same template that creates the resource.
+- **Every log on the full-price table plan.** Verbose lines you rarely query fit the Basic or Auxiliary plans, which cost less and query with limits.
+- **Alerting on processor use.** In July the print servers sat at about 20% while Pay took 9 seconds. Alert on p99 Pay time.
+
+## Where this shows up in system design
+
+- **Every "how would you monitor this?" follow-up:** name the SLO, the KQL query that measures it, and the action group that pages.
+- **[Metrics and logging](/system-design/case-studies/metrics-and-logging):** the case study designs what Azure Monitor and Log Analytics do for you.
+- **Audit and security:** the Activity Log, exported to the audit subscription's workspace, answers "who changed this?".
 
 ## Related
 
-[Observability on AWS](/cloud/aws/observability) · [Observability on Google Cloud](/cloud/gcp/observability) · [Observability on AWS](/cloud/aws/observability) · [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries)
+[Observability on the Cloud](/cloud/operations/observability-on-the-cloud) · [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call) · [Observability on AWS](/cloud/aws/observability) · [Observability on Google Cloud](/cloud/gcp/observability) · [System design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Brightpost's database errors never reached the Log Analytics workspace. What do you check first?" category="Cloud" level="Mid">
+    **Short answer.** The database's diagnostic settings. Azure keeps platform metrics by default, but a resource's own logs reach a workspace only through a diagnostic setting that names the log categories and the workspace.
+
+    **Why.** The Azure Monitor Agent collects from inside VMs. A managed database has no VM you can reach, so the platform sends its logs, and only where a diagnostic setting points. Then check that the setting points at the right workspace, and that the table's retention has not already removed the lines. The fix belongs in the template that creates the database, so the next one is covered too.
+
+    <AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={4} cloud="azure" highlight={["collector", "logs"]} minWidth={620} caption="The agent fills the workspace from the VMs; managed resources need their own diagnostic setting." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you make sure every new resource gets a diagnostic setting?
+    - Which log categories would you leave off, and why?
+
+    **Watch out for.** Blaming the agent. It never sees a managed database's logs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The p99 Pay alert fires. How do you get from the alert to the failing line on Azure?" category="Cloud" level="Mid">
+    **Short answer.** Open the requests chart in Application Insights, pick a slow Pay, and open its end-to-end transaction view. The longest span names the service; its log lines carry the same operation id, the trace id under another name, so one KQL query finds them.
+
+    **Why.** Application Insights stores requests, dependencies and traces in the same workspace as the logs. In July this walk shows Pay at 9.3 seconds and the print service at 9.0. The print service's lines show three A1 print files built before Pay answered, about 3 seconds each. Without the shared id, it was 6 files and 2 days.
+
+    **Follow-ups the interviewer may ask.**
+    - What if sampling dropped that request's trace?
+    - How would you write the p99 alert as a log search alert rule?
+
+    **Watch out for.** Searching all logs for the time window first. Hundreds of lines share that minute; only the operation id narrows it to one Pay.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="One Log Analytics workspace for Brightpost, or several?" category="Cloud" level="Senior">
+    **Short answer.** One workspace per environment: one for test and one for the shop. The Activity Log and security logs also go to a workspace in the audit subscription, which shop admins cannot change.
+
+    **Why.** A KQL query is simplest inside one workspace, so services that are debugged together should share one. Test and shop stay apart, so test noise stays out of shop queries and costs, and access is simpler. Audit data is kept apart for a different reason: someone who takes over the shop subscription must not be able to delete it. Within the shop workspace, resource-level access lets a team read only its own resources' logs.
+
+    **Follow-ups the interviewer may ask.**
+    - Where would the Prometheus metrics from a Kubernetes cluster go?
+    - How would you set different retention for audit tables and debug tables?
+
+    **Watch out for.** One workspace per resource. Every incident then starts with a query across ten workspaces.
+  </InterviewQuestion>
+</InterviewQuestions>

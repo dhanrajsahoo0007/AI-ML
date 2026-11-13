@@ -34,7 +34,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // labelAt 0.3, above the Serverless tab. Zone tabs sit on a zone's
 // top-left corner; the shop zone is the vpc kind and every edge enters it from the side.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon.
-// Nodes are sized for the longest name the Services toggle puts in them ("Managed instance group" w 214,
+// Nodes are sized for the longest name the Services toggle puts in them ("Auto Scaling group" w 214,
 // "Cloud Run functions" w 192, "Reserved Instances" w 190, "Virtual Machines", "Azure PostgreSQL").
 const bucket = { aws: "aws-s3", gcp: "gcp-cloud-storage", azure: "azure-blob" } as const;
 
@@ -156,7 +156,7 @@ const spec: DiagramSpec = {
       w: 214,
       cloud: {
         aws: { id: "aws-ec2", label: "Auto Scaling group" },
-        gcp: { id: "gcp-compute-engine", label: "Managed instance group" },
+        gcp: { id: "gcp-compute-engine", label: "Instance group" },
         azure: { id: "azure-vm", label: "VM Scale Sets" },
       },
     },

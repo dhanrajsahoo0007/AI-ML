@@ -1,9 +1,22 @@
 ---
 title: "DevOps & IaC on AWS"
 description: "CloudFormation, CDK, CodePipeline, CodeBuild, CodeDeploy and Systems Manager: shipping and operating a design on AWS, with Google Cloud and Azure equivalents."
+updated: 2026-11-14
 ---
 
 Interviewers rarely ask for a deployment pipeline, but "how do you roll this out safely?" comes up often. On AWS the native answers are **CloudFormation** (or **CDK** on top of it) for infrastructure as code, **CodePipeline**, **CodeBuild** and **CodeDeploy** for releases, and **Systems Manager** to operate servers. Many teams use Terraform and GitHub Actions instead. The ideas are the same.
+
+## The idea
+
+A delivery pipeline builds each change once and sends that exact build through every check, and a deployment strategy decides how shoppers move from the old version to the new one. <Term id="infrastructure-as-code">Infrastructure as code</Term> does the same for the servers and networks: a reviewed file, a plan, then an apply from the pipeline.
+
+<Callout tone="blue" title="Learn the idea">
+  The cloud-neutral version, with Brightpost's column rename that failed 18 checkouts in 12 minutes, is in [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies). Templates, plans and state are in [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code); patching and agents are in [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management).
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/deployment-strategies" stepper cloud="aws" minWidth={620} caption="Brightpost's releases on AWS: CodePipeline builds one image into ECR, then all at once, rolling, blue/green and a 5% canary behind an Application Load Balancer, with a CloudWatch alarm and AppConfig flags." />
+
+<CloudMapping diagram="cloud/deployment-strategies" lead="aws" />
 
 ## TL;DR
 
@@ -16,17 +29,19 @@ Interviewers rarely ask for a deployment pipeline, but "how do you roll this out
 
 <CloudGroupTable group="devops" lead="aws" />
 
-## A safe release on AWS
+## How it fits together on AWS
 
-```mermaid
-flowchart LR
-    GIT["Git push"] --> CB["CodeBuild: test, build image"] --> ECR[("ECR")]
-    ECR --> STG["Deploy to staging (CDK / CloudFormation)"]
-    STG --> TEST["Integration tests"]
-    TEST --> APPROVE["Manual approval (optional)"]
-    APPROVE --> PROD["CodeDeploy blue/green to prod ECS"]
-    PROD -->|"CloudWatch alarm fires"| RB["Automatic rollback"]
-```
+Step 1: a merge starts **CodePipeline**. **CodeBuild** builds the shop's image once and pushes it to Amazon ECR, which gives it a digest. Step 2: **CodeDeploy** runs an in-place deployment one instance at a time. It takes each EC2 instance out of the Application Load Balancer's target group, updates it, and puts it back after its health check.
+
+Steps 3 and 4 are the rename and its fix. On AWS the migration is one more pipeline action, such as a CodeBuild job, so it ships in its own release with only the expand. Step 5: CodeDeploy blue/green copies the Auto Scaling group, moves the load balancer to the copy, and keeps the original instances for a set time. Step 6: a **CloudWatch alarm** on checkout errors is attached to the deployment, and CodeDeploy rolls back when it fires. Step 7: **AWS AppConfig**, part of Systems Manager, serves the feature flag.
+
+| The concept says | On AWS | What to know |
+|---|---|---|
+| Promote one digest | CodePipeline stages pass the ECR image digest along | Refer to the image by digest in the task definition or launch template, not by `latest` |
+| Rolling on servers | CodeDeploy in-place: all at once, half at a time, or one at a time | Canary and linear traffic shifting are for ECS and Lambda, not EC2 in place |
+| Canary at 5% | ECS: CodeDeploy shifts between two target groups. Lambda: alias weights. EC2: weighted target groups on the ALB | Brightpost's 5% for 30 minutes is a custom canary configuration |
+| Roll back on an alarm | CloudWatch alarms named on the deployment group, with automatic rollback on | An alarm only on CPU or "is it up?" would have missed the rename |
+| The template | CloudFormation stack, often written in CDK | A change set is the plan; the stack is the state |
 
 ## Services
 
@@ -34,9 +49,13 @@ flowchart LR
 
 <CloudServiceProfile id="aws-cloudformation" />
 
+Pick it when the whole estate is on AWS and you want AWS to keep the state and roll a failed update back for you.
+
 ### AWS CDK
 
 <CloudServiceProfile id="aws-cdk" />
+
+Pick it when the team would rather write TypeScript or Python than YAML, and wants tested, reusable building blocks.
 
 A CDK construct can describe a whole service from the case studies in a few lines:
 
@@ -57,9 +76,33 @@ service.service.autoScaleTaskCount({ minCapacity: 3, maxCapacity: 50 })
 
 <CloudServiceProfile id="aws-codepipeline" />
 
+Pick it when builds and deploys should run inside your own AWS accounts and networks. Pick GitHub Actions when the team already lives there; it reaches AWS through an IAM role, with no stored key.
+
 ### AWS Systems Manager
 
 <CloudServiceProfile id="aws-systems-manager" />
+
+Pick it when you run EC2 instances at all: patching, inventory, shell access with no open port, and Parameter Store come with one agent. **AWS Config**, a separate service, records resource settings over time and judges them with rules.
+
+### Cost and migration tools in this group
+
+These answer other questions: what the bill is, and what moves from a data centre. See [FinOps and Cost Tools](/cloud/operations/finops-and-cost-tools) and [Migration and Modernization](/cloud/operations/migration-and-modernization).
+
+<CloudServiceProfile id="aws-cost-explorer" />
+
+Pick it when the bill went up and you need to know which service, account or tag did it.
+
+<CloudServiceProfile id="aws-budgets" />
+
+Pick it when each team or account needs an alert before spend crosses a line, like Brightpost's alerts at 50%, 80% and 100%.
+
+<CloudServiceProfile id="aws-compute-optimizer" />
+
+Pick it when instances have run for a couple of weeks and you want numbers for a rightsizing review.
+
+<CloudServiceProfile id="aws-migration-hub" />
+
+Pick it only if your organisation already uses it; new migration projects start in AWS Transform.
 
 ## Where this shows up in system design
 
@@ -76,13 +119,62 @@ service.service.autoScaleTaskCount({ minCapacity: 3, maxCapacity: 50 })
 
 ## Related
 
-[Observability on AWS](/cloud/aws/observability) · [Containers on AWS](/cloud/aws/containers) · [Identity & Security on AWS](/cloud/aws/security)
+[CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies) · [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code) · [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management) · [DevOps & IaC on Google Cloud](/cloud/gcp/devops) · [DevOps & IaC on Azure](/cloud/azure/devops) · [Observability on AWS](/cloud/aws/observability) · [Containers on AWS](/cloud/aws/containers) · [Identity & Security on AWS](/cloud/aws/security) · [System design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How do you deploy a new version of a service with no downtime on ECS?" category="Cloud" level="Mid">
-    A rolling update keeps minimum healthy tasks running while new ones start and pass load balancer health checks. For safer releases, CodeDeploy blue/green starts a full new task set, shifts traffic in steps (canary or linear), watches CloudWatch alarms, and rolls back automatically if they fire.
+  <InterviewQuestion question="How do you open a shell on an EC2 instance that has no SSH port open and no key pair?" category="Cloud" level="Junior">
+    **Short answer.** With Session Manager, part of Systems Manager. The agent on the instance opens an outbound connection to Systems Manager, and your shell travels over it. IAM decides who may start a session.
+
+    **Why.** No inbound port means nothing for a scanner on the internet to find, and no bastion host to patch. No key pair means no private key to leak or rotate. Each session can be logged, so you know who ran what. The instance needs the agent and an IAM role that lets it talk to Systems Manager.
+
+    <AnimatedDiagram spec="animated/cloud/image-pipeline" step={3} cloud="aws" highlight={["fleetmgr", "listed", "unlisted", "shop"]} minWidth={620} caption="Every server's agent connects out to Systems Manager; commands, sessions and inventory share that path." />
+
+    **Follow-ups the interviewer may ask.**
+    - What else does the same agent give you besides a shell?
+    - How would you find instances that have no agent or no role?
+
+    **Watch out for.** Forgetting the instance role. Without it the instance never shows up in Systems Manager, so it gets no sessions and no patches either.
   </InterviewQuestion>
+
+  <InterviewQuestion question="How do you deploy a new version of a service with no downtime on ECS?" category="Cloud" level="Mid">
+    **Short answer.** A rolling update for everyday changes, and CodeDeploy blue/green with a canary for risky ones. Both keep healthy tasks serving while the new ones start and pass the load balancer's health check.
+
+    **Why.** A rolling update starts new tasks and stops old ones while keeping a minimum share healthy. It needs no extra capacity, but rolling back is another rollout. CodeDeploy blue/green starts a full new task set in a second target group. It can shift 5% of traffic for 30 minutes, then the rest, while CloudWatch alarms watch. If an alarm fires, traffic goes back to the old task set in seconds.
+
+    <AnimatedDiagram spec="animated/cloud/deployment-strategies" step={6} cloud="aws" path="next>alarm>lb" minWidth={620} caption="The canary takes 5%; the CloudWatch alarm on its errors sends the traffic back." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which alarm would you trust to roll back automatically?
+    - What happens to requests in flight when traffic shifts?
+
+    **Watch out for.** An alarm that only checks the health check. Brightpost's broken servers still loaded pages while every checkout failed.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A CloudFormation update to Brightpost's stack fails halfway. What happens, and how do you see the risk before the next one?" category="Cloud" level="Mid">
+    **Short answer.** By default CloudFormation rolls the stack back to its last working state. Before the next update, create a change set and read it: it lists what will be added, changed or replaced.
+
+    **Why.** "Replaced" is the word to look for. Some property changes delete a resource and create a new one, and for a database that means a new, empty one. A stack policy that forbids replacing the database stops that from happening by accident. Drift detection shows anything changed by hand since the last update.
+
+    <AnimatedDiagram spec="animated/cloud/iac-pipeline" step={4} cloud="aws" highlight={["repo", "engine", "plan", "api"]} minWidth={620} caption="CloudFormation compares the template with what is live; the change set lists only the difference." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you stop a pull request from replacing the orders database?
+    - What changes if the team uses Terraform instead?
+
+    **Watch out for.** Approving a change set without reading the replacement column. The plan is only useful if someone reads it.
+  </InterviewQuestion>
+
   <InterviewQuestion question="How do you change a database schema during a zero-downtime deploy?" category="Architecture" level="Senior">
-    Expand and contract. First add new columns or tables in a backward-compatible way; deploy code that writes both and reads the new; backfill old rows; switch reads fully; and only then remove the old columns in a later release. At every step, the old and new versions of the service work with the schema.
+    **Short answer.** Expand and contract, over several releases. Add the new column, ship code that writes both and reads the old, backfill, switch reads, and drop the old column releases later.
+
+    **Why.** During a rolling or canary deploy, two versions share one schema. Brightpost once renamed `address` in one step, and every checkout on an old server failed for 12 minutes. On AWS the migration is its own CodePipeline action, often a CodeBuild job, that runs only the expand step. Each release works for the version before it and after it, so CodeDeploy's automatic rollback always has somewhere to go.
+
+    <AnimatedDiagram spec="animated/cloud/deployment-strategies" step={4} cloud="aws" highlight={["migration", "db", "current", "next"]} minWidth={620} caption="The migration only adds the column in RDS; old instances keep theirs and the new version writes both." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you know no running code still reads the old column?
+    - How do you backfill a large table without locking it?
+
+    **Watch out for.** Running the migration in the same release as the code that needs it. A rollback then has no schema to return to.
   </InterviewQuestion>
 </InterviewQuestions>

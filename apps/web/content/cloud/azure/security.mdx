@@ -1,20 +1,59 @@
 ---
 title: "Identity & Security on Azure"
 description: "Entra ID, managed identities, Azure RBAC and Policy, Key Vault, WAF, DDoS Protection and Defender for Cloud, with the AWS and Google Cloud equivalents."
+updated: 2026-11-14
 ---
 
-Identity is Azure's home ground. **Microsoft Entra ID** handles employee sign-in and access to Azure, **managed identities** let services authenticate without secrets, **Azure RBAC** and **Azure Policy** control and constrain what can be done, and **Entra External ID** covers customer sign-in. **Key Vault**, **WAF**, **DDoS Protection** and **Defender for Cloud** complete the picture.
+Brightpost's shop app reads customer export files, its 6 staff sign in to manage the shop, and its logs must survive a break-in. Each of those needs an answer to "who is calling, and may they do this?" On Azure one fact shapes every answer: **Microsoft Entra ID is the identity root**. Every person and every workload signs in through it, while **Azure role-based access control (RBAC)** separately decides what each one may do to resources.
+
+## The idea
+
+Every request to a cloud is checked twice: who is calling, and whether that caller may do exactly this. Workloads and people should prove who they are with short-lived tokens from the identity service, never with a key pasted into code.
+
+<Callout tone="blue" title="Learn the idea">
+  New to this? [Identity and Access](/cloud/fundamentals/identity-and-access) tells the story of Brightpost's leaked storage key step by step. [Zero Trust](/cloud/resilience/zero-trust) checks people and devices on every request, and [Encryption and Keys](/cloud/resilience/encryption-and-keys) and [Secrets Management](/cloud/resilience/secrets-management) protect the data and passwords. This page names the Azure pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/iam-role-chain" stepper cloud="azure" minWidth={620} caption="Brightpost's storage key on Azure in seven steps: a leaked account key, a managed identity, a narrow role assignment, Entra ID sign-in, an audit subscription and Azure Monitor." />
+
+<CloudMapping diagram="cloud/iam-role-chain" lead="azure" />
 
 ## TL;DR
 
 - **Managed identities** for every app, with Azure RBAC roles; no connection strings with keys.
-- **Azure Policy** as guardrails across subscriptions (allowed Regions, required encryption, no public IPs).
-- **Key Vault** for secrets, keys and certificates, behind private endpoints.
+- **Azure Policy** as guardrails across subscriptions (allowed regions, no public blob access, required logs).
+- **Key Vault** for secrets, keys and certificates, read by managed identities, behind private endpoints.
 - **Front Door WAF** at the edge; **Defender for Cloud** for posture and threats.
 
 ## At a glance
 
 <CloudGroupTable group="security" lead="azure" />
+
+## How it fits together on Azure
+
+Brightpost has three subscriptions under one management group tree: test, shop and audit. In step 1 the shop's VM reads the orders container in Blob Storage with the storage account key, pasted into the code. Step 2 is the leak. That key opens the whole storage account for anyone who holds it.
+
+In step 3 Brightpost turns on a **managed identity** for the VM and stops using the account key. The VM asks Entra ID for a short-lived token, and the Azure SDK renews it. Step 4 is a **role assignment**: the identity holds Storage Blob Data Reader on one container, so a write is refused. In step 5 staff sign in to Entra ID with MFA, enforced by a Conditional Access policy. Their Entra groups hold the role assignments.
+
+Step 6 adds the audit subscription. Its archive storage account gives the shop's identity a role at that one account. **Azure Policy**, assigned at the top management group, denies public blob access everywhere. In step 7 **Azure Monitor** keeps the record. The Activity Log covers management actions in each subscription. Blob reads are resource logs, which appear only after a diagnostic setting sends them to a Log Analytics workspace.
+
+| Question | Azure piece | Brightpost example |
+|---|---|---|
+| Who are you, and may you sign in now? | Entra ID with Conditional Access | Staff need MFA; sign-ins from unknown countries are blocked |
+| What may you do to this resource? | Azure RBAC role assignment at a scope | Key Vault Secrets User on the shop vault only |
+| What may a resource look like? | Azure Policy | No public blob access; only 2 allowed regions |
+| Who acts for a workload? | Managed identity, system- or user-assigned | System-assigned for the VM, which goes when the VM goes |
+| May this be deleted? | Resource lock | The orders database carries a delete lock |
+
+Scopes nest: management group, subscription, resource group, resource. A role assigned at a scope reaches everything below it. Key Vault can use Azure RBAC or its older access policies; new vaults should use RBAC, so one model covers everything.
+
+### Running the directory
+
+Entra ID is also where staff accounts live, so a few admin jobs come with it.
+
+- **Guest users.** Outside people, such as the printing partner's staff or a contractor, are invited as guests. They sign in with their own organisation's account, and you remove them in one place.
+- **Self-service password reset.** Staff reset a forgotten password themselves, after proving who they are with a method they registered, such as an authenticator app. The help desk stops resetting passwords by phone, a common attack path.
+- **Licences.** Entra ID has a free tier and paid P1 and P2 licences, assigned per user. Conditional Access needs P1; Privileged Identity Management (PIM), which grants admin roles only for a few hours on request, needs P2.
 
 ## Services
 
@@ -22,34 +61,92 @@ Identity is Azure's home ground. **Microsoft Entra ID** handles employee sign-in
 
 <CloudServiceProfile id="azure-entra-id" />
 
+**Pick it when** anyone or anything signs in to Azure: staff, guests, and every workload through managed identities.
+
+### Azure management groups
+
+<CloudServiceProfile id="azure-management-groups" />
+
+**Pick it when** you have more than a couple of subscriptions and want access and policy set once for each branch.
+
+### Azure Policy
+
+<CloudServiceProfile id="azure-policy" />
+
+**Pick it when** a rule must hold for every resource, such as no public storage, whoever deploys it and however.
+
 ### Azure Key Vault
 
 <CloudServiceProfile id="azure-key-vault" />
+
+**Pick it when** an app needs a secret, key or certificate; use one vault per application and environment.
 
 ### Azure Web Application Firewall
 
 <CloudServiceProfile id="azure-waf" />
 
+**Pick it when** a public web app or API needs managed rules, bot protection or rate limits on Front Door or Application Gateway.
+
 ### Microsoft Defender for Cloud
 
 <CloudServiceProfile id="azure-defender" />
 
-## Coming from AWS
+**Pick it when** you want a security score and threat alerts across subscriptions, including AWS and Google Cloud ones; see [Threat Detection](/cloud/resilience/threat-detection).
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| IAM role for a workload | Managed identity + Azure RBAC | Assigned to the resource; tokens come from Entra ID |
-| SCPs / AWS Config rules | Azure Policy | Deny or audit non-compliant resources at any scope |
-| Cognito | Entra External ID | Azure AD B2C is closed to new customers |
-| KMS + Secrets Manager + ACM | Key Vault | One service for keys, secrets and certificates |
-| Security Hub + GuardDuty | Defender for Cloud | Also covers AWS and Google Cloud accounts |
+## Common mistakes
+
+- **Owner for everyone "to get started".** Owner can also grant access to others. Give engineers Contributor at a resource group, and make Owner eligible through PIM instead of permanent.
+- **Using storage account keys or connection strings with keys.** They open the whole account and rarely rotate. Turn on managed identities, then disable shared key access on the account.
+- **Mixing up Entra roles and Azure roles.** A directory administrator role manages users and groups; it grants no access to storage or VMs. Those come from Azure RBAC role assignments.
+
+## Where this shows up in system design
+
+- **Every service-to-service call:** each App Service, Function or AKS workload has a managed identity and asks Entra ID for a token, as in [Security fundamentals](/system-design/fundamentals/security).
+- **Landing zones:** a management group tree with Azure Policy at each branch, so new subscriptions arrive with guardrails already applied.
+- **Public APIs:** Front Door WAF for abuse at the edge, with per-user limits in the app, as in [Rate Limiting](/system-design/patterns/rate-limiting).
 
 ## Related
 
-[Identity & Security on AWS](/cloud/aws/security) · [Identity & Security on Google Cloud](/cloud/gcp/security) · [Security fundamentals](/system-design/fundamentals/security) · [Rate Limiting](/system-design/patterns/rate-limiting)
+[Identity and Access](/cloud/fundamentals/identity-and-access) · [Zero Trust](/cloud/resilience/zero-trust) · [Encryption and Keys](/cloud/resilience/encryption-and-keys) · [Secrets Management](/cloud/resilience/secrets-management) · [Accounts and Governance](/cloud/fundamentals/accounts-and-governance) · [Identity & Security on AWS](/cloud/aws/security) · [Identity & Security on Google Cloud](/cloud/gcp/security) · [System Design](/system-design)
 
 <InterviewQuestions>
   <InterviewQuestion question="How does an Azure Function read a secret from Key Vault without storing credentials?" category="Cloud" level="Junior">
-    Give the function app a managed identity, grant that identity the Key Vault Secrets User role on the vault, and reference the secret from app settings or fetch it with the Azure SDK. Entra ID issues the tokens, so no secret is stored to read the secret.
+    **Short answer.** Turn on a managed identity for the function app and assign it the Key Vault Secrets User role on the vault. Then use a Key Vault reference in the app settings, or read the secret with the Azure SDK. Entra ID issues the identity's tokens, so no secret is stored to read the secret.
+
+    **Why.** The platform knows which function app is asking, so it can vouch for it to Entra ID without a password. The token is short-lived and renewed for you. The role assignment covers one vault, so the function cannot read another app's secrets.
+
+    <AnimatedDiagram spec="animated/cloud/iam-role-chain" step={3} cloud="azure" highlight={["iam", "svcid", "server"]} minWidth={620} caption="The managed identity gets a short-lived token from Entra ID; there is no key left to leak." />
+
+    **Follow-ups the interviewer may ask.**
+    - System-assigned or user-assigned identity: which would you use here, and why?
+    - How does the function pick up a new version of the secret?
+
+    **Watch out for.** Granting the role on the subscription "to make it work". Every vault in the subscription then opens to the function.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Azure RBAC, Azure Policy or Conditional Access: which one stops a developer creating a public storage account?" category="Cloud" level="Mid">
+    **Short answer.** Azure Policy. A policy that disallows public blob access, assigned with the deny effect at the top management group, refuses the deployment whoever sends it. RBAC decides who may create storage accounts at all; Conditional Access decides whether the developer may sign in right now.
+
+    **Why.** RBAC answers "may this person act on this scope?", and a developer legitimately needs to create storage. It cannot say "only private ones". Policy checks what the resource will look like, so it covers people, pipelines and scripts alike. Brightpost's guardrail of no public buckets is exactly this kind of rule.
+
+    <AnimatedDiagram spec="animated/cloud/iam-role-chain" step={6} cloud="azure" highlight={["guardrail", "policy", "role2"]} minWidth={620} caption="Azure Policy sits above every subscription and caps what any role assignment below it can create." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find storage accounts that were public before the policy existed?
+    - When would you use audit instead of deny?
+
+    **Watch out for.** Switching a new policy straight to deny at the top. It also blocks infrastructure-as-code pipelines everywhere, so run it in audit mode first and read the results.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost has three subscriptions. How do you give its engineers what they need without anyone holding Owner all the time?" category="Cloud" level="Mid">
+    **Short answer.** Put the subscriptions under management groups, assign roles to Entra groups, and keep them narrow. Engineers get Contributor on the test subscription and Reader on the shop one. Owner on the shop subscription is an eligible role in PIM, activated for a few hours with a reason and MFA.
+
+    **Why.** Assigning to groups means removing a person is one change. Management groups let one policy and one role assignment cover a branch. PIM turns standing power into short, logged sessions, so a stolen session rarely holds Owner. The audit subscription gets no engineer write access at all.
+
+    **Follow-ups the interviewer may ask.**
+    - What are break-glass accounts, and why are they left out of Conditional Access?
+    - How would a contractor get temporary access to one resource group?
+
+    **Watch out for.** Forgetting emergency access. If Conditional Access or MFA breaks, you need two cloud-only accounts, excluded from those policies and watched closely, or nobody can get in to fix it.
   </InterviewQuestion>
 </InterviewQuestions>

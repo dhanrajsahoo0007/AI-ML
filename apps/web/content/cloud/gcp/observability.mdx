@@ -1,20 +1,47 @@
 ---
 title: "Observability on Google Cloud"
 description: "Cloud Monitoring, Cloud Logging, Cloud Trace, Managed Service for Prometheus and Audit Logs, with the AWS and Azure equivalents."
+updated: 2026-11-14
 ---
 
-Google Cloud Observability groups **Cloud Monitoring** (metrics, uptime checks, SLOs, alerting), **Cloud Logging** (logs, log-based metrics, sinks) and **Cloud Trace**. **Managed Service for Prometheus** stores Prometheus metrics in the same backend, and **Cloud Audit Logs** record who changed what.
+When Pay gets slow, Brightpost needs to know within minutes, find the service holding the time, and read the line that says why. On Google Cloud that job belongs to **Google Cloud Observability**: **Cloud Monitoring** for metrics, SLOs and alerts, **Cloud Logging** for logs, and **Cloud Trace** for traces. One fact shapes the design. Every log entry passes through a router whose sinks decide where it is stored, for how long, and in which project.
+
+## The idea
+
+A running system sends out three signals: metrics say whether something is wrong, logs say what happened, and traces say where the time went. An agent on each workload ships them to managed stores, and an alert watches the number users feel.
+
+<Callout tone="blue" title="Learn the idea">
+  The cloud-neutral version, with Brightpost's slow Pay button in July, is in [Observability on the Cloud](/cloud/operations/observability-on-the-cloud). Choosing what to alert on, and who gets woken, is in [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call).
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/telemetry-pipeline" stepper cloud="gcp" minWidth={620} caption="Brightpost's telemetry on Google Cloud: the Ops Agent ships metrics and logs from Compute Engine, Cloud Trace holds the spans, and an alerting policy on p99 Pay time pages Asha." />
+
+<CloudMapping diagram="cloud/telemetry-pipeline" lead="gcp" />
 
 ## TL;DR
 
-- **SLOs in Cloud Monitoring** with burn-rate alerts on the user-facing signals.
-- **Cloud Logging** with exclusion filters and sinks to BigQuery for analysis.
-- **OpenTelemetry** into Cloud Trace for distributed traces.
-- **Audit Logs** are on for admin activity by default; enable data access logs where needed.
+- **Ops Agent** on every Compute Engine VM for memory, disk space and log files; GKE collects container logs on its own.
+- **Cloud Logging** routes every entry through sinks to log buckets, BigQuery, Cloud Storage or Pub/Sub. Set retention per bucket and drop noise with exclusion filters.
+- **SLOs are objects in Cloud Monitoring**, so burn-rate alerting policies need no formula of your own.
+- **OpenTelemetry** in the code, with spans sent to Cloud Trace and the same trace id written into every log line.
 
 ## At a glance
 
 <CloudGroupTable group="observability" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+In steps 1 and 2, Brightpost's three services run on six Compute Engine VMs, and each writes its own log file. In step 3 the **Ops Agent** goes on every VM. Compute Engine already reports processor and network use; memory needs the agent, because it lives inside the operating system. A Cloud Monitoring dashboard charts it all.
+
+In step 4 the Ops Agent sends the log files to **Cloud Logging** as structured entries. The **Log Router** passes each entry to the project's sinks. The `_Default` sink stores it in the `_Default` log bucket, where Brightpost sets 30 days of retention. In step 5 OpenTelemetry in each service passes the `traceparent` header on every call, and the spans go to **Cloud Trace**. In step 6 an **alerting policy** watches p99 Pay time and notifies Asha through a notification channel.
+
+| The concept says | On Google Cloud | What to know |
+|---|---|---|
+| Collector | Ops Agent on VMs; built-in collection on GKE | Memory on a VM appears only with the Ops Agent |
+| Log store | Log buckets, filled by Log Router sinks | Each project starts with a `_Required` bucket for admin audit logs and a `_Default` bucket |
+| Log search | Logging query language, or SQL through Log Analytics | Log Analytics is switched on per bucket |
+| Alert rule and route | Alerting policy → notification channel | A policy's documentation field can carry the runbook link |
+| One view of many projects | A metrics scope in a scoping project | Logs need a sink to a central bucket instead |
 
 ## Services
 
@@ -22,23 +49,72 @@ Google Cloud Observability groups **Cloud Monitoring** (metrics, uptime checks, 
 
 <CloudServiceProfile id="gcp-cloud-monitoring" />
 
+Pick it when the workload runs on Google Cloud and you want SLOs, uptime checks and alerts in one place. **Managed Service for Prometheus** stores Prometheus metrics in the same backend, so PromQL queries and Grafana dashboards, which you host yourself, keep working.
+
 ### Cloud Logging
 
 <CloudServiceProfile id="gcp-cloud-logging" />
+
+Pick it for every log on Google Cloud, then decide routing early: which sinks, which buckets, how long. **Log-based metrics** turn matching lines into a metric an alert can watch. **Cloud Audit Logs** land here too: admin activity is always recorded, while data-access logs are off for most services until you turn them on.
 
 ### Cloud Trace
 
 <CloudServiceProfile id="gcp-cloud-trace" />
 
-## Coming from AWS
+Pick it when one request crosses Cloud Run, GKE or VMs and you need the slow hop. Trace spans link to the log entries that carry the same trace id.
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| CloudWatch metrics and alarms | Cloud Monitoring | Built-in SLO objects and burn-rate alerts |
-| CloudWatch Logs | Cloud Logging | Sinks route logs to BigQuery, Storage or Pub/Sub |
-| X-Ray | Cloud Trace | Both use OpenTelemetry |
-| CloudTrail | Cloud Audit Logs | Admin activity logs are always on |
+## Common mistakes
+
+- **Routing as an afterthought.** Logs from three projects stay in three places until someone writes the sinks. Plan the central bucket with the projects.
+- **Keeping everything in the bucket.** Noisy health-check lines are billed when stored. Drop them with an exclusion filter, or turn them into a log-based metric.
+- **Alerting on processor use.** In July the print servers sat at about 20% while Pay took 9 seconds. Alert on p99 Pay time or a checkout SLO.
+
+## Where this shows up in system design
+
+- **Every "how would you monitor this?" follow-up:** name the SLO, the Cloud Monitoring metric that measures it, and the burn-rate policy that pages.
+- **[Metrics and logging](/system-design/case-studies/metrics-and-logging):** the case study designs what Cloud Monitoring and Cloud Logging do for you.
+- **Analytics on logs:** a sink to BigQuery, or Log Analytics, lets you join log lines with orders in SQL.
 
 ## Related
 
-[Observability on AWS](/cloud/aws/observability) · [Observability on Azure](/cloud/azure/observability) · [Observability on AWS](/cloud/aws/observability) · [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries)
+[Observability on the Cloud](/cloud/operations/observability-on-the-cloud) · [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call) · [Observability on AWS](/cloud/aws/observability) · [Observability on Azure](/cloud/azure/observability) · [System design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="A log line from Brightpost's print service reaches Cloud Logging. Where does it go, and where can you cut its cost?" category="Cloud" level="Mid">
+    **Short answer.** The Log Router checks it against every sink in the project. A print-service line matches the `_Default` sink and lands in the `_Default` bucket; admin-activity audit logs go to the `_Required` bucket instead. Cost is cut at the router, with exclusion filters, and at the bucket, with retention.
+
+    **Why.** A sink is a filter plus a destination: a log bucket, BigQuery, Cloud Storage or Pub/Sub. An entry that no sink stores is dropped, so it is not billed for storage. Brightpost writes about 70 MB of logs a day at info level, and debug writes about 20 times more. An exclusion for debug lines, or for health checks, stops that before it is stored.
+
+    <AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={4} cloud="gcp" highlight={["collector", "logs"]} minWidth={620} caption="The Ops Agent sends every server's log lines to Cloud Logging, where the router picks the bucket." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you keep a year of logs without paying log-bucket prices?
+    - What happens to an excluded line you later need?
+
+    **Watch out for.** Excluding lines you will need in an incident. Excluded entries are gone; sample them instead of dropping all of them.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you alert on Brightpost's 99.9% checkout target in Cloud Monitoring?" category="Cloud" level="Mid">
+    **Short answer.** Create an SLO on the checkout service: a request-based SLI from good and bad checkout counts, a 99.9% target and a rolling 30 days. Then add a burn-rate alerting policy that pages when the last hour and the last 5 minutes both burn too fast.
+
+    **Why.** The SLO is an object, so Cloud Monitoring computes the error budget and the burn rate for you. A burn-rate condition asks "at this pace, will we break the promise?", which a processor alarm cannot answer. Two windows stop a short blip from paging, and let the alert clear soon after the fix. A slower burn over a day becomes a ticket, not a page.
+
+    **Follow-ups the interviewer may ask.**
+    - Where does the good-or-bad count come from: the load balancer or your code?
+    - Where would you put the runbook link?
+
+    **Watch out for.** One alert on a single 5-minute window. It pages on every blip, and the team learns to mute it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost has a test, a shop and an audit project. How do you get one view of their metrics and logs?" category="Cloud" level="Senior">
+    **Short answer.** For metrics, make one project the scoping project and add the others to its metrics scope. For logs, add an aggregated sink at the folder or organisation level that copies entries to a central log bucket. Audit logs go to a bucket in the audit project with long retention.
+
+    **Why.** Metrics and logs are joined in different ways on Google Cloud. A metrics scope lets dashboards and alerting policies read many projects without moving data. Logs are stored where a sink sends them, so a central view means a central bucket. An aggregated sink catches new projects in that folder too. Keeping audit logs in the audit project means a mistake in the shop project cannot delete them.
+
+    **Follow-ups the interviewer may ask.**
+    - Who may read the central bucket, and how do you limit a team to its own logs?
+    - Would you still keep each project's `_Default` bucket?
+
+    **Watch out for.** Creating one sink per project by hand. The next new project will be forgotten.
+  </InterviewQuestion>
+</InterviewQuestions>

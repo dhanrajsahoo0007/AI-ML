@@ -1,20 +1,65 @@
 ---
 title: "AI & ML on Google Cloud"
 description: "Vertex AI, Model Garden, Agent Engine, Vertex AI Search and TPUs, with the AWS and Azure equivalents."
+updated: 2026-11-14
 ---
 
-**Vertex AI** is Google Cloud's single AI platform. It serves Gemini and partner models, including **Claude**, through Model Garden; trains and serves your own models; and runs agents on **Agent Engine**. **Vertex AI Search** and the **RAG Engine** handle retrieval, and **TPUs** are Google's own accelerators for large training and inference jobs.
+Brightpost uses AI in three places. A drafter writes replies to about 60 support emails a day, a support chatbot answers customers, and a tagger labels product photos with style words. On Google Cloud nearly all of it sits in one platform, **Vertex AI**: Gemini and partner models, retrieval, evaluation, and training for the one model Brightpost owns. One more door matters here. **BigQuery ML** trains simple models with SQL inside the warehouse, so a data team can forecast without leaving its tables.
+
+## The idea
+
+Clouds sell AI as a ladder, from a finished service you call to a model you train and run yourself. Use the lowest rung that passes your tests: keep facts that change in a search index, and own a model only where nothing hosted does the job.
+
+<Callout tone="blue" title="Learn the idea">
+  New to cloud AI? [AI/ML Platforms on the Cloud](/cloud/operations/ai-ml-platforms-on-the-cloud) tells how Brightpost's tuned reply drafter wrote an old Christmas date into 70 emails, and [AI Security on the Cloud](/cloud/resilience/ai-security) secures its support chatbot. The theory of models, retrieval and agents is in [GenAI & LLM Systems](/ai-system-design). This page names the Google Cloud pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" stepper cloud="gcp" minWidth={620} caption="Brightpost's reply drafter on Google Cloud in seven steps: a tuned model on its own GPU, the date it could not learn, Gemini on Vertex AI, RAG Engine, evaluation, token monitoring and a pipeline for the one model it owns." />
+
+<CloudMapping diagram="cloud/ai-platform-building-blocks" lead="gcp" />
 
 ## TL;DR
 
-- **Vertex AI** for LLM features: Gemini, Claude and open models behind one platform.
-- **Agent Engine** to deploy agents with sessions, memory and tracing.
-- **Vertex AI Search / RAG Engine** for grounding; **Vector Search** or AlloyDB for embeddings.
-- **TPUs** for large training and inference where they beat GPUs on price-performance.
+- **Vertex AI** serves Gemini, plus partner and open models through **Model Garden**, paid per token or by Provisioned Throughput.
+- **Vertex AI RAG Engine** and **Vector Search** ground answers in your documents; **Agent Engine** runs agents in production.
+- **BigQuery ML** trains and runs forecasts and classifiers with SQL, where the data already is.
+- **Model Armor** screens prompts and replies for any model. **TPUs** are Google's own chips for large training jobs.
 
 ## At a glance
 
 <CloudGroupTable group="ai-ml" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+In steps 1 and 2 Asha's tuned model ran on its own GPU machine, billed every hour. It never saw the edited help article, so drafts kept the old Christmas date. Step 3 deletes that endpoint, and the drafter calls Gemini on Vertex AI, paid per token.
+
+In step 4 the help articles sit in Cloud Storage. A RAG Engine import splits and embeds them into a vector store, such as Vector Search, and a Cloud Storage event starts the import on each edit. Step 5 runs Brightpost's 80 test questions through the Gen AI evaluation service before any change ships.
+
+Step 6 differs most here. Gemini can be called through a regional endpoint or a global one, and the global one may serve the request from any region. Brightpost uses a regional endpoint in a region its data rules allow, reached through Private Service Connect, and Cloud Monitoring counts the tokens. Step 7 trains the photo style tagger with Vertex AI Pipelines and keeps approved versions in the Model Registry.
+
+| The idea | On Google Cloud | What to know |
+|---|---|---|
+| Hosted model catalog | Model Garden in Vertex AI | Gemini is Google's own; partner models such as Claude have their own terms and regions |
+| Managed retrieval | Vertex AI RAG Engine; Vertex AI Search | RAG Engine gives you the parts; Vertex AI Search is a finished search product |
+| Where a call is processed | Regional or global endpoint | Pick the regional endpoint when data must stay in one region |
+| Guardrail | Model Armor | Floor settings set the minimum filters for a project, folder or organisation |
+| Machine learning in SQL | BigQuery ML | `CREATE MODEL` and `ML.FORECAST` run inside the warehouse |
+
+## Machine learning in SQL: BigQuery ML
+
+The finance lead wants next week's orders, from two years of daily totals already in BigQuery. A time-series model trains with one statement and forecasts with another. No data moves, and no endpoint waits all day.
+
+```sql
+CREATE OR REPLACE MODEL shop.orders_forecast
+OPTIONS (model_type = 'ARIMA_PLUS',
+         time_series_timestamp_col = 'day',
+         time_series_data_col = 'orders') AS
+SELECT day, orders FROM shop.daily_orders;
+
+SELECT * FROM ML.FORECAST(MODEL shop.orders_forecast, STRUCT(7 AS horizon));
+```
+
+It suits tables: forecasts, churn scores, simple classifiers. BigQuery can also call a Gemini model from SQL through a remote model, for example to tag the mood of support emails in a query. It is not for chat or retrieval. The warehouse itself is on [Analytics & Data on Google Cloud](/cloud/gcp/analytics).
 
 ## Services
 
@@ -22,24 +67,82 @@ description: "Vertex AI, Model Garden, Agent Engine, Vertex AI Search and TPUs, 
 
 <CloudServiceProfile id="gcp-vertex-ai" />
 
+**Pick it when** a feature needs a foundation model, or you train and serve your own. It is the default for both on Google Cloud.
+
 ### Vertex AI Agent Engine
 
 <CloudServiceProfile id="gcp-agent-engine" />
+
+**Pick it when** an agent calls tools for many users and needs sessions, memory and tracing you would otherwise build.
+
+### Model Armor
+
+<CloudServiceProfile id="gcp-model-armor" />
+
+**Pick it when** any model, Gemini or not, takes text from customers or retrieved documents. It is a filter, so keep the tools scoped and refunds over £30 waiting for a person.
 
 ### Cloud TPU
 
 <CloudServiceProfile id="gcp-tpu" />
 
-## Coming from AWS
+**Pick it when** you train or serve large models in JAX or PyTorch/XLA and TPUs beat GPUs on price for that job. Brightpost's tagger is too small to need them.
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| Bedrock | Vertex AI Model Garden | Gemini is first-party; Claude available on both |
-| Bedrock AgentCore | Vertex AI Agent Engine | Similar managed runtime for agents |
-| Bedrock Knowledge Bases | Vertex AI Search / RAG Engine | Search product with built-in ranking |
-| SageMaker AI | Vertex AI | Training, pipelines and endpoints in the same platform as foundation models |
-| Trainium / Inferentia | TPUs | Mature JAX and PyTorch/XLA support |
+The ready-made APIs have no profiles here: Cloud Vision, Speech-to-Text, Cloud Translation, Natural Language and Document AI each do one job, paid per item.
+
+## Common mistakes
+
+- **Calling the global endpoint with customer data.** It may process the prompt in any region. Use a regional endpoint where data rules apply.
+- **Expecting RAG Engine to watch the bucket.** An import runs when something starts it. Trigger it on each edit, or the index keeps old facts.
+- **Exporting warehouse tables to train a forecast.** BigQuery ML trains where the data already is. Reach for Vertex AI only when SQL models fall short.
+
+## Where this shows up in system design
+
+- **Support assistants and RAG:** Gemini with RAG Engine, as in [RAG fundamentals](/ai-system-design/genai-system-design/rag-fundamentals).
+- **Demand forecasts and dashboards:** BigQuery ML beside the warehouse, as in [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines).
+- **Ranking and recommendations:** custom models trained in Vertex AI Pipelines and served in batch, as in the [YouTube](/system-design/case-studies/youtube) case study.
 
 ## Related
 
-[AI & ML on AWS](/cloud/aws/ai-ml) · [AI & ML on Azure](/cloud/azure/ai-ml) · [AI & ML on AWS](/cloud/aws/ai-ml) · [Vector Databases](/system-design/databases/vector-databases)
+[AI/ML Platforms on the Cloud](/cloud/operations/ai-ml-platforms-on-the-cloud) · [AI Security on the Cloud](/cloud/resilience/ai-security) · [AI & ML on AWS](/cloud/aws/ai-ml) · [AI & ML on Azure](/cloud/azure/ai-ml) · [Analytics & Data on Google Cloud](/cloud/gcp/analytics) · [Vector Databases](/system-design/databases/vector-databases) · [GenAI & LLM Systems](/ai-system-design) · [System Design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="When would a data team use BigQuery ML instead of Vertex AI?" category="Cloud" level="Junior">
+    **Short answer.** When the data is already in BigQuery tables and the model is a standard kind, such as a forecast, a classifier or a regression. One SQL statement trains it and another scores rows. Vertex AI is for custom training code, images, text models and online serving.
+
+    **Why.** Brightpost's finance lead forecasts next week's orders from two years of daily totals. With BigQuery ML that is a `CREATE MODEL` and an `ML.FORECAST` query, with no data export and nothing left running. The photo style tagger needs custom training on images, so it lives in Vertex AI.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you check the forecast is any good before the team relies on it?
+    - Can a BigQuery ML model be served outside BigQuery?
+
+    **Watch out for.** Saying SQL models are toys. For tabular forecasts they are often enough, and the data never leaves the warehouse.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does an edited help article reach the next answer when Brightpost uses Vertex AI RAG Engine?" category="Cloud" level="Mid">
+    **Short answer.** The articles live in Cloud Storage. An import into RAG Engine splits and embeds them into the vector store. A Cloud Storage event starts the import when an article changes, so the next search finds the new text.
+
+    **Why.** A tuned model learned the Christmas date from 9,000 old emails and kept it after the article changed: 70 wrong drafts and 23 refunds. With retrieval, the edit is in the index about 5 minutes later. The drafter asks for the 3 closest passages and sends them to Gemini with the question. Nothing is retrained.
+
+    <AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={4} cloud="gcp" path="data>indexjob>vector>app" caption="An edit in Cloud Storage starts a RAG Engine import, and the drafter searches the fresh vectors first." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to the vectors of a deleted article?
+    - When would you choose Vertex AI Search over RAG Engine?
+
+    **Watch out for.** A nightly import. The date would still be wrong for up to a day, which is a day of wrong drafts.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where does Model Armor sit in Brightpost's support chatbot, and what does it not stop?" category="Cloud" level="Mid">
+    **Short answer.** It checks each prompt before Gemini reads it and each reply before the customer sees it, for injection attempts, harmful content and personal data. It does not stop a tricked model from using a tool that can do too much.
+
+    **Why.** A pasted note once refunded a stranger's order. Model Armor would catch many such notes, but filters miss new tricks. So the tools run under a service account scoped to the signed-in customer, and Workflows holds any refund over £30 for the support agent. Floor settings make sure no team ships a bot without the checks.
+
+    <AnimatedDiagram spec="animated/cloud/ai-guardrail-path" step={3} cloud="gcp" highlight={["customer", "chat", "guardrail", "model"]} caption="Model Armor screens every prompt and reply around the model." />
+
+    **Follow-ups the interviewer may ask.**
+    - Should retrieved documents pass Model Armor as well as the customer's message?
+    - What does the chatbot tell a customer whose prompt was blocked?
+
+    **Watch out for.** Calling Model Armor the security design. It is a smoke alarm; scoped tools and a person for big refunds are the locks.
+  </InterviewQuestion>
+</InterviewQuestions>

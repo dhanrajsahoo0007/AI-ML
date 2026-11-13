@@ -1,20 +1,47 @@
 ---
 title: "DevOps & IaC on Google Cloud"
 description: "Cloud Build, Cloud Deploy, Artifact Registry and Infrastructure Manager, with the AWS and Azure equivalents."
+updated: 2026-11-14
 ---
 
-Google Cloud's delivery tools are **Cloud Build** for CI, **Cloud Deploy** for promoting releases to GKE and Cloud Run with canaries and approvals, and **Infrastructure Manager** for running Terraform. Terraform is the de facto infrastructure-as-code tool on Google Cloud; Deployment Manager reached end of support on March 31, 2026.
+Brightpost ships a new version of its shop most working days, and its servers and networks change too. On Google Cloud the delivery path is **Cloud Build** to build and test, **Artifact Registry** to keep the image, and **Cloud Deploy** to move it from staging to production. Infrastructure is written in Terraform, which **Infrastructure Manager** can run for you. Two facts shape a design here. Cloud Deploy fixes a release when it is created, so promotion always moves the same build. And Cloud Run can split traffic between versions itself, so a canary needs no second fleet.
+
+## The idea
+
+A delivery pipeline builds each change once and sends that exact build through every check, and a deployment strategy decides how shoppers move from the old version to the new one. <Term id="infrastructure-as-code">Infrastructure as code</Term> does the same for the servers and networks: a reviewed file, a plan, then an apply from the pipeline.
+
+<Callout tone="blue" title="Learn the idea">
+  The cloud-neutral version, with Brightpost's column rename that failed 18 checkouts in 12 minutes, is in [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies). Templates, plans and state are in [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code); patching and agents are in [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management).
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/deployment-strategies" stepper cloud="gcp" minWidth={620} caption="Brightpost's releases on Google Cloud: Cloud Build and Cloud Deploy put one image in Artifact Registry, then rolling, blue/green and a 5% canary behind Cloud Load Balancing, watched by an alerting policy." />
+
+<CloudMapping diagram="cloud/deployment-strategies" lead="gcp" />
 
 ## TL;DR
 
-- **Terraform** (through Infrastructure Manager or your own pipeline) for infrastructure as code.
-- **Cloud Build** to test and build images into Artifact Registry.
-- **Cloud Deploy** to promote the same release through environments with canary rollouts.
-- **Workload Identity Federation** so GitHub Actions or other CI deploy without service account keys.
+- **Cloud Build** tests each commit and pushes one image to Artifact Registry.
+- **Cloud Deploy** promotes that same release through staging and production, with approvals, canary phases and rollback, on GKE and Cloud Run.
+- **Terraform** is the infrastructure language, run by Infrastructure Manager or your own pipeline. **Config Connector** is the Kubernetes-style alternative.
+- **Workload Identity Federation** lets GitHub Actions or other CI deploy with no stored service account key.
 
 ## At a glance
 
 <CloudGroupTable group="devops" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+Step 1: a merge starts a **Cloud Build** trigger. It runs the tests in containers and pushes one image to **Artifact Registry**, which gives it a digest. Step 2: on Compute Engine, a **managed instance group** rolls its VMs to a new instance template a few at a time. On Cloud Run, each deploy makes a new **revision**.
+
+Steps 3 and 4 are the rename and its fix: the migration becomes its own step that only expands the Cloud SQL schema. Step 5: on Cloud Run, blue/green sends 100% of traffic to the new revision while the old one stays ready. Step 6: a managed instance group can run a **canary update** with 5% of VMs on the new template, and Cloud Deploy sets canary percentages in phases. A **Cloud Monitoring alerting policy** watches checkout errors. Step 7: there is no general feature-flag service, so the flag comes from a library or a third party.
+
+| The concept says | On Google Cloud | What to know |
+|---|---|---|
+| Promote one digest | A Cloud Deploy release, created from one image digest | Promotion moves that release on; it never rebuilds |
+| Environments and approvals | Targets in a delivery pipeline, such as staging then production | A target can require approval before any rollout |
+| Canary at 5% | Cloud Run traffic split between revisions, or a managed instance group canary update | A revision tag gives the new version a test address with no traffic |
+| Roll back on an alarm | A verify job after a phase, then a rollback of the target | On Cloud Run a rollback is a traffic change, done in seconds |
+| The template | Terraform, run by Infrastructure Manager, or Config Connector | Infrastructure Manager shows a preview and keeps the state |
 
 ## Services
 
@@ -22,23 +49,87 @@ Google Cloud's delivery tools are **Cloud Build** for CI, **Cloud Deploy** for p
 
 <CloudServiceProfile id="gcp-cloud-build" />
 
+Pick it when the image is going to Cloud Run, GKE or Cloud Deploy and you want builds with no servers to run.
+
 ### Cloud Deploy
 
 <CloudServiceProfile id="gcp-cloud-deploy" />
+
+Pick it when you deploy to GKE or Cloud Run and want promotion, approvals, canaries and rollback without writing them yourself.
 
 ### Infrastructure Manager
 
 <CloudServiceProfile id="gcp-infra-manager" />
 
-## Coming from AWS
+Pick it when you want Terraform with Google keeping the state and the run history. Pick **Config Connector** instead when the team already runs GKE and wants cloud resources written as Kubernetes objects that are checked and fixed continuously.
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| CloudFormation / CDK | Terraform via Infrastructure Manager | No Google-native template language in active use |
-| CodeBuild | Cloud Build | Similar container-step builds |
-| CodePipeline + CodeDeploy | Cloud Deploy | Canary and approvals for GKE and Cloud Run |
-| CodeCommit | Secure Source Manager | Most teams use GitHub or GitLab instead |
+### Cost and migration tools in this group
+
+These answer other questions: what the bill is, and what moves from a data centre. See [FinOps and Cost Tools](/cloud/operations/finops-and-cost-tools) and [Migration and Modernization](/cloud/operations/migration-and-modernization).
+
+<CloudServiceProfile id="gcp-cloud-billing" />
+
+Pick it when each project needs a budget with alerts, and turn on the BigQuery export on day one.
+
+<CloudServiceProfile id="gcp-migration-center" />
+
+Pick it when you are planning a move from your own servers and need an inventory and a cost estimate first.
+
+## Common mistakes
+
+- **Rebuilding in each environment.** A second Cloud Build run for production makes a new digest that no test has seen. Create one release and promote it.
+- **Downloading a service account key for CI.** Use Workload Identity Federation, so each run gets a short-lived token.
+- **Pointing production at an image family.** A new VM gets the newest image in the family, tested or not. Name an exact image in production.
+
+## Where this shows up in system design
+
+- **Zero-downtime releases:** a canary on Cloud Run or GKE with a verify step, plus expand and contract for every schema change in Cloud SQL or Spanner.
+- **Many environments from one definition:** one Terraform configuration with different settings per project, applied from a pipeline.
 
 ## Related
 
-[DevOps & IaC on AWS](/cloud/aws/devops) · [DevOps & IaC on Azure](/cloud/azure/devops) · [DevOps & IaC on AWS](/cloud/aws/devops) · [Containers on Google Cloud](/cloud/gcp/containers)
+[CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies) · [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code) · [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management) · [DevOps & IaC on AWS](/cloud/aws/devops) · [DevOps & IaC on Azure](/cloud/azure/devops) · [Containers on Google Cloud](/cloud/gcp/containers) · [System design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What do Cloud Build and Cloud Deploy each do, and where does the image live in between?" category="Cloud" level="Junior">
+    **Short answer.** Cloud Build is the CI half: it tests each commit and builds the image. The image lives in Artifact Registry, named by its digest. Cloud Deploy is the CD half: it turns that digest into a release and moves it from staging to production.
+
+    **Why.** Splitting the jobs means the build happens once. Cloud Deploy fixes the release when it is created, so production runs the bytes that passed in staging. A rollback picks an earlier release, which still points at its own unchanged image.
+
+    <AnimatedDiagram spec="animated/cloud/deployment-strategies" step={1} cloud="gcp" highlight={["pipeline", "registry"]} minWidth={620} caption="Cloud Build and Cloud Deploy build one image into Artifact Registry; every server pulls that digest." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where do staging's and production's different settings live?
+    - How could production refuse an image the pipeline did not build?
+
+    **Watch out for.** Deploying by tag, such as `latest`. A tag can be moved to another image; a digest cannot.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost runs on Cloud Run. How would you send 5% of shoppers to version 1.9 for 30 minutes and roll back without a person?" category="Cloud" level="Mid">
+    **Short answer.** Use Cloud Deploy's canary strategy with a first phase at 5%. After that phase, a verify job checks checkout errors in Cloud Monitoring. If the check fails, the target is rolled back, which on Cloud Run is a traffic change.
+
+    **Why.** Cloud Run splits traffic between revisions itself, so the canary needs no extra servers. At 5% for 30 minutes, a bad release meets about 1 shopper in 20 for a short time, not all of them. The verify step judges the new revision on errors, not on whether it started.
+
+    <AnimatedDiagram spec="animated/cloud/deployment-strategies" step={6} cloud="gcp" path="next>alarm>lb" minWidth={620} caption="The canary's errors reach the alerting policy, and the traffic goes back to the old version." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would you check first if the canary's errors rise and the old version's rise too?
+    - How would you test the new revision before it takes any traffic?
+
+    **Watch out for.** A verify step that only checks the revision is up. Brightpost's broken servers loaded pages while every checkout failed.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Infrastructure Manager, your own Terraform in Cloud Build, or Config Connector: which would you pick for Brightpost?" category="Cloud" level="Mid">
+    **Short answer.** Infrastructure Manager. Brightpost writes Terraform and wants Google to keep the state, lock it and show a preview, with no state bucket to run.
+
+    **Why.** All three avoid hand changes in the console. Running Terraform yourself in Cloud Build works too, but state storage, locking and access become your job. Config Connector suits teams that already run GKE. It treats each resource as a Kubernetes object and keeps undoing hand changes, so drift is fixed, not only reported.
+
+    <AnimatedDiagram spec="animated/cloud/iac-pipeline" step={6} cloud="gcp" path="ci>engine>state" minWidth={620} caption="Cloud Build runs Infrastructure Manager, which reads and locks one managed copy of the state." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does the pipeline get permission to apply with no key?
+    - What would you do with resources that were created by hand before?
+
+    **Watch out for.** Picking Deployment Manager from an old tutorial. It reached end of support in March 2026.
+  </InterviewQuestion>
+</InterviewQuestions>
