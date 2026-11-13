@@ -22,7 +22,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   db 390,530 | standby 650,530 | payments 135,690 | backup 390,690 | outage 135,800.
 // One order is followed through server A: its edges to the cache, the database and both payment providers fan out
 // from its bottom. The payment edge runs straight down zone A, which holds nothing else; the backup edge bends at
-// (262, 612), in the gutter below the zone bands, and the database edge bends at (262, 500), so both clear the
+// (200, 612), below zone A, and the database edge bends at (262, 500), so both clear the
 // cache and the database. The load balancer's edge to server C bends at (592, 243) so it enters zone C right of the
 // band's inline label; the pipeline and health feed sit right of x 604, clear of that edge.
 //
@@ -152,7 +152,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       x: 390,
       y: 530,
-      w: 172,
+      w: 180,
       cloud: database,
     },
     {
@@ -163,7 +163,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       x: 650,
       y: 530,
-      w: 176,
+      w: 180,
       cloud: database,
     },
     {
@@ -280,7 +280,7 @@ const spec: DiagramSpec = {
       to: "backup",
       label: "if no answer",
       dashed: true,
-      via: [[262, 612]],
+      via: [[200, 612]],
       labelAt: 0.88,
       step: 3,
     },
