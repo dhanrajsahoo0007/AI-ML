@@ -1,11 +1,346 @@
 ---
 title: "Serverless Functions: Triggers, Cold Starts and Concurrency"
-description: "What starts a function, why its first run is slow, how many copies run at once, and what that does to the database behind it."
-status: outline
+description: "What starts a function, why its first run is slow, how many copies run at once, and what a burst of copies does to the database behind it."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** a function as code the provider starts on an event and stops when done. Three things decide whether it works for you: what triggers it, what happens the first time it starts (the cold start), and how many copies run at once (concurrency) and what that does to the database behind it.
+<KeyIdea>
+  A function is a small piece of code that the cloud runs each time something happens, in as many copies as there are things happening at once.
+</KeyIdea>
 
-**Related reading on this site:** [Serverless & Orchestration on AWS](/cloud/aws/serverless) · [Serverless & Orchestration on Google Cloud](/cloud/gcp/serverless) · [Serverless & Orchestration on Azure](/cloud/azure/serverless)
+## The story
+
+Brightpost resizes its product photos with a function. Since the well-architected review, it runs once per photo, when the photo lands in the uploads bucket. Each run takes about 2 seconds, plus about 1 second when a fresh copy starts. It saves each thumbnail's address in the shop database, which accepts at most 200 connections. At 8:50 on sale day, the contractor uploads the 1,500 photos of the sale collection in about 2 minutes. The platform starts a copy for every photo that finds no free one: about 300 at once. Each copy opens its own connection, and within 20 seconds none are left. The shop's app servers are refused. Failed photos are retried a minute later, so the storm returns in waves. From 8:51 to 9:06 half of all checkouts fail, and about 60 orders are lost.
+
+The function did what it was built to do. Nobody had asked how many copies of it could run at once. The steps below explain triggers, copies and limits, then repair that morning.
+
+## How it works
+
+Four words first. A **function** is code that a platform runs each time an event happens; it is the purest form of <Term id="serverless">serverless</Term> compute. The event that starts it is its **trigger**. One run is an **invocation**. Each invocation runs inside a **copy**: a small, sealed environment with your code loaded. Clouds call it an instance or an execution environment.
+
+### Step 1: A function and its trigger
+
+<AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={1} minWidth={620} caption="A photo lands in the uploads bucket. The storage event starts the resize function, which writes a thumbnail and saves its address." />
+
+Here the trigger is a storage event: "a new file landed in the uploads <Term id="object-storage">bucket</Term>". The platform finds or starts a copy and hands it the event, which names the file. The function reads the photo, writes a thumbnail to a second bucket and saves its address. Then it returns, and billing stops.
+
+You hand over the code and the trigger. The platform owns the machines, the operating system, and how many copies run. You pay per invocation and per second: Brightpost's 300 photos a week are about 10 minutes of run time. [The Compute Spectrum](/cloud/compute/compute-spectrum) shows where functions sit among the other places to run code.
+
+<PremiumBreak />
+
+### Step 2: Five kinds of trigger
+
+Triggers fall into two families. With a **synchronous** trigger, a caller waits for the reply. With an **asynchronous** one, nobody waits: the event is handed over and the sender moves on. That difference decides who retries a failure.
+
+<Compare
+  columns={["Trigger", "Brightpost example", "Who waits", "Who retries a failure"]}
+  rows={[
+    ["HTTP request", "The admin page's \"redo one photo\" button", "The caller", "The caller, if it chooses"],
+    ["Storage event", "A photo lands in the uploads bucket", "Nobody", "The platform, a few times"],
+    ["Queue message", "One message per photo (Step 7)", "Nobody", "The queue, up to a set number of tries"],
+    ["Schedule", "The 04:00 sweep (Step 8)", "Nobody", "Usually nobody; the next run catches up"],
+    ["Stream", "None yet; for example, order events read in order", "Nobody", "The platform, batch by batch"],
+  ]}
+  caption="The same function code can sit behind any of these. The trigger decides who waits and who retries."
+/>
+
+A **stream** is an ordered log of events, split into parts. A function reads each part in order, one batch at a time, so a batch that keeps failing blocks its part. [Queues vs Streams](/cloud/start-here/queues-vs-streams) compares the two.
+
+### Step 3: Cold starts and warm starts
+
+<AnimatedDiagram spec="animated/cloud/serverless-request" stepper caption="The first photo pays for a new copy. The second reuses it. Two at once need a second copy, and a quiet night removes both." />
+
+The platform keeps a finished copy for a while and reuses it. The first event pays for the build, and that wait is a <Term id="cold-start">cold start</Term>. Later events on a ready copy are **warm starts**.
+
+Brightpost's cold start is about 1 second: fetch the code, start the runtime, then run the setup part, which loads the image library and opens a database connection. Four things make it longer: a bigger code package, a heavier runtime, more setup work, and less memory, which usually means less processor.
+
+Keep setup outside the code that runs per event, so warm events skip it. Never rely on a copy staying alive: the platform can stop it at any time, with its memory and local files.
+
+### Step 4: Concurrency: one event per copy, or many
+
+**Concurrency** is how many invocations run at the same moment. Some platforms give each copy one event at a time, so 300 photos in flight need 300 copies. Others let one copy take many events at once, up to a number you set.
+
+<Compare
+  columns={["", "One event per copy", "Many per copy (80 each)"]}
+  rows={[
+    ["Copies for 300 events in flight", "300", "About 4"],
+    ["Cold starts during that burst", "Up to 300", "About 4"],
+    ["Database connections, one per copy", "300", "About 4, or 20 with a pool of 5 each"],
+    ["Code must be safe when events share memory", false, true],
+    ["One slow event slows its neighbours", false, true],
+  ]}
+  caption="The same burst on two concurrency models. Connections follow copies, not requests."
+/>
+
+Either way, the platform adds copies when events arrive faster than copies free up. How fast, and how many per account, are <Term id="quota">quotas</Term> that differ by cloud and change over time. Look them up, and set your own.
+
+### Step 5: The burst that emptied the database
+
+<AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={2} minWidth={620} caption="The failure: 1,500 photos start about 300 copies, each copy opens a connection, and the shop's servers are refused." />
+
+Brightpost's platform gives each copy one photo, and each copy keeps one connection. So busy copies equal open connections: on an ordinary day, 1 or 2.
+
+<Callout tone="red" title="What breaks">
+  At 8:50 the contractor's tool sends 1,500 photos in about 2 minutes. About 300 copies start and ask for 300 connections. The database has 110 free, because 6 app servers hold 15 each. Those 110 go in 20 seconds, and the 4 app servers starting for the 9:00 rush get none. Refused copies fail, the platform retries them a minute later, and each wave fills the database again.
+</Callout>
+
+Nothing in the function's code was wrong. It had no limit on its copies, and each copy took something scarce.
+
+### Step 6: Cap the copies, share the connections
+
+<AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={3} minWidth={620} caption="At most 20 copies, and a pool that shares 20 connections among them. The app servers keep the rest." />
+
+A **concurrency cap** is the most copies one function may run at once. Brightpost sets 20. Events beyond that wait or are retried, depending on the trigger.
+
+A **connection pool** sits in front of the database and holds a set of connections open; callers borrow one and hand it back. The 20 copies share 20 connections, and the app servers keep the other 180. [Managed Relational Databases](/cloud/data/managed-relational) covers poolers and proxies on each cloud.
+
+Pick the cap from the slowest thing behind the function, not from the traffic in front of it.
+
+### Step 7: A queue takes the burst
+
+<AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={4} minWidth={620} caption="Each photo becomes one message. The function takes 20 at a time, and a photo that fails 5 times is parked." />
+
+The extra photos must wait somewhere, and a **queue** beats the platform's retry loop. Each photo becomes one message, and the function takes 20 at a time. That is <Term id="back-pressure">back pressure</Term>: the burst drains at the speed the database can take. 1,500 photos of 2 seconds, across 20 copies, take 150 seconds.
+
+After 5 failed tries, a message moves to a **dead-letter queue**, a side queue for messages that keep failing. An alarm tells Asha, and the other 1,499 carry on. The [webhooks page](/cloud/networking/webhooks-on-the-cloud) uses the same rule for payment events.
+
+Retries mean a photo can be processed twice. So the function must be <Term id="idempotent">idempotent</Term>: two runs have the same effect as one. It writes the thumbnail under the photo's own name and sets its address, so a second run changes nothing. [Idempotency](/system-design/patterns/idempotency) covers the pattern.
+
+### Step 8: A clock is a trigger too
+
+<AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={5} minWidth={620} caption="A schedule starts the function at 04:00 with no outside event, to remake any missing thumbnail." />
+
+A schedule starts a function at set times. Brightpost adds a sweep at 04:00 that resizes any photo with no thumbnail. Some schedulers promise at least one run per tick, not exactly one, so two sweeps at once must do no harm.
+
+In the picture, one box stands for the resize code. Some clouds allow one trigger per function, so there each trigger gets its own small function that calls the same code.
+
+### Step 9: An HTTP call: someone waits
+
+<AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={6} minWidth={620} caption="The support agent's admin page calls the function's HTTPS address to redo one photo, and waits for the reply." />
+
+An HTTP trigger gives the function its own web address. The support agent's admin page calls it to redo one photo, and waits. Now a cold start adds to a person's wait, and a failure goes back to the caller. The front door also has its own time limit, often shorter than the function's. For a public API, an <Term id="api-gateway">API gateway</Term> adds keys, quotas and routes ([API Gateways & API Management](/cloud/networking/api-gateways)).
+
+### Step 10: Memory, time limits and money
+
+- **Memory.** On most platforms processor power grows with it. One photo takes about 4 s at 512 MB, 2 s at 1 GB and 1.8 s at 2 GB. The image library uses one core, so more than 1 GB buys almost nothing.
+- **Time limit.** Every platform stops a run after a maximum time, counted in minutes. Brightpost's 15 minutes could not fit the 40-minute recommender job ([Choosing Compute](/cloud/start-here/choosing-compute)). Set your own timeout to a few times the normal run: 10 seconds for resize.
+- **Cost.** You pay per invocation, plus run time multiplied by memory. So 1 GB for 2 s costs the same as 512 MB for 4 s. A normal week is 10 minutes of run time; the sale burst was 50. Idle costs nothing, unless you keep copies warm.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a trigger, copies the platform manages, a cap on how many run, and a place for failed events.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Triggers:** HTTP through a function URL or Amazon API Gateway. S3 and EventBridge push events. For SQS and Kinesis or DynamoDB streams, an event source mapping polls and hands Lambda batches.
+    - **Concurrency:** each execution environment handles one event, or one batch, at a time. Reserved concurrency caps a function and sets that share aside from the account's regional pool.
+    - **Keeping copies warm:** provisioned concurrency, billed while it waits. SnapStart, for some runtimes such as Java, restores a snapshot of a started environment.
+    - **Limits you set:** memory, with processor share following it, and a timeout of up to 15 minutes.
+    - **Failed events:** pushed events are retried twice by default, then go to a failure destination or dead-letter queue. SQS moves a message to its dead-letter queue after a maximum receive count.
+
+    **The difference that changes a design.** All functions in a region share one account-wide concurrency pool, so a resize burst can starve the payment-webhook worker. Reserved concurrency caps resize and guarantees the worker its share. For an SQS trigger, the mapping's maximum concurrency setting caps readers without pushing messages back early.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Triggers:** HTTP on the function's own HTTPS address. Event triggers arrive through Eventarc: Cloud Storage, Pub/Sub and many other Google Cloud services.
+    - **Concurrency:** Cloud Run functions run on Cloud Run, so one instance can take several requests at once, up to a number you set. Maximum instances caps the copies.
+    - **Keeping copies warm:** minimum instances keeps instances started, billed while idle.
+    - **Limits you set:** memory, CPU and a timeout. Event-driven functions have a shorter maximum timeout than HTTP functions.
+    - **Failed events:** an event-driven function retries only when retries are turned on. A dead-letter topic on the Pub/Sub subscription catches events that keep failing.
+
+    **The difference that changes a design.** Concurrency per instance changes the database arithmetic: at 80 per instance, 300 photos in flight need about 4 instances, not 300. The code must then be safe to share. The Cloud SQL connectors secure a connection but do not pool it.
+  </Tab>
+  <Tab label="Azure">
+    - **Triggers:** HTTP, blob, queue, Service Bus, Event Grid, Event Hubs and timer triggers. **Bindings** declare inputs and outputs, such as "write the result to this queue", without client code.
+    - **Concurrency:** one instance runs many executions at once, limited by trigger settings such as batch size. The plan's maximum instance count caps scale-out.
+    - **Keeping copies warm:** the hosting plan decides. Consumption scales to zero and starts cold. Flex Consumption can keep always-ready instances. Premium keeps pre-warmed instances and never scales to zero.
+    - **Limits you set:** memory per instance on Flex Consumption, and a timeout whose maximum depends on the plan.
+    - **Failed events:** Service Bus moves a message to its dead-letter subqueue after a maximum delivery count. A storage queue trigger moves it to a poison queue.
+
+    **The difference that changes a design.** The hosting plan is the design choice. It sets cold starts, the time limit, private network access and the instance ceiling for every function in a function app. So resize and a latency-sensitive API may belong in different apps. Azure Database for PostgreSQL has PgBouncer built in.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/serverless-event-triggers" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/serverless-event-triggers" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Is a function the right home?"
+  tree={{
+    q: "Is the work started by an event: a request, a file, a message or a clock?",
+    yes: {
+      q: "Does each run finish well inside the time limit, with room for the data to grow?",
+      yes: {
+        q: "Is the traffic steady and busy all day, many requests every second?",
+        yes: {
+          answer: "Serverless containers or VMs. Per-run billing costs more than a few copies that are always on.",
+          href: "/cloud/compute/serverless-containers-and-paas",
+        },
+        no: {
+          q: "Does it call something with a fixed limit, such as database connections?",
+          yes: "A function, with a concurrency cap, a connection pool and, for work that can wait, a queue in front.",
+          no: "A function. Set a timeout of a few times the normal run, and a dead-letter target for asynchronous triggers.",
+        },
+      },
+      no: {
+        answer: "A container job or a batch service. Brightpost's 40-minute recommender moved to a container job.",
+        href: "/cloud/start-here/choosing-compute",
+      },
+    },
+    no: {
+      answer: "Something that runs all the time, such as a worker holding connections open: a container or a VM.",
+      href: "/cloud/compute/compute-spectrum",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The resize function is capped at 20 copies, and each photo takes 2 seconds. How long do 1,500 queued photos take?" hint="Total work, divided by the copies.">
+    About 150 seconds. The work is 1,500 × 2 = 3,000 seconds, shared by 20 copies, so the last thumbnail appears about 2.5 minutes after the upload.
+  </QuizItem>
+  <QuizItem question="One photo takes 4 s at 512 MB, 2 s at 1 GB and 1.8 s at 2 GB. You pay for memory × time. Which setting is best?" hint="Multiply each pair.">
+    1 GB. It costs the same as 512 MB (2 GB-seconds each) and runs twice as fast. 2 GB costs 3.6 GB-seconds for 0.2 s less.
+  </QuizItem>
+  <QuizItem question="One photo file is broken, and its message fails 5 times. What happens to it, and to the other 1,499?">
+    It moves to the dead-letter queue and its alarm fires. The other 1,499 carry on; nothing waits behind the broken one.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Storage event, no cap", "Queue, 20-copy cap, pool", "Always-on worker, 2 copies"]}
+  rows={[
+    ["Copies during the 1,500-photo burst", "About 300", "20", "2"],
+    ["Database connections taken", "300 asked, 110 free", "20, through the pool", "2"],
+    ["Time to clear the burst", "About 15 minutes, in waves", "About 2.5 minutes", "About 25 minutes"],
+    ["Cost on a quiet day", "Run time only", "Run time only", "2 copies billed all day"],
+    ["A photo that keeps failing", "Retried, then dropped or parked", "Parked in the dead-letter queue", "Parked in the dead-letter queue"],
+    ["Orders lost on sale morning", "About 60", "0", "0"],
+  ]}
+  caption="Brightpost's sale morning, replayed on three designs."
+/>
+
+The capped queue gives Brightpost the worker's safety and the function's idle cost. The price is a few minutes of delay in a burst.
+
+## Common pitfalls
+
+- **Writing output where the trigger watches.** The function starts itself, and every run starts another. Write to a separate bucket or folder, and filter the trigger by folder or name.
+- **A new database connection for every event.** It adds connect time to every run and multiplies connections. Connect in setup, reuse the connection, and pool it.
+- **No concurrency cap.** The account's quota becomes your limit, and a burst reaches everything downstream. Cap from what lies behind the function.
+- **Assuming each event arrives once.** Asynchronous triggers retry, and queues deliver at least once. Make the handler idempotent first.
+- **Keeping state in the copy.** A local file or an in-memory counter vanishes with the copy. Keep state in a database, a bucket or a cache.
+
+## How to say it in an interview
+
+"A function is code the platform runs per event, in copies it starts and stops. I look at the trigger first, because it decides who waits and who retries. A new copy pays a cold start, so I keep setup light and reuse connections across warm starts. Then I ask how many copies can run at once. One event per copy means a burst of 300 events opens 300 database connections. So I cap concurrency from what the database can take, add a pool, and queue work that can wait, with a dead-letter queue. Handlers are idempotent."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a cold start, and when does it matter?" level="Junior" category="Cloud">
+    **Short answer.** A cold start is the extra wait while the platform builds a new copy: it fetches the code, starts the runtime and runs the setup code. It matters when a person waits for the reply, and hardly at all for background work.
+
+    **Why.** Brightpost's resize function adds about 1 second to 2 seconds of work, and nobody waits for a thumbnail. On a page a shopper waits on, each cold copy adds its start-up to that wait. Smaller packages, lighter setup and more memory shorten it; warm copies remove it, and bill while idle.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-request" step={1} caption="The first photo waits while the copy is built: code, runtime and setup, about 1 second." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why does more memory often shorten a cold start?
+    - When is paying for warm copies worth it?
+
+    **Watch out for.** Saying cold starts happen only on the first request ever. They happen after every quiet spell, and on every new copy in a burst.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why can 1,000 concurrent requests mean 1,000 database connections on one platform and far fewer on another?" level="Mid" category="Cloud">
+    **Short answer.** It depends on how many requests one copy serves at once. With one per copy, 1,000 in flight means 1,000 copies and 1,000 connections. With 80 per copy, it means about 13 copies, each with a small pool.
+
+    **Why.** Connections follow copies, not requests. Brightpost's platform gives each copy one photo, so 300 photos in flight asked for 300 connections from a database with 110 free. Either way, the safe design caps copies and puts a pool in front, because the database limit is fixed and the traffic is not.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={2} highlight={["fn", "db", "shop"]} caption="Every busy copy holds one connection, so the shop's servers find none left." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does serving many requests per copy ask of your code?
+    - Why put the pool in front of the database rather than inside each copy?
+
+    **Watch out for.** Counting requests per second instead of requests in flight. 100 a second at 2 seconds each is 200 in flight.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A function reads from a queue, and some messages are processed twice. Why, and what do you change?" level="Mid" category="Cloud">
+    **Short answer.** Queues deliver at least once. A message comes back if the copy fails, or is still working when the queue's hold on it runs out. Make the handler idempotent, and set the hold time longer than the function's timeout.
+
+    **Why.** A taken message is hidden for a set time, then handed out again. If a huge photo takes 40 seconds and the hold is 30, a second copy takes it too. Brightpost's function writes under the photo's own name, so the second run changes nothing. For a payment, save the message id in the same transaction and skip ids already seen.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={4} path="uploads>queue>fn" caption="Each photo is one message. The queue hides a taken message for a while, then hands it out again." />
+
+    **Follow-ups the interviewer may ask.**
+    - A batch of 10 has one failure. What happens to the other 9?
+    - When does a message move to the dead-letter queue?
+
+    **Watch out for.** Trying to make the queue deliver exactly once. Design the handler for duplicates instead.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your function's storage trigger writes its output into the bucket it watches. What happens, and how do you prevent it?" level="Mid" category="Cloud">
+    **Short answer.** Every output file is a new event, so the function triggers itself again and again. Runs and the bill grow until a cap, a quota or a person stops it. Write the output elsewhere and filter the trigger.
+
+    **Why.** A thumbnail saved next to "photo.jpg" starts a run that writes another, and so on. With 20 copies and 2 seconds a run, that is 600 runs a minute. Brightpost keeps uploads and thumbnails in separate buckets for this reason. Add a trigger filter, a code check that skips its own output, and a budget alarm.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={1} path="uploads>fn>thumbs" caption="Input and output live in different buckets, so a thumbnail never starts another run." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you notice a loop within minutes?
+    - If you could keep only one guard, which one?
+
+    **Watch out for.** Relying on a check in the code alone. One bug in it and the loop is back.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design Brightpost's image-resize path so that a burst of uploads cannot take the shop down." level="Senior" category="Cloud">
+    **Short answer.** A storage event feeds a queue. A function capped at 20 copies reads it through a connection pool. A dead-letter queue with an alarm catches failures, and the handler is idempotent. The burst waits in the queue, and the shop keeps its connections.
+
+    **Why.** The database holds 200 connections, and the app servers need most of them on a sale day. So the cap comes from the database: 20 copies, 20 pooled connections. The queue turns 1,500 photos into a 2.5-minute backlog. Watch the age of the oldest message; if it passes 10 minutes, raise the cap only if the pool has room.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={4} highlight={["queue", "fn", "pool", "db", "dlq"]} caption="Queue, capped function, pool and dead-letter queue: the burst waits instead of reaching the database." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you choose the cap of 20?
+    - What changes if a thumbnail must appear within 5 seconds of upload?
+
+    **Watch out for.** Fixing it with a bigger database. It costs more every day, and the next burst is bigger.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A stream-triggered function hits one bad record and stops making progress. Why, and how do you design for it?" level="Senior" category="Cloud">
+    **Short answer.** A stream is read in order, part by part. When a batch keeps failing, the platform retries it, and that part waits behind it. Catch errors per record, send the bad one aside, and limit retries by count or age.
+
+    **Why.** Order is the point of a stream, so the platform will not skip ahead. If Brightpost streamed order events to a stock counter, one malformed event would freeze stock updates for its part. More copies do not help: each part has one reader. So the handler parks the bad record and its position, and an alarm watches how far the reader lags. Retried batches repeat good records, so the handler must be idempotent.
+
+    **Follow-ups the interviewer may ask.**
+    - Why can you not clear the backlog by adding copies?
+    - When is it wrong to skip a bad record?
+
+    **Watch out for.** Treating a stream like a queue. A queue sets one bad message aside and carries on; a stream waits.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [The Compute Spectrum: VMs to Functions](/cloud/compute/compute-spectrum)
+- [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas)
+- [Choosing Compute](/cloud/start-here/choosing-compute)
+- [Receiving and Sending Webhooks on the Cloud](/cloud/networking/webhooks-on-the-cloud)
+- [Quotas, Throttling, Retries and Backoff on the Cloud](/cloud/resilience/quotas-and-retries)
+- [Serverless & Orchestration on AWS](/cloud/aws/serverless)
+- [Serverless & Orchestration on Google Cloud](/cloud/gcp/serverless)
+- [Serverless & Orchestration on Azure](/cloud/azure/serverless)
+- [Message Queues and Pub/Sub](/system-design/patterns/message-queues)
+- [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
+
+## Further reading
+
+- [AWS Lambda Developer Guide](https://docs.aws.amazon.com/lambda/latest/dg/welcome.html): triggers, concurrency and the execution environment.
+- [Cloud Run functions](https://cloud.google.com/run/docs/functions-with-run): functions on Cloud Run, with Eventarc triggers.
+- [Azure Functions overview](https://learn.microsoft.com/azure/azure-functions/functions-overview): triggers and bindings.
+- [Azure Functions hosting options](https://learn.microsoft.com/azure/azure-functions/functions-scale): what each plan changes.

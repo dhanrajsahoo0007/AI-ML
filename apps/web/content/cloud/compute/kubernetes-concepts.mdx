@@ -1,11 +1,341 @@
 ---
 title: "Kubernetes Concepts: Cluster Anatomy and the Request Path"
 description: "The parts of a Kubernetes cluster, the path a request takes from the internet to a pod, and what a managed cluster leaves to you."
-status: outline
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** Kubernetes as a control loop over a fleet: you declare how many copies of a container you want and controllers make reality match. The page names the parts (cluster, control plane, node pool, node, pod, deployment, service, ingress and autoscalers), follows one request from the internet to a pod, and explains what a managed cluster does and does not do for you. It also covers one control plane across clouds and data centres.
+<KeyIdea>
+  Kubernetes keeps a written list of what should be running, and it keeps changing the real machines until they match that list.
+</KeyIdea>
 
-**Related reading on this site:** [Containers on AWS](/cloud/aws/containers) · [Containers on Google Cloud](/cloud/gcp/containers) · [Containers on Azure](/cloud/azure/containers)
+## The story
+
+In its third year Brightpost moves its shop onto a cluster: a group of machines that one system manages together. Three copies of the shop's web app, shop-web, run on three machines, one per zone, beside checkout and search. At 10:00 on the first morning of the spring sale, 900 shoppers are online. Asha deploys a small fix to the basket page. A new copy of shop-web needs about 90 seconds after it starts to load 12,000 product prices into memory. Nobody told the cluster that. It sent shoppers to each new copy the moment it started, and removed an old copy straight away. Within 30 seconds no warm copy was left. Asha rolled back, and the rollback did the same thing again. For about 3 minutes, about 2,000 page loads failed and about 40 orders were lost.
+
+The cluster did exactly what it was told. The steps below show what it was told, and the one line that was missing.
+
+## How it works
+
+Three words first. A <Term id="container">container</Term> is an app packed with everything it needs, started as an isolated process. A **node** is one machine in the cluster, usually a rented virtual machine (VM). <Term id="kubernetes">Kubernetes</Term> is the system that decides which containers run on which nodes, and keeps them running.
+
+### Step 1: A brain and a set of machines
+
+<AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" minWidth={620} caption="One cluster: the control plane at the top holds what you asked for; the three nodes below run the pods." />
+
+A cluster has two halves. The **control plane** is the brain, with four parts:
+
+- The **API server**, the only front door. You and every other part talk to it.
+- The **state store**, a small database of what you asked for and what runs now.
+- The **scheduler**, which picks a node for each new piece of work.
+- The **controllers**, small loops that each look after one kind of thing.
+
+The **nodes** are the muscle. On each one an agent, the **kubelet**, starts the work the API server assigns to that node and reports back. A <Term id="node-pool">node pool</Term> is a group of same-sized nodes. Brightpost has one pool with 3 nodes, each with 4 processors and 16 GB of memory.
+
+<PremiumBreak />
+
+### Step 2: Desired state and the reconcile loop
+
+<AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" path="you>api>controllers" minWidth={620} caption="You write what you want to the API server. A controller reads it, compares it with what runs, and acts on the difference." />
+
+You never say "start a copy on node 2". You write **desired state**, "3 copies of shop-web", and the API server saves it.
+
+Each controller runs one loop, forever: read the desired state, look at the actual state, act on the difference. This is the **reconcile loop**. Suppose node 2 loses power. A controller sees 3 copies wanted and 2 running and asks for one more, and the scheduler places it on node 1 or 3. Nobody is paged. [Autoscaling](/cloud/compute/autoscaling) uses the same loop for machines.
+
+### Step 3: Pods, Deployments and ReplicaSets
+
+<AnimatedDiagram spec="animated/cloud/k8s-request-path" step={1} minWidth={620} caption="A Deployment keeps 3 copies of shop-web, one on each node, beside the pods of other apps." />
+
+Kubernetes runs a <Term id="pod">pod</Term>, not a bare container: one or more containers that share an address and start and stop together. Most pods hold one container; a helper such as a log shipper can share it.
+
+Pods are disposable, so nobody creates them by hand. A **Deployment** is a written request: "run 3 copies of this image". It creates a **ReplicaSet**, a controller that keeps that many pods alive. A new image means a new ReplicaSet, which grows while the old one shrinks. That is an update.
+
+### Step 4: Services: one name for many pods
+
+<AnimatedDiagram spec="animated/cloud/k8s-request-path" step={2} minWidth={620} caption="The Service has one stable address and spreads requests over every shop-web pod it knows." />
+
+Every pod gets its own network address, and it changes each time the pod is replaced. So no app should call a pod directly.
+
+A **Service** is a stable name and address in front of a changing set of pods, picked by a label such as `app: shop-web`. Checkout calls `shop-web` by name; the cluster's own DNS turns it into the Service's address, and each request goes to one pod behind it. When a pod is replaced, the list changes and callers never notice.
+
+### Step 5: Traffic from outside: Ingress and Gateway
+
+<AnimatedDiagram spec="animated/cloud/k8s-request-path" step={3} minWidth={620} caption="Shoppers reach the cloud's load balancer over HTTPS. It forwards each request to the Service, which picks a pod." />
+
+A Service's address works only inside the cluster. To let shoppers in, you write an **Ingress**, a rule such as "brightpost.example goes to the shop-web Service". A **Gateway** is a newer way to write the same rules, with clearer ownership of each part.
+
+A rule does nothing by itself. An ingress or gateway controller reads it, and on a managed cluster it usually asks the cloud for a <Term id="load-balancer">load balancer</Term> to match. The load balancer ends HTTPS and sends each request on, through the Service, to a pod. [Load Balancing](/cloud/networking/load-balancing) covers the load balancers themselves.
+
+### Step 6: Rolling updates, and the 90-second gap
+
+<AnimatedDiagram spec="animated/cloud/k8s-request-path" step={4} minWidth={620} caption="The failure: new pods count as ready the moment they start. The Service sends shoppers to them while they load prices, and the old pods are already gone." />
+
+A **rolling update** replaces pods a few at a time, so the app keeps running during a release. It starts a new pod, waits until it is ready, then removes an old one. But with no check written, a pod counts as ready as soon as its container starts.
+
+<Callout tone="red" title="What breaks">
+  At 10:00 the rollout starts a new shop-web pod. It counts as ready at once, so the Service sends shoppers to it and an old pod is removed. The other two follow within 30 seconds. For the next 90 seconds the new pods are still loading 12,000 prices, and most page loads fail. Asha rolls back, and the old version has no check either, so it happens again. About 2,000 page loads fail and about 40 orders are lost.
+</Callout>
+
+Nothing crashed, so no alarm fired. Every pod was "running" the whole time.
+
+### Step 7: A readiness check
+
+<AnimatedDiagram spec="animated/cloud/k8s-request-path" step={5} minWidth={620} caption="Each pod answers /ready once its prices are loaded. Only pods on the ready list get traffic, and the rollout waits for each one." />
+
+A **readiness check** is a test the kubelet runs on each pod, for example an HTTP call to `/ready` every 5 seconds. Shop-web now answers OK only after its prices are loaded. Until then the pod stays off the Service's ready list, and the rollout does not move on.
+
+The rollout still adds one new pod before it removes an old one, but now it waits for each check to pass. A release takes about 5 minutes instead of 30 seconds, and no shopper sees an error. A separate **liveness check** restarts a pod that is stuck.
+
+### Step 8: Requests, limits, config and secrets
+
+Many apps share each node, so each pod states what it needs.
+
+<Compare
+  columns={["Setting", "What it means", "Who uses it", "Shop-web's value"]}
+  rows={[
+    ["Request", "What the pod is promised", "The scheduler, to pick a node with room", "1 processor, 1 GB"],
+    ["Limit", "The most it may use", "The node: it slows the pod at its CPU limit and stops it past its memory limit", "2 processors, 1.5 GB"],
+  ]}
+  caption="Requests decide where a pod fits. Limits stop one pod from starving its neighbours."
+/>
+
+The scheduler adds up requests, not real use, so a pod with no request can land anywhere. A pod with no memory limit can fill a node, and the node then stops pods to free memory. Set both on every pod.
+
+A **ConfigMap** holds plain settings outside the image, such as the sale's start time. A Kubernetes **Secret** holds a <Term id="secret">secret</Term>, such as the database password. Anyone allowed to read a Secret sees its value. Limit who may read it, or use a workload identity and keep no password at all; [Secrets Management](/cloud/resilience/secrets-management) covers both.
+
+### Step 9: Two autoscalers: pods first, then nodes
+
+<AnimatedDiagram spec="animated/cloud/k8s-request-path" step={7} minWidth={620} caption="CPU climbs, so the pod autoscaler asks for 5 copies. The 2 new pods do not fit, so the node autoscaler adds node 4 for them." />
+
+<Term id="autoscaling">Autoscaling</Term> in a cluster has two layers. The **pod autoscaler** changes a Deployment's copy count from a metric. Brightpost aims for 60% processor use, with 3 to 12 copies. On the sale morning use reaches 85%, and within seconds it asks for 5 copies.
+
+The new pods ask for 1 processor each, and the 3 nodes have 0.3 left each. So the pods wait, marked **Pending**. The **node autoscaler** sees them and asks the cloud for another VM, which takes minutes to boot and join. When load falls, it drains a quiet node and removes it.
+
+### Step 10: Who runs what
+
+<ResponsibilityGrid set="kubernetes" />
+
+A managed service takes some of the cluster's parts off you. Read the columns left to right.
+
+1. **Self-managed.** You run the control plane and the nodes on your own VMs.
+2. **Managed, with your own node pools.** The cloud runs the control plane, its backups and its upgrades. You pick node sizes, start node upgrades and set how pools scale.
+3. **Hands-off nodes.** The cloud also picks, patches and scales the nodes. You hand over pods with honest requests and lose some control of the machines.
+
+The fourth column, serverless containers, has no cluster at all. Your images, pod specs, requests and readiness checks stay yours in every column. So does Brightpost's 90-second gap.
+
+## On AWS, Google Cloud and Azure
+
+All three clouds run the same open-source Kubernetes, so pods, Deployments and Services work the same. They differ in who runs the nodes and how traffic gets in.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Control plane:** Amazon EKS runs it across several zones of a region.
+    - **Nodes:** managed node groups, EC2 instances that EKS creates and updates. Karpenter or the Cluster Autoscaler adds nodes.
+    - **Hands-off mode:** EKS Auto Mode, where AWS picks, patches and scales the nodes. Fargate profiles run chosen pods with no node to see; node-level add-ons do not run there.
+    - **Traffic from outside:** the AWS Load Balancer Controller turns an Ingress into an Application Load Balancer. A Service of type LoadBalancer becomes a Network Load Balancer.
+
+    **The difference that changes a design.** By default each pod gets an address from your VPC's subnet, the same kind a VM gets. The load balancer can then send traffic straight to pod addresses, and pods sit in the VPC like any VM. The cost is address space: a small subnet caps how many pods the cluster can run, so plan subnet sizes before you build.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Control plane:** Google Kubernetes Engine (GKE) runs it. A zonal cluster has one control plane in one zone; a regional cluster copies it across the region's zones.
+    - **Nodes:** in Standard mode, node pools of Compute Engine VMs that GKE can upgrade, repair and autoscale.
+    - **Hands-off mode:** Autopilot. Google runs the nodes, and the bill mostly follows what your pods request.
+    - **Traffic from outside:** GKE's Ingress and Gateway controllers create a Google Cloud load balancer that can send requests straight to pods.
+
+    **The difference that changes a design.** In Autopilot, requests are the bill. A pod that asks for 2 processors and uses 0.3 pays for 2. So request sizing becomes a cost task, not only a placement task. Autopilot also refuses some node-level access, such as privileged pods, so check what your add-ons need first.
+  </Tab>
+  <Tab label="Azure">
+    - **Control plane:** Azure Kubernetes Service (AKS) runs it, and you never see its machines.
+    - **Nodes:** node pools built on Virtual Machine Scale Sets, each with its own cluster autoscaler. A system pool runs the cluster's add-ons; user pools run your apps.
+    - **Hands-off mode:** AKS Automatic. Azure picks node sizes, scales and upgrades the nodes, and starts with preset defaults for security and networking.
+    - **Traffic from outside:** Application Gateway for Containers, or an ingress controller inside the cluster behind an Azure Load Balancer.
+
+    **The difference that changes a design.** Every AKS cluster needs at least one system node pool. The cluster's DNS and other add-ons run there. Keep your apps on user node pools. Then a busy app, or one with no memory limit, cannot starve the add-ons that every other pod depends on.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/k8s-request-path" stepper minWidth={620} caption="The whole path in seven steps. The Services toggle shows each provider's name for the load balancer and the node autoscaler." />
+
+<CloudMapping diagram="cloud/k8s-request-path" lead="aws" />
+
+### One control plane, many places
+
+Some companies also run Kubernetes in their own data centre or on another cloud. Each provider offers one place to manage those clusters with the same policies.
+
+- **Google Cloud:** a fleet groups clusters under one set of policies, including clusters attached from other clouds and Google Distributed Cloud on your own hardware.
+- **Azure:** Azure Arc-enabled Kubernetes connects a cluster anywhere to Azure, so Azure Policy, monitoring and config from Git reach it.
+- **AWS:** EKS Anywhere runs EKS's Kubernetes on your own hardware; EKS on AWS Outposts runs it on AWS racks in your building.
+
+Brightpost has no data centre, so it needs none of these.
+
+## Try it
+
+<DecisionTree
+  title="How should we run containers?"
+  tree={{
+    q: "Do you run several services, with someone whose job includes the cluster?",
+    no: {
+      answer: "Skip Kubernetes for now. A serverless container platform runs an image with no cluster to look after.",
+      href: "/cloud/compute/serverless-containers-and-paas",
+    },
+    yes: {
+      q: "Do you need control of the nodes: special machine types, node-level agents or your own OS settings?",
+      yes: "A managed cluster with your own node pools. Turn on the node autoscaler.",
+      no: {
+        q: "Must the cluster run outside a cloud region, in your own building?",
+        yes: "Use the provider's on-premises or multi-place option, and manage every cluster from one control point.",
+        no: "A managed cluster where the cloud runs the nodes too. Patching nodes stops being your job.",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="A new shop-web pod starts at 10:00:00 and has its prices loaded at 10:01:30. Its readiness check runs every 5 seconds. Roughly when does it first get a shopper's request?" hint="It must pass one check after the prices are loaded.">
+    By about 10:01:35, at the first check after loading. Until then it is off the ready list.
+  </QuizItem>
+  <QuizItem question="The pod autoscaler asks for 5 copies. Each new pod requests 1 processor, and each of the 3 nodes has 0.3 left. What does the shopper see for the next few minutes?" hint="Where can the new pods go?">
+    The 3 running copies carry the extra load. The 2 new pods stay Pending until a new node joins, minutes later.
+  </QuizItem>
+  <QuizItem question="Node 3 loses power. Which part notices that shop-web now has 2 copies instead of 3, and what does it do?">
+    A controller. It sees 3 wanted and 2 running and asks for one more; the scheduler places it on node 1 or 2.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "No readiness check", "Ready check, one new pod at a time", "Ready check, all 3 new at once"]}
+  rows={[
+    ["Time for a release", "About 30 s", "About 5 minutes", "About 100 s"],
+    ["Failed page loads on the sale morning", "About 2,000", "0", "0"],
+    ["Extra room needed during the release", "None", "1 pod", "3 pods: a 4th node on a busy day"],
+    ["Old version still serving until the new one is warm", false, true, true],
+    ["Good fit when", "Never, for a web app", "Most releases", "An urgent fix with spare room"],
+  ]}
+  caption="Three ways to release shop-web, with the story's numbers: 3 copies and 90 seconds to warm up."
+/>
+
+A readiness check costs a few lines of config and makes each release slower. For a shop on a sale morning, 5 minutes with no errors beats 30 seconds with 2,000.
+
+## Common pitfalls
+
+- **No readiness check.** Traffic reaches a pod before it can answer. Add a `/ready` check that passes only when the app can serve.
+- **No requests or limits.** A pod that asks for nothing can land anywhere, and one with no memory limit can fill a node. Set both on every pod.
+- **A liveness check that tests the database.** When the database slows, every pod fails it and restarts at once. Liveness asks only "is this process stuck?"
+- **A pod autoscaler with no room under it.** A maximum of 12 copies means nothing if the pool stops at 3 nodes. Size both maximums together.
+- **Calling pods by address.** The address changes with every replacement. Call the Service's name.
+
+## How to say it in an interview
+
+"Kubernetes is a reconcile loop over a fleet of machines. I write desired state, such as three copies of an image, and controllers keep reality matching it. A Service gives the pods one stable name, and an Ingress or Gateway puts a cloud load balancer in front. Every pod gets requests, limits and a readiness check, so it is placed well, cannot starve its neighbours, and gets traffic only when warm. The pod autoscaler adds copies in seconds; the node autoscaler adds machines in minutes. On a managed service the cloud runs the control plane, and in hands-off mode the nodes too."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a pod, and why does Kubernetes not run containers directly?" level="Junior" category="Cloud">
+    **Short answer.** A pod is the smallest thing Kubernetes runs: one or more containers that share a network address and start and stop together. It lets a helper, such as a log shipper, sit beside the app and act as one unit.
+
+    **Why.** Some containers only make sense together. A pod gives them one address, shared storage and one lifetime on one node. Even with one container, the pod is the unit that Deployments, Services and autoscalers count. Brightpost's 3 shop-web copies are 3 pods, one per node.
+
+    <AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" highlight={["kubelet1", "web1", "app1"]} caption="The kubelet on each node starts pods; each pod here holds one app's container." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to a pod's local files when it is replaced?
+    - When would you put two containers in one pod rather than two pods?
+
+    **Watch out for.** Calling a pod "a small VM". It shares the node's operating system kernel and is meant to be thrown away.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Pods already have IP addresses. Why do you need a Service in front of them?" level="Mid" category="Cloud">
+    **Short answer.** A pod's address changes every time the pod is replaced, and there are several pods. A Service gives one stable name and address and spreads requests over whichever pods are ready right now.
+
+    **Why.** Brightpost's pods are replaced on every release, on node failures and whenever the autoscaler changes the count. If checkout held pod addresses, each change would break calls. With a Service, the cluster's DNS resolves `shop-web` to one address, and the ready list changes behind it.
+
+    <AnimatedDiagram spec="animated/cloud/k8s-request-path" step={5} highlight={["service", "ready", "pod1", "pod2", "pod3"]} caption="One stable address in front; only pods on the ready list get requests." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does traffic from the internet reach a Service?
+    - What happens to requests in flight when a pod leaves the list?
+
+    **Watch out for.** Saying a Service is a load balancer the cloud creates. An internal Service is a cluster feature; only outside traffic needs a cloud load balancer.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A Deployment shows 3 desired, 2 ready and 1 Pending for ten minutes. Walk through the causes." level="Mid" category="Cloud">
+    **Short answer.** Pending means the scheduler cannot place the pod. Usually no node has room for its requests and the node autoscaler cannot add one. Or the pod demands something no node has, such as a zone or a GPU.
+
+    **Why.** The scheduler adds up requests, not real use. Brightpost's new pods ask for 1 processor and each node has 0.3 left, so they wait. Normally the node autoscaler adds a node within minutes. Ten minutes points to a block: the pool is at its maximum, the VM size is out of stock, or the quota is used up. The pod's events name the reason.
+
+    <AnimatedDiagram spec="animated/cloud/k8s-request-path" step={7} highlight={["hpa", "nodeauto", "pod4", "pod5"]} caption="Pending pods are what the node autoscaler watches for; node 4 joins for them." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you tell a quota problem from a full node pool?
+    - Would lowering the pod's request be a fix or a hidden risk?
+
+    **Watch out for.** Restarting the pod. It will be Pending again, because nothing about the nodes changed.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A rolling update caused errors even though every new pod started fine. What was missing?" level="Mid" category="Cloud">
+    **Short answer.** A readiness check. Without one, a pod counts as ready the moment its container starts. The Service sends it traffic before it can answer, and the rollout removes old pods without waiting.
+
+    **Why.** Brightpost's shop-web needs 90 seconds to load 12,000 prices. With no check, all 3 old pods were gone within 30 seconds, and the rollback repeated it: about 2,000 failed page loads. A `/ready` check that passes only after loading fixes it. The rollout then waits for each new pod, and a release takes about 5 minutes with no errors.
+
+    <AnimatedDiagram spec="animated/cloud/k8s-request-path" step={4} caption="The failure: the Service sends shoppers to new pods that are still warming up." />
+
+    **Follow-ups the interviewer may ask.**
+    - How is a liveness check different, and why must it not test the database?
+    - How would you make this rollout faster without errors?
+
+    **Watch out for.** Blaming the rollout speed. A slower rollout with no readiness check fails the same way, only more slowly.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When would you choose the mode of a managed Kubernetes service where the cloud runs the nodes, and what do you give up?" level="Senior" category="Cloud">
+    **Short answer.** When the team wants Kubernetes' model but has no one to patch, size and scale nodes. You give up control of the machines: node types, node-level agents, privileged pods. Billing often follows what pods request.
+
+    **Why.** Brightpost has 3 engineers. With their own node pools, node upgrades, OS patches and autoscaler settings are theirs. When the cloud runs the nodes, those jobs go away. The price is honest requests: a pod that asks for 2 processors and uses 0.3 still reserves 2. Agents that need the node itself may not run. Images, pod specs, limits and readiness checks stay theirs.
+
+    <AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" highlight={["api", "store", "controllers", "scheduler"]} caption="In every managed mode the cloud runs the control plane; the hands-off mode adds the nodes." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which workloads would you keep on your own node pool?
+    - How does this compare with a serverless container platform with no cluster at all?
+
+    **Watch out for.** Saying "the cloud runs everything". Brightpost's readiness gap would break a hands-off cluster in exactly the same way.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Sale traffic doubles in two minutes. What scales in your cluster, in what order, and how long does each part take?" level="Senior" category="Cloud">
+    **Short answer.** First the pod autoscaler adds copies, in seconds, if the nodes have room. When they do not, the new pods go Pending and the node autoscaler adds VMs, which takes minutes. Each new pod then needs its own warm-up before it passes the readiness check.
+
+    **Why.** At Brightpost, processor use hits 85% against a 60% target, so the pod autoscaler asks for 5 copies. Two cannot fit, the node autoscaler adds node 4, and each new pod warms for 90 seconds. That is 4 to 5 minutes end to end. To shorten it, keep spare room on nodes, raise the minimum before a planned sale, and cut the warm-up.
+
+    <AnimatedDiagram spec="animated/cloud/k8s-request-path" path="hpa>deploy" step={6} caption="The fast layer: the pod autoscaler changes the copy count in seconds." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you keep spare room on nodes without paying for idle machines all year?
+    - Which metric would you scale shop-web on, and why?
+
+    **Watch out for.** Assuming the pod autoscaler is enough. With full nodes it only creates Pending pods.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [The Compute Spectrum: VMs to Functions](/cloud/compute/compute-spectrum)
+- [Containers and Registries](/cloud/compute/containers-and-registries)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas)
+- [Load Balancing](/cloud/networking/load-balancing)
+- [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies)
+- [Secrets Management](/cloud/resilience/secrets-management)
+- [Containers on AWS](/cloud/aws/containers)
+- [Containers on Google Cloud](/cloud/gcp/containers)
+- [Containers on Azure](/cloud/azure/containers)
+- [Load balancing patterns](/system-design/patterns/load-balancing)
+
+## Further reading
+
+- [Kubernetes concepts](https://kubernetes.io/docs/concepts/): the project's own guide to pods, workloads and Services.
+- [Amazon EKS User Guide](https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html): node options and load balancing on AWS.
+- [GKE overview](https://cloud.google.com/kubernetes-engine/docs/concepts/kubernetes-engine-overview): Standard and Autopilot modes.
+- [Azure Kubernetes Service documentation](https://learn.microsoft.com/azure/aks/): node pools and AKS Automatic.
