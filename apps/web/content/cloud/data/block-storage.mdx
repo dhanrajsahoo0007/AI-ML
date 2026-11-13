@@ -1,11 +1,328 @@
 ---
 title: "Block Storage: Volume Types, IOPS and Snapshots"
-description: "What a cloud disk really is, what IOPS and throughput mean, why volume types exist, and how snapshots copy only what changed."
-status: outline
+description: "What a cloud disk is, the three numbers that set its speed, why volume types and burst credits exist, and how snapshots copy only what changed."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** a cloud disk as a network-attached volume: what IOPS and throughput mean, why volume types exist, the rule that a volume attaches in one zone, and snapshots as incremental copies.
+<KeyIdea>
+  A cloud disk is a volume that your server reaches over the network. Its speed is a setting you choose and pay for, and its spare copy is a snapshot that keeps only the blocks that changed.
+</KeyIdea>
 
-**Related reading on this site:** [Files, blocks and objects](/system-design/fundamentals/storage-types) · [Storage on AWS](/cloud/aws/storage) · [Storage on Google Cloud](/cloud/gcp/storage)
+## The story
+
+Last spring a contractor added customer reviews to Brightpost's product pages. The review service runs on one virtual machine (VM) with its own database. The database keeps its files on a 100 GB general-purpose cloud disk. On a normal day the busiest minute asks that disk for about 80 reads a second. The disk promised 300 a second, and up to 3,000 for a while. On sale day, 2,000 shoppers arrived at 9 a.m. Each product page needed about 20 disk reads for its reviews, so the disk was asked for 1,200 reads a second. It kept up until 9:50, then dropped to 300. Product pages wait for their reviews, and load time rose from 0.4 s to about 7 s. At 11:15 Asha changed the disk's type, and by 11:25 pages loaded in 0.4 s again. In those 95 minutes about 160 orders were lost.
+
+Every step below explains one number from that morning, then shows how Brightpost now copies and restores that disk.
+
+## How it works
+
+Three words first. A **volume** is one cloud disk, and <Term id="block-storage">block storage</Term> is the service that sells volumes. A **block** is a small fixed-size piece of a disk, a few kilobytes, read or written whole. **IOPS**, short for input/output operations per second, counts the reads and writes a disk does each second.
+
+### Step 1: A disk on the other side of the network
+
+<AnimatedDiagram spec="animated/cloud/block-snapshot-chain" step={1} minWidth={620} caption="Brightpost's review service on a normal day: the server reads about 80 blocks a second from its general-purpose volume." />
+
+A volume is not inside the server. It lives in the provider's storage system, in the same <Term id="availability-zone">zone</Term> as the VM, and reaches it over the network. The VM's operating system sees an ordinary drive. Every read travels there and back, so one read takes about 1 ms. The SSD inside a laptop answers in about 0.1 ms.
+
+The trip buys two things. The provider keeps several copies of every block inside the zone, so one broken drive loses nothing. And the volume outlives the VM: detach it, and another VM in the zone can use it. [Object, Block and File](/cloud/data/storage-types) compares the three storage shapes; this page goes inside the volume.
+
+<PremiumBreak />
+
+### Step 2: Three numbers: IOPS, throughput and latency
+
+<AnimatedDiagram spec="animated/cloud/block-storage-1" stepper minWidth={620} caption="Small reads hit the IOPS limit, big reads hit the throughput limit, and latency is the time each read takes." />
+
+Every volume is described by three numbers.
+
+- **IOPS:** how many reads and writes a second. A database asks for many small blocks, 8 KB each here, scattered across the disk. 1,200 of them a second move under 10 MB.
+- **<Term id="throughput">Throughput</Term>:** how many megabytes a second. A backup job reads the same disk in 1 MB pieces, start to end. At 125 MB a second it uses only 125 IOPS.
+- **<Term id="latency">Latency</Term>:** how long one read takes. When more reads arrive than the disk allows, they wait in a queue, and the wait adds to every read.
+
+Small scattered reads need IOPS; big sequential reads need throughput. [B-trees](/system-design/databases/b-trees) shows why a database reads small scattered pages.
+
+### Step 3: Baseline, burst and credits
+
+<AnimatedDiagram spec="animated/cloud/block-snapshot-chain" step={2} minWidth={620} caption="The failure: at 9:50 the credit bucket is empty, so the volume serves 300 reads a second while the database asks for 1,200." />
+
+Some disk types give a **baseline**, a speed held all day, plus a **burst** above it that runs on **credits**. Below the baseline, each unused read is saved as a credit in a bucket; above it, each extra read spends one. Brightpost's disk had a baseline of 300 IOPS, a burst of 3,000 and a full bucket of 2.7 million credits.
+
+On a normal day the busiest minute needs 80 IOPS, so the bucket stays full.
+
+<Callout tone="red" title="What breaks">
+  At 9:00 the database asks for 1,200 reads a second. The disk serves them all and spends 900 credits a second above its baseline. 2.7 million credits last 3,000 seconds: 50 minutes. At 9:50 the bucket is empty and the disk falls to 300 IOPS. Reads queue, each product page waits about 7 seconds for its reviews, and shoppers leave.
+</Callout>
+
+Fast in a short test and slow after an hour of real load: that is this pattern. Watch the credit balance, or pick a type with no credits.
+
+### Step 4: Volume types
+
+<AnimatedDiagram spec="animated/cloud/block-snapshot-chain" step={3} minWidth={620} caption="The fix: a disk type with 2,000 IOPS set and no credits, below the VM's own limit of 2,500." />
+
+Clouds sell a few families of volume. The names differ; the families are the same.
+
+<Compare
+  columns={["Type", "Built for", "Speed comes from", "At Brightpost"]}
+  rows={[
+    ["General-purpose SSD", "Most disks: boot disks, small databases", "The size, or IOPS and throughput you set; some types burst on credits", "Boot disks"],
+    ["Provisioned-IOPS SSD", "Busy databases that need steady, low latency", "The IOPS you buy, held all day", "Not needed at 1,200 IOPS"],
+    ["Throughput HDD", "Big files read start to end, such as logs", "Megabytes a second; slow at small scattered reads", "Not used"],
+    ["Cold HDD", "Data read rarely", "The lowest price per gigabyte, and the lowest speed", "Not used"],
+  ]}
+  caption="Families, not products. The tabs further down name each cloud's types."
+/>
+
+At 11:15 Asha moved the volume to a type whose IOPS are set, not earned: 2,000, held all day. On her cloud the change applied while the database kept running. On some types you must stop the VM, or copy the data to a new volume.
+
+On older types speed grows with size, so teams bought large disks only for IOPS. Newer types make size, IOPS and throughput three separate settings.
+
+### Step 5: The VM has a limit too
+
+Each VM size also caps the disk traffic it can carry: a total of IOPS and a total of throughput, shared by all its volumes. A small VM in front of a fast volume gets the VM's number, not the volume's.
+
+Brightpost's review VM, a small size with 2 vCPUs, allows 2,500 IOPS, so Asha chose 2,000. Buying 5,000 would pay for 2,500 that could never arrive. When a disk seems slow, compare what the program asks for, what the volume allows and what the VM allows. The smallest wins.
+
+### Step 6: Local disks: fast, and gone with the host
+
+Some VM sizes come with a **local disk**, a drive inside the physical host. It skips the network, but it belongs to the host, not to you.
+
+<Compare
+  columns={["", "Network volume", "Local disk"]}
+  rows={[
+    ["One read takes", "About 1 ms", "About 0.1 ms"],
+    ["Data survives a stop or a move to another host", true, false],
+    ["Can move to another VM", true, false],
+    ["Snapshots", true, false],
+    ["Use it for", "Databases, boot disks, anything you keep", "Caches, temporary files, copies you can rebuild"],
+  ]}
+  caption="The two kinds of disk a VM can have."
+/>
+
+### Step 7: Snapshots: first full, then only what changed
+
+<AnimatedDiagram spec="animated/cloud/block-snapshot-chain" step={5} minWidth={620} caption="Snapshot 1 copies all 40 GB in use. Snapshots 2 and 3 store only the blocks that changed and reuse the rest." />
+
+A <Term id="snapshot">snapshot</Term> saves a volume's blocks as they were at one moment. The provider keeps it in its own storage at region level, outside the volume's zone.
+
+The first snapshot copies every block in use: 40 GB of Brightpost's 100 GB disk. Each later one copies only the blocks that changed since the one before, about 1 GB a night, and points back for the rest. Thirty nightly snapshots hold about 70 GB, not 30 × 40 = 1,200 GB.
+
+Each snapshot still restores the whole disk. Delete an old one, and the provider keeps any block a newer snapshot needs. Brightpost snapshots the review disk at 02:00 each night and keeps 30 days.
+
+### Step 8: Crash-consistent or application-consistent
+
+A snapshot taken with no warning catches the disk as a power cut would. Writes still held in memory are missing. That is a **crash-consistent** snapshot. A database is built to survive a power cut: on start it replays its log and repairs the rest, which takes Brightpost's about 20 seconds.
+
+An **application-consistent** snapshot warns the program first. The database or the operating system writes out what it holds, pauses for a moment, and then the snapshot is taken.
+
+<Compare
+  columns={["", "Crash-consistent", "Application-consistent"]}
+  rows={[
+    ["How it is taken", "Blocks frozen at one instant, no warning", "Writes flushed and paused, then the snapshot"],
+    ["Like", "Pulling the power cord", "Closing every file, then copying"],
+    ["On restore", "The database replays its log: 20 s at Brightpost", "Starts clean"],
+    ["Cost", "Nothing extra", "A pause in writes: 2 s at 02:00"],
+    ["Watch for", "Files on two volumes must be frozen at the same instant", "A script that forgets to resume writes"],
+  ]}
+  caption="Two ways to take the same snapshot."
+/>
+
+Brightpost's database keeps all its files on one volume. With two, data and log, both must be captured at the same instant. For a database, its own backup tool makes the safest copy; a snapshot is the fast way to get a whole disk back.
+
+### Step 9: Restore into another zone, copy to another region
+
+<AnimatedDiagram spec="animated/cloud/block-snapshot-chain" step={7} minWidth={620} caption="Snapshot 3 becomes a new volume in zone B for a spare server, and a weekly copy goes to a second region." />
+
+A snapshot becomes a **new** volume, in any zone of the region. That is how data crosses zones: a volume is zonal, a snapshot is not. Brightpost tests this every month: a new volume in zone B is ready in about 4 minutes, and a spare server attaches it.
+
+On some clouds a new volume fetches each block from the snapshot the first time it is read, so first reads are slow. Read the whole disk once before traffic arrives, or turn on the fast-restore option where one exists.
+
+A copy in another <Term id="region">region</Term> survives the loss of the whole region; Brightpost copies one a week to its second allowed region. [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults) covers locking copies away from your own mistakes.
+
+### Step 10: Encrypt, resize, replicate
+
+- **Encryption at rest.** The cloud encrypts each block before it writes it, with a key from its key service, the <Term id="kms" />. Snapshots of an encrypted volume, and volumes made from them, stay encrypted. Some clouds encrypt every disk by default; on others it is a setting, so turn it on for the whole account. A copy in another region needs a key that region can use.
+- **Resizing.** You can grow a volume, often while in use, then grow the file system inside it. You cannot shrink one.
+- **Zonal or replicated.** Brightpost's volume lives in zone A. If zone A fails, the review service waits for a restore in zone B and loses up to a day of reviews. A replicated disk writes each block to two or more zones before it confirms, so nothing is lost and writes take a little longer. Only some disk types offer it.
+
+## On AWS, Google Cloud and Azure
+
+Volumes, IOPS, snapshots and keys work the same way on all three clouds. The names differ, and so does whether a disk can reach beyond one zone.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Volume types:** Amazon EBS: gp3 and gp2 (general-purpose SSD), io2 and io1 (provisioned IOPS), st1 (throughput HDD) and sc1 (cold HDD). Neither HDD type can boot. Instance store disks are local and lose their data when the instance stops.
+    - **Speed settings:** gp3 sets IOPS and throughput apart from size, with no credits; gp2 grows with size and bursts on credits. Elastic Volumes changes type, size and IOPS on an attached volume. Each instance type has its own EBS limit.
+    - **Snapshots:** incremental and kept at region level. Copy them to another region or account; schedule them with Data Lifecycle Manager or AWS Backup. A restored volume loads each block on first read, unless Fast Snapshot Restore is on for that snapshot.
+    - **Encryption:** per volume, with a key in AWS KMS; an account setting turns it on by default, one region at a time. A copy to another region names a key there.
+    - **Across zones:** a volume lives in one Availability Zone; to move it, snapshot and restore.
+
+    **The difference that changes a design.** EBS has no volume that spans zones. A self-run database that must survive a zone failure needs its own replica in a second zone, or accepts a restore from the last snapshot. Moving gp2 to gp3 removes the credit bucket that hurt Brightpost.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Volume types:** Persistent Disk (standard, balanced, SSD and extreme) and Hyperdisk (Balanced, Extreme and Throughput). Local SSD sits in the host; keep only data you can lose on it.
+    - **Speed settings:** Persistent Disk speed grows with the disk's size and with the VM's number of vCPUs. Hyperdisk sets IOPS and throughput apart from size, and you can change them on a disk in use.
+    - **Snapshots:** incremental and global: stored in a region or multi-region you choose, and restorable in any region. Snapshot schedules attach to disks.
+    - **Encryption:** every disk is encrypted by default with Google-managed keys. Customer-managed keys in Cloud KMS are optional.
+    - **Across zones:** regional Persistent Disk and Hyperdisk Balanced High Availability write every block to two zones of the region.
+
+    **The difference that changes a design.** A replicated disk turns a zone failure into attaching the disk to a VM in the other zone, with no data lost; writes wait for both zones. Global snapshots remove the copy step between regions.
+  </Tab>
+  <Tab label="Azure">
+    - **Volume types:** Managed Disks: Standard HDD, Standard SSD, Premium SSD, Premium SSD v2 and Ultra Disk. Many VM sizes also have a temporary disk, wiped when the VM is deallocated or moved.
+    - **Speed settings:** Standard SSD and Premium SSD speed comes from a size tier, and smaller sizes can burst on credits. Premium SSD v2 and Ultra Disk set IOPS and throughput apart from size, and you can change them while the disk is in use. Each VM size caps total disk IOPS and throughput.
+    - **Snapshots:** incremental snapshots store only the changes since the last one and can be copied to another region. Azure Backup can take application-consistent backups of whole VMs.
+    - **Encryption:** every managed disk is encrypted at rest by default with platform-managed keys. Customer-managed keys come from Key Vault through a disk encryption set.
+    - **Across zones:** zone-redundant (ZRS) disks, offered for Premium SSD and Standard SSD, write to three zones of the region. Other disks live in one zone.
+
+    **The difference that changes a design.** On Premium SSD the size tier sets the speed, so teams buy a bigger disk to get more IOPS and pay for gigabytes they never fill. Premium SSD v2 and Ultra Disk break that link, but neither can be an OS disk. They suit a busy database's data disk.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/block-snapshot-chain" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/block-snapshot-chain" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which kind of disk?"
+  tree={{
+    q: "Can you lose this data when the VM stops or moves to another host?",
+    yes: "A local disk: the fastest reads, for caches and scratch files. Keep nothing on it that you cannot rebuild.",
+    no: {
+      q: "Does the program read big files from start to end, such as logs or exports?",
+      yes: "A throughput HDD volume, priced for megabytes a second. Not for a boot disk or a database.",
+      no: {
+        q: "Does it need thousands of small reads a second, all day, at steady low latency?",
+        yes: "A provisioned-IOPS SSD. Check the VM's own disk limit before you buy IOPS.",
+        no: {
+          answer: "A general-purpose SSD. Prefer a type where you set IOPS with no credits, or alert on the credit balance.",
+          href: "/cloud/compute/virtual-machines",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost's disk has a baseline of 300 IOPS and a full bucket of 2.7 million credits. How long does the bucket last if the database asks for 2,100 reads a second?" hint="Credits spent per second are the reads above the baseline.">
+    25 minutes. The disk spends 2,100 − 300 = 1,800 credits a second, and 2.7 million ÷ 1,800 is 1,500 seconds.
+  </QuizItem>
+  <QuizItem question="A volume set to 5,000 IOPS is attached to a VM that allows 2,500. The database asks for 4,000 reads a second. What does it get?">
+    At most 2,500 a second, the VM's limit. The other 1,500 reads wait in the queue, and 2,500 of the volume's IOPS are paid for and never used.
+  </QuizItem>
+  <QuizItem question="The review disk has 40 GB in use, and about 1 GB changes each night. About how much do 30 nightly snapshots store?" hint="Only the first one is full.">
+    About 70 GB: 40 GB for the first snapshot, plus about 1 GB for each of the other 29.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "General-purpose with credits", "IOPS you set", "Local disk"]}
+  rows={[
+    ["Speed on a normal day", "300 IOPS, bursts to 3,000", "2,000 IOPS", "Far higher, about 0.1 ms a read"],
+    ["A 95-minute peak at 1,200 IOPS", "Credits gone after 50 minutes", "Holds all day", "Holds all day"],
+    ["Data after a stop or a host failure", "Kept", "Kept", "Can be lost"],
+    ["Snapshots", true, true, false],
+    ["You pay for", "Size only", "Size and the IOPS you set", "Comes with the VM size"],
+    ["Brightpost uses it for", "Boot disks", "The review database", "Nothing yet"],
+  ]}
+  caption="Brightpost's three choices for the review database's disk."
+/>
+
+The credit disk is cheapest until the first long peak. For a database on the path to checkout, steady IOPS cost a little more every day and nothing extra on the worst one.
+
+## Common pitfalls
+
+- **Load tests shorter than the bucket.** A 10-minute test measures the burst, not the baseline. Run the test for longer than the bucket lasts, and watch the credit balance while it runs.
+- **Buying IOPS the VM cannot carry.** The VM size caps all its disk traffic. Check that limit first; past it, a faster volume changes the bill and nothing else.
+- **Keeping data on a local disk.** It can vanish with a stop or a host move. Keep only caches and scratch files there.
+- **Snapshots nobody has restored.** An untested snapshot is a hope, not a backup. Restore one into another zone every month and time how long it takes.
+- **Two volumes, two moments.** A database with data and log on separate volumes needs both captured at the same instant. Use the cloud's multi-volume snapshot or the database's own backup.
+
+## How to say it in an interview
+
+"A cloud volume is a disk on the provider's network in one zone, so a read takes about a millisecond, ten times a local SSD. I size it by three numbers: IOPS for small scattered reads, throughput for big sequential ones, and the latency the program can stand. I avoid credit-based bursting on the busy path, since it lasts only until the bucket empties. I check the VM's own disk limit before buying IOPS. Snapshots copy the disk once in full and then only changed blocks, so nightly copies are cheap. I test restores into another zone and copy some to a second region. For a database I still rely on its own backups and replicas."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why is a cloud volume slower than the SSD in your laptop?" level="Junior" category="Cloud">
+    **Short answer.** Every read crosses the network to the provider's storage system and back. A laptop SSD answers in about 0.1 ms; a network volume in about 1 ms. In return the volume keeps several copies of each block, outlives the VM and can be snapshotted.
+
+    **Why.** The volume sits in a storage system in the zone, not inside the host, so each block makes a round trip. Speed also has limits you choose: the volume type's IOPS and throughput, and the VM's own cap. Brightpost's review disk was slow because its credits ran out, not because of the network. When you need laptop speed for data you can lose, use a local disk.
+
+    <AnimatedDiagram spec="animated/cloud/block-snapshot-chain" step={1} highlight={["server", "disk"]} caption="The server and its volume are two machines: every read crosses the zone's network." />
+
+    **Follow-ups the interviewer may ask.**
+    - When would you choose a local disk instead?
+    - Apart from the network, what can make a volume slow?
+
+    **Watch out for.** Saying cloud disks use slower hardware. The drives are fast; the round trip and the limits you bought set the speed.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A self-run database is fast for the first hour of a busy day, then queries take seconds. What do you check?" level="Mid" category="Cloud">
+    **Short answer.** Burst credits first, then the VM's disk limit. A volume that bursts on credits holds its burst only until the bucket empties, then falls to its baseline.
+
+    **Why.** Brightpost's review disk had a 300 IOPS baseline and a 3,000 burst. From 9:00 the database asked for 1,200 reads a second and spent 900 credits a second. 2.7 million credits lasted 50 minutes, and at 9:50 reads queued and pages took 7 s. The metrics show it: the credit balance reaches zero while IOPS goes flat at exactly the baseline. The fix is a type with IOPS set, below the VM's own limit.
+
+    <AnimatedDiagram spec="animated/cloud/block-snapshot-chain" step={2} highlight={["credits", "disk", "server"]} caption="The bucket is empty, so the volume serves its 300 IOPS baseline against 1,200 asked." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you have caught this before the sale?
+    - Why not make the disk bigger instead?
+
+    **Watch out for.** Restarting the database. It empties the database's memory cache, so even more reads hit a disk that has no credits left.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why are nightly snapshots cheap even for a 2 TB volume?" level="Mid" category="Cloud">
+    **Short answer.** Only the first snapshot copies every block in use. Each later one stores only the blocks that changed since the one before, and points back to older snapshots for the rest.
+
+    **Why.** Say 2 TB is in use and 20 GB changes a day. Thirty nightly snapshots store about 2 TB plus 29 × 20 GB, under 2.6 TB, not 60 TB. Brightpost's disk has 40 GB in use and changes about 1 GB a night, so 30 snapshots hold about 70 GB. Each snapshot still restores the whole disk. Deleting an old one keeps any block a newer one needs, so the chain never breaks.
+
+    <AnimatedDiagram spec="animated/cloud/block-snapshot-chain" step={5} highlight={["snap1", "snap2", "snap3"]} caption="One full snapshot, then two that hold only changed blocks." />
+
+    **Follow-ups the interviewer may ask.**
+    - What kind of workload makes snapshots expensive after all?
+    - Where is a snapshot stored, and what does that protect against?
+
+    **Watch out for.** Saying that deleting the first snapshot breaks the later ones. The provider keeps every block a remaining snapshot needs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you move a self-managed PostgreSQL volume to another region with under 10 minutes of data loss?" level="Senior" category="Cloud">
+    **Short answer.** Seed with a snapshot, then catch up with replication. Copy a recent snapshot to the target region and restore it to a new volume. Start PostgreSQL there as a replica that streams changes from the primary, and cut over when the lag is near zero.
+
+    **Why.** Snapshots alone cannot promise 10 minutes: the copy across regions takes time, and Brightpost's weekly copy could lose 7 days. The snapshot moves the bulk without loading the primary. Streaming replication then ships each change as it happens, so the loss at cut-over is the replica's lag, usually seconds. To cut over, stop writes, let the replica catch up, promote it and point the app at it. Encrypt the copy with a key in the target region.
+
+    <AnimatedDiagram spec="animated/cloud/block-snapshot-chain" step={7} path="disk>snap3>copy" caption="A snapshot carries the bulk of the disk to the second region; replication carries the rest." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you prove the replica is complete before cut-over?
+    - What happens if the first region fails halfway through the move?
+
+    **Watch out for.** Taking a snapshot every 5 minutes and calling the loss 5 minutes. The copy and the restore add their own time, and the newest snapshot may not have arrived yet.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Object, Block and File: Which One for Which Job](/cloud/data/storage-types)
+- [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines)
+- [Object Storage: Tiers, Lifecycle, Versioning and Redundancy](/cloud/data/object-storage)
+- [Managed Relational Databases](/cloud/data/managed-relational)
+- [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults)
+- [Encryption at Rest, in Transit and Key Management](/cloud/resilience/encryption-and-keys)
+- [Storage on AWS](/cloud/aws/storage)
+- [Storage on Google Cloud](/cloud/gcp/storage)
+- [Storage on Azure](/cloud/azure/storage)
+- [Files, blocks and objects](/system-design/fundamentals/storage-types)
+- [B-trees](/system-design/databases/b-trees)
+
+## Further reading
+
+- [Amazon EBS User Guide](https://docs.aws.amazon.com/ebs/latest/userguide/what-is-ebs.html): volume types, snapshots and encryption.
+- [Compute Engine storage options](https://cloud.google.com/compute/docs/disks): Persistent Disk, Hyperdisk and Local SSD.
+- [Azure managed disks overview](https://learn.microsoft.com/azure/virtual-machines/managed-disks-overview): disk roles and redundancy.
+- [Azure managed disk types](https://learn.microsoft.com/azure/virtual-machines/disks-types): Standard, Premium, Premium SSD v2 and Ultra.
