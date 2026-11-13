@@ -1,13 +1,14 @@
 import type { DiagramSpec } from "@/components/diagrams/types";
 
 // The ladder of ways to use AI on a cloud (cloud/operations/ai-ml-platforms-on-the-cloud). Four rungs, one per row and
-// one per step, ordered from least control and least work (top) to most of both (bottom). Each row pairs what you
-// bring (left) with what the cloud runs for you (right). The Services toggle names each provider's product on each
+// one per step, ordered from least control and least work (top) to most of both (bottom). Each row pairs the service
+// the cloud runs for you (left) with what you bring (right). The Services toggle names each provider's product on each
 // rung; the generic label stays underneath.
 //
-// Layout: two columns. Left (x 120): what you bring. Right (x 400): the managed service. Rows (centres): 100 | 240 |
-// 380 | 520, each in its own zone. The "more control" edges run down the right column at x 400, well right of the
-// zone tabs, which end near 240. Row edges are short and carry one-word labels that fit the 65-unit gap.
+// Layout: two columns. Left (x 135): the managed service, so a phone, which opens on the left 360 units, shows each
+// rung's service and its Services-toggle name. Right (x 410): what you bring. Rows (centres): 100 | 240 | 380 | 520,
+// each in its own zone. The "more control" edges run down the right column at x 410, clear of the zone tabs, which
+// sit on the left and end near 240. Row edges carry one-word labels that fit the 60-unit gap.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. The
 // service boxes are sized for "Bedrock Knowledge Bases" (23 characters).
 const spec: DiagramSpec = {
@@ -34,7 +35,7 @@ const spec: DiagramSpec = {
       sub: "a photo, a call, a PDF",
       icon: "file",
       tone: "neutral",
-      x: 120,
+      x: 410,
       y: 100,
       w: 200,
     },
@@ -44,7 +45,7 @@ const spec: DiagramSpec = {
       sub: "nothing to run",
       icon: "api",
       tone: "teal",
-      x: 400,
+      x: 135,
       y: 100,
       w: 230,
       cloud: {
@@ -62,7 +63,7 @@ const spec: DiagramSpec = {
       icon: "chat",
       tone: "neutral",
       step: 2,
-      x: 120,
+      x: 410,
       y: 240,
       w: 200,
     },
@@ -73,7 +74,7 @@ const spec: DiagramSpec = {
       icon: "model",
       tone: "teal",
       step: 2,
-      x: 400,
+      x: 135,
       y: 240,
       w: 230,
       cloud: {
@@ -91,7 +92,7 @@ const spec: DiagramSpec = {
       icon: "folder",
       tone: "violet",
       step: 3,
-      x: 120,
+      x: 410,
       y: 380,
       w: 200,
     },
@@ -102,7 +103,7 @@ const spec: DiagramSpec = {
       icon: "search",
       tone: "teal",
       step: 3,
-      x: 400,
+      x: 135,
       y: 380,
       w: 230,
       cloud: {
@@ -120,7 +121,7 @@ const spec: DiagramSpec = {
       icon: "gpu",
       tone: "teal",
       step: 4,
-      x: 120,
+      x: 410,
       y: 520,
       w: 200,
     },
@@ -132,7 +133,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       accent: true,
       step: 4,
-      x: 400,
+      x: 135,
       y: 520,
       w: 230,
       cloud: {
@@ -147,9 +148,9 @@ const spec: DiagramSpec = {
     { from: "in2", to: "svc2", label: "send", packet: true },
     { from: "in3", to: "svc3", label: "add", packet: true },
     { from: "in4", to: "svc4", label: "build", packet: true },
-    { from: "svc1", to: "svc2", label: "more control", dashed: true },
-    { from: "svc2", to: "svc3", label: "more work", dashed: true },
-    { from: "svc3", to: "svc4", label: "most of both", dashed: true },
+    { from: "in1", to: "in2", label: "more control", dashed: true },
+    { from: "in2", to: "in3", label: "more work", dashed: true },
+    { from: "in3", to: "in4", label: "most of both", dashed: true },
   ],
 };
 
