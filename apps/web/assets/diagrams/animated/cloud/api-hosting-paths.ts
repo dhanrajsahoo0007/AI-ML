@@ -13,20 +13,20 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Layout: three columns.
 //   Left (x 78-230): the clients row on top, then the shop's own path: load balancer, app servers, database.
-//   Middle (x 420-490): gift shops on top, then the gateway, the order API service and the GraphQL service.
-//   Right (x 707): edge cache, certificate, the owners' app.
+//   Middle (x 400-490): gift shops on top, then the gateway, the order API service and the GraphQL service.
+//   Right (x 702): edge cache, certificate, the owners' app.
 // Rows (centres): 80 | 250 | 390 | 530.
-// shoppers 78,80 | shop217 230,80 | shops 420,80 | edge 707,80 | lb 230,250 | gw 490,250 | cert 707,250 |
-// app 230,390 | api 490,390 | wapp 707,390 | db 230,530 | gql 490,530.
+// shoppers 78,80 | shop217 230,80 | shops 400,80 | edge 702,80 | lb 230,250 | gw 490,250 | cert 702,250 |
+// app 230,390 | api 490,390 | wapp 702,390 | db 230,530 | gql 490,530.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 use only the
 // clients row and the left column, so the free preview and the failure show without scrolling.
 //
-// Zone tabs sit on a zone's top-left corner. The Shop zone starts at x 90 so the shoppers' diagonal enters right of
+// Zone tabs sit on a zone's top-left corner. The Shop zone starts at x 70 so the shoppers' diagonal enters right of
 // its tab; the API zone's tab ("API") ends near x 441, so the gift shops' edge enters at x 465 and the refused calls
-// of shop 217 come in through the zone's left side (via 355,250).
+// of shop 217 come in through the zone's left side (via 350,140 and 350,250).
 // Text room: about 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Nodes are sized
-// for the longest provider name the Services toggle shows ("Virtual machines", "Cloud Run server").
+// for the longest provider name the Services toggle shows ("Virtual machines", "API Management", "Cloud Run server").
 const spec: DiagramSpec = {
   title: "From one shared app to a gateway in front of its own API service",
   width: 800,
@@ -41,11 +41,11 @@ const spec: DiagramSpec = {
     { title: "A GraphQL service for the owners' app" },
   ],
   zones: [
-    { id: "clients", title: "Clients", tone: "neutral", x: 5, y: 25, w: 500, h: 112 },
-    { id: "edgezone", title: "Edge and name", tone: "blue", x: 609, y: 25, w: 188, h: 282 },
-    { id: "shop", title: "Shop", tone: "teal", x: 90, y: 190, w: 238, h: 245 },
+    { id: "clients", title: "Clients", tone: "neutral", x: 5, y: 25, w: 480, h: 112 },
+    { id: "edgezone", title: "Edge and name", tone: "blue", x: 600, y: 25, w: 198, h: 282 },
+    { id: "shop", title: "Shop", tone: "teal", x: 70, y: 190, w: 258, h: 245 },
     { id: "wholesale", title: "API", tone: "teal", x: 380, y: 190, w: 205, h: 395 },
-    { id: "owners", title: "Shop owners", tone: "neutral", x: 609, y: 335, w: 188, h: 110 },
+    { id: "owners", title: "Shop owners", tone: "neutral", x: 600, y: 335, w: 198, h: 110 },
     { id: "data", title: "Data", tone: "violet", x: 150, y: 470, w: 160, h: 138 },
   ],
   nodes: [
@@ -66,7 +66,7 @@ const spec: DiagramSpec = {
       sub: "about 300 shops",
       icon: "bag",
       tone: "neutral",
-      x: 420,
+      x: 400,
       y: 80,
       w: 150,
     },
@@ -157,7 +157,7 @@ const spec: DiagramSpec = {
       step: 4,
       x: 490,
       y: 250,
-      w: 160,
+      w: 176,
       cloud: {
         aws: { id: "aws-api-gateway", label: "API Gateway" },
         gcp: { label: "API Gateway" },
@@ -173,9 +173,9 @@ const spec: DiagramSpec = {
       icon: "certificate",
       tone: "red",
       step: 5,
-      x: 707,
+      x: 702,
       y: 250,
-      w: 176,
+      w: 186,
       cloud: {
         aws: { label: "ACM certificate" },
         gcp: { label: "Managed SSL cert" },
@@ -191,9 +191,9 @@ const spec: DiagramSpec = {
       icon: "cdn",
       tone: "blue",
       step: 6,
-      x: 707,
+      x: 702,
       y: 80,
-      w: 176,
+      w: 186,
       cloud: {
         aws: { id: "aws-cloudfront", label: "CloudFront" },
         gcp: { id: "gcp-cloud-cdn", label: "Cloud CDN" },
@@ -209,9 +209,9 @@ const spec: DiagramSpec = {
       icon: "browser",
       tone: "neutral",
       step: 7,
-      x: 707,
+      x: 702,
       y: 390,
-      w: 176,
+      w: 186,
     },
     {
       id: "gql",
@@ -235,7 +235,7 @@ const spec: DiagramSpec = {
     { from: "shoppers", to: "lb", label: "shop pages", packet: true, labelAt: 0.35 },
     { from: "shops", to: "lb", label: "order API", packet: true, delay: 0.8, labelAt: 0.35, until: 3 },
     { from: "lb", to: "app", label: "every route", packet: true, delay: 1.2, until: 1 },
-    { from: "app", to: "db", label: "SQL", packet: true, delay: 1.8 },
+    { from: "app", to: "db", label: "SQL", packet: true, delay: 1.8, labelAt: 0.3 },
 
     // Step 2: one shop's retry loop floods the shared door. Nothing counts calls per shop.
     {
@@ -254,7 +254,7 @@ const spec: DiagramSpec = {
     // Step 3: the order API runs on its own service; the balancer sends /api paths there.
     { from: "lb", to: "app", label: "shop pages", packet: true, delay: 1.2, step: 3 },
     { from: "lb", to: "api", label: "/api paths", packet: true, delay: 0.6, step: 3, until: 3 },
-    { from: "api", to: "db", label: "SQL, capped", packet: true, delay: 1.4, labelAt: 0.4, step: 3 },
+    { from: "api", to: "db", label: "SQL, capped", packet: true, delay: 1.4, labelAt: 0.55, step: 3 },
 
     // Step 4: each shop calls the gateway with its own key; shop 217's extra calls are refused.
     { from: "shops", to: "gw", label: "shop key", packet: true, labelAt: 0.4, step: 4, until: 5 },
@@ -264,8 +264,11 @@ const spec: DiagramSpec = {
       label: "slow down",
       tone: "red",
       dashed: true,
-      via: [[355, 250]],
-      labelAt: 0.3,
+      via: [
+        [350, 140],
+        [350, 250],
+      ],
+      labelAt: 0.5,
       step: 4,
     },
     { from: "gw", to: "api", label: "within limits", packet: true, delay: 0.8, step: 4 },
