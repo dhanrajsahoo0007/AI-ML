@@ -15,11 +15,12 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // OS and code only), so the first two versions end with `until`.
 //
 // Layout: three columns (x 125 | 410 | 665) and five rows (y 95 | 245 | 395 | 545 | 695), one zone per store family.
-//   Left:   cache 125,95 | app servers 125,245 | server disk 125,395 | files lost 125,545.
+//   Left:   cache 125,95 | app servers 125,245 | server disk 125,395 | files lost 125,560.
 //   Middle: event stream 410,95 | orders database 410,245 | buckets 410,395 | exports bucket 410,545 |
 //           file share 410,695.
 //   Right:  warehouse 665,95 | search index 665,245 | backup vault 665,395 | tracking table 665,545 |
-//           printing partner 665,695.
+//           printing partner 665,705 (the lost files and the partner sit 10-15 lower in their subnet zones, so
+//           the NEW ring clears the inline zone label).
 // Why this order: on a phone the figure scrolls sideways and opens on the left ~480 units. Steps 1 to 3 (the free
 // preview, the failure and its repair) use only the left and middle columns.
 // The canvas stays under 800 wide so labels are readable in the 660 px article column; it grows taller instead.
@@ -29,6 +30,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // no tab). The edge from the app to the stream and the nightly copy to the warehouse put their pills low enough to
 // clear the "Relational" and "Search" tabs (labelAt). The backup edge leaves the database to the right, runs down the
 // gutter between the middle and right columns (x 542) and enters the vault from its left side, below the audit tab.
+// The exports edge does the same in the left gutter (x 262) and enters the exports bucket from its left side.
 // Text room: about 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Every node is
 // 176 wide, sized for the longest name the Services toggle shows: "Virtual Machines" (app), "Persistent Disk" (disk),
 // "Vertex AI Search" (search), "Azure Postgres" (database), "Managed Redis" (cache), "Backup and DR" (vault).
@@ -51,7 +53,7 @@ const spec: DiagramSpec = {
     { id: "cache-z", title: "Cache", tone: "orange", x: 15, y: 36, w: 220, h: 118 },
     { id: "app-z", title: "App", tone: "teal", x: 15, y: 186, w: 220, h: 118 },
     { id: "block-z", title: "Block", tone: "violet", x: 15, y: 336, w: 220, h: 118 },
-    { id: "gone-z", title: "Deleted", tone: "neutral", kind: "subnet", x: 15, y: 486, w: 220, h: 118 },
+    { id: "gone-z", title: "Deleted", tone: "neutral", kind: "subnet", x: 15, y: 486, w: 220, h: 130 },
     { id: "stream-z", title: "Stream", tone: "orange", x: 290, y: 36, w: 240, h: 118 },
     { id: "rel-z", title: "Relational", tone: "violet", x: 290, y: 186, w: 240, h: 118 },
     { id: "object-z", title: "Object", tone: "violet", x: 290, y: 336, w: 240, h: 268 },
@@ -60,7 +62,7 @@ const spec: DiagramSpec = {
     { id: "search-z", title: "Search", tone: "violet", x: 555, y: 186, w: 220, h: 118 },
     { id: "audit-z", title: "Audit account", tone: "orange", x: 555, y: 336, w: 220, h: 118 },
     { id: "nosql-z", title: "NoSQL", tone: "violet", x: 555, y: 486, w: 220, h: 118 },
-    { id: "outside-z", title: "Outside", tone: "neutral", kind: "subnet", x: 555, y: 636, w: 220, h: 118 },
+    { id: "outside-z", title: "Outside", tone: "neutral", kind: "subnet", x: 555, y: 636, w: 220, h: 128 },
   ],
   nodes: [
     // Step 1
@@ -122,7 +124,7 @@ const spec: DiagramSpec = {
       tone: "red",
       step: 2,
       x: 125,
-      y: 545,
+      y: 560,
       w: 176,
     },
 
@@ -203,7 +205,7 @@ const spec: DiagramSpec = {
       tone: "neutral",
       step: 5,
       x: 665,
-      y: 695,
+      y: 705,
       w: 176,
     },
     {
@@ -273,7 +275,17 @@ const spec: DiagramSpec = {
 
     // Step 3: export files go to a bucket every server can reach; the disk keeps only what a new server rebuilds.
     { from: "app", to: "disk", label: "OS, code only", dashed: true, labelAt: 0.38, step: 3 },
-    { from: "app", to: "exports", label: "exports", packet: true, step: 3 },
+    {
+      from: "app",
+      to: "exports",
+      label: "exports",
+      packet: true,
+      via: [
+        [262, 300],
+        [262, 545],
+      ],
+      step: 3,
+    },
 
     // Step 4: two copies shaped for speed.
     { from: "app", to: "cache", label: "baskets", packet: true, step: 4 },

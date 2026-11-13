@@ -12,7 +12,7 @@ updated: 2026-11-13
 
 ## The story
 
-In March, Asha adds a "download my data" button to Brightpost's shop. The shop builds a ZIP file with the customer's orders and home address, saves it on the server's own disk, and emails a link that works for 7 days. Every test passes, because the test account runs one server. In the first week 120 customers ask for a file. The shop runs 2 servers, and the load balancer sends each click to either one. So 58 first clicks land on the server without the file and show "file not found". On Saturday's sale the fleet grows to 10 servers, and at 11 p.m. the scaling rule removes 8. Their disks are deleted with them, and 38 files nobody had downloaded yet are gone. By Monday the support agent has 74 angry emails and rebuilds each file by hand.
+In March, Asha adds a "download my data" button to Brightpost's shop. The shop builds a ZIP file with the customer's orders and home address and saves it on the server's own disk. Then it emails a link that works for 7 days. Every test passes, because the test account runs one server. In the first week 120 customers ask for a file. The shop runs 2 servers, and the load balancer sends each click to either one. So 58 first clicks land on the server without the file and show "file not found". On Saturday's sale the fleet grows to 10 servers, and at 11 p.m. the scaling rule removes 8. Their disks are deleted with them, and 38 files nobody had downloaded yet are gone. By Monday the support agent has 74 emails to answer, one file at a time.
 
 The file was fine. It lived in the one place on the cloud that is thrown away on purpose. This page maps where every kind of Brightpost's data lives instead, and why.
 
@@ -30,7 +30,7 @@ The section's growth map shows where the shop stands. The orders database has le
 
 Brightpost keeps three kinds of data today. Orders live in the managed database. The nightly export files and the product photos live in buckets. Each server's operating system and code live on that server's disk.
 
-Those are two of the three storage shapes. <Term id="block-storage">Block storage</Term> is a disk attached to one server. <Term id="object-storage">Object storage</Term> keeps whole files, called objects, fetched by name over the network. <Term id="file-storage">File storage</Term> is a shared folder that several servers open at once. [Files, blocks and objects](/system-design/fundamentals/storage-types) teaches how each works. This page places data on them. The rule: ask what happens to the data if the thing holding it disappears.
+The disk and the buckets are two of the three storage shapes. <Term id="block-storage">Block storage</Term> is a disk attached to one server. <Term id="object-storage">Object storage</Term> keeps whole files, called objects, fetched by name over the network. <Term id="file-storage">File storage</Term> is a shared folder that several servers open at once. [Files, blocks and objects](/system-design/fundamentals/storage-types) teaches how each works. To place data on them, ask what happens to the data if the thing holding it disappears.
 
 <PremiumBreak />
 
@@ -44,7 +44,7 @@ A server's disk is durable in one narrow sense. The provider keeps copies of eve
   Each export file exists on one of 2 servers, so about half the first clicks reach the wrong one: 58 of 120. On Saturday the scaling rule removes 8 of 10 servers at 11 p.m. Their disks go with them, and 38 files are lost. Each file also held a home address, on a disk nobody had listed as a place customer data lives.
 </Callout>
 
-The disk did its job. The mistake was placing shared, long-lived files in a store that lives only as long as one server.
+The disk did its job. Shared, long-lived files sat in a store that lives only as long as one server.
 
 ### Step 3: Files go to object storage
 
@@ -58,7 +58,7 @@ The email link points at the shop, not at the file. After the customer signs in,
 
 <AnimatedDiagram spec="animated/cloud/data-map" step={4} minWidth={620} caption="Baskets move to an in-memory cache, and product changes feed a search index." />
 
-Two stores hold copies shaped for speed. The <Term id="cache">cache</Term> keeps shoppers' baskets in memory for 7 days, so every page reads one in under a millisecond. The search index holds a word-by-word copy of the 2,000 products, so a search never touches the orders database. Both can be rebuilt if lost. [Databases on Each Cloud](/cloud/start-here/databases-per-cloud) tells how Brightpost found out it needed them. [Managed Caches](/cloud/data/managed-caches) goes deeper on the cache.
+Two stores hold copies shaped for speed, and both can be rebuilt if lost. The <Term id="cache">cache</Term> keeps shoppers' baskets in memory for 7 days, so every page reads one in under a millisecond. The search index holds a word-by-word copy of the 2,000 products, so a search never touches the orders database. [Databases on Each Cloud](/cloud/start-here/databases-per-cloud) tells how Brightpost found out it needed them.
 
 ### Step 5: Events, items by key, and folders
 
@@ -76,7 +76,7 @@ Three more shapes of data appear as the shop grows.
 
 The finance lead asks which posters sell best each December, across two years of orders. That question reads millions of rows but only a few columns. A **data warehouse** is a store built for it. It keeps each column together, so a question reads only the columns it needs.
 
-Every night the warehouse takes a copy of the orders and the day's click events. It is never the source of truth: if it is lost, it can be loaded again. [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines) covers the choices.
+Every night it takes a copy of the orders and the day's click events. It is never the source of truth: if it is lost, it is loaded again. [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines) covers the choices.
 
 ### Step 7: Backups live somewhere else
 
@@ -84,11 +84,11 @@ Every night the warehouse takes a copy of the orders and the day's click events.
 
 The database's standby protects against a failed zone. It does not protect against a bad delete, because it copies the delete within a second. A backup does.
 
-Brightpost's nightly backup at 03:00 now goes to a **backup vault** in the audit account. A test script once deleted the live database from a shared account. A backup in the same account can be deleted by the same mistake. A vault in another account, with its own delete lock, survives it. [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults) covers retention and restore tests.
+Brightpost's nightly backup at 03:00 now goes to a **backup vault** in the audit account. A test script once deleted the live database from a shared account, and a backup in that account would have gone too. A vault in another account, with its own delete lock, survives such a mistake. [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults) covers retention and restore tests.
 
 ### Step 8: Five questions for every store
 
-Every store on the map answers the same five questions. The answers differ, and so does the design that follows.
+Every store on the map answers the same five questions, and the answers shape its design.
 
 1. **How durable is it?** How many copies exist, and what can each copy survive?
 2. **Where do the copies live?** In one zone, across zones, in another region or in another account?
@@ -202,7 +202,7 @@ Every store on the map has a managed service on all three clouds. What differs i
   caption="Where to keep Brightpost's export files: the first and the second answer."
 />
 
-A disk is faster to start a read, and that is its whole case. For a file a customer fetches once, tens of milliseconds cost nothing, and losing 38 files cost a week.
+The disk wins only on the time to start a read. For a file a customer fetches once, tens of milliseconds cost nothing; losing 38 files cost a week.
 
 ## Common pitfalls
 
@@ -214,7 +214,7 @@ A disk is faster to start a read, and that is its whole case. For a file a custo
 
 ## How to say it in an interview
 
-"I place each kind of data by how it is used and by what happens if its home disappears. A server's disk is scratch space for the operating system and code, because a scaling rule can delete it at any time. Files go to object storage, which every server can reach and which keeps copies across zones. Records that change together go to a relational database, which stays the source of truth; caches, search indexes and warehouses hold copies for speed or analysis. For every store I ask five questions: how durable it is, where its copies live, who can read it, how it is backed up, and what it costs to keep and to move."
+"I place each kind of data by how it is used and by what happens if its home disappears. A server's disk is scratch space for the operating system and code, because a scaling rule can delete it at any time. Files go to object storage, which every server can reach and which keeps copies across zones. Records that change together go to a relational database, which stays the source of truth; caches, search indexes and warehouses hold copies for speed or analysis. For every store I ask five questions. How durable is it, and where do its copies live? Who can read it, how is it backed up, and what does it cost to keep and to move?"
 
 ## Interview questions
 
@@ -222,7 +222,7 @@ A disk is faster to start a read, and that is its whole case. For a file a custo
   <InterviewQuestion question="Which of Brightpost's data belongs in object storage, and why?" level="Junior" category="Cloud">
     **Short answer.** Whole files that are written once and read by name: product photos, the nightly order exports, customer export files and backups. Object storage keeps them across several zones, every server can reach them, and a lifecycle rule can delete them on a schedule.
 
-    **Why.** None of these files is edited in place, and none needs a query inside it. A photo is fetched by its name; an export is read as one piece. A server disk would tie each file to one server, and a database would store large files as rows it was not built for. Orders stay in the database, because an order and its lines change together.
+    **Why.** None of these files is edited in place, and none needs a query inside it. A server disk would tie each file to one server, and a database is not built to hold large files. Orders stay in the database, because an order and its lines change together.
 
     <AnimatedDiagram spec="animated/cloud/data-map" step={3} highlight={["app", "buckets", "exports"]} caption="Order files, photos and exports live in buckets that every server reaches." />
 
@@ -264,7 +264,7 @@ A disk is faster to start a read, and that is its whole case. For a file a custo
   <InterviewQuestion question="A customer asks Brightpost to delete their data. How do you make sure every copy goes?" level="Senior" category="Cloud">
     **Short answer.** Start from a list of every store that holds personal data, kept up to date as stores are added. Delete at the source, then in each copy, and let copies that cannot be edited, such as backups, expire on a known schedule.
 
-    **Why.** On Brightpost's map the address lives in the orders database, the nightly export files, the exports bucket, the warehouse and the backup vault. The database and the warehouse can delete rows. The 730 export files must be rewritten without the customer, or kept on a retention rule. Exports expire after 7 days. Backups are rarely edited, so keep a list of deleted customers and apply it again after any restore. The export files on old server disks were the copy nobody had listed.
+    **Why.** On Brightpost's map the address lives in five stores: the orders database, the nightly export files, the exports bucket, the warehouse and the backup vault. The database and the warehouse can delete rows. The 730 export files must be rewritten without the customer, or expire under a retention rule. Exports expire after 7 days. Backups are rarely edited, so keep a list of deleted customers and apply it again after any restore.
 
     <AnimatedDiagram spec="animated/cloud/data-map" step={7} highlight={["db", "buckets", "exports", "warehouse", "vault"]} caption="Five stores on the map hold a customer's address; each needs its own delete." />
 
