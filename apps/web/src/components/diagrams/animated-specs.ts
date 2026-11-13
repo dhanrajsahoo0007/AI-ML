@@ -15,194 +15,195 @@ import s9 from "../../../assets/diagrams/animated/behavioral/intro-ninety-second
 import s10 from "../../../assets/diagrams/animated/behavioral/leveling-ladder";
 import s11 from "../../../assets/diagrams/animated/behavioral/meta-behavioral-round";
 import s12 from "../../../assets/diagrams/animated/behavioral/meta-loop";
-import s13 from "../../../assets/diagrams/animated/behavioral/one-way-vs-two-way-door";
-import s14 from "../../../assets/diagrams/animated/behavioral/probe-tree";
-import s15 from "../../../assets/diagrams/animated/behavioral/scope-by-level";
-import s16 from "../../../assets/diagrams/animated/behavioral/self-introspection-loop";
-import s17 from "../../../assets/diagrams/animated/behavioral/star-plus-l-arc";
-import s18 from "../../../assets/diagrams/animated/behavioral/story-matrix-map";
-import s19 from "../../../assets/diagrams/animated/behavioral/weakness-answer-arc";
-import s20 from "../../../assets/diagrams/animated/behavioral/why-this-company";
-import s21 from "../../../assets/diagrams/animated/cloud/ai-guardrail-path";
-import s22 from "../../../assets/diagrams/animated/cloud/ai-security-1";
-import s23 from "../../../assets/diagrams/animated/cloud/alert-path";
-import s24 from "../../../assets/diagrams/animated/cloud/api-gateway-request";
-import s25 from "../../../assets/diagrams/animated/cloud/api-hosting-paths";
-import s26 from "../../../assets/diagrams/animated/cloud/autoscaling-1";
-import s27 from "../../../assets/diagrams/animated/cloud/autoscaling-loop";
-import s28 from "../../../assets/diagrams/animated/cloud/backup-chain";
-import s29 from "../../../assets/diagrams/animated/cloud/batch-job-queue";
-import s30 from "../../../assets/diagrams/animated/cloud/block-snapshot-chain";
-import s31 from "../../../assets/diagrams/animated/cloud/block-storage-1";
-import s32 from "../../../assets/diagrams/animated/cloud/brightpost-compute-journey";
-import s33 from "../../../assets/diagrams/animated/cloud/brightpost-data-tier";
-import s34 from "../../../assets/diagrams/animated/cloud/brightpost-grows";
-import s35 from "../../../assets/diagrams/animated/cloud/cache-patterns";
-import s36 from "../../../assets/diagrams/animated/cloud/cdn-request-path";
-import s37 from "../../../assets/diagrams/animated/cloud/ci-cd-pipeline";
-import s38 from "../../../assets/diagrams/animated/cloud/compute-spectrum";
-import s39 from "../../../assets/diagrams/animated/cloud/compute-spectrum-1";
-import s40 from "../../../assets/diagrams/animated/cloud/container-image-to-run";
-import s41 from "../../../assets/diagrams/animated/cloud/container-vs-vm";
-import s42 from "../../../assets/diagrams/animated/cloud/data-map";
-import s43 from "../../../assets/diagrams/animated/cloud/database-migration-1";
-import s44 from "../../../assets/diagrams/animated/cloud/db-failover-sequence";
-import s45 from "../../../assets/diagrams/animated/cloud/defence-layers";
-import s46 from "../../../assets/diagrams/animated/cloud/delivery-guarantees";
-import s47 from "../../../assets/diagrams/animated/cloud/deployment-strategies";
-import s48 from "../../../assets/diagrams/animated/cloud/detection-pipeline";
-import s49 from "../../../assets/diagrams/animated/cloud/dns-lookup";
-import s50 from "../../../assets/diagrams/animated/cloud/dns-resolution";
-import s51 from "../../../assets/diagrams/animated/cloud/dr-tiers";
-import s52 from "../../../assets/diagrams/animated/cloud/encryption-states";
-import s53 from "../../../assets/diagrams/animated/cloud/envelope-encryption";
-import s54 from "../../../assets/diagrams/animated/cloud/error-budget-burn";
-import s55 from "../../../assets/diagrams/animated/cloud/event-pipeline";
-import s56 from "../../../assets/diagrams/animated/cloud/failure-domains";
-import s57 from "../../../assets/diagrams/animated/cloud/firewall-evaluation";
-import s58 from "../../../assets/diagrams/animated/cloud/firewall-layers";
-import s59 from "../../../assets/diagrams/animated/cloud/gateway-vs-lb";
-import s60 from "../../../assets/diagrams/animated/cloud/global-routing";
-import s61 from "../../../assets/diagrams/animated/cloud/gpu-fleet";
-import s62 from "../../../assets/diagrams/animated/cloud/grpc-call";
-import s63 from "../../../assets/diagrams/animated/cloud/grpc-deadline";
-import s64 from "../../../assets/diagrams/animated/cloud/hub-spoke";
-import s65 from "../../../assets/diagrams/animated/cloud/hybrid-link";
-import s66 from "../../../assets/diagrams/animated/cloud/hybrid-transfer-paths";
-import s67 from "../../../assets/diagrams/animated/cloud/iac-pipeline";
-import s68 from "../../../assets/diagrams/animated/cloud/iam-role-chain";
-import s69 from "../../../assets/diagrams/animated/cloud/k8s-cluster-anatomy";
-import s70 from "../../../assets/diagrams/animated/cloud/k8s-request-path";
-import s71 from "../../../assets/diagrams/animated/cloud/lake-to-warehouse";
-import s72 from "../../../assets/diagrams/animated/cloud/landing-zone";
-import s73 from "../../../assets/diagrams/animated/cloud/lb-l4-vs-l7";
-import s74 from "../../../assets/diagrams/animated/cloud/learning-paths";
-import s75 from "../../../assets/diagrams/animated/cloud/limit-layers";
-import s76 from "../../../assets/diagrams/animated/cloud/managed-relational-ha";
-import s77 from "../../../assets/diagrams/animated/cloud/managed-websockets";
-import s78 from "../../../assets/diagrams/animated/cloud/migration-cutover";
-import s79 from "../../../assets/diagrams/animated/cloud/multi-az-tier";
-import s80 from "../../../assets/diagrams/animated/cloud/nat-egress";
-import s81 from "../../../assets/diagrams/animated/cloud/nines-ladder";
-import s82 from "../../../assets/diagrams/animated/cloud/nosql-partitions";
-import s83 from "../../../assets/diagrams/animated/cloud/object-upload-lifecycle";
-import s84 from "../../../assets/diagrams/animated/cloud/one-server-to-elastic";
-import s85 from "../../../assets/diagrams/animated/cloud/paas-stack";
-import s86 from "../../../assets/diagrams/animated/cloud/pricing-basics-1";
-import s87 from "../../../assets/diagrams/animated/cloud/private-endpoint";
-import s88 from "../../../assets/diagrams/animated/cloud/queue-topic-stream";
-import s89 from "../../../assets/diagrams/animated/cloud/realtime-transports";
-import s90 from "../../../assets/diagrams/animated/cloud/region-zone-edge";
-import s91 from "../../../assets/diagrams/animated/cloud/replica-lag-read-after-write";
-import s92 from "../../../assets/diagrams/animated/cloud/residency-perimeter";
-import s93 from "../../../assets/diagrams/animated/cloud/resource-hierarchy";
-import s94 from "../../../assets/diagrams/animated/cloud/responsibility-line";
-import s95 from "../../../assets/diagrams/animated/cloud/retry-backoff-jitter";
-import s96 from "../../../assets/diagrams/animated/cloud/retry-storm";
-import s97 from "../../../assets/diagrams/animated/cloud/rpo-rto-timeline";
-import s98 from "../../../assets/diagrams/animated/cloud/secret-fetch-rotate";
-import s99 from "../../../assets/diagrams/animated/cloud/secrets-management-1";
-import s100 from "../../../assets/diagrams/animated/cloud/serverless-containers-scale";
-import s101 from "../../../assets/diagrams/animated/cloud/serverless-event-triggers";
-import s102 from "../../../assets/diagrams/animated/cloud/serverless-request";
-import s103 from "../../../assets/diagrams/animated/cloud/service-equivalents-1";
-import s104 from "../../../assets/diagrams/animated/cloud/service-model-ladder";
-import s105 from "../../../assets/diagrams/animated/cloud/service-models-1";
-import s106 from "../../../assets/diagrams/animated/cloud/slo-ladder";
-import s107 from "../../../assets/diagrams/animated/cloud/storage-class-ladder";
-import s108 from "../../../assets/diagrams/animated/cloud/storage-three-shapes";
-import s109 from "../../../assets/diagrams/animated/cloud/stream-partitions";
-import s110 from "../../../assets/diagrams/animated/cloud/sts-assume-role";
-import s111 from "../../../assets/diagrams/animated/cloud/telemetry-pipeline";
-import s112 from "../../../assets/diagrams/animated/cloud/three-signals";
-import s113 from "../../../assets/diagrams/animated/cloud/tls-at-lb";
-import s114 from "../../../assets/diagrams/animated/cloud/vm-anatomy";
-import s115 from "../../../assets/diagrams/animated/cloud/vm-fleet-three-zones";
-import s116 from "../../../assets/diagrams/animated/cloud/vpc-three-tier";
-import s117 from "../../../assets/diagrams/animated/cloud/webhook-receiver";
-import s118 from "../../../assets/diagrams/animated/cloud/webhook-retry";
-import s119 from "../../../assets/diagrams/animated/cloud/well-architected-thinking-1";
-import s120 from "../../../assets/diagrams/animated/cloud/write-topologies";
-import s121 from "../../../assets/diagrams/animated/cloud/zero-trust-request";
-import s122 from "../../../assets/diagrams/animated/databases/btree-lookup";
-import s123 from "../../../assets/diagrams/animated/databases/cdc-to-search";
-import s124 from "../../../assets/diagrams/animated/databases/inverted-index";
-import s125 from "../../../assets/diagrams/animated/databases/lsm-write-path";
-import s126 from "../../../assets/diagrams/animated/databases/polyglot-ecommerce";
-import s127 from "../../../assets/diagrams/animated/databases/read-scaling";
-import s128 from "../../../assets/diagrams/animated/fundamentals/abuse-protection";
-import s129 from "../../../assets/diagrams/animated/fundamentals/ajax-polling";
-import s130 from "../../../assets/diagrams/animated/fundamentals/ajax-polling-fleet";
-import s131 from "../../../assets/diagrams/animated/fundamentals/anatomy-of-a-request";
-import s132 from "../../../assets/diagrams/animated/fundamentals/anatomy-of-a-request-hops";
-import s133 from "../../../assets/diagrams/animated/fundamentals/api-auth";
-import s134 from "../../../assets/diagrams/animated/fundamentals/api-auth-oauth-flow";
-import s135 from "../../../assets/diagrams/animated/fundamentals/api-design";
-import s136 from "../../../assets/diagrams/animated/fundamentals/api-design-pagination";
-import s137 from "../../../assets/diagrams/animated/fundamentals/api-gateway";
-import s138 from "../../../assets/diagrams/animated/fundamentals/api-gateway-flow";
-import s139 from "../../../assets/diagrams/animated/fundamentals/availability";
-import s140 from "../../../assets/diagrams/animated/fundamentals/capacity-planning";
-import s141 from "../../../assets/diagrams/animated/fundamentals/cdn";
-import s142 from "../../../assets/diagrams/animated/fundamentals/choosing-an-api-style";
-import s143 from "../../../assets/diagrams/animated/fundamentals/choosing-an-api-style-flow";
-import s144 from "../../../assets/diagrams/animated/fundamentals/choosing-realtime";
-import s145 from "../../../assets/diagrams/animated/fundamentals/common-attacks";
-import s146 from "../../../assets/diagrams/animated/fundamentals/common-attacks-accounts";
-import s147 from "../../../assets/diagrams/animated/fundamentals/compression";
-import s148 from "../../../assets/diagrams/animated/fundamentals/compression-where";
-import s149 from "../../../assets/diagrams/animated/fundamentals/dns-geodns";
-import s150 from "../../../assets/diagrams/animated/fundamentals/dns-lookup";
-import s151 from "../../../assets/diagrams/animated/fundamentals/encryption-and-hashing";
-import s152 from "../../../assets/diagrams/animated/fundamentals/encryption-and-hashing-salt-layout";
-import s153 from "../../../assets/diagrams/animated/fundamentals/estimation";
-import s154 from "../../../assets/diagrams/animated/fundamentals/estimation-peak";
-import s155 from "../../../assets/diagrams/animated/fundamentals/functional-requirements";
-import s156 from "../../../assets/diagrams/animated/fundamentals/graphql";
-import s157 from "../../../assets/diagrams/animated/fundamentals/graphql-flow";
-import s158 from "../../../assets/diagrams/animated/fundamentals/http";
-import s159 from "../../../assets/diagrams/animated/fundamentals/http-loss-flow";
-import s160 from "../../../assets/diagrams/animated/fundamentals/interview-framework";
-import s161 from "../../../assets/diagrams/animated/fundamentals/latency-budget";
-import s162 from "../../../assets/diagrams/animated/fundamentals/latency-ladder";
-import s163 from "../../../assets/diagrams/animated/fundamentals/load-balancing-basics";
-import s164 from "../../../assets/diagrams/animated/fundamentals/long-polling";
-import s165 from "../../../assets/diagrams/animated/fundamentals/long-polling-fleet";
-import s166 from "../../../assets/diagrams/animated/fundamentals/networking";
-import s167 from "../../../assets/diagrams/animated/fundamentals/networking-path";
-import s168 from "../../../assets/diagrams/animated/fundamentals/non-functional-requirements";
-import s169 from "../../../assets/diagrams/animated/fundamentals/one-server-to-many";
-import s170 from "../../../assets/diagrams/animated/fundamentals/proxies";
-import s171 from "../../../assets/diagrams/animated/fundamentals/proxies-sidecar";
-import s172 from "../../../assets/diagrams/animated/fundamentals/push-notifications";
-import s173 from "../../../assets/diagrams/animated/fundamentals/rest";
-import s174 from "../../../assets/diagrams/animated/fundamentals/rest-stateless";
-import s175 from "../../../assets/diagrams/animated/fundamentals/rpc";
-import s176 from "../../../assets/diagrams/animated/fundamentals/rpc-internal";
-import s177 from "../../../assets/diagrams/animated/fundamentals/rpc-layout";
-import s178 from "../../../assets/diagrams/animated/fundamentals/scaling-journey";
-import s179 from "../../../assets/diagrams/animated/fundamentals/scaling-journey-sessions";
-import s180 from "../../../assets/diagrams/animated/fundamentals/security";
-import s181 from "../../../assets/diagrams/animated/fundamentals/serialization";
-import s182 from "../../../assets/diagrams/animated/fundamentals/serialization-bytes";
-import s183 from "../../../assets/diagrams/animated/fundamentals/serialization-registry";
-import s184 from "../../../assets/diagrams/animated/fundamentals/server-sent-events";
-import s185 from "../../../assets/diagrams/animated/fundamentals/server-sent-events-fleet";
-import s186 from "../../../assets/diagrams/animated/fundamentals/soap";
-import s187 from "../../../assets/diagrams/animated/fundamentals/soap-integration";
-import s188 from "../../../assets/diagrams/animated/fundamentals/storage-types";
-import s189 from "../../../assets/diagrams/animated/fundamentals/tcp-udp";
-import s190 from "../../../assets/diagrams/animated/fundamentals/tcp-udp-tcp-flow";
-import s191 from "../../../assets/diagrams/animated/fundamentals/tcp-udp-udp-flow";
-import s192 from "../../../assets/diagrams/animated/fundamentals/tls";
-import s193 from "../../../assets/diagrams/animated/fundamentals/tls-termination";
-import s194 from "../../../assets/diagrams/animated/fundamentals/webhooks";
-import s195 from "../../../assets/diagrams/animated/fundamentals/webhooks-pipeline";
-import s196 from "../../../assets/diagrams/animated/fundamentals/websockets";
-import s197 from "../../../assets/diagrams/animated/fundamentals/websockets-scaling";
-import s198 from "../../../assets/diagrams/animated/messenger/architecture";
-import s199 from "../../../assets/diagrams/animated/messenger/aws";
-import s200 from "../../../assets/diagrams/animated/uber-eats/architecture";
+import s13 from "../../../assets/diagrams/animated/behavioral/new-grad-story-sources";
+import s14 from "../../../assets/diagrams/animated/behavioral/one-way-vs-two-way-door";
+import s15 from "../../../assets/diagrams/animated/behavioral/probe-tree";
+import s16 from "../../../assets/diagrams/animated/behavioral/scope-by-level";
+import s17 from "../../../assets/diagrams/animated/behavioral/self-introspection-loop";
+import s18 from "../../../assets/diagrams/animated/behavioral/star-plus-l-arc";
+import s19 from "../../../assets/diagrams/animated/behavioral/story-matrix-map";
+import s20 from "../../../assets/diagrams/animated/behavioral/weakness-answer-arc";
+import s21 from "../../../assets/diagrams/animated/behavioral/why-this-company";
+import s22 from "../../../assets/diagrams/animated/cloud/ai-guardrail-path";
+import s23 from "../../../assets/diagrams/animated/cloud/ai-security-1";
+import s24 from "../../../assets/diagrams/animated/cloud/alert-path";
+import s25 from "../../../assets/diagrams/animated/cloud/api-gateway-request";
+import s26 from "../../../assets/diagrams/animated/cloud/api-hosting-paths";
+import s27 from "../../../assets/diagrams/animated/cloud/autoscaling-1";
+import s28 from "../../../assets/diagrams/animated/cloud/autoscaling-loop";
+import s29 from "../../../assets/diagrams/animated/cloud/backup-chain";
+import s30 from "../../../assets/diagrams/animated/cloud/batch-job-queue";
+import s31 from "../../../assets/diagrams/animated/cloud/block-snapshot-chain";
+import s32 from "../../../assets/diagrams/animated/cloud/block-storage-1";
+import s33 from "../../../assets/diagrams/animated/cloud/brightpost-compute-journey";
+import s34 from "../../../assets/diagrams/animated/cloud/brightpost-data-tier";
+import s35 from "../../../assets/diagrams/animated/cloud/brightpost-grows";
+import s36 from "../../../assets/diagrams/animated/cloud/cache-patterns";
+import s37 from "../../../assets/diagrams/animated/cloud/cdn-request-path";
+import s38 from "../../../assets/diagrams/animated/cloud/ci-cd-pipeline";
+import s39 from "../../../assets/diagrams/animated/cloud/compute-spectrum";
+import s40 from "../../../assets/diagrams/animated/cloud/compute-spectrum-1";
+import s41 from "../../../assets/diagrams/animated/cloud/container-image-to-run";
+import s42 from "../../../assets/diagrams/animated/cloud/container-vs-vm";
+import s43 from "../../../assets/diagrams/animated/cloud/data-map";
+import s44 from "../../../assets/diagrams/animated/cloud/database-migration-1";
+import s45 from "../../../assets/diagrams/animated/cloud/db-failover-sequence";
+import s46 from "../../../assets/diagrams/animated/cloud/defence-layers";
+import s47 from "../../../assets/diagrams/animated/cloud/delivery-guarantees";
+import s48 from "../../../assets/diagrams/animated/cloud/deployment-strategies";
+import s49 from "../../../assets/diagrams/animated/cloud/detection-pipeline";
+import s50 from "../../../assets/diagrams/animated/cloud/dns-lookup";
+import s51 from "../../../assets/diagrams/animated/cloud/dns-resolution";
+import s52 from "../../../assets/diagrams/animated/cloud/dr-tiers";
+import s53 from "../../../assets/diagrams/animated/cloud/encryption-states";
+import s54 from "../../../assets/diagrams/animated/cloud/envelope-encryption";
+import s55 from "../../../assets/diagrams/animated/cloud/error-budget-burn";
+import s56 from "../../../assets/diagrams/animated/cloud/event-pipeline";
+import s57 from "../../../assets/diagrams/animated/cloud/failure-domains";
+import s58 from "../../../assets/diagrams/animated/cloud/firewall-evaluation";
+import s59 from "../../../assets/diagrams/animated/cloud/firewall-layers";
+import s60 from "../../../assets/diagrams/animated/cloud/gateway-vs-lb";
+import s61 from "../../../assets/diagrams/animated/cloud/global-routing";
+import s62 from "../../../assets/diagrams/animated/cloud/gpu-fleet";
+import s63 from "../../../assets/diagrams/animated/cloud/grpc-call";
+import s64 from "../../../assets/diagrams/animated/cloud/grpc-deadline";
+import s65 from "../../../assets/diagrams/animated/cloud/hub-spoke";
+import s66 from "../../../assets/diagrams/animated/cloud/hybrid-link";
+import s67 from "../../../assets/diagrams/animated/cloud/hybrid-transfer-paths";
+import s68 from "../../../assets/diagrams/animated/cloud/iac-pipeline";
+import s69 from "../../../assets/diagrams/animated/cloud/iam-role-chain";
+import s70 from "../../../assets/diagrams/animated/cloud/k8s-cluster-anatomy";
+import s71 from "../../../assets/diagrams/animated/cloud/k8s-request-path";
+import s72 from "../../../assets/diagrams/animated/cloud/lake-to-warehouse";
+import s73 from "../../../assets/diagrams/animated/cloud/landing-zone";
+import s74 from "../../../assets/diagrams/animated/cloud/lb-l4-vs-l7";
+import s75 from "../../../assets/diagrams/animated/cloud/learning-paths";
+import s76 from "../../../assets/diagrams/animated/cloud/limit-layers";
+import s77 from "../../../assets/diagrams/animated/cloud/managed-relational-ha";
+import s78 from "../../../assets/diagrams/animated/cloud/managed-websockets";
+import s79 from "../../../assets/diagrams/animated/cloud/migration-cutover";
+import s80 from "../../../assets/diagrams/animated/cloud/multi-az-tier";
+import s81 from "../../../assets/diagrams/animated/cloud/nat-egress";
+import s82 from "../../../assets/diagrams/animated/cloud/nines-ladder";
+import s83 from "../../../assets/diagrams/animated/cloud/nosql-partitions";
+import s84 from "../../../assets/diagrams/animated/cloud/object-upload-lifecycle";
+import s85 from "../../../assets/diagrams/animated/cloud/one-server-to-elastic";
+import s86 from "../../../assets/diagrams/animated/cloud/paas-stack";
+import s87 from "../../../assets/diagrams/animated/cloud/pricing-basics-1";
+import s88 from "../../../assets/diagrams/animated/cloud/private-endpoint";
+import s89 from "../../../assets/diagrams/animated/cloud/queue-topic-stream";
+import s90 from "../../../assets/diagrams/animated/cloud/realtime-transports";
+import s91 from "../../../assets/diagrams/animated/cloud/region-zone-edge";
+import s92 from "../../../assets/diagrams/animated/cloud/replica-lag-read-after-write";
+import s93 from "../../../assets/diagrams/animated/cloud/residency-perimeter";
+import s94 from "../../../assets/diagrams/animated/cloud/resource-hierarchy";
+import s95 from "../../../assets/diagrams/animated/cloud/responsibility-line";
+import s96 from "../../../assets/diagrams/animated/cloud/retry-backoff-jitter";
+import s97 from "../../../assets/diagrams/animated/cloud/retry-storm";
+import s98 from "../../../assets/diagrams/animated/cloud/rpo-rto-timeline";
+import s99 from "../../../assets/diagrams/animated/cloud/secret-fetch-rotate";
+import s100 from "../../../assets/diagrams/animated/cloud/secrets-management-1";
+import s101 from "../../../assets/diagrams/animated/cloud/serverless-containers-scale";
+import s102 from "../../../assets/diagrams/animated/cloud/serverless-event-triggers";
+import s103 from "../../../assets/diagrams/animated/cloud/serverless-request";
+import s104 from "../../../assets/diagrams/animated/cloud/service-equivalents-1";
+import s105 from "../../../assets/diagrams/animated/cloud/service-model-ladder";
+import s106 from "../../../assets/diagrams/animated/cloud/service-models-1";
+import s107 from "../../../assets/diagrams/animated/cloud/slo-ladder";
+import s108 from "../../../assets/diagrams/animated/cloud/storage-class-ladder";
+import s109 from "../../../assets/diagrams/animated/cloud/storage-three-shapes";
+import s110 from "../../../assets/diagrams/animated/cloud/stream-partitions";
+import s111 from "../../../assets/diagrams/animated/cloud/sts-assume-role";
+import s112 from "../../../assets/diagrams/animated/cloud/telemetry-pipeline";
+import s113 from "../../../assets/diagrams/animated/cloud/three-signals";
+import s114 from "../../../assets/diagrams/animated/cloud/tls-at-lb";
+import s115 from "../../../assets/diagrams/animated/cloud/vm-anatomy";
+import s116 from "../../../assets/diagrams/animated/cloud/vm-fleet-three-zones";
+import s117 from "../../../assets/diagrams/animated/cloud/vpc-three-tier";
+import s118 from "../../../assets/diagrams/animated/cloud/webhook-receiver";
+import s119 from "../../../assets/diagrams/animated/cloud/webhook-retry";
+import s120 from "../../../assets/diagrams/animated/cloud/well-architected-thinking-1";
+import s121 from "../../../assets/diagrams/animated/cloud/write-topologies";
+import s122 from "../../../assets/diagrams/animated/cloud/zero-trust-request";
+import s123 from "../../../assets/diagrams/animated/databases/btree-lookup";
+import s124 from "../../../assets/diagrams/animated/databases/cdc-to-search";
+import s125 from "../../../assets/diagrams/animated/databases/inverted-index";
+import s126 from "../../../assets/diagrams/animated/databases/lsm-write-path";
+import s127 from "../../../assets/diagrams/animated/databases/polyglot-ecommerce";
+import s128 from "../../../assets/diagrams/animated/databases/read-scaling";
+import s129 from "../../../assets/diagrams/animated/fundamentals/abuse-protection";
+import s130 from "../../../assets/diagrams/animated/fundamentals/ajax-polling";
+import s131 from "../../../assets/diagrams/animated/fundamentals/ajax-polling-fleet";
+import s132 from "../../../assets/diagrams/animated/fundamentals/anatomy-of-a-request";
+import s133 from "../../../assets/diagrams/animated/fundamentals/anatomy-of-a-request-hops";
+import s134 from "../../../assets/diagrams/animated/fundamentals/api-auth";
+import s135 from "../../../assets/diagrams/animated/fundamentals/api-auth-oauth-flow";
+import s136 from "../../../assets/diagrams/animated/fundamentals/api-design";
+import s137 from "../../../assets/diagrams/animated/fundamentals/api-design-pagination";
+import s138 from "../../../assets/diagrams/animated/fundamentals/api-gateway";
+import s139 from "../../../assets/diagrams/animated/fundamentals/api-gateway-flow";
+import s140 from "../../../assets/diagrams/animated/fundamentals/availability";
+import s141 from "../../../assets/diagrams/animated/fundamentals/capacity-planning";
+import s142 from "../../../assets/diagrams/animated/fundamentals/cdn";
+import s143 from "../../../assets/diagrams/animated/fundamentals/choosing-an-api-style";
+import s144 from "../../../assets/diagrams/animated/fundamentals/choosing-an-api-style-flow";
+import s145 from "../../../assets/diagrams/animated/fundamentals/choosing-realtime";
+import s146 from "../../../assets/diagrams/animated/fundamentals/common-attacks";
+import s147 from "../../../assets/diagrams/animated/fundamentals/common-attacks-accounts";
+import s148 from "../../../assets/diagrams/animated/fundamentals/compression";
+import s149 from "../../../assets/diagrams/animated/fundamentals/compression-where";
+import s150 from "../../../assets/diagrams/animated/fundamentals/dns-geodns";
+import s151 from "../../../assets/diagrams/animated/fundamentals/dns-lookup";
+import s152 from "../../../assets/diagrams/animated/fundamentals/encryption-and-hashing";
+import s153 from "../../../assets/diagrams/animated/fundamentals/encryption-and-hashing-salt-layout";
+import s154 from "../../../assets/diagrams/animated/fundamentals/estimation";
+import s155 from "../../../assets/diagrams/animated/fundamentals/estimation-peak";
+import s156 from "../../../assets/diagrams/animated/fundamentals/functional-requirements";
+import s157 from "../../../assets/diagrams/animated/fundamentals/graphql";
+import s158 from "../../../assets/diagrams/animated/fundamentals/graphql-flow";
+import s159 from "../../../assets/diagrams/animated/fundamentals/http";
+import s160 from "../../../assets/diagrams/animated/fundamentals/http-loss-flow";
+import s161 from "../../../assets/diagrams/animated/fundamentals/interview-framework";
+import s162 from "../../../assets/diagrams/animated/fundamentals/latency-budget";
+import s163 from "../../../assets/diagrams/animated/fundamentals/latency-ladder";
+import s164 from "../../../assets/diagrams/animated/fundamentals/load-balancing-basics";
+import s165 from "../../../assets/diagrams/animated/fundamentals/long-polling";
+import s166 from "../../../assets/diagrams/animated/fundamentals/long-polling-fleet";
+import s167 from "../../../assets/diagrams/animated/fundamentals/networking";
+import s168 from "../../../assets/diagrams/animated/fundamentals/networking-path";
+import s169 from "../../../assets/diagrams/animated/fundamentals/non-functional-requirements";
+import s170 from "../../../assets/diagrams/animated/fundamentals/one-server-to-many";
+import s171 from "../../../assets/diagrams/animated/fundamentals/proxies";
+import s172 from "../../../assets/diagrams/animated/fundamentals/proxies-sidecar";
+import s173 from "../../../assets/diagrams/animated/fundamentals/push-notifications";
+import s174 from "../../../assets/diagrams/animated/fundamentals/rest";
+import s175 from "../../../assets/diagrams/animated/fundamentals/rest-stateless";
+import s176 from "../../../assets/diagrams/animated/fundamentals/rpc";
+import s177 from "../../../assets/diagrams/animated/fundamentals/rpc-internal";
+import s178 from "../../../assets/diagrams/animated/fundamentals/rpc-layout";
+import s179 from "../../../assets/diagrams/animated/fundamentals/scaling-journey";
+import s180 from "../../../assets/diagrams/animated/fundamentals/scaling-journey-sessions";
+import s181 from "../../../assets/diagrams/animated/fundamentals/security";
+import s182 from "../../../assets/diagrams/animated/fundamentals/serialization";
+import s183 from "../../../assets/diagrams/animated/fundamentals/serialization-bytes";
+import s184 from "../../../assets/diagrams/animated/fundamentals/serialization-registry";
+import s185 from "../../../assets/diagrams/animated/fundamentals/server-sent-events";
+import s186 from "../../../assets/diagrams/animated/fundamentals/server-sent-events-fleet";
+import s187 from "../../../assets/diagrams/animated/fundamentals/soap";
+import s188 from "../../../assets/diagrams/animated/fundamentals/soap-integration";
+import s189 from "../../../assets/diagrams/animated/fundamentals/storage-types";
+import s190 from "../../../assets/diagrams/animated/fundamentals/tcp-udp";
+import s191 from "../../../assets/diagrams/animated/fundamentals/tcp-udp-tcp-flow";
+import s192 from "../../../assets/diagrams/animated/fundamentals/tcp-udp-udp-flow";
+import s193 from "../../../assets/diagrams/animated/fundamentals/tls";
+import s194 from "../../../assets/diagrams/animated/fundamentals/tls-termination";
+import s195 from "../../../assets/diagrams/animated/fundamentals/webhooks";
+import s196 from "../../../assets/diagrams/animated/fundamentals/webhooks-pipeline";
+import s197 from "../../../assets/diagrams/animated/fundamentals/websockets";
+import s198 from "../../../assets/diagrams/animated/fundamentals/websockets-scaling";
+import s199 from "../../../assets/diagrams/animated/messenger/architecture";
+import s200 from "../../../assets/diagrams/animated/messenger/aws";
+import s201 from "../../../assets/diagrams/animated/uber-eats/architecture";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/behavioral/amazon-lp-tensions": s0,
@@ -218,192 +219,193 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/behavioral/leveling-ladder": s10,
   "diagrams/animated/behavioral/meta-behavioral-round": s11,
   "diagrams/animated/behavioral/meta-loop": s12,
-  "diagrams/animated/behavioral/one-way-vs-two-way-door": s13,
-  "diagrams/animated/behavioral/probe-tree": s14,
-  "diagrams/animated/behavioral/scope-by-level": s15,
-  "diagrams/animated/behavioral/self-introspection-loop": s16,
-  "diagrams/animated/behavioral/star-plus-l-arc": s17,
-  "diagrams/animated/behavioral/story-matrix-map": s18,
-  "diagrams/animated/behavioral/weakness-answer-arc": s19,
-  "diagrams/animated/behavioral/why-this-company": s20,
-  "diagrams/animated/cloud/ai-guardrail-path": s21,
-  "diagrams/animated/cloud/ai-security-1": s22,
-  "diagrams/animated/cloud/alert-path": s23,
-  "diagrams/animated/cloud/api-gateway-request": s24,
-  "diagrams/animated/cloud/api-hosting-paths": s25,
-  "diagrams/animated/cloud/autoscaling-1": s26,
-  "diagrams/animated/cloud/autoscaling-loop": s27,
-  "diagrams/animated/cloud/backup-chain": s28,
-  "diagrams/animated/cloud/batch-job-queue": s29,
-  "diagrams/animated/cloud/block-snapshot-chain": s30,
-  "diagrams/animated/cloud/block-storage-1": s31,
-  "diagrams/animated/cloud/brightpost-compute-journey": s32,
-  "diagrams/animated/cloud/brightpost-data-tier": s33,
-  "diagrams/animated/cloud/brightpost-grows": s34,
-  "diagrams/animated/cloud/cache-patterns": s35,
-  "diagrams/animated/cloud/cdn-request-path": s36,
-  "diagrams/animated/cloud/ci-cd-pipeline": s37,
-  "diagrams/animated/cloud/compute-spectrum": s38,
-  "diagrams/animated/cloud/compute-spectrum-1": s39,
-  "diagrams/animated/cloud/container-image-to-run": s40,
-  "diagrams/animated/cloud/container-vs-vm": s41,
-  "diagrams/animated/cloud/data-map": s42,
-  "diagrams/animated/cloud/database-migration-1": s43,
-  "diagrams/animated/cloud/db-failover-sequence": s44,
-  "diagrams/animated/cloud/defence-layers": s45,
-  "diagrams/animated/cloud/delivery-guarantees": s46,
-  "diagrams/animated/cloud/deployment-strategies": s47,
-  "diagrams/animated/cloud/detection-pipeline": s48,
-  "diagrams/animated/cloud/dns-lookup": s49,
-  "diagrams/animated/cloud/dns-resolution": s50,
-  "diagrams/animated/cloud/dr-tiers": s51,
-  "diagrams/animated/cloud/encryption-states": s52,
-  "diagrams/animated/cloud/envelope-encryption": s53,
-  "diagrams/animated/cloud/error-budget-burn": s54,
-  "diagrams/animated/cloud/event-pipeline": s55,
-  "diagrams/animated/cloud/failure-domains": s56,
-  "diagrams/animated/cloud/firewall-evaluation": s57,
-  "diagrams/animated/cloud/firewall-layers": s58,
-  "diagrams/animated/cloud/gateway-vs-lb": s59,
-  "diagrams/animated/cloud/global-routing": s60,
-  "diagrams/animated/cloud/gpu-fleet": s61,
-  "diagrams/animated/cloud/grpc-call": s62,
-  "diagrams/animated/cloud/grpc-deadline": s63,
-  "diagrams/animated/cloud/hub-spoke": s64,
-  "diagrams/animated/cloud/hybrid-link": s65,
-  "diagrams/animated/cloud/hybrid-transfer-paths": s66,
-  "diagrams/animated/cloud/iac-pipeline": s67,
-  "diagrams/animated/cloud/iam-role-chain": s68,
-  "diagrams/animated/cloud/k8s-cluster-anatomy": s69,
-  "diagrams/animated/cloud/k8s-request-path": s70,
-  "diagrams/animated/cloud/lake-to-warehouse": s71,
-  "diagrams/animated/cloud/landing-zone": s72,
-  "diagrams/animated/cloud/lb-l4-vs-l7": s73,
-  "diagrams/animated/cloud/learning-paths": s74,
-  "diagrams/animated/cloud/limit-layers": s75,
-  "diagrams/animated/cloud/managed-relational-ha": s76,
-  "diagrams/animated/cloud/managed-websockets": s77,
-  "diagrams/animated/cloud/migration-cutover": s78,
-  "diagrams/animated/cloud/multi-az-tier": s79,
-  "diagrams/animated/cloud/nat-egress": s80,
-  "diagrams/animated/cloud/nines-ladder": s81,
-  "diagrams/animated/cloud/nosql-partitions": s82,
-  "diagrams/animated/cloud/object-upload-lifecycle": s83,
-  "diagrams/animated/cloud/one-server-to-elastic": s84,
-  "diagrams/animated/cloud/paas-stack": s85,
-  "diagrams/animated/cloud/pricing-basics-1": s86,
-  "diagrams/animated/cloud/private-endpoint": s87,
-  "diagrams/animated/cloud/queue-topic-stream": s88,
-  "diagrams/animated/cloud/realtime-transports": s89,
-  "diagrams/animated/cloud/region-zone-edge": s90,
-  "diagrams/animated/cloud/replica-lag-read-after-write": s91,
-  "diagrams/animated/cloud/residency-perimeter": s92,
-  "diagrams/animated/cloud/resource-hierarchy": s93,
-  "diagrams/animated/cloud/responsibility-line": s94,
-  "diagrams/animated/cloud/retry-backoff-jitter": s95,
-  "diagrams/animated/cloud/retry-storm": s96,
-  "diagrams/animated/cloud/rpo-rto-timeline": s97,
-  "diagrams/animated/cloud/secret-fetch-rotate": s98,
-  "diagrams/animated/cloud/secrets-management-1": s99,
-  "diagrams/animated/cloud/serverless-containers-scale": s100,
-  "diagrams/animated/cloud/serverless-event-triggers": s101,
-  "diagrams/animated/cloud/serverless-request": s102,
-  "diagrams/animated/cloud/service-equivalents-1": s103,
-  "diagrams/animated/cloud/service-model-ladder": s104,
-  "diagrams/animated/cloud/service-models-1": s105,
-  "diagrams/animated/cloud/slo-ladder": s106,
-  "diagrams/animated/cloud/storage-class-ladder": s107,
-  "diagrams/animated/cloud/storage-three-shapes": s108,
-  "diagrams/animated/cloud/stream-partitions": s109,
-  "diagrams/animated/cloud/sts-assume-role": s110,
-  "diagrams/animated/cloud/telemetry-pipeline": s111,
-  "diagrams/animated/cloud/three-signals": s112,
-  "diagrams/animated/cloud/tls-at-lb": s113,
-  "diagrams/animated/cloud/vm-anatomy": s114,
-  "diagrams/animated/cloud/vm-fleet-three-zones": s115,
-  "diagrams/animated/cloud/vpc-three-tier": s116,
-  "diagrams/animated/cloud/webhook-receiver": s117,
-  "diagrams/animated/cloud/webhook-retry": s118,
-  "diagrams/animated/cloud/well-architected-thinking-1": s119,
-  "diagrams/animated/cloud/write-topologies": s120,
-  "diagrams/animated/cloud/zero-trust-request": s121,
-  "diagrams/animated/databases/btree-lookup": s122,
-  "diagrams/animated/databases/cdc-to-search": s123,
-  "diagrams/animated/databases/inverted-index": s124,
-  "diagrams/animated/databases/lsm-write-path": s125,
-  "diagrams/animated/databases/polyglot-ecommerce": s126,
-  "diagrams/animated/databases/read-scaling": s127,
-  "diagrams/animated/fundamentals/abuse-protection": s128,
-  "diagrams/animated/fundamentals/ajax-polling": s129,
-  "diagrams/animated/fundamentals/ajax-polling-fleet": s130,
-  "diagrams/animated/fundamentals/anatomy-of-a-request": s131,
-  "diagrams/animated/fundamentals/anatomy-of-a-request-hops": s132,
-  "diagrams/animated/fundamentals/api-auth": s133,
-  "diagrams/animated/fundamentals/api-auth-oauth-flow": s134,
-  "diagrams/animated/fundamentals/api-design": s135,
-  "diagrams/animated/fundamentals/api-design-pagination": s136,
-  "diagrams/animated/fundamentals/api-gateway": s137,
-  "diagrams/animated/fundamentals/api-gateway-flow": s138,
-  "diagrams/animated/fundamentals/availability": s139,
-  "diagrams/animated/fundamentals/capacity-planning": s140,
-  "diagrams/animated/fundamentals/cdn": s141,
-  "diagrams/animated/fundamentals/choosing-an-api-style": s142,
-  "diagrams/animated/fundamentals/choosing-an-api-style-flow": s143,
-  "diagrams/animated/fundamentals/choosing-realtime": s144,
-  "diagrams/animated/fundamentals/common-attacks": s145,
-  "diagrams/animated/fundamentals/common-attacks-accounts": s146,
-  "diagrams/animated/fundamentals/compression": s147,
-  "diagrams/animated/fundamentals/compression-where": s148,
-  "diagrams/animated/fundamentals/dns-geodns": s149,
-  "diagrams/animated/fundamentals/dns-lookup": s150,
-  "diagrams/animated/fundamentals/encryption-and-hashing": s151,
-  "diagrams/animated/fundamentals/encryption-and-hashing-salt-layout": s152,
-  "diagrams/animated/fundamentals/estimation": s153,
-  "diagrams/animated/fundamentals/estimation-peak": s154,
-  "diagrams/animated/fundamentals/functional-requirements": s155,
-  "diagrams/animated/fundamentals/graphql": s156,
-  "diagrams/animated/fundamentals/graphql-flow": s157,
-  "diagrams/animated/fundamentals/http": s158,
-  "diagrams/animated/fundamentals/http-loss-flow": s159,
-  "diagrams/animated/fundamentals/interview-framework": s160,
-  "diagrams/animated/fundamentals/latency-budget": s161,
-  "diagrams/animated/fundamentals/latency-ladder": s162,
-  "diagrams/animated/fundamentals/load-balancing-basics": s163,
-  "diagrams/animated/fundamentals/long-polling": s164,
-  "diagrams/animated/fundamentals/long-polling-fleet": s165,
-  "diagrams/animated/fundamentals/networking": s166,
-  "diagrams/animated/fundamentals/networking-path": s167,
-  "diagrams/animated/fundamentals/non-functional-requirements": s168,
-  "diagrams/animated/fundamentals/one-server-to-many": s169,
-  "diagrams/animated/fundamentals/proxies": s170,
-  "diagrams/animated/fundamentals/proxies-sidecar": s171,
-  "diagrams/animated/fundamentals/push-notifications": s172,
-  "diagrams/animated/fundamentals/rest": s173,
-  "diagrams/animated/fundamentals/rest-stateless": s174,
-  "diagrams/animated/fundamentals/rpc": s175,
-  "diagrams/animated/fundamentals/rpc-internal": s176,
-  "diagrams/animated/fundamentals/rpc-layout": s177,
-  "diagrams/animated/fundamentals/scaling-journey": s178,
-  "diagrams/animated/fundamentals/scaling-journey-sessions": s179,
-  "diagrams/animated/fundamentals/security": s180,
-  "diagrams/animated/fundamentals/serialization": s181,
-  "diagrams/animated/fundamentals/serialization-bytes": s182,
-  "diagrams/animated/fundamentals/serialization-registry": s183,
-  "diagrams/animated/fundamentals/server-sent-events": s184,
-  "diagrams/animated/fundamentals/server-sent-events-fleet": s185,
-  "diagrams/animated/fundamentals/soap": s186,
-  "diagrams/animated/fundamentals/soap-integration": s187,
-  "diagrams/animated/fundamentals/storage-types": s188,
-  "diagrams/animated/fundamentals/tcp-udp": s189,
-  "diagrams/animated/fundamentals/tcp-udp-tcp-flow": s190,
-  "diagrams/animated/fundamentals/tcp-udp-udp-flow": s191,
-  "diagrams/animated/fundamentals/tls": s192,
-  "diagrams/animated/fundamentals/tls-termination": s193,
-  "diagrams/animated/fundamentals/webhooks": s194,
-  "diagrams/animated/fundamentals/webhooks-pipeline": s195,
-  "diagrams/animated/fundamentals/websockets": s196,
-  "diagrams/animated/fundamentals/websockets-scaling": s197,
-  "diagrams/animated/messenger/architecture": s198,
-  "diagrams/animated/messenger/aws": s199,
-  "diagrams/animated/uber-eats/architecture": s200,
+  "diagrams/animated/behavioral/new-grad-story-sources": s13,
+  "diagrams/animated/behavioral/one-way-vs-two-way-door": s14,
+  "diagrams/animated/behavioral/probe-tree": s15,
+  "diagrams/animated/behavioral/scope-by-level": s16,
+  "diagrams/animated/behavioral/self-introspection-loop": s17,
+  "diagrams/animated/behavioral/star-plus-l-arc": s18,
+  "diagrams/animated/behavioral/story-matrix-map": s19,
+  "diagrams/animated/behavioral/weakness-answer-arc": s20,
+  "diagrams/animated/behavioral/why-this-company": s21,
+  "diagrams/animated/cloud/ai-guardrail-path": s22,
+  "diagrams/animated/cloud/ai-security-1": s23,
+  "diagrams/animated/cloud/alert-path": s24,
+  "diagrams/animated/cloud/api-gateway-request": s25,
+  "diagrams/animated/cloud/api-hosting-paths": s26,
+  "diagrams/animated/cloud/autoscaling-1": s27,
+  "diagrams/animated/cloud/autoscaling-loop": s28,
+  "diagrams/animated/cloud/backup-chain": s29,
+  "diagrams/animated/cloud/batch-job-queue": s30,
+  "diagrams/animated/cloud/block-snapshot-chain": s31,
+  "diagrams/animated/cloud/block-storage-1": s32,
+  "diagrams/animated/cloud/brightpost-compute-journey": s33,
+  "diagrams/animated/cloud/brightpost-data-tier": s34,
+  "diagrams/animated/cloud/brightpost-grows": s35,
+  "diagrams/animated/cloud/cache-patterns": s36,
+  "diagrams/animated/cloud/cdn-request-path": s37,
+  "diagrams/animated/cloud/ci-cd-pipeline": s38,
+  "diagrams/animated/cloud/compute-spectrum": s39,
+  "diagrams/animated/cloud/compute-spectrum-1": s40,
+  "diagrams/animated/cloud/container-image-to-run": s41,
+  "diagrams/animated/cloud/container-vs-vm": s42,
+  "diagrams/animated/cloud/data-map": s43,
+  "diagrams/animated/cloud/database-migration-1": s44,
+  "diagrams/animated/cloud/db-failover-sequence": s45,
+  "diagrams/animated/cloud/defence-layers": s46,
+  "diagrams/animated/cloud/delivery-guarantees": s47,
+  "diagrams/animated/cloud/deployment-strategies": s48,
+  "diagrams/animated/cloud/detection-pipeline": s49,
+  "diagrams/animated/cloud/dns-lookup": s50,
+  "diagrams/animated/cloud/dns-resolution": s51,
+  "diagrams/animated/cloud/dr-tiers": s52,
+  "diagrams/animated/cloud/encryption-states": s53,
+  "diagrams/animated/cloud/envelope-encryption": s54,
+  "diagrams/animated/cloud/error-budget-burn": s55,
+  "diagrams/animated/cloud/event-pipeline": s56,
+  "diagrams/animated/cloud/failure-domains": s57,
+  "diagrams/animated/cloud/firewall-evaluation": s58,
+  "diagrams/animated/cloud/firewall-layers": s59,
+  "diagrams/animated/cloud/gateway-vs-lb": s60,
+  "diagrams/animated/cloud/global-routing": s61,
+  "diagrams/animated/cloud/gpu-fleet": s62,
+  "diagrams/animated/cloud/grpc-call": s63,
+  "diagrams/animated/cloud/grpc-deadline": s64,
+  "diagrams/animated/cloud/hub-spoke": s65,
+  "diagrams/animated/cloud/hybrid-link": s66,
+  "diagrams/animated/cloud/hybrid-transfer-paths": s67,
+  "diagrams/animated/cloud/iac-pipeline": s68,
+  "diagrams/animated/cloud/iam-role-chain": s69,
+  "diagrams/animated/cloud/k8s-cluster-anatomy": s70,
+  "diagrams/animated/cloud/k8s-request-path": s71,
+  "diagrams/animated/cloud/lake-to-warehouse": s72,
+  "diagrams/animated/cloud/landing-zone": s73,
+  "diagrams/animated/cloud/lb-l4-vs-l7": s74,
+  "diagrams/animated/cloud/learning-paths": s75,
+  "diagrams/animated/cloud/limit-layers": s76,
+  "diagrams/animated/cloud/managed-relational-ha": s77,
+  "diagrams/animated/cloud/managed-websockets": s78,
+  "diagrams/animated/cloud/migration-cutover": s79,
+  "diagrams/animated/cloud/multi-az-tier": s80,
+  "diagrams/animated/cloud/nat-egress": s81,
+  "diagrams/animated/cloud/nines-ladder": s82,
+  "diagrams/animated/cloud/nosql-partitions": s83,
+  "diagrams/animated/cloud/object-upload-lifecycle": s84,
+  "diagrams/animated/cloud/one-server-to-elastic": s85,
+  "diagrams/animated/cloud/paas-stack": s86,
+  "diagrams/animated/cloud/pricing-basics-1": s87,
+  "diagrams/animated/cloud/private-endpoint": s88,
+  "diagrams/animated/cloud/queue-topic-stream": s89,
+  "diagrams/animated/cloud/realtime-transports": s90,
+  "diagrams/animated/cloud/region-zone-edge": s91,
+  "diagrams/animated/cloud/replica-lag-read-after-write": s92,
+  "diagrams/animated/cloud/residency-perimeter": s93,
+  "diagrams/animated/cloud/resource-hierarchy": s94,
+  "diagrams/animated/cloud/responsibility-line": s95,
+  "diagrams/animated/cloud/retry-backoff-jitter": s96,
+  "diagrams/animated/cloud/retry-storm": s97,
+  "diagrams/animated/cloud/rpo-rto-timeline": s98,
+  "diagrams/animated/cloud/secret-fetch-rotate": s99,
+  "diagrams/animated/cloud/secrets-management-1": s100,
+  "diagrams/animated/cloud/serverless-containers-scale": s101,
+  "diagrams/animated/cloud/serverless-event-triggers": s102,
+  "diagrams/animated/cloud/serverless-request": s103,
+  "diagrams/animated/cloud/service-equivalents-1": s104,
+  "diagrams/animated/cloud/service-model-ladder": s105,
+  "diagrams/animated/cloud/service-models-1": s106,
+  "diagrams/animated/cloud/slo-ladder": s107,
+  "diagrams/animated/cloud/storage-class-ladder": s108,
+  "diagrams/animated/cloud/storage-three-shapes": s109,
+  "diagrams/animated/cloud/stream-partitions": s110,
+  "diagrams/animated/cloud/sts-assume-role": s111,
+  "diagrams/animated/cloud/telemetry-pipeline": s112,
+  "diagrams/animated/cloud/three-signals": s113,
+  "diagrams/animated/cloud/tls-at-lb": s114,
+  "diagrams/animated/cloud/vm-anatomy": s115,
+  "diagrams/animated/cloud/vm-fleet-three-zones": s116,
+  "diagrams/animated/cloud/vpc-three-tier": s117,
+  "diagrams/animated/cloud/webhook-receiver": s118,
+  "diagrams/animated/cloud/webhook-retry": s119,
+  "diagrams/animated/cloud/well-architected-thinking-1": s120,
+  "diagrams/animated/cloud/write-topologies": s121,
+  "diagrams/animated/cloud/zero-trust-request": s122,
+  "diagrams/animated/databases/btree-lookup": s123,
+  "diagrams/animated/databases/cdc-to-search": s124,
+  "diagrams/animated/databases/inverted-index": s125,
+  "diagrams/animated/databases/lsm-write-path": s126,
+  "diagrams/animated/databases/polyglot-ecommerce": s127,
+  "diagrams/animated/databases/read-scaling": s128,
+  "diagrams/animated/fundamentals/abuse-protection": s129,
+  "diagrams/animated/fundamentals/ajax-polling": s130,
+  "diagrams/animated/fundamentals/ajax-polling-fleet": s131,
+  "diagrams/animated/fundamentals/anatomy-of-a-request": s132,
+  "diagrams/animated/fundamentals/anatomy-of-a-request-hops": s133,
+  "diagrams/animated/fundamentals/api-auth": s134,
+  "diagrams/animated/fundamentals/api-auth-oauth-flow": s135,
+  "diagrams/animated/fundamentals/api-design": s136,
+  "diagrams/animated/fundamentals/api-design-pagination": s137,
+  "diagrams/animated/fundamentals/api-gateway": s138,
+  "diagrams/animated/fundamentals/api-gateway-flow": s139,
+  "diagrams/animated/fundamentals/availability": s140,
+  "diagrams/animated/fundamentals/capacity-planning": s141,
+  "diagrams/animated/fundamentals/cdn": s142,
+  "diagrams/animated/fundamentals/choosing-an-api-style": s143,
+  "diagrams/animated/fundamentals/choosing-an-api-style-flow": s144,
+  "diagrams/animated/fundamentals/choosing-realtime": s145,
+  "diagrams/animated/fundamentals/common-attacks": s146,
+  "diagrams/animated/fundamentals/common-attacks-accounts": s147,
+  "diagrams/animated/fundamentals/compression": s148,
+  "diagrams/animated/fundamentals/compression-where": s149,
+  "diagrams/animated/fundamentals/dns-geodns": s150,
+  "diagrams/animated/fundamentals/dns-lookup": s151,
+  "diagrams/animated/fundamentals/encryption-and-hashing": s152,
+  "diagrams/animated/fundamentals/encryption-and-hashing-salt-layout": s153,
+  "diagrams/animated/fundamentals/estimation": s154,
+  "diagrams/animated/fundamentals/estimation-peak": s155,
+  "diagrams/animated/fundamentals/functional-requirements": s156,
+  "diagrams/animated/fundamentals/graphql": s157,
+  "diagrams/animated/fundamentals/graphql-flow": s158,
+  "diagrams/animated/fundamentals/http": s159,
+  "diagrams/animated/fundamentals/http-loss-flow": s160,
+  "diagrams/animated/fundamentals/interview-framework": s161,
+  "diagrams/animated/fundamentals/latency-budget": s162,
+  "diagrams/animated/fundamentals/latency-ladder": s163,
+  "diagrams/animated/fundamentals/load-balancing-basics": s164,
+  "diagrams/animated/fundamentals/long-polling": s165,
+  "diagrams/animated/fundamentals/long-polling-fleet": s166,
+  "diagrams/animated/fundamentals/networking": s167,
+  "diagrams/animated/fundamentals/networking-path": s168,
+  "diagrams/animated/fundamentals/non-functional-requirements": s169,
+  "diagrams/animated/fundamentals/one-server-to-many": s170,
+  "diagrams/animated/fundamentals/proxies": s171,
+  "diagrams/animated/fundamentals/proxies-sidecar": s172,
+  "diagrams/animated/fundamentals/push-notifications": s173,
+  "diagrams/animated/fundamentals/rest": s174,
+  "diagrams/animated/fundamentals/rest-stateless": s175,
+  "diagrams/animated/fundamentals/rpc": s176,
+  "diagrams/animated/fundamentals/rpc-internal": s177,
+  "diagrams/animated/fundamentals/rpc-layout": s178,
+  "diagrams/animated/fundamentals/scaling-journey": s179,
+  "diagrams/animated/fundamentals/scaling-journey-sessions": s180,
+  "diagrams/animated/fundamentals/security": s181,
+  "diagrams/animated/fundamentals/serialization": s182,
+  "diagrams/animated/fundamentals/serialization-bytes": s183,
+  "diagrams/animated/fundamentals/serialization-registry": s184,
+  "diagrams/animated/fundamentals/server-sent-events": s185,
+  "diagrams/animated/fundamentals/server-sent-events-fleet": s186,
+  "diagrams/animated/fundamentals/soap": s187,
+  "diagrams/animated/fundamentals/soap-integration": s188,
+  "diagrams/animated/fundamentals/storage-types": s189,
+  "diagrams/animated/fundamentals/tcp-udp": s190,
+  "diagrams/animated/fundamentals/tcp-udp-tcp-flow": s191,
+  "diagrams/animated/fundamentals/tcp-udp-udp-flow": s192,
+  "diagrams/animated/fundamentals/tls": s193,
+  "diagrams/animated/fundamentals/tls-termination": s194,
+  "diagrams/animated/fundamentals/webhooks": s195,
+  "diagrams/animated/fundamentals/webhooks-pipeline": s196,
+  "diagrams/animated/fundamentals/websockets": s197,
+  "diagrams/animated/fundamentals/websockets-scaling": s198,
+  "diagrams/animated/messenger/architecture": s199,
+  "diagrams/animated/messenger/aws": s200,
+  "diagrams/animated/uber-eats/architecture": s201,
 };
