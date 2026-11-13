@@ -27,8 +27,8 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Routing: the chat service's refund request to the workflow (step 6) runs diagonally between the guardrail and the
 // model; its label sits at 0.24, just below the chat service, clear of the guardrail-to-model label (0.8). The AI
 // zone is a subnet (inline label, no tab) because the blocked note enters it through the top at x 390. Short zone
-// titles ("App", "Data") keep their tabs left of the vertical edges at x 130; the payment zone is a subnet too,
-// because two refund edges enter it from above. The refused lookup of order 5122 (step 5) bends right of the
+// titles ("App", "Data") keep their tabs left of the vertical edges at x 130. The payment provider has no zone, so
+// the refund edges reach it without crossing a label; their labels sit at 0.68, below the AI zone. The refused lookup of order 5122 (step 5) bends right of the
 // straight lookup edge (via 235,516), so the two labels sit side by side.
 // Node tops sit at least 26 units under their zone's top so the NEW ring clears the zone tab.
 // Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Boxes fit the longest
@@ -51,12 +51,11 @@ const spec: DiagramSpec = {
     { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 290, y: 35, w: 200, h: 110 },
     { id: "content", title: "Shop content", tone: "violet", x: 545, y: 35, w: 240, h: 110 },
     { id: "chatz", title: "App", tone: "teal", x: 10, y: 195, w: 240, h: 110 },
-    { id: "ai", title: "AI service", tone: "teal", kind: "subnet", x: 290, y: 195, w: 200, h: 290 },
+    { id: "ai", title: "AI service", tone: "teal", kind: "subnet", x: 290, y: 183, w: 200, h: 302 },
     { id: "records", title: "Records", tone: "orange", x: 545, y: 195, w: 240, h: 110 },
     { id: "identity", title: "Identity", tone: "red", x: 10, y: 375, w: 240, h: 110 },
     { id: "approvals", title: "Approvals", tone: "orange", x: 545, y: 375, w: 240, h: 305 },
     { id: "data", title: "Data", tone: "violet", x: 10, y: 545, w: 240, h: 135 },
-    { id: "provider", title: "Provider", tone: "neutral", kind: "subnet", x: 290, y: 545, w: 200, h: 110 },
   ],
   nodes: [
     // Step 1
@@ -228,7 +227,7 @@ const spec: DiagramSpec = {
     { from: "customer", to: "chat", label: "chat", packet: true, bidirectional: true, labelAt: 0.2, until: 6 },
     { from: "chat", to: "model", label: "prompt + tools", packet: true, delay: 0.8, until: 2 },
     { from: "chat", to: "orders", label: "look up any order", dashed: true, until: 1 },
-    { from: "chat", to: "payments", label: "refund, no limit", dashed: true, labelAt: 0.35, until: 1 },
+    { from: "chat", to: "payments", label: "refund, no limit", dashed: true, labelAt: 0.68, until: 1 },
 
     // Step 2: the pasted note gives the orders; the model obeys and both tools do what it asks.
     { from: "note", to: "chat", label: "pasted in", tone: "red", packet: true, step: 2, until: 2 },
@@ -240,7 +239,7 @@ const spec: DiagramSpec = {
       tone: "red",
       packet: true,
       delay: 1.8,
-      labelAt: 0.35,
+      labelAt: 0.68,
       step: 2,
       until: 2,
     },
@@ -250,7 +249,7 @@ const spec: DiagramSpec = {
     { from: "guardrail", to: "model", label: "checked", packet: true, labelAt: 0.8, delay: 0.8, step: 3 },
     { from: "note", to: "guardrail", label: "blocked", tone: "red", dashed: true, step: 3 },
     { from: "chat", to: "orders", label: "look up any order", dashed: true, step: 3, until: 4 },
-    { from: "chat", to: "payments", label: "refund, no limit", dashed: true, labelAt: 0.35, step: 3, until: 5 },
+    { from: "chat", to: "payments", label: "refund, no limit", dashed: true, labelAt: 0.68, step: 3, until: 5 },
 
     // Step 4: retrieved text joins the prompt as data and passes the same check.
     { from: "articles", to: "guardrail", label: "retrieved as data", packet: true, step: 4 },
