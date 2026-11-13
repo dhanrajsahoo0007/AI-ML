@@ -84,12 +84,12 @@ Interviewers grade your outage/failure story across **five stages**:
       3. **5-Whys Root Cause:** Why did `pg_stat_user_indexes` show 0 scans on the primary? Because our weekly enterprise billing rollup ran exclusively against the read replica, and our index-usage audit script only queried primary statistics!
       4. **Systemic Guardrail:** I updated our schema-migration CI linter to aggregate `pg_stat_user_indexes` across the primary AND all read replicas over a 35-day window (covering monthly jobs), and added an invisible-index (`hypopg` / soft-disable) 7-day canary stage before any physical `DROP INDEX` could execute."*
     - **Result:** *"Zero dropped events after queue drain, 14-minute MTTR, and our replica-aware index linter caught 6 other replica-only indexes across 4 teams before they could cause outages over the next year."*
-    - **Learning:** *"Never trust single-node telemetry in a distributed topology—and never rely on human checklists when a CI migration gate can query every replica automatically."*
+    - **Learning:** *"Never trust single-node telemetry in a distributed topology, and never rely on human checklists when a CI migration gate can query every replica automatically."*
   </Tab>
   <Tab label="Owning a Strategic / Estimation Failure">
     **Prompt:** *"Tell me about a time you failed to meet a commitment or made a major estimation mistake."*
 
-    - **Situation & Task:** *"As Tech Lead for a new self-serve data export pipeline, I committed to a 6-week launch date for our Q2 customer conference based on my estimate of our internal Parquet export engine. Three weeks in, I realized I had severely underestimated multi-region S3 egress throttling and customer IAM role validation edge cases—putting us on track to miss the conference by 4 weeks."*
+    - **Situation & Task:** *"As Tech Lead for a new self-serve data export pipeline, I committed to a 6-week launch date for our Q2 customer conference based on my estimate of our internal Parquet export engine. Three weeks in, I realized I had severely underestimated multi-region S3 egress throttling and customer IAM role validation edge cases, putting us on track to miss the conference by 4 weeks."*
     - **Action:** *"The moment my Week-3 end-to-end load test exposed the 4-week slip, I didn't hide it or hope the team could crunch 80-hour weeks to miracle it out. Within 24 hours, I brought the exact load-test numbers and a **Recovery Options Matrix** to my EM and PM:
       - **Full Cross-Account IAM Role Delegation:** Slip conference by 4 weeks.
       - **Phased Conference Launch:** Ship automated Parquet exports to pre-signed time-bound URLs + 1-click Terraform IAM templates on time for the conference (covering 90% of customer self-serve value), and ship live cross-account role assumption 3 weeks post-conference.

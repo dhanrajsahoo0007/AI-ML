@@ -52,7 +52,7 @@ AI/ML behavioral scorecards focus on **four signature competencies**:
 <DecisionTree
   title="Are your project stories ready for an AI / ML behavioral loop?"
   tree={{
-    q: "Do you have a story where an offline metric (AUC, NDCG, perplexity, or LLM-judge score) improved, but the online production metric regressed or stayed flat—and you diagnosed the exact root cause?",
+    q: "Do you have a story where an offline metric (AUC, NDCG, perplexity, or LLM-judge score) improved, but the online production metric regressed or stayed flat, and you diagnosed the exact root cause?",
     yes: {
       q: "Do you have a story where you personally inspected raw data/traces and caught a subtle data leakage, label corruption, or train-serve skew bug?",
       yes: {
@@ -75,14 +75,14 @@ AI/ML behavioral scorecards focus on **four signature competencies**:
   <Tab label="Debugging an Offline-vs-Online A/B Test Inversion">
     **Prompt:** *"Tell me about a time a model or ranking improvement looked great offline, but failed in an online A/B test."*
 
-    - **Situation & Task:** *"On our e-commerce search ranking squad, I trained a cross-encoder transformer reranker that improved offline NDCG@10 by **+4.8%**—our largest offline gain all year. However, when we ran a 5% online A/B test, gross merchandise value (GMV) per session dropped by **-1.9%**."*
+    - **Situation & Task:** *"On our e-commerce search ranking squad, I trained a cross-encoder transformer reranker that improved offline NDCG@10 by **+4.8%**: our largest offline gain all year. However, when we ran a 5% online A/B test, gross merchandise value (GMV) per session dropped by **-1.9%**."*
     - **Action:** *"Instead of discarding the model or blaming test noise, I ran a **3-hypothesis forensic decomposition**:
       1. **Train-Serve Skew Check:** I logged live feature tensors on 10,000 shadow queries and compared them against our offline replay join. Parity was 99.9%.
       2. **Latency Elasticity Slicing:** I bucketed the A/B test results by device network speed and p95 latency. I found our cross-encoder added **185 ms at p95**; on mobile cellular connections, every 100 ms of search latency increased query abandonment by 1.4%, completely wiping out our relevance gain!
       3. **Exposure Bias in Offline Labels:** Furthermore, our offline golden set was sampled from historical clicks on top-3 results, penalizing novel long-tail items.
       To fix both bottlenecks, I distilled the cross-encoder into a 2-layer INT8 quantized dual-encoder with dynamic token pruning for queries over 6 words, and gated reranking to the top 25 candidates instead of top 100."*
     - **Result:** *"Reranker p95 latency dropped from 210 ms to **18 ms**, and our follow-up A/B test delivered a statistically significant **+2.3% GMV lift (+$14M annualized)** while preserving +4.1% NDCG@10."*
-    - **Learning:** *"Offline ranking metrics assume zero latency cost. In production, latency IS a quality feature—always evaluate offline accuracy gains inside a hard latency-elasticity budget."*
+    - **Learning:** *"Offline ranking metrics assume zero latency cost. In production, latency IS a quality feature: always evaluate offline accuracy gains inside a hard latency-elasticity budget."*
   </Tab>
   <Tab label="Catching Silent Data Leakage & Building an LLM Cascade">
     **Prompt:** *"Tell me about a time you discovered a major flaw in an evaluation benchmark or training pipeline."*
@@ -115,7 +115,7 @@ AI/ML behavioral scorecards focus on **four signature competencies**:
 
 ## Common red flags & how to recover
 
-- **Reciting textbook paper summaries as your own work:** If you used a standard architecture (e.g., RAG with hybrid search or LoRA fine-tuning), don't spend 10 minutes explaining how LoRA works—spend 10 minutes on **your data curation, failure taxonomy, latency optimization, and production guardrails**.
+- **Reciting textbook paper summaries as your own work:** If you used a standard architecture (e.g., RAG with hybrid search or LoRA fine-tuning), don't spend 10 minutes explaining how LoRA works: spend 10 minutes on **your data curation, failure taxonomy, latency optimization, and production guardrails**.
 - **Ignoring the failure mode of non-determinism:** Every AI system fails on the tail. Always explain how the UX and backend handle low-confidence predictions safely (e.g., abstention, human-in-the-loop fallback, or deterministic citations).
 
 <InterviewQuestions>

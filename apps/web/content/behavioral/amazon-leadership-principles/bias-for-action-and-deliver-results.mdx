@@ -66,7 +66,7 @@ Amazon interviewers don't want stories where everything went smoothly according 
   <Tab label="Bias for Action (Converting a 1-Way Door)">
     **Prompt:** *"Tell me about a time you made a critical decision without having all the data."*
 
-    - **Situation & Task:** *"We needed to choose a partitioning key for a new multi-tenant audit-log store in DynamoDB 10 days before launch. We had traffic profiles for SMB tenants, but zero production traces for the 5 Fortune-500 tenants onboarding in Q3—giving us ~65% certainty on hot-partition risk."*
+    - **Situation & Task:** *"We needed to choose a partitioning key for a new multi-tenant audit-log store in DynamoDB 10 days before launch. We had traffic profiles for SMB tenants, but zero production traces for the 5 Fortune-500 tenants onboarding in Q3, giving us ~65% certainty on hot-partition risk."*
     - **Action:** *"Waiting 6 weeks for enterprise load traces would delay the launch, but picking a static `tenant_id` partition key was a **one-way door** if a large tenant spiked above 1,000 WCU/sec. I converted it into a **two-way door** by adding a write-sharding suffix (`tenant_id#bucket_0..N`) controlled by a dynamic per-tenant config map, defaulting N=1 for SMBs and allowing us to widen any noisy tenant to N=16 buckets live with zero data migration while an async scatter-gather reader merged queries."*
     - **Result:** *"We launched on schedule. When our largest enterprise tenant ran an unannounced 4,500 writes/sec backfill in month two, I bumped their shard factor from 1 to 16 via config in 30 seconds with zero throttling."*
     - **Learning:** *"We standardized configurable write-sharding suffixes across all new multi-tenant DynamoDB tables."*
@@ -91,7 +91,7 @@ Amazon interviewers don't want stories where everything went smoothly according 
     Most internal service boundaries, caching layers, and internal schemas are two-way doors if wrapped behind a clean interface. Spotting when a team is treating a two-way door like a constitutional amendment is a core L5/L6 skill.
   </QuizItem>
   <QuizItem
-    question="2. When you are under a tight deadline, what is your personal tell—do you over-cut quality, or do you freeze trying to ship 100% of the original scope?"
+    question="2. When you are under a tight deadline, what is your personal tell: do you over-cut quality, or do you freeze trying to ship 100% of the original scope?"
     hint="Knowing your default failure mode helps you self-correct early."
   >
     The sweet spot for *Deliver Results* is **cutting surface area (fewer features/endpoints in v1) while holding quality invariants (idempotency, observability, security) at 100%**.
@@ -121,7 +121,7 @@ Amazon interviewers don't want stories where everything went smoothly according 
     level="Senior"
     companies={["Amazon", "Meta"]}
   >
-    That can still be an **outstanding** *Bias for Action* story—provided your reversibility mechanism worked! Show that:
+    That can still be an **outstanding** *Bias for Action* story, provided your reversibility mechanism worked! Show that:
     1. Waiting for 100% certainty would have cost 4 weeks.
     2. You shipped a guarded 2% canary in 2 days to get real production ground truth.
     3. The canary disproved the hypothesis within 3 hours, auto-rolled back with zero user harm, and saved the team 3.5 weeks of building the wrong thing.
