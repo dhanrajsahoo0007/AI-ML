@@ -1,11 +1,357 @@
 ---
 title: "Managed Caches: Redis, Valkey, Memcached and the Patterns Around Them"
-description: "What a managed in-memory store gives you, and the choices it forces: eviction, cluster or single node, durable or cache-only."
-status: outline
+description: "Running a managed in-memory cache: engines, cache-aside with TTLs, replicas and failover, shards, eviction, stampedes, hot keys and what to watch."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** what a managed in-memory store gives you (replication, failover, cluster mode and backups) and the choices it forces (eviction policy, cluster versus single node, durable versus cache-only). Caching patterns are shown once with cloud specifics; the theory is linked.
+<KeyIdea>
+  A cache keeps answers you will be asked for again in fast memory, and a managed cache is one the cloud runs, copies and repairs for you, while you still decide what goes in it and for how long.
+</KeyIdea>
 
-**Related reading on this site:** [Caching](/system-design/patterns/caching) · [Caching on AWS](/cloud/aws/caching)
+## The story
+
+Brightpost already keeps shoppers' baskets in a cache, since [baskets moved out of the database](/cloud/start-here/databases-per-cloud). Product pages still come from the orders database: one query gathers the price, the stock and the star rating, about 40 ms each. Before the spring sale, Asha caches product pages too. At 8:55 she loads the 40 sale products into the cache, each with a 5-minute expiry. At 9:00 all 40 expire together, just as the sale email lands. In the next 2 seconds, 1,200 requests ask for the hero poster's page. Every one misses the cache, and every one runs the same query. The database's 4 processors hit 100%, and each query now takes over 6 seconds. The app gives up after 3, so no request ever puts the page back. Checkout waits up to 8 seconds. At 9:12 Asha loads the key by hand. About 70 orders were lost in those 12 minutes.
+
+The steps below rebuild Brightpost's cache so that 9:00 cannot happen again, then add what a managed cache gives you on top.
+
+## How it works
+
+Three words first. A <Term id="cache">cache</Term> is a store that keeps copies of data in memory, so a read takes well under a millisecond. A **key** is the name you store a value under, such as `page:hero-poster`. A **hit** means the key was there; a **miss** means it was not, and the app must fetch the data from the real store, here the orders database.
+
+### Step 1: A managed cache, and what the cloud runs for you
+
+<AnimatedDiagram spec="animated/cloud/cache-patterns" step={1} minWidth={620} caption="Before the change: baskets come from the cache, but every product view runs a query on the orders database." />
+
+A managed cache is a cache server that the cloud installs, patches, watches and replaces. You ask for an amount of memory, an engine and a number of copies. You get back one address that your app connects to. The service keeps a copy in a second zone, swaps out a broken machine, and takes backups if you ask.
+
+What stays yours: which data goes in, under which key, for how long, and what happens when it is missing. In the picture, baskets already come from the cache. Product pages do not, so every one of Brightpost's product views costs the database a 40 ms query. The theory of caching, from strategies to invalidation, lives in [Caching](/system-design/patterns/caching). This page is about running one on a cloud.
+
+<PremiumBreak />
+
+### Step 2: Cache-aside, with a TTL on every key
+
+<AnimatedDiagram spec="animated/cloud/cache-patterns" step={2} minWidth={620} caption="Cache-aside: the app reads the key first and reaches the database only on a miss, then stores the answer for 5 minutes." />
+
+Most apps on a managed cache use **cache-aside**: the app, not the cache, does the work.
+
+1. Read the key from the cache. On a hit, return it.
+2. On a miss, run the query on the database.
+3. Store the answer in the cache with a <Term id="ttl">TTL</Term>, a time to live, then return it.
+
+The TTL is the longest a copy can be out of date. Brightpost picks 5 minutes for product pages, so a new price shows within 5 minutes. When staff change a price, the admin tool also deletes that key, so the next read fetches the new one. The cache never talks to the database itself. If the cache is down, the app can still read the database, only slower.
+
+Every key gets a TTL. A key without one stays until memory runs out, and nobody remembers why it is there.
+
+### Step 3: The key expires, and everyone misses at once
+
+<AnimatedDiagram spec="animated/cloud/cache-patterns" step={3} minWidth={620} caption="The failure: the hero poster's key expires at 9:00, 1,200 requests miss together and all of them query the database." />
+
+Cache-aside has a weak moment: the second after a popular key expires. Every request that arrives before someone refills it is a miss. If each miss runs the query, a **cache stampede** follows: many requests rebuild the same value at the same time.
+
+<Callout tone="red" title="What breaks">
+  At 9:00:00 the hero poster's key expires. In 2 seconds, 1,200 requests miss and send 1,200 copies of the same 40 ms query. On 4 processors that is 12 seconds of work arriving at once, and checkout waits behind it. Each query now takes over 6 seconds, but the app gives up after 3, so none of them refills the key. Shoppers press refresh, which adds more misses.
+</Callout>
+
+Two choices made it worse. All 40 keys were loaded at 8:55 with the same TTL, so they expired in the same second. And the app had no rule for "someone else is already rebuilding this".
+
+### Step 4: One rebuild per key, refreshed before it expires
+
+<AnimatedDiagram spec="animated/cloud/cache-patterns" step={4} minWidth={620} caption="One request takes the rebuild lock and runs the query; the others get the old copy, and the key is refreshed before it expires." />
+
+Brightpost adds three guards, each one small.
+
+- **Request coalescing.** Many requests for one missing key are merged into one rebuild. Brightpost does it with a **lock**: a short-lived key that only one request can create. The winner runs the query; the others wait 50 ms and read the cache again.
+- **Early refresh.** The app stores the build time inside the value. When less than 30 seconds of the 5 minutes remain, the next reader takes the lock and rebuilds in the background. Everyone else still gets the current copy, so a busy key never misses at all.
+- **Jittered TTLs.** Each key's TTL is 5 minutes plus or minus a random 30 seconds. Keys loaded together now expire over a minute, not in one second.
+
+```python
+page = cache.get(key)
+if page and page.age < 270:            # more than 30 s left: serve it
+    return page
+if cache.set("lock:" + key, me, nx=True, ex=5):   # only one caller wins
+    page = build_from_database()
+    cache.set(key, page, ex=300 + random.randint(-30, 30))
+    cache.delete("lock:" + key)
+    return page
+return page or wait_and_read_again()   # someone else is rebuilding
+```
+
+The lock expires after 5 seconds by itself, so a crashed rebuild cannot block the key forever. At 9:00 next time, 1,200 requests cause 1 query.
+
+### Step 5: Pick the engine: Redis, Valkey or Memcached
+
+The **engine** is the cache software the service runs. Managed caches offer three.
+
+<Compare
+  columns={["", "Redis and Valkey", "Memcached"]}
+  rows={[
+    ["What a value can be", "Strings, hashes, lists, sets, sorted sets, counters", "Strings only"],
+    ["Copies in another zone, automatic takeover", true, false],
+    ["Cluster mode with shards", true, "The client spreads keys over nodes"],
+    ["Snapshots to disk", true, false],
+    ["Locks, rate limits, leaderboards", "Built-in commands", "Hard: no safe updates of a structure"],
+    ["Uses many processor cores per node", "Commands run on one main thread", true],
+    ["Brightpost's pick", "Baskets, product pages, the rebuild lock", "No: a lost node loses baskets"],
+  ]}
+  caption="The engines a managed cache offers. Valkey and Redis speak the same commands."
+/>
+
+Valkey started in 2024 as an open-source copy of Redis, after Redis changed its licence. The two accept the same commands, so the same client code works with both. Memcached is simpler and spreads work over many cores. It fits a pure cache of strings that the app can rebuild in seconds. It does not fit anything you want back after a node dies, such as baskets.
+
+### Step 6: Memory, eviction and sizing
+
+<CacheSim policy="lru" capacity={4} sequence="H A H B H C D H E A H B" title="Which key leaves when memory is full?" />
+
+A cache node has a fixed amount of memory. When it is full and a new key arrives, the **eviction policy** decides what happens. In the widget, H is the hero poster: it is read so often that least-recently-used eviction never drops it.
+
+- **Least recently used** drops the key read longest ago. Least frequently used drops the one read least often.
+- **Only keys with a TTL** limits eviction to keys that would expire anyway.
+- **No eviction** refuses new writes with an error. That suits a store you cannot lose data from, never a cache.
+
+Brightpost's data is small: 2,000 product pages of about 30 KB is 60 MB. Up to 40,000 baskets of 5 KB, each kept 7 days, is 200 MB. Its node has 1 GB, so it runs at about 30%. Keep used memory under about 75%. Copying to a replica, taking a snapshot and fragmented memory all need room. Services keep some memory back for this, and the amount differs. If evictions appear on a node holding baskets, the node is too small, whatever the policy.
+
+### Step 7: A replica in a second zone, and automatic failover
+
+<AnimatedDiagram spec="animated/cloud/cache-patterns" step={5} minWidth={620} caption="The primary copies every write to a replica in zone B, which takes over if zone A fails." />
+
+The cache keeps a copy in a second zone, as on the databases page. That copy is a <Term id="read-replica">replica</Term>: the primary sends it every write a moment after it happens. This <Term id="replication">replication</Term> is asynchronous, so the replica can trail by a few milliseconds.
+
+If the primary or its <Term id="availability-zone">zone</Term> fails, the service promotes the replica. This is <Term id="failover">failover</Term>. The cache's address stays the same and now points at the new primary. In Brightpost's drill, the app saw about 30 seconds of errors. Detection and promotion took part of it. The rest came from app servers holding broken connections, and from client timeouts set too long. A client with a 1-second timeout and quick retries brings it down to a few seconds.
+
+Writes from the last moment before the failure can be lost. For a cache that is fine: a missing key is a miss.
+
+### Step 8: Cluster mode, shards and the hot key
+
+<AnimatedDiagram spec="animated/cloud/cache-patterns" step={6} minWidth={620} caption="Cluster mode hands part of the key slots to new shards, so memory and writes spread over more nodes." />
+
+One node has a ceiling: its memory, and the work its main thread can do. **Cluster mode** splits the keys over several <Term id="sharding">shards</Term>. Each shard is a primary with its own replicas. In Redis and Valkey, every key is hashed into one of 16,384 **slots**, and each shard owns a range of slots. The client asks which shard owns which slot and sends each command straight there. To grow, the service moves slots to a new shard while the cache keeps serving.
+
+Two rules come with it. Commands that touch several keys work only when the keys share a slot, so related keys need a common part in braces, such as `{basket:42}:items`. And sharding spreads keys, not load on one key. The hero poster's key lives in one slot on one shard, however many shards there are. That is a <Term id="hot-key">hot key</Term>. At Brightpost's 600 reads a second, one node does not notice. A shop 100 times bigger would: read that key from replicas, or keep a 2-second copy inside each app server. Brightpost's 260 MB fits one node, so it runs without cluster mode for now.
+
+### Step 9: Persistence, durable stores and serverless caches
+
+A cache that restarts empty is **cold**: every read misses until it fills, which is a stampede waiting to happen. Some engines can avoid that.
+
+- **No persistence.** The node keeps data only in memory. A restart starts cold. Fine for pages you can rebuild.
+- **Snapshots.** The node writes all its data to disk every so often. A restart reloads the last snapshot, so it starts warm but misses the writes since then.
+- **An append-only log.** Every write is also added to a log on disk. Less is lost, and each write costs a little more.
+- **A durable in-memory database.** Some clouds sell a separate service with the same commands. It writes every change to a log in several zones before it answers. It can be the source of truth, at a higher price per write.
+
+The rule from the databases page holds: a basket may live in the cache, an order never does.
+
+A **serverless cache** asks for no node size or shard count. You pay for the data stored and the requests made, and it grows with the load. It fits spiky or unknown traffic. It takes away some settings, and at a steady high load, nodes you size yourself usually cost less. Not every cloud offers one; the tabs below say which do.
+
+### Step 10: What to watch
+
+<AnimatedDiagram spec="animated/cloud/cache-patterns" step={7} minWidth={620} caption="The cache reports hits, misses, evictions and memory, and alarms fire before shoppers notice." />
+
+A cache fails quietly. The app keeps working on misses, only slower, until the database cannot keep up. So Brightpost watches five numbers.
+
+<Compare
+  columns={["Metric", "What it tells you", "Brightpost's alarm"]}
+  rows={[
+    ["Hit rate", "Hits divided by all reads", "Below 80% for 10 minutes"],
+    ["Evictions", "Keys pushed out because memory is full", "Any, on the node with baskets"],
+    ["Memory used", "How close the node is to evicting", "Above 75%"],
+    ["Main thread processor", "Work on the thread that runs commands", "Above 70% for 5 minutes"],
+    ["Replication lag", "How far the replica trails", "Above 1 second"],
+  ]}
+  caption="On a normal day the product keys hit about 96% of the time."
+/>
+
+Watch the processor on the main thread, not the average across the node. A node with 4 cores can show 25% while its one busy thread is full.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: an engine in memory, a replica in another zone with automatic failover, shards when one node is not enough, and TTLs and eviction that you choose.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Engines:** Amazon ElastiCache runs Valkey, Redis OSS or Memcached.
+    - **High availability:** replicas in other zones with automatic failover. The endpoint name stays the same and moves to the new primary.
+    - **Scaling out:** cluster mode for Valkey and Redis OSS spreads slots over shards and reshards online. Memcached grows by adding nodes.
+    - **Persistence:** snapshots, called backups, for Valkey and Redis OSS. Memcached keeps nothing.
+    - **Serverless or durable option:** ElastiCache Serverless picks nodes and shards for you. Amazon MemoryDB is the durable in-memory database.
+
+    **The difference that changes a design.** AWS splits the cache from the durable store. ElastiCache is a cache: plan for losing recent writes. When Redis-style data must survive any failure, the design moves to MemoryDB, which commits each write to a log across zones. Snapshots on ElastiCache do not make it a database.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Engines:** Memorystore runs Valkey, Redis (single instance or Cluster) or Memcached. Valkey is the default for new caches.
+    - **High availability:** replicas in other zones with automatic failover.
+    - **Scaling out:** Valkey and Redis Cluster spread slots over shards and change the shard count online. A single Redis instance grows only in size.
+    - **Persistence:** an option on Valkey and Redis: snapshots, or on some an append-only log.
+    - **Serverless or durable option:** no separate durable product and no serverless tier. You choose the node type and the shard count.
+
+    **The difference that changes a design.** One product covers caching and persistence. Durability is a setting on the same cache, not a move to another service. The cache is reached over a private connection into your network, so the network plan comes before the cache.
+  </Tab>
+  <Tab label="Azure">
+    - **Engines:** Azure Managed Redis. The older Azure Cache for Redis is being retired. There is no managed Memcached.
+    - **High availability:** a replica of each shard with automatic failover, spread across zones where the region has them.
+    - **Scaling out:** clustered from the start. A clustering policy decides whether clients see every shard or one endpoint.
+    - **Persistence:** optional: snapshots or a log of writes.
+    - **Serverless or durable option:** no serverless tier. You choose a tier and a memory size, and the service sets the shards.
+
+    **The difference that changes a design.** You size a whole cache, not nodes and shards. The clustering policy then decides the client: a cluster-aware client for the policy that shows every shard, any client for the single endpoint. Pick the policy before writing client code, because changing it later means a new cache.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/cache-patterns" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/cache-patterns" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which in-memory store?"
+  tree={{
+    q: "Would losing this data hurt, with no other copy to rebuild it from?",
+    yes: {
+      answer: "Not a cache. Use a durable in-memory database, or a real database with a cache in front.",
+      href: "/cloud/data/managed-nosql",
+    },
+    no: {
+      q: "Do you need more than plain strings: counters, lists, sorted sets, locks?",
+      yes: {
+        q: "Is the traffic spiky or unknown, and is a serverless cache offered?",
+        yes: "A serverless Redis- or Valkey-compatible cache. No nodes to size.",
+        no: "A node-based Valkey or Redis cache with a replica in a second zone. Add cluster mode when one node is not enough.",
+      },
+      no: "Memcached is enough if a lost node only costs misses. Valkey or Redis if you also want a copy in another zone.",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Asha loads the 40 sale products at 8:55 with a TTL of 5 minutes plus or minus 30 seconds. When do they expire?" hint="Add the jitter to both sides.">
+    Between 8:59:30 and 9:00:30, spread over a minute instead of in one second. About 2 keys expire every 3 seconds.
+  </QuizItem>
+  <QuizItem question="With the rebuild lock in place, the hero poster's key goes missing and 1,200 requests arrive in 2 seconds. How many database queries run?" hint="Who may rebuild?">
+    One. The request that creates the lock runs the query. The other 1,199 wait 50 ms and read the cache again, where they find the new copy.
+  </QuizItem>
+  <QuizItem question="The basket node is at 98% memory and its policy is no eviction. A shopper adds a poster. What happens?">
+    The write is refused with an error, so the basket does not change. No eviction suits a store that must not lose data; a cache this full needs more memory.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "One node", "Primary and replica", "Cluster mode", "Serverless cache"]}
+  rows={[
+    ["If a node fails", "Every key lost, cold start", "About 30 s of errors, keys kept", "That shard: about 30 s", "Handled by the service"],
+    ["Grows by", "A bigger node", "A bigger node", "More shards, online", "Itself"],
+    ["You choose", "Size", "Size, replica count", "Size, shard count", "Limits, if any"],
+    ["Multi-key commands", true, true, "Only within one slot", "Depends on the service"],
+    ["Cost shape", "Lowest, per hour", "About 2 times one node", "Per node, times shards", "Per data stored and request"],
+    ["Brightpost uses it for", "Test account", "The shop: 260 MB, 2 zones", "Not yet", "A flash sale of unknown size"],
+  ]}
+  caption="Brightpost's numbers. Failover times are from its own drill; real values differ by cloud and setup."
+/>
+
+A replica in a second zone is the floor for anything shoppers touch. Cluster mode pays off only once one node's memory or main thread runs out.
+
+## Common pitfalls
+
+- **The same TTL on keys loaded together.** They all expire in the same second, as at 9:00. Add random jitter to every TTL.
+- **No rule for a missing popular key.** Every miss runs the query, and the database takes the stampede. Use a rebuild lock and refresh hot keys before they expire.
+- **The cache as the only copy.** A failover or a restart can lose the last writes. Write anything that matters to the database first.
+- **No eviction, no headroom.** A full cache with no eviction refuses writes, and one at 95% evicts during a snapshot. Keep memory under 75% and alarm on evictions.
+- **Long client timeouts.** During a failover the app waits on dead connections. Set timeouts of about a second, retry with a short pause, and run a failover drill every quarter.
+
+## How to say it in an interview
+
+"I use a managed cache so the cloud handles patching, replicas and failover, and I own the keys, the TTLs and the miss path. The default is cache-aside: read the cache, query the database on a miss, store the answer with a TTL. Every TTL gets random jitter, and hot keys get a rebuild lock and an early refresh, so one expiry cannot turn into a stampede. I pick Valkey or Redis when I need data structures or a replica in another zone, and Memcached only for a pure cache. I keep memory under about 75%, run a replica in a second zone, and add shards only when one node runs out. I alarm on hit rate, evictions, memory and the main thread, and nothing that must survive lives only in the cache."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does a managed cache do that running Redis on a virtual machine does not?" level="Junior" category="Cloud">
+    **Short answer.** It installs and patches the engine, keeps a replica in another zone, fails over by itself, replaces broken machines and takes snapshots. You still choose the keys, the TTLs, the eviction policy and the size.
+
+    **Why.** On its own virtual machine, Redis is one process on one disk in one zone. A crash at 3 a.m. waits for a person, and a zone failure loses the cache. Brightpost's managed cache promotes its zone B replica and keeps the same address. In its drill the app saw about 30 seconds of errors, with nobody paged. The service cannot know which keys are hot or how stale a page may be. That design work stays with the team.
+
+    <AnimatedDiagram spec="animated/cloud/cache-patterns" step={5} highlight={["cache", "replica"]} caption="The service keeps the replica in zone B in step and promotes it when the primary fails." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would still page you at 3 a.m. with a managed cache?
+    - When would you still run the engine yourself?
+
+    **Watch out for.** Saying "managed means it cannot lose data". A managed cache with asynchronous replicas can still lose the last writes in a failover.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Memcached or Redis and Valkey for storing user sessions?" level="Mid" category="Cloud">
+    **Short answer.** Valkey or Redis, with a replica in a second zone. A session is small, read on every page, and annoying to lose, so it needs a copy that survives one node. Memcached keeps no copies.
+
+    **Why.** If a Memcached node dies, every session on it is gone and those users are logged out. Valkey and Redis copy each write to a replica, and the service fails over by itself. Sessions also want a TTL that resets on each visit, which both engines do. Brightpost keeps baskets this way for 7 days. Memcached's many-core speed matters only above a load a small shop never reaches.
+
+    **Follow-ups the interviewer may ask.**
+    - How long should a session live, and what resets the clock?
+    - What happens to logged-in users during a failover?
+
+    **Watch out for.** Treating sessions as precious. If losing one means losing money, as with a paid order, it belongs in the database, not in any cache.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your cache fails over and the app sees 30 seconds of errors. Why, and how do you shorten it?" level="Mid" category="Cloud">
+    **Short answer.** Failover has three parts: noticing the primary is gone, promoting the replica, and clients finding the new primary. The service owns the first two. The third, usually the longest, is in the client: open connections to the dead node and long timeouts.
+
+    **Why.** In Brightpost's drill, detection and promotion took part of the 30 seconds. App servers kept sending commands down broken connections and waited the full timeout on each. Set connect and command timeouts near 1 second. Retry with a short random pause, and reconnect on errors. Use a client that refreshes its view of the cluster, and keep the DNS cache to seconds. Then run the drill again and measure.
+
+    <AnimatedDiagram spec="animated/cloud/cache-patterns" step={5} highlight={["app", "cache", "replica"]} caption="The address stays the same; the app servers must drop dead connections and reach the promoted replica." />
+
+    **Follow-ups the interviewer may ask.**
+    - Should the app fall back to the database while the cache is down?
+    - What could be lost in those 30 seconds?
+
+    **Watch out for.** Blaming the provider and stopping there. Most of the gap is often client settings the team controls.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A popular key expires and the database falls over. What happened, and how do you prevent it?" level="Mid" category="Cloud">
+    **Short answer.** A cache stampede: every request that arrived before the key was refilled missed and ran the same query. Prevent it with one rebuild per key, an early refresh for hot keys, and random jitter on every TTL.
+
+    **Why.** At Brightpost, 40 keys loaded at 8:55 with the same 5-minute TTL expired at 9:00. In 2 seconds, 1,200 requests for the hero poster ran 1,200 copies of a 40 ms query on 4 processors. A lock that only one request can create turns that into 1 query. Refreshing when 30 seconds remain means a busy key never goes missing. Jitter of plus or minus 30 seconds spreads the expiries over a minute.
+
+    <AnimatedDiagram spec="animated/cloud/cache-patterns" step={3} highlight={["app", "key", "db"]} caption="One key expires and every request rebuilds it at once." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens if the request holding the lock crashes?
+    - Would a longer TTL alone have fixed it?
+
+    **Watch out for.** Making the cache bigger. Size had nothing to do with it; the key expired on time.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="One product key gets most of the reads during a flash sale, and adding shards does not help. Why, and what do you do?" level="Senior" category="Cloud">
+    **Short answer.** Sharding spreads keys, not the load on one key. Every key hashes to one slot on one shard, so that shard does all the work for it. Spread the reads instead: read from replicas, keep a short copy inside each app server, or store several copies under different keys.
+
+    **Why.** Brightpost's hero poster takes about 600 reads a second, which one node handles easily. At 100 times that, one shard's main thread fills while the others idle. Replicas share reads if a few milliseconds of staleness is fine. A 2-second copy in each of 10 app servers turns 60,000 reads a second into about 5 a second at the cache. Splitting into `hero#1` to `hero#8` spreads the key over shards, but every price change must update all 8.
+
+    <AnimatedDiagram spec="animated/cloud/cache-patterns" step={6} highlight={["key", "cache", "shards"]} caption="The new shards take other slots; the hero poster's key stays on the shard that owns its slot." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find a hot key before it hurts?
+    - How stale may the in-app copy be for a price?
+
+    **Watch out for.** Adding shards or a bigger node by reflex. A bigger node buys a little; the hot key still sits on one main thread.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Databases on Each Cloud](/cloud/start-here/databases-per-cloud)
+- [Managed Relational Databases](/cloud/data/managed-relational)
+- [Managed NoSQL](/cloud/data/managed-nosql)
+- [CDN, Edge and WAF](/cloud/networking/cdn-edge-and-waf)
+- [Caching on AWS](/cloud/aws/caching)
+- [Caching on Google Cloud](/cloud/gcp/caching)
+- [Caching on Azure](/cloud/azure/caching)
+- [Caching](/system-design/patterns/caching)
+- [Consistent hashing](/system-design/patterns/consistent-hashing)
+- [Rate limiting](/system-design/patterns/rate-limiting)
+
+## Further reading
+
+- [Amazon ElastiCache User Guide](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/WhatIs.html): engines, replication groups and cluster mode.
+- [Memorystore documentation](https://cloud.google.com/memorystore/docs): Valkey, Redis and Memcached on Google Cloud.
+- [Azure Managed Redis overview](https://learn.microsoft.com/azure/redis/overview): tiers, clustering and high availability.
+- [Valkey documentation](https://valkey.io/docs/): commands, eviction and cluster mode.
