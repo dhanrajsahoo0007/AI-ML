@@ -9,176 +9,235 @@ access: free
 ## In one sentence
 
 <KeyIdea>
-Standard STAR (Situation, Task, Action, Result) tells what happened; **STAR+L (+Learning)** adds the systemic mechanism you built afterward and allocates 60% of your speaking time to first-person engineering decisions and trade-offs.
+  STAR (Situation, Task, Action, Result) tells what happened. **STAR+L** adds the **Learning**: what you changed
+  afterwards. It also sets a time budget, so that most of a two-minute answer is about what **you** did and why.
 </KeyIdea>
 
 ## The story
 
-Watch ten engineers practice behavioral interviews and nine of them will fall into the exact same trap: the **90-Second Backstory Monologue**.
+Watch ten engineers practise a behavioral answer and most of them make the same mistake. They start with the history: the company, the old system, who used to own it, how the product makes money. Ninety seconds pass. The interviewer looks at the clock. The candidate then rushes the part that matters into one sentence: _"So we refactored the service, added a cache, and latency dropped by half."_
 
-They start explaining their company's org chart, the history of the legacy monolith from 2019, the three product managers who left, and the business model of the checkout funnel. By the time they reach what they actually *did*, two minutes have passed, the interviewer is glancing at the clock, and the candidate rushes through their engineering actions in two vague sentences: *"So we refactored the service, added a cache, and latency dropped by 50%."*
+The interviewer has almost nothing to write down. Background earns no points. An interviewer can only score four things: the **decisions you made** under a constraint, **how you dealt with people or technical problems** in the way, the **result with a number**, and **what you changed afterwards**. STAR+L is a way to spend your two minutes on those four things.
 
-Interviewers call this **all wind-up, no pitch**. Backstory carries zero rubric points. An interviewer can only score you on **decisions you made under constraints**, **how you resolved technical or human friction**, **measurable results**, and **how the episode changed your engineering systems**. That is what the **STAR+L** arc is designed to enforce.
+## What the interviewer scores
 
-## What interviewers are really testing
+<AnimatedDiagram
+  spec="animated/behavioral/star-plus-l-arc"
+  stepper
+  caption="A two-minute answer by part. Step through it: the Action block is the largest because it is the part that gets scored."
+/>
 
-<AnimatedDiagram spec="animated/behavioral/star-plus-l-arc" stepper caption="The 2-minute STAR+L time budget: spend 15% on Situation/Task, 60% on Action, 15% on Result, and 10% on Learning." />
+Each part of the answer has one job.
 
-Every part of the **STAR+L** structure answers a specific question on the interviewer's scorecard:
+| Part                   | Time             | Its job                                                              | The usual mistake                                          |
+| ---------------------- | ---------------- | -------------------------------------------------------------------- | ---------------------------------------------------------- |
+| **Situation and task** | about 20 seconds | Name the system, what was at risk and the limit you worked under     | Company history and org charts                             |
+| **Action**             | about 70 seconds | Three things **you** did, each with the reason you chose it          | "We" in every sentence, or a list of tasks with no reasons |
+| **Result**             | about 20 seconds | The number before and after, and one thing that did not get worse    | "It went well"                                             |
+| **Learning**           | about 10 seconds | The check, rule or habit you added so the problem does not come back | A feeling: "I learned that communication matters"          |
 
-| Stage | Time Budget | What it must accomplish | The #1 mistake to avoid |
-| --- | --- | --- | --- |
-| **S + T (Situation & Task)** | **15% (~20s)** | Name the system, the hard technical/business constraint, and why the status quo was failing | Explaining 2 years of company history or org charts |
-| **A (Action)** | **60% (~70s)** | Walk through **3 concrete moves ("I")**: Diagnosis, Trade-off/Alignment, and Execution | Saying *"we"* or listing tasks without explaining *why* |
-| **R (Result)** | **15% (~20s)** | State the primary metric delta, the business impact, and the guardrail metric that stayed safe | Saying *"it went well"* with no numbers |
-| **+L (Learning)** | **10% (~10s)** | State the **reusable mechanism** (linter, alert, RFC checklist) you added so the class of problem never recurred | Giving a generic platitude (*"I learned communication is key"*) |
+Two minutes is a starting length, not a rule from any company. It is long enough for three actions and short enough to leave the interviewer time to ask follow-ups, which is where most of the scoring happens. Meta's own interview guide recommends the STAR structure and asks for concrete examples in place of general statements (see Sources).
 
-### Why the "+L" (Learning) shows seniority
+## A weak answer, then the fix
 
-At Junior and Mid levels (L3/L4), fixing the immediate problem is a complete victory. At Senior, Staff, and Principal levels (L5–L7), interviewers ask: *"Did this engineer leave the system and team structurally stronger than they found it?"*
+<AnimatedDiagram
+  spec="animated/behavioral/answer-time-split"
+  stepper
+  caption="The same two minutes, spent two ways. Only the action, the result and the learning can be scored."
+/>
 
-Closing every story with a 10-second **+Learning** sentence pre-answers the interviewer's follow-up probe and signals engineering maturity, especially when the learning includes an honest admission of what you initially misjudged.
+Here is a first-try answer. Read it as the interviewer would and find the sentences that cost points.
+
+<SpotTheFlag
+  title="Spot the red flags"
+  prompt="Tell me about a time you made a system faster."
+  sentences={[
+    {
+      text: "So, our company does online checkout for small shops, and the checkout service was written in 2019 by a team that has since left.",
+      flag: "Backstory. The interviewer needs the system and the problem, not its history. This is 15 seconds with nothing to score.",
+    },
+    {
+      text: "Checkout p99 had climbed to 4.2 seconds, and we had three weeks before the holiday peak.",
+      note: "This is what the setup is for: the number that was wrong and the limit. Keep it.",
+    },
+    {
+      text: "We looked into it and found some problems with the database.",
+      flag: "'We' hides who did the work, and 'some problems' hides what was found. Say what you traced and what the cause was.",
+    },
+    {
+      text: "I took thread dumps under load and saw requests holding a database connection while they retried a slow payment call.",
+      note: "A first-person action with a cause. This is the sentence the interviewer writes down.",
+    },
+    {
+      text: "Then we fixed it and it was much faster.",
+      flag: "No decision, no reason and no number. 'Much faster' cannot be scored.",
+    },
+    {
+      text: "It was a great team effort and I learned that communication is really important.",
+      flag: "A feeling, not a learning. Name the check or rule you added so it cannot happen again.",
+    },
+  ]}
+/>
+
+The same story with the time spent where it counts:
+
+- **Situation and task (20 seconds).** "Our checkout service handles 8,000 requests a second for small shops. p99 had climbed to 4.2 seconds, and I had three weeks before the holiday peak."
+- **Action (70 seconds).** "First, I took thread dumps under load and saw requests holding a database connection while they retried a slow payment call. Second, I had two options: a larger connection pool, or moving the payment call outside the transaction. I rejected the larger pool because it would only move the limit. Third, I moved the call out, added a circuit breaker with a 48-hour trial on 5 percent of traffic, and showed the mobile team the numbers so they would accept a new error code."
+- **Result (20 seconds).** "p99 fell to 140 ms at three times normal traffic, and failed payments stayed flat. Pages for that service went from 11 a week to none."
+- **Learning (10 seconds).** "I added a lint rule that fails the build when code makes a network call inside a database transaction. It has caught four since."
 
 <PremiumBreak />
 
-## How the bar changes by level
+## The same answer at three levels
 
-Inside the **60% Action** block, the verbs you use reveal your operating level. Choose three actions that span **technical diagnosis**, **decision judgment**, and **team/system leverage**:
+The parts stay the same at every level. What changes is the Action block: how far your decisions reached and how many people they moved.
 
-<Compare
-  columns={["Action Stage", "L3 / L4 (Execution)", "L5 (Senior Ownership)", "L6+ (Staff / Org Leverage)"]}
-  rows={[
-    ["Action 1: Diagnosis", "Reproduced the bug locally and found the failing query", "Proved root cause in production telemetry and bounded blast radius", "Connected localized symptoms across 3 teams into one architectural root cause"],
-    ["Action 2: Decision & Alignment", "Discussed the fix with my tech lead in code review", "Evaluated 3 designs in a trade-off table; aligned PM on a phased scope cut", "Converted a cross-org deadlock into a shared RFC with clear kill criteria"],
-    ["Action 3: Execution & Guardrail", "Shipped the PR with unit tests and monitored the deploy", "Led canary rollout with auto-rollback and added SLO burn-rate alerts", "Shipped a paved-road library + codemod so 8 teams migrated in 1 sprint"],
-  ]}
-  caption="How to structure your 3 core moves inside the 70-second Action block."
+<AnimatedDiagram
+  spec="animated/behavioral/scope-by-level"
+  stepper
+  caption="What an interviewer listens for in the Action block at each level: how far the change reached."
 />
 
-## Interactive diagnostic: test your story
+<Tabs title="One story, the Action block at three levels">
+  <Tab label="Mid level">
+    *"I reproduced the slow request on my machine and found the retry inside the transaction. I talked it through with my tech lead in code review and we agreed to move the call out. I wrote the change with unit tests and watched the deploy."*
 
-Check whether your draft story follows the STAR+L time budget or needs trimming:
+    **What it shows:** you can find and fix a problem in your own area with some guidance. That is the right size for a mid-level story.
+
+  </Tab>
+  <Tab label="Senior">
+    *"I proved the cause in production with thread dumps, not on my machine. I compared two designs in a short written note and chose the one that removed the limit. I ran it on 5 percent of traffic with automatic rollback, and I got the mobile team to accept a new error code before launch."*
+
+    **What it shows:** you chose the problem's solution yourself, managed the risk of the change and brought another team along.
+
+  </Tab>
+  <Tab label="Staff">
+    *"The same pattern was in three other services owned by other teams. I wrote the lint rule and a small library that makes the safe pattern the easy one, and I worked with those teams' leads to adopt it in one sprint. I also changed our design review template to ask about network calls in transactions."*
+
+    **What it shows:** you fixed the class of problem across teams and changed how the org works, so it does not need you next time.
+
+  </Tab>
+</Tabs>
+
+## When to break the order: headline first
+
+On a question about a mistake or a conflict, 90 seconds of setup before the outcome can sound like you are avoiding it. Give one sentence of headline first, then tell the story in the usual order.
+
+<Tabs title="Two ways to open">
+  <Tab label="Headline first (mistakes and conflict)">
+    **Question:** *"Tell me about a time you caused a production incident."*
+
+    - **Headline (5 seconds).** *"I once ran a backfill with no throttle and slowed reads on our user-profile service for 14 minutes. It is why our migration tool now throttles itself."*
+    - **Situation and task.** *"We were backfilling 180 million rows to add a tenant column before a compliance audit. The read target was 80 ms at <Term id="p99" />."*
+    - **Action.**
+      1. *"When the replica lag alert fired at minute six, I stopped my backfill and moved reads to the healthy zone. I did not try to tune it live."*
+      2. *"In the review I traced the lag to large batches rewriting indexed rows."*
+      3. *"I rewrote the runner to check replica lag every half second and pause above 200 ms."*
+    - **Result.** *"The backfill finished over the next 36 hours with under 4 ms of added p99. We met the audit date."*
+    - **Learning.** *"That lag check is now in our shared migration tool. It has run more than 40 large backfills with no pages."*
+
+  </Tab>
+  <Tab label="Usual order (ambiguity and delivery)">
+    **Question:** *"Tell me about an ambiguous project you scoped from nothing."*
+
+    - **Situation and task.** *"Customers were leaving because our document assistant gave wrong citations on financial tables. I was given one line: make table answers trustworthy in six weeks, with no extra GPU budget."*
+    - **Action.**
+      1. *"I built a set of 200 real failed questions so we had a baseline: 41 percent correct citations."*
+      2. *"I spent three days comparing two approaches. Reading the table layout and running a query on it reached 88 percent at one sixth of the token cost."*
+      3. *"I agreed a rule with product and legal: below a confidence of 0.72, the assistant shows the source cells and does not guess."*
+    - **Result.** *"Correct citations rose from 41 to 93 percent in an A/B test, and support escalations fell by 68 percent."*
+    - **Learning.** *"No prompt or chunking change merges now without passing that 200-question set in the build."*
+
+  </Tab>
+</Tabs>
+
+## Check your own draft
 
 <DecisionTree
   title="Audit your STAR+L draft"
   tree={{
-    q: "Time yourself reading the Situation + Task aloud. Does it take longer than 25 seconds (roughly 3 sentences)?",
-    yes: "Trim the wind-up! Cut everything except: (1) what the system does + scale, (2) what broke or was at risk, and (3) your hard constraint.",
+    q: "Read your situation and task out loud with a timer. Does it take longer than 25 seconds?",
+    yes: "Cut it to three things: what the system does and at what scale, what was wrong or at risk, and your limit. Remove the rest.",
     no: {
-      q: "Count the pronouns in your Action block. Does 'we' appear more often than 'I'?",
-      yes: "Rewrite every Action sentence in first person ('I profiled...', 'I proposed...', 'I paired with...'). Credit the team in the Result, not the Action.",
+      q: "Count the pronouns in your Action block. Is 'we' there more often than 'I'?",
+      yes: "Rewrite each action sentence in the first person: I profiled, I proposed, I paired with. Give the team its credit in the result.",
       no: {
-        q: "Does your +Learning step name a concrete engineering mechanism (code check, runbook, eval harness, design rule) rather than a feeling?",
+        q: "Does your learning name something you can point at, such as a check, a runbook or a rule, and not a feeling?",
         yes: {
-          answer: "Your STAR+L arc is sharp and calibrated. Next: prepare for the 3 follow-up probes.",
+          answer: "Your draft is in good shape. Next, prepare for the follow-up questions.",
           href: "/behavioral/foundations/handling-follow-up-probes",
         },
-        no: "Replace platitudes ('I learned to communicate early') with a mechanism ('I added a mandatory 15-minute schema-lock check to our migration CI pipeline').",
+        no: "Replace the feeling with the change. Not 'I learned to communicate early' but 'I added a schema-lock check to our migration pipeline'.",
       },
     },
   }}
 />
 
-## Worked engineering example (STAR+L)
+## Build your own
 
-### When to break standard STAR: The "Headline-First" (ANSWER) variation
+Take one real project and work through these three prompts with a timer.
 
-When a senior leader or Bar Raiser asks a sharp, high-pressure question (*"Tell me about your biggest production mistake"* or *"Tell me about a time you disagreed with your manager"*), waiting 90 seconds to hear the outcome can feel evasive. Use the **Headline-First** opening: give a **1-sentence spoiler** before entering **STAR+L**.
-
-<Tabs title="Standard STAR+L vs. Headline-First STAR+L">
-  <Tab label="Headline-First (Best for Mistakes & Conflict)">
-    **Prompt:** *"Tell me about a time you caused a production incident."*
-
-    - **1-Sentence Headline (5s):** *"I once shipped a backfill script without a replica lag throttle that degraded read <Term id="p99" /> on our user-profile service for 14 minutes, and it led me to build our org's self-throttling migration runner."*
-    - **Situation & Task (15s):** *"We were backfilling 180M rows on Postgres to add a tenant isolation column before an enterprise compliance audit. Read <Term id="slo" /> was 80 ms p99."*
-    - **Action (65s):**
-      1. *"When the replica lag alert fired at 6 minutes, I immediately killed my backfill PID and shifted read traffic to the healthy AZ rather than trying to tune batch size live."*
-      2. *"In the post-mortem, I traced the spike to WAL amplification from updating indexed JSONB rows in 50,000-row batches."*
-      3. *"I rewrote the migration runner to poll `pg_stat_replication` every 500 ms and pause automatically whenever replica lag exceeded 200 ms."*
-    - **Result (15s):** *"We finished all 180M rows over the next 36 hours with max p99 impact under 4 ms, hitting the compliance deadline on time."*
-    - **+Learning (10s):** *"We packaged that lag-aware loop into our shared Go migration CLI; it has run 40+ large backfills since with zero pages."*
-  </Tab>
-  <Tab label="Standard STAR+L (Best for Ambiguity & Execution)">
-    **Prompt:** *"Tell me about an ambiguous project you scoped from scratch."*
-
-    - **Situation & Task (20s):** *"Our enterprise customers were churning because our RAG document assistant hallucinated citations on multi-table financial PDFs. Leadership gave me a one-line goal: 'Make table answers trustworthy in 6 weeks' with no additional GPU budget."*
-    - **Action (70s):**
-      1. *"I built a 200-query golden evaluation set from real failed customer logs so we had a repeatable baseline (41% citation accuracy)."*
-      2. *"I ran a 3-day spike comparing vision-LLM page parsing vs. layout-aware markdown extraction + SQL tool execution; the hybrid layout+SQL path hit 88% accuracy at 1/6th the token cost."*
-      3. *"I aligned Product and Legal on a strict abstention threshold: when retrieval confidence fell below 0.72, the UI highlighted the source table cells instead of guessing."*
-    - **Result (20s):** *"Citation accuracy rose from 41% to 93% in production A/B testing, support escalations dropped 68%, and two at-risk enterprise renewals closed."*
-    - **+Learning (10s):** *"I established a team rule: no prompt or chunking change merges to `main` without passing the 200-case golden regression suite in CI."*
-  </Tab>
-</Tabs>
-
-## Introspect your own work
-
-<Quiz title="Rewrite your own habits">
+<Quiz title="Draft one story">
   <QuizItem
-    question="1. Pick your favorite project story. Can you state its Situation & Task in exactly two sentences: (Sentence 1) System + scale + problem, (Sentence 2) Hard constraint + stakes?"
-    hint="Try speaking it out loud while looking at a stopwatch."
+    question="1. Say your situation and task in two sentences. Sentence one: the system, its scale and the problem. Sentence two: your limit and what was at stake."
+    hint="Say it out loud. Reading in your head is faster than speaking."
   >
-    Example: *"On our multi-tenant billing pipeline processing $40M/month, invoice generation was taking 9 hours and breaching our 6 AM enterprise SLA (Sentence 1). I had three weeks before quarter-end to bring runtime under 45 minutes without changing the external webhook schema (Sentence 2)."*
+    Example: *"Our billing pipeline handles 40 million dollars a month, and invoice generation took 9 hours and missed
+    its 6 am deadline. I had three weeks before quarter end to bring it under 45 minutes without changing the invoice
+    format."*
   </QuizItem>
   <QuizItem
-    question="2. Look at the 'Action' section of your story. Did you include at least one option you considered and rejected?"
-    hint="Judgment is only visible when you show the road not taken."
+    question="2. In your Action block, name one option you considered and rejected."
+    hint="Judgment only shows when the listener can see the road you did not take."
   >
-    If you only state what you built, it sounds like there was only one obvious path. Always add one sentence: *"I considered Option B (e.g., pre-aggregating in Redis), but rejected it because a cache flush during billing close would have required a 4-hour cold rebuild."*
+    If you only say what you built, it sounds like there was one obvious path. Add one sentence: *"I considered keeping
+    the totals in a cache, but a cache flush during billing close would have meant a four-hour rebuild."*
   </QuizItem>
   <QuizItem
-    question="3. What is the honest '+Learning' from your hardest project last year?"
-    hint="Think about what surprised you halfway through implementation."
+    question="3. What is the honest learning from your hardest project last year?"
+    hint="Think about what surprised you halfway through."
   >
-    Ask yourself: *"If I had to mentor an engineer starting that exact project tomorrow, what is the one trap I would warn them about in week one?"* Turn that warning into your **+Learning** mechanism.
+    Ask: *"If a colleague started that project tomorrow, what would I warn them about in week one?"* Then turn the
+    warning into something that exists: a check, a template or a review step.
   </QuizItem>
 </Quiz>
 
-## Common red flags & how to recover
+## Red flags
 
-- **The Chronological Diary Trap:** Walking through Monday, Tuesday, Wednesday (*"First I had a meeting, then I opened a doc, then I talked to Bob..."*). Instead, group your actions into **3 thematic moves**: (1) How I diagnosed/framed it, (2) How I made the trade-off & aligned people, (3) How I shipped & verified it.
-- **The Unbounded "We":** Every time you say *"we decided"*, the interviewer mentally divides your credit by your team size. Use **"I"** for your actions and **"We"** for the shared team outcome.
-- **Missing the Guardrail Metric:** Saying *"I cut latency by 40%"* without stating that accuracy or error rates held steady makes senior interviewers suspect you traded away correctness.
+- **The diary.** Monday I had a meeting, Tuesday I opened a document, Wednesday I talked to Bob. Group your actions into three moves: how you found the cause, how you chose and got agreement, how you shipped and checked.
+- **"We" everywhere.** Each "we decided" leaves the interviewer unsure what you did. Use "I" for your actions and "we" for the shared result.
+- **A result with nothing held steady.** "I cut latency by 40 percent" makes a careful interviewer wonder what you gave up. Add the thing that stayed the same: error rate, accuracy or cost.
+- **A learning you never used.** If the lesson did not change anything you can name, it reads as a line added for the interview.
 
-<InterviewQuestions>
-  <InterviewQuestion
-    question="How long should my initial STAR+L answer be before I stop talking?"
-    level="Junior"
-    companies={["Amazon", "Google", "Meta"]}
-  >
-    Aim for **90 to 120 seconds** (roughly 220–280 spoken words). That is long enough to establish constraints, walk through three concrete actions, and land quantified results + learning, while leaving 4–5 minutes for the interviewer's follow-up probes.
-  </InterviewQuestion>
+## Common questions about the method
 
-  <InterviewQuestion
-    question="How do I use 'I' without sounding arrogant or taking credit for my teammates' work?"
-    level="Mid"
-    companies={["Google", "Apple", "Airbnb"]}
-  >
-    Separate **ownership of your slice** from **credit for the whole**:
-
-    - **Arrogant:** *"I built the entire distributed checkout system."*
-    - **Vague ("We" trap):** *"We designed the checkout system and migrated the database."*
-    - **Calibrated ("I" + explicit credit):** *"On a 4-engineer checkout squad, I owned the idempotency and outbox schema while my teammate Maya led the Stripe webhook consumer. Specifically, I designed..."*
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="When should I break the chronological STAR order?"
-    level="Senior"
-    companies={["Amazon", "Netflix"]}
-  >
-    Break chronological order in two situations:
-    1. **Failure, outage, or mistake prompts:** Start with a **1-sentence headline** naming the mistake and the fix so you don't sound evasive.
-    2. **Principle/philosophy prompts** (*"How do you approach tech debt?"*): State your **3-part framework in 15 seconds**, then say *"Here is a concrete time I applied that on our search cluster..."* and run a 90-second STAR+L story.
-  </InterviewQuestion>
-</InterviewQuestions>
+<Quiz title="Common questions">
+  <QuizItem question="How long should my first answer be before I stop talking?">
+    Aim for 90 seconds to two minutes, which is roughly 220 to 280 spoken words. That covers three actions and a result,
+    and it leaves the interviewer time for follow-ups. If you are asked to go deeper, you can. If you talk for four
+    minutes, you cannot take it back.
+  </QuizItem>
+  <QuizItem question="How do I say 'I' without taking credit for my teammates' work?">
+    Separate your part from the whole. Not *"I built the checkout system"*, and not *"we designed the checkout system"*.
+    Say: *"On a team of four, I owned the idempotency design and the outbox table, and a teammate led the payment
+    webhooks. In my part, I chose to..."*
+  </QuizItem>
+  <QuizItem question="When should I not tell the story in order?">
+    In two cases. For a mistake, a failure or a conflict, give a one-sentence headline first so you do not sound
+    evasive. For a question about how you think (*"How do you approach technical debt?"*), give your approach in 15
+    seconds, then say *"here is a time I did that"* and tell one story.
+  </QuizItem>
+</Quiz>
 
 ## Related
 
-- [How Behavioral Interviews Actually Work](/behavioral/foundations/how-behavioral-interviews-work): what happens inside the debrief room.
-- [Handling Follow-Up Probes & Bar Raiser Drill-Downs](/behavioral/foundations/handling-follow-up-probes): surviving the 3-level onion peel after your 2-minute opener.
-- [Building Your 8-Story Matrix](/behavioral/foundations/building-your-story-matrix): mapping 8 career episodes across 50+ prompts.
-- [Quantifying Engineering & ML Impact](/behavioral/foundations/quantifying-engineering-impact): finding credible numbers when you don't have revenue metrics.
+- [How Behavioral Interviews Actually Work](/behavioral/foundations/how-behavioral-interviews-work): what happens to your answer after the interview.
+- [Handling Follow-Up Probes](/behavioral/foundations/handling-follow-up-probes): the questions that come after your two minutes.
+- [Building Your 8-Story Matrix](/behavioral/foundations/building-your-story-matrix): which stories to prepare.
+- [Quantifying Engineering Impact](/behavioral/foundations/quantifying-engineering-impact): finding a number when you do not own a revenue metric.
 
-## Further reading
+## Sources
 
-- [Amazon Interview Prep, The STAR Method](https://www.amazon.jobs/content/en/how-we-hire/interviewing-at-amazon): Amazon's official guidance on behavioral story structure.
+- [Meta Careers: Preparing for your software engineering interview at Meta](https://www.metacareers.com/blog/preparing-for-your-software-engineering-interview-at-meta/). Meta's guide recommends the STAR structure and concrete examples for its behavioral interview.
+
+The time budget, the Learning step and the example answers on this page are our own.
