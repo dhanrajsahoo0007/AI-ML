@@ -26,9 +26,10 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // left and middle columns, so the free preview and the failure show without scrolling. The canvas stays under 800
 // wide so labels stay readable in the 660 px article column.
 //
-// Crossings: the registry feeds the current version only in step 1 (`until: 1`), and the new version reaches the
-// database only from step 2, so those two diagonals are never drawn together. Vertical edges into a zone run at
-// x 130 or x 395, right of the zone tabs. Every zone top sits at least 26 units above its first node.
+// Crossings: the registry feeds the current version only in step 1 (`until: 1`), through a bend in the gap between
+// the zones, and the new version reaches the database only from step 2, so those two paths are never drawn together.
+// Vertical edges into a zone run at x 130 or x 395, right of the zone tabs. Every zone top sits at least 26 units
+// above its first node.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. Nodes are
 // sized for the longest name the Services toggle puts in them ("Cloud Load Balancing", "Cloud Build + Deploy",
 // "Auto Scaling group", "App Configuration"), not only for the generic label.
@@ -210,7 +211,20 @@ const spec: DiagramSpec = {
 
     // Step 1: all at once. Every server is replaced together, so the shop is down while they restart.
     { from: "lb", to: "current", label: "all traffic", packet: true, delay: 0.6, until: 1 },
-    { from: "registry", to: "current", label: "all 3 at once", dashed: true, flow: true, until: 1 },
+    // It climbs the free x 395 lane to the gap between the zones (y 327), so it enters Delivery right of its tab.
+    {
+      from: "registry",
+      to: "current",
+      label: "all 3 at once",
+      dashed: true,
+      flow: true,
+      via: [
+        [395, 327],
+        [215, 327],
+      ],
+      labelAt: 0.55,
+      until: 1,
+    },
     { from: "current", to: "db", label: "reads, writes", packet: true, delay: 1.2, until: 2 },
 
     // Step 2: rolling. One server at a time moves to the new version; both versions take traffic.
