@@ -1,11 +1,321 @@
 ---
 title: "Private Networks, Subnets & Routing"
-description: "How a private network with subnets and route tables keeps servers off the public internet while users still reach the app."
-status: outline
+description: "How a private network, subnets and route tables keep servers and databases off the internet, and how three zones let the shop survive losing one."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** why one server with a public address is a problem, and how a private network with address ranges, subnets per tier and zone, route tables and an internet gateway fixes it. The step-by-step picture on this page is reused across the section.
+<KeyIdea>
+  A private network is a fenced range of addresses in the cloud: you decide which few machines face the internet, and everything else can only be reached from inside.
+</KeyIdea>
 
-**Related reading on this site:** [Networking basics](/system-design/fundamentals/networking) · [Networking on AWS](/cloud/aws/networking) · [Networking on Google Cloud](/cloud/gcp/networking)
+## The story
+
+Brightpost is a small online shop that sells posters and greeting cards, about 400 orders a day. Its first cloud network had one slice for the app server and one for the orders database, and both slices could reach the internet. The app server had a public address, so customers could reach it. The database did not, until a Thursday evening when Asha had to load 600 new prices from her laptop. As a quick fix, she gave the database a public address and allowed logins from anywhere. The prices loaded in 10 minutes, and the setting stayed. Eleven days later a weekly report flagged it. The database's log showed about 3,800 failed logins from 140 different addresses. The long password held, so nobody read the names and home addresses of 90,000 customers. Proving that took the team 2 days.
+
+One setting was enough to expose the database, because nothing else in the network stood in the way. Every step below adds something that does.
+
+## How it works
+
+Four words first. An **IP address** is the number that names a machine on a network, such as 10.0.11.7. A **packet** is one small piece of data sent from one address to another. A **public address** can be reached from anywhere on the internet. A **private address** works only inside one private network, and the internet cannot send anything to it.
+
+### Step 1: A private network and its address range
+
+<AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={1} minWidth={620} caption="Brightpost's first network: the app server and, after the quick fix, the database each have a public address." />
+
+A <Term id="vpc">private network</Term> is a part of the cloud that only you use, with its own range of private addresses. Machines inside it reach each other by private address. Nothing from the internet gets in unless you give it a way in.
+
+You choose the range when you create the network, written in <Term id="cidr" /> form. Brightpost's is 10.0.0.0/16, and the number after the slash says how much of the address is fixed. A /16 fixes the first two numbers, so the range runs from 10.0.0.0 to 10.0.255.255: about 65,000 addresses. A /24 fixes three numbers and holds 256. So the network can be cut into 256 slices of /24, such as 10.0.11.0/24 for the app server. [Networking basics](/system-design/fundamentals/networking) covers addresses and ports in full.
+
+In the picture, the network is already there: every cloud server sits in one. The problem is the two public addresses. Each one is a door straight through the fence, and the database's door was open to all 140 scanners.
+
+<PremiumBreak />
+
+### Step 2: Slices of the range: subnets
+
+A <Term id="subnet" /> is one slice of the network's range. A machine takes its address from the subnet it is placed in, and every subnet follows one set of routing rules. Brightpost gives each **tier**, a layer of the app with one job, its own slices.
+
+<Compare
+  columns={["Tier", "Zone A", "Zone B", "Zone C", "What lives there"]}
+  rows={[
+    ["Public", "10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24", "The load balancer"],
+    ["App", "10.0.11.0/24", "10.0.12.0/24", "10.0.13.0/24", "App servers"],
+    ["Data", "10.0.21.0/24", "10.0.22.0/24", "10.0.23.0/24", "The database and its standby"],
+  ]}
+  caption="Brightpost's address plan inside 10.0.0.0/16: nine slices of 256 addresses, and 247 slices still free."
+/>
+
+The third number tells you the tier at a glance: 1 to 3 is public, 11 to 13 is app, 21 to 23 is data. Its last digit is the zone. Each cloud keeps a few addresses in every subnet for itself, so a /24 gives about 250 usable ones. Brightpost runs at most 10 app servers on a sale day, so every slice has room.
+
+Some clouds tie each subnet to one zone, so this plan is nine subnets. Where one subnet covers every zone of a region, it is three. The picture draws one band per tier, cut by the zones, which fits both.
+
+### Step 3: Public, app and data tiers
+
+<AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={2} minWidth={620} caption="Only the load balancer has a public address. The server and the database keep private ones, and the scanners find nothing to reach." />
+
+- **Public subnets** hold only what the internet must reach. Here that is one <Term id="load-balancer" />, and it has Brightpost's only public address.
+- **App subnets** hold the app servers. The load balancer passes each request to a server's private address.
+- **Data subnets** hold the database. Only the app servers talk to it.
+
+The database's public address is gone. The scanners from the story knock on an address that is no longer Brightpost's. Its private address, 10.0.21.5, means nothing on the internet, because private ranges such as 10.x are never routed there.
+
+Separate tiers also let rules say "only the app subnets may reach the data subnets"; [Firewalls](/cloud/networking/firewalls) writes them.
+
+### Step 4: The same tiers in three zones
+
+<AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={3} minWidth={620} caption="Each tier runs in zones A, B and C. The load balancer shares requests between three servers, and every write is copied to a standby in zone B." />
+
+A <Term id="availability-zone">zone</Term> is a group of buildings in the region with its own power and network; [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge) shows why one is not enough. The network spans the region, so every tier can run in every zone.
+
+Brightpost puts one app server in each zone. The database keeps a **standby**, a second copy in zone B. Each write reaches both copies before the shop says "order placed". Running copies in several zones like this is called <Term id="multi-az">multi-AZ</Term>. Zone C's data slice stays empty for now, as room for a third copy.
+
+### Step 5: Routes decide where packets go
+
+<AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={4} minWidth={620} caption="Every packet from the internet passes the gateway. Only the public route table has a route to it; the app and data subnets keep traffic local." />
+
+An **internet gateway** is the network's door to the internet: packets from outside come in through it, and packets to outside leave through it. A <Term id="route-table" /> is the list a subnet checks for every packet that leaves a machine: for this destination, go there.
+
+<Compare
+  columns={["Destination", "Public route table", "Private route table"]}
+  rows={[
+    ["10.0.0.0/16: anywhere in the network", "Stay local", "Stay local"],
+    ["0.0.0.0/0: every other address", "Internet gateway", "No route: dropped"],
+  ]}
+  caption="Brightpost's two route tables. The app and data subnets use the private one."
+/>
+
+When a packet matches two lines, the more specific one wins. A packet for 10.0.21.5 fits both 10.0.0.0/16 and 0.0.0.0/0. The /16 is the narrower range, so the packet stays local. 0.0.0.0/0 matches every address, so it is the fallback, often called the **default route**.
+
+Where a cloud decides "public" per subnet, Asha's quick fix would now need two mistakes: a public address and a route out of the data subnet. Where routes belong to the whole network, a guardrail plays the second part, as the tabs below show.
+
+### Step 6: Losing a zone
+
+<AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={5} minWidth={620} caption="The failure: zone A is lost. The load balancer gets no answer from server A and shares the traffic between B and C, and the standby becomes the primary." />
+
+Replay a zone failure on the new network. Zone A goes dark, and with it server A, the primary database and zone A's slice of every tier.
+
+<Callout tone="red" title="What breaks">
+  Server A stops answering health checks, and after about 30 seconds the load balancer stops sending it requests. Servers B and C take half each. The primary database is gone too, so the cloud promotes the standby in zone B, which takes about 2 minutes. Checkouts in those 2 minutes fail, and customers retry. No saved order is lost, because each one was already in zone B.
+</Callout>
+
+The load balancer, the gateway and the route tables keep working, because the cloud runs them across all zones. If servers B and C get busy, the scaling rule adds more in their slices, which have about 250 free addresses each.
+
+### Step 7: Rules and ways out
+
+Routes say where a packet can go. Three more pieces finish the network, each on its own page.
+
+1. **Firewall rules** decide whether a packet may pass. See [Firewalls](/cloud/networking/firewalls).
+2. **A way out for private servers.** The app servers need updates and must call the payment provider. A <Term id="nat-gateway" /> lets them start connections outward, while nothing outside can start one inward. See [NAT & Leaving the Network](/cloud/networking/nat-and-egress).
+3. **Private paths to cloud services.** A <Term id="private-endpoint" /> gives a managed service an address inside your network. See [Private Endpoints](/cloud/networking/private-endpoints).
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a private range, slices per tier, only the front door public, and every tier in several zones.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Network:** a VPC belongs to one region. You can add more IPv4 ranges to it later.
+    - **Subnets:** each subnet lives in exactly one Availability Zone, so Brightpost's plan is nine subnets. AWS keeps 5 addresses in each.
+    - **What makes it public:** a route table whose 0.0.0.0/0 route points at an internet gateway attached to the VPC. A machine also needs a public IPv4 address. A subnet without its own table uses the VPC's main route table.
+    - **Load balancer:** an internet-facing Application Load Balancer needs public subnets in at least two zones.
+    - **Database:** Amazon RDS uses a DB subnet group: data subnets in at least two zones.
+
+    **The difference that changes a design.** A subnet is pinned to one zone, so the zone is part of the address plan. You create one subnet per tier per zone and tell each load balancer and database which subnets to use. A subnet's range cannot be changed later, so leave room. A second region means a second VPC, with a range that must not overlap.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Network:** a VPC network is global: it can hold subnets in many regions. Use custom mode to set every range yourself.
+    - **Subnets:** a subnet is regional and covers every zone of its region, so Brightpost's plan is three subnets. Google Cloud keeps 4 addresses in each.
+    - **What makes it public:** an external IP address on the machine or the load balancer. Routes belong to the whole network, not to one subnet. The default route sends 0.0.0.0/0 to the default internet gateway, yet a VM with no external IP cannot be reached from outside.
+    - **Load balancer:** the global external Application Load Balancer runs at Google's edge, outside your network, and reaches your VMs on their private addresses.
+    - **Database:** Cloud SQL with a private IP runs in a network Google manages, joined to yours through a range you set aside.
+
+    **The difference that changes a design.** Because routes are network-wide, "public subnet" is not a setting here: a machine is public when it has an external IP. The second lock is an organisation policy that forbids external IPs on VMs, plus firewall rules. A second region adds subnets, not a second network, and a subnet's range can be widened later.
+  </Tab>
+  <Tab label="Azure">
+    - **Network:** a virtual network (VNet) belongs to one region and one subscription, with one or more address ranges.
+    - **Subnets:** a subnet covers every zone of the region, so Brightpost's plan is three subnets. Azure keeps 5 addresses in each.
+    - **What makes it public:** a public IP address on a VM's network card or a load balancer. There is no internet gateway to create: built-in system routes cover every subnet, and a route table can override them.
+    - **Load balancer:** Application Gateway needs a subnet of its own, and it holds the public IP.
+    - **Database:** Azure Database for PostgreSQL flexible server sits in a subnet handed over to it (a delegated subnet), or behind a private endpoint.
+
+    **The difference that changes a design.** The default routes already lead to the internet, so "private" on Azure means no public IP on anything but the gateway, plus network security group rules. Subnets span zones, so a zone failure takes the machines in that zone, not the subnet. You pick a zone for each VM, or a zone-redundant option where a service offers one.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/vpc-three-tier" stepper minWidth={620} caption="The whole story in five steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/vpc-three-tier" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which subnet does it go in?"
+  tree={{
+    q: "Must people or systems on the internet start connections to it?",
+    yes: {
+      q: "Is it a load balancer or another managed front door?",
+      yes: "Public subnet. It holds the public address and passes each request to a private one.",
+      no: {
+        answer: "Put a load balancer in front of it in the public subnet. Keep the machine itself in an app subnet, with no public address.",
+        href: "/cloud/networking/load-balancing",
+      },
+    },
+    no: {
+      q: "Does it store data that the app reads and writes?",
+      yes: {
+        answer: "Data subnet. Only the app subnets may reach it, and it has no route to the internet.",
+        href: "/cloud/networking/firewalls",
+      },
+      no: {
+        answer: "App subnet. If it must call out, for updates or a partner's API, give it a way out through NAT, not a public address.",
+        href: "/cloud/networking/nat-and-egress",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="How many addresses does Brightpost's slice 10.0.21.0/24 hold, and why can the database not use all of them?" hint="Count the free numbers after the slash.">
+    256, because a /24 fixes the first three numbers and leaves the last one free. The cloud keeps a few addresses in every subnet for itself, so about 250 are usable.
+  </QuizItem>
+  <QuizItem question="An app server sends a packet to 10.0.21.5. Its route table says 10.0.0.0/16 → local and 0.0.0.0/0 → internet gateway. Where does the packet go?" hint="Both lines match. Which one is narrower?">
+    It stays local and reaches the database. Both lines match, and the more specific one wins: /16 is a much narrower range than 0.0.0.0/0.
+  </QuizItem>
+  <QuizItem question="After step 3, one of the 140 scanners tries the database's old public address again. What does it reach?">
+    Nothing of Brightpost's. The database has no public address any more, and its private address, 10.0.21.5, cannot be reached from the internet.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Flat and public (step 1)", "Three tiers, one zone", "Three tiers, three zones"]}
+  rows={[
+    ["Public addresses", "2: server and database", "1: the load balancer", "1: the load balancer"],
+    ["What a scanner can reach", "The database's login", "Only the load balancer", "Only the load balancer"],
+    ["Subnets to plan", "2", "3", "9 where subnets are zonal, 3 where they span zones"],
+    ["Down when a zone fails", "Until the zone returns", "Until the zone returns", "About 2 minutes for writes"],
+    ["New costs", "None", "A load balancer", "Two more servers, a standby, traffic between zones"],
+    ["First-time setup, as code", "Minutes", "About half a day", "About a day"],
+  ]}
+  caption="Brightpost's numbers. Setup times are what a small team should expect the first time."
+/>
+
+The middle column closes the leak for the price of one load balancer. The right column adds two servers and a standby, and turns a lost zone into about 2 minutes.
+
+## Common pitfalls
+
+- **Overlapping ranges.** Two networks with the same range cannot be joined later by <Term id="peering" /> or a private link, because a packet for 10.0.11.7 could mean either one. Take every range from one company plan: Brightpost's test network uses 10.1.0.0/16.
+- **Keeping the default network.** Default networks often give servers public addresses and reuse one range in every account. Create your own, as code, with a planned range.
+- **Slices too small.** A /28 holds 16 addresses, and after the cloud's own share about 11 are left. Ten servers on sale day, plus new ones started during a deploy, run out. Use a /24 or larger for any tier that scales.
+- **A public address "for a quick fix".** That is the story's mistake. Reach private machines through the cloud's managed access tools or a <Term id="vpn" />, and set a guardrail that forbids public addresses on databases.
+
+## How to say it in an interview
+
+"I start with a private network and a planned range, such as 10.0.0.0/16, that overlaps no network I may join later. I split it into subnets by tier: public for the load balancer, app for the servers, data for the database. Only the load balancer has a public address. Route tables make the difference: only the public subnets have a route to the internet gateway, and private servers reach out through NAT when they must. I repeat each tier in three zones, so losing a zone costs a failover of about 2 minutes, not the shop. Firewall rules then say exactly which tier may reach which."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why should a database never have a public IP address?" level="Junior" category="Cloud">
+    **Short answer.** A public address lets anyone on the internet try to connect. A database only needs to hear from the app servers, so it keeps a private address in a data subnet with no route to the internet. Then nobody outside can even reach its login.
+
+    **Why.** Brightpost's database was public for 11 days and collected about 3,800 failed logins from 140 addresses. A weak password or a flaw in the login code would have exposed 90,000 customers. With a private address, an attacker must first get inside the network.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={2} highlight={["scanner", "db", "lb"]} caption="Only the load balancer is public; the scanners have nothing at the database to knock on." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does an engineer query the database without a public address?
+    - What stops someone from adding a public address again by mistake?
+
+    **Watch out for.** Saying "a strong password is enough". The password is the last lock, and the login code itself can be attacked before any password is checked.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What makes a subnet public or private?" level="Mid" category="Cloud">
+    **Short answer.** Its routes. A subnet is public when its route table sends 0.0.0.0/0 to the internet gateway, and private when it has no such route. A machine in a public subnet also needs a public address to be reached.
+
+    **Why.** A packet takes the most specific route that matches it, so traffic inside 10.0.0.0/16 stays local everywhere. Only the public table has a fallback route to the gateway, so exposing the database takes two mistakes. On Google Cloud routes belong to the whole network, so "public" means a machine with an external IP, and a guardrail plays the route's part.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={4} highlight={["rt-public", "rt-private", "igw"]} caption="Only the public route table points at the gateway." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does a server in a private subnet download updates?
+    - What happens to a packet with no matching route?
+
+    **Watch out for.** Saying a subnet is private because it has a firewall. A firewall decides whether a packet may pass; the route decides whether there is any path at all.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you plan the address ranges for a new cloud network?" level="Mid" category="Cloud">
+    **Short answer.** Take a private range from a company-wide plan that no other network or office uses. Make it large, such as a /16, and cut it into /24 slices: one per tier, and one per zone where the cloud needs it. Leave most of the range free.
+
+    **Why.** Networks with overlapping ranges cannot be joined later, and renumbering a live network means moving every machine. On some clouds a subnet cannot be resized. Brightpost's 10.0.0.0/16 holds 256 slices of /24 and uses 9, each with about 250 usable addresses for at most 10 servers.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you hand out ranges to 20 teams without clashes?
+    - Two networks already overlap and must talk. What are your options?
+
+    **Watch out for.** Taking the range the setup screen suggests for every network. Each one then gets the same range, and none of them can be joined.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design Brightpost's subnets so that losing one zone does not take the shop down." level="Mid" category="Cloud">
+    **Short answer.** Every tier in three zones: a load balancer that serves all three, one app server per zone, and a synchronous database standby in a second zone. Where subnets are zonal, each tier gets a subnet in every zone.
+
+    **Why.** When zone A goes dark, health checks drop server A in about 30 seconds, and servers B and C take half each. The standby in zone B becomes the primary in about 2 minutes. Saved orders survive, because each write reached both copies first. The load balancer, gateway and route tables run across zones, so they stay up.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={5} highlight={["lb", "app-b", "app-c", "db-standby"]} caption="With zone A lost, the load balancer and the survivors in zones B and C carry the shop." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if two servers cannot carry the peak?
+    - What else in the design is tied to one zone, such as a NAT gateway or a disk?
+
+    **Watch out for.** Servers in three zones but the database, or the load balancer's subnets, in only one. The weakest tier decides what a zone failure costs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Google Cloud's VPC network is global. What does that remove from the AWS design, and what does it not remove?" level="Senior" category="Cloud">
+    **Short answer.** It removes the per-zone subnets and the second network for a second region. It does not remove zones as failure domains, the address plan, firewall rules, or spreading servers and database copies across zones.
+
+    **Why.** On AWS, Brightpost's plan is nine subnets per region, and a second region means a second VPC with a range that must not overlap. On Google Cloud the plan is three subnets, and a second region adds three more to the same network. Traffic between regions is still slower and billed, and a zone still fails.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={3} cloud="gcp" caption="The same three tiers on Google Cloud: one subnet per tier covers all three zones." />
+
+    **Follow-ups the interviewer may ask.**
+    - Does a global network mean a global failure domain?
+    - How do you split one network between many teams' projects?
+
+    **Watch out for.** Saying a global network makes zones unimportant. The network is global; the machines and the database copies are still zonal.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="An engineer needs to query the production database from a laptop. How do you allow it without giving the database a public address?" level="Senior" category="Cloud">
+    **Short answer.** Bring the engineer into the network, not the database out. A short, identity-checked session through the cloud's managed access service, or a VPN, reaches an admin machine in an app subnet. The database accepts connections from that machine only.
+
+    **Why.** Brightpost's quick fix was this request, solved the wrong way, and it stayed open for 11 days. A session that needs single sign-on with MFA, lasts 1 hour and is logged cannot stay open by accident. A read-only role limits what a mistake can change, and a guardrail stops the quick fix coming back.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you make sure sessions end and nobody keeps one open?
+    - What changes if the engineer must write, not only read?
+
+    **Watch out for.** A public address that allows only "Asha's home address". Home addresses change and are shared, and the database's login is still on the internet.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Firewalls: Security Groups, NACLs, NSGs & Firewall Policies](/cloud/networking/firewalls)
+- [NAT & Leaving the Network](/cloud/networking/nat-and-egress)
+- [Private Endpoints: PrivateLink, Private Service Connect & Private Link](/cloud/networking/private-endpoints)
+- [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks)
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [Networking on AWS](/cloud/aws/networking)
+- [Networking on Google Cloud](/cloud/gcp/networking)
+- [Networking on Azure](/cloud/azure/networking)
+- [Networking basics](/system-design/fundamentals/networking)
+- [A request's journey](/system-design/fundamentals/anatomy-of-a-request)
+
+## Further reading
+
+- [How Amazon VPC works](https://docs.aws.amazon.com/vpc/latest/userguide/how-it-works.html): VPCs, subnets, route tables and gateways.
+- [Google Cloud VPC networks](https://cloud.google.com/vpc/docs/vpc): global networks and regional subnets.
+- [Azure Virtual Network overview](https://learn.microsoft.com/azure/virtual-network/virtual-networks-overview): VNets, subnets and zones.
+- [Azure virtual network traffic routing](https://learn.microsoft.com/azure/virtual-network/virtual-networks-udr-overview): system routes and route tables.
