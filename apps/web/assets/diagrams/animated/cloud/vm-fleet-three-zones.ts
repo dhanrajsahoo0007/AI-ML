@@ -234,7 +234,7 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: shoppers reach the one server; at boot it downloads its packages from the internet.
-    { from: "shoppers", to: "server-a", label: "orders", packet: true, via: [[185, 250]], labelAt: 0.35, until: 1 },
+    { from: "shoppers", to: "server-a", label: "orders", packet: true, via: [[185, 195]], labelAt: 0.35, until: 1 },
     { from: "mirror", to: "server-a", label: "packages at boot", packet: true, delay: 0.6, until: 1 },
 
     // Step 2: one front door for three zones; the group keeps one copy of the template in each zone.
@@ -254,7 +254,7 @@ const spec: DiagramSpec = {
     { from: "group", to: "server-c", dashed: true, step: 2 },
 
     // Step 3: the group adds 5 servers; each waits 11 minutes on the slow mirror and is kept out of service.
-    { from: "group", to: "new-c", label: "adds 5", dashed: true, via: [[545, 330]], labelAt: 0.62, step: 3 },
+    { from: "group", to: "new-c", label: "adds 5", dashed: true, via: [[545, 330]], labelAt: 0.55, step: 3 },
     { from: "mirror", to: "new-a", tone: "red", packet: true, duration: 6, step: 3, until: 3 },
     { from: "mirror", to: "new-b", label: "slow: 11 min", tone: "red", packet: true, duration: 6, step: 3, until: 3 },
     { from: "mirror", to: "new-c", tone: "red", packet: true, duration: 6, step: 3, until: 3 },
