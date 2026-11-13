@@ -11,18 +11,20 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Nodes never move and never disappear. The app-to-database and app-to-key edges change their labels from step to
 // step, so every version but the last ends with `until`; the step-3 failure edges end at step 3.
 //
-// Layout: three columns (x 125 | 395 | 670) and four rows (y 100 | 250 | 405 | 560).
-//   Left, the shop side: shoppers 125,100 | app servers 125,250 | orders database 125,405 | monitoring 125,560.
-//   Middle, zone A of the cache: rebuild lock 395,100 | cache primary 395,250 | hero poster key 395,405.
-//   Right, added later: replica in zone B 670,250 | more shards 670,405.
+// Layout: three columns (x 125 | 395 | 670) and four rows (y 100 | 280 | 460 | 640).
+//   Left, the shop side: shoppers 125,100 | app servers 125,280 | orders database 125,460 | monitoring 125,640.
+//   Middle, zone A of the cache: rebuild lock 395,100 | cache primary 395,280 | hero poster key 395,460.
+//   Right, added later: replica in zone B 670,280 | more shards 670,460.
+// Rows are 180 apart so the pills of the vertical edges in the left column (y 190, 370, 550) sit between a zone's
+// bottom and the next zone's tab, not on the tab: each zone starts 29 above its node, 32 below the pill.
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 to 4 (the free
 // preview, the failure and its fix) and step 7 use only the left and middle columns; only the replica and the shards
 // need the right column. The canvas stays under 800 wide so labels are readable in the 660 px article column.
 //
 // Edge routes: the app reaches the key and the lock on diagonals whose pills sit in the gutter between the left zones
 // (which end at x 235) and zone A (which starts at x 300), between zone rows. The key-to-monitoring diagonal passes
-// below the database box; its pill sits between the Database and Monitoring zones. The shards edge leaves the primary
-// to the lower right and passes under the replica. Vertical edges at x 125 enter zones right of their tabs.
+// below the database box; its pill sits between the Database and Monitoring zones. The shards edge bends at (520, 460) and
+// enters the shards box from the left, so it never crosses the Cluster mode tab; its pill sits inside zone A. Vertical edges at x 125 enter zones right of their tabs.
 // Every node's top sits at least 26 units below its zone's top, so the NEW ring clears the tab.
 // Text room: a label takes about 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. Nodes
 // are sized for the longest name the Services toggle shows: "Virtual Machines" (app, w 170), "Flexible server"
@@ -31,7 +33,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 const spec: DiagramSpec = {
   title: "A managed cache: cache-aside, a stampede, a rebuild lock, a replica and shards",
   width: 795,
-  height: 640,
+  height: 710,
   steps: [
     { title: "Every product view reads the database" },
     { title: "Cache-aside: read the key, fill it on a miss" },
@@ -42,13 +44,13 @@ const spec: DiagramSpec = {
     { title: "Watch hit rate, evictions and memory" },
   ],
   zones: [
-    { id: "shoppers-zone", title: "Shoppers", tone: "neutral", x: 10, y: 40, w: 225, h: 115 },
-    { id: "app-zone", title: "App servers", tone: "teal", x: 10, y: 190, w: 225, h: 120 },
-    { id: "db-zone", title: "Database", tone: "violet", x: 10, y: 345, w: 225, h: 115 },
-    { id: "mon-zone", title: "Monitoring", tone: "orange", x: 10, y: 500, w: 225, h: 120 },
-    { id: "zone-a", title: "Cache, zone A", tone: "orange", x: 300, y: 40, w: 190, h: 420 },
-    { id: "zone-b", title: "Zone B", tone: "orange", x: 560, y: 190, w: 225, h: 120 },
-    { id: "shards-zone", title: "Cluster mode", tone: "orange", x: 560, y: 345, w: 225, h: 120 },
+    { id: "shoppers-zone", title: "Shoppers", tone: "neutral", x: 10, y: 40, w: 225, h: 120 },
+    { id: "app-zone", title: "App servers", tone: "teal", x: 10, y: 222, w: 225, h: 118 },
+    { id: "db-zone", title: "Database", tone: "violet", x: 10, y: 402, w: 225, h: 118 },
+    { id: "mon-zone", title: "Monitoring", tone: "orange", x: 10, y: 582, w: 225, h: 118 },
+    { id: "zone-a", title: "Cache, zone A", tone: "orange", x: 300, y: 40, w: 190, h: 480 },
+    { id: "zone-b", title: "Zone B", tone: "orange", x: 560, y: 222, w: 225, h: 118 },
+    { id: "shards-zone", title: "Cluster mode", tone: "orange", x: 560, y: 402, w: 225, h: 118 },
   ],
   nodes: [
     // Step 1
@@ -69,7 +71,7 @@ const spec: DiagramSpec = {
       icon: "server",
       tone: "teal",
       x: 125,
-      y: 250,
+      y: 280,
       w: 170,
       cloud: { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" },
     },
@@ -80,7 +82,7 @@ const spec: DiagramSpec = {
       icon: "database",
       tone: "violet",
       x: 125,
-      y: 405,
+      y: 460,
       w: 170,
       cloud: {
         aws: { id: "aws-rds", label: "RDS PostgreSQL" },
@@ -96,7 +98,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       accent: true,
       x: 395,
-      y: 250,
+      y: 280,
       w: 170,
       cloud: {
         aws: "aws-elasticache",
@@ -114,7 +116,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 2,
       x: 395,
-      y: 405,
+      y: 460,
       w: 170,
     },
 
@@ -140,7 +142,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 5,
       x: 670,
-      y: 250,
+      y: 280,
       w: 196,
       cloud: {
         aws: { id: "aws-elasticache", label: "ElastiCache replica" },
@@ -158,7 +160,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 6,
       x: 670,
-      y: 405,
+      y: 460,
       w: 196,
       cloud: {
         aws: { id: "aws-elasticache", label: "Cluster mode" },
@@ -176,7 +178,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 7,
       x: 125,
-      y: 560,
+      y: 640,
       w: 170,
       cloud: { aws: "aws-cloudwatch", gcp: "gcp-cloud-monitoring", azure: "azure-monitor" },
     },
@@ -197,14 +199,14 @@ const spec: DiagramSpec = {
 
     // Step 4: one request takes the lock and rebuilds; the others get the old copy. The key is refreshed early.
     { from: "app", to: "lock", label: "take lock", packet: true, step: 4 },
-    { from: "app", to: "key", label: "old copy, refresh early", packet: true, delay: 0.6, step: 4 },
+    { from: "app", to: "key", label: "refresh early", packet: true, delay: 0.6, step: 4 },
     { from: "app", to: "db", label: "1 query per key", packet: true, delay: 1.2, step: 4 },
 
     // Step 5: the primary copies every write to the replica in zone B.
     { from: "cache", to: "replica", label: "copy", flow: true, dashed: true, step: 5 },
 
     // Step 6: cluster mode hands some of the key slots to new shards.
-    { from: "cache", to: "shards", label: "slots move", dashed: true, step: 6 },
+    { from: "cache", to: "shards", label: "slots move", dashed: true, via: [[520, 460]], labelAt: 0.35, step: 6 },
 
     // Step 7: the cache reports misses, evictions and memory use.
     { from: "key", to: "metrics", label: "misses, evictions", dashed: true, flow: true, step: 7 },
