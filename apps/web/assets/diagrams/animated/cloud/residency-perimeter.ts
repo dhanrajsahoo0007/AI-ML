@@ -256,7 +256,7 @@ const spec: DiagramSpec = {
         [528, 100],
         [528, 418],
       ],
-      labelAt: 0.72,
+      labelAt: 0.685,
       step: 4,
     },
     { from: "bucket", to: "analytics", label: "copy in London", packet: true, step: 4 },
