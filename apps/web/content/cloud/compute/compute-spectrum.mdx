@@ -1,11 +1,294 @@
 ---
 title: "The Compute Spectrum: VMs to Functions"
-description: "See every way to run code on one axis, from virtual machines to functions, by asking how much of the machine you still run."
-status: outline
+description: "Every way to run code on one axis, from virtual machines to functions: what each gives you, what it takes away, and what it costs idle and busy."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** what compute means (a processor, memory and a place to run your code, rented by the second) and the one axis the whole hub sits on: how much of the machine you still own. It sets up the who-runs-what layers that the rest of the hub zooms into.
+<KeyIdea>
+  Every way to run code sits on one line: the more of the machine you hand over, the less you look after, and the less you control.
+</KeyIdea>
 
-**Related reading on this site:** [Choosing Compute](/cloud/start-here/choosing-compute) · [What the Cloud Is](/cloud/fundamentals/what-is-cloud)
+## The story
+
+Brightpost's shop runs on a fleet of rented virtual machines: two on a normal day, up to 10 on a sale day. The same fleet serves the tracking page, where customers check where their parcel is, about 1,200 visits a day. Asha wants to update tracking without redeploying the shop, and she likes the idea of paying nothing at night. So she moves it to a serverless container platform and sets the minimum number of running copies to zero. The platform removes the last copy after 15 quiet minutes. Nobody checks a parcel between 00:30 and 07:00, so each morning starts with no copy at all. At 07:05 the first shopper waits 8 seconds: 4 to fetch a 1.1 GB image, 3 to start the app, 1 to reach the database. Quiet spells in the afternoon do the same. In the first week, 96 visits wait 6 to 9 seconds. Then 23 customers give up and email the support agent "Where is my order?", the one question the page answers. Every test Asha ran had hit a copy that was already running.
+
+Nothing was broken. Asha picked a place on the spectrum without knowing what that place takes away. The steps below lay out the whole spectrum, then fix the morning.
+
+## How it works
+
+Three words first. **Compute** is processor time and memory that a cloud rents you, plus a place for your code to run. A **copy** is one running instance of your program; to serve more people, a platform runs more copies. **Start-up time** is how long a new copy takes before it can answer anyone.
+
+### Step 1: One axis: how much of the machine you still run
+
+<AnimatedDiagram spec="animated/cloud/compute-spectrum" step={1} minWidth={620} caption="Five places to run the same code. Moving right, you hand over more and run less." />
+
+There are five common places to run code. From left to right: virtual machines, containers on your own virtual machines, a managed Kubernetes cluster, serverless containers, and functions. Read the two rows in the picture. The first says what you hand the cloud. The second says what is still your job once it runs.
+
+On the left you hand over a whole disk and look after the operating system (OS) yourself. On the right you hand over a few lines of code and look after nothing below them. Every step right removes a job, and also a choice. [Service Models](/cloud/fundamentals/service-models) draws the wider ladder; this page zooms into its compute rungs, and each has a deeper page in this hub.
+
+<PremiumBreak />
+
+### Step 2: The left end: a whole machine
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" step={1} minWidth={620} caption="Where Brightpost began: one rented virtual machine that ran the shop and its database." />
+
+A **virtual machine** (VM) is a rented slice of a big computer that behaves like a computer of its own. Brightpost started on one, as the picture shows, and its shop still runs on a fleet of them.
+
+A VM gives you the most. You pick the OS, install drivers, and run a job for days. Its disk survives a restart. It also asks the most. A new VM needs 1 to 3 minutes to boot and set up. You patch its OS and pay for every hour it is on, busy or not. You grow in whole machines: to serve 200 more shoppers, Brightpost adds a VM. [Virtual Machines](/cloud/compute/virtual-machines) opens one up, and [Autoscaling](/cloud/compute/autoscaling) shows how a fleet grows and shrinks.
+
+### Step 3: Containers, on your VMs or in a cluster
+
+<ResponsibilityGrid set="kubernetes" />
+
+A <Term id="container">container</Term> is your app packed with everything it needs, started as an isolated process. Its files are one **container image**, kept in an <Term id="image-registry">image registry</Term>. On a VM with room, a new container starts in seconds, and one VM holds many. [Containers and Registries](/cloud/compute/containers-and-registries) covers images.
+
+Containers on your own VMs still leave you the VMs: their OS, their patches, and which container runs where. <Term id="kubernetes">Kubernetes</Term> takes over the "where". It places <Term id="pod">pods</Term>, groups of containers, onto machines in a <Term id="node-pool">node pool</Term>. In a managed cluster the cloud runs the brain of Kubernetes; the table shows who runs the rest in each mode. Scaling now has two loops: pods in seconds, then nodes in minutes. [Kubernetes Concepts](/cloud/compute/kubernetes-concepts) walks the whole cluster.
+
+### Step 4: Serverless containers: hand over the image
+
+<AnimatedDiagram spec="animated/cloud/compute-spectrum-1" step={2} minWidth={620} caption="Tracking leaves the VM fleet. The platform starts copies of its 1.1 GB image on demand and they read order status from the database." />
+
+A **serverless container** platform takes one image and runs it with no machines in sight. You never patch an OS or size a node. The platform adds copies as requests arrive and removes them when traffic stops. The key setting is the **minimum number of copies**. At zero, an idle service costs nothing.
+
+That is the deal Asha took for tracking. It takes three things away. A request may run only up to a timeout. A copy's local files vanish when it is removed. And when no copy is running, the next request waits for one to start. [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas) covers the settings.
+
+### Step 5: The 8-second morning
+
+<AnimatedDiagram spec="animated/cloud/compute-spectrum-1" step={3} minWidth={620} caption="The failure: no copy is left after a quiet night, so the first shopper at 07:05 waits about 8 seconds while one starts." />
+
+With a minimum of zero, every quiet spell ends in a start-up. The first request pays for all of it.
+
+<Callout tone="red" title="What breaks">
+  At 07:05 a shopper opens the tracking page. No copy is running, so the platform fetches the 1.1 GB image (4 s), starts the app (3 s) and opens a database connection (1 s). The page appears after 8 seconds. Over the first week, 96 visits wait 6 to 9 seconds, and 23 customers give up and email support instead.
+</Callout>
+
+The tests missed it because they ran in the afternoon, against a copy that was already warm. Start-up time is a cost that only shows after idle time, so a test must start from zero copies to see it.
+
+### Step 6: A warm copy and a smaller image
+
+<AnimatedDiagram spec="animated/cloud/compute-spectrum-1" step={4} minWidth={620} caption="One warm copy is always on and answers in 0.3 s. A 180 MB image lets extra copies start in about 2 seconds." />
+
+Asha makes two changes. First, the minimum goes from 0 to 1. One **warm copy**, a copy that is already running, now answers the 07:05 shopper in 0.3 seconds. That copy is billed all day, so tracking no longer costs nothing at night. For a page a person waits on, that is the right trade.
+
+Second, she shrinks the image from 1.1 GB to 180 MB by removing build tools and test files, so the app also loads less at start. An extra copy is now ready in about 2 seconds, which matters when a sale morning adds copies. Her test now starts from zero copies. The full stepper below adds an alert when the slowest 1% of replies, the <Term id="p99">p99</Term>, take more than 2 seconds.
+
+### Step 7: Functions: the right end, where the clock rules
+
+<AnimatedDiagram spec="animated/cloud/compute-spectrum" step={2} minWidth={620} caption="Time: how fast a new copy is ready, and how long one run may last, in each place." />
+
+A **function** is a small piece of code that the platform runs once each time an event happens, such as a photo arriving. You hand over the code and a trigger, nothing more. Brightpost's photo-resize worker is one: about 2 seconds per photo, and about 1 second extra after a quiet night. That extra wait is a <Term id="cold-start">cold start</Term>, the function's version of the 8-second morning. Nobody waits on a thumbnail, so there it does no harm.
+
+Read the two new rows across. Start-up time falls from minutes on the left to about a second on the right. The longest run goes the other way: no limit on a VM, a request timeout on serverless containers, and a hard limit counted in minutes on a function. [Serverless Functions](/cloud/compute/serverless-functions) covers triggers and cold starts in depth.
+
+### Step 8: How each place scales, and where files go
+
+<AnimatedDiagram spec="animated/cloud/compute-spectrum" step={3} minWidth={620} caption="Scaling and local files: the unit each place adds, and what happens to files on its disk." />
+
+Each place grows by adding a different thing. A VM fleet adds whole machines, minutes each. Containers on VMs add containers, and someone adds VMs underneath. Kubernetes adds pods, then nodes. Serverless containers and functions add copies in seconds. <Term id="autoscaling">Autoscaling</Term> is the rule that decides when.
+
+The faster a place scales, the shorter-lived its copies, so local files stop being safe. Keep state outside the copy: in a database, a cache or a bucket. Brightpost's baskets already live in the shared database, so any server can serve any shopper. That habit lets work move right along the spectrum.
+
+### Step 9: The cost shape, idle and busy
+
+<AnimatedDiagram spec="animated/cloud/compute-spectrum" step={4} minWidth={620} caption="Cost shape: what each place charges while idle, and how it compares when busy all day." />
+
+The two cost rows point in opposite directions. Idle, the right end wins: a function or a serverless container at minimum zero costs nothing. Busy all day, the left end wins: a VM on a <Term id="reserved-capacity">commitment</Term> is the cheapest way to buy work that never stops. Per-request billing carries a premium, and steady load pays it every second.
+
+So the same code is cheapest in different places at different loads. Tracking, at 1,200 visits a day with quiet nights, belongs near the right. The shop app, busy every hour with 2 VMs at minimum, belongs near the left. [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus) covers work that is neither, and [Choosing Compute](/cloud/start-here/choosing-compute) turns all of this into three questions.
+
+## On AWS, Google Cloud and Azure
+
+All three clouds offer the five places. They differ most at the right end: what happens when a service has no copy running.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **VMs:** Amazon EC2. An Auto Scaling group adds whole instances from a launch template.
+    - **Containers on your VMs:** Amazon ECS on EC2 instances. ECS places the containers; you patch the instances.
+    - **Managed Kubernetes:** Amazon EKS. AWS runs the control plane; managed node groups, Fargate or Auto Mode decide who runs the nodes.
+    - **Serverless containers:** ECS tasks on AWS Fargate. An ECS service keeps the number of tasks you set, and autoscaling changes that number.
+    - **Functions:** AWS Lambda. Provisioned concurrency keeps a set number of copies ready, and it is billed while they wait.
+
+    **The difference that changes a design.** Fargate does not start a task because a request arrived. An ECS service at zero tasks answers nothing until autoscaling or a person raises the count. So on AWS, a page with no copy at night is a Lambda function behind an HTTP front door. A Fargate service for tracking keeps at least one task, which is Asha's fix from the start.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **VMs:** Compute Engine. A managed instance group adds whole VMs from an instance template.
+    - **Containers on your VMs:** Compute Engine VMs running a container runtime. Container-Optimized OS is an image built for that.
+    - **Managed Kubernetes:** Google Kubernetes Engine (GKE). In Standard mode you size node pools; in Autopilot, Google runs the nodes and bills by what pods request.
+    - **Serverless containers:** Cloud Run. The minimum instances setting is zero by default.
+    - **Functions:** Cloud Run functions. They run on Cloud Run and share its minimum instances setting.
+
+    **The difference that changes a design.** Services, jobs and functions all run on one platform, so one setting fixes the morning for each: minimum instances. One Cloud Run instance can also serve many requests at once, up to a number you set. So a single warm instance can carry all of tracking's 1,200 daily visits.
+  </Tab>
+  <Tab label="Azure">
+    - **VMs:** Azure Virtual Machines. A Virtual Machine Scale Set adds whole VMs from one image.
+    - **Containers on your VMs:** VMs or scale sets running a container runtime you install and patch.
+    - **Managed Kubernetes:** Azure Kubernetes Service (AKS). Azure runs the control plane; AKS Automatic runs the nodes too.
+    - **Serverless containers:** Azure Container Apps. Scale rules set the number of replicas, from a minimum that can be zero.
+    - **Functions:** Azure Functions. The hosting plan decides cold starts; the Premium and Flex Consumption plans can keep instances ready.
+
+    **The difference that changes a design.** Container Apps scale on more than web traffic. Its rules come from KEDA, an open-source event-driven autoscaler, so a replica count can follow queue length or other events. A background worker can then sleep at zero and wake when messages arrive. The same platform holds the tracking page at minimum 1 and a queue worker at minimum 0.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/compute-spectrum-1" stepper minWidth={620} caption="Tracking's move in five steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/compute-spectrum-1" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Where on the spectrum?"
+  tree={{
+    q: "Does the code need its own OS settings, drivers or a special kernel?",
+    yes: {
+      answer: "Virtual machines. Bake the setup into an image and run a fleet that replaces machines on its own.",
+      href: "/cloud/compute/virtual-machines",
+    },
+    no: {
+      q: "Is each unit of work started by an event and done in a few minutes?",
+      yes: {
+        answer: "A function. Check the time limit against your largest input, not your test input.",
+        href: "/cloud/compute/serverless-functions",
+      },
+      no: {
+        q: "Will you run many services, with someone whose job includes the cluster?",
+        yes: {
+          answer: "Managed Kubernetes. Pick the mode where the cloud runs the nodes unless you need node control.",
+          href: "/cloud/compute/kubernetes-concepts",
+        },
+        no: {
+          q: "Is it busy at a high, steady load every hour of the day?",
+          yes: "Containers on VMs bought with a commitment, or serverless containers with a few copies always on. Compare a month's bill at your real load.",
+          no: "Serverless containers. Set the minimum to 1 if a person waits on the first reply, and to 0 if nobody does.",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Tracking runs at minimum zero, and the platform removes the last copy after 15 quiet minutes. Nobody visits from 00:30 to 07:05. How many slow starts does that night cause, and who pays for them?" hint="Count the times traffic returns after a quiet spell.">
+    One, at 07:05. The bill pays nothing overnight; the first shopper pays with an 8-second wait.
+  </QuizItem>
+  <QuizItem question="Asha sets the minimum to 1. Which two rows of the spectrum picture changed for tracking?" hint="One is about time, one is about money.">
+    "New copy ready in" no longer applies to the first request, because a warm copy answers in 0.3 s. "Paid while idle" goes from nothing to one copy all day.
+  </QuizItem>
+  <QuizItem question="On a sale morning tracking needs 3 copies, and only 1 is warm. With the 180 MB image, what do the extra shoppers see?">
+    The warm copy keeps answering while 2 more start. A few requests wait up to about 2 seconds, not 8, and only while the new copies come up.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Stay on the VM fleet", "Serverless, minimum 0", "Serverless, minimum 1", "A function"]}
+  rows={[
+    ["First reply after a quiet night", "0.3 s", "About 8 s, then 2 s with the small image", "0.3 s", "About 1 s more: a cold start"],
+    ["Paid overnight", "Nothing extra: the fleet runs anyway", "Nothing", "One copy", "Nothing"],
+    ["Deploys apart from the shop", false, true, true, true],
+    ["Who patches the OS", "Brightpost", "The provider", "The provider", "The provider"],
+    ["Extra copy ready in", "1 to 3 minutes: a new VM", "About 2 s", "About 2 s", "Under 1 s to a few"],
+    ["Good fit when", "Tracking stays part of the shop", "Nobody waits on the first reply", "A person waits on every reply", "Short work started by events"],
+  ]}
+  caption="Four homes for Brightpost's tracking page, with the story's numbers. Real start-up times depend on the image, the app and the cloud."
+/>
+
+Minimum 1 costs one small copy all day and buys every morning's first reply. For a page customers wait on, that is cheap; for a background job, minimum 0 is the better deal.
+
+## Common pitfalls
+
+- **Minimum zero on a page people wait for.** Every quiet spell ends with a slow first reply. Keep at least one warm copy for anything a customer opens.
+- **Testing only against warm copies.** Asha's afternoon tests never saw the 8 seconds. Scale the service to zero, then time the first request.
+- **Giant images.** A 1.1 GB image spent 4 of the 8 seconds downloading. Ship only what the app needs at run time, and start-up falls with it.
+- **Files on a copy's own disk.** Copies on the right end of the spectrum vanish without warning. Keep baskets, uploads and sessions in a database, a cache or a bucket.
+- **Comparing prices at one load.** Serverless wins at low or spiky load and loses at steady high load. Compare a whole month at your real traffic shape, idle hours included.
+
+## How to say it in an interview
+
+"I see compute as one spectrum: VMs, containers on VMs, managed Kubernetes, serverless containers and functions. Moving right, I hand the provider more of the machine and run less myself. Each step also takes something away: control of the OS, long runs, local files, and a predictable first start after idle time. Cost changes shape too: the right end costs nothing idle, the left end is cheapest when busy all day. So I place each workload by its run time, its traffic shape and who will operate it. Then I check what that place takes away, such as a cold start on a page a customer waits for."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What do you stop managing when you move from a VM to a container platform?" level="Junior" category="Cloud">
+    **Short answer.** On a serverless container platform you stop managing the OS, the machines and how many of them run. You hand over an image and a few settings. If you run containers on your own VMs, you stop installing software by hand, but the machines are still yours.
+
+    **Why.** On a VM, Brightpost patches the OS, sizes the fleet and replaces broken machines. An image carries the app and its libraries, so every copy runs the same. Moving one more column right hands over the hosts as well. What stays yours: the libraries inside the image, the data, the permissions and the settings. Brightpost's 8-second morning came from a setting it owned, the minimum of zero copies.
+
+    <AnimatedDiagram spec="animated/cloud/compute-spectrum" step={1} caption="What you hand over and what you still run, in each place." />
+
+    **Follow-ups the interviewer may ask.**
+    - Who patches a flaw in a library inside your image?
+    - What would change if you chose managed Kubernetes instead?
+
+    **Watch out for.** Saying "nothing, the platform does it all". The image's contents and the scaling settings are still your job.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why is a function different from a very small VM?" level="Mid" category="Cloud">
+    **Short answer.** A VM is a machine that stays on until you stop it. A function is code the platform starts for each event and stops afterwards. The platform owns its OS, its runtime, how many copies run, and how long each one lives.
+
+    **Why.** Brightpost's resize worker shows the trade. About 300 photos a week at 2 seconds each is 10 minutes of work, and the function bills about those 10 minutes. A VM would bill every hour. In return, the function has a time limit counted in minutes, keeps no files after a run, and adds about a second after a quiet night. A small VM has none of these limits, and none of the savings.
+
+    <AnimatedDiagram spec="animated/cloud/compute-spectrum" step={2} caption="Start-up time and the longest run: the two rows where a function and a VM differ most." />
+
+    **Follow-ups the interviewer may ask.**
+    - When does a cold start matter, and when does it not?
+    - Where would you run a job that needs 40 minutes?
+
+    **Watch out for.** Comparing them by size. The difference is lifetime and control, not memory.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your container service scales to zero at night, and the first visitor each morning waits 8 seconds. What are your options?" level="Mid" category="Cloud">
+    **Short answer.** Keep one copy warm with a minimum of 1, or make start-up faster with a smaller image. Or accept the wait where nobody watches. For a page a customer waits on, I would do the first two.
+
+    **Why.** Brightpost's 8 seconds were 4 for a 1.1 GB image, 3 for the app to start and 1 for a database connection. A minimum of 1 removes the morning wait, at the cost of one copy billed all day. A 180 MB image cuts an extra copy to about 2 seconds. That still matters on a sale morning, when the platform adds copies under load.
+
+    <AnimatedDiagram spec="animated/cloud/compute-spectrum-1" step={4} highlight={["customers", "warm", "registry"]} caption="The warm copy answers at once; the smaller image speeds up every extra copy." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you measure how often users hit a cold copy?
+    - What does minimum 1 cost compared with staying on the VM fleet?
+
+    **Watch out for.** A scheduled request every few minutes to keep it warm. It keeps one copy alive by luck, and it does nothing when traffic needs a second copy.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A team says serverless is always cheaper. When is that false?" level="Senior" category="Cloud">
+    **Short answer.** When the load is high and steady. Per-request billing carries a premium, and steady load pays it every second. A VM busy all day, bought on a commitment, does the same work for less. Hidden extras, such as warm minimums, also narrow the gap.
+
+    **Why.** The cost shapes differ. Serverless costs almost nothing idle and rises with every request. A VM costs the same each hour, busy or not. The lines cross. Brightpost's tracking page, 1,200 visits a day with quiet nights, sits on the serverless side. Its shop app, busy every hour on 2 VMs at minimum, sits on the VM side. Then add engineer hours: patching VMs costs time that a team of 3 may not have.
+
+    <AnimatedDiagram spec="animated/cloud/compute-spectrum" step={4} caption="Paid while idle and cost when busy all day point in opposite directions." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you find the crossover point for one workload?
+    - How do engineer hours enter the comparison?
+
+    **Watch out for.** Comparing unit prices at one load level. Compare a whole month at the real traffic shape, idle hours and minimums included.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Choosing Compute](/cloud/start-here/choosing-compute)
+- [Service Models: How Much Do You Run?](/cloud/fundamentals/service-models)
+- [Shared Responsibility](/cloud/fundamentals/shared-responsibility)
+- [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [Containers and Registries](/cloud/compute/containers-and-registries)
+- [Kubernetes Concepts](/cloud/compute/kubernetes-concepts)
+- [Serverless Functions](/cloud/compute/serverless-functions)
+- [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas)
+- [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus)
+- [Compute on AWS](/cloud/aws/compute)
+- [Compute on Google Cloud](/cloud/gcp/compute)
+- [Compute on Azure](/cloud/azure/compute)
+- [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+
+## Further reading
+
+- [Lambda execution environment lifecycle](https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html): how AWS starts, reuses and stops function copies.
+- [Amazon ECS on AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html): tasks without managing instances.
+- [Cloud Run minimum instances](https://cloud.google.com/run/docs/configuring/min-instances): keeping instances warm.
+- [Scaling in Azure Container Apps](https://learn.microsoft.com/azure/container-apps/scale-app): scale rules and replica limits.

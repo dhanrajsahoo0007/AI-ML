@@ -1,11 +1,319 @@
 ---
 title: "Hosting REST and GraphQL APIs"
-description: "Where a REST or GraphQL API runs on each cloud and what sits in front of it: gateway or load balancer, auth, throttling and domains."
-status: outline
+description: "Where an API runs on the cloud and what stands in front of it: load balancer, API gateway or managed GraphQL, plus keys, throttles, domains and limits."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** where an API runs and what sits in front of it on each cloud: gateway versus load balancer, managed GraphQL, authentication, throttling, custom domains and cold paths. REST and GraphQL themselves are taught in the system design section and linked.
+<KeyIdea>
+  An API on the cloud has two parts you choose separately: the computers that run its code, and the front door that decides which calls may reach them.
+</KeyIdea>
 
-**Related reading on this site:** [REST](/system-design/fundamentals/rest) · [GraphQL](/system-design/fundamentals/graphql) · [Choosing an API style](/system-design/fundamentals/choosing-an-api-style)
+## The story
+
+Brightpost's wholesale team sells cards in bulk to about 300 gift shops. In September it launched an order API, so a shop's till can check stock and place orders by itself. To ship fast, the API went in as extra routes in the shop's own app, on the same servers. On a normal afternoon all 300 shops make about 30 calls a minute. One Wednesday at 14:05, shop 217 installs a new till plug-in. When a call fails, the plug-in retries at once, with no pause, and soon sends about 4,000 calls a minute. Autoscaling adds servers, and the database runs out of connections. Checkout takes about 7 seconds instead of under 1. Nothing counted calls per shop, so Asha needs until 15:10 to find the shop in the logs. The plug-in is switched off at 15:45. About 50 shoppers leave with full baskets.
+
+The API was not wrong. Its home was. Every step below gives it a better one.
+
+## How it works
+
+Three words first. An **API** (application programming interface) is a set of addresses that programs call to read or change data. An **endpoint** is one of those addresses, such as `/orders/42`. A **client** is the program that calls it: here, a gift shop's till.
+
+### Step 1: Where an API runs, and what stands in front
+
+<AnimatedDiagram spec="animated/cloud/api-hosting-paths" step={1} minWidth={620} caption="Brightpost's first setup: shoppers and gift shops come through one load balancer to the same app servers." />
+
+On the cloud, every API has two parts. **Behind** is the compute that runs your code: virtual machines, containers or functions. **In front** is the door that accepts calls from the internet: a <Term id="load-balancer">load balancer</Term>, an <Term id="api-gateway">API gateway</Term>, or a managed GraphQL service. You pick the two separately.
+
+In the picture, the door is the shop's load balancer, and the compute is the shop's own two app servers. Whether the routes speak REST or GraphQL does not change the hosting question. REST gives each thing its own address and uses HTTP verbs. GraphQL offers one address, and the client names the exact fields it wants. Both are taught in [REST](/system-design/fundamentals/rest), [GraphQL](/system-design/fundamentals/graphql) and [Choosing an API style](/system-design/fundamentals/choosing-an-api-style).
+
+<PremiumBreak />
+
+### Step 2: One shared door, one bad client
+
+<AnimatedDiagram spec="animated/cloud/api-hosting-paths" step={2} minWidth={620} caption="The failure: one shop's retry loop floods the door that shoppers use too, and checkout slows for everyone." />
+
+A load balancer spreads calls across servers. It does not know who sent them. To it, shop 217's 4,000 calls a minute look like 4,000 shoppers.
+
+<Callout tone="red" title="What breaks">
+  Each of shop 217's calls runs a stock query. Autoscaling grows the fleet from 2 servers to 6 in 20 minutes, and every new server opens more database connections. The database hits its connection limit, so checkout queries wait in line. Shoppers and one gift shop share the same servers, so they share the slowdown. For 1 hour 40 minutes, checkout takes about 7 seconds.
+</Callout>
+
+Two things were missing: compute of the API's own, and a door that knows which shop sent each call.
+
+### Step 3: A service of its own, behind the load balancer
+
+<AnimatedDiagram spec="animated/cloud/api-hosting-paths" step={3} minWidth={620} caption="The order API moves to its own container service. The balancer sends /api paths there and shop pages to the shop servers." />
+
+First, the order API moves to a **service** of its own: its own containers, its own scaling rule, and a cap of 20 database connections. A layer 7 load balancer routes by path, so `/api` paths go to the new service. [Load balancing](/cloud/networking/load-balancing) explains layer 7 routing.
+
+This is the "straight through a load balancer" path. It is quick and cheap, and it suits an API that only your own apps call. Now a flood fills only the API service, and checkout stays under 1 second. But the other 299 shops still wait, because the balancer cannot tell one shop from another.
+
+### Step 4: Functions or containers behind the API
+
+A <Term id="serverless">serverless</Term> function runs your code once per call and costs nothing while idle. A <Term id="container">container</Term> service keeps copies of a small server running. Brightpost picked containers.
+
+<Compare
+  columns={["", "A function per route", "A container service"]}
+  rows={[
+    ["While nobody calls", "Nothing runs, nothing to pay for", "At least one copy runs, unless the service scales to zero"],
+    ["First call after a quiet spell", "A cold start: about 1 s for Brightpost's resize function", "No wait while a copy is warm"],
+    ["Database connections", "Each copy opens its own; a burst can open hundreds", "A fixed pool per copy, 20 in all for Brightpost"],
+    ["Long calls", "Capped by the function's time limit and the door's", "Capped by the door's time limit"],
+    ["Fits", "Spiky, light routes and rare jobs", "Steady traffic, many routes, one codebase"],
+  ]}
+  caption="The gift shops call all day, and every call touches the database, so a fixed pool of containers wins here."
+/>
+
+A <Term id="cold-start">cold start</Term> is the wait while the cloud starts a fresh copy of your code. Many APIs mix both, and [Serverless functions](/cloud/compute/serverless-functions) covers the function side.
+
+### Step 5: A gateway in front: keys, throttles and usage plans
+
+<AnimatedDiagram spec="animated/cloud/api-hosting-paths" step={4} minWidth={620} caption="Each gift shop calls the gateway with its own key. Shop 217's extra calls are refused, and the rest reach the service." />
+
+An API gateway is a door that reads every call before passing it on. Brightpost gives each shop an **API key**, a long random string that names the shop. The gateway checks the key, then counts calls per key. A **throttle** caps the rate: 5 calls a second per shop, with bursts of up to 10. A **quota** caps the total: 20,000 calls a day per shop. A **usage plan** bundles a throttle and a quota, and you attach keys to it.
+
+Replay the Wednesday. Shop 217 sends about 67 calls a second. The gateway passes 5 and answers the rest with status 429, "too many requests", before they reach any server. The other 299 shops notice nothing. The idea is in [Rate limiting](/system-design/patterns/rate-limiting); [API gateways](/cloud/networking/api-gateways) covers API management in depth.
+
+<RateLimiterSim algorithm="token-bucket" limit={5} bucketSize={10} steadyRps={3} burst={30} />
+
+A key names a shop but proves little: anyone who copies it becomes that shop. For calls that change orders, add a short-lived sign-in token, as [Authentication for APIs](/system-design/fundamentals/api-auth) explains.
+
+### Step 6: Your own name and a certificate
+
+<AnimatedDiagram spec="animated/cloud/api-hosting-paths" step={5} minWidth={620} caption="The gateway answers on api.brightpost.example, with a certificate the cloud renews by itself." />
+
+Every gateway gets a long address the provider makes up. A **custom domain** puts your own name on it: `api.brightpost.example`. A DNS record points the name at the gateway, and a <Term id="tls">TLS</Term> certificate for that name proves to each till that it reached Brightpost.
+
+Use a certificate the cloud issues and renews for you. One uploaded by hand expires on a date someone must remember, and then every till's calls fail at once. The name also lets you move later: only the DNS record changes.
+
+### Step 7: Limits on size and time
+
+Every door has limits, and they differ by cloud, by product and sometimes by tier. Treat them as part of the design.
+
+1. **Request and response size.** A gateway refuses a body above its cap. Send large files to a storage bucket through a short-lived upload link.
+2. **How long the door waits.** A gateway or balancer waits only so long for your service, then answers with an error. Brightpost's month-end export takes about 90 seconds, so it replies "accepted" with a job number, and the till fetches the file later.
+3. **Calls for the whole account.** Providers cap each account and region, above your own throttles.
+
+Look them up before you build. Some can be raised on request, and some cannot.
+
+### Step 8: Caching GET responses at the edge
+
+<AnimatedDiagram spec="animated/cloud/api-hosting-paths" step={6} minWidth={620} caption="Catalogue reads stop at the edge cache. Only misses and orders reach the gateway." />
+
+About 7 in 10 of the shops' calls read the trade catalogue: 2,000 products with pack sizes and no prices. It is the same for every shop and changes a few times a day. So Brightpost puts an edge cache, part of a <Term id="cdn">CDN</Term>, in front of the gateway for `GET /catalogue`. The response says the copy may be kept for 10 minutes, its <Term id="ttl">TTL</Term>. The edge answers from its copy, and only a miss reaches the gateway.
+
+This cuts gateway calls by more than half. But a cached answer skips the gateway's key check and throttle. That is fine for a catalogue anyone could see, and a leak for prices, which differ per shop. Mark caller-specific responses as not cacheable. [CDN, edge and WAF](/cloud/networking/cdn-edge-and-waf) covers the edge itself.
+
+### Step 9: GraphQL: a managed service or your own server
+
+<AnimatedDiagram spec="animated/cloud/api-hosting-paths" step={7} minWidth={620} caption="The owners' app sends one query. Resolvers call the order API and read the database to answer it." />
+
+Next, the wholesale team builds a web app for shop owners. Its home screen needs orders, stock and invoices: 4 REST calls, or one GraphQL query. A **resolver** is the small piece of code that fetches one field.
+
+A **managed GraphQL service** runs the GraphQL server for you: you upload the schema and resolvers, and it handles sign-in and scaling. Or you run your own server in containers, behind a gateway or balancer. Either way, cap query depth and cost per query, or one nested query can read every table.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: compute behind, a door in front, and per-client keys and limits at that door.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Gateway:** Amazon API Gateway, in two main kinds. REST APIs have more features; HTTP APIs are simpler and built for proxying.
+    - **Keys and throttles:** REST APIs have API keys and usage plans, with a throttle and a quota per key. HTTP APIs throttle per route and stage, with no usage plans.
+    - **Behind it:** Lambda functions, or containers on ECS reached privately through a VPC link.
+    - **GraphQL:** AWS AppSync, a managed GraphQL service. Its resolvers can call Lambda, HTTP endpoints and several AWS data stores.
+    - **Name and certificate:** a custom domain name with a certificate from AWS Certificate Manager (ACM).
+
+    **The difference that changes a design.** On AWS the gateway kind decides the features. Per-key usage plans and response caching belong to REST APIs, not HTTP APIs. Pick the kind before you build, because moving later means recreating the API.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Gateway:** API Gateway, set up from an OpenAPI file, for small and medium APIs. Apigee is the full API management platform. Cloud Endpoints is an older option that runs a proxy next to your service.
+    - **Keys and throttles:** API Gateway checks API keys and can apply quotas per calling project. Apigee adds API products, quotas and spike-arrest rules.
+    - **Behind it:** Cloud Run services for containers, or Cloud Run functions. Apigee can also front services on GKE or outside Google Cloud.
+    - **GraphQL:** no general managed GraphQL service. Teams usually run their own GraphQL server on Cloud Run, with API Gateway or Apigee in front.
+    - **Name and certificate:** for your own domain on API Gateway, put an external Application Load Balancer in front. It holds a Google-managed certificate.
+
+    **The difference that changes a design.** The two products are far apart in size. API Gateway is a light door for a team's own backends. Apigee suits many APIs with partners, a developer portal and analytics. A small team starts with API Gateway.
+  </Tab>
+  <Tab label="Azure">
+    - **Gateway:** Azure API Management (APIM). One service holds the gateway, a developer portal and the rules for every API.
+    - **Keys and throttles:** clients get subscription keys through products. Policies such as rate limit by key and quota by key set throttles and quotas.
+    - **Behind it:** Azure Functions, Container Apps or App Service. On some tiers APIM reaches them privately through a virtual network.
+    - **GraphQL:** APIM can pass GraphQL calls through to your own server, or serve a synthetic GraphQL API whose resolvers call REST and other sources.
+    - **Name and certificate:** a custom domain on APIM, with its certificate usually kept in Key Vault.
+
+    **The difference that changes a design.** APIM's behaviour lives in policies, small XML rules set for all APIs, a product, one API or one operation. They stack, so a product's throttle and an operation's rule both apply. The tier decides network features and scaling, so choose it early.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/api-hosting-paths" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/api-hosting-paths" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="What stands in front of this API?"
+  tree={{
+    q: "Do outside companies or apps you do not control call it?",
+    yes: {
+      q: "Do you need a key per client, per-client limits or usage reports?",
+      yes: "An API gateway: one key per client, a throttle and a quota per key, and private compute behind it.",
+      no: "A gateway is still the simplest home for sign-in checks and logs. A balancer with checks in your code also works.",
+    },
+    no: {
+      q: "Is it GraphQL, gathering data from several sources?",
+      yes: "A managed GraphQL service if your cloud has one. Otherwise a GraphQL server on containers, with depth and cost limits.",
+      no: {
+        answer: "Straight through a layer 7 load balancer. Your app checks sign-in, and a rate rule at the edge guards the door.",
+        href: "/cloud/networking/load-balancing",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Shop 217 sends about 4,000 calls a minute. Its key allows 5 calls a second. About how many calls a minute reach the order API?" hint="Turn the throttle into a minute.">
+    About 300: 5 a second for 60 seconds, plus one burst of up to 10 at the start. The gateway answers the other 3,700 with "too many requests", and none of them reach a server.
+  </QuizItem>
+  <QuizItem question="The catalogue may be cached at the edge for 10 minutes. A pack size changes at 9:00. When does every shop see the new size?" hint="How old can a cached copy be?">
+    By 9:10 at the latest, when the last cached copy expires. To show it sooner, purge that path from the edge cache.
+  </QuizItem>
+  <QuizItem question="Prices differ per shop. Why can the price list not share the catalogue's edge cache?">
+    A cached copy is served to whoever asks next, without the gateway's key check. Shop A could see shop B's prices. Mark per-shop responses as not cacheable.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Straight through a load balancer", "API gateway in front", "Managed GraphQL service"]}
+  rows={[
+    ["Knows who is calling", "No, unless your code checks", "Yes: a key or token on every call", "Yes: a key, token or sign-in"],
+    ["Limits per client", false, true, "Depends on the product"],
+    ["Extra wait per call, Brightpost's measure", "About 2 ms", "About 15 ms", "About 20 ms"],
+    ["Cost shape", "Per hour, plus traffic", "Per call on most plans, or per hour on fixed tiers", "Per query and per connection, on most products"],
+    ["Brightpost uses it for", "Shop pages", "The 300 gift shops", "The owners' app"],
+  ]}
+  caption="Brightpost's choices. The waits are what Brightpost measured from London; yours will differ."
+/>
+
+A gateway costs a few milliseconds and a bill per call. It buys the one thing a balancer cannot give: knowing which client sent each call, and stopping one client without stopping the rest.
+
+## Common pitfalls
+
+- **Throttling by address instead of by key.** One shop's 8 tills share one address, and a scraper uses hundreds. Count calls per key; keep an address rule at the edge as a backstop.
+- **One key for every client.** With a shared key, you cannot throttle or switch off one shop. Give each client its own key.
+- **A back door around the gateway.** If the API service keeps its own public address, callers can skip every key and throttle. Make the service private, and accept calls only from the gateway.
+- **Caching answers that depend on the caller.** An edge cache serves its copy to the next caller. Cache only responses that are the same for everyone, and mark the rest as not cacheable.
+- **Long work inside one call.** A 90-second export hits the door's time limit. Accept the job, return a job number, and let the client fetch the result later.
+
+## How to say it in an interview
+
+"I treat hosting an API as two choices: the compute behind it and the door in front. For my own web app, a layer 7 load balancer is often enough, with sign-in checked in the code. For partners, I put an API gateway in front, with a key, a throttle and a quota per client, so one client's bug costs only that client. Behind it, the API runs on its own containers or functions, reachable only through the gateway. The door gets a custom domain with a managed certificate. I design around its size and time limits, cache only public GET responses at the edge, and give GraphQL depth and cost limits."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does an API gateway do that a load balancer does not?" level="Junior" category="Cloud">
+    **Short answer.** A load balancer spreads calls across servers and checks they are healthy. An API gateway also reads each call: it checks a key or token, counts calls per client, and can refuse one client while others carry on.
+
+    **Why.** Brightpost's load balancer saw shop 217's 4,000 calls a minute as 4,000 strangers. The gateway reads the key on each call, passes 5 a second from that shop and refuses the rest. The other 299 shops are not affected.
+
+    <AnimatedDiagram spec="animated/cloud/api-hosting-paths" step={4} highlight={["shops", "shop217", "gw", "api"]} caption="The gateway knows which shop sent each call, so it can slow down one and pass the others." />
+
+    **Follow-ups the interviewer may ask.**
+    - When is a load balancer alone enough?
+    - Can you put both in front of the same API?
+
+    **Watch out for.** Saying a gateway replaces the load balancer everywhere. For your own web pages, the balancer is often all you need.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="One partner's bug floods your API and slows your main site. How do you stop it happening again?" level="Mid" category="Cloud">
+    **Short answer.** Separate and limit. Move the API onto compute of its own, so a flood cannot reach the site's servers. Then put a gateway in front with a key and a throttle per partner, so a flood from one partner stops at the door.
+
+    **Why.** Brightpost needed both. Its own service, capped at 20 database connections, kept checkout under 1 second, but the flood still filled the API. The throttle of 5 calls a second per key then cut shop 217 to about 300 calls a minute.
+
+    <AnimatedDiagram spec="animated/cloud/api-hosting-paths" step={2} caption="Before: one shop's retry loop and every shopper share the same door and servers." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you pick the throttle number for each partner?
+    - What should the partner's client do when it gets "too many requests"?
+
+    **Watch out for.** Only adding servers. Brightpost's autoscaling did that, and more servers opened more database connections, which made it worse.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Should an API run on serverless functions or on containers?" level="Mid" category="Cloud">
+    **Short answer.** Functions fit spiky, light routes: nothing runs while idle, but the first call after a quiet spell waits for a cold start. Containers fit steady traffic: copies stay warm and share a fixed database pool. Many APIs use both.
+
+    **Why.** Brightpost's 300 shops call all day, and every call queries the database. Functions open one connection per copy, so a burst could open hundreds. A container service with a 20-connection pool is steadier. A once-a-month report fits a function, where a 1-second cold start goes unnoticed.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you protect the database if you had to use functions?
+    - What changes if a container service can scale to zero?
+
+    **Watch out for.** Calling functions "always cheaper". At steady, high traffic, a warm container often costs less per call.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You want to cache API responses at the edge. What can go wrong, and how do you avoid it?" level="Mid" category="Cloud">
+    **Short answer.** A cached answer goes to whoever asks next, and it skips the gateway's key check and throttle. So cache only GET responses that are the same for every caller, give them a short lifetime, and mark everything else as not cacheable.
+
+    **Why.** Brightpost caches its catalogue for 10 minutes. It has no prices and is the same for every shop, and it stops about 7 in 10 calls at the edge. A cached price list could show one shop's prices to another, so prices stay on the gateway.
+
+    <AnimatedDiagram spec="animated/cloud/api-hosting-paths" step={6} highlight={["shops", "edge", "gw"]} caption="Catalogue reads stop at the edge; orders and per-shop data still go through the gateway." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you push a change out before the 10 minutes are up?
+    - Could you cache per-shop data safely at all?
+
+    **Watch out for.** Caching by URL alone when the answer depends on a header, such as the caller's key. Two callers then get the same copy.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where would you host a GraphQL API on each of the three clouds?" level="Senior" category="Cloud">
+    **Short answer.** On AWS, AppSync is a managed GraphQL service. On Azure, API Management can pass GraphQL through to your server or serve a GraphQL API with its own resolvers. On Google Cloud, you usually run your own GraphQL server on Cloud Run, with a gateway in front.
+
+    **Why.** A managed service runs the server, sign-in and scaling, and you write the schema and resolvers. Your own server gives full control, and you own patching and scaling. Either way, add a maximum query depth and cost. Brightpost's owners' app needs one query instead of 4 REST calls, but one nested query could read every table.
+
+    <AnimatedDiagram spec="animated/cloud/api-hosting-paths" step={7} highlight={["wapp", "gql", "api", "db"]} caption="One query from the owners' app; resolvers call the order API and read the database." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you throttle GraphQL, where one call can cost 1 read or 10,000?
+    - Where does the N+1 problem show up in the resolvers?
+
+    **Watch out for.** Throttling GraphQL by calls per second alone. One expensive query can do more damage than 100 cheap ones, so limit by cost.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="An export endpoint sometimes runs longer than the gateway will wait. What do you change?" level="Senior" category="Cloud">
+    **Short answer.** Stop doing long work inside one call. The endpoint accepts the job, replies at once with a job number, and a worker builds the file. The client asks for the status later, then downloads the file from storage through a short-lived link.
+
+    **Why.** Every gateway and balancer stops waiting at some point, and the limits differ by cloud and product. Brightpost's month-end export takes about 90 seconds and grows with every new shop. With a job number, the call takes milliseconds, the worker can run for minutes, and the file never passes the gateway's size cap.
+
+    **Follow-ups the interviewer may ask.**
+    - Should the client poll, or should you call it back with a webhook?
+    - What happens if the client submits the same job twice?
+
+    **Watch out for.** Raising the timeout as far as it goes. The export keeps growing, and next quarter it hits the new limit.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [API Gateways & API Management](/cloud/networking/api-gateways)
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf)
+- [Service-to-Service Calls on the Cloud](/cloud/networking/service-to-service)
+- [Serverless Functions: Triggers, Cold Starts and Concurrency](/cloud/compute/serverless-functions)
+- [Serverless & Orchestration on AWS](/cloud/aws/serverless)
+- [Serverless & Orchestration on Google Cloud](/cloud/gcp/serverless)
+- [Serverless & Orchestration on Azure](/cloud/azure/serverless)
+- [Choosing an API style](/system-design/fundamentals/choosing-an-api-style)
+- [Rate Limiting](/system-design/patterns/rate-limiting)
+
+## Further reading
+
+- [Amazon API Gateway Developer Guide](https://docs.aws.amazon.com/apigateway/latest/developerguide/welcome.html): REST and HTTP APIs, usage plans.
+- [Google Cloud API Gateway documentation](https://cloud.google.com/api-gateway/docs): gateways for Cloud Run and functions.
+- [Apigee documentation](https://cloud.google.com/apigee/docs): full API management on Google Cloud.
+- [Azure API Management overview](https://learn.microsoft.com/azure/api-management/api-management-key-concepts): gateway, products and policies.

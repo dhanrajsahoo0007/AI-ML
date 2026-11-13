@@ -1,11 +1,336 @@
 ---
 title: "DNS on the Cloud: Public Zones, Private Zones & Routing Policies"
-description: "How cloud DNS serves names to the internet and to your private network, and how its answers can steer traffic between regions."
-status: outline
+description: "How cloud DNS answers the internet and your private networks, why a private zone must be linked to each network, and how health checks steer answers."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the difference between a zone the internet can see and one only your network can see, and how DNS answers become a traffic-steering tool (weighted, latency, geographic and failover). DNS theory is recapped in one paragraph and linked.
+<KeyIdea>
+  A cloud's DNS keeps two address books, one the internet can read and one only your chosen networks can read, and it can change an answer when something breaks.
+</KeyIdea>
 
-**Related reading on this site:** [DNS](/system-design/fundamentals/dns) · [Edge, DNS & CDN on AWS](/cloud/aws/edge)
+## The story
+
+Brightpost is a small online shop that sells posters and greeting cards, about 400 orders a day. Its app servers never use the database's number. They ask for `db.brightpost.internal`, a name kept in a private zone that only the shop network can see, and get back 10.0.21.5. One Tuesday, Asha moves the nightly export job to a new network built for batch jobs, joined to the shop network. She tests the path with the address 10.0.21.5, and it connects. At 03:30 that night the job asks for the database by name. The new network cannot see the private zone, so the answer is "no such name". The job logs the error and exits, and nothing watches that log. On Friday at 09:00 the finance lead's weekly sales report is missing three days. Linking the zone takes 2 minutes. Rebuilding the three export files takes about 2 hours, and the report goes out at noon.
+
+The network path was fine all week. Only the name was missing, and every step below is about where names live and who can read them.
+
+## How it works
+
+Three words first. A **zone** is the set of names one owner controls, such as everything under `brightpost.example`, kept by one DNS provider. A **record** is one entry in a zone: a name, a type and an answer, such as "www → this address". A **resolver** is the server that asks zones on a program's behalf and remembers the answers.
+
+### Step 1: A public zone answers the internet
+
+<AnimatedDiagram spec="animated/cloud/dns-resolution" step={1} minWidth={620} caption="A customer's resolver asks Brightpost's public zone for www and gets the load balancer's address, valid for 300 seconds." />
+
+How a name becomes an address is the same on every network. The customer's phone asks its resolver, the resolver finds the zone that owns the name, and the zone answers. Every answer carries a <Term id="ttl">TTL</Term>, the number of seconds anyone may reuse it. [DNS](/system-design/fundamentals/dns) walks through the lookup, the record types and caching in full.
+
+What the cloud adds is the zone itself, run for you. A **public zone** is a zone the whole internet can query. The provider runs its name servers in many places, so one broken server does not hide your shop. You tell your domain's registrar which name servers hold the zone. Brightpost's public zone holds `www.brightpost.example` and the bare `brightpost.example`. Both answer with the address of the shop's <Term id="load-balancer">load balancer</Term>, with a TTL of 300 seconds.
+
+<PremiumBreak />
+
+### Step 2: Records that point at cloud resources
+
+A load balancer's public addresses can change when the provider replaces its machines, and a record holding a copied address goes stale. There are three ways to point at a resource:
+
+<Compare
+  columns={["Record", "What it holds", "Works on the bare domain?", "When the resource's address changes"]}
+  rows={[
+    ["A record", "A fixed address", true, "You must edit it"],
+    ["CNAME", "Another name to look up instead", false, "Follows the other name, at the cost of one more lookup"],
+    ["Alias", "A pointer to a cloud resource, answered as plain addresses", true, "The provider follows it for you"],
+  ]}
+  caption="The bare domain, brightpost.example, cannot be a CNAME, because it also holds the zone's own records."
+/>
+
+With an **alias record** you name the resource, and the zone answers with its current addresses. Brightpost points both public names at the load balancer this way. Where a load balancer keeps a reserved address, a plain A record does the same job.
+
+### Step 3: A private zone answers inside your network
+
+<AnimatedDiagram spec="animated/cloud/dns-resolution" step={2} minWidth={620} caption="The app server asks for db.brightpost.internal. The private zone is linked to the shop network, so the answer is 10.0.21.5." />
+
+Every cloud <Term id="vpc">private network</Term> comes with a **built-in resolver** at a fixed address, which servers use without any setup. It can ask the public internet and the private zones linked to its network.
+
+A **private zone** answers only inside the networks you link it to; the internet can neither query nor list it. Brightpost's is `brightpost.internal`. The ending `.internal` is set aside for private use, so it will never exist on the internet. Its record `db` points at 10.0.21.5, the database's private address. If the database moves, Asha changes one record, and every server follows within its 60-second TTL.
+
+### Step 4: The resolver checks linked zones first
+
+<AnimatedDiagram spec="animated/cloud/dns-lookup" stepper caption="The built-in resolver answers private names from linked zones and sends every other question out. An unlinked network sends the private name out too." />
+
+For each question, the built-in resolver works in this order:
+
+1. If a private zone linked to this network holds the name, it answers from that zone.
+2. Otherwise it asks public DNS, as any resolver would.
+3. It keeps the answer for its TTL, so a repeat question never leaves the network.
+
+Step 4 of the figure is Brightpost's Tuesday night. The jobs network had no linked zone, so the question went out, and public DNS has never heard of `brightpost.internal`.
+
+### Step 5: The network nobody linked
+
+<AnimatedDiagram spec="animated/cloud/dns-resolution" step={3} minWidth={620} caption="The failure: the export job's network is not linked to the private zone, so the database's name has no answer there." />
+
+A private zone keeps a list of linked networks. Creating a network does not add it to the list, and neither does joining two networks with <Term id="peering">peering</Term>. Peering carries packets, but each network keeps its own resolver and its own zones.
+
+<Callout tone="red" title="What breaks">
+  At 03:30 the export job asks its built-in resolver for `db.brightpost.internal`. No linked zone holds the name, so the resolver asks the internet and gets "no such name". The job never sends a single packet to 10.0.21.5, although the path is open. It exits, three nights in a row, and three of the nightly export files are never written.
+</Callout>
+
+Asha's test used the address, so it proved the path and missed the name. Test a new network the way the program will use it: by name.
+
+### Step 6: Link every network that needs the name
+
+<AnimatedDiagram spec="animated/cloud/dns-resolution" step={4} minWidth={620} caption="The private zone is linked to the jobs network too. The job gets 10.0.21.5 and reaches the database over the peering." />
+
+The fix is one link: the private zone now lists both networks. Brightpost makes two more changes. The template that creates a network now also links it to `brightpost.internal`. And if no export file appears by 04:00, an alert reaches Asha's phone.
+
+Two other places need the same care. A resolver in an office cannot see the zone either. Clouds offer resolver endpoints that forward chosen names both ways; [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity) sets them up. And a <Term id="private-endpoint" /> needs a private zone that points the service's usual name at it; [Private Endpoints](/cloud/networking/private-endpoints) covers that pairing.
+
+### Step 7: Split-horizon: one name, two answers
+
+**Split-horizon** DNS gives one name one answer outside your network and another inside it, using a public zone and a private zone of the same name. Say Brightpost's order API is `api.brightpost.example`:
+
+<Compare
+  columns={["Who asks", "Zone that answers", "Answer"]}
+  rows={[
+    ["A customer's phone", "The public zone", "The load balancer's public address"],
+    ["An app server in the shop network", "The private zone, linked to that network", "A private address, so the call stays inside"],
+    ["A server in a network the zone is not linked to", "The public zone", "The public address: the call goes out and comes back in"],
+  ]}
+  caption="Split-horizon works only where the private zone is linked. The last row is the story's mistake with a public fallback."
+/>
+
+One rule surprises people. By default, a linked private zone owns every name under it inside that network. If `www` is missing from the private copy, servers inside get "no such name" for it, though the public zone has it. Brightpost keeps its private names under `.internal` and avoids the problem.
+
+### Step 8: Routing policies: answers that depend on the asker
+
+A **routing policy** lets the zone choose between several answers for one name:
+
+<Compare
+  columns={["Policy", "Picks the answer by", "A Brightpost example"]}
+  rows={[
+    ["Simple", "One answer for everyone", "Today: both public names → the load balancer"],
+    ["Failover", "A primary while its health check passes, else a standby", "The load balancer, else a back-soon page"],
+    ["Weighted", "Shares you set, such as 90 and 10", "10% of lookups to a new load balancer during a move"],
+    ["Latency", "The region with the lowest delay from the asker's resolver", "If a copy ever runs near Sydney, the 30 Australian orders a day go there"],
+    ["Geolocation", "The asker's country or continent", "A 'not shipping here yet' page outside the UK and Australia"],
+  ]}
+  caption="The policy decides per lookup. Every answer it gives is then cached for that record's TTL."
+/>
+
+A policy sees the resolver's location, not the customer's, and it picks a region, not a server.
+
+### Step 9: Health checks and the TTL trap
+
+<AnimatedDiagram spec="animated/cloud/dns-resolution" step={5} minWidth={620} caption="A health check probes the load balancer. The public zone answers with it while it is up, and with the back-soon page when it is down." />
+
+A **health check** is a probe the DNS service sends to an endpoint on a schedule, from several places. Brightpost's probes the load balancer every 30 seconds. After 3 failures in a row, about 90 seconds, the zone answers with the back-soon page instead: a static page in a storage bucket.
+
+A resolver that cached the old answer a second before the switch keeps it for the full TTL.
+
+- With a 300-second TTL, the worst case is about 90 + 300 = 390 seconds, about 6.5 minutes.
+- With the 60-second TTL Brightpost now sets on these records, it is 90 + 60 = 150 seconds, about 2.5 minutes.
+- Programs that keep an address far longer, such as a pool of connections opened at start-up, miss the switch until they reconnect.
+
+Lowering a TTL takes effect only after the old one expires, so lower it at least one old TTL before a planned change.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: public zones, private zones linked to networks, a built-in resolver in each network, and health-checked answers.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Public zone:** an Amazon Route 53 public hosted zone. You give the registrar the name servers Route 53 assigns to it.
+    - **Private zone:** a private hosted zone, associated with one or more VPCs, which need their DNS resolution and DNS hostnames settings on. A VPC in another account needs the zone owner's authorisation first.
+    - **Pointing at resources:** alias records point at load balancers, CloudFront distributions, S3 website buckets and other AWS resources, and they work on the bare domain.
+    - **Routing and health checks:** simple, failover, weighted, latency, geolocation, geoproximity, IP-based and multivalue answer policies. Route 53 health checks probe an endpoint from several locations, or follow a CloudWatch alarm.
+    - **Across networks and offices:** the Route 53 Resolver answers in every VPC at the VPC range's base address plus two. Inbound and outbound Resolver endpoints, with forwarding rules, connect it to an office's DNS servers.
+
+    **The difference that changes a design.** One service holds the zones, the routing policies and the health checks. A failover is two records with one name: a primary tied to a health check, and a secondary. Route 53's health checkers run on the internet and cannot reach a private address, so a private resource needs an alarm-based check.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Public zone:** a Cloud DNS public managed zone. You give the registrar the name servers Cloud DNS assigns to it.
+    - **Private zone:** a private managed zone, visible to the VPC networks you authorise on it. A VPC network spans regions, so one authorisation covers every region it reaches.
+    - **Pointing at resources:** a load balancer keeps a reserved IP address, so a plain A record is the usual way, on the bare domain too.
+    - **Routing and health checks:** routing policies on a record set: weighted round robin, geolocation, and failover from a primary to a backup. Health checks can remove an unhealthy load balancer from the answers.
+    - **Across networks and offices:** forwarding zones send chosen names to your own DNS servers. DNS peering lets one VPC network use another network's zones. An inbound server policy lets an office ask Cloud DNS.
+
+    **The difference that changes a design.** The global external load balancer has one anycast address, announced from many sites at once. One plain record reaches every region, and the load balancer picks the nearest healthy backend per connection. So DNS routing policies matter most for private names and for traffic that skips that load balancer.
+  </Tab>
+  <Tab label="Azure">
+    - **Public zone:** an Azure DNS zone. You give the registrar the name servers Azure DNS assigns to it.
+    - **Private zone:** an Azure Private DNS zone, linked to VNets by virtual network links. A link can turn on auto-registration, which adds a record for each VM in that VNet. Every VNet's built-in resolver answers at 168.63.129.16.
+    - **Pointing at resources:** alias record sets point at a public IP address, a Traffic Manager profile, or a Front Door or CDN endpoint, on the bare domain too.
+    - **Routing and health checks:** Azure DNS has no routing policies of its own. Azure Traffic Manager answers DNS queries by priority, weight, performance, geography, multivalue or subnet, and it probes each endpoint.
+    - **Across networks and offices:** Azure DNS Private Resolver adds inbound endpoints that an office can ask, and outbound endpoints whose forwarding rulesets ask the office.
+
+    **The difference that changes a design.** Routing lives in a second service. The public zone holds an alias to a Traffic Manager profile, which runs the probes, picks the answer and sets its own TTL. A failover design has two pieces to configure and to watch.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/dns-resolution" stepper minWidth={620} caption="The whole story in five steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/dns-resolution" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which routing policy?"
+  tree={{
+    q: "Can more than one place serve this name?",
+    no: "A simple record, or an alias to the load balancer. Add a failover to a back-soon page if customers should see a message during an outage.",
+    yes: {
+      q: "Should each customer get the copy that answers fastest?",
+      yes: {
+        answer: "Latency routing, with a health check on every copy. Compare it with a global load balancer first.",
+        href: "/cloud/networking/load-balancing",
+      },
+      no: {
+        q: "Must the answer depend on the customer's country?",
+        yes: "Geolocation routing, plus a default answer for every country you did not list.",
+        no: {
+          q: "Are you moving traffic step by step, such as 10% to a new version?",
+          yes: "Weighted routing. Raise the share as the new version proves itself, with a low TTL.",
+          no: {
+            answer: "Failover routing: a primary with a health check, and a standby in another region.",
+            href: "/cloud/resilience/multi-region",
+          },
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost's load balancer fails at 14:00:00. The health check runs every 30 seconds and needs 3 failures; the record's TTL is 60 seconds. By when has every resolver moved to the back-soon page?" hint="Add the detection time and one TTL.">
+    By about 14:02:30. Detection takes about 90 seconds, and a resolver that cached the old answer before the switch keeps it for 60 more. Programs that ignore the TTL can take longer.
+  </QuizItem>
+  <QuizItem question="A server in the jobs network can connect to 10.0.21.5, but a lookup of db.brightpost.internal says no such name. Is the problem routing, a firewall, or DNS?" hint="What did the connection by address prove?">
+    DNS. The connection by address proves the route and the firewall rules are fine. The private zone is not linked to the jobs network, so its resolver cannot see the name.
+  </QuizItem>
+  <QuizItem question="Brightpost adds a private zone named brightpost.example, linked to the shop network, holding only db. What does an app server get for www.brightpost.example?">
+    No such name. By default the linked private zone owns every name under it inside that network, and it has no www record. The public zone is never asked.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "DNS routing policy", "Global load balancer (one anycast address)"]}
+  rows={[
+    ["What moves customers after a failure", "A new DNS answer", "The edge picks another backend for the next connection"],
+    ["Time to move, Brightpost's numbers", "About 2.5 minutes: 90 s to detect, then the 60 s TTL", "Seconds after its own health check fails; no TTL involved"],
+    ["Whose location it sees", "The customer's resolver", "The customer's own connection"],
+    ["Extra hop in the request path", "None", "A proxy at the provider's edge"],
+    ["Protocols", "Any", "Depends on the product; HTTP and HTTPS everywhere"],
+    ["Cost shape", "Per zone and per query, plus each health check", "Per hour, plus each GB that passes through it"],
+  ]}
+  caption="Both can steer between regions. Many designs use both: DNS points at the global address, and the load balancer does the steering."
+/>
+
+With one region and 400 orders a day, Brightpost needs neither. A failover to a back-soon page costs one health check and shows customers a message instead of an error.
+
+## Common pitfalls
+
+- **A new network that nobody linked.** That is the story's mistake. Create the zone link in the same template as the network, and test new paths by name, not by address.
+- **A health check that tests the wrong thing.** A check of an open port stays green while the database is down. Check a page that reads one row.
+- **A long TTL on a record you may need to move.** With a 1-day TTL, a move or a failover can take a day for some customers. Keep 60–300 seconds on records that may change, and lower a TTL one old TTL ahead.
+- **A private zone that shadows the public one.** Every public name the private copy lacks disappears inside the network. Use a separate ending such as `.internal`, or copy every name your servers need.
+- **Records left pointing at deleted resources.** A name that still points at a released address or a deleted bucket can be claimed by a stranger, who then serves pages under your name. Delete the record in the same change that deletes the resource.
+
+## How to say it in an interview
+
+"I use a managed public zone for names the internet needs, with alias records so the zone follows the load balancer's addresses. Internal names go in a private zone that only linked networks can see, and every network's built-in resolver checks those zones before it asks the internet. The link is a separate step, so I create it in the same template as the network and test new paths by name. For failover, I tie the primary record to a health check and keep the TTL around 60 seconds. I expect a switch to take detection plus one TTL, about two to three minutes. Across regions I compare DNS routing with a global anycast load balancer, which moves traffic without waiting for caches."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a public and a private DNS zone in a cloud?" level="Junior" category="Cloud">
+    **Short answer.** A public zone answers anyone on the internet. A private zone answers only inside the networks it is linked to, through each network's built-in resolver. Public zones hold names customers use; private zones hold names only your servers need.
+
+    **Why.** Brightpost's public zone tells every customer's resolver where the load balancer is. Its private zone tells the app servers that `db.brightpost.internal` is 10.0.21.5, and nobody outside can query it. The name also keeps the address out of the code.
+
+    <AnimatedDiagram spec="animated/cloud/dns-resolution" step={2} highlight={["public-zone", "private-zone", "app", "resolver"]} caption="The public zone answers the internet's resolvers; the private zone answers only the shop network." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens when a server in an unlinked network asks for a private name?
+    - Can the same name exist in both kinds of zone?
+
+    **Watch out for.** Calling a private zone "secret". Anyone in a linked network can query it, so it hides names from the internet, not from your own servers.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A server in a new network can reach the database by IP address but not by its name. What do you check?" level="Mid" category="Cloud">
+    **Short answer.** The DNS view of the new network, not the path. First, whether the private zone that holds the name is linked to that network. Then, whether the network uses the built-in resolver or a custom one that forwards correctly.
+
+    **Why.** A working connection by address proves the routes, the peering and the firewall rules. The name goes to the new network's own resolver, which sees only zones linked to that network; peering shares none. Brightpost's export job failed this way for three nights, and the fix was one link.
+
+    <AnimatedDiagram spec="animated/cloud/dns-lookup" step={4} caption="An unlinked network sends the private name out to the internet, which answers no such name." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you stop the next new network from missing its link?
+    - The servers are in an office, not a cloud network. What changes?
+
+    **Watch out for.** Opening firewall rules or adding routes. The path already works, and changing it adds risk without fixing the name.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When would you use an alias record instead of a CNAME?" level="Mid" category="Cloud">
+    **Short answer.** When a name must point at a cloud resource whose addresses can change, and especially on the bare domain, which cannot be a CNAME. The provider answers an alias with the resource's current addresses.
+
+    **Why.** A load balancer's addresses belong to the provider and can change, so a copied address goes stale. A CNAME follows the change but costs one more lookup, and the bare domain `brightpost.example` cannot hold one. An alias works on both of Brightpost's public names.
+
+    <AnimatedDiagram spec="animated/cloud/dns-resolution" step={1} highlight={["public-zone", "lb"]} caption="The public zone answers with the load balancer's current address." />
+
+    **Follow-ups the interviewer may ask.**
+    - What do you do on a cloud whose load balancer keeps a fixed address?
+    - Can an alias point at a resource in another provider?
+
+    **Watch out for.** Saying a CNAME works everywhere. It cannot sit on the bare domain, and nothing else can share a name with it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="DNS failover moved customers off a dead load balancer only after 10 minutes, though the health check flagged it in 90 seconds. Why?" level="Mid" category="Cloud">
+    **Short answer.** Caches. The zone switched its answer after 90 seconds, but resolvers kept the old answer for its TTL. Some programs kept the old address even longer, because they never looked the name up again.
+
+    **Why.** With a 300-second TTL, the worst case for resolvers is 90 + 300 seconds, about 6.5 minutes. The rest comes from clients that ignore the TTL, such as connection pools opened at start-up. Lowering the TTL during the outage does not help, because resolvers hold the old one. Brightpost keeps 60 seconds on its failover records: about 2.5 minutes at worst.
+
+    <AnimatedDiagram spec="animated/cloud/dns-resolution" step={5} path="health>public-zone>resolver" caption="The health check changes the zone's answer; resolvers see it only when their cached copy expires." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does a 10-second TTL cost?
+    - How do you make the app servers' connection pools follow DNS changes?
+
+    **Watch out for.** Blaming the health check alone. Detection was 90 seconds; caching made up the other eight and a half minutes.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Latency-based DNS routing or a global anycast load balancer: when would you choose each?" level="Senior" category="Cloud">
+    **Short answer.** A global load balancer when the traffic is HTTP or TCP it supports and failover must take seconds: it has one address and steers each connection. Latency-based DNS when you need any protocol, no proxy in the path, or endpoints the load balancer cannot reach.
+
+    **Why.** DNS routing sees the resolver's location and waits on caches, so a failover takes detection plus one TTL, minutes. An anycast load balancer takes the customer to the nearest edge site and moves the next connection as soon as its own health check fails. It adds a proxy and its own cost per hour and per GB. Google Cloud and Azure offer one natively; on AWS, Global Accelerator puts anycast addresses in front of regional load balancers. For Brightpost's 30 Australian orders a day, neither pays yet; the edge cache for photos does more.
+
+    **Follow-ups the interviewer may ask.**
+    - Can you use both at once?
+    - How does each behave when a whole region fails?
+
+    **Watch out for.** Treating latency routing as instant failover. It still waits on every resolver's cache.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [DNS](/system-design/fundamentals/dns)
+- [Private Endpoints: PrivateLink, Private Service Connect & Private Link](/cloud/networking/private-endpoints)
+- [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity)
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks)
+- [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets)
+- [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region)
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [Edge, DNS & CDN on AWS](/cloud/aws/edge)
+- [Edge, DNS & CDN on Google Cloud](/cloud/gcp/edge)
+- [Edge, DNS & CDN on Azure](/cloud/azure/edge)
+
+## Further reading
+
+- [Amazon Route 53 Developer Guide](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html): hosted zones, routing policies and health checks.
+- [Google Cloud DNS overview](https://cloud.google.com/dns/docs/overview): public and private zones, forwarding and peering.
+- [Azure DNS overview](https://learn.microsoft.com/azure/dns/dns-overview): public zones, Private DNS and Private Resolver.
+- [Azure Traffic Manager overview](https://learn.microsoft.com/azure/traffic-manager/traffic-manager-overview): DNS-based routing methods and endpoint monitoring.
