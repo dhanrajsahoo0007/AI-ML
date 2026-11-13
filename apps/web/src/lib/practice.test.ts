@@ -3,6 +3,7 @@ import {
   ANSWER_PARTS,
   ANSWER_SECONDS,
   clock,
+  mergePracticeLogs,
   parsePracticeLog,
   partAt,
   shuffled,
@@ -104,5 +105,35 @@ describe("the answer timer", () => {
     expect(clock(65.8)).toBe("1:05");
     expect(clock(120)).toBe("2:00");
     expect(clock(-3)).toBe("0:00");
+  });
+});
+
+describe("mergePracticeLogs", () => {
+  const at = (day: number) => `2026-11-${String(day).padStart(2, "0")}T00:00:00.000Z`;
+
+  it("keeps the later practice and the larger count, and uploads what the account lacks", () => {
+    const local = {
+      a: { rating: 4 as const, times: 3, at: at(12) },
+      b: { rating: 2 as const, times: 1, at: at(5) },
+      c: { rating: 5 as const, times: 1, at: at(9) },
+    };
+    const remote = {
+      a: { rating: 2 as const, times: 5, at: at(10) },
+      b: { rating: 3 as const, times: 2, at: at(8) },
+      d: { rating: 1 as const, times: 1, at: at(1) },
+    };
+    const { log, upload } = mergePracticeLogs(local, remote);
+    expect(log).toEqual({
+      a: { rating: 4, times: 5, at: at(12) },
+      b: { rating: 3, times: 2, at: at(8) },
+      c: { rating: 5, times: 1, at: at(9) },
+      d: { rating: 1, times: 1, at: at(1) },
+    });
+    expect(Object.keys(upload)).toEqual(["a", "c"]);
+  });
+
+  it("uploads nothing when both sides agree", () => {
+    const same = { a: { rating: 3 as const, times: 2, at: at(3) } };
+    expect(mergePracticeLogs(same, same).upload).toEqual({});
   });
 });

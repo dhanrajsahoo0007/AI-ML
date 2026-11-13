@@ -11,6 +11,7 @@ export { Quiz, QuizItem } from "./quiz";
 export { DecisionTree } from "./decision-tree";
 export { SpotTheFlag } from "./spot-the-flag";
 export { GuessTheLevel, WhichPrinciple } from "./choice-drill";
+export { StoryBuilder, StoryMatrix, MockLoop, PrepChecklist } from "./practice-tools";
 export { RequirementsTable } from "./requirements-table";
 export { EstimateTable } from "./estimate-table";
 export { Numbers } from "./numbers";

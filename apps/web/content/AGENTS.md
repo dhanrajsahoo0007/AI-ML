@@ -71,7 +71,7 @@ Read these three before writing a `system-design/` page (all Markdown files, so 
 Rules the code enforces:
 
 - **Teaching components** (`KeyIdea`, `Term`, `Glossary`, `Compare`, `ProsCons`, `Tabs`/`Tab`, `Quiz`/`QuizItem`,
-  `DecisionTree`, `SpotTheFlag`, `GuessTheLevel`, `WhichPrinciple`, `RequirementsTable`, `EstimateTable`, `Numbers`, `PatternUses`, `LearningPath`; source
+  `DecisionTree`, `SpotTheFlag`, `GuessTheLevel`, `WhichPrinciple`, `StoryBuilder`, `StoryMatrix`, `MockLoop`, `PrepChecklist`, `RequirementsTable`, `EstimateTable`, `Numbers`, `PatternUses`, `LearningPath`; source
   `apps/web/src/components/teach/`) validate props with strict zod schemas: an unknown or misspelled prop is a red
   note in dev and fails the production build.
 - **Widgets** (eleven lazy islands in `apps/web/src/components/teach/widgets/`): at most two per page, `DecisionTree`,

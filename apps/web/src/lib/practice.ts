@@ -77,6 +77,33 @@ export function recordPractice(id: string, rating: Rating): PracticeLog {
   return next;
 }
 
+/** Replaces the stored ratings (used by the account sync) and tells the page. */
+export function writePracticeLog(log: PracticeLog): void {
+  try {
+    window.localStorage.setItem(PRACTICE_KEY, JSON.stringify(log));
+    window.dispatchEvent(new Event(PRACTICE_EVENT));
+  } catch {
+    // Storage is full or blocked: the account still has its copy.
+  }
+}
+
+/**
+ * Combines this browser's ratings with the account's. For a question both sides have, the later practice wins
+ * and the larger count is kept. `upload` holds the entries the account does not have yet.
+ */
+export function mergePracticeLogs(local: PracticeLog, remote: PracticeLog): { log: PracticeLog; upload: PracticeLog } {
+  const log: PracticeLog = { ...remote };
+  const upload: PracticeLog = {};
+  for (const [id, mine] of Object.entries(local)) {
+    const theirs = remote[id];
+    if (theirs && theirs.at >= mine.at && theirs.times >= mine.times) continue;
+    const newest = !theirs || mine.at > theirs.at ? mine : theirs;
+    log[id] = { rating: newest.rating, at: newest.at, times: Math.max(mine.times, theirs?.times ?? 0) };
+    upload[id] = log[id];
+  }
+  return { log, upload };
+}
+
 /**
  * The ids ordered for "Weakest first": never practised, then the lowest rating, then the one practised longest
  * ago. Ids that tie keep the order they were given in.

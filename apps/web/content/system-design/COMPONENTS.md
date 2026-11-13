@@ -17,7 +17,8 @@ which fails on an invalid prop. When a prop changes, update the example here in 
 Contents:
 
 1. [Teaching components](#1-teaching-components): KeyIdea, Term, Glossary, Compare, ProsCons, Tabs/Tab, Quiz/QuizItem,
-   DecisionTree, SpotTheFlag, GuessTheLevel, WhichPrinciple, RequirementsTable, EstimateTable, Numbers, PatternUses, LearningPath
+   DecisionTree, SpotTheFlag, GuessTheLevel, WhichPrinciple, StoryBuilder, StoryMatrix, MockLoop, PrepChecklist,
+   RequirementsTable, EstimateTable, Numbers, PatternUses, LearningPath
 2. [Interactive widgets](#2-interactive-widgets): eleven lazy islands, at most two per page
 3. [Diagrams](#3-diagrams): the `<AnimatedDiagram>` tag, sidecars, the three spec kinds, `composeSpecs`, lint rules
 4. [Glyphs](#4-glyphs): the 77 drawn icons for diagram nodes and lanes
@@ -301,6 +302,59 @@ Interview questions to be matched to the principle, value or focus area each one
       principle: "Dive Deep",
       why: "It asks whether you check the detail behind a summary number.",
     },
+  ]}
+/>
+```
+
+### StoryBuilder, StoryMatrix and MockLoop
+
+The Practice Lab tools (`/behavioral/practice-lab/*`). Each takes **no props** and is meant for a page of its own, so
+an article links to the tool's page and does not embed it. All three are lazy client islands that keep the reader's
+data in the browser (`src/lib/stories.ts`, `src/lib/practice.ts`) and copy it to the account when the reader is signed
+in (`src/lib/practice-sync.ts`, `src/features/practice/`).
+
+- `<StoryBuilder />`: four text boxes (situation and task, action, result, learning) with a live speaking-time
+  estimate against the 15/60/15/10 budget, an "I" against "we" count, and a warning when the result has no number.
+  A link such as `/behavioral/practice-lab/story-builder?for=conflict` starts a new story already ticked for that
+  competency (a slug from `content/question-bank/signals.yaml`, group `Competencies`).
+- `<StoryMatrix />`: the reader's stories against the signals of `signals.yaml`, one view per group. Rows with no
+  story are marked as gaps.
+- `<MockLoop />`: the reader picks a company and a level and gets five prompts drawn from the leadership-track
+  question bank, each with the two-minute timer, the follow-ups one at a time, and a 1 to 5 rating. Only prompts are
+  sent to the browser, never answers. Put it after `<PremiumBreak />` on a premium page.
+
+```mdx
+<StoryBuilder />
+```
+
+### PrepChecklist
+
+A preparation plan the reader ticks off, with a progress bar. Ticks are kept in the browser only
+(`src/lib/checklist.ts`). A lazy client island; counts towards the two-widgets-per-page limit.
+
+- `id` (required): lowercase letters, digits and dashes. It names the list in the browser's storage, so do not change
+  it after the page is published.
+- `title` (required string).
+- `groups` (required, 1 to 12): `{ title, items }[]`, where `items` (1 to 20) is `{ id, text, href? }[]`. Item ids
+  must be different across the whole list. `href`, a site path, adds an "Open" link.
+
+```mdx
+<PrepChecklist
+  id="three-day-plan"
+  title="Three-day plan"
+  groups={[
+    {
+      title: "Day 1: stories",
+      items: [
+        { id: "pick-stories", text: "Pick the five projects you know best." },
+        {
+          id: "write-two",
+          text: "Write two of them in the story builder.",
+          href: "/behavioral/practice-lab/story-builder",
+        },
+      ],
+    },
+    { title: "Day 2: practice", items: [{ id: "mock-one", text: "Run one mock loop out loud." }] },
   ]}
 />
 ```

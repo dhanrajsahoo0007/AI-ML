@@ -3,14 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CornerDownRight, Eye, Pause, Play, RotateCcw } from "lucide-react";
-import { cn } from "@/lib/utils";
 import {
-  ANSWER_PARTS,
-  ANSWER_SECONDS,
+  AnswerCue,
+  AnswerTimerBar,
+  buttonClass,
+  primaryClass,
+  useAnswerTimer,
+} from "@/components/practice/answer-timer.client";
+import {
   PRACTICE_EVENT,
   RATINGS,
-  clock,
-  partAt,
   readPracticeLog,
   recordPractice,
   shuffled,
@@ -33,18 +35,6 @@ const ORDERS: readonly { value: Order; label: string }[] = [
   { value: "weakest", label: "Weakest first" },
   { value: "shuffle", label: "Shuffle" },
 ];
-
-const PART_TONE: Record<string, string> = {
-  situation: "var(--dg-blue)",
-  action: "var(--dg-orange)",
-  result: "var(--dg-green)",
-  learning: "var(--dg-violet)",
-};
-
-const buttonClass =
-  "inline-flex items-center gap-1.5 rounded-md border border-hairline bg-paper px-3 py-1.5 text-[13px] font-medium text-ink transition-colors hover:border-ink focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50";
-const primaryClass =
-  "inline-flex items-center gap-1.5 rounded-md border border-ink bg-ink px-3 py-1.5 text-[13px] font-medium text-paper transition-colors hover:bg-ink-2 focus-visible:outline-2 focus-visible:outline-ring";
 
 const idOf = (el: HTMLElement) => el.dataset.qaId ?? "";
 
@@ -189,12 +179,10 @@ function PracticePanel({
   entry?: PracticeEntry;
   onRate: (rating: Rating) => void;
 }) {
-  const [running, setRunning] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
+  const { running, elapsed, toggle, stop, reset } = useAnswerTimer();
   const [revealed, setRevealed] = useState(false);
   const [rated, setRated] = useState<Rating | null>(null);
   const [probes, setProbes] = useState(0);
-  const base = useRef({ at: 0, from: 0 });
   const followUps = useMemo(
     () => Array.from(item.querySelectorAll<HTMLDetailsElement>("details[data-qa-followup]")),
     [item]
@@ -217,78 +205,22 @@ function PracticePanel({
     };
   }, [item, followUps, revealed, probes]);
 
-  useEffect(() => {
-    if (!running) return;
-    base.current = { at: performance.now(), from: elapsed };
-    const tick = () => setElapsed(base.current.from + (performance.now() - base.current.at) / 1000);
-    const timer = window.setInterval(tick, 250);
-    return () => window.clearInterval(timer);
-    // `elapsed` is read once when the timer starts; it must not restart the interval on every tick.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running]);
-
-  const part = partAt(elapsed);
-  const over = elapsed >= ANSWER_SECONDS;
   const reveal = () => {
-    setRunning(false);
+    stop();
     setRevealed(true);
-  };
-  const reset = () => {
-    setRunning(false);
-    setElapsed(0);
   };
 
   return (
     <div className="mb-5 rounded-lg border border-hairline bg-paper p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">Answer out loud</p>
-        <p className="font-mono text-sm text-ink tabular-nums" role="timer" aria-label="Time spent on your answer">
-          {clock(elapsed)} <span className="text-muted-foreground">/ {clock(ANSWER_SECONDS)}</span>
-        </p>
-      </div>
-
-      <div className="mt-3 flex h-2.5 gap-0.5 overflow-hidden rounded-full" aria-hidden>
-        {ANSWER_PARTS.map((p, i) => {
-          const start = ANSWER_PARTS.slice(0, i).reduce((n, x) => n + x.share, 0) * ANSWER_SECONDS;
-          const length = p.share * ANSWER_SECONDS;
-          const filled = Math.min(1, Math.max(0, (elapsed - start) / length));
-          return (
-            <div key={p.key} className="relative bg-hairline" style={{ flexGrow: p.share, flexBasis: 0 }}>
-              <div
-                className="absolute inset-y-0 left-0"
-                style={{ width: `${filled * 100}%`, backgroundColor: PART_TONE[p.key] }}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <ol className="mt-1.5 flex gap-0.5 text-[11px] leading-tight text-muted-foreground">
-        {ANSWER_PARTS.map((p) => (
-          <li
-            key={p.key}
-            className={cn("min-w-0 truncate", part?.key === p.key && !revealed && "font-semibold text-ink")}
-            style={{ flexGrow: p.share, flexBasis: 0 }}
-          >
-            {p.short}
-          </li>
-        ))}
-      </ol>
+      <AnswerTimerBar elapsed={elapsed} done={revealed} />
 
       <p className="mt-3 min-h-10 text-sm text-ink-2" aria-live="polite">
-        {revealed ? (
-          <>Compare your answer with the one below, then rate it.</>
-        ) : over ? (
-          <span className="font-medium text-destructive">Two minutes are up. Land the result and stop.</span>
-        ) : (
-          <>
-            <span className="font-semibold text-ink">{part?.label}.</span> {part?.cue}
-          </>
-        )}
+        {revealed ? <>Compare your answer with the one below, then rate it.</> : <AnswerCue elapsed={elapsed} />}
       </p>
 
       {!revealed && (
         <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" className={buttonClass} onClick={() => setRunning((v) => !v)}>
+          <button type="button" className={buttonClass} onClick={toggle}>
             {running ? <Pause aria-hidden className="size-3.5" /> : <Play aria-hidden className="size-3.5" />}
             {running ? "Pause" : elapsed > 0 ? "Resume" : "Start timer"}
           </button>
