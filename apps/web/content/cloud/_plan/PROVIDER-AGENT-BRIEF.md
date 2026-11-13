@@ -39,7 +39,7 @@ including teenagers, who know the idea from a concept page and now want the real
 
 ## What each page gets
 
-- **"The idea" section** right after the intro: two sentences in our own words, a `<Callout tone="info" title="Learn
+- **"The idea" section** right after the intro: two sentences in our own words, a `<Callout tone="blue" title="Learn
   the idea">` linking the concept page(s), then `<AnimatedDiagram spec="animated/cloud/<spec>" stepper cloud="<p>"
   minWidth={620} caption="…" />` and `<CloudMapping diagram="cloud/<spec>" lead="<p>" />`.
 - **AWS (Rule 1):** upgrade in place; delete an inline Mermaid only if it duplicates the stepper; rewrite every
