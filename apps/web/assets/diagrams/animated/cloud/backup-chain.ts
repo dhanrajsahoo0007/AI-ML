@@ -30,7 +30,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 const spec: DiagramSpec = {
   title: "From snapshots beside the disk to a locked, tested copy in another account",
   width: 795,
-  height: 560,
+  height: 580,
   steps: [
     { title: "Snapshots beside the disk, one copy away" },
     { title: "One admin session deletes every nearby copy" },
@@ -42,10 +42,10 @@ const spec: DiagramSpec = {
   zones: [
     { id: "shop", title: "Shop account", tone: "violet", x: 10, y: 40, w: 240, h: 420 },
     { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 295, y: 40, w: 190, h: 110 },
-    { id: "audit", title: "Audit account", tone: "blue", x: 295, y: 215, w: 190, h: 305 },
+    { id: "audit", title: "Audit", tone: "blue", x: 295, y: 215, w: 190, h: 305 },
     { id: "org", title: "Organisation", tone: "orange", x: 560, y: 40, w: 225, h: 110 },
-    { id: "region2", title: "Audit account, region 2", tone: "blue", x: 560, y: 215, w: 225, h: 165 },
-    { id: "test", title: "Test account", tone: "teal", x: 560, y: 415, w: 225, h: 125 },
+    { id: "region2", title: "Audit, region 2", tone: "blue", x: 560, y: 215, w: 225, h: 190 },
+    { id: "test", title: "Test account", tone: "teal", kind: "subnet", x: 560, y: 440, w: 225, h: 120 },
   ],
   nodes: [
     // Step 1
@@ -131,7 +131,7 @@ const spec: DiagramSpec = {
       icon: "policy",
       tone: "orange",
       step: 3,
-      x: 672,
+      x: 682,
       y: 95,
       w: 180,
       cloud: {
@@ -168,7 +168,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       variant: "glyph",
       step: 5,
-      x: 672,
+      x: 682,
       y: 325,
       cloud: {
         aws: { id: "aws-backup", label: "Copy in region 2" },
@@ -185,8 +185,8 @@ const spec: DiagramSpec = {
       icon: "history",
       tone: "teal",
       step: 6,
-      x: 672,
-      y: 480,
+      x: 682,
+      y: 505,
       w: 180,
       cloud: {
         aws: { id: "aws-backup", label: "Restore testing" },

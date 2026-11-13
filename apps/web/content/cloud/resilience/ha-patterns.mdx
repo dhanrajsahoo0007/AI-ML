@@ -1,11 +1,342 @@
 ---
 title: "High Availability Inside One Region"
-description: "How each tier of an app survives the loss of a zone without a human: spread copies, stay stateless, health-check and fail over."
-status: outline
+description: "How each tier of an app survives losing a zone without a human: stateless copies, room to spare, honest health checks, timeouts and failover."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** how a tier survives a zone failure without a human: spread copies across zones, keep the app tier stateless, let a load balancer health-check and route around the dead copy, and let the managed database fail over.
+<KeyIdea>
+  A system stays up when every part has a spare copy in another building, and the copies that are left have enough room to carry the work alone.
+</KeyIdea>
 
-**Related reading on this site:** [Availability, reliability and the nines](/system-design/fundamentals/availability) · [Load Balancing](/system-design/patterns/load-balancing) · [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+## The story
+
+Brightpost has run in three zones near London since the evening zone A lost power. On the autumn sale, at 10:00, about 1,440 shoppers are online. The shop runs 9 app servers, 3 in each zone. One server serves about 200 shoppers at once, so each one is about 80% busy. The week before, Asha had raised the scaling rule's target from 60% to 80%, because the servers "sat a third idle". At 10:05 a network fault cuts zone B off. Within 30 seconds the load balancer stops sending it shoppers, and 6 servers must carry 1,440 shoppers: 120% of what they can serve. Pages take 10 seconds. Two servers grow so slow that they fail their health checks, and the balancer drops them too. The scaling rule can add only 1 server, because its maximum is 10. Zone B returns at 10:31. In those 26 minutes about 210 orders are lost.
+
+Three zones were the right shape, but the shop had no room to lose one. Each step below removes one single point of failure, and step 5 adds the missing room.
+
+## How it works
+
+Three words first. **High availability** means a service keeps working when one part fails, without a person stepping in. A **single point of failure** is any part whose loss stops the whole service. A <Term id="availability-zone">zone</Term> is a group of data centres in a region with its own power, cooling and network; [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge) shows one going dark.
+
+### Step 1: Find every single point of failure
+
+<AnimatedDiagram spec="animated/cloud/multi-az-tier" step={1} minWidth={620} caption="Brightpost's first setup: one app server and one orders database, both in zone A. Every box is a single point of failure." />
+
+Walk through the design one box at a time and ask: if this copy dies now, what stops? Here the server, the database and the zone each take the whole shop with them.
+
+Each kind has its own fix, and this table is the checklist for the rest of the page.
+
+<Compare
+  columns={["Single point", "What removes it", "Step"]}
+  rows={[
+    ["One server address", "A load balancer that spans the zones", "2"],
+    ["Data kept on one server", "A stateless app tier: state lives in shared stores", "2"],
+    ["One database copy", "A managed standby in another zone", "3, 8"],
+    ["No room to lose a zone", "Capacity for the zones that are left", "5"],
+    ["A check that only says 'running'", "A health check that tests what requests need", "6"],
+    ["A slow outside service", "Timeouts, fallbacks and switches", "7"],
+  ]}
+  caption="The single-point-of-failure checklist for one region."
+/>
+
+Copies side by side fail only when all of them fail at once. Parts in a chain fail when any one of them fails. [Availability, reliability and the nines](/system-design/fundamentals/availability) does that arithmetic.
+
+<PremiumBreak />
+
+### Step 2: Make the app tier stateless, then copy it
+
+<AnimatedDiagram spec="animated/cloud/multi-az-tier" step={2} minWidth={620} caption="A load balancer shares shoppers between app servers in three zones. Each box stands for that zone's servers." />
+
+A server is **stateless** when it keeps nothing a shopper needs after the request ends. Brightpost's baskets live in the shared database, and a shopper's sign-in travels in a signed cookie. So any server can serve any shopper, and a lost server loses nothing but the requests it was running.
+
+Only a stateless tier can be copied freely. A server that holds baskets in its own memory makes each shopper depend on one machine.
+
+The <Term id="load-balancer" /> gives the shop one address and shares requests between the copies. The cloud runs it in every zone, so it is not a single point itself. A managed server group spreads the copies evenly over the three zones. [Load Balancing](/cloud/networking/load-balancing) covers the balancer in depth.
+
+### Step 3: Let managed services keep their own copies
+
+<AnimatedDiagram spec="animated/cloud/multi-az-tier" step={3} minWidth={620} caption="The managed database keeps a standby in zone B, and every write reaches it before the shop says 'order placed'." />
+
+Many managed services offer a **multi-zone mode**: one setting, and the provider keeps a second copy in another zone and fails over to it. Brightpost's database has a standby in zone B. Each write reaches both copies before it counts, which is a synchronous copy. If the primary's zone goes dark, the provider promotes the standby in about 2 minutes. Running copies in several zones like this is called <Term id="multi-az">multi-AZ</Term>.
+
+The setting is often off by default, because it roughly doubles that service's bill. Check it on every managed service in your design. The tabs below name the switch on each cloud.
+
+<ResponsibilityGrid set="ha-controls" />
+
+### Step 4: Sale day: zone B is cut off
+
+<AnimatedDiagram spec="animated/cloud/multi-az-tier" step={4} minWidth={620} caption="The failure: zone B is cut off. The balancer gets no answer there, and the servers in zones A and C must carry 120% each." />
+
+Replay 10:05. Zone B's 3 servers stop answering health checks. After three missed checks, about 30 seconds, the balancer sends every shopper to zones A and C. The primary database is in zone A, so it keeps running; only its standby is gone.
+
+<Callout tone="red" title="What breaks">
+  The shop needs 7.2 servers' worth of power for 1,440 shoppers, and 6 servers are left. Each is asked for 240 shoppers at once and can serve 200. Requests queue, pages take 10 seconds, and two servers miss their health checks because they answer too slowly. The balancer drops them, so the last four get busier still. The scaling rule adds 1 server, the most its limit of 10 allows. About 210 orders are lost before zone B returns.
+</Callout>
+
+Every tier had copies in three zones. What was missing was room.
+
+### Step 5: Room to lose a zone
+
+<AnimatedDiagram spec="animated/cloud/multi-az-tier" step={5} minWidth={620} caption="Four servers in each zone at 60%. With any zone dark, the other eight would run at 90%." />
+
+Plan for **N-1**: with N zones, the system must carry the peak on N-1 of them. With three zones, two must carry all the work, so each server may run at most two thirds of the busiest level you accept. Brightpost accepts 90%, so its target is back to 60%.
+
+<Compare
+  columns={["", "3 zones at 80%", "3 zones at 60%", "2 zones at 45%"]}
+  rows={[
+    ["Servers for 1,440 shoppers", "9", "12", "16"],
+    ["Busy after losing a zone", "120%: overload", "90%", "90%"],
+    ["Spare servers you pay for", "0", "3", "7"],
+  ]}
+  caption="Brightpost's sale-day numbers. One server serves about 200 shoppers at once."
+/>
+
+The scaling rule's maximum must allow the N-1 fleet and some growth, so Brightpost raises it from 10 to 15. Its account <Term id="quota" /> must allow that many servers too. New servers take about 3 minutes to be ready, so headroom has to exist before the fault, not after. [Autoscaling](/cloud/compute/autoscaling) explains the target and the limits.
+
+### Step 6: Health checks that test what requests need
+
+<AnimatedDiagram spec="animated/cloud/multi-az-tier" step={6} minWidth={620} caption="The balancer asks each server's readiness path, which also runs one small query on the database." />
+
+A **health check** is a small test request the balancer sends each server every 10 seconds. A check that loads only the home page proves the web server runs. It says nothing about the checkout. Picture a server whose database connections have all died. The home page still loads, so the check passes, and every checkout sent there fails.
+
+Brightpost's servers now answer a **readiness** path, `/ready`. It passes only when the server can run one tiny query on the database and has free connections.
+
+Two cautions. A check that tests every outside service can mark all servers unhealthy at once, and then the balancer has nowhere to send work. And give the check a generous time limit, so a busy server is not mistaken for a dead one, as on sale day.
+
+### Step 7: Timeouts, fallbacks and a switch for the extras
+
+<AnimatedDiagram spec="animated/cloud/multi-az-tier" step={7} minWidth={620} caption="Each call to the partner's API waits at most 800 ms, and a feature flag can switch the extras off." />
+
+Every product page shows a delivery date from the printing partner's API. Without a time limit, a slow partner holds each request open and fills the servers. A **timeout** is the longest a call may wait before the caller gives up. Brightpost waits 800 ms, then shows "arrives in 3 to 5 working days". That is **graceful degradation**: the page gets a little worse instead of failing.
+
+A **feature flag** is a switch the app reads while it runs, so a person can turn a feature off without a deploy. On a bad day Brightpost switches off the delivery dates and the "related posters" panel, which cuts the work per page. Payment and checkout stay on. [Circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries) covers the patterns behind this.
+
+### Step 8: A database failover, seen from the app
+
+<AnimatedDiagram spec="animated/cloud/db-failover-sequence" stepper caption="Brightpost's 06:00 drill: the write times out, the standby is promoted, and the app retries through the name." />
+
+The app reaches the database through a name, the **endpoint**, that the provider points at whichever copy is in charge. During a <Term id="failover" /> the app must survive about 2 minutes of errors.
+
+1. **Time out fast.** A write that gets no answer fails after a few seconds, not a minute.
+2. **Retry with growing waits:** 1 s, 2 s, 4 s. Each order carries an <Term id="idempotent" /> key, so a retried write is saved once.
+3. **Look the name up again.** The endpoint's <Term id="ttl" /> is seconds, but some runtimes keep answers longer. Set that cache to seconds.
+
+A connection proxy can hide most of this, and [Managed Relational Databases](/cloud/data/managed-relational) covers it.
+
+### Step 9: Prove it
+
+A failover that nobody has tried is a guess. Once a month at 06:00 Brightpost forces a database failover and checks that no order is lost or doubled. Once a quarter, at a quiet hour, it takes one zone's servers out of the balancer for 30 minutes and watches the other two. The grid in step 3 shows that testing stays with you.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: copies in three zones, a regional load balancer, a multi-zone switch on each managed service, and room to lose a zone.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Servers across zones:** an Auto Scaling group with one subnet in each Availability Zone, kept in balance.
+    - **Load balancer:** an Application Load Balancer with a subnet in each zone. Target group health checks set the path, the interval and the thresholds.
+    - **Database:** RDS Multi-AZ keeps a synchronous standby in another zone. At failover, the endpoint's DNS name moves to it.
+    - **Cache and files:** ElastiCache with Multi-AZ fails over to a replica in another zone. S3 Standard spreads objects across zones; the One Zone storage classes do not.
+    - **Replacing bad servers:** by default the group checks only that the machine runs. Switch on load balancer health checks so it also replaces servers that fail `/ready`.
+
+    **The difference that changes a design.** A subnet lives in one zone, so the group and the balancer must each list one subnet per zone. RDS Proxy keeps the app's connections open during a failover. AWS AppConfig can hold feature flags.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Servers across zones:** a regional managed instance group spreads VMs over the zones of a region.
+    - **Load balancer:** Cloud Load Balancing, regional or global, with a health check that is its own resource.
+    - **Database:** Cloud SQL's high availability setting keeps a standby in another zone with a synchronous copy. At failover the instance keeps the same IP address.
+    - **Cache and files:** Memorystore for Redis in the Standard tier keeps a replica in another zone. A regional Cloud Storage bucket keeps copies across zones.
+    - **Replacing bad servers:** autohealing on the group uses a second health check. It recreates VMs that fail it.
+
+    **The difference that changes a design.** Many resources are regional, such as the group, its subnets and an HA database, so picking "regional" handles the zones. Give autohealing a slower check than the balancer, so a busy VM is not deleted.
+  </Tab>
+  <Tab label="Azure">
+    - **Servers across zones:** a Virtual Machine Scale Set set to use zones 1, 2 and 3.
+    - **Load balancer:** Application Gateway or a Standard Load Balancer, zone-redundant. Health probes set the path and the interval.
+    - **Database:** Azure Database for PostgreSQL flexible server with zone-redundant high availability: a synchronous standby in another zone. The server name stays the same after failover.
+    - **Cache and files:** the managed Redis caches offer zone redundancy. Blob storage needs zone-redundant storage (ZRS); locally redundant storage keeps its copies in one data centre.
+    - **Replacing bad servers:** the scale set's automatic instance repairs replace instances that fail its health signal.
+
+    **The difference that changes a design.** You choose zonal or zone-redundant service by service, and many choices are fixed when you create the resource, so check each one before you build. Azure App Configuration can hold feature flags.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/multi-az-tier" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/multi-az-tier" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Can this tier lose a zone?"
+  tree={{
+    q: "Does any copy keep data that exists only on its own disk or in its memory?",
+    yes: "Not yet. Move that state to a shared store, such as the database or a cache with a multi-zone mode. Then copy the tier.",
+    no: {
+      q: "Does the tier have copies in at least two zones, or a managed multi-zone mode switched on?",
+      no: "Not yet. Spread the copies over the zones, or switch the multi-zone mode on.",
+      yes: {
+        q: "If the busiest zone went dark at peak, could the copies left carry the load?",
+        no: {
+          answer: "Not yet. Lower the scaling target or add copies until N-1 zones carry the peak, and raise the limits to match.",
+          href: "/cloud/compute/autoscaling",
+        },
+        yes: {
+          q: "Does the health check test what a real request needs, such as the database?",
+          no: "Almost. Add a cheap readiness check, so the balancer stops sending work to copies that cannot do it.",
+          yes: "Ready. Now prove it with a drill at a quiet hour.",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost has 1,440 shoppers on 12 servers, 4 in each of three zones. Zone C goes dark. How busy is each server that is left?" hint="One server serves about 200 shoppers at once.">
+    90%. The 8 servers left share 1,440 shoppers, 180 each, and 180 of 200 is 90%.
+  </QuizItem>
+  <QuizItem question="A server's health check loads the home page and passes, but every checkout on that server fails. What is wrong?" hint="What does a checkout need that the home page does not?">
+    The check tests too little. The checkout needs the database, and this server's connections to it are broken. A readiness check that runs one small query would fail, and the balancer would stop sending it work.
+  </QuizItem>
+  <QuizItem question="During a 2-minute database failover, the app retries an order 3 times. Why is the order saved only once?">
+    Each order carries the same idempotency key on every try. The database stores the first write that succeeds and recognises the key on any later one.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "One zone", "Three zones, no headroom", "Three zones, N-1 headroom"]}
+  rows={[
+    ["Sale-day servers for 1,440 shoppers", "9", "9", "12"],
+    ["Database copies", "1", "2, in sync", "2, in sync"],
+    ["When a zone is lost", "Down until it returns", "Overloaded: about 210 orders lost in 26 min", "About 30 s of errors on that zone's share"],
+    ["When the primary's zone is lost", "Down until it returns", "About 2 min of failed writes, then overload", "About 2 min of failed writes"],
+    ["Extra cost", "None", "A standby; traffic between zones", "Also 3 more servers on peak days"],
+  ]}
+  caption="Brightpost's numbers. Servers scale back down after the sale, so the 3 extra servers cost money only on busy days."
+/>
+
+Headroom is the easiest part to forget and among the cheapest to buy. Brightpost's 3 extra servers run for a few peak hours and would have saved about 210 orders.
+
+## Common pitfalls
+
+- **Three zones, sized for three.** Copies in every zone do not help if each runs near full. Size for N-1, and set the scaling maximum and the quota to match.
+- **A health check that tests only "running".** The home page loads while checkouts fail. Add a cheap readiness check that touches the database.
+- **The multi-zone switch left off.** The database or cache runs in one zone because the default was cheaper. Check every managed service's zone setting.
+- **No timeouts on outside calls.** One slow partner fills every server with waiting requests. Give every call a timeout and a fallback answer.
+- **A failover nobody has tried.** The app caches the old address, or retries make double orders. Drill at a quiet hour and count both.
+
+## How to say it in an interview
+
+"I start by listing every single point of failure, tier by tier. The app tier is stateless, so I copy it into three zones behind a regional load balancer. Every managed service runs in its multi-zone mode, and the database has a synchronous standby in another zone. I size for N-1: with three zones, each server runs at about 60%, so two zones can carry the peak. The health check tests what a request needs, such as the database, and every outside call has a timeout and a fallback. The app retries with backoff and idempotency keys through a database failover, and I prove all of it with drills."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a single point of failure, and how do you find them in a three-tier web app?" level="Junior" category="Cloud">
+    **Short answer.** A single point of failure is a part whose loss stops the whole service. To find them, go through the design one box at a time and ask what stops if that box dies now. Any answer other than "nothing" marks one.
+
+    **Why.** Brightpost began with one server and one database in one zone, so every box was a single point, and so was the zone. The entry gets a load balancer across zones, the app tier is made stateless and copied, and the database gets a standby. Capacity can be a single point too.
+
+    <AnimatedDiagram spec="animated/cloud/multi-az-tier" step={1} caption="One server, one database, one zone: every box takes the whole shop with it." />
+
+    **Follow-ups the interviewer may ask.**
+    - Is the load balancer itself a single point of failure?
+    - What about services the whole region depends on, such as DNS?
+
+    **Watch out for.** Stopping at the servers. A shop with three servers and one database copy still has a single point.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why must the app tier be stateless before spreading it across zones helps?" level="Mid" category="Cloud">
+    **Short answer.** If a server holds a shopper's basket or session in its own memory, that shopper depends on that one machine. When it or its zone dies, the shopper's state dies with it. A stateless server keeps nothing between requests, so any copy in any zone can take over.
+
+    **Why.** Brightpost keeps baskets in the shared database and the sign-in in a signed cookie. When zone B was cut off, its shoppers' next requests went to zones A and C and found their baskets intact. With baskets in server memory, every shopper on a lost server would start again with an empty basket.
+
+    <AnimatedDiagram spec="animated/cloud/multi-az-tier" step={2} highlight={["lb", "server-a", "server-b", "server-c", "db"]} caption="Any server can serve any shopper, because the baskets live in the shared database." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where would you keep sessions if the database were too slow for them?
+    - Does a stateless tier need sticky sessions at all?
+
+    **Watch out for.** Saying the app is stateless because it has no database of its own. Files on local disk and in-memory sessions are state too.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What does a database failover look like to the application?" level="Mid" category="Cloud">
+    **Short answer.** For about 2 minutes, writes fail. Open connections break, and new ones fail until the endpoint points at the promoted standby. The app must time out fast, retry with growing waits, look the name up again and use idempotency keys.
+
+    **Why.** In Brightpost's 06:00 drill the next write times out, and the standby is promoted at about 06:01:40. At 06:02 the app looks up the name again and retries the same order with the same key, so it is saved once. Committed orders are safe, because each was already in the standby.
+
+    <AnimatedDiagram spec="animated/cloud/db-failover-sequence" step={4} caption="After the promotion the app looks up the name again and retries the same order with the same key." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does a connection proxy change what the app sees?
+    - Why can an app keep failing after the database is back?
+
+    **Watch out for.** Assuming the provider makes a failover invisible. It keeps the data; your app still sees errors for about 2 minutes.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A health check passes, but users get errors from that server. What is wrong with the check?" level="Mid" category="Cloud">
+    **Short answer.** It tests less than a real request needs. A static page proves the process runs, not that the server can reach the database. Use a readiness check that runs one cheap query.
+
+    **Why.** Picture a Brightpost server whose database connections have died. Its home page still loads, so a home-page check passes, and each checkout sent there fails. A `/ready` path that runs one query fails within three checks, about 30 seconds, and the balancer moves its shoppers.
+
+    <AnimatedDiagram spec="animated/cloud/multi-az-tier" step={6} highlight={["lb", "server-a", "server-b", "server-c"]} caption="The balancer asks each server's readiness path, which tests the database too." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens if the database itself goes down and every server fails `/ready`?
+    - Should the check also test the partner's API?
+
+    **Watch out for.** Making the check test every outside service. One slow partner then fails every server at once.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You run three zones, each about 80% busy at peak. Is that highly available?" level="Senior" category="Cloud">
+    **Short answer.** No. It survives server failures, but not the zone failure it was built for. With one zone dark, the other two must run at 120%. Size for N-1: with three zones, about 60% per server, so the survivors land near 90%.
+
+    **Why.** That was Brightpost's sale day: 1,440 shoppers on 9 servers, 160 each. Losing zone B left 6 servers at 240 each, and slow servers failed their health checks and were dropped. The scaling rule was capped at 10. With 12 servers and a maximum of 15, the same fault leaves 8 servers at 90%.
+
+    <AnimatedDiagram spec="animated/cloud/multi-az-tier" step={4} caption="Zone B is cut off, and the servers in zones A and C must carry 120% each." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would four zones change the target?
+    - What else must allow the bigger fleet, besides the scaling rule?
+
+    **Watch out for.** Counting on autoscaling to fill the gap. Starting servers takes minutes, and the limits or the quota may stop it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Every product page calls a partner's API for a delivery date. How do you stop that partner from taking your shop down?" level="Senior" category="Cloud">
+    **Short answer.** Give the call a short timeout and a fallback answer, and put the feature behind a flag you can switch off. Then the page gets slightly worse when the partner is slow, instead of failing. Payment and checkout must never wait on it.
+
+    **Why.** Without a timeout, each slow call holds a request open, and the servers fill with waiting pages. Brightpost waits 800 ms, then shows "arrives in 3 to 5 working days". If the partner stays slow, a circuit breaker stops calling it for a while. A flag turns the panel off without a deploy.
+
+    <AnimatedDiagram spec="animated/cloud/multi-az-tier" step={7} path="flags>server-c>partner" caption="An 800 ms timeout on the partner's API, and a switch that turns the extras off." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you choose the timeout value?
+    - Where would you cache the partner's answers?
+
+    **Watch out for.** Retrying the slow call at once. Retries add load to a partner that is already struggling.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets)
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [Managed Relational Databases](/cloud/data/managed-relational)
+- [Managed Caches](/cloud/data/managed-caches)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [Availability, SLAs and What Fails Together](/cloud/resilience/availability-math)
+- [Disaster Recovery: Four Tiers, RPO and RTO](/cloud/resilience/dr-strategies)
+- [Load balancing pattern](/system-design/patterns/load-balancing)
+- [Circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries)
+
+## Further reading
+
+- [AWS Well-Architected reliability pillar](https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html): designing for failure.
+- [Amazon RDS Multi-AZ deployments](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZ.html): the standby and failover.
+- [Google Cloud SQL high availability](https://cloud.google.com/sql/docs/postgres/high-availability): regional instances.
+- [Azure reliability documentation](https://learn.microsoft.com/azure/reliability/): zone-redundant services.

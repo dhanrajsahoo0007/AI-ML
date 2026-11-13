@@ -1,11 +1,343 @@
 ---
 title: "Queues, Topics, Streams, Event Buses and Workflows on the Cloud"
-description: "The five shapes of managed messaging and what each cloud's service does with ordering, retention, replay and failed messages."
-status: outline
+description: "Managed streams in practice: partitions, hot keys, lag and replay, what exactly-once means, event buses with rules, and workflows that run multi-step jobs."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the managed messaging family as five shapes (queue, topic, stream, event bus and workflow), what each cloud's product does with ordering, retention, replay and dead letters, and the delivery guarantees you really get. It builds on the Start Here guide and does not re-teach queue theory.
+<KeyIdea>
+  A managed stream moves your events for you. You still choose how they are split, watch how far each reader is behind, and give a job with several steps a coordinator that remembers where it stopped.
+</KeyIdea>
 
-**Related reading on this site:** [Queues vs Streams](/cloud/start-here/queues-vs-streams) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Messaging & Streaming on AWS](/cloud/aws/messaging)
+## The story
+
+Brightpost's product pages say "only 12 left". Since spring, every basket change and every order goes on a stock stream, and a group of stock workers keeps the counts up to date. The stream has 3 partitions, keyed by product id. On the summer sale day the hero poster was a signed print run of 1,500 copies. Between 9 and 11 a.m. it drew about 24,000 events, 200 a minute, and every one landed on partition 2. That partition's worker handled about 50 a minute. The other two workers sat almost idle, so processor use looked normal and no errors appeared. The run sold out at 9:50, but the page kept selling it until 12:20, when the 9:50 events were finally counted. The 11 a.m. events were counted at 5 p.m., 6 hours late. By then 380 customers had paid for a poster that did not exist. Asha and the support agent spent two days refunding them by hand.
+
+Nothing in the stream service broke. The steps below show what partitions, readers and lag do in practice, then two services beyond streams: event buses and workflows.
+
+## How it works
+
+Three words first. An **event** is a record that something happened, such as "1 hero poster added to a basket". A **stream** keeps events in order and lets many readers come back to them. A **consumer group** is one reader, perhaps many workers, that keeps its own place in the stream. How queues, topics and streams differ, and why every broker can deliver twice, is on [Queues vs Streams](/cloud/start-here/queues-vs-streams). This page goes one level deeper.
+
+### Step 1: A stream, split by a key
+
+<AnimatedDiagram spec="animated/cloud/event-pipeline" step={1} minWidth={620} caption="The shop puts each basket change on one of 3 partitions, chosen by product id. One worker reads each partition and writes the stock counts the product page shows." />
+
+A stream is split into <Term id="partition">partitions</Term>, separate logs that grow side by side. The producer attaches a **partition key** to each event. The service turns the key into a number with a hash, and that number picks the partition. All events for one product land on the same partition, in the order they were sent.
+
+Inside one consumer group, each partition is read by one worker at a time. That keeps each product's events in order, and it caps speed: 3 partitions allow at most 3 busy workers in a group. Most scaling questions about streams come back to that rule. The theory is on [Message Queues and Pub/Sub](/system-design/patterns/message-queues).
+
+<PremiumBreak />
+
+### Step 2: One hot product, one busy partition
+
+<AnimatedDiagram spec="animated/cloud/event-pipeline" step={2} minWidth={620} caption="The failure: every hero-poster event hashes to partition 2. Its one worker falls 6 hours behind, and the product page shows the wrong stock." />
+
+A hash spreads keys evenly, not events. When one key gets most of the traffic, its partition gets most of the work. That key is a <Term id="hot-key">hot key</Term>. Adding workers cannot help, because the group lets only one worker read partition 2.
+
+<Callout tone="red" title="What breaks">
+  From 9:00, 200 hero-poster events arrive each minute and the worker counts 50, at about 1.2 seconds each. After 2 hours, 18,000 events wait in line. At 50 a minute, the last of them is counted 360 minutes later, at 5 p.m. Checkout trusted the count, so between 9:50 and 12:20 it sold 380 posters that did not exist.
+</Callout>
+
+Two things failed. Nobody saw the delay, and the key put a whole sale on one worker.
+
+### Step 3: Lag is the number to watch
+
+<AnimatedDiagram spec="animated/cloud/event-pipeline" step={3} minWidth={620} caption="Each partition reports how far its reader is behind. The alarm fires when any partition's oldest unread event is 5 minutes old." />
+
+**Lag** says how far a reader is behind. Count it in events: the newest offset minus the reader's offset. Or count it in time: the age of the oldest event the reader has not handled. An **offset** is an event's position number in its partition. Time is the version shoppers feel.
+
+Brightpost's dashboard watched processor use and errors. A worker that is behind looks busy, not broken, so both looked fine. Watch lag per partition, because an average hides the one partition that is hours behind. Brightpost's alarm now fires when any partition's lag passes 5 minutes. On sale day it would have fired a few minutes after 9.
+
+### Step 4: Spread the hot key, batch the work
+
+<AnimatedDiagram spec="animated/cloud/event-pipeline" step={4} minWidth={620} caption="The key is now the product id plus a slot from 0 to 5, so hero-poster events spread over all 3 partitions. Each worker sums 500 events into one write." />
+
+Brightpost made two changes, and both matter.
+
+1. **Batch.** Each worker now reads 500 events at a time, adds them up per product and makes one database write per product. A batch takes about 6 seconds, so one worker handles about 5,000 events a minute, 100 times the old rate.
+2. **Spread the key.** The key becomes the product id plus a random slot from 0 to 5. The hero poster's events now land on all 3 partitions. Each slot keeps a part-count, and the page adds the 6 parts.
+
+Splitting a key works here because a count is a sum, and order between slots does not matter. Order 1042's "placed, paid, shipped" could not be split this way. More partitions alone would not have helped: one key still hashes to one partition.
+
+### Step 5: Consumer groups, offsets and rebalancing
+
+<AnimatedDiagram spec="animated/cloud/stream-partitions" step={2} minWidth={620} caption="Each worker owns one partition and saves its offset. A fourth worker joins, the group rebalances, and with 3 partitions it gets none." />
+
+Each worker saves its offset now and then in an **offset store**: "partition 1, done up to 9,398". That saved place is a **checkpoint**. A restarted worker carries on from it, and reads the events after it again, so the work must be safe to repeat.
+
+When a worker joins or dies, the group **rebalances**: the partitions are handed out again, and reading pauses for a few seconds. With 3 partitions, a fourth worker gets nothing and waits, ready to take over.
+
+To scale a group, find which case you are in. Every partition behind: add partitions, then workers. One partition behind: a hot key, fixed as in Step 4. Each event slow: batch. Adding partitions moves some keys, so a key's order can break during the change. Some services have no partitions to size, but each ordering key is still one line.
+
+### Step 6: Retention and replay
+
+<AnimatedDiagram spec="animated/cloud/stream-partitions" step={3} minWidth={620} caption="A second group, analytics, reads the same 3 partitions at its own offsets, far behind the stock group and unaffected by it." />
+
+Reading does not remove events. They stay for the **retention** period, 7 days on Brightpost's streams. Each group keeps its own offsets, so analytics can be far behind without slowing the stock workers.
+
+After the fix, Asha started a new group at the first event of sale day. It rebuilt every count in under 10 minutes, and she checked them against the orders table. A **replay** re-runs every side effect, so this group wrote counts and sent no emails.
+
+Retention is not a backup: longer retention costs more, and it still ends. For a year of history, a **sink** copies events into object storage for [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines).
+
+### Step 7: What "exactly once" really means
+
+<AnimatedDiagram spec="animated/cloud/delivery-guarantees" stepper minWidth={620} caption="Save the offset first and a crash loses 500 events. Count first and a crash counts them twice. Save both in one commit and each is counted once." />
+
+When a worker saves its offset decides what a crash does. Offset first: a crash loses the batch, **at most once**. Count first: a crash counts it twice, **at least once**. Brightpost now saves the counts and the offset in one database commit, so each event changes the count once.
+
+Services that advertise "exactly once" mean something inside the service:
+
+- **Deduplication on publish:** a repeated send within a short window is dropped.
+- **Exactly-once delivery:** an acknowledgement is accepted once or fails visibly.
+- **Exactly-once processing:** a stream engine commits its reads, state and output together.
+
+None covers an email your worker sends. The effect happens once only when your write and offset commit together, or the write is <Term id="idempotent">idempotent</Term>, keyed by the event id.
+
+### Step 8: Event buses: routing rules and schemas
+
+<AnimatedDiagram spec="animated/cloud/event-pipeline" step={5} minWidth={620} caption="The shop sends business events to an event bus. A rule matches 'order cancelled' and sends those events to the refund workflow." />
+
+A topic copies every message to every subscriber. An **event bus** adds **rules**: each matches events by fields, such as type and source, and sends matches to a **target**, such as a function or a workflow. Brightpost's shop sends "order placed", "shipped" and "cancelled" to one bus, and one rule sends cancellations to the refund workflow. A new team adds a rule without touching the shop. Buses also carry the cloud's own events, such as "a file was added".
+
+A **schema** lists an event's fields and types. A **schema registry** keeps each version, so a renamed field fails a check before a consumer breaks. Brightpost adds fields but never renames or removes one. A bus suits many kinds of event at modest volume; a stream suits high volume with replay.
+
+### Step 9: Workflows: one coordinator for a multi-step job
+
+<AnimatedDiagram spec="animated/cloud/event-pipeline" step={6} minWidth={620} caption="For each cancelled order the workflow refunds the payment with retries, cancels the print job and emails the customer. Big orders wait for the support agent." />
+
+A refund has three steps: refund the payment, cancel the print job, email the customer. Chained functions, each calling the next, have no memory. If one times out, nobody knows where each order stopped.
+
+A **workflow service** runs a **state machine**: a list of steps, with what to do on success, failure and timeout. It saves the state after every step, retries with backoff, and can wait days for a person. Refunds of more than 3 items wait for the support agent. The history shows which step each of the 380 orders reached.
+
+That is **orchestration**: one coordinator runs the steps. In **choreography**, each service reacts to an event and emits the next.
+
+<Compare
+  columns={["", "Orchestration (a workflow)", "Choreography (events)"]}
+  rows={[
+    ["Who knows the whole job", "The workflow definition", "Nobody; it is spread across services"],
+    ["Where is order 58213?", "One look at its history", "Search the logs of each service"],
+    ["A step fails for good", "The workflow runs its undo steps", "Each service must notice and undo"],
+    ["Adding a reaction", "Change the workflow", "Add a subscriber; nothing else changes"],
+    ["Brightpost uses it for", "Refunds: 3 steps that must all finish", "Order shipped: email and analytics react"],
+  ]}
+  caption="Use a coordinator when steps must all finish or be undone; use events when reactions are independent."
+/>
+
+Undoing finished steps after a later one fails is the [saga pattern](/system-design/patterns/saga).
+
+## On AWS, Google Cloud and Azure
+
+The ideas are the same on all three clouds. The products differ in where partitions, checkpoints and workflow state live.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Stream:** Amazon Kinesis Data Streams. The partition key picks a shard; you set the shard count, or on-demand mode adds shards. Amazon Data Firehose copies a stream into S3.
+    - **Scaling readers:** the Kinesis Client Library keeps a lease and checkpoint per shard in a DynamoDB table. Lambda reads shards in batches, several per shard if you ask, keeping each key in order. Lag shows as iterator age.
+    - **Event bus:** Amazon EventBridge. Rules match event patterns and send events to targets. A schema registry stores event shapes, and archives keep events for replay.
+    - **Workflow:** AWS Step Functions. Each state can retry and catch errors, with timeouts. A task token pauses the run until a person or another system calls back.
+    - **Kafka:** Amazon MSK, as provisioned clusters or a serverless option.
+
+    **The difference that changes a design.** Each shape is its own service, and you wire them together. A Kinesis stream's parallelism follows its shards, so a hot partition key is a hot shard, as at Brightpost. Lambda's per-shard concurrency helps many keys, but one key is still one line.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Stream:** Pub/Sub, with retention and seek for replay and ordering keys for order. There are no partitions to size. Managed Service for Apache Kafka offers partitions and offsets for Kafka clients.
+    - **Scaling readers:** Pub/Sub spreads messages over however many subscribers pull, and flow control caps how many each holds. Lag shows as the age of the oldest unacknowledged message.
+    - **Event bus:** Eventarc routes events from Google Cloud services and Pub/Sub to targets such as Cloud Run and Workflows, by filters on event attributes. Pub/Sub topics can enforce a schema.
+    - **Workflow:** Workflows. Steps are written in YAML or JSON, with retries and timeouts. Callbacks pause a run until an outside system or a person replies.
+    - **Kafka:** Managed Service for Apache Kafka.
+
+    **The difference that changes a design.** Pub/Sub moves the scaling question from partitions to keys. You never reshard, but each ordering key is delivered in order, one message at a time, so a hot key is still slow. Pub/Sub offers exactly-once delivery on pull subscriptions, and Dataflow offers exactly-once processing inside a pipeline. Neither covers an email your code sends.
+  </Tab>
+  <Tab label="Azure">
+    - **Stream:** Azure Event Hubs, with partitions, consumer groups and retention. Capture writes events to Blob Storage or Data Lake Storage.
+    - **Scaling readers:** the event processor client keeps checkpoints and partition ownership in a Blob Storage container. The usual design is one active reader per partition per consumer group.
+    - **Event bus:** Azure Event Grid. Subscriptions filter events by type and subject and push them to handlers with retries. Undelivered events can go to a dead-letter container in Blob Storage.
+    - **Workflow:** Azure Logic Apps, built in a designer with many connectors. Durable Functions, where an orchestration is code that can wait on timers and outside events.
+    - **Kafka:** Event Hubs accepts Apache Kafka clients through its Kafka endpoint. It is not a Kafka cluster you tune.
+
+    **The difference that changes a design.** Choose an event hub's partition count with care: on some tiers it cannot change after creation. Size for the sale day, not a normal one. Workflows come in two styles: Logic Apps when the steps are mostly connectors, Durable Functions when they are mostly your own code.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/event-pipeline" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every managed box." />
+
+<CloudMapping diagram="cloud/event-pipeline" lead="aws" />
+
+## Try it
+
+Pick the managed service for a job that a plain queue or topic does not fit.
+
+<DecisionTree
+  title="Which kind of managed service?"
+  tree={{
+    q: "Does one job have several steps that must all finish, with retries, timeouts or a wait for a person?",
+    yes: "A workflow service. It keeps each job's state and history, so nothing is lost when a step times out.",
+    no: {
+      q: "Do many targets each want only some kinds of event, picked by rules on the event's fields?",
+      yes: "An event bus, with one rule per target and a schema for each event type.",
+      no: {
+        q: "Do readers need high volume, order per key and replay?",
+        yes: {
+          q: "Does your team already run Kafka tools and clients?",
+          yes: "Managed Kafka: partitions, offsets and the Kafka tools you know, with the cluster run for you.",
+          no: "The cloud's own stream service: less to run, and it scales with the traffic.",
+        },
+        no: {
+          answer: "A queue or a topic is enough. Queues vs Streams shows how to pick.",
+          href: "/cloud/start-here/queues-vs-streams",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Before the fix, Asha adds 3 more workers to the stock group. How much faster does partition 2 drain?" hint="Count partitions, not workers.">
+    Not at all. With 3 partitions, at most 3 workers are busy, and only one can read partition 2. The 3 new workers wait idle.
+  </QuizItem>
+  <QuizItem question="200 events arrive each minute and the worker counts 50. After 2 hours, how many wait, and how long until the last is counted?" hint="Arrivals minus counted, then divide.">
+    24,000 arrived and 6,000 were counted, so 18,000 wait. At 50 a minute that is 360 minutes: 6 hours.
+  </QuizItem>
+  <QuizItem question="A replay group rebuilds last week's counts, and its code also sends 'back in stock' emails. What goes wrong?">
+    It sends a week of old emails again. A replay re-runs every side effect, so a replay group must skip them or check an idempotency key first.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Stream with set partitions", "On-demand stream", "Managed Kafka cluster"]}
+  rows={[
+    ["What you size", "Partitions, ahead of time", "Nothing; it follows traffic", "Brokers, disks and partitions"],
+    ["You mainly pay for", "Capacity reserved each hour", "Data written and read", "Brokers running all day, plus storage"],
+    ["A quiet night", "Same cost as a busy hour", "Close to nothing", "Same cost as a busy hour"],
+    ["Sale day at 10 times the traffic", "Add partitions in advance", "Scales with it, within limits", "Add brokers and partitions in advance"],
+    ["Every Kafka tool works", false, false, true],
+    ["Brightpost's choice", "No", "Yes: 3 engineers, spiky days", "Only if a team already runs Kafka"],
+  ]}
+  caption="The cost shape follows what you size. Brightpost's quiet nights and 4,000-order sale days favour the on-demand stream."
+/>
+
+A sized stream is cheapest at steady load; an on-demand one needs no planning. Managed Kafka buys the Kafka tools at the price of brokers that run all day.
+
+## Common pitfalls
+
+- **Watching processor use instead of lag.** Brightpost's workers looked healthy while one partition was 6 hours behind. Alarm on lag per partition, measured in time.
+- **A key with one huge value.** One product took a whole sale's events. Add a slot to keys whose events can be summed, and batch the work.
+- **More workers than partitions.** Extra workers in a group wait idle. Add partitions, or make each event cheaper.
+- **Trusting "exactly once" for side effects.** The claim stops at the service's edge. Commit results with the offset, or key every write by the event id.
+- **Chaining functions for a multi-step job.** When a step times out, nobody knows where each order stopped. Give the job a workflow that saves its state.
+
+## How to say it in an interview
+
+"I pick the partition key for even spread as well as order, because a group gets at most one busy worker per partition. One hot key can stall a partition while the dashboards look healthy, so I alarm on lag per partition, in time. If one key dominates and order does not matter, I add a slot to the key and batch the writes. I treat exactly once as a property of my writes: I commit the result with the offset, or make the write idempotent. For business events with many targets I use an event bus with rules and schemas. Any job with several steps that must all finish gets a workflow service."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is consumer lag, and why watch it instead of processor use?" level="Junior" category="Cloud">
+    **Short answer.** Lag is how far a reader is behind the newest event, counted in events or as the age of the oldest unread one. It is the delay users feel. A reader that is behind looks busy, not broken, so processor use and errors miss it.
+
+    **Why.** On Brightpost's sale day, one worker of 3 fell 6 hours behind while the group's processor use looked normal and nothing failed. The page sold 380 posters that did not exist. An alarm on any partition's lag over 5 minutes would have fired a few minutes after 9.
+
+    <AnimatedDiagram spec="animated/cloud/event-pipeline" step={3} highlight={["p2", "w2", "lag"]} caption="The lag alarm reads each partition, so one stuck partition cannot hide in an average." />
+
+    **Follow-ups the interviewer may ask.**
+    - Should the alarm use events or time?
+    - What does lag do when a reader is switched off?
+
+    **Watch out for.** Averaging lag across partitions. Two partitions at zero and one at 6 hours average to 2 hours, and the worst one is the one that matters.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Consumers lag behind a stream by two hours. Which knob fixes it on Kinesis, Pub/Sub and Event Hubs?" level="Mid" category="Cloud">
+    **Short answer.** First find out whether every partition is behind or one. If all are, add parallel readers: more shards on Kinesis, more subscribers on Pub/Sub, more partitions on Event Hubs where the tier allows. If one is, it is a hot key, and no reader count helps.
+
+    **Why.** A group gets at most one busy worker per partition, so workers past the partition count wait idle. Lambda can also run several batches per Kinesis shard. Pub/Sub has no partitions, but each ordering key is still one line. Batching often helps most: Brightpost went from 50 to about 5,000 events a minute per worker.
+
+    <AnimatedDiagram spec="animated/cloud/stream-partitions" step={2} highlight={["p0", "p1", "p2", "w3"]} caption="With 3 partitions, a fourth worker in the same group gets nothing to read." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to per-key order while partitions are added?
+    - How would you tell a hot key from slow work per event?
+
+    **Watch out for.** Adding workers first. It is the fastest change to make and does nothing once workers equal partitions.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="One event crashes the stream reader every time, and its partition stops moving. What do you do?" level="Mid" category="Cloud">
+    **Short answer.** Catch the failure per event. After a few tries, park the event and its error in a side store, such as a dead-letter queue or a bucket. Then save the offset and move on, and alarm when the side store holds anything.
+
+    **Why.** A stream never skips on its own. The reader re-reads from its checkpoint, so every event behind the bad one in that partition waits, for that group only. The lag alarm is often the first sign. After the fix, the parked event is replayed; keyed by its event id, a repeat changes nothing.
+
+    **Follow-ups the interviewer may ask.**
+    - When is skipping the event wrong, and what do you do instead?
+    - Some managed readers can send failed batches to a destination for you. What must you still check?
+
+    **Watch out for.** Retrying for ever or skipping in silence. One stalls the partition; the other loses the event with no trace.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Orchestration or choreography for refunding an order: payment, print job and email?" level="Mid" category="Cloud">
+    **Short answer.** Orchestration, with a workflow service. The three steps must all finish or be undone, with retries, timeouts, a wait for a person and a record per order. Choreography suits independent reactions, such as email and analytics reacting to "order shipped".
+
+    **Why.** Brightpost refunded 380 orders by hand over two days. Chained functions would have lost track when a step timed out. The workflow saves state after each step and retries the payment refund with backoff. Refunds of more than 3 items wait for the support agent. Its history answers "where is this order?" in one look.
+
+    <AnimatedDiagram spec="animated/cloud/event-pipeline" step={6} path="bus>workflow>payments" caption="A rule starts the workflow; the workflow drives every step and waits for approval when needed." />
+
+    **Follow-ups the interviewer may ask.**
+    - The refund succeeds but the print job cannot be cancelled. What now?
+    - How long can a workflow wait for a person?
+
+    **Watch out for.** Putting every flow in one workflow. Use a coordinator where steps depend on each other, not for every event in the shop.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A stream service advertises exactly-once. What does that promise, and what must your consumer still do?" level="Senior" category="Cloud">
+    **Short answer.** It promises something inside the service: a repeated publish dropped within a window, an acknowledgement accepted once, or an engine that commits reads, state and output together. It does not cover what your code does outside, such as a database write, an email or a card charge. Your consumer still makes the effect happen once.
+
+    **Why.** A reader that crashes between its write and its offset save repeats the write, whatever the broker promised. Brightpost saves the stock counts and the offset in one database commit, and reads the offset back after a crash. Where one commit is impossible, as with an email, the consumer records each event id and skips one it has seen.
+
+    <AnimatedDiagram spec="animated/cloud/delivery-guarantees" step={3} caption="The counts and the offset are saved in one commit, so a crash after it changes nothing." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you make an email send happen once?
+    - What does a replay do to a consumer built this way?
+
+    **Watch out for.** Switching the setting on and removing the idempotency check. The next crash inside the worker repeats the side effect.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design live stock counts for a sale where one product may get half of all events." level="Senior" category="Cloud">
+    **Short answer.** Key by product id plus a slot, so the hot product spreads over every partition. Batch and sum in the workers, store part-counts and add them on read. Alarm on lag per partition. Most important, checkout never trusts a count that can lag: it reserves stock in the database with a conditional update.
+
+    **Why.** Keyed by product id, one partition got every hero-poster event and fell 6 hours behind. Slots work because a count is a sum, and batches of 500 lift a worker from 50 to about 5,000 events a minute. A derived count can always lag, so it is for display. The reservation, "take one if any are left", is what stops the 1,501st sale.
+
+    <AnimatedDiagram spec="animated/cloud/event-pipeline" step={4} highlight={["shop", "p0", "p1", "p2"]} caption="Product id plus a slot from 0 to 5 spreads the hot product over all 3 partitions." />
+
+    **Follow-ups the interviewer may ask.**
+    - How many slots, and what does each extra slot cost on read?
+    - How do you rebuild the counts after a bug?
+
+    **Watch out for.** Adding partitions and calling it fixed. One key still hashes to one partition.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Queues vs Streams](/cloud/start-here/queues-vs-streams)
+- [Receiving and Sending Webhooks on the Cloud](/cloud/networking/webhooks-on-the-cloud)
+- [Serverless Functions](/cloud/compute/serverless-functions)
+- [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines)
+- [Quotas, Throttling, Retries and Backoff on the Cloud](/cloud/resilience/quotas-and-retries)
+- [Messaging & Streaming on AWS](/cloud/aws/messaging)
+- [Messaging & Streaming on Google Cloud](/cloud/gcp/messaging)
+- [Messaging & Streaming on Azure](/cloud/azure/messaging)
+- [Message Queues and Pub/Sub](/system-design/patterns/message-queues)
+- [Saga](/system-design/patterns/saga)
+- [Idempotency](/system-design/patterns/idempotency)
+- [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
+
+## Further reading
+
+- [Amazon Kinesis Data Streams Developer Guide](https://docs.aws.amazon.com/streams/latest/dev/introduction.html): shards, partition keys and consumers.
+- [AWS Step Functions Developer Guide](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html): state machines, retries and callbacks.
+- [Workflows overview](https://cloud.google.com/workflows/docs/overview): Google Cloud's workflow service.
+- [Event Hubs features and terminology](https://learn.microsoft.com/azure/event-hubs/event-hubs-features): partitions, consumer groups and checkpoints.

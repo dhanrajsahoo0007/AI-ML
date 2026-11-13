@@ -1,11 +1,318 @@
 ---
 title: "Availability, SLAs and What Fails Together"
-description: "What 99.9% means in minutes, why chained parts multiply downtime, and how zones and regions set what fails together."
-status: outline
+description: "What a cloud SLA really promises, how the parts of a request path multiply into your real availability, and which failures take several parts at once."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** what 99.9% means in minutes, why dependencies in a chain multiply unavailability while parallel copies divide it, and how zones and regions are the units of failing together. It defines SLA, SLO and SLI once.
+<KeyIdea>
+  A system is up only when every part it needs is up at once, so it is less available than any one part, and each provider promises only its own.
+</KeyIdea>
 
-**Related reading on this site:** [Availability, reliability and the nines](/system-design/fundamentals/availability) · [What the Cloud Is](/cloud/fundamentals/what-is-cloud)
+## The story
+
+In spring 2026 Brightpost's wholesale shop signed contracts with about 300 gift shops. The sales draft said the site would be up "99.99% of every month". Nobody worked out that this allows 4.3 minutes of downtime a month. Every order crossed six parts in a row: an edge cache, a load balancer, an app server, a session cache, the orders database and an outside card-payment provider. The session cache was one node in one zone, and there was one payment provider. One Wednesday in June at 11:00, the payment provider stopped answering for 3 hours. Every cloud service Brightpost used stayed healthy. About 75 shop orders failed, and the contract owed all 300 wholesale shops a credit. Then Asha multiplied the six parts out. The path came to about 99.7%: about 2 hours of downtime in an average month.
+
+Every step below asks two questions: what does a number really promise, and which parts fail together?
+
+## How it works
+
+Four words first. <Term id="availability" /> is the share of time a system answers its users correctly. An <Term id="sla">SLA</Term>, a service level agreement, is a promise in a contract, with a penalty when it is missed. An <Term id="slo">SLO</Term> is the internal target a team sets for itself. An <Term id="sli">SLI</Term> is the measurement both are checked against, such as the share of checkouts that succeed.
+
+### Step 1: Parts in a row multiply
+
+<AnimatedDiagram spec="animated/cloud/failure-domains" step={1} minWidth={620} caption="Brightpost's order path as the contract was signed: six parts in a row, with one session cache in zone B and one payment provider outside the cloud." />
+
+An order succeeds only if all six parts answer. When parts sit in a row, their availabilities multiply, so each one takes a little off the total. Copies side by side do the opposite: the system fails only when every copy fails. [Availability, reliability and the nines](/system-design/fundamentals/availability) teaches both rules.
+
+Here is the figure Asha wrote down for each part. Most came from a provider's or partner's contract, rounded; the servers' came from the shop's own history.
+
+<Compare
+  columns={["Part on the path", "Brightpost's figure", "Why that figure"]}
+  rows={[
+    ["Edge cache (CDN)", "99.99%", "Provider-wide, many copies"],
+    ["Load balancer", "99.99%", "Runs in all three zones"],
+    ["App servers", "99.99%", "One per zone; deploys are the main risk"],
+    ["Session cache", "99.9%", "One node in one zone"],
+    ["Orders database", "99.95%", "Primary and standby in two zones"],
+    ["Card payments", "99.9%", "One outside provider"],
+    ["The whole path", "about 99.72%", "All six multiplied"],
+  ]}
+  caption="0.9999 x 0.9999 x 0.9999 x 0.999 x 0.9995 x 0.999 = about 0.9972."
+/>
+
+The contract promised more than any single part offered. No design can do that with parts in a row.
+
+<PremiumBreak />
+
+### Step 2: What 99.7% means in minutes
+
+<AnimatedDiagram spec="animated/cloud/nines-ladder" step={3} minWidth={620} caption="The nines ladder. Brightpost's path sits between the two lowest rungs; its contract sat on the fourth." />
+
+A percentage hides the size of the gap. Turn it into time. A 30-day month has 43,200 minutes. At 99.99%, the allowed downtime is 0.01% of that: 4.3 minutes. At 99.72%, it is 0.28%: about 121 minutes, or 2 hours.
+
+So the shop promised about 28 times less downtime than its path could deliver. Each rung also needs a different design. Three nines needs copies in several zones. Four nines needs every part in parallel and recovery with no person in the loop, because nobody paged at 3 a.m. acts within 4 minutes.
+
+### Step 3: What a cloud SLA really promises
+
+When Brightpost read its providers' SLAs after the outage, it found five surprises.
+
+<Compare
+  columns={["What people assume", "What an SLA usually says"]}
+  rows={[
+    ["The service will be up 99.9% of the time", "If it is not, you may claim a credit. It promises money back, not uptime"],
+    ["One number covers the cloud", "Each service has its own SLA, its own number and its own meaning of \"down\""],
+    ["Down means my site is down", "Down is measured the provider's way, such as the share of failed requests in each few-minute window"],
+    ["Every outage counts", "Exclusions: your own mistakes and settings, preview features, events outside its control, a suspended account"],
+    ["The credit arrives by itself", "You file a claim before a deadline, and the credit goes on a future bill, capped at that service's charge"],
+  ]}
+  caption="The pattern holds on all three big clouds. Each service's own SLA text has the details."
+/>
+
+Two more points change designs. Some services promise a higher figure only when you run copies in two or more zones. And the SLA covers only the provider's part: your code, settings and partners are yours, as [Shared Responsibility](/cloud/fundamentals/shared-responsibility) explains. A 3-hour database outage would earn Brightpost a share of one month's database bill. The lost orders and the wholesale credits would still be its own loss.
+
+### Step 4: The partner nobody counted
+
+<AnimatedDiagram spec="animated/cloud/failure-domains" step={2} minWidth={620} caption="The failure: the payment provider stops answering for 3 hours. Every cloud part is healthy, and every checkout fails." />
+
+The payment provider sits outside the cloud, but every checkout needs it, so it is part of the path.
+
+<Callout tone="red" title="What breaks">
+  At 11:00 the payment provider stops answering. Each checkout waits for its reply, then fails after 30 seconds. The servers, the database and the load balancer report healthy, so no cloud alarm fires. Customers tell support first. By 14:00 about 75 orders are lost, and the wholesale contract owes every one of the 300 shops a credit for June.
+</Callout>
+
+The cloud's SLAs pay nothing, because the cloud was up. The payment provider's contract pays a small share of one month's fees. Brightpost had promised more than anyone had promised Brightpost.
+
+### Step 5: Copies side by side
+
+<AnimatedDiagram spec="animated/cloud/failure-domains" step={3} minWidth={620} caption="A second payment provider. When the first does not answer within 5 seconds, the app server tries the backup." />
+
+Brightpost signs with a second payment provider. The app server waits 5 seconds for the first one, then sends the charge to the backup. An order now fails only if both are down at once.
+
+With two providers at 99.9% each, the chance that both are down is 0.001 x 0.001, one in a million: 99.9999% on paper. Asha writes down 99.99%. The switch is new code that can fail, and both providers depend on the same card networks. Copies help only as much as they fail separately, and the rest of this page is about that word.
+
+### Step 6: Failure domains, from one machine to your own changes
+
+A **failure domain** is everything that fails together when one thing breaks. Each size takes more with it than the one before. [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge) introduced zones and regions; this table adds the domains that page left out.
+
+<Compare
+  columns={["Failure domain", "What goes with it", "Copies that survive it"]}
+  rows={[
+    ["One host", "Every virtual machine on that physical machine", "Copies on other hosts"],
+    ["One rack", "Machines that share a power feed or a network switch", "Copies spread across racks; some clouds let you ask for that"],
+    ["One zone", "Every server, disk and node in its buildings", "Copies in two or three zones"],
+    ["One region", "Every zone in it", "A copy in a second region"],
+    ["A provider-wide service", "Anything that depends on it, in every region", "A design that keeps running without changing it"],
+    ["Your own change", "Everything that got the bad deploy or config", "Rolling out to one domain at a time"],
+  ]}
+  caption="Bigger domains fail less often. The last row can be the biggest of all."
+/>
+
+<AnimatedDiagram spec="animated/cloud/failure-domains" step={4} minWidth={620} caption="The session cache gets a copy in zone C. If zone B goes dark, the copy takes over in about a minute." />
+
+Brightpost's session cache had one node, in zone B. The shop ran in three zones, yet a fault in zone B would sign every customer out and stop checkouts. A part that lives in one zone caps the whole path at that zone. The cache now keeps a copy in zone C, and its figure moves to 99.99%.
+
+### Step 7: Copies that share a fate
+
+<AnimatedDiagram spec="animated/cloud/failure-domains" step={5} minWidth={620} caption="A new version goes to zone C first, then B, then A. A bad push stops at one zone." />
+
+Three servers in three zones look like three separate copies. But all three boot from one **image**, the saved disk a server starts from, and read one settings file. A bad image or a wrong setting reaches every zone in the same minute. This is a **correlated failure**: copies fail together because they share a cause.
+
+The fix is to roll out along failure domains. Brightpost's pipeline updates zone C first, waits 20 minutes and checks the error rate, then moves to zone B and zone A. A bad version breaks one zone, and the load balancer moves its customers to the other two. Trying a new version on a small share of traffic first is a <Term id="canary" />; [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies) covers the patterns.
+
+### Step 8: When the provider itself has a bad day
+
+<AnimatedDiagram spec="animated/cloud/failure-domains" step={6} minWidth={620} caption="The provider's health feed reports an incident in Brightpost's region, and the pipeline holds every deploy until it clears." />
+
+A cloud has two halves. The **data plane** serves your traffic: running servers, stored files, database reads. The **control plane** creates and changes things: the console, the API, and the scaling rules that add servers. During a control-plane outage, running servers keep serving, but new ones may not start. So Brightpost keeps enough servers running to carry a normal day without scaling.
+
+Every provider publishes a public status page and a personal view of events that touch your own resources. Brightpost sends that personal feed to its alerts and its pipeline. While the provider reports an incident in the region, nothing new is deployed, so an error has only one possible cause. Status pages can lag at the start of an incident, so your own measurements come first.
+
+### Step 9: Choosing a target with the business
+
+A target is a business decision, so start with what an hour down costs. On a normal day Brightpost takes about 25 orders in a daytime hour; on a sale day, more than 300. Missing the wholesale promise adds a credit to 300 invoices.
+
+Then price each rung. With the cache copy and the backup provider, the path multiplies to about 99.9%: about 9 hours down a year instead of about 24. That saves about 400 orders on normal days. Reaching 99.99% would save about 200 more and needs a second region. Brightpost stops at 99.9%.
+
+A promise must sit below what the path delivers, so a normal month never pays credits. At renewal Brightpost promises the wholesale shops 99.5% a month, about 3.6 hours, and keeps an internal SLO of 99.9%. The gap between the SLO and 100% is the <Term id="error-budget" />; [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call) turns it into alerts.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: per-service SLAs that pay credits, figures that depend on how you deploy, and a view of the provider's incidents.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Where SLAs are published:** one SLA page per service on the AWS website. Some services have none.
+    - **What a miss pays:** service credits, a share of that service's charges for the month, put on a future bill. You request them through AWS Support.
+    - **When the higher number applies:** Amazon EC2's SLA has a region-level figure for instances in two or more Availability Zones. A single instance gets a lower one.
+    - **Public status:** the AWS Health Dashboard shows the health of each service in each region.
+    - **Your own events:** the account view of AWS Health lists events that touch your resources. Its events can go to Amazon EventBridge to raise an alert or pause a pipeline.
+
+    **The difference that changes a design.** AWS treats zones and regions as its main fault-isolation boundaries, and most services are zonal or regional. A few global services, such as IAM and Route 53, run their control plane in one region while their data plane runs everywhere. So a recovery plan should not depend on creating or editing such resources during an incident. Set up the switch in advance, such as DNS failover driven by health checks.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Where SLAs are published:** one SLA page per product, listed on the Google Cloud SLA index.
+    - **What a miss pays:** financial credits, a share of that product's charges for the month. You request them within the time the SLA sets.
+    - **When the higher number applies:** Compute Engine's SLA gives a higher figure for instances spread across several zones than for a single instance.
+    - **Public status:** the Google Cloud Service Health dashboard lists incidents by product and location.
+    - **Your own events:** Personalized Service Health shows incidents that may affect your projects, and can raise alerts through Cloud Monitoring.
+
+    **The difference that changes a design.** Some resources are global, such as a VPC network or a global external load balancer. One configuration serves every region, so a bad change to it can reach every region at once. Treat changes to global resources like a deploy: review them, roll them out in stages, and keep the last good version ready.
+  </Tab>
+  <Tab label="Azure">
+    - **Where SLAs are published:** one document, the Service Level Agreements for Online Services, with a section for each service.
+    - **What a miss pays:** service credits, a share of the affected service's monthly fee. You claim them through Azure support.
+    - **When the higher number applies:** Virtual Machines get different figures for one VM, for VMs in an availability set, and for VMs across availability zones.
+    - **Public status:** the Azure status page shows wide incidents.
+    - **Your own events:** Azure Service Health shows incidents, planned maintenance and advisories for your subscriptions. Resource Health shows each resource, and Service Health alerts can notify a team.
+
+    **The difference that changes a design.** Azure names rack-level failure domains for you. An availability set spreads VMs across fault domains, racks with their own power and network switch. It also spreads them across update domains, which get planned maintenance at different times. Availability zones go one size bigger. The deployment choice sets the SLA figure, so it belongs in the design.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/failure-domains" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/failure-domains" lead="aws" />
+
+## Try it
+
+Compare two targets: how much downtime each allows per day, week, month and year.
+
+<NinesCalculator a={99.9} b={99.99} />
+
+<Quiz>
+  <QuizItem question="Six parts sit in a row, and each one really is 99.99% available. What is the path's availability, and how many minutes a month is that?" hint="Multiply 0.9999 six times.">
+    About 99.94%, which allows about 26 minutes a month. Even if every part had four nines, the path would not.
+  </QuizItem>
+  <QuizItem question="The orders database misses its SLA by 3 hours in a month. What does Brightpost get back?" hint="Whose losses does an SLA cover?">
+    A credit worth a share of that month's database bill, after it files a claim. The 75 lost orders and the 300 wholesale credits stay Brightpost's loss.
+  </QuizItem>
+  <QuizItem question="A wrong setting is pushed to all three app servers in the same minute. How many zones protect the shop?">
+    None. Zones protect against a building failing, not against a change every copy receives. Rolling out one zone at a time keeps two zones healthy.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "As signed", "Fix the chain", "Four nines for real"]}
+  rows={[
+    ["Path, multiplied out", "About 99.7%", "About 99.9%", "About 99.99%"],
+    ["Downtime in an average month", "About 2 hours", "About 43 minutes", "About 4 minutes"],
+    ["What it adds", "Nothing", "Cache copy in a second zone, backup payment provider, zone-by-zone deploys", "All of that, plus a warm second region and practised switch-overs"],
+    ["New running costs", "None", "One cache node and the backup provider's fees", "Roughly a second copy of the servers and database"],
+    ["Engineer time", "None", "About 3 weeks", "Several months, then a drill every quarter"],
+    ["Orders saved a year, normal days", "0", "About 400", "About 600"],
+    ["Safe to promise in a contract", "99%", "99.5%", "99.9%"],
+  ]}
+  caption="Brightpost's numbers, at about 25 orders in a normal daytime hour. Sale days lose more than 300 orders an hour."
+/>
+
+Fixing the chain buys two thirds of the gain for a few weeks of work. The last rung costs far more for about 200 orders a year.
+
+## Common pitfalls
+
+- **Promising the provider's number.** Your path multiplies many parts, so it is always below any single one. Multiply your own path first, then promise less than the product.
+- **Treating a credit as insurance.** A credit is a share of one service's bill. It never covers lost orders or the credits you owe your own customers.
+- **Leaving partners out of the chain.** Payments, email, sign-in and DNS are parts of the path too. List every call an order makes, inside and outside the cloud.
+- **Copies that share a fate.** Three zones that boot one image and read one settings file fail together on a bad push. Roll out one zone at a time.
+- **Recovery that needs the control plane.** Planning to create servers during an incident depends on the part most likely to be struggling. Keep enough capacity running, and set up failover in advance.
+
+## How to say it in an interview
+
+"I start by listing every part a request needs, including partners outside the cloud such as payments. Parts in a row multiply, so six parts at three or four nines can come to about 99.7%, which is about 2 hours a month. A provider's SLA is a credit on one service's bill when it misses, with exclusions. It is not uptime, and it never covers my losses. I raise the product with copies that fail separately: across zones, with a second provider, and with deploys that go one zone at a time. I keep enough capacity running that recovery never depends on the control plane. Then I pick the target with the business from what an hour down costs, and I promise less than the path delivers."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does three nines actually buy you?" level="Junior" category="Cloud">
+    **Short answer.** 99.9% allows about 43 minutes of downtime in a 30-day month, or about 8.8 hours a year. That is enough for a person to notice and fix a problem. It usually needs copies in two or three zones and a managed failover.
+
+    **Why.** Downtime is (100% minus the target) times the period: 0.1% of 43,200 minutes is about 43. One more nine cuts that to about 4.3 minutes, too short for a person to react. Brightpost's six-part path multiplied to about 99.7%, about 2 hours a month.
+
+    <AnimatedDiagram spec="animated/cloud/nines-ladder" step={2} caption="Each rung allows less downtime and needs a different kind of design." />
+
+    **Follow-ups the interviewer may ask.**
+    - Is 99.9% a month the same as 99.9% a year?
+    - What would you add to move from three nines to four?
+
+    **Watch out for.** Quoting a nine without its period. 99.9% a year allows one 8.8-hour outage; 99.9% a month does not.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Two 99.9% services in a chain: what is the system's availability?" level="Mid" category="Cloud">
+    **Short answer.** About 99.8%. Parts in a row multiply: 0.999 x 0.999 is about 0.998. That allows about 86 minutes a month, twice what either part allows alone.
+
+    **Why.** The request succeeds only when both answer, so each part's downtime adds to the total. Brightpost's six-part order path, payment provider included, came to about 99.72%. Copies side by side work the other way: two independent payment providers at 99.9% each are both down about one time in a million.
+
+    <AnimatedDiagram spec="animated/cloud/failure-domains" path="shoppers>cdn>lb>server-a>payments" caption="One order crosses every part on this path, and each one multiplies in." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you raise the product without changing either service?
+    - Why is the parallel figure optimistic in real life?
+
+    **Watch out for.** Taking the lowest part's figure as the answer. The chain is always below its weakest part.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why does a single-zone design cap your availability no matter how good the code is?" level="Mid" category="Cloud">
+    **Short answer.** Everything in one zone fails together when that zone fails. If any part on the path lives in one zone, the whole path can be no better than that zone, whatever the code does.
+
+    **Why.** A zone is a group of buildings with shared power, cooling and network. Brightpost ran its servers in three zones but kept its session cache as one node in zone B. A fault there would stop checkouts, even with healthy servers elsewhere. A copy of the cache in zone C removed that cap.
+
+    <AnimatedDiagram spec="animated/cloud/failure-domains" step={4} highlight={["cache", "cache-copy", "server-a", "db"]} caption="A one-node cache in zone B was the single-zone part on a three-zone path." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find the single-zone parts in an existing system?
+    - What does the cache copy cost while nothing is broken?
+
+    **Watch out for.** Saying "we run in three zones" when only the servers do. The database, cache and queues count too.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What does a cloud provider's SLA actually promise you?" level="Mid" category="Cloud">
+    **Short answer.** A credit, not uptime. If one service misses its own figure, measured the provider's way, you can claim a share of that service's bill for the month. It covers none of your own losses.
+
+    **Why.** Each service has its own SLA, its own meaning of "down" and its own exclusions, such as your own mistakes and preview features. Some figures apply only to copies in two or more zones. You claim before a deadline, and the credit is capped at that service's charge. A 3-hour database outage would return part of Brightpost's database bill, not 75 lost orders or 300 wholesale credits.
+
+    **Follow-ups the interviewer may ask.**
+    - Why is a provider's SLA figure usually lower than its internal target?
+    - How do you use SLAs when you plan your own design?
+
+    **Watch out for.** Treating the SLA figure as a measure of how often the service is up. It is the point where the provider starts paying.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A large customer asks you to promise 99.99% in a contract. How do you decide what to promise?" level="Senior" category="Cloud">
+    **Short answer.** First multiply the real path, including partners, to see what it delivers today. Then price each rung against what an hour down costs. Promise a figure below what the path delivers, and keep a tighter internal target.
+
+    **Why.** Brightpost promised 99.99%, 4.3 minutes a month, on a path that multiplied to about 99.7%. One 3-hour partner outage owed credits to 300 shops. A cache copy and a backup provider lift the path to about 99.9% in about 3 weeks. Four nines needs a second region and months of work, for about 200 more orders a year. So Brightpost promises 99.5% and runs to an internal 99.9%.
+
+    <AnimatedDiagram spec="animated/cloud/nines-ladder" step={3} caption="The promise sat on the fourth rung; the path sat below the second." />
+
+    **Follow-ups the interviewer may ask.**
+    - The customer insists on 99.99%. What would you need to change, and what would you charge?
+    - How would you measure availability the way the contract defines it?
+
+    **Watch out for.** Copying the cloud provider's figure into your contract. Your path has many parts, and the provider's credit will not pay your customers.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [Shared Responsibility](/cloud/fundamentals/shared-responsibility)
+- [High Availability Inside One Region](/cloud/resilience/ha-patterns)
+- [Disaster Recovery: Four Tiers, RPO and RTO](/cloud/resilience/dr-strategies)
+- [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region)
+- [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call)
+- [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies)
+- [Observability on AWS](/cloud/aws/observability)
+- [Observability on Google Cloud](/cloud/gcp/observability)
+- [Observability on Azure](/cloud/azure/observability)
+- [Availability, reliability and the nines](/system-design/fundamentals/availability)
+- [Non-Functional Requirements](/system-design/fundamentals/non-functional-requirements)
+
+## Further reading
+
+- [AWS Service Level Agreements](https://aws.amazon.com/legal/service-level-agreements/): one page per service.
+- [Google Cloud Service Level Agreements](https://cloud.google.com/terms/sla): the index of product SLAs.
+- [Microsoft Service Level Agreements for Online Services](https://www.microsoft.com/licensing/docs/view/Service-Level-Agreements-SLA-for-Online-Services): the single Azure SLA document.
+- [AWS Fault Isolation Boundaries](https://docs.aws.amazon.com/whitepapers/latest/aws-fault-isolation-boundaries/abstract-and-introduction.html): zones, regions, control planes and data planes.
