@@ -1,60 +1,118 @@
 ---
 title: "Containers on Google Cloud"
 description: "GKE Standard, GKE Autopilot, Cloud Run and Artifact Registry: what each one does, when to pick it, and the matching AWS and Azure service."
+updated: 2026-11-14
 ---
 
-Google Cloud keeps containers simple: **GKE** when you want Kubernetes, **Cloud Run** when you don't. There is no separate ECS-style orchestrator and no Fargate-style capacity type. Cloud Run covers that ground on its own, and also runs functions and batch jobs.
+Brightpost's shop runs as containers: three copies of shop-web, one per zone, beside checkout and search. On Google Cloud, Google Kubernetes Engine (GKE) runs them on a cluster, and Cloud Run runs an image with no cluster at all. One GKE choice changes a design: in Autopilot mode Google runs the nodes, and the bill follows what each pod asks for.
+
+## The idea
+
+A <Term id="kubernetes">Kubernetes</Term> cluster keeps a written list of what should run in its control plane, and its nodes keep changing until they match it. On GKE, Google always runs the control plane; Autopilot hands it the nodes as well.
+
+<Callout tone="info" title="Learn the idea">
+  [Kubernetes Concepts](/cloud/compute/kubernetes-concepts) explains the cluster with Brightpost's shop. [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas) covers images with no cluster; [Containers and Registries](/cloud/compute/containers-and-registries) covers images themselves.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" stepper cloud="gcp" minWidth={620} caption="One GKE cluster: Google runs the control plane at the top, and three nodes in three zones run Brightpost's pods." />
+
+<CloudMapping diagram="cloud/k8s-cluster-anatomy" lead="gcp" />
 
 ## TL;DR
 
-- **Default to Cloud Run** for stateless HTTP services, event handlers and jobs. It scales on requests, down to zero.
-- **Use GKE when Kubernetes is the requirement**, and start in **Autopilot** mode so Google runs the nodes and you pay per pod.
-- **Use GKE Standard** when you need node-level control: custom node pools, GPUs with specific drivers, DaemonSets, privileged pods.
-- **Coming from AWS:** Cloud Run ≈ Lambda + Fargate + ECS Express Mode; GKE Autopilot ≈ EKS Auto Mode; GKE Standard ≈ EKS with node groups.
+- **Cloud Run first** for stateless HTTP services, event handlers and jobs. It scales on requests, down to zero.
+- **GKE when Kubernetes is the requirement:** many services on one platform, Helm charts or operators.
+- **Start GKE in Autopilot.** Google runs, patches and sizes the nodes, and you pay mostly for what pods request.
+- **Pick GKE Standard** for node-level control: your own machine types, node pools and node settings.
 
 ## At a glance
 
 <CloudGroupTable group="containers" lead="gcp" />
 
+## How it fits together on Google Cloud
+
+A deploy pipeline sends the desired state, "3 copies of shop-web", to the GKE control plane, which Google runs. A regional cluster copies it across zones, so one zone's outage does not stop changes. The nodes are Compute Engine virtual machines. In Standard mode you group them into <Term id="node-pool">node pools</Term>; in Autopilot Google picks them. On each node the kubelet pulls the image from Artifact Registry and starts the <Term id="pod">pods</Term>.
+
+| The idea | On Google Cloud | What to know |
+|---|---|---|
+| Control plane | GKE, zonal or regional | A zonal cluster has one control plane in one zone. Use regional for production. |
+| Nodes | Node pools of Compute Engine VMs | One pool spread over three zones gives one shop-web node per zone. |
+| Hands-off nodes | Autopilot | The bill follows pod requests. Some node-level access, such as privileged pods, is refused. |
+| Upgrades | Release channels | GKE upgrades on its own schedule; set a maintenance window so it never lands in a sale. |
+
 ## Services
-
-### Cloud Run
-
-<CloudServiceProfile id="gcp-cloud-run" />
-
-Cloud Run has three shapes. **Services** answer HTTP requests and scale with concurrent requests. **Jobs** run containers to completion, in parallel tasks if needed. **Functions** (formerly Cloud Functions) let you deploy source code and have Cloud Run build the container. Each instance can serve many requests at once (up to 1,000), so it scales out far less than one-request-per-instance platforms like Lambda.
-
-Two settings matter most in a design: **minimum instances** (keep some warm to avoid cold starts on latency-sensitive paths) and **billing mode** (request-based for spiky APIs, instance-based for services that do background work or hold WebSockets).
 
 ### Google Kubernetes Engine
 
 <CloudServiceProfile id="gcp-gke" />
 
-**Autopilot** is the recommended mode for new clusters. Google provisions nodes to fit pod requests, patches and upgrades them, and enforces secure defaults. You pay for the CPU, memory and storage your pods request, not for whole nodes, so bin-packing waste is Google's problem. **Standard** mode is for when you need to tune nodes yourself.
+**Pick it when** several teams share one platform, or you need Kubernetes tools. Start in Autopilot. In Standard you pay for whole nodes, empty room included. In Autopilot a pod that asks for 2 vCPU and uses 0.3 still pays for 2.
+
+### Cloud Run
+
+<CloudServiceProfile id="gcp-cloud-run" />
+
+**Pick it when** a stateless service needs no cluster; [Serverless on Google Cloud](/cloud/gcp/serverless) covers it.
 
 ### Artifact Registry
 
 <CloudServiceProfile id="gcp-artifact-registry" />
 
-## What changes when you move a design from AWS
+**Pick it when** you store images for GKE or Cloud Run. Deploy by digest, the fingerprint of an image's exact bytes, not by a moving `latest` tag.
 
-| AWS design | On Google Cloud | What actually changes |
-|---|---|---|
-| Lambda functions | Cloud Run functions or services | Instances serve many requests at once, so fewer cold starts and fewer database connections |
-| ECS on Fargate | Cloud Run | No cluster or service objects; scale-to-zero is built in |
-| ECS on EC2 / EKS node groups | GKE Standard | Node pools replace capacity providers and node groups |
-| EKS Auto Mode | GKE Autopilot | Billing is per pod request rather than per node |
-| ECR | Artifact Registry | Also hosts language packages |
+## Common mistakes
+
+- **Standard mode by habit.** Without a need for node control, you take on node sizing and patching for nothing.
+- **Requests copied from a template.** In Autopilot every pod pays for what it asks. Size requests from real use.
+- **No maintenance window.** Release channels upgrade the cluster on Google's schedule. Choose the hours yourself.
+
+## Where this shows up in system design
+
+- **Stateless web tier:** shop-web on GKE with a readiness check, behind a Google Cloud load balancer. See [load balancing patterns](/system-design/patterns/load-balancing).
+- **Queue workers:** Pub/Sub consumers as a GKE Deployment that scales on the backlog, not on CPU. See [back pressure](/system-design/patterns/back-pressure).
 
 ## Related
 
-[Containers on AWS](/cloud/aws/containers) · [Containers on Azure](/cloud/azure/containers) · [Choosing compute on AWS](/cloud/start-here/choosing-compute)
+[Kubernetes Concepts](/cloud/compute/kubernetes-concepts) · [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas) · [Containers and Registries](/cloud/compute/containers-and-registries) · [Containers on AWS](/cloud/aws/containers) · [Containers on Azure](/cloud/azure/containers) · [Serverless on Google Cloud](/cloud/gcp/serverless) · [System Design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Cloud Run or GKE for a new microservice on Google Cloud?" category="Cloud" level="Mid">
-    Cloud Run, unless the service needs something only Kubernetes gives you: operators or CRDs, DaemonSets, custom networking, or a shared platform many teams already deploy to. Cloud Run removes cluster operations entirely and scales to zero.
+  <InterviewQuestion question="What is the difference between GKE Standard and Autopilot?" category="Cloud" level="Junior">
+    **Short answer.** Google runs the control plane in both. In Standard you manage the nodes and pay for them whole. In Autopilot Google manages them, and you pay mostly for what pods request.
+
+    **Why.** In Standard, Brightpost picks 3 nodes with 4 vCPU and 16 GB each, upgrades them, and pays for them even when half empty. In Autopilot it writes only pod specs, and Google adds or removes machines to fit them.
+
+    <AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" cloud="gcp" highlight={["kubelet1", "kubelet2", "kubelet3"]} minWidth={620} caption="The node band: yours to size and patch in Standard, Google's in Autopilot." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would make you pick Standard anyway?
+    - What kinds of pods does Autopilot refuse?
+
+    **Watch out for.** Saying Autopilot has no nodes. The nodes exist; you do not manage them.
   </InterviewQuestion>
-  <InterviewQuestion question="How does Cloud Run's concurrency change capacity planning compared with Lambda?" category="Cloud" level="Senior">
-    A Lambda environment handles one request at a time, so 1,000 concurrent requests need 1,000 environments. A Cloud Run instance can handle many at once (up to 1,000), so the same load may need only a handful of instances. That means fewer cold starts and fewer database connections, but each instance must be safe to run requests in parallel.
+
+  <InterviewQuestion question="Cloud Run or GKE for a new microservice on Google Cloud?" category="Cloud" level="Mid">
+    **Short answer.** Cloud Run, unless the service needs what only Kubernetes gives: operators, node-level agents, or a shared cluster other teams already use.
+
+    **Why.** Cloud Run removes the cluster: no version to upgrade, no nodes, and it scales to zero. GKE pays off when many services share one platform with namespaces and policies. If Brightpost already runs GKE for its shop, one more Deployment there may be less new work than a second platform.
+
+    **Follow-ups the interviewer may ask.**
+    - How would a Cloud Run service and a GKE service call each other privately?
+    - What would make you move a service onto GKE later?
+
+    **Watch out for.** Treating Cloud Run as "functions only". It runs any container image that answers HTTP.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A GKE Autopilot bill doubled after a release, but traffic did not change. What do you check?" category="Cloud" level="Mid">
+    **Short answer.** Pod requests. Autopilot bills mostly by what pods request, so a release that raised requests raises the bill, whatever the real use.
+
+    **Why.** Suppose the release raised shop-web's request from 1 vCPU to 2. Real use stayed near 0.3 vCPU a pod, but 3 copies now reserve 6 vCPU instead of 3. Compare requested with used, then set requests to real use plus headroom.
+
+    <AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" cloud="gcp" highlight={["scheduler", "web1", "web2", "web3"]} minWidth={620} caption="The scheduler places pods by their requests, and Autopilot bills those same requests." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why not set requests very low to save money?
+    - How would you catch this before the release ships?
+
+    **Watch out for.** Counting nodes. In Autopilot the nodes are Google's; the bill follows requests.
   </InterviewQuestion>
 </InterviewQuestions>

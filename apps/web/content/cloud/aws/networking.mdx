@@ -1,9 +1,24 @@
 ---
 title: "Networking on AWS"
 description: "VPC, subnets, security groups, NAT, load balancers, Transit Gateway, PrivateLink, VPC Lattice and Direct Connect, with the Google Cloud and Azure equivalents."
+updated: 2026-11-14
 ---
 
 Every AWS architecture diagram sits inside a VPC, even when nobody draws it. Getting the network right decides what can talk to what, what fails together, and a surprising share of the bill (NAT and cross-zone traffic). This page covers the network inside a Region. DNS, CDN and global entry points are in [Edge, DNS & CDN](/cloud/aws/edge).
+
+## The idea
+
+A private network is a fenced range of addresses where only the front door, a load balancer, faces the internet. The app servers and the database keep private addresses in their own subnets. Each tier runs in three zones, so losing one zone costs a short failover instead of the shop.
+
+<Callout tone="blue" title="Learn the idea">
+  New to private networks? [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets) builds Brightpost's network step by step, and [Private Endpoints](/cloud/networking/private-endpoints) shows how private servers reach managed services. This page names the AWS pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/vpc-three-tier" stepper cloud="aws" minWidth={620} caption="Brightpost's network on AWS in five steps: one public load balancer, private app and data subnets, three zones, and a zone failure." />
+
+<CloudMapping diagram="cloud/vpc-three-tier" lead="aws" />
+
+On AWS a subnet lives in exactly one Availability Zone, so Brightpost's three tiers in three zones are nine subnets. The third number names the tier: 1 to 3 public, 11 to 13 app, 21 to 23 data, one per zone. A subnet is public when its route table sends 0.0.0.0/0 to the VPC's internet gateway.
 
 ## TL;DR
 
@@ -18,31 +33,9 @@ Every AWS architecture diagram sits inside a VPC, even when nobody draws it. Get
 
 <CloudGroupTable group="networking" lead="aws" />
 
-## A standard three-tier VPC
+## Security groups by tier
 
-```mermaid
-flowchart TB
-    U["Users"] --> IGW["Internet gateway"]
-    subgraph VPC["VPC 10.0.0.0/16, three Availability Zones"]
-      subgraph PUB["Public subnets"]
-        ALB["Application Load Balancer"]
-        NAT["NAT gateway"]
-      end
-      subgraph APP["Private app subnets"]
-        SVC["ECS services / EC2"]
-      end
-      subgraph DATA["Private data subnets"]
-        DB[("Aurora")]
-        CACHE[("ElastiCache")]
-      end
-      EP["Gateway endpoints: S3, DynamoDB"]
-    end
-    IGW --> ALB --> SVC
-    SVC --> DB
-    SVC --> CACHE
-    SVC -->|"outbound internet"| NAT --> IGW
-    SVC --> EP
-```
+A <Term id="security-group" /> is a stateful firewall attached to each resource. A rule's source can be another security group, so each tier admits only the tier in front of it, however many servers autoscaling starts.
 
 | Layer | Security group allows inbound | From |
 |---|---|---|
@@ -50,6 +43,8 @@ flowchart TB
 | App services | App port | The load balancer's security group |
 | Database | 5432 | The app services' security group |
 | Cache | 6379 | The app services' security group |
+
+Network ACLs, the subnet-level layer, stay at their defaults. [Firewalls](/cloud/networking/firewalls) compares both layers, and [NAT & Leaving the Network](/cloud/networking/nat-and-egress) covers the NAT gateway each private subnet uses to reach the internet.
 
 ## Services
 
@@ -68,6 +63,8 @@ flowchart TB
 | **Connections** | Fine for most web traffic | Millions of long-lived connections, static IPs per zone |
 | **Extras** | WAF, Cognito/OIDC auth, sticky sessions | Preserves client IP, PrivateLink endpoint services |
 | **Pick it for** | APIs and web apps | WebSocket fleets at huge scale, games, IoT, non-HTTP |
+
+[Load Balancing](/cloud/networking/load-balancing) explains the layer 4 and layer 7 choice in general.
 
 ### AWS Transit Gateway
 
@@ -90,7 +87,7 @@ flowchart TB
 - **Every case study:** the edge tier (load balancers) sits in public subnets; chat servers, workers and databases in private ones.
 - **Connection-heavy servers:** the [Messenger](/system-design/case-studies/facebook-messenger) chat tier uses an NLB, which passes millions of WebSocket connections through cheaply.
 - **Zone failure:** spreading every tier across three zones is how a design survives losing a data centre. Reliability questions often start here.
-- **Multi-account platforms:** a shared network account with Transit Gateway, and teams exposing services to each other through PrivateLink or VPC Lattice.
+- **Multi-account platforms:** a shared network account with Transit Gateway, and teams exposing services to each other through PrivateLink or VPC Lattice. [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks) has the general picture.
 
 ## Common mistakes
 
@@ -102,16 +99,46 @@ flowchart TB
 
 ## Related
 
-[Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Containers on AWS](/cloud/aws/containers) · [Load Balancing](/system-design/patterns/load-balancing) · [Networking fundamentals](/system-design/fundamentals/networking) · [Security fundamentals](/system-design/fundamentals/security)
+[Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets) · [Private Endpoints](/cloud/networking/private-endpoints) · [Firewalls](/cloud/networking/firewalls) · [NAT & Leaving the Network](/cloud/networking/nat-and-egress) · [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity) · [Networking on Google Cloud](/cloud/gcp/networking) · [Networking on Azure](/cloud/azure/networking) · [Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Containers on AWS](/cloud/aws/containers) · [Load Balancing](/system-design/patterns/load-balancing) · [Networking fundamentals](/system-design/fundamentals/networking) · [Security fundamentals](/system-design/fundamentals/security)
 
 <InterviewQuestions>
   <InterviewQuestion question="Security groups vs network ACLs?" category="Cloud" level="Junior">
-    Security groups are stateful, attach to resources, only allow traffic, and can reference other security groups. Network ACLs are stateless, attach to subnets, have ordered allow and deny rules, and need rules for return traffic. Most designs rely on security groups and leave NACLs at their defaults, using them only for broad subnet-level denies.
+    **Short answer.** Security groups are stateful allow-lists attached to each resource, and a rule can name another security group. Network ACLs are stateless, numbered allow and deny lists attached to a subnet. Most designs filter with security groups and leave network ACLs at their defaults.
+
+    **Why.** Stateful means a reply to an allowed request is let back in without a rule of its own. A network ACL checks every packet on its own, so it needs rules for reply traffic too, and missing ones break connections quietly. Brightpost's database group allows port 5432 only from the app servers' group, so a fourth server started on a sale day is covered with no edit.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={2} cloud="aws" highlight={["lb", "app-a", "db"]} caption="Each tier's security group names the tier in front of it: load balancer, then app server, then database." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you block one abusive IP address, when security groups cannot deny?
+    - What happens to replies if a custom network ACL has no outbound rule for them?
+
+    **Watch out for.** Using network ACLs as the main filter. They cannot name a tier, only address ranges, and every rule needs a matching rule for the replies.
   </InterviewQuestion>
-  <InterviewQuestion question="ALB or NLB in front of WebSocket servers?" category="Architecture" level="Mid">
-    Both support WebSockets. An ALB is fine at moderate scale and adds HTTP routing, auth and WAF. At millions of long-lived connections an NLB is usually better: it passes TCP through with very low overhead, scales without warm-up, keeps static IPs and preserves the client IP.
+
+  <InterviewQuestion question="ALB or NLB in front of WebSocket servers?" category="Cloud" level="Mid">
+    **Short answer.** Both carry WebSockets. Use an ALB at moderate scale when you want HTTP routing, sign-in and AWS WAF. Use an NLB when connections reach the millions, or you need static IPs or the client's own IP address.
+
+    **Why.** An ALB ends each connection and reads the HTTP, so it can route by path and run WAF rules. Its idle timeout closes quiet connections, so clients must send heartbeats. An NLB passes TCP through at layer 4 with very little overhead, scales without warm-up, keeps a static IP per zone and shows targets the client's address.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you keep idle WebSocket connections open through the load balancer?
+    - What happens to open connections when you deploy a new version of the servers?
+
+    **Watch out for.** Picking an NLB and then expecting path routing or WAF from it. Those are layer 7 features, so they move to the servers or to a layer in front.
   </InterviewQuestion>
-  <InterviewQuestion question="Your NAT gateway bill is huge. What do you check?" category="Cloud" level="Mid">
-    Which traffic goes through it. S3 and DynamoDB traffic should use free gateway endpoints; other AWS APIs can use interface endpoints; container image pulls can come from ECR through endpoints or a pull-through cache. Then check cross-zone paths, since a NAT gateway in another zone adds data transfer charges on top of processing.
+
+  <InterviewQuestion question="Your NAT gateway bill is huge. What do you check?" category="Cloud" level="Senior">
+    **Short answer.** Find which traffic goes through the NAT gateway, then move what you can off it. S3 and DynamoDB traffic should use free gateway endpoints, other AWS APIs interface endpoints, and container image pulls ECR through endpoints. Then check that each zone uses its own NAT gateway.
+
+    **Why.** A NAT gateway charges for every GB it processes, and much of that traffic often goes to AWS services themselves. A gateway endpoint is a route in the private route table, so that traffic never reaches the NAT. VPC Flow Logs show the biggest senders. A NAT gateway in another zone adds cross-zone charges on top.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={4} cloud="aws" highlight={["rt-public", "rt-private", "igw"]} caption="The private route table decides where outbound traffic goes: endpoint routes and each zone's NAT route are added here." />
+
+    **Follow-ups the interviewer may ask.**
+    - Would a regional NAT gateway change how you lay out the zones?
+    - How do you find which service sends the most data through the NAT?
+
+    **Watch out for.** Saving money with one NAT gateway for all three zones. When its zone fails, private servers in the other two zones also lose their way out, and calls to the payment provider fail everywhere.
   </InterviewQuestion>
 </InterviewQuestions>

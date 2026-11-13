@@ -1,9 +1,24 @@
 ---
 title: "Containers on AWS"
 description: "ECS, EKS, Fargate, ECS Express Mode and ECR: what each one does, when to pick it, and the matching Google Cloud and Azure service."
+updated: 2026-11-14
 ---
 
 AWS gives you two ways to orchestrate containers and two ways to supply the machines underneath them, and the four combine freely. That is why "ECS or EKS? Fargate or EC2?" confuses people: they are answers to two different questions.
+
+## The idea
+
+An orchestrator keeps a written list of which containers should run, and keeps changing the machines until they match that list. On AWS you pick who keeps the list (ECS, or Kubernetes in EKS) and, separately, who runs the machines under it.
+
+<Callout tone="info" title="Learn the idea">
+  New to clusters? [Kubernetes Concepts](/cloud/compute/kubernetes-concepts) explains the control plane, nodes and pods with Brightpost's shop. [Containers and Registries](/cloud/compute/containers-and-registries) covers images, tags and digests. [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas) covers running an image with no cluster at all.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" stepper cloud="aws" minWidth={620} caption="One cluster on AWS: EKS runs the control plane at the top, and three nodes in three zones run Brightpost's pods." />
+
+<CloudMapping diagram="cloud/k8s-cluster-anatomy" lead="aws" />
+
+With EKS, AWS runs the whole orange control plane and you see only its API. ECS replaces that box with AWS's own scheduler, which has no Kubernetes API and no version for you to upgrade.
 
 ## TL;DR
 
@@ -24,7 +39,7 @@ AWS gives you two ways to orchestrate containers and two ways to supply the mach
 | **ECS** | The default: per-task billing, nothing to patch | GPUs, big tasks, bin-packing, Spot and Savings Plans | ECS Managed Instances: EC2 choice without host operations |
 | **EKS** | Fargate profiles: no nodes, but no DaemonSets | Managed node groups + Karpenter: full control | EKS Auto Mode: AWS provisions, patches and right-sizes nodes |
 
-Go across a row and you change **who runs the machines**. Go down a column and you change **which API you deploy with**. Each step to the right of "EC2" removes a job from your team and adds a little cost or a little less control.
+Go across a row and you change **who runs the machines**. Go down a column and you change **which API you deploy with**. Each step to the right of "EC2" removes a job from your team and adds a little cost or a little less control. The general idea, column by column, is in [Kubernetes Concepts](/cloud/compute/kubernetes-concepts), step 10.
 
 <ResponsibilityGrid set="aws-compute" />
 
@@ -42,7 +57,7 @@ For service-to-service calls inside the cluster, **ECS Service Connect** gives e
 
 <CloudServiceProfile id="aws-eks" />
 
-The real cost of EKS is people, not the $0.10 an hour. Someone has to upgrade the control plane, the nodes and the add-ons (VPC CNI, CoreDNS, kube-proxy, the load balancer controller) at least once a year, and test every Helm chart against the new version. **EKS Auto Mode** takes nodes and core add-ons off that list. It is the right default for a new cluster unless you need custom AMIs, special kernel settings or tight control over the instance mix.
+The real cost of EKS is people, not the cluster fee. At least once a year someone upgrades the control plane, the nodes and the add-ons (VPC CNI, CoreDNS, kube-proxy, the load balancer controller). Then they test every Helm chart against the new version. **EKS Auto Mode** takes nodes and core add-ons off that list. It is the right default for a new cluster unless you need custom AMIs, special kernel settings or tight control over the instance mix.
 
 ### AWS Fargate
 
@@ -52,7 +67,7 @@ Fargate is a capacity type, not an orchestrator. You always use it through ECS o
 
 ### ECS Express Mode
 
-Express Mode, launched in November 2025, is the shortest path from an image to a running web service. One command or console form creates the ECS service on Fargate, an Application Load Balancer with HTTPS, autoscaling, and a URL. Since July 2026 it also accepts a custom task definition, so sidecars and log routing work too. The result is a normal ECS service: when you outgrow the defaults, you edit it like any other.
+Express Mode, launched in November 2025, is the shortest path from an image to a running web service. One command or console form creates the ECS service on Fargate, an Application Load Balancer with HTTPS, autoscaling, and a URL. The result is a normal ECS service: when you outgrow the defaults, you edit it like any other.
 
 ### AWS App Runner
 
@@ -62,12 +77,16 @@ Express Mode, launched in November 2025, is the shortest path from an image to a
 
 <CloudServiceProfile id="aws-ecr" />
 
+Give every build a version tag, turn on tag immutability for the repository, and deploy by **digest**, the fingerprint of the image's exact bytes. A registry belongs to one account in one region. So Brightpost builds into the test account's ECR repository and copies the tested digest, unchanged, to the shop account's repository. [Containers and Registries](/cloud/compute/containers-and-registries) tells why a moving `latest` tag once put two versions of the shop live at once.
+
+<AnimatedDiagram spec="animated/cloud/container-image-to-run" step={5} cloud="aws" minWidth={620} caption="Builds land in the test account's ECR repository; only a tested, scanned digest is promoted to the repository production pulls from." />
+
 ## How the choice plays out
 
 | Situation | Pick | Why |
 |---|---|---|
 | A new API, a small team, uneven traffic | ECS on Fargate | Nothing to patch, no control-plane fee, scales per task |
-| A web app that just needs a URL | ECS Express Mode | Load balancer, TLS and autoscaling in one step |
+| A web app that needs only a URL | ECS Express Mode | Load balancer, TLS and autoscaling in one step |
 | WebSocket servers holding millions of connections | ECS on EC2 behind an NLB | Large network-optimised instances, steady load, Savings Plans |
 | Kafka consumers or queue workers | ECS on Fargate (Spot for retryable work) | Scale on queue depth, interruptions are safe |
 | GPU inference | EKS or ECS on EC2 GPU instances | Fargate has no GPUs |
@@ -86,19 +105,58 @@ The [Facebook Messenger](/system-design/case-studies/facebook-messenger) design 
 
 ## Related
 
-[Compute on AWS](/cloud/aws/compute) · [Choosing compute on AWS](/cloud/start-here/choosing-compute) · [Containers on Google Cloud](/cloud/gcp/containers) · [Containers on Azure](/cloud/azure/containers) · [Load Balancing](/system-design/patterns/load-balancing) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
+[Kubernetes Concepts](/cloud/compute/kubernetes-concepts) · [Containers and Registries](/cloud/compute/containers-and-registries) · [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas) · [Compute on AWS](/cloud/aws/compute) · [Choosing compute on AWS](/cloud/start-here/choosing-compute) · [Containers on Google Cloud](/cloud/gcp/containers) · [Containers on Azure](/cloud/azure/containers) · [Load Balancing](/system-design/patterns/load-balancing) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
 
 <InterviewQuestions>
   <InterviewQuestion question="ECS or EKS for a new service on AWS?" category="Cloud" level="Mid">
-    ECS, unless Kubernetes itself is a requirement. ECS has no control-plane fee, far fewer components to upgrade, and deep IAM and load balancer integration. Choose EKS when the team already runs Kubernetes, relies on Helm charts and operators, or needs the same platform across clouds or on-prem.
+    **Short answer.** ECS, unless Kubernetes itself is a requirement. ECS has no control-plane fee and far fewer parts to upgrade. EKS earns its place when the team already runs Kubernetes or needs one platform across clouds.
+
+    **Why.** With ECS, AWS runs the scheduler and there is no Kubernetes version to keep current. Task roles, load balancer target groups and CloudWatch work with no add-ons. EKS gives you the standard Kubernetes API: Helm charts, operators and the same manifests on other clouds. The price is people. Someone upgrades the cluster at least once a year and retests every add-on. For a team of 3 engineers, that is a large share of a week.
+
+    <AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" cloud="aws" highlight={["api", "store", "controllers", "scheduler"]} minWidth={620} caption="With EKS, AWS runs these four parts, but you still choose their version and upgrade the add-ons around them." />
+
+    **Follow-ups the interviewer may ask.**
+    - If you start on ECS and move to EKS later, what carries over?
+    - What does ECS Service Connect give you that a service mesh would?
+
+    **Watch out for.** Picking EKS because "everyone uses Kubernetes". It pays off with many teams and services, not with three.
   </InterviewQuestion>
+
   <InterviewQuestion question="When is Fargate the wrong choice?" category="Cloud" level="Mid">
-    When you need GPUs, tasks larger than 16 vCPU / 120 GB, host access such as DaemonSets or privileged containers, or when load is steady and high enough that EC2 with Savings Plans is clearly cheaper per vCPU-hour.
+    **Short answer.** When you need GPUs, tasks bigger than Fargate's largest size, or access to the host. Also when load is steady and high enough that EC2 with a Savings Plan is clearly cheaper per vCPU-hour.
+
+    **Why.** Fargate gives each task its own isolated slice of a machine and hides the host. That rules out anything that needs the host: DaemonSets on EKS (one pod on every node, such as a log agent), privileged containers and custom kernels. Fargate bills by the second for what each task requests. With uneven load that wins, because no idle host is waiting. With steady load near full use, a commitment on EC2 instances costs less. The general idea is on [Pricing Basics](/cloud/fundamentals/pricing-basics).
+
+    **Follow-ups the interviewer may ask.**
+    - How would you ship logs from Fargate tasks without a DaemonSet?
+    - When would ECS Managed Instances beat both Fargate and plain EC2?
+
+    **Watch out for.** Comparing list prices only. EC2 also needs spare headroom, patching time and bin-packing work.
   </InterviewQuestion>
+
   <InterviewQuestion question="What does EKS Auto Mode change?" category="Cloud" level="Senior">
-    AWS takes over the nodes: it provisions right-sized instances for pending pods, patches and replaces them, and runs core add-ons. You keep the Kubernetes API and your workloads. You pay a management fee on those instances and give up some control over node configuration.
+    **Short answer.** AWS takes over the nodes. It launches right-sized instances for pending pods, patches and replaces them, and runs the core add-ons. You keep the Kubernetes API and your workloads, pay a management fee on those instances, and give up some control of node settings.
+
+    **Why.** In the cluster picture, the nodes are the bottom band. With managed node groups that band is yours: instance types, machine image updates and the node autoscaler. Auto Mode moves it to AWS, using Karpenter underneath. What stays yours: when to upgrade the Kubernetes version, pod requests and limits, and readiness checks. Brightpost's 90-second warm-up gap, from the concept page, would break an Auto Mode cluster in exactly the same way.
+
+    <AnimatedDiagram spec="animated/cloud/k8s-cluster-anatomy" cloud="aws" highlight={["kubelet1", "kubelet2", "kubelet3"]} minWidth={620} caption="Auto Mode moves the node band to AWS: it picks, patches and replaces the machines the kubelets run on." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which workloads would you keep on a node group you manage yourself?
+    - How is Auto Mode different from running pods on Fargate profiles?
+
+    **Watch out for.** Calling Auto Mode "serverless Kubernetes". You still own the cluster version, the manifests and the pod sizes.
   </InterviewQuestion>
-  <InterviewQuestion question="How would you run WebSocket servers for a chat app on AWS?" category="Architecture" level="Senior">
-    ECS services on network-optimised EC2 instances behind a Network Load Balancer, which passes long-lived TCP connections through cheaply. Keep a user-to-server registry in ElastiCache, drain connections gracefully on deploys, and spread tasks across three Availability Zones.
+
+  <InterviewQuestion question="How would you run WebSocket servers for a chat app on AWS?" category="Cloud" level="Senior">
+    **Short answer.** ECS services on network-optimised EC2 instances behind a Network Load Balancer, spread across three Availability Zones. A registry in ElastiCache records which user is connected to which server.
+
+    **Why.** A WebSocket stays open for minutes or hours, so the load is steady and long-lived. A Network Load Balancer passes long-lived TCP connections through with little overhead. Large instances hold many connections each, and steady use suits a Savings Plan. The user-to-server registry lets any server forward a message to the server that holds the recipient. On deploys, drain connections gradually so clients reconnect in waves, not all at once.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to a million open connections during a deploy?
+    - How does the registry survive a cache node failure?
+
+    **Watch out for.** Scaling connection servers on CPU. Open connections, not CPU, are what fills these servers.
   </InterviewQuestion>
 </InterviewQuestions>

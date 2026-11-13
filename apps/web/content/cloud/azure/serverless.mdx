@@ -1,20 +1,47 @@
 ---
 title: "Serverless & Orchestration on Azure"
-description: "Azure Functions, Durable Functions, Logic Apps, Event Grid, API Management and Web PubSub, with the AWS and Google Cloud equivalents."
+description: "Azure Functions and its hosting plans, Durable Functions, Logic Apps, Event Grid, API Management and Web PubSub: when each fits and how they combine on Azure."
+updated: 2026-11-14
 ---
 
-Azure serverless centres on **Azure Functions**, with **triggers and bindings** that read and write other services declaratively. **Durable Functions** has long offered workflows written as code, **Logic Apps** offers low-code integration, **Event Grid** routes events, **API Management** fronts APIs, and **Web PubSub** holds WebSocket connections for you.
+Brightpost resizes every product photo with a function, and a sale-day burst of 1,500 photos once took every database connection the shop had. On Azure, the services in this group decide how such a burst arrives, how many copies run, and what happens to a photo that fails. The fact that changes a design here: a **hosting plan** belongs to a whole function app. It sets cold starts, time limits, network access and the instance ceiling for every function inside it.
+
+## The idea
+
+A <Term id="serverless">serverless</Term> function is code the cloud runs once per event, in as many copies as there are events in flight. You choose the trigger and a cap on copies; Azure owns the machines, the start-up and the scaling.
+
+<Callout tone="blue" title="Learn the idea">
+  [Serverless Functions](/cloud/compute/serverless-functions) explains triggers, cold starts and why copies multiply. [API Gateways & API Management](/cloud/networking/api-gateways) covers the front door. [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas) covers Container Apps and App Service, for when a function is the wrong shape.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/serverless-event-triggers" stepper cloud="azure" minWidth={620} caption="Brightpost's resize function in six steps, with Azure names. Step 2 is the 1,500-photo burst; steps 3 and 4 repair it." />
+
+<CloudMapping diagram="cloud/serverless-event-triggers" lead="azure" />
 
 ## TL;DR
 
-- **Functions** (Flex Consumption plan) for event-driven code; **Durable Functions** for long-running orchestrations in code.
-- **Logic Apps** for integration workflows across Microsoft 365, SaaS and Azure.
-- **Event Grid** for event routing; **Service Bus** when work must be queued reliably.
-- **API Management** in front of APIs; **Web PubSub** or **SignalR Service** for real-time connections.
+- **Azure Functions** runs event-driven code; **Durable Functions** adds long-running workflows written as code.
+- **Logic Apps** builds integration workflows with ready-made connectors and little code.
+- **Event Grid** routes events from Azure resources and your own apps; **Service Bus** queues work that must not be lost.
+- **API Management** fronts APIs with keys, plans and a portal; **Web PubSub** holds WebSocket connections for you.
 
 ## At a glance
 
 <CloudGroupTable group="serverless" lead="azure" />
+
+## How it fits together on Azure
+
+Step 1: a photo lands in the Blob Storage uploads container. Event Grid reports the new blob, and a blob trigger starts the resize function in Azure Functions. Through **bindings**, declared inputs and outputs, it writes a thumbnail to a second container. It saves the thumbnail's address in Azure Database for PostgreSQL. In step 2 the burst arrives, and each busy instance opens its own connections.
+
+Step 3 sets the function app's **maximum instance count** and turns on the database's built-in PgBouncer pool. Step 4 puts a Service Bus queue between the uploads container and the function. A message that fails too many times moves to the queue's dead-letter subqueue. Step 5 is a **timer trigger** in the same function app, and step 6 is an **HTTP trigger**.
+
+| The idea | On Azure | What to know |
+|---|---|---|
+| A copy | An instance of the function app | One instance runs many executions at once |
+| Cap on copies | Maximum instance count | Set on the app, so it covers every function in it |
+| Keeping copies warm | Always-ready (Flex Consumption) or pre-warmed (Premium) instances | Billed while idle |
+| Failed message | Dead-letter subqueue (Service Bus) | Moves after a maximum delivery count |
+| Scheduled trigger | Timer trigger | Lives in the function app; no separate scheduler needed |
 
 ## Services
 
@@ -22,38 +49,86 @@ Azure serverless centres on **Azure Functions**, with **triggers and bindings** 
 
 <CloudServiceProfile id="azure-functions" />
 
+Pick it when a small piece of code reacts to a blob, a queue message, an event, a timer or an HTTP call. Then pick the plan. **Flex Consumption** scales to zero, can keep a few always-ready instances and can join a virtual network. **Premium** keeps pre-warmed instances and never scales to zero. **Dedicated** runs functions on an App Service plan you already pay for.
+
 ### Azure Logic Apps
 
 <CloudServiceProfile id="azure-logic-apps" />
+
+Pick it when a workflow mostly connects systems, such as "a new order email arrives, so add a row and post a message". For workflows that are mostly your own logic, **Durable Functions** keeps them in code.
 
 ### Azure Event Grid
 
 <CloudServiceProfile id="azure-event-grid" />
 
+Pick it when something should react to a change in an Azure resource, such as a new blob, or to your own events. Event Grid pushes each event to its handlers, retries with backoff, and can dead-letter undelivered events to a storage container.
+
 ### Azure API Management
 
 <CloudServiceProfile id="azure-apim" />
+
+Pick it when outside callers need keys, rate plans and a developer portal. It fronts Functions, Container Apps or any HTTP backend.
 
 ### Azure Web PubSub
 
 <CloudServiceProfile id="azure-web-pubsub" />
 
-## Coming from AWS
+Pick it when browsers need live updates and you do not want to run WebSocket servers. Your API hands each client a token; your backend publishes to a user, a group or one connection.
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| Lambda | Azure Functions | Bindings read and write other services without SDK code |
-| Step Functions | Durable Functions or Logic Apps | Code-first (Durable) or low-code (Logic Apps) |
-| EventBridge | Event Grid | Also hosts an MQTT broker for IoT |
-| API Gateway WebSocket APIs | Web PubSub | Send to users or groups by id; scale in units of connections |
-| API Gateway REST | API Management | Fuller developer portal and policy engine |
+## Common mistakes
+
+- **One function app for everything.** The resize function and a shopper-facing API share one plan and one instance cap. Put work with different needs in different function apps.
+- **No cap in front of the database.** A burst scales the app out until each instance holds connections. Set the maximum instance count and use the built-in PgBouncer.
+- **Non-deterministic orchestrator code.** A Durable Functions orchestrator replays its history, so reading the clock or calling an API inside it breaks. Do that work in activity functions.
+
+## Where this shows up in system design
+
+- **Image and file pipelines:** blob events through a Service Bus queue to a capped function, as in the resize story above.
+- **Order follow-up:** a [saga](/system-design/patterns/saga) in Durable Functions or Logic Apps, with an undo step for each action.
+- **Live notifications:** Web PubSub pushing order updates to the admin page (see [Real-Time Connections on the Cloud](/cloud/networking/realtime-on-the-cloud)).
 
 ## Related
 
-[Serverless & Orchestration on AWS](/cloud/aws/serverless) · [Serverless & Orchestration on Google Cloud](/cloud/gcp/serverless) · [Messaging on Azure](/cloud/azure/messaging) · [WebSockets](/system-design/fundamentals/websockets)
+[Serverless Functions](/cloud/compute/serverless-functions) · [API Gateways & API Management](/cloud/networking/api-gateways) · [Serverless & Orchestration on AWS](/cloud/aws/serverless) · [Serverless & Orchestration on Google Cloud](/cloud/gcp/serverless) · [Messaging on Azure](/cloud/azure/messaging) · [System Design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How would you add real-time notifications to an Azure web app without running WebSocket servers?" category="Architecture" level="Mid">
-    Use Azure Web PubSub (or SignalR Service for ASP.NET apps). Clients connect to it directly with a token from your API; your backend publishes messages to a user, group or connection id over REST, and the service fans them out.
+  <InterviewQuestion question="What do triggers and bindings do in Azure Functions, and what is the catch?" category="Cloud" level="Junior">
+    **Short answer.** A trigger is the one event that starts a function, such as a new blob or a queue message. Bindings declare extra inputs and outputs, such as "write the result to this container", so you write less client code. The catch is that the code becomes tied to Azure.
+
+    **Why.** Brightpost's resize function has a blob trigger on the uploads container and an output binding to the thumbnails container. The function body only resizes; the platform reads and writes the blobs. Moving that function to another cloud means replacing the bindings with real client code.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-event-triggers" step={1} cloud="azure" path="uploads>fn>thumbs" caption="A blob trigger starts the function; an output binding writes the thumbnail to a second container." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why must the output container differ from the one the trigger watches?
+    - When would you use the client library instead of a binding?
+
+    **Watch out for.** Saying a function can have several triggers. It has exactly one; bindings add the rest.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Which hosting plan would you pick for Brightpost's resize function, and which for an API a shopper waits on?" category="Cloud" level="Mid">
+    **Short answer.** Flex Consumption for resize: it scales to zero overnight, and nobody waits for a thumbnail. For the shopper-facing API, a separate app with always-ready instances on Flex Consumption, or Premium with pre-warmed ones, so shoppers rarely meet a cold start.
+
+    **Why.** After a quiet night every copy is gone, and the first event pays the start-up again. Resize can afford that extra second. A checkout page cannot. Because the plan belongs to the function app, the two workloads go in two apps with their own plans and caps.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-request" step={4} caption="After a quiet night no copy is left, so the next event starts cold again." />
+
+    **Follow-ups the interviewer may ask.**
+    - When does a Dedicated plan make sense?
+    - What does each plan cost while nothing is running?
+
+    **Watch out for.** Putting both workloads in one app to save setup. They then share one plan, one cap and one set of cold starts.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Durable Functions or Logic Apps for Brightpost's order follow-up?" category="Cloud" level="Mid">
+    **Short answer.** Durable Functions if the steps are mostly Brightpost's own logic and the team prefers code and tests. Logic Apps if the flow mostly moves data between other systems, such as email, a spreadsheet and the printing partner's API.
+
+    **Why.** Both keep the state of each run, retry steps and can wait for an outside reply. Durable Functions keeps the workflow in the same repository and pipeline as the rest of the code. Logic Apps gives ready-made connectors and a visual designer, which suits integration work that changes often.
+
+    **Follow-ups the interviewer may ask.**
+    - How would each one undo the charge if the printing partner refuses?
+    - Where would Event Grid fit in this flow?
+
+    **Watch out for.** Picking by habit. Ask who will change the flow next year, and how they prefer to work.
   </InterviewQuestion>
 </InterviewQuestions>

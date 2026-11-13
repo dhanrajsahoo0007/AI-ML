@@ -1,20 +1,51 @@
 ---
 title: "Edge, DNS & CDN on Azure"
 description: "Azure Front Door, Azure DNS and Traffic Manager, with the AWS and Google Cloud equivalents."
+updated: 2026-11-14
 ---
 
-**Azure Front Door** is Azure's global front door: CDN caching, layer-7 load balancing across Regions and WAF in one service. **Azure DNS** hosts zones, and **Traffic Manager** steers non-HTTP traffic with DNS. The classic tiers are retiring (Front Door classic on March 31, 2027; Azure CDN Standard from Microsoft classic on September 30, 2027), so new designs use **Front Door Standard or Premium**.
+Brightpost's photos and pages must reach shoppers in the UK and Australia quickly, and floods and scrapers must stop before they reach the app servers. On Azure one service does most of this job: **Azure Front Door**. It caches at Microsoft's edge, routes web traffic across regions, and runs the web firewall, all in one place. Steering by DNS is a separate service, **Traffic Manager**, because Azure DNS hosts zones but has no routing policies of its own.
+
+Older edge products, Front Door (classic) and Azure CDN Standard from Microsoft (classic), are being retired. New designs use **Front Door Standard or Premium**.
+
+## The idea
+
+A managed edge stands in front of everything you serve: copies come from a site near the customer, and bad traffic is stopped before it reaches your servers. DNS points the shop's name at that edge.
+
+<Callout tone="blue" title="Learn the idea">
+  The cloud-neutral version, with Brightpost's sale-day scraper, is in [CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf). Zones and routing policies are in [DNS on the Cloud](/cloud/networking/dns), and serving two regions is in [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region).
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/cdn-request-path" stepper cloud="azure" minWidth={620} caption="Brightpost's sale day on Azure: Front Door in front of Blob Storage and an Application Gateway, then its WAF and a Private Link origin." />
+
+<CloudMapping diagram="cloud/cdn-request-path" lead="azure" />
 
 ## TL;DR
 
-- **Front Door Standard/Premium** in front of every global web app or API: caching, failover across Regions, WAF.
-- **Azure DNS** for zones, including private zones for private endpoints.
-- **Traffic Manager** for DNS-based failover of non-HTTP endpoints.
-- Premium adds Private Link to origins and managed WAF rule sets.
+- **Front Door Standard or Premium** in front of every global web app or API: caching, failover across regions and a WAF.
+- **Azure DNS** for public zones, and private zones for private endpoints.
+- **Traffic Manager** for DNS-based routing and failover, mainly for traffic that is not HTTP.
+- **Premium** adds Private Link to origins and the managed and bot WAF rule sets.
 
 ## At a glance
 
 <CloudGroupTable group="edge" lead="azure" />
+
+## How it fits together on Azure
+
+Step 1: a shopper reaches the nearest Front Door edge site on an anycast address, and TLS ends there. A **route** sends `/photos/` to an **origin group** holding the Blob Storage account. Everything else goes to an origin group holding the Application Gateway in front of the app servers. With caching on, a photo is answered at the edge.
+
+Step 2: product pages are not cached during a sale, so the scraper's 900 requests a second reach the app servers. Step 3: Azure DDoS infrastructure protection drops floods of junk packets at Front Door, with no rule from Brightpost. Step 4: a **WAF policy** attached to Front Door adds a rate-limit rule on product pages. Step 5: on Premium, Front Door reaches the Application Gateway over **Private Link**, so the gateway needs no public address.
+
+| The concept says | On Azure | What to know |
+|---|---|---|
+| Edge cache and global routing | Front Door Standard or Premium | One service; origin groups use health probes to pick a healthy origin |
+| Flood absorber | DDoS infrastructure protection | Included for Front Door; paid Azure DDoS Protection covers public IPs in your VNets |
+| Web firewall | Azure WAF policy on Front Door | Detection mode logs; prevention mode blocks |
+| Origin lock | Private Link origin (Premium) | Otherwise allow the `AzureFrontDoor.Backend` service tag and check the `X-Azure-FDID` header |
+| DNS steering | Traffic Manager | Azure DNS holds an alias record that points at the profile |
+
+The WAF's own profile is on [Identity & Security on Azure](/cloud/azure/security). The same WAF can also run regionally on Application Gateway, so decide which layer owns which rules.
 
 ## Services
 
@@ -22,23 +53,76 @@ description: "Azure Front Door, Azure DNS and Traffic Manager, with the AWS and 
 
 <CloudServiceProfile id="azure-front-door" />
 
+Pick it when any web app or API faces the internet, and always when it runs in more than one region.
+
 ### Azure DNS
 
 <CloudServiceProfile id="azure-dns" />
+
+Pick it when you need to host the shop's public zone, or private zones that point service names at private endpoints.
 
 ### Azure Traffic Manager
 
 <CloudServiceProfile id="azure-traffic-manager" />
 
-## Coming from AWS
+Pick it when endpoints that are not HTTP, or that run in another cloud, need DNS failover or performance routing.
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| CloudFront + Global Accelerator | Front Door | One service for CDN and global HTTP load balancing |
-| Route 53 hosted zones | Azure DNS | Routing policies live in Traffic Manager instead |
-| Route 53 routing policies | Traffic Manager | Priority, weighted, performance and geographic routing |
-| Lambda@Edge | Front Door rules engine | Rule-based rewrites and headers; no custom code |
+## Common mistakes
+
+- **Leaving the origin open.** An Application Gateway with a public address and no checks lets a scraper skip Front Door's WAF.
+- **Using Traffic Manager for a web shop.** Its failover waits for DNS caches; Front Door moves shoppers without them, and adds caching and the WAF.
+- **Expecting paid DDoS Protection to cover Front Door.** It protects public IPs in your VNets; Front Door already has infrastructure protection.
+
+## Where this shows up in system design
+
+- **Two regions, one address:** Front Door with origins near London and Sydney replaces DNS steering for web traffic.
+- **Media-heavy designs:** photos and video segments come from Blob Storage through Front Door, with SAS links for private files.
+- **Abuse protection:** WAF rate rules on Front Door act before requests reach your servers.
 
 ## Related
 
-[Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Edge, DNS & CDN on Google Cloud](/cloud/gcp/edge) · [Networking on Azure](/cloud/azure/networking) · [Caching](/system-design/patterns/caching)
+[CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf) · [DNS on the Cloud](/cloud/networking/dns) · [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region) · [Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Edge, DNS & CDN on Google Cloud](/cloud/gcp/edge) · [Networking on Azure](/cloud/azure/networking) · [System design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Azure DNS or Traffic Manager: which one steers users between regions?" category="Cloud" level="Junior">
+    **Short answer.** Traffic Manager. Azure DNS hosts the zone and its records, but it has no routing policies. Traffic Manager probes each endpoint and answers by priority, weight, performance or geography.
+
+    **Why.** The public zone holds an alias record that points at a Traffic Manager profile. When a shopper's resolver asks for the name, Traffic Manager picks a healthy region and sets the answer's TTL. Two services means two things to configure and to watch.
+
+    <AnimatedDiagram spec="animated/cloud/global-routing" step={2} cloud="azure" minWidth={620} caption="Traffic Manager answers each shopper with the nearest healthy region." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why can the bare domain not be a CNAME to the profile?
+    - What does a 60-second TTL mean for a failover?
+
+    **Watch out for.** Saying Azure DNS has latency routing. That job belongs to Traffic Manager or Front Door.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Front Door or Traffic Manager to fail a web shop over between two regions?" category="Cloud" level="Mid">
+    **Short answer.** Front Door. Shoppers keep one anycast address, and Front Door's health probes move them to the healthy region without waiting for DNS caches. Traffic Manager fits traffic that is not HTTP.
+
+    **Why.** Traffic Manager changes the DNS answer, and resolvers keep the old one for its TTL, sometimes longer. Front Door ends each connection at the edge and picks an origin per request. It also caches photos and runs the WAF on the same path.
+
+    <AnimatedDiagram spec="animated/cloud/global-routing" step={6} cloud="azure" minWidth={620} caption="Front Door gives shoppers one address and moves them when a region fails its probes." />
+
+    **Follow-ups the interviewer may ask.**
+    - Front Door moves the shoppers. What moves the database writer?
+    - When would you use the cross-region Load Balancer instead?
+
+    **Watch out for.** Calling failover done once traffic moves. Data in the failed region still needs a plan.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you make sure no request reaches an Azure origin without passing Front Door?" category="Cloud" level="Mid">
+    **Short answer.** On Premium, connect each origin over Private Link and remove its public address. On Standard, allow only the `AzureFrontDoor.Backend` service tag and check that the `X-Azure-FDID` header matches your own Front Door.
+
+    **Why.** Brightpost's scraper once found the load balancer's own address and skipped every rule at the edge. The service tag alone admits traffic from any customer's Front Door, so the ID check matters too.
+
+    <AnimatedDiagram spec="animated/cloud/cdn-request-path" step={5} cloud="azure" highlight={["bots", "lb", "lock"]} minWidth={620} caption="The scraper's direct try at the Application Gateway is refused; only Front Door gets in." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you test that the lock works?
+    - Where should the WAF rules live: Front Door or Application Gateway?
+
+    **Watch out for.** Relying on the service tag alone. Another tenant's Front Door shares the same addresses.
+  </InterviewQuestion>
+</InterviewQuestions>

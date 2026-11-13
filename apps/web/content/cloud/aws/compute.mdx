@@ -1,14 +1,27 @@
 ---
 title: "Compute on AWS"
 description: "EC2, Auto Scaling, Spot, Savings Plans, Elastic Beanstalk and Batch: choosing instances, paying less, and the matching Google Cloud and Azure service."
+updated: 2026-11-14
 ---
 
 Every other compute service on AWS, from Fargate to Lambda, runs on top of EC2. This page covers the VM layer itself: picking an instance, keeping a fleet healthy across zones, and paying a fraction of the list price. Containers and functions have their own pages.
 
+## The idea
+
+A fleet of virtual machines (VMs) is identical servers built from one template. A control loop keeps it the right size: it measures a metric such as average processor use, compares it with a target, adds or removes servers, then waits. On AWS the servers are EC2 instances, the template is a launch template and the loop is an Auto Scaling group.
+
+<Callout tone="blue" title="Learn the idea">
+  New to this? [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines) covers families, images and fleets, and [Autoscaling: The Control Loop](/cloud/compute/autoscaling) walks through the loop with Brightpost's newsletter evening. [Choosing Compute](/cloud/start-here/choosing-compute) helps you decide whether you need VMs at all.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" stepper cloud="aws" minWidth={620} caption="Brightpost's newsletter evening on AWS, in seven steps. Switch the toggle to compare names on the other clouds." />
+
+<CloudMapping diagram="cloud/autoscaling-loop" lead="aws" />
+
 ## TL;DR
 
 - **EC2 is the right tool when you need the machine:** specific hardware (GPUs, big memory, local NVMe), licensed or legacy software, or steady load where commitments make VMs cheapest.
-- **Never run a single instance for a service.** Use an **Auto Scaling group** across three Availability Zones behind a load balancer.
+- **Never run a single instance for a service.** Use an **Auto Scaling group** across three <Term id="availability-zone">Availability Zones</Term> behind a <Term id="load-balancer">load balancer</Term>.
 - **Pay less in three ways:** Savings Plans for the steady baseline, Spot for interruptible work, Graviton (Arm) for better price-performance.
 - **Batch jobs** go to **AWS Batch**; **classic web apps on VMs** can use **Elastic Beanstalk**, but new container work should start on ECS.
 
@@ -40,15 +53,17 @@ An instance name such as `m8g.xlarge` has three parts: the **family** (`m`), the
 | **Reserved Instances** | Up to about 72% | 1 or 3 years, specific type | Mostly replaced by Savings Plans; still used to reserve capacity in a zone |
 | **Spot** | Up to about 90% | None, but AWS can reclaim with 2 minutes' notice | Stateless workers, batch, CI, anything that can retry |
 
-A common mix: Savings Plans cover the always-on floor, On-Demand covers the daily peak, and Spot runs workers and batch.
+A common mix: Savings Plans cover the always-on floor, On-Demand covers the daily peak, and Spot runs workers and batch. The general idea behind commitments and spare capacity, on every cloud, is in [Cost Models and Purchasing Options](/cloud/operations/cloud-cost-models).
 
 ## Keeping a fleet healthy
 
-An **Auto Scaling group** keeps a desired number of instances running from a **launch template** (image, instance types, user data). It replaces instances that fail health checks, including load balancer checks, and balances them across zones.
+An **Auto Scaling group** keeps a desired number of instances running from a **launch template** (image, instance types, user data). It replaces instances that fail health checks, including load balancer checks, and balances them across zones. A subnet lives in one zone, so the group spreads only across the subnets you list: give it one per zone.
 
-- **Scaling policies:** target tracking (for example "keep CPU at 50%"), step scaling, scheduled scaling for known peaks, and predictive scaling that learns daily patterns.
+- **Scaling policies:** target tracking (for example "keep CPU at 60%"), step scaling, scheduled scaling for known peaks, and predictive scaling that learns daily patterns. Steps 1 and 5 of the stepper show these.
+- **Warm-up and drain:** a default instance warm-up keeps a booting instance out of the average (step 2). Before an instance leaves, the target group's deregistration delay drains its open requests, and a lifecycle hook can wait for in-flight work (step 4).
 - **Mixed instances policy:** several instance types and On-Demand + Spot in one group, so a Spot shortage in one type does not stop scaling.
-- **Warm pools** keep pre-initialised instances stopped and ready, cutting scale-out time for apps that boot slowly.
+- **Warm pools** keep pre-initialised instances stopped and ready, cutting scale-out time for apps that boot slowly (step 6).
+- **Queue workers** scale on a custom metric, such as Amazon SQS backlog per instance, not on CPU (step 7).
 - **Placement groups:** *cluster* packs instances close together for low-latency HPC; *spread* puts each on separate hardware; *partition* isolates groups of instances for Kafka or Cassandra racks.
 
 ## Services
@@ -82,16 +97,55 @@ An **Auto Scaling group** keeps a desired number of instances running from a **l
 
 ## Related
 
-[Containers on AWS](/cloud/aws/containers) · [Choosing compute on AWS](/cloud/start-here/choosing-compute) · [Load Balancing](/system-design/patterns/load-balancing) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
+[Autoscaling: The Control Loop](/cloud/compute/autoscaling) · [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines) · [Choosing Compute](/cloud/start-here/choosing-compute) · [Compute on Google Cloud](/cloud/gcp/compute) · [Compute on Azure](/cloud/azure/compute) · [Containers on AWS](/cloud/aws/containers) · [Load Balancing](/system-design/patterns/load-balancing) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
 
 <InterviewQuestions>
   <InterviewQuestion question="How would you cut the EC2 bill for a service that runs all day with a daily peak?" category="Cloud" level="Mid">
-    Right-size from real metrics first. Then cover the always-on floor with a Compute Savings Plan, serve the daily peak with On-Demand through autoscaling, move interruptible workers and batch to Spot, and switch to Graviton instances where the stack supports arm64.
+    **Short answer.** Right-size from real metrics first. Then cover the always-on floor with a Compute Savings Plan, let autoscaling add On-Demand instances for the daily peak, and move interruptible workers and batch to Spot. Switch to Graviton where the stack builds for arm64.
+
+    **Why.** A commitment bought before right-sizing locks in waste for one to three years. The floor runs every hour, so a commitment pays off there. The peak runs a few hours, so paying On-Demand for it costs less than an idle commitment the rest of the day. Spot is cheapest but can vanish, so it suits only work that can retry.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find the floor? (The lowest hourly usage over a few normal weeks.)
+    - Savings Plan or Reserved Instances? (Savings Plans, unless you also need a capacity reservation in one zone.)
+
+    **Watch out for.** Committing to the peak. A Savings Plan bills every hour whether you use it or not.
   </InterviewQuestion>
   <InterviewQuestion question="How do you make an EC2-based tier highly available?" category="Reliability" level="Mid">
-    Run it in an Auto Scaling group spread across at least three Availability Zones behind a load balancer, with load balancer health checks so failed instances are replaced automatically. Keep instances stateless so any one can be replaced, and store state in managed services.
+    **Short answer.** Run it in an Auto Scaling group across at least three Availability Zones, behind an Application Load Balancer, with load balancer health checks turned on. Keep the instances stateless and store state in managed services.
+
+    **Why.** A zone can fail as a whole, so the group needs instances in the others. The group spreads only across the subnets you list, and each subnet sits in one zone. Load balancer health checks catch an app that has hung on a healthy machine, so the group replaces it.
+
+    <AnimatedDiagram spec="animated/cloud/vm-fleet-three-zones" step={2} cloud="aws" minWidth={620} caption="One Auto Scaling group, one instance per zone, one load balancer across all three." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens when a zone fails? (The group launches replacements in the zones that are left.)
+    - How do you roll out a new image? (A new launch template version, then an instance refresh that replaces instances a few at a time.)
+
+    **Watch out for.** Leaving the group on EC2 status checks only. An instance whose app has crashed still passes them, so nothing replaces it.
   </InterviewQuestion>
   <InterviewQuestion question="When is Spot a bad idea?" category="Cloud" level="Mid">
-    For work that cannot be interrupted or resumed: a single-instance database, long jobs with no checkpoints, or a tier where losing capacity at peak breaks the SLA. Spot fits stateless, retryable work spread over several instance types.
+    **Short answer.** For work that cannot be interrupted or resumed: a single-instance database, long jobs with no checkpoints, or a tier where losing capacity at peak breaks the SLA. Spot fits stateless, retryable work spread over several instance types.
+
+    **Why.** AWS can take a Spot instance back with 2 minutes' notice when it needs the capacity. Reclaims often hit many instances of the same type at once, so a group built on one type can lose most of its capacity together.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you make workers safe on Spot? (Several instance types in a mixed instances policy, idempotent jobs, checkpoints, and a handler for the notice.)
+    - Can a web tier use Spot at all? (Yes, above an On-Demand base that carries the minimum load.)
+
+    **Watch out for.** A Spot group with one instance type in one zone. It has nowhere to go when that pool runs short.
+  </InterviewQuestion>
+  <InterviewQuestion question="An Auto Scaling group adds 4 instances for each newsletter wave and removes them 2 minutes later, cutting off checkouts. What do you change?" category="Cloud" level="Senior">
+    **Short answer.** Make scale-in slow and safe. Use target tracking with a realistic instance warm-up, let the target group drain each instance before it goes, and add a lifecycle hook for in-flight work. Then add a scheduled action that raises the minimum before the known waves.
+
+    **Why.** Each cycle pays about 4 minutes of start-up lag again, and each sudden removal cuts open checkouts. Target tracking scales in more slowly than it scales out, so the group stays large between waves. A schedule handles load you can predict before any metric moves.
+
+    <AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={4} cloud="aws" minWidth={620} caption="The fix: scale-in waits, drains for 60 s and removes one instance at a time, so the next wave meets 6." />
+
+    **Follow-ups the interviewer may ask.**
+    - Would a warm pool help? (Yes: stopped, pre-installed instances join in about a minute instead of 4.)
+    - How should the receipt workers scale? (On SQS backlog per instance, not on CPU.)
+
+    **Watch out for.** Tuning only the scale-out side. Flapping almost always comes from a scale-in rule that is too eager.
   </InterviewQuestion>
 </InterviewQuestions>

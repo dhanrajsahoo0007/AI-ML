@@ -1,20 +1,47 @@
 ---
 title: "Networking on Google Cloud"
 description: "Global VPC, firewall rules, Cloud NAT, Cloud Load Balancing, Private Service Connect and Interconnect, with the AWS and Azure equivalents."
+updated: 2026-11-14
 ---
 
-The biggest networking difference between the clouds is on Google Cloud: a **VPC is global**. One network spans every Region, subnets are regional, and VMs in different Regions talk privately with no peering or transit hub. Combined with the **global external load balancer**, a multi-Region design on Google Cloud needs noticeably less plumbing than on AWS.
+Brightpost's shop needs a network where only the load balancer faces the internet, while the app servers and the orders database stay private across three zones near London. On Google Cloud one fact shapes that design: a **VPC network is global**. Subnets are regional and cover every zone of their region, so three tiers are three subnets. A second region later adds subnets to the same network, not a new network.
+
+## The idea
+
+A private network is a fenced range of addresses where only the front door, a load balancer, faces the internet. The app servers and the database keep private addresses in their own subnets. Each tier runs in three zones, so losing one zone costs a short failover instead of the shop.
+
+<Callout tone="blue" title="Learn the idea">
+  New to private networks? [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets) builds Brightpost's network step by step, and [Private Endpoints](/cloud/networking/private-endpoints) shows how private servers reach managed services. This page names the Google Cloud pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/vpc-three-tier" stepper cloud="gcp" minWidth={620} caption="Brightpost's network on Google Cloud in five steps: one public load balancer, private app and data subnets, three zones, and a zone failure." />
+
+<CloudMapping diagram="cloud/vpc-three-tier" lead="gcp" />
 
 ## TL;DR
 
-- **One global VPC** per environment; **Shared VPC** lets many projects use a centrally managed network.
-- **Firewall rules and policies** target network tags or service accounts.
-- **Cloud NAT** for outbound internet from private VMs; **Private Service Connect** for private access to services.
-- **Cloud Load Balancing**: one global anycast IP for HTTP across Regions, plus regional and internal options.
+- **One global VPC network per environment**, in custom mode. Subnets are regional and each covers every zone of its region.
+- **A VM is public only if it has an external IP address.** Routes belong to the whole network, and an organisation policy can forbid external IPs.
+- **Firewall rules and policies** live on the network and pick their targets by service account or network tag. **Shared VPC** lets many projects use one network.
+- **Cloud NAT** lets private VMs reach out; **Private Google Access** and **Private Service Connect** reach Google APIs and managed services privately.
 
 ## At a glance
 
 <CloudGroupTable group="networking" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+Step 1 is the leak: a Compute Engine VM and a Cloud SQL instance, each with an external IP address. In step 2 the global external Application Load Balancer holds the only public address. It runs at Google's edge, outside your network, and reaches the VMs on their private addresses. Cloud SQL moves to a private IP, inside a network Google runs that is joined to yours.
+
+In step 3 a regional managed instance group, a set of identical VMs that Google keeps running, places one VM in each zone of the same app subnet. Cloud SQL's high-availability setting keeps a standby in a second zone. Step 4 is quieter here: the default route already points at the internet gateway, but a VM with no external IP cannot be reached from outside. In step 5 zone A goes dark; health checks drop its VM, the other two take the traffic, and Cloud SQL fails over.
+
+| The idea | On Google Cloud | What to know |
+|---|---|---|
+| Private network | VPC network, custom mode | Global: one per environment, not one per region |
+| Subnet per tier | Regional subnet | Covers every zone; its range can be widened later |
+| Public subnet | External IP on a VM or load balancer | No subnet is "public"; a guardrail forbids external IPs |
+| Firewall per tier | VPC firewall rules and firewall policies | Target tiers by service account; hierarchical policies apply first |
+| One network, many teams | Shared VPC | A host project owns the network; service projects use its subnets |
 
 ## Services
 
@@ -22,34 +49,80 @@ The biggest networking difference between the clouds is on Google Cloud: a **VPC
 
 <CloudServiceProfile id="gcp-vpc" />
 
+**Pick it when** you run anything on VMs, GKE or private Cloud SQL: every one of them lives in a VPC network.
+
 ### Cloud Load Balancing
 
 <CloudServiceProfile id="gcp-cloud-load-balancing" />
+
+**Pick it when** users must reach private backends through one address, whether global HTTP, regional TCP or internal traffic. [Load Balancing](/cloud/networking/load-balancing) explains the choices.
 
 ### Private Service Connect
 
 <CloudServiceProfile id="gcp-psc" />
 
+**Pick it when** private VMs must reach a managed service, a partner's service or another team's service on a private address, without joining whole networks.
+
 ### Cloud Interconnect
 
 <CloudServiceProfile id="gcp-interconnect" />
 
-## Coming from AWS
+**Pick it when** a data centre or office sends large, steady traffic to Google Cloud. For small traffic a VPN is enough; see [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity).
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| VPC per Region + Transit Gateway | One global VPC | Cross-Region private traffic needs no peering or hub |
-| Security groups | Firewall rules by tag or service account | Rules live on the network and target workloads by identity |
-| NAT gateway per zone | Cloud NAT | Software-defined, no gateway instances, regional |
-| ALB + CloudFront/Global Accelerator | Global external Application Load Balancer | One anycast IP fronts backends in many Regions |
-| PrivateLink | Private Service Connect | Same idea, also used to reach managed services like Cloud SQL |
+## Common mistakes
+
+- **Keeping the automatic `default` network.** It creates subnets in every region with preset ranges, plus a rule allowing remote login from anywhere. Create a custom-mode network as code instead.
+- **Firewall rules that target network tags for sensitive tiers.** Anyone who can edit a VM can change its tags. Using a service account needs its own permission, so target tiers by service account.
+- **Giving a VM an external IP "to download updates".** That is a public address on a private server. Use [Cloud NAT](/cloud/networking/nat-and-egress) for the internet and Private Google Access for Google APIs.
+
+## Where this shows up in system design
+
+- **Multi-region designs:** one network spans regions, so a second region is new subnets plus one more backend on the same global load balancer.
+- **Platforms with many teams:** a platform team runs the Shared VPC host project, teams get service projects, and [firewall policies](/cloud/networking/firewalls) set rules above all of them.
+- **Every case study's edge tier:** the global external Application Load Balancer, with Cloud Armor, in front of private VMs or GKE.
 
 ## Related
 
-[Networking on AWS](/cloud/aws/networking) · [Networking on Azure](/cloud/azure/networking) · [Edge, DNS & CDN on Google Cloud](/cloud/gcp/edge) · [Load Balancing](/system-design/patterns/load-balancing)
+[Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets) · [Private Endpoints](/cloud/networking/private-endpoints) · [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks) · [Networking on AWS](/cloud/aws/networking) · [Networking on Azure](/cloud/azure/networking) · [Edge, DNS & CDN on Google Cloud](/cloud/gcp/edge) · [System Design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Why does a multi-Region design need less networking on Google Cloud?" category="Cloud" level="Mid">
-    Because a VPC is global: subnets in every Region share one private network, so services talk across Regions without peering or a transit hub. The global external Application Load Balancer gives one anycast IP that routes users to the nearest healthy Region.
+  <InterviewQuestion question="A VM on Google Cloud has no external IP address. How does it download updates and reach Cloud Storage?" category="Cloud" level="Junior">
+    **Short answer.** Through Cloud NAT for the internet and Private Google Access for Google APIs. Cloud NAT lets the VM start connections outward while nothing outside can start one inward. Private Google Access, a subnet setting, lets it call Google APIs such as Cloud Storage without any public address.
+
+    **Why.** The network's default route points at the internet gateway, but a VM with no external IP has no public address to send from. Cloud NAT is a setting on a Cloud Router in one region, with no gateway machine to fail. It serves the chosen subnets in every zone.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={4} cloud="gcp" highlight={["igw", "rt-public", "app-a"]} caption="Routes belong to the whole network; the app server has no external IP, so Cloud NAT gives it a way out." />
+
+    **Follow-ups the interviewer may ask.**
+    - A partner allows calls only from known addresses. How do you keep Cloud NAT's address fixed?
+    - What happens when one VM opens many connections to the same destination?
+
+    **Watch out for.** Saying the default route makes the VM public. Without an external IP, nobody outside can reach it, and it cannot reach out either until Cloud NAT is set up.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Should firewall rules on Google Cloud target network tags or service accounts?" category="Cloud" level="Mid">
+    **Short answer.** Service accounts, for anything sensitive. Give each tier its own service account, then write rules such as "the app servers' account may reach the database port". Keep tags for low-risk grouping.
+
+    **Why.** Rules belong to the whole network and pick machines by label. A tag is a free-text label that anyone allowed to edit a VM can change. Attaching a service account needs its own permission, so a rule that targets it cannot be widened by editing one VM.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={2} cloud="gcp" highlight={["lb", "app-a", "db"]} caption="Each tier admits only the tier in front of it: load balancer, then app server, then database." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you stop every team from opening remote login to the internet?
+    - The database is Cloud SQL with a private IP. Where do your rules apply to it?
+
+    **Watch out for.** Forgetting the load balancer's own traffic. Backends must allow its health checks and proxies from Google's published ranges, or every VM shows as unhealthy.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="If Brightpost added a second region and a second team, what would change in its Google Cloud network?" category="Cloud" level="Mid">
+    **Short answer.** Very little plumbing. The new region gets three new subnets in the same global network, and the global load balancer gets one more backend. The second team gets a service project attached to a Shared VPC, so it uses the network without owning it.
+
+    **Why.** A VPC network is global, so VMs in two regions already talk on private addresses with no peering or transit hub. Shared VPC gives one host project the network and lets admins grant other projects use of chosen subnets. The address plan still needs ranges that never overlap.
+
+    **Follow-ups the interviewer may ask.**
+    - Does a global network mean one failure can take down both regions?
+    - How do you stop the second team from changing the first team's firewall rules?
+
+    **Watch out for.** Forgetting that traffic between regions is slower and billed. The network is global; distance and the bill are not.
   </InterviewQuestion>
 </InterviewQuestions>

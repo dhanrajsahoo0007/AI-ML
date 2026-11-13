@@ -1,20 +1,47 @@
 ---
 title: "Networking on Azure"
 description: "VNets, NSGs, NAT Gateway, Application Gateway, Load Balancer, Private Link, Virtual WAN and ExpressRoute, with the AWS and Google Cloud equivalents."
+updated: 2026-11-14
 ---
 
-An Azure **Virtual Network** is regional like an AWS VPC, but its **subnets span all zones** in the Region, so you don't create one subnet per zone. **Network security groups** filter traffic, **Private Link** puts PaaS services on private IPs, and **Virtual WAN** or hub-and-spoke peering connects many networks. New VNets created with current APIs start with **private subnets that have no implicit internet access**, so outbound traffic needs a NAT Gateway or firewall.
+Brightpost's shop needs a network where only the load balancer faces the internet, while the app servers and the orders database stay private across three zones near London. On Azure one fact shapes that design: **a subnet spans every zone of its region**. So three tiers are three subnets, and you choose a zone for each VM, or a zone-redundant option for each service, instead of for each subnet.
+
+## The idea
+
+A private network is a fenced range of addresses where only the front door, a load balancer, faces the internet. The app servers and the database keep private addresses in their own subnets. Each tier runs in three zones, so losing one zone costs a short failover instead of the shop.
+
+<Callout tone="blue" title="Learn the idea">
+  New to private networks? [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets) builds Brightpost's network step by step, and [Private Endpoints](/cloud/networking/private-endpoints) shows how private servers reach managed services. This page names the Azure pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/vpc-three-tier" stepper cloud="azure" minWidth={620} caption="Brightpost's network on Azure in five steps: one public load balancer, private app and data subnets, three zones, and a zone failure." />
+
+<CloudMapping diagram="cloud/vpc-three-tier" lead="azure" />
 
 ## TL;DR
 
-- **Hub-and-spoke**: a hub VNet with Azure Firewall and gateways, spokes per workload, or **Virtual WAN** at scale.
-- **NSGs** on subnets and NICs; **application security groups** to group VMs by role.
-- **Private endpoints** for Storage, SQL, Cosmos DB and Key Vault, with private DNS zones.
-- **Application Gateway** (regional L7), **Load Balancer** (L4), **Front Door** (global L7).
+- **One virtual network (VNet) per environment per region.** Subnets span zones, so each tier needs one subnet, and each VM gets its own zone.
+- **Network security groups (NSGs)** filter traffic on subnets and network cards; **application security groups (ASGs)** name the tiers inside their rules.
+- **Private endpoints** give one resource, such as a storage account, a private address, with a private DNS zone. **Service endpoints** keep the public address.
+- **Many networks:** hub-and-spoke with VNet peering, or **Virtual WAN** at scale. **Application Gateway** is regional layer 7, **Load Balancer** layer 4.
 
 ## At a glance
 
 <CloudGroupTable group="networking" lead="azure" />
+
+## How it fits together on Azure
+
+Step 1 is the leak: a VM and an Azure Database for PostgreSQL flexible server, each with a public address. In step 2 Application Gateway, in a subnet of its own, holds the only public IP. The VMs have none, and the database moves into a subnet handed over to it (a delegated subnet), or behind a private endpoint.
+
+In step 3 Brightpost places one VM in each of three zones, all in the same app subnet. The database's zone-redundant high availability keeps a standby in a second zone. Step 4 has no gateway to create: built-in system routes already cover every subnet, and a route table can override them. In step 5 a zone goes dark. The subnets survive because they span zones; the VM and the primary database in that zone do not. Application Gateway drops the dead VM, and the standby takes over.
+
+| The idea | On Azure | What to know |
+|---|---|---|
+| Subnet per tier per zone | One subnet per tier, spanning zones | You set the zone on each VM, not on the subnet |
+| Internet gateway and public subnet | System routes and a public IP | No gateway resource; "public" means a public IP |
+| Firewall per tier | NSG with application security groups | The default rule allows all traffic inside the VNet |
+| Private path to a managed service | Private endpoint and private DNS zone | One endpoint per resource, not per service |
+| Many networks | VNet peering, or Virtual WAN | Peering is not transitive; a hub must route between spokes |
 
 ## Services
 
@@ -22,38 +49,86 @@ An Azure **Virtual Network** is regional like an AWS VPC, but its **subnets span
 
 <CloudServiceProfile id="azure-vnet" />
 
+**Pick it when** you run VMs, AKS or private endpoints: every one of them lives in a VNet.
+
 ### Azure Application Gateway
 
 <CloudServiceProfile id="azure-app-gateway" />
+
+**Pick it when** HTTP traffic needs a regional front door with path routing, TLS and a WAF. For global HTTP, Front Door sits in front of it; see [Load Balancing](/cloud/networking/load-balancing).
 
 ### Azure Load Balancer
 
 <CloudServiceProfile id="azure-load-balancer" />
 
+**Pick it when** you need layer 4 TCP or UDP balancing, public or internal, such as game servers or a private tier behind the app.
+
 ### Azure Private Link
 
 <CloudServiceProfile id="azure-private-link" />
+
+**Pick it when** a storage account, database or key vault must be reachable only on a private address inside your VNet.
 
 ### Azure ExpressRoute
 
 <CloudServiceProfile id="azure-expressroute" />
 
-## Coming from AWS
+**Pick it when** an office or data centre sends large, steady traffic to Azure. For small traffic a VPN is enough; see [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity).
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| VPC with a subnet per zone | VNet with regional subnets | Zone spreading is per resource, not per subnet |
-| Security groups | Network security groups | Applied to subnets or NICs; ASGs group VMs by role |
-| Transit Gateway | Virtual WAN or hub VNet with peering | Hub usually holds Azure Firewall |
-| PrivateLink endpoints | Private endpoints + private DNS zones | DNS zones are required for hostnames to resolve privately |
-| ALB / NLB | Application Gateway / Load Balancer | Global HTTP goes through Front Door instead |
+## Common mistakes
+
+- **Trusting the default NSG rules.** Every NSG allows all traffic inside the VNet, so any subnet can reach the database. Add your own deny, then allow each tier by ASG. See [Firewalls](/cloud/networking/firewalls).
+- **A private endpoint with no private DNS zone.** The service's name still points at its public address, so traffic skips the endpoint or fails.
+- **Expecting spokes to reach each other through the hub's peerings.** Peering does not chain. Spoke traffic needs routes to a firewall in the hub, or Virtual WAN; see [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks).
+
+## Where this shows up in system design
+
+- **Landing zones:** a hub VNet holds Azure Firewall and the VPN or ExpressRoute gateway, and each workload gets a spoke.
+- **The edge tier:** Front Door in front of an Application Gateway in each region, with the app servers private behind it.
+- **Designs built on managed services:** private endpoints for Storage, SQL and Key Vault keep data off the public internet. [NAT & Leaving the Network](/cloud/networking/nat-and-egress) covers the way out.
 
 ## Related
 
-[Networking on AWS](/cloud/aws/networking) · [Networking on Google Cloud](/cloud/gcp/networking) · [Edge, DNS & CDN on Azure](/cloud/azure/edge) · [Load Balancing](/system-design/patterns/load-balancing)
+[Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets) · [Private Endpoints](/cloud/networking/private-endpoints) · [Firewalls](/cloud/networking/firewalls) · [Networking on AWS](/cloud/aws/networking) · [Networking on Google Cloud](/cloud/gcp/networking) · [Edge, DNS & CDN on Azure](/cloud/azure/edge) · [System Design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="Why does a private endpoint need a private DNS zone?" category="Cloud" level="Mid">
-    Clients still use the service's public hostname, such as mystorage.blob.core.windows.net. A private DNS zone linked to the VNet makes that name resolve to the private endpoint's IP inside the network; without it, traffic would go to the public endpoint or fail.
+  <InterviewQuestion question="Azure subnets span zones. How do you still make Brightpost survive losing one?" category="Cloud" level="Junior">
+    **Short answer.** Spread the machines, not the subnets. Put one VM in each of three zones in the same app subnet, use a zone-redundant Application Gateway, and turn on zone-redundant high availability for the database.
+
+    **Why.** A subnet covers every zone, so a zone failure takes the machines in that zone and leaves the subnet. Health checks drop the dead VM in about 30 seconds, and the other two share the traffic. The database standby in a second zone takes over in about 2 minutes, with no saved order lost.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={5} cloud="azure" highlight={["lb", "app-b", "app-c", "db-standby"]} caption="With zone A lost, Application Gateway and the survivors in the other zones carry the shop." />
+
+    **Follow-ups the interviewer may ask.**
+    - What else is tied to one zone, such as a NAT Gateway or a disk?
+    - How do you check which zone each VM is really in?
+
+    **Watch out for.** Creating VMs without choosing a zone. Such a VM has no zone promise, so all three could sit in the zone that fails, and the subnet's reach across zones does not help.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you let only Brightpost's app servers reach the database on Azure?" category="Cloud" level="Mid">
+    **Short answer.** Put the app servers' network cards in an application security group, then write an NSG rule on the data subnet. It allows the database port from that group only, above your own deny of everything else from the VNet.
+
+    **Why.** An ASG names a tier, so a server added on a sale day joins the rule as soon as its card joins the group. Every NSG starts with a default rule allowing all traffic inside the VNet. Without your own deny above it, any subnet could reach the database.
+
+    <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={2} cloud="azure" highlight={["lb", "app-a", "db"]} caption="Each tier admits only the tier in front of it: Application Gateway, then app server, then database." />
+
+    **Follow-ups the interviewer may ask.**
+    - With NSGs on both the subnet and the network card, which one decides?
+    - How do you stop a team from opening remote login to the internet?
+
+    **Watch out for.** Writing rules with address ranges instead of groups. A new server outside the range is silently left out, or a too-wide range lets everything in.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Private endpoint or service endpoint: how should Brightpost's app reach its storage account privately?" category="Cloud" level="Mid">
+    **Short answer.** A private endpoint, with a private DNS zone linked to the VNet. It gives that one storage account a private address in Brightpost's subnet. A service endpoint is a subnet setting: traffic travels over Azure's network, but to the account's public address.
+
+    **Why.** With a private endpoint the account can turn off public access entirely. Apps keep the usual name, such as `brightpost.blob.core.windows.net`, and the private zone `privatelink.blob.core.windows.net` answers with the private address. Without that zone, the name still points at the public address.
+
+    **Follow-ups the interviewer may ask.**
+    - How does an office connected over VPN resolve the same name to the private address?
+    - What stops a service endpoint from reaching someone else's storage account?
+
+    **Watch out for.** One endpoint for "storage" in general. A private endpoint maps to one resource, so each account, database or key vault needs its own endpoint and DNS record.
   </InterviewQuestion>
 </InterviewQuestions>
