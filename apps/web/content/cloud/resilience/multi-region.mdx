@@ -12,7 +12,7 @@ updated: 2026-11-13
 
 ## The story
 
-Brightpost is a small online shop that sells posters and greeting cards, about 400 orders a day. It runs in one region near London. It also ships to Australia, about 30 orders a day, and there a product page takes about 3 seconds to show. The company guardrail allows two regions, so the team plans a second one near Sydney. For a 14-day trial, both regions take orders. Each has its own copy of the orders database, and each copy sends its changes to the other about 1 second later. On the second Saturday, a signed print has one copy left. A shopper in Leeds and a shopper in Perth buy it 0.4 seconds apart. Each region sees one in stock and sells it. By the end of the trial, 3 orders had sold stock that was already gone, and Brightpost refunded all 3.
+Brightpost is a small online shop that sells posters and greeting cards, about 400 orders a day. It runs in one region near London. It also ships to Australia, about 30 orders a day, and there a product page takes about 3 seconds to show. The company guardrail allows two regions, so the team plans a second one near Sydney. For a 14-day trial, both regions take orders. Each has its own copy of the orders database, and the copies swap changes about 1 second later. On the second Saturday, a signed print has one copy left. A shopper in Leeds and a shopper in Perth buy it 0.4 seconds apart. Each region sees one in stock and sells it. By the end of the trial, 3 orders had sold stock that was already gone, and Brightpost refunded all 3.
 
 Every step below follows that trial, from the first slow page to the design Brightpost will launch with.
 
@@ -44,7 +44,7 @@ A <Term id="dns">DNS</Term> service can answer the shop's name differently for d
 - **Geo routing** answers by the asker's country or continent. Use it when a rule says where someone's data must go.
 - A **health check** is a probe the DNS service sends to each region every few seconds. A region that fails it drops out of the answers.
 
-The catch is caching. Each answer carries a <Term id="ttl">TTL</Term>, how long resolvers may keep it. Brightpost uses 60 seconds. A check every 10 seconds, with 3 misses to fail, takes 30 seconds to notice an outage. Add up to 60 seconds of cached answers. Some resolvers hold answers longer, so a few shoppers call a dead region for minutes.
+The catch is caching. Each answer carries a <Term id="ttl">TTL</Term>, how long resolvers may keep it. Brightpost uses 60 seconds. Checks every 10 seconds, with 3 misses to fail, notice an outage in 30 seconds. Cached answers then live up to 60 more. Some resolvers hold answers longer, so a few shoppers call a dead region for minutes.
 
 ### Step 3: A writer in each region
 
@@ -131,7 +131,7 @@ Brightpost promotes by hand after 15 minutes of outage. Promoting during a short
 
 **Failback** is the trip home. London's old copy holds those missing orders and none of Sydney's new ones, so never switch it back on as the writer. Rebuild it as a copy of Sydney, let it catch up, and move the writer back in a quiet hour. Add the stranded orders by hand.
 
-A failover nobody has tried is a guess. Brightpost plans a drill every 3 months, on a Sunday at 06:00 London time: drain London, move the writer to Sydney and back, and count the errors.
+A failover nobody has tried is a guess. Brightpost plans a drill every 3 months, on a Sunday at 06:00 London time. The team drains London, moves the writer to Sydney and back, and counts errors.
 
 ## On AWS, Google Cloud and Azure
 
@@ -195,10 +195,10 @@ The idea is the same on all three clouds: steer each user to a healthy region, a
 
 <Quiz>
   <QuizItem question="Brightpost's DNS checks need 30 seconds to mark London down, and answers carry a 60-second TTL. How long until most shoppers are sent to Sydney?" hint="Add the time to notice and the time to forget.">
-    About 90 seconds: 30 to notice, then up to 60 while cached answers expire. Shoppers whose resolver ignores the TTL can wait longer. A global front door cuts this to about 30 seconds.
+    About 90 seconds: 30 to notice, then up to 60 while cached answers expire. A global front door cuts this to about 30 seconds.
   </QuizItem>
   <QuizItem question="London takes an order and fails 0.5 seconds later. The Sydney copy runs about 1 second behind. Is the order in Sydney after promotion?">
-    Probably not. It had not been copied yet. That order is within Brightpost's RPO of about 1 second, and it sits in London's old copy until someone recovers it.
+    Probably not: it had not been copied yet. It is within Brightpost's RPO of about 1 second, and waits in London's old copy.
   </QuizItem>
   <QuizItem question="A shopper in Perth pays and opens My orders 0.3 seconds later. Where does that read go, and does it show the order?" hint="Look at the 10-second rule.">
     To London, because read-your-writes sends a shopper's own order pages to the writer for 10 seconds. The order is there, so it shows.
@@ -241,7 +241,7 @@ For 30 orders a day, one writer buys the speed Sydney needs and keeps one answer
   <InterviewQuestion question="Give three reasons to run an app in more than one region." level="Junior" category="Cloud">
     **Short answer.** To be closer to far-away users, to survive a whole region failing, and to meet a rule that some data must stay in one country.
 
-    **Why.** Brightpost's Sydney shoppers wait about 3 seconds for a page, because every round trip to London takes about 250 ms. A stack near Sydney cuts that to under 1 second. Residency is the only reason that can make a region compulsory.
+    **Why.** Brightpost's Sydney shoppers wait about 3 seconds a page, because each round trip to London takes about 250 ms. A stack near Sydney cuts that to under 1 second. Residency is the only reason that can make a region compulsory.
 
     <AnimatedDiagram spec="animated/cloud/global-routing" step={1} path="syd>lapp>ldb" caption="Every Sydney request crosses the world to London and back." />
 
@@ -249,13 +249,13 @@ For 30 orders a day, one writer buys the speed Sydney needs and keeps one answer
     - Could an edge cache fix the latency instead?
     - What does a second region add to the bill?
 
-    **Watch out for.** Saying "more regions means more availability" without counting the cost, or forgetting that the database decides whether the second region can really take over.
+    **Watch out for.** Forgetting the database. Without a copy of the data, the second region cannot take over.
   </InterviewQuestion>
 
   <InterviewQuestion question="DNS failover or a global anycast load balancer: what decides?" level="Mid" category="Cloud">
     **Short answer.** How fast users must move after a failure. DNS works for any protocol but waits for cached answers to expire. An anycast front door keeps one address and moves the next request within seconds.
 
-    **Why.** With Brightpost's settings, DNS needs 30 seconds to notice and up to 60 more for cached answers: about 90 seconds, longer for resolvers that ignore the TTL. The front door notices in about 30 seconds and never changes its address. It costs a fixed fee and carries only the protocols the product supports.
+    **Why.** With Brightpost's settings, DNS needs 30 seconds to notice and up to 60 more for cached answers: about 90 seconds. The front door notices in about 30 seconds and never changes its address. It costs a fixed fee and carries only the protocols the product supports.
 
     <AnimatedDiagram spec="animated/cloud/global-routing" step={6} path="syd>fd>sapp" caption="One address for every shopper; the front door picks the healthy region." />
 
@@ -269,7 +269,7 @@ For 30 orders a day, one writer buys the speed Sydney needs and keeps one answer
   <InterviewQuestion question="Shoppers in Sydney place orders. Where could those writes go?" level="Mid" category="Cloud">
     **Short answer.** To one writer in London, to a writer in Sydney that copies to London, or to one global database that both regions vote on.
 
-    **Why.** One writer costs a 250 ms trip per order and keeps one answer per order. A writer per region costs about 10 ms but lets copies disagree, which is how Brightpost sold one poster twice. A global database keeps every read current, but every write waits about 250 ms and needs a third site to break ties.
+    **Why.** One writer costs a 250 ms trip per order and keeps one answer. A writer per region costs about 10 ms but lets copies disagree: Brightpost sold one poster twice. A global database keeps reads current, but every write waits about 250 ms.
 
     <AnimatedDiagram spec="animated/cloud/write-topologies" step={3} caption="Three shapes, each with its promise and its cost." />
 
@@ -297,7 +297,7 @@ For 30 orders a day, one writer buys the speed Sydney needs and keeps one answer
   <InterviewQuestion question="After failing over to Sydney, how do you fail back to London without losing the orders taken in Sydney?" level="Senior" category="Cloud">
     **Short answer.** Never switch London's old database back on as the writer. Rebuild it as a copy of Sydney, let it catch up, then move the writer back in a quiet hour. Recover the few orders stranded in the old London copy by hand.
 
-    **Why.** London's old copy has the last second of orders that never reached Sydney, and none of the orders Sydney took since. Making it the writer again would lose Sydney's orders, or create two writers that conflict. The planned switch back loses nothing, because nobody writes while the writer moves.
+    **Why.** London's old copy has the last second of orders that never reached Sydney, and none of Sydney's since. Making it the writer again would lose Sydney's orders, or create two writers. The planned switch back loses nothing, because nobody writes while the writer moves.
 
     <AnimatedDiagram spec="animated/cloud/global-routing" step={5} highlight={["ldb", "sdb"]} caption="One writer and one copy; failback swaps their roles, then swaps them back." />
 

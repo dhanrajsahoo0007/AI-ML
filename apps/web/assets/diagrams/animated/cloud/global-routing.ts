@@ -59,7 +59,7 @@ const spec: DiagramSpec = {
     {
       id: "syd",
       label: "Sydney shoppers",
-      sub: "about 30 orders a day",
+      sub: "30 orders a day",
       icon: "users",
       tone: "neutral",
       x: 390,
@@ -233,7 +233,7 @@ const spec: DiagramSpec = {
     { from: "fd", to: "sapp", label: "healthy", packet: true, delay: 1.2, labelAt: 0.35, step: 6 },
 
     // Step 7: Sydney must run alone: the same sign-in, and its own copy of every secret.
-    { from: "identity", to: "sapp", label: "same sign-in", dashed: true, step: 7 },
+    { from: "identity", to: "sapp", label: "same sign-in", dashed: true, labelAt: 0.35, step: 7 },
     { from: "secrets", to: "sapp", label: "own copy", dashed: true, flow: true, step: 7 },
   ],
 };

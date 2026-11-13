@@ -7,7 +7,7 @@ import type { LayoutShape, LayoutSpec, Tone } from "@/components/diagrams/types"
 //
 // Geometry: panels start at x 10, 270 and 530 and are 250 wide; the groups run y 24-374 (tab at y 10-38). Boxes are
 // 226 wide at panel x + 12: copies at y 54-104 and 170-220, promise at 244-294, cost at 306-356. Arrows cross the
-// 66-unit gap between the copies. Canvas 790 x 386.
+// 66-unit gap between the copies. All of it is shifted down by TOP (30). Canvas 790 x 416.
 // Label room: 6.2 px per character within width - 8 for the lint, about 7.2 px in the real font, so a label stays
 // under 30 characters and a sub line under 34.
 
@@ -62,6 +62,8 @@ const PANELS: Panel[] = [
 ];
 
 const PANEL_X = (i: number) => 10 + i * 260;
+// Everything sits 30 units down, so the figure's pause button does not cover the third panel's corner.
+const TOP = 30;
 
 const shapes: LayoutShape[] = PANELS.flatMap((p, i): LayoutShape[] => {
   const x0 = PANEL_X(i);
@@ -98,7 +100,7 @@ const shapes: LayoutShape[] = PANELS.flatMap((p, i): LayoutShape[] => {
           id: `${p.id}-arrow-${k}`,
           type: "arrow",
           x: x0 + a.dx,
-          y: a.up ? 170 : 104,
+          y: TOP + (a.up ? 170 : 104),
           w: 0,
           h: a.up ? -66 : 66,
           label: a.label,
@@ -109,11 +111,11 @@ const shapes: LayoutShape[] = PANELS.flatMap((p, i): LayoutShape[] => {
         }
   );
   return [
-    box("top", 54, p.top, "violet"),
+    box("top", TOP + 54, p.top, "violet"),
     ...arrows,
-    box("bottom", 170, p.bottom, "violet"),
-    box("promise", 244, p.promise, "green"),
-    box("cost", 306, p.cost, p.costTone, p.costTone === "red" ? { highlight: true as const } : {}),
+    box("bottom", TOP + 170, p.bottom, "violet"),
+    box("promise", TOP + 244, p.promise, "green"),
+    box("cost", TOP + 306, p.cost, p.costTone, p.costTone === "red" ? { highlight: true as const } : {}),
   ];
 });
 
@@ -121,13 +123,13 @@ const spec: LayoutSpec = {
   kind: "layout",
   title: "Three places the writes can go",
   width: 790,
-  height: 386,
+  height: TOP + 386,
   groups: PANELS.map((p, i) => ({
     id: `${p.id}-panel`,
     title: p.title,
     tone: "neutral" as const,
     x: PANEL_X(i),
-    y: 24,
+    y: TOP + 24,
     w: 250,
     h: 350,
   })),
