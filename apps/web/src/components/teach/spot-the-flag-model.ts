@@ -35,7 +35,7 @@ export function verdictOf(sentence: FlagSentence, picked: boolean): Verdict {
   return picked ? "false-alarm" : "clear";
 }
 
-export interface FlagScore {
+interface FlagScore {
   /** Red flags in the answer. */
   flags: number;
   caught: number;

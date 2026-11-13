@@ -71,11 +71,11 @@ Read these three before writing a `system-design/` page (all Markdown files, so 
 Rules the code enforces:
 
 - **Teaching components** (`KeyIdea`, `Term`, `Glossary`, `Compare`, `ProsCons`, `Tabs`/`Tab`, `Quiz`/`QuizItem`,
-  `DecisionTree`, `RequirementsTable`, `EstimateTable`, `Numbers`, `PatternUses`, `LearningPath`; source
+  `DecisionTree`, `SpotTheFlag`, `RequirementsTable`, `EstimateTable`, `Numbers`, `PatternUses`, `LearningPath`; source
   `apps/web/src/components/teach/`) validate props with strict zod schemas: an unknown or misspelled prop is a red
   note in dev and fails the production build.
 - **Widgets** (eleven lazy islands in `apps/web/src/components/teach/widgets/`): at most two per page, `DecisionTree`
-  included. Not yet enforced by content-check, so reviewers check it.
+  and `SpotTheFlag` included. Not yet enforced by content-check, so reviewers check it.
 - **Glossary**: owned by the section with `glossary: true` in `sections.yaml`. `<Term id>` ids must exist in
   `system-design/glossary.yaml` (zod-validated by `apps/web/src/lib/glossary.ts`: kebab-case unique ids, `short` at
   most 160 characters, `related` ids must exist).
@@ -84,6 +84,9 @@ Rules the code enforces:
   for the `/interviews` library with a restricted set: `AnimatedDiagram`, `Callout`, `Compare`, `KeyIdea`, `Tabs`,
   `Tab` (`ANSWER_COMPONENTS` in `apps/web/src/lib/question-answer.ts`). Any other component or a mermaid fence fails
   content-check with the file and question id. In YAML answers only `$$...$$` is math, so prices stay plain text.
+- **Practice mode**: a question list whose questions are all in a `track: leadership` category gets a "Practice mode"
+  toggle (answer timer, self-rating, follow-up drill; `apps/web/src/components/mdx/interview-practice.client.tsx`).
+  Ratings are stored under the question `id`, so do not change the id of a published question.
 - **taxonomy.yaml**: quote every subsection `description` (and any title) that contains a comma; an unquoted comma
   ends a YAML flow-mapping value. Content-check rejects a subsection that is not exactly `{slug, title, description}`.
 

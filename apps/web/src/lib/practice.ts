@@ -105,7 +105,7 @@ export function shuffled<T>(items: readonly T[], random: () => number): T[] {
 /** Target length of a first answer, in seconds. */
 export const ANSWER_SECONDS = 120;
 
-export interface AnswerPart {
+interface AnswerPart {
   key: "situation" | "action" | "result" | "learning";
   label: string;
   /** One word for the timer bar, where the first part is too narrow for its full label. */
@@ -130,7 +130,7 @@ export const ANSWER_PARTS: readonly AnswerPart[] = [
   {
     key: "learning",
     label: "Learning",
-    short: "Learning",
+    short: "+L",
     share: 0.1,
     cue: "What you changed so it does not happen again.",
   },
