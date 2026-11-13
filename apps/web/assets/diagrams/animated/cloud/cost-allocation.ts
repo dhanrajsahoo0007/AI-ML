@@ -18,8 +18,8 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   Left (x 130), "what runs": shop servers, orders database, wholesale servers, GPU test cluster; rightsizing below.
 //   Middle (x 390), "the provider's cost tools": finance lead on top, billing data, cost alerts; tag policy below.
 //   Right (x 672), "what the team reads": three cost views on top, then the warehouse and cost per order.
-// shopsrv 130,95 | db 130,215 | wsrv 130,335 | gpu 130,465 | rightsize 130,605 |
-// finance 390,95 | billing 390,275 | alerts 390,420 | tagpol 390,605 |
+// shopsrv 130,95 | db 130,215 | wsrv 130,335 | gpu 130,465 | rightsize 130,620 |
+// finance 390,95 | billing 390,275 | alerts 390,420 | tagpol 390,620 |
 // shopview 672,95 | wholeview 672,185 | unalloc 672,275 | warehouse 672,420 | unitcost 672,560.
 //
 // Why this order: on a phone the figure opens on the left 480 units. Steps 1 and 2 use only the left and middle
@@ -34,7 +34,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 const spec: DiagramSpec = {
   title: "Giving every line of the bill an owner",
   width: 795,
-  height: 665,
+  height: 680,
   steps: [
     { title: "Every resource meters into one bill" },
     { title: "A GPU cluster nobody owns" },
@@ -45,12 +45,12 @@ const spec: DiagramSpec = {
   ],
   zones: [
     { id: "accounts", title: "Workload accounts", tone: "teal", x: 10, y: 40, w: 240, h: 475 },
-    { id: "advice", title: "Advice", tone: "orange", x: 10, y: 548, w: 240, h: 102 },
+    { id: "advice", title: "Advice", tone: "orange", x: 10, y: 563, w: 240, h: 102 },
     { id: "people", title: "People", tone: "neutral", x: 295, y: 40, w: 190, h: 92 },
     { id: "tools", title: "Cost tools", tone: "orange", kind: "subnet", x: 295, y: 160, w: 190, h: 330 },
-    { id: "guard", title: "Guardrail", tone: "red", x: 295, y: 548, w: 190, h: 102 },
+    { id: "guard", title: "Guardrail", tone: "red", x: 295, y: 563, w: 190, h: 102 },
     { id: "reports", title: "Cost reports", tone: "orange", x: 565, y: 40, w: 220, h: 275 },
-    { id: "warehouse-zone", title: "Your warehouse", tone: "violet", x: 565, y: 345, w: 220, h: 305 },
+    { id: "warehouse-zone", title: "Your warehouse", tone: "violet", x: 565, y: 345, w: 220, h: 320 },
   ],
   nodes: [
     // Step 1: what runs, and the one bill it adds up to.
@@ -84,7 +84,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 130,
       y: 335,
-      w: 176,
+      w: 186,
       cloud: { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" },
     },
     {
@@ -136,7 +136,7 @@ const spec: DiagramSpec = {
       tone: "red",
       step: 3,
       x: 390,
-      y: 605,
+      y: 620,
       w: 176,
       cloud: {
         aws: { id: "aws-organizations", label: "SCP + tag policy" },
@@ -234,7 +234,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 6,
       x: 130,
-      y: 605,
+      y: 620,
       w: 186,
       cloud: {
         aws: "aws-compute-optimizer",
@@ -267,10 +267,10 @@ const spec: DiagramSpec = {
       tone: "red",
       dashed: true,
       via: [
-        [262, 605],
+        [262, 620],
         [262, 480],
       ],
-      labelAt: 0.55,
+      labelAt: 0.61,
       step: 3,
     },
 
@@ -294,7 +294,7 @@ const spec: DiagramSpec = {
     { from: "alerts", to: "gpu", label: "day 1", tone: "red", packet: true, step: 5 },
 
     // Step 6: rightsizing reads usage and flags the cluster as idle.
-    { from: "rightsize", to: "gpu", label: "idle after day 2", dashed: true, step: 6 },
+    { from: "rightsize", to: "gpu", label: "idle after day 2", dashed: true, labelAt: 0.66, step: 6 },
   ],
 };
 
