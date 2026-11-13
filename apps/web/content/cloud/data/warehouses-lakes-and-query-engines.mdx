@@ -1,11 +1,312 @@
 ---
 title: "Warehouses, Lakes and Query Engines"
-description: "Why analysis does not run on the orders database, and how warehouses, data lakes and query engines fit together on the cloud."
-status: outline
+description: "Why analysis leaves the orders database, and how a lake of files, a query engine billed per data read and a warehouse fit together on the cloud."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** why analysis does not run on the orders database, the three shapes of analytical storage on the cloud (a warehouse, a lake of files in object storage, and a lakehouse), the engines that query them, and the path data takes from the app to the lake.
+<KeyIdea>
+  Questions across years of data belong in a store built to read a few columns of many rows, and on the cloud the bill follows the data each question reads.
+</KeyIdea>
 
-**Related reading on this site:** [Analytical (OLAP) & Columnar](/system-design/databases/analytical-databases) · [Analytics & Data on AWS](/cloud/aws/analytics) · [Analytics & Data on Google Cloud](/cloud/gcp/analytics)
+## The story
+
+In September a contractor builds a sales dashboard for Brightpost's finance lead. It answers the question the finance lead keeps asking: which posters sell best each December, and which pages do people view before they buy? Every night since launch, a job has copied the day's click events, about 25,000, into a bucket as raw JSON text. Two years of them make 730 files and about 18 GB. The contractor points a serverless query engine at the bucket. It needs no servers and bills by the data each query reads. The dashboard has 6 charts, refreshes every 15 minutes, and stays open on an office screen day and night. Each chart reads all 18 GB, every time: about 10 TB a day. The budget alert at 100% fires on the 22nd. The month ends about 40% dearer than August, with a new line on the bill: queries.
+
+Every step below explains one part of that bill, and how each chart went from 18 GB to under 1 MB.
+
+## How it works
+
+Two kinds of work first. **Transactions** are small reads and writes of a few rows, such as "save this order". **Analytics** are questions across many rows, such as "total sales per poster, every December". A database tuned for one is slow at the other.
+
+### Step 1: Why questions do not run on the orders database
+
+<AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={1} minWidth={620} caption="Brightpost's starting point: the finance lead reads the orders database's copy, and click events sit in a stream for 7 days." />
+
+Brightpost's orders database stores each order as one row, with all its fields side by side. That suits checkout, which reads or writes one whole order at a time. A question like "best-sellers each December" needs two fields from all 290,000 orders. A row store must still read every field of every row to find them.
+
+The finance lead's monthly report already runs on the database's <Term id="read-replica">read copy</Term>, and takes about 20 minutes. Two problems remain. The click events are not in the database at all; they live in a stream that keeps them for 7 days. And a copy sized for checkout gets slower as the questions span more years. Analytical stores keep each **column** together instead, so a question reads only the fields it names. [Analytical (OLAP) and columnar databases](/system-design/databases/analytical-databases) explains why that is so much faster.
+
+<PremiumBreak />
+
+### Step 2: A lake: files in a bucket
+
+<AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={2} minWidth={620} caption="Every night the day's clicks and orders land as raw JSON files in a lake bucket." />
+
+A **data lake** is a collection of files in <Term id="object-storage">object storage</Term>, kept for analysis. Any program can write a file there, in any format, and storage is the cheapest line on the bill. Nobody has to design tables first. The structure is applied later, when someone reads the files. That idea is called **schema on read**.
+
+Brightpost's lake starts with a raw area. Each night one job reads the day's events from the stream and writes one JSON file. Another copies the day's orders out of the database. After two years the click folder holds 730 files and about 18 GB.
+
+The raw area is never edited. If a later step has a bug, Brightpost rebuilds everything from these files.
+
+### Step 3: A query engine reads the files in place
+
+<AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={3} minWidth={620} caption="The dashboard sends SQL to the query engine, which asks the catalog which files make the table and reads them where they sit." />
+
+A **query engine** runs SQL over files without loading them anywhere first. A <Term id="serverless">serverless</Term> one has no servers for you to size or start. It spreads each query across many machines it owns and reads the files in parallel. You pay for the data each query reads.
+
+The engine needs to know which files make a table, and what columns they hold. That is the job of a **catalog**: a list of tables, each pointing at a folder of files, with column names and types. The contractor adds one entry, `clicks`, that points at the click folder. Now `SELECT` works on 730 files as if they were one table.
+
+### Step 4: Paying per data read
+
+<AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={4} minWidth={620} caption="The failure: every 15 minutes, day and night, each of 6 charts reads all 18 GB of raw JSON." />
+
+Per-read billing is fair for an occasional question. A one-off query over 18 GB is a small cost. It becomes a large one when a machine asks the same question all day.
+
+<Callout tone="red" title="What breaks">
+  The dashboard refreshes 96 times a day and has 6 charts, so it runs 576 queries a day. JSON is text with every field name repeated in every event, and the engine must read all of it to find two fields. With no date filter that it can use, each query reads all 730 files. That is 576 × 18 GB, about 10 TB a day and 300 TB in September.
+</Callout>
+
+Three things multiplied the bill: a text format that cannot skip columns, one big folder that cannot skip days, and a refresh that never sleeps. The next three steps remove one each.
+
+### Step 5: Columnar files, split by date
+
+<AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={5} minWidth={620} caption="A nightly job converts the raw files to Parquet in one folder per day; a chart now reads about 20 MB." />
+
+**Parquet** is an open file format that stores each column together, compressed. It also records the smallest and largest value in each block, so an engine can skip blocks that cannot match. The same two years of clicks take about 3 GB as Parquet.
+
+A <Term id="partition">partition</Term> here is one folder per day, named by date, such as `dt=2026-09-14`. When a query filters on that date, the engine reads only the matching folders. Engines call this **partition pruning**.
+
+<Compare
+  columns={["What a chart reads", "Bytes per chart", "Why it shrinks"]}
+  rows={[
+    ["Raw JSON, every file", "18 GB", "Nothing can be skipped"],
+    ["Parquet, every file", "About 3 GB", "Compressed columns"],
+    ["Parquet, one month of folders", "About 125 MB", "Partition pruning skips 23 months"],
+    ["Parquet, one month, 3 columns", "About 20 MB", "Columnar: the other fields are never read"],
+  ]}
+  caption="Brightpost's click data, read for one chart. Each row adds one fix to the one above."
+/>
+
+From 18 GB to about 20 MB is about 900 times less per chart. The raw files stay, untouched, in their own area.
+
+### Step 6: A warehouse with modelled tables
+
+<AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={6} minWidth={620} caption="The warehouse loads the curated tables each night, and the dashboard reads a summary table of under 1 MB." />
+
+A **data warehouse** is a managed analytical database. Data is loaded into it and shaped into tables built for the questions people ask. Brightpost's warehouse holds one table of order lines and one of page views. A **summary table** adds up sales and views per poster per day, rebuilt after each nightly load. A month of it is under 1 MB, so 96 refreshes a day cost almost nothing.
+
+Cloud warehouses **separate storage from compute**. The data sits in the provider's storage and is billed by size. The machines that run queries are billed separately: by the time they run, or by capacity you reserve. You can grow compute for a busy month-end without copying any data.
+
+The finance lead keeps the query engine for one-off questions. The dashboard, which asks the same thing all day, reads the warehouse.
+
+### Step 7: Getting data in: ETL, ELT and streaming
+
+Data reaches a lake or a warehouse in one of three ways. The nightly arrows in the stepper are the first.
+
+1. **Batch.** A job copies a day's data at night. Brightpost's raw files arrive this way.
+2. **Change data capture (CDC).** A tool reads the database's change log and sends each new or changed row within seconds. [Database Migration](/cloud/data/database-migration) uses the same technique.
+3. **Streaming sink.** A service reads a stream and writes a file every few minutes.
+
+**ETL** means extract, transform, then load: data is cleaned before it reaches the warehouse. **ELT** loads first and transforms inside the warehouse with SQL. Brightpost does both: a job converts to Parquet, and SQL builds the summary table.
+
+Fast sinks bring a trap. A file every minute is 1,440 files a day, most of a few kilobytes, and engines spend more time opening files than reading them. A **compaction** job merges each day's small files into a few large ones.
+
+### Step 8: The lakehouse, honestly
+
+A **lakehouse** keeps warehouse-style tables as files in the lake. An **open table format**, such as Apache Iceberg or Delta Lake, adds a log over the Parquet files that records which files make each version of a table. That brings updates, deletes and reads of an older version, and several engines can share one copy. It is not free: you still run compaction, a catalog and access rules, and a busy dashboard is often faster from a warehouse table. For Brightpost's 18 GB a lake plus a warehouse is simpler; a lakehouse pays off when many teams share terabytes.
+
+### Step 9: Who may see which columns
+
+<AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={7} minWidth={620} caption="Access rules hide customer names and addresses, set once with the catalog and applied in the warehouse too." />
+
+The orders in the lake carry customer names and home addresses. The contractor needs order dates, posters and totals, and nothing that names a person. **Column-level rules** say which <Term id="role">role</Term> may read which columns. Some services can also filter rows or mask a value, showing `****` instead of an address.
+
+Rules set with the catalog apply to every engine that honours that catalog. So the contractor's role gets the order table without its 2 name and address columns, both in the lake and in the warehouse.
+
+One gap remains. A column rule works only for reads through an engine. Anyone with read access on the bucket can download the raw files. So analysts get no direct read on the bucket; only the engines do. [Identity and Access](/cloud/fundamentals/identity-and-access) covers the roles.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: files in object storage, a catalog of tables, an engine or warehouse to read them, and column rules.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Lake storage:** Amazon S3 buckets. Amazon Data Firehose can land a stream in S3 and write Parquet.
+    - **Query engine:** Amazon Athena runs SQL over files in S3. It bills by the data each query scans, unless you buy capacity for it.
+    - **Warehouse:** Amazon Redshift, as provisioned clusters or Redshift Serverless. Redshift Spectrum lets it query S3 tables as well.
+    - **Catalog and loading:** the AWS Glue Data Catalog, shared by Athena, Redshift and Amazon EMR. Glue crawlers find tables, and Glue jobs convert and load.
+    - **Column rules:** AWS Lake Formation grants on databases, tables, columns and rows, enforced by the engines that use the catalog.
+
+    **The difference that changes a design.** The lake and the warehouse are separate products, joined by the Glue catalog. Athena bills per scan and Redshift by the compute you run. So a team routes one-off questions to Athena and repeated ones to Redshift. An Athena workgroup can cap the data one query may scan, which would have stopped Brightpost's dashboard on its first refresh.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Lake storage:** Cloud Storage buckets.
+    - **Query engine:** BigQuery itself, through external or BigLake tables that point at files in Cloud Storage.
+    - **Warehouse:** BigQuery. Storage and compute are billed apart; compute is on demand, by bytes processed, or reserved slots of capacity.
+    - **Catalog and loading:** BigQuery datasets hold the table definitions. Knowledge Catalog (formerly Dataplex) finds and describes data across lakes and warehouses. Dataflow or scheduled queries convert and load.
+    - **Column rules:** policy tags on columns, plus row-level access policies and data masking. BigLake tables carry the same rules over to files.
+
+    **The difference that changes a design.** One engine serves the lake and the warehouse. So the choice is less "which product" and more "native table or table over files". On demand, every query is billed by the bytes it processes. Partitioned and clustered tables, a maximum-bytes-billed setting and daily quotas are the guards.
+  </Tab>
+  <Tab label="Azure">
+    - **Lake storage:** OneLake, the single lake behind Microsoft Fabric, built on Azure Data Lake Storage. Shortcuts point at data kept elsewhere.
+    - **Query engine:** a Fabric lakehouse's SQL analytics endpoint reads its tables. Older setups use Azure Synapse serverless SQL pools, billed by data processed.
+    - **Warehouse:** Fabric Warehouse. Many existing setups run Azure Synapse Analytics dedicated SQL pools.
+    - **Catalog and loading:** the OneLake catalog lists Fabric's tables and files. Data Factory pipelines and notebooks convert and load. Microsoft Purview catalogues and classifies data across the estate.
+    - **Column rules:** column-level and row-level security and data masking on Fabric warehouse tables, with Purview labels on sensitive data.
+
+    **The difference that changes a design.** Fabric bills by a capacity you buy, shared by all its engines, not per query. Fabric tables are stored in the open Delta Lake format, so the lakehouse is the default shape. A runaway dashboard there adds no per-scan line. Instead, it uses up the capacity and can slow or delay other jobs on it.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/lake-to-warehouse" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/lake-to-warehouse" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Where should this question run?"
+  tree={{
+    q: "Must the answer include orders from the last few minutes?",
+    yes: "The orders database's read copy, with a small query. Lakes and warehouses usually trail by hours.",
+    no: {
+      q: "Will the same question run again and again, as on a dashboard?",
+      yes: "A summary table in the warehouse, rebuilt after each load. Each refresh reads kilobytes, not gigabytes.",
+      no: {
+        q: "Is the data in the lake as columnar files split by date?",
+        yes: "The query engine over the lake. Filter on the date the folders are named by, and name only the columns you need.",
+        no: "Convert it first. A one-off scan of 18 GB of raw JSON is fine; 576 of them a day are not.",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The dashboard has 6 charts and refreshes every 15 minutes, all day. Each chart reads 18 GB. How much does it read in a day?" hint="How many refreshes fit in 24 hours?">
+    96 refreshes × 6 charts × 18 GB, about 10 TB a day. After the fixes, the same refreshes read the summary table: under 1 MB each.
+  </QuizItem>
+  <QuizItem question="A query asks for September's clicks but filters on a timestamp field, not the date the folders are named by. What does it read?" hint="What does the engine use to skip folders?">
+    Every folder, about 3 GB of Parquet. The engine skips folders only when the filter names the partition column, here the folder date.
+  </QuizItem>
+  <QuizItem question="The contractor's role cannot see the address column in the catalog, but it can read the lake bucket. Can the contractor see addresses?">
+    Yes. They can download the raw files from the bucket and open them; column rules apply only to reads through an engine. Remove the bucket read.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Read copy of the database", "Query engine over the lake", "Warehouse"]}
+  rows={[
+    ["Built for", "Small reads like checkout's", "Questions over files, any time", "The same questions, asked often"],
+    ["You pay for", "The copy's server, all month", "The data each query reads", "Compute time or reserved capacity, plus storage"],
+    ["Brightpost's chart, per refresh", "Cannot answer: no clicks there", "18 GB raw, about 20 MB tuned", "Under 1 MB from the summary"],
+    ["Freshness", "Seconds behind", "As fresh as the last file", "As fresh as the last load: nightly"],
+    ["Setup", "One setting", "A bucket, a catalog, a conversion job", "All that, plus loads and table models"],
+    ["Main risk", "Slows as questions grow", "A bill that grows with careless queries", "Paying for compute that sits idle"],
+  ]}
+  caption="Brightpost's numbers. Real prices and billing units differ by cloud."
+/>
+
+Most teams end up with all three: the copy for live checks, the engine for one-off questions, and the warehouse for anything on a schedule.
+
+## Common pitfalls
+
+- **Scanning everything.** `SELECT *` with no date filter reads every byte, and per-read billing charges for every byte. Name the columns, filter on the partition date, and set a per-query cap on data scanned.
+- **Querying raw JSON or CSV.** Text formats cannot skip columns or blocks. Keep the raw files, and point every regular query at a Parquet copy.
+- **Millions of small files.** A sink that writes every minute makes 1,440 files a day. Compact each day into a few large files.
+- **Partitions too fine or on the wrong column.** One folder per hour per poster makes thousands of tiny folders. Split by the date that queries filter on, and stop there.
+- **Rules in the catalog, reads on the bucket.** Column rules do not cover someone who downloads the files. Only the engines get read access to the lake.
+
+## How to say it in an interview
+
+"I keep analytics off the production database; it is tuned for small reads of whole rows. Raw data lands in a lake: files in object storage, kept unchanged so I can rebuild anything from them. A nightly job converts them to a columnar format like Parquet, split by date, and a catalog turns each folder into a table. One-off questions go to a serverless query engine billed per data read; a filter on the date and a short column list keep that cheap. Anything on a schedule, like a dashboard, reads a summary table in a warehouse. Column-level rules sit with the catalog, and only the engines can read the bucket."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why not run analytics on the production database?" level="Junior" category="Cloud">
+    **Short answer.** The production database is tuned for small reads and writes of whole rows, such as saving one order. An analytical question reads a few fields of every row. It competes with checkout for the same machine and runs slowly.
+
+    **Why.** A row store keeps each order's fields together, so a question about two fields reads all of them, for all 290,000 orders. Brightpost's monthly report takes about 20 minutes on its read copy, and the click events are not in the database at all.
+
+    <AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={1} highlight={["finance", "db", "stream"]} caption="The finance lead's questions reach the database, while the click events sit in a stream for 7 days." />
+
+    **Follow-ups the interviewer may ask.**
+    - Is a read replica enough? When is it not?
+    - How fresh does an analytics copy need to be?
+
+    **Watch out for.** Saying "add an index". An index finds a few rows fast; it does not help a question that touches every row.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A dashboard refreshes all day. Should it read a serverless query engine over the lake or a warehouse?" level="Mid" category="Cloud">
+    **Short answer.** A warehouse summary table. A per-read engine charges for every refresh, so a question asked all day should read a small, prepared table. Keep the query engine for one-off questions.
+
+    **Why.** Brightpost's dashboard runs 576 queries a day. Over raw JSON that was 18 GB each; even tuned Parquet is about 20 MB each. A summary table of sales per poster per day, rebuilt after the nightly load, is under 1 MB for a month. The warehouse bills by compute time or reserved capacity, which a small table barely uses.
+
+    <AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={6} path="dashboard>warehouse>curated" caption="The dashboard reads the summary; the warehouse loads it from the curated tables each night." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if the dashboard needs data from the last hour?
+    - How would a result cache change the answer?
+
+    **Watch out for.** Assuming serverless means cheap. Serverless means no idle cost; a busy, careless query costs more there than anywhere.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A query over the lake costs 40 times more than expected. Name three likely causes." level="Mid" category="Cloud">
+    **Short answer.** The files are text such as JSON or CSV, so no column can be skipped. The filter does not use the partition column, so every folder is read. Or the query runs far more often than anyone planned.
+
+    **Why.** All three hit Brightpost at once. JSON repeats every field name in every event, so 2 years of clicks were 18 GB instead of about 3 GB as Parquet. With no usable date filter, each query read all 730 files. And 6 charts refreshing every 15 minutes made 576 queries a day. Millions of small files and `SELECT *` are the next suspects.
+
+    <AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={4} highlight={["dashboard", "engine", "raw"]} caption="Six charts, every 15 minutes, each reading all 18 GB." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where would you look first to find the query?
+    - What cap stops this before the bill does?
+
+    **Watch out for.** Blaming the engine's price. The price per byte was as advertised; the number of bytes was the design fault.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you stop a contractor from seeing customer addresses in the lake and the warehouse?" level="Mid" category="Cloud">
+    **Short answer.** Give the contractor a role with column-level rules that leave out names and addresses. Set them with the catalog so every engine applies them. Give the role no direct read on the lake bucket.
+
+    **Why.** Brightpost's orders carry names and home addresses; the contractor needs only dates, posters and totals. Rules set with the catalog cover the query engine and the warehouse. They do not cover a file downloaded from the bucket, so only the engines get bucket access.
+
+    <AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={7} highlight={["rules", "catalog", "warehouse"]} caption="One set of column rules, kept with the catalog and applied in the warehouse too." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you hide rows, such as one country's customers?
+    - How do you prove later who read the address column?
+
+    **Watch out for.** Copying the data without the columns into a second bucket and calling it done. Every copy is another place to secure and delete from.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Would you build Brightpost a lakehouse, or a lake plus a warehouse?" level="Senior" category="Cloud">
+    **Short answer.** For Brightpost today, a lake plus a warehouse, or one service that does both. A lakehouse earns its extra moving parts when several teams and engines share terabytes and keeping copies in step hurts.
+
+    **Why.** Brightpost has 18 GB of clicks, one dashboard and one finance lead. A nightly load into a warehouse is easy to run and to explain. A lakehouse adds updates, deletes and old versions over Parquet, but still needs compaction, a catalog and access rules. I would still store the curated files in an open table format, so a later move needs no rewrite.
+
+    <AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={5} highlight={["raw", "curated", "engine"]} caption="The curated tables are where an open table format would go." />
+
+    **Follow-ups the interviewer may ask.**
+    - What changes if a data science team needs the same tables in a notebook?
+    - How would you delete one customer's data from Parquet files?
+
+    **Watch out for.** Choosing by trend. Name the number that would change the answer: data size, team count, or how often copies drift.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Where Data Lives on the Cloud](/cloud/data/data-on-the-cloud)
+- [Databases on Each Cloud](/cloud/start-here/databases-per-cloud)
+- [Object Storage: Tiers, Lifecycle, Versioning and Redundancy](/cloud/data/object-storage)
+- [Queues, Topics, Streams, Event Buses and Workflows on the Cloud](/cloud/data/streaming-and-messaging-services)
+- [Database Migration: Full Load, Change Data Capture and Cutover](/cloud/data/database-migration)
+- [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics)
+- [FinOps and the Cost Tools](/cloud/operations/finops-and-cost-tools)
+- [Analytics & Data on AWS](/cloud/aws/analytics)
+- [Analytics & Data on Google Cloud](/cloud/gcp/analytics)
+- [Analytics & Data on Azure](/cloud/azure/analytics)
+- [Analytical (OLAP) & Columnar](/system-design/databases/analytical-databases)
+- [CQRS and Event Sourcing](/system-design/patterns/cqrs-event-sourcing)
+
+## Further reading
+
+- [Amazon Athena User Guide](https://docs.aws.amazon.com/athena/latest/ug/what-is.html): SQL over files in S3.
+- [BigQuery overview](https://cloud.google.com/bigquery/docs/introduction): storage, compute and pricing models.
+- [Microsoft Fabric overview](https://learn.microsoft.com/fabric/fundamentals/microsoft-fabric-overview): OneLake, lakehouse and warehouse.
+- [Apache Parquet documentation](https://parquet.apache.org/docs/): the columnar file format.

@@ -1,11 +1,316 @@
 ---
 title: "CI/CD and Deployment Strategies"
-description: "How a commit reaches production without downtime, and how to choose between rolling, blue-green and canary releases."
-status: outline
+description: "Build once and promote the same artifact, choose rolling, blue/green or canary, roll back on alarms, and change a database in steps both versions can use."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the path from a commit to production without downtime: build once, promote the same artifact, and choose between rolling, blue-green and canary releases by how fast you must roll back and how much spare capacity you can afford. Feature flags separate deploying from releasing.
+<KeyIdea>
+  Build each change once, send that exact build through every check, show it to a few shoppers before all of them, and keep a way back that takes seconds.
+</KeyIdea>
 
-**Related reading on this site:** [DevOps & IaC on AWS](/cloud/aws/devops) · [DevOps & IaC on Google Cloud](/cloud/gcp/devops) · [DevOps & IaC on Azure](/cloud/azure/devops)
+## The story
+
+On a busy Saturday in late November, Brightpost runs 3 app servers. At 12:00 Asha ships version 1.9 of the shop. It renames a column in the orders table from `address` to `delivery_address`. The pipeline runs the database change first, then replaces one server every 4 minutes. The old servers, still on 1.8, write to `address`, which no longer exists. Every checkout that reaches an old server fails. The health checks stay green, because pages still load; only the write fails. It lasts 12 minutes, until the last old server is gone. In that time 27 shoppers try to pay, 18 fail and 7 never come back. Rolling back the code would not have helped: version 1.8 needs the column that was gone.
+
+Nothing in the cloud failed. Two changes that needed different moments shipped as one. Each step below separates one more pair: building from deploying, deploying from releasing, and code from schema.
+
+## How it works
+
+A few words first. **CI**, continuous integration, means every change merged into the main code is built and tested automatically, within minutes. **CD**, continuous delivery, means every build that passes can reach production by the same automated path. A **pipeline** is that chain of stages. An **artifact** is what the build produces and every later stage uses; for Brightpost it is a <Term id="container">container</Term> image. A **deployment strategy** is the order in which servers and shoppers move from the old version to the new one.
+
+### Step 1: Build once, then replace the servers
+
+<AnimatedDiagram spec="animated/cloud/deployment-strategies" step={1} minWidth={620} caption="The pipeline builds one image and stores it in the registry; the deploy replaces all 3 servers at the same moment." />
+
+The pipeline builds the shop's image once and stores it in an <Term id="image-registry">image registry</Term>. The registry gives it a **digest**, a fingerprint of its exact bytes. Every server and every environment pulls that digest, so they all run the same thing. [Containers and Registries](/cloud/compute/containers-and-registries) explains why a digest is safer than a tag.
+
+The simplest strategy is **all at once**: stop every server, start every server on the new version. Brightpost's first deploys worked this way. Two versions never run together. The price is about 2 minutes of errors on every deploy, and a rollback is another full deploy.
+
+<PremiumBreak />
+
+### Step 2: The pipeline: build once, promote the same digest
+
+<AnimatedDiagram spec="animated/cloud/ci-cd-pipeline" stepper minWidth={620} caption="CI builds, tests, scans and signs one image. CD moves that same digest from staging to production." />
+
+The CI half runs on every commit: build, unit tests, a scan for known flaws, and a signature. The result is one digest in the registry. The CD half moves that digest from environment to environment. That move is called **promotion**, and it never rebuilds. A rebuild can pick up a newer base layer, so production would run bytes that no test has seen.
+
+Brightpost's staging is the test account. It runs the same digest as production with different settings, such as the database address. A smoke test places one test order there first. The pipeline signs in to the cloud through <Term id="federation">federation</Term>, with no stored key, as [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code) sets up.
+
+### Step 3: Rolling: old and new serve together
+
+<AnimatedDiagram spec="animated/cloud/deployment-strategies" step={2} minWidth={620} caption="A rolling deploy moves one server at a time to the new version, so both versions take shoppers for a while." />
+
+A **rolling** deploy replaces one server at a time. The <Term id="load-balancer">load balancer</Term> stops sending new shoppers to it, lets open requests finish, and adds the new server once it passes its health check. [Load Balancing](/cloud/networking/load-balancing) covers that draining step.
+
+At Brightpost each server takes about 4 minutes, so 3 servers take 12. The shop stays up and needs no extra servers. But for those minutes two versions serve shoppers at once, and they share one database. Anything the old version cannot understand will break it.
+
+### Step 4: The failure: a rename the old servers cannot read
+
+<AnimatedDiagram spec="animated/cloud/deployment-strategies" step={3} minWidth={620} caption="The failure: the migration renames the column before the rollout, and every write from an old server is refused." />
+
+A **migration** is a script that changes the database's structure, its **schema**. Brightpost's pipeline ran it as the first stage of the deploy.
+
+<Callout tone="red" title="What breaks">
+  At 12:00 the column is renamed and all 3 servers are still on 1.8, so every checkout fails. At 12:04 one server runs 1.9 and works; two old ones keep failing. At 12:12 the last old server is replaced and checkouts recover. The health checks only asked "does the page load?", so no alarm fired. Of 27 shoppers who tried to pay, 18 failed.
+</Callout>
+
+There was no way back either. A rollback would have put 1.8 on every server, and 1.8 needs `address`. The schema had moved forward with no version that could run on both sides of it.
+
+### Step 5: Expand, migrate, contract
+
+<AnimatedDiagram spec="animated/cloud/deployment-strategies" step={4} minWidth={620} caption="The migration only adds the new column. Old servers keep writing the old one; the new version writes both." />
+
+The fix is to change a database in steps, so that each running version works with the schema at every moment. This is the **expand and contract** pattern.
+
+1. **Expand.** Add `delivery_address`. Keep `address`. Version 1.8 does not notice the new column.
+2. **Dual-write.** Release 1.9 writes both columns and still reads `address`. A rollback to 1.8 is safe.
+3. **Backfill.** A job copies `address` into `delivery_address` for old rows.
+4. **Switch reads.** Release 1.10 reads `delivery_address`.
+5. **Contract.** Days later, once no running version or rollback target uses `address`, drop it.
+
+The rule behind it: a schema change ships in a different release from the code that needs it. [Database Migration](/cloud/data/database-migration) covers moving a whole database, which is a different job.
+
+### Step 6: Blue/green: a second fleet and a flip
+
+<AnimatedDiagram spec="animated/cloud/deployment-strategies" step={5} minWidth={620} caption="Green is a full copy on the new version. The balancer sends 100% to green, and blue stays up for a rollback." />
+
+In a <Term id="blue-green">blue/green</Term> deploy, the current fleet is **blue**. The pipeline starts a full second fleet, **green**, on the new version. Brightpost tests green through a private address with the smoke test order. Then the load balancer flips all traffic to green in one move.
+
+Rolling back is the same flip in reverse, and takes seconds. Blue stays idle for an hour, then is removed. The cost is a second fleet for that hour: 3 extra servers on a busy day. Both fleets share one database, so expand and contract is still needed.
+
+### Step 7: Canary: a few shoppers first, rolled back by an alarm
+
+<AnimatedDiagram spec="animated/cloud/deployment-strategies" step={6} minWidth={620} caption="The new version takes 5% of shoppers. An alarm watches its error rate and moves the 5% back without waiting for a person." />
+
+A <Term id="canary">canary</Term> release sends a small share of traffic to the new version first. Brightpost starts at 5% for 30 minutes, then 25%, 50% and 100%. Between steps the pipeline reads **health signals**: checkout errors and slow pages, for the canary and the old version side by side.
+
+**Automated rollback** means the pipeline acts on those signals by itself. Brightpost's alarm fires when the canary's checkout errors pass 1% for 5 minutes. The deploy tool then sets the canary to 0% and stops the release, with nobody awake. Good alarms come from the shop's targets: see [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call).
+
+### Step 8: Feature flags: deploy is not release
+
+<AnimatedDiagram spec="animated/cloud/deployment-strategies" step={7} minWidth={620} caption="The new checkout ships inside version 1.9 but stays switched off until the flag service turns it on." />
+
+A **feature flag** is a switch the code reads at run time: "show the new checkout: on or off". A **deploy** puts new code on servers. A **release** shows a change to shoppers. With a flag they become two moments. Version 1.9 can go out on Tuesday with the new checkout off. On Thursday the team turns it on for staff, then for 10% of shoppers, then for all.
+
+Turning a flag off takes seconds and needs no deploy. Each flag doubles a path through the code, so Brightpost deletes a flag within 2 weeks of reaching 100%. A flag cannot protect a schema change: a dropped column is gone for flagged and unflagged code alike.
+
+### Step 9: Approvals and change freezes
+
+<AnimatedDiagram spec="animated/cloud/ci-cd-pipeline" step={4} minWidth={620} caption="A rollback redeploys the previous digest. During a freeze the approval gate stays shut." />
+
+An **approval** is a stage that waits for a named person. At Brightpost a second engineer approves each production deploy, and the pipeline records who approved which digest. Approvals catch what tests cannot, such as a release on the morning of a sale.
+
+A **change freeze** is a period with no production deploys. Brightpost freezes the week of its biggest sale, except for fixes that two people approve. The pipeline enforces it as a closed gate, not a calendar note. The rest of the year, small daily deploys are easier to test and to roll back than a month of work at once.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: one artifact, promoted through environments, released in slices, with an alarm that can send traffic back.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Build and store:** CodeBuild runs the builds, CodePipeline chains the stages, and images go to Amazon ECR.
+    - **Deploy to servers:** CodeDeploy, in place in batches, or blue/green by copying the Auto Scaling group and moving the load balancer to it.
+    - **Traffic shifting:** for ECS and Lambda, CodeDeploy shifts traffic in canary or linear steps, between two target groups (ECS) or alias weights (Lambda).
+    - **Automatic rollback:** a deployment can name CloudWatch alarms. If one fires, CodeDeploy stops and returns to the last good version.
+    - **Gates and flags:** a manual approval action in CodePipeline. Feature flags in AWS AppConfig.
+
+    **The difference that changes a design.** The deploy tool moves the traffic, and how depends on the compute. EC2 swaps instance groups, ECS swaps target groups, Lambda changes alias weights. Pick the compute first; the strategies on offer follow.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Build and store:** Cloud Build runs each step as a container and pushes to Artifact Registry. Binary Authorization can refuse unsigned images on GKE and Cloud Run.
+    - **Deploy to servers:** Cloud Deploy promotes a release through ordered targets, such as staging then production, on GKE or Cloud Run. A managed instance group rolls VMs to a new template.
+    - **Traffic shifting:** Cloud Run splits traffic between revisions by percentage; a tag gives a revision its own test address. Cloud Deploy's canary strategy sets the percentages in phases.
+    - **Automatic rollback:** Cloud Deploy can run a verify job after a phase and roll a target back to its previous release. On Cloud Run, rollback is a traffic change.
+    - **Gates and flags:** a Cloud Deploy target can require approval before a rollout. There is no general flag service; teams use an open-source or third-party one.
+
+    **The difference that changes a design.** Cloud Run splits traffic itself, per revision, so a canary needs no second fleet. Cloud Deploy fixes a release when it is created, and promotion moves that same release on. "Promote the same digest" is how the tool works, not a rule to remember.
+  </Tab>
+  <Tab label="Azure">
+    - **Build and store:** Azure Pipelines or GitHub Actions build the image and push it to Azure Container Registry.
+    - **Deploy to servers:** App Service deployment slots: deploy to a staging slot, warm it, swap it with production. A VM scale set takes a new image in rolling batches.
+    - **Traffic shifting:** a slot can take a set percentage of production traffic. Container Apps with several active revisions splits traffic between them by weight.
+    - **Automatic rollback:** swap back, or move the weight back. An Azure Pipelines check can query Azure Monitor alerts before a stage goes on.
+    - **Gates and flags:** Azure Pipelines environments take approvals and checks, such as business hours, which suits a freeze. Feature flags in Azure App Configuration.
+
+    **The difference that changes a design.** A slot is a full second copy of the app on the same plan, so blue/green needs no new servers, only room on the plan. Settings marked as slot settings stay put, so production's database address never moves in a swap.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/deployment-strategies" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/deployment-strategies" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which deployment strategy?"
+  tree={{
+    q: "Does the change alter the database in a way the old version cannot use?",
+    yes: "Split it first. Expand the schema in its own release, ship the code, and contract days later. Then walk this tree again for the code release.",
+    no: {
+      q: "Do you have an alarm you trust, such as checkout errors per version?",
+      yes: {
+        q: "Can the platform send a set percentage of traffic to the new version?",
+        yes: "Canary: 5%, then 25%, 50% and 100%, with automatic rollback on the alarm. Ship new features behind a flag.",
+        no: "Blue/green if you can run a second fleet for an hour, with the alarm deciding when to flip back. Otherwise rolling, one server at a time.",
+      },
+      no: {
+        q: "Can you run twice the servers for about an hour?",
+        yes: "Blue/green: test green privately, flip, and keep blue warm for an hour. Rollback is one flip. Build the alarm next.",
+        no: "Rolling, one server at a time, with draining and health checks. Build the alarm before the next big release.",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost's rolling deploy replaced one of 3 servers every 4 minutes. Why did checkouts fail from 12:00, before any new server was up?" hint="Look at what ran first.">
+    The migration ran first and renamed the column at 12:00. For the first 4 minutes all 3 servers were still on 1.8, so every checkout failed.
+  </QuizItem>
+  <QuizItem question="A canary takes 5% of checkouts in an hour with 120 checkouts. Its alarm needs 5 minutes of errors to fire. About how many shoppers meet a broken canary?" hint="120 an hour is 2 a minute.">
+    About 1. In 5 minutes 10 checkouts happen, and 5% of 10 is half a checkout. The story lost 18.
+  </QuizItem>
+  <QuizItem question="Release 1.10 reads only `delivery_address`. When may Asha drop `address`?">
+    When no running version and no rollback target uses it. While a rollback to 1.9 is possible, its writes to `address` must work. So the drop waits for a later release.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "All at once", "Rolling", "Blue/green", "Canary"]}
+  rows={[
+    ["Extra servers during a deploy", "0", "0 (or 1 to keep 3 up)", "3, a full copy, for about 1 hour", "1 at 5%"],
+    ["Shoppers who meet a bad version", "All, at once", "A growing share over 12 minutes", "All, after the flip", "5% for the first 30 minutes"],
+    ["Time to roll back", "Another full deploy, 2 more minutes of errors", "Another 12-minute roll", "Seconds: flip back", "Seconds: canary to 0%"],
+    ["Two versions serve at once", false, true, false, true],
+    ["Needs an alarm you trust", false, false, false, true],
+    ["Brightpost uses it for", "Nothing now", "Small config changes", "Sale-week fixes", "Every shop release"],
+  ]}
+  caption="Brightpost's numbers on a busy day with 3 servers. Every column shares one database, so schema changes need expand and contract in all four."
+/>
+
+Canary limits how many shoppers meet a mistake most cheaply, but needs an alarm that is right. Blue/green buys the fastest rollback with a second fleet.
+
+## Common pitfalls
+
+- **Rebuilding for each environment.** Production then runs bytes no test has seen. Build once and promote the digest.
+- **Shipping schema and code together.** During a rolling deploy the old version meets the new schema, and the rollback has nowhere to go. Expand first, contract last.
+- **Health checks that only ask "is it up?".** Brightpost's pages loaded while every old server's checkout failed. Judge a release on checkout errors and slow requests, per version.
+- **A rollback nobody has tried.** "Redeploy the old tag" fails when the tag has moved or the schema has changed. Practise it on staging, by digest.
+- **Flags that never die.** Each flag doubles a path through the code. Give each one an owner and a removal date.
+
+## How to say it in an interview
+
+"I build each change once, sign it, and promote the same digest from staging to production, so production runs exactly what was tested. For the rollout I prefer a canary: 5% first, then wider, with an alarm on checkout errors that shifts traffic back automatically. Without a trusted alarm, I use blue/green for a one-flip rollback, or rolling when a second fleet costs too much. Database changes go out separately with expand and contract, so both versions work and rollback stays possible. Feature flags let me deploy code switched off and release it later. Approvals and freezes are gates in the pipeline, not habits."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a rolling and a blue/green deployment?" level="Junior" category="Cloud">
+    **Short answer.** A rolling deploy replaces servers a few at a time inside the same fleet, so old and new versions serve together for a while. Blue/green builds a full second fleet on the new version and flips all traffic to it at once, keeping the old fleet for a fast rollback.
+
+    **Why.** Rolling needs no extra servers, but Brightpost's 3 servers took 12 minutes, and a rollback is another 12-minute roll. Blue/green costs 3 extra servers for about an hour, but rolling back is one flip that takes seconds.
+
+    <AnimatedDiagram spec="animated/cloud/deployment-strategies" step={5} highlight={["lb", "current", "next"]} caption="Blue/green: the balancer sends all traffic to green and keeps blue warm." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to requests that are halfway through when the balancer flips?
+    - Why does blue/green still need care with the database?
+
+    **Watch out for.** Saying blue/green means zero risk. Both fleets share one database, so a schema change can break blue even when green is fine.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why build the container image once and promote it, instead of rebuilding for each environment?" level="Mid" category="Cloud">
+    **Short answer.** So production runs the same bytes that passed every test. A rebuild is a new artifact with a new digest. It can pick up a newer base image or library, and nothing has tested it.
+
+    **Why.** Brightpost's pipeline builds once, scans and signs the result, and stores one digest. Staging and production pull that digest; only settings differ. A rollback names the previous digest, which still exists unchanged.
+
+    <AnimatedDiagram spec="animated/cloud/ci-cd-pipeline" step={3} caption="One digest moves from the registry to staging, then through an approval to production." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where should environment-specific settings live, if not in the image?
+    - How does production refuse an image the pipeline did not sign?
+
+    **Watch out for.** Promoting by tag, such as `latest` or `v1.9`. A tag can be moved to a different image; a digest cannot.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A canary shows a 0.5% error increase on 5% of traffic. What do you do, and how does the pipeline do it without you?" level="Mid" category="Cloud">
+    **Short answer.** Hold the rollout, compare the canary with the old version, and move its traffic back if the gap is real. The pipeline does this itself. An alarm compares the two error rates, and when it fires the deploy tool sets the canary to 0%.
+
+    **Why.** At 5%, the extra errors touch about 1 request in 4,000, so pausing costs little. Going to 25% would multiply the damage by five. Judge it against the old version over the same minutes: a rise in both means the release is not the cause. Brightpost's alarm fires at 1% over 5 minutes, so a 0.5% rise holds the rollout for a person to decide.
+
+    <AnimatedDiagram spec="animated/cloud/deployment-strategies" step={6} path="next>alarm>lb" caption="The canary's errors reach the alarm, and the alarm moves its traffic back at the balancer." />
+
+    **Follow-ups the interviewer may ask.**
+    - How long should a canary run before it widens?
+    - What if the canary is too small to show a real signal?
+
+    **Watch out for.** Judging the canary on "it started and passed its health check". Brightpost's broken servers passed theirs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is the difference between deploying and releasing, and how do feature flags help?" level="Mid" category="Cloud">
+    **Short answer.** Deploying puts new code on servers. Releasing shows a change to users. A feature flag is a switch the code reads at run time. Code can be deployed switched off, then released to staff, then to a share of users, then to all.
+
+    **Why.** Brightpost deploys 1.9 on Tuesday with the new checkout off. On Thursday it turns the flag on for 10% of shoppers. If something looks wrong, the flag goes off in seconds, with no deploy and no rollback.
+
+    <AnimatedDiagram spec="animated/cloud/deployment-strategies" step={7} highlight={["flag", "next"]} caption="The new checkout is inside the deployed code, switched off by the flag service." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does a forgotten flag cost after a year?
+    - Can a feature flag protect a database change?
+
+    **Watch out for.** Treating flags as free. Each one doubles a path through the code, so old flags must be removed on a schedule.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you rename a column in a busy database without downtime?" level="Senior" category="Cloud">
+    **Short answer.** With expand and contract, over several releases. Add the new column. Release code that writes both and reads the old one. Backfill old rows, then release code that reads the new one. Drop the old column only when no running version or rollback target uses it.
+
+    **Why.** During a rolling or canary deploy two versions run against one schema. Brightpost renamed `address` in one step, and every checkout on a 1.8 server failed for 12 minutes. With expand and contract, each step works for the version before it and after it, so every release can roll back. The backfill runs in small batches, so it never locks the busy table for long.
+
+    <AnimatedDiagram spec="animated/cloud/deployment-strategies" step={4} highlight={["migration", "db", "current", "next"]} caption="The schema grows first; old servers keep their column while the new version writes both." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you know no code still reads the old column?
+    - What changes if the two columns can disagree during the backfill?
+
+    **Watch out for.** Running the migration in the same release as the code that needs it. That is the exact shape of Brightpost's 12 minutes.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design a release process for a team of 3 engineers with nobody on call at night and one big sale every November." level="Senior" category="Cloud">
+    **Short answer.** One pipeline: build, test, scan and sign once, promote the digest to staging, smoke test, one approval, then a canary in production with automatic rollback. Deploy small changes in working hours only, separate schema changes, and freeze the gate in sale week.
+
+    **Why.** With nobody awake at night, the rollback must not need a person, so the canary's alarm on checkout errors does it. Working-hours deploys mean someone is there if the alarm misses something. Small daily changes keep each release easy to judge. The freeze is a closed gate in the pipeline, with a two-person exception for urgent fixes.
+
+    <AnimatedDiagram spec="animated/cloud/ci-cd-pipeline" step={4} caption="The rollback redeploys the previous digest; the freeze keeps the approval gate shut in sale week." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would you drop first if the team had one engineer?
+    - How do you ship an urgent fix during the freeze?
+
+    **Watch out for.** Adding approvals instead of automated checks. A person who clicks "approve" 20 times a week stops reading what they approve.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Containers and Registries](/cloud/compute/containers-and-registries)
+- [Load Balancing](/cloud/networking/load-balancing)
+- [Serverless Containers and PaaS](/cloud/compute/serverless-containers-and-paas)
+- [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code)
+- [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management)
+- [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call)
+- [Database Migration](/cloud/data/database-migration)
+- [DevOps & IaC on AWS](/cloud/aws/devops)
+- [DevOps & IaC on Google Cloud](/cloud/gcp/devops)
+- [DevOps & IaC on Azure](/cloud/azure/devops)
+- [Load balancing basics](/system-design/fundamentals/load-balancing-basics)
+
+## Further reading
+
+- [AWS CodeDeploy deployment configurations](https://docs.aws.amazon.com/codedeploy/latest/userguide/deployment-configurations.html): in-place, blue/green, canary and linear.
+- [Google Cloud Deploy overview](https://cloud.google.com/deploy/docs/overview): delivery pipelines, releases and promotion.
+- [Cloud Run rollouts, rollbacks and traffic migration](https://cloud.google.com/run/docs/rollouts-rollbacks-traffic-migration): splitting traffic between revisions.
+- [Azure App Service deployment slots](https://learn.microsoft.com/azure/app-service/deploy-staging-slots): staging slots and swaps.

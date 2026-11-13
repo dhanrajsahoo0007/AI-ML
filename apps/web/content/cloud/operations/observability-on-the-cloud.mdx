@@ -1,11 +1,314 @@
 ---
 title: "Observability on the Cloud"
-description: "Why metrics, logs and traces answer three different questions, and how they travel from your code to a managed backend."
-status: outline
+description: "Metrics, logs and traces answer three different questions. How each leaves your servers, where the cloud keeps it, and how one id joins them."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** why metrics, logs and traces are three different questions about the same request, how they get from a VM, container or function into a managed backend, and what each cloud calls the pieces.
+<KeyIdea>
+  A running system can tell you three things: whether it is healthy, what happened, and where the time went. It can only tell you what it wrote down.
+</KeyIdea>
 
-**Related reading on this site:** [Observability on AWS](/cloud/aws/observability) · [Observability on Google Cloud](/cloud/gcp/observability) · [Observability on Azure](/cloud/azure/observability)
+## The story
+
+Brightpost is a small online shop that sells posters and greeting cards, about 400 orders a day. By July it runs as three services on 2 servers each: the shop app, an order service, and a print service that books the printing partner. One week, 12 customers email support: pressing Pay took 6 to 9 seconds. Asha signs in to all 6 servers one by one and reads their log files. The shop app writes plain text in local time. The order service writes JSON in UTC. The print service writes only errors, and nothing had failed. No line says which Pay it belongs to, so she matches lines by the clock. It takes her 2 days to find the cause. For each large A1 poster in a basket, the print service built the print file before it answered, about 3 seconds each.
+
+Every step below shortens those 2 days, until the same question takes 5 minutes.
+
+## How it works
+
+Three words first. **Telemetry** is the data a running system sends out about itself. A **signal** is one kind of telemetry. **Observability** is how well you can answer a new question, such as "why was this Pay slow?", from telemetry alone.
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" step={3} minWidth={620} caption="Where the shop stands at the start of this hub: copies of the app in three zones behind a load balancer. Each copy is one more place a log line can hide." />
+
+### Step 1: Three signals, three questions
+
+<AnimatedDiagram spec="animated/cloud/three-signals" minWidth={620} caption="One slow Pay request leaves a metric, a log line and a span. Each lands in its own store and answers its own question." />
+
+A **metric** is a number measured over time, such as "Pay requests per minute" or "how long Pay took". Metrics are small and fast to chart, so they answer *is something wrong, and how much?* A **log** is a line of text your code writes when something happens, with a time and details. It answers *what exactly happened?* A **trace** follows one request through every service it touches. Each piece of work on the way is a **span**, with a start time and a duration. A trace answers *where did the time go?*
+
+One Pay request leaves all three. In July, the metric would have shown that Pay was slow, the trace that the print service held the time, and the log line why. How to collect and store these at scale is taught in [Metrics and logging](/system-design/case-studies/metrics-and-logging). This page covers what the clouds add.
+
+<PremiumBreak />
+
+### Step 2: Six servers, six log files
+
+<AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={2} minWidth={620} caption="The failure: Pay takes 9 seconds, and six log files in three formats cannot say which lines belong to one Pay." />
+
+Brightpost's first setup is step 1 of this picture. Each server writes a file on its own disk, read over SSH, a remote command line on that one server. With 6 servers, a single Pay leaves lines in 3 places.
+
+<Callout tone="red" title="What breaks">
+  The complaint names a time and nothing else. Asha finds 41 shop-app lines in that minute, in local time, and 29 order-service lines, in UTC. The print service wrote nothing, because nothing failed. No id links a shop-app line to an order-service line. She guesses by the clock across 6 files, and it takes 2 days.
+</Callout>
+
+The fix is not more logging. It is three habits: send telemetry off the servers, write it in one shape, and carry one id through every hop.
+
+### Step 3: What the platform sends, and what you add
+
+A cloud watches your resources from outside, so some signals arrive without any work. Others only your code can produce.
+
+<Compare
+  columns={["Signal", "Sent by the platform", "Added by you"]}
+  rows={[
+    ["Metrics", "Processor, network and disk traffic per server; requests, errors and latency at the load balancer; database connections", "Pay time, orders placed, print bookings; memory used inside a server"],
+    ["Logs", "Changes made to the account (the audit trail); balancer access logs once switched on; whatever a function prints", "One structured line for each step of each Pay"],
+    ["Traces", "Spans from a few managed services", "Spans inside your own services, and passing the trace id along"],
+  ]}
+  caption="What Brightpost got for free, and what it had to add."
+/>
+
+Memory is the surprise: it lives inside the operating system, which the platform cannot see, so an agent must read it. Platform metrics usually come with the price. Your own metrics and logs are billed by volume, as [Pricing basics](/cloud/fundamentals/pricing-basics) showed.
+
+### Step 4: Getting telemetry off the machine
+
+<AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={3} minWidth={620} caption="A collector on every server sends numbers to a managed metrics store, and a dashboard charts them." />
+
+An **agent** is a small program on each server. It reads the server's numbers and log files and sends them to the cloud's backend. On a <Term id="container">container</Term> platform the same job runs as a **sidecar**, a helper container next to the app, or as one agent per machine. A <Term id="serverless">serverless</Term> function has no machine you can reach, so the platform collects whatever it prints.
+
+**OpenTelemetry** is an open standard, with libraries for most languages, for producing metrics, logs and traces in one format. Its **collector** receives that data, batches it, drops what you do not want, and forwards it to any backend. Code instrumented with OpenTelemetry can switch backends with a configuration change, not a code change. Brightpost runs a collector on all 6 servers.
+
+### Step 5: Metrics: labels, percentiles and series
+
+A metric has a name, a value, a time and **labels** that split it, such as `service=print` or `zone=b`. Each combination of labels is its own **series**, and stores bill for series. So a label must have few values. Zone has 3. A customer id has 90,000, and would make 90,000 series. Ids belong in logs and traces.
+
+Averages hide slow requests. In July the average Pay took 1.1 seconds, because only baskets with A1 posters were slow. The <Term id="p99">p99</Term> is the time that 99 of every 100 requests beat. Brightpost's p99 Pay time was 8.7 seconds, while its median was 0.8.
+
+Many teams already use **Prometheus**, an open-source metrics system, and **Grafana**, an open-source dashboard tool. Each cloud offers a managed store that accepts Prometheus data and queries, so those dashboards keep working.
+
+### Step 6: Logs: structured, central and kept for a set time
+
+<AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={4} minWidth={620} caption="All 6 servers send log lines in one format to one log store, which keeps them for 30 days." />
+
+A **structured log** is a record with named fields instead of a free sentence, usually one line of JSON. All three services now write the same fields:
+
+```json
+{"time":"2026-07-14T09:12:03.418Z","level":"info","service":"print","trace_id":"4bf9","order_id":"B-58213","msg":"A1 print file built","ms":3021}
+```
+
+The log store keeps lines from all 6 servers, sorted into one group per service. Each group has a **retention period**: how long lines are kept before they are deleted. Brightpost keeps 30 days. The audit trail is separate and stays in the audit account's archive.
+
+Logs are a line on the bill, charged for what is written and what is kept. At the normal level, info, the shop writes about 70 MB a day. The debug level, full detail, writes about 20 times more.
+
+### Step 7: Traces: one id carried across services
+
+<AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={5} minWidth={620} caption="Pay gets a trace id at the shop app. Each service passes it on, and every span lands in the trace store under that id." />
+
+When Pay starts, the shop app's tracing library makes a **trace id**, a random 32-character string, shortened here to 4bf9. It sends the id to the order service in a request header named `traceparent`, part of a standard called W3C Trace Context. gRPC calls carry it in their metadata. The order service passes the same id to the print service. This is **context propagation**.
+
+Each service reports its spans with that id, and the trace store joins them into one timeline:
+
+1. Shop app, Pay: 9.3 s.
+2. Order service, place order: 9.2 s.
+3. Print service, book slot: 9.0 s, of which three A1 print files took 3.0 s each.
+
+The July cause sits on line 3, and one trace finds it in 5 minutes. The fix was to build print files after Pay answers. [Service-to-Service Calls on the Cloud](/cloud/networking/service-to-service) covers these hops.
+
+### Step 8: Sampling: keep the traces that matter
+
+Keeping every span of every request costs money and adds little. **Sampling** keeps a share of traces and drops the rest.
+
+- **Head sampling** decides when a request starts, for example "keep 1 in 10". The decision travels with the trace id, so every service keeps or drops the same trace.
+- **Tail sampling** decides at the end, in the collector, once it knows a trace was slow or failed. All spans of one trace must reach the same collector for this to work.
+
+Brightpost keeps every Pay trace, about 400 a day. It keeps 1 in 10 of its other 30,000 daily requests, plus every trace slower than 2 seconds or with an error.
+
+### Step 9: Alerts, dashboards and one id to join them
+
+<AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={6} minWidth={620} caption="An alert rule watches p99 Pay time and pages Asha. Nobody has to stare at the dashboard." />
+
+A dashboard is for people who are already looking. An **alert rule** looks for you and sends a page, a message that wakes the person on call. Alert on what shoppers feel. Brightpost's rule: p99 Pay time above 2 seconds for 10 minutes. A processor alarm would have slept through July, because the print servers ran at about 20%. How to pick the target is [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call).
+
+Now the signals join up. The page links to the Pay chart, the chart's slow points link to example traces, and the trace id finds every log line for that Pay. Each hop is one click.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a managed store for each signal, an agent or collector that feeds them, and OpenTelemetry as the common format.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Metrics:** Amazon CloudWatch metrics. Services publish their own; memory and disk use on EC2 need the CloudWatch agent.
+    - **Logs:** CloudWatch Logs, in log groups. Query them with CloudWatch Logs Insights.
+    - **Traces:** AWS X-Ray, fed by OpenTelemetry through the AWS Distro for OpenTelemetry (ADOT).
+    - **Collecting:** the CloudWatch agent on servers, or the ADOT collector.
+    - **Prometheus and Grafana:** Amazon Managed Service for Prometheus and Amazon Managed Grafana.
+
+    **The difference that changes a design.** Logs live in log groups, one per application or function, in each account and region. Retention is a setting on each group, and a new group keeps its logs until you change it. So set retention when you create the group, in your infrastructure code, or the log line grows every month. Seeing several accounts in one place takes cross-account setup.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Metrics:** Cloud Monitoring. Compute Engine sends its system metrics; memory and disk use need the Ops Agent.
+    - **Logs:** Cloud Logging. Query with the Logging query language, or with SQL through Log Analytics.
+    - **Traces:** Cloud Trace, which accepts OpenTelemetry data.
+    - **Collecting:** the Ops Agent on servers. Google Kubernetes Engine collects container logs by default.
+    - **Prometheus and Grafana:** Google Cloud Managed Service for Prometheus. Grafana runs on your side and reads Cloud Monitoring.
+
+    **The difference that changes a design.** Every log entry passes through the Log Router first. Its sinks decide where entries go: a log bucket, BigQuery, Cloud Storage or Pub/Sub. Each project starts with a `_Required` bucket for audit logs and a `_Default` bucket with its own retention. A sink can send many projects' logs to one central bucket, so routing is a design choice, not an afterthought.
+  </Tab>
+  <Tab label="Azure">
+    - **Metrics:** Azure Monitor Metrics. Every resource sends platform metrics; memory inside a VM needs the Azure Monitor Agent.
+    - **Logs:** Azure Monitor Logs in a Log Analytics workspace. Query with KQL, the Kusto Query Language.
+    - **Traces:** Application Insights, fed by the Azure Monitor OpenTelemetry Distro inside the app.
+    - **Collecting:** the Azure Monitor Agent, set up with data collection rules.
+    - **Prometheus and Grafana:** Azure Monitor managed service for Prometheus and Azure Managed Grafana.
+
+    **The difference that changes a design.** A workspace is the unit: one workspace can hold logs from many resources and subscriptions, and one KQL query reads across them. Resource logs reach it only through a diagnostic setting on each resource. With none, they are not kept. Retention is set on the workspace and per table, and choosing one central workspace or several is an early decision.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/telemetry-pipeline" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/telemetry-pipeline" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which signal do I open first?"
+  tree={{
+    q: "Do you know which request went wrong, such as an order number or a trace id?",
+    yes: {
+      q: "Does it cross more than one service?",
+      yes: "Open its trace. The longest span shows which service held the time; then read that span's log lines.",
+      no: "Search the logs for that id. The lines tell you what happened to that one request.",
+    },
+    no: {
+      q: "Do you know when it started?",
+      yes: "Open the metrics for that window. Find which service, zone or endpoint changed, then jump to an example trace.",
+      no: {
+        answer: "Start from the alert or the dashboard. If nothing alerted, write the alert rule you were missing.",
+        href: "/cloud/operations/slos-alerting-and-on-call",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="In July the average Pay took 1.1 seconds and the p99 took 8.7 seconds. Which number should the alert watch, and why?" hint="Who is hidden by the average?">
+    The p99. Only baskets with A1 posters were slow, so they barely move the average. The p99 shows that 1 in 100 shoppers waited almost 9 seconds.
+  </QuizItem>
+  <QuizItem question="Brightpost keeps 1 in 10 of its ordinary requests. A trace for a 4-second product page was kept anyway. Why?" hint="Look at the extra rule in Step 8.">
+    Tail sampling. The collector keeps every trace slower than 2 seconds or with an error, whatever the 1 in 10 rule chose.
+  </QuizItem>
+  <QuizItem question="The team adds a label with the customer id to the Pay time metric. What happens?">
+    With 90,000 customers the metric becomes up to 90,000 series, and the store bills for each one. The customer id belongs in log lines and spans instead.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Metrics", "Logs", "Traces"]}
+  rows={[
+    ["Answers", "Is something wrong?", "What happened?", "Where did the time go?"],
+    ["Brightpost's cost grows with", "Number of series", "MB written and days kept", "Spans kept"],
+    ["Size of one Pay", "A few values in a summary", "About 6 lines, 2 KB", "About 8 spans, 3 KB"],
+    ["Kept at Brightpost", "Every minute, all of it", "30 days, all of it", "Every Pay; 1 in 10 of the rest"],
+    ["Good for alerts", true, false, false],
+    ["Holds ids such as an order number", false, true, true],
+  ]}
+  caption="Brightpost's choices. Real limits and prices differ by cloud."
+/>
+
+Metrics are cheap enough to keep everything and alert on. Logs and traces carry the detail, so that is where you choose what to keep.
+
+## Common pitfalls
+
+- **Each service logs its own way.** Three formats and three time zones cost Brightpost 2 days. Agree on one set of fields, time in UTC, and a trace id on every line.
+- **Debug logging left on after an incident.** It writes about 20 times more and buries the errors. Switch it on for one service, with an end date.
+- **No retention set.** Some log stores keep everything until told otherwise, and the bill grows every month. Set retention when you create the log group, in code.
+- **Ids as metric labels.** A customer or order id turns one metric into thousands of series. Put ids in logs and spans.
+- **Alerting on the cause you guess.** A processor alarm slept while Pay took 9 seconds. Alert on what shoppers feel, such as p99 Pay time.
+
+## How to say it in an interview
+
+"I think of observability as three signals that answer three questions. Metrics tell me something is wrong and how much; I alert on them, using percentiles of what users feel. Logs say what happened to one request, so they are structured, central, and kept for a set time, because they are a bill line. Traces show where the time went across services, which needs a trace id propagated in a header on every hop. I instrument with OpenTelemetry and run a collector, so the backend can change without code changes. I sample traces by volume and keep every slow or failed one. The trace id ties all three together, from the alert to the exact log line."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Logs, metrics or traces: which one do you open first, and why?" level="Junior" category="Cloud">
+    **Short answer.** Usually metrics, because they show fast whether something is wrong, how much, and since when. Then a trace to find which service held the time. Then that service's log lines to see why.
+
+    **Why.** Each signal answers one question. In Brightpost's July incident, the Pay metric showed a p99 of 8.7 seconds. One trace showed 9.0 seconds inside the print service. The log line said an A1 print file was being built before the reply. Starting from the logs meant reading 6 files with no shared id, which took 2 days.
+
+    <AnimatedDiagram spec="animated/cloud/three-signals" step={4} caption="One request, three signals, three questions, joined by the trace id." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if you already have the customer's order number?
+    - Which signal would you alert on?
+
+    **Watch out for.** Saying "logs, because they have everything". Without a shared id, everything is too much to read.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why alarm on p99 latency instead of average processor use?" level="Mid" category="Cloud">
+    **Short answer.** Processor use is a guess at a cause, and the average hides the slow minority. Shoppers feel latency, and the p99 shows what the slowest 1 in 100 waited.
+
+    **Why.** In July Brightpost's print servers ran at about 20%, so a processor alarm stayed quiet. The work was slow, not heavy. Only baskets with A1 posters were slow, so the average Pay was 1.1 seconds while the p99 was 8.7. An alert on p99 Pay time above 2 seconds for 10 minutes would have paged on the first day, not after 12 emails.
+
+    <AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={6} highlight={["metrics", "alert", "asha"]} caption="The alert reads the metric shoppers feel and pages the person on call." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why the 10-minute window, and not one bad minute?
+    - When is a processor alert still useful?
+
+    **Watch out for.** Alerting on p100, the single slowest request. One odd request would page someone at 3 a.m.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does one trace follow a request across three services?" level="Mid" category="Cloud">
+    **Short answer.** The first service creates a trace id and sends it in a header on every outgoing call. Each service passes it on and reports its spans with that id. The trace store joins the spans into one timeline.
+
+    **Why.** Brightpost's shop app makes the id when Pay starts and sends it in the standard `traceparent` header to the order service, which passes it to the print service. Each span records its start, its duration and its parent span. The store builds a waterfall: Pay 9.3 s, place order 9.2 s, book slot 9.0 s. A service that drops the header breaks the trace in two.
+
+    <AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={5} path="shop>order>print" caption="The same trace id travels with Pay through all three services." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to the trace when a message goes through a queue?
+    - How do the services agree on whether to keep a trace?
+
+    **Watch out for.** Thinking the cloud does this by itself. A load balancer may add its own header, but your code must pass the context on.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your log bill tripled in a month with no new traffic. What do you check?" level="Mid" category="Cloud">
+    **Short answer.** Find which log group grew, then why. The usual causes are debug logging left on, a new noisy line in a loop, a retry storm writing errors, or retention never set.
+
+    **Why.** Logs bill for what is written and for what is kept. Brightpost writes about 70 MB a day at info level, and debug writes about 20 times more. So one service left on debug can triple the bill alone. Retention matters too: a group with no limit adds a month of storage every month. The fix is a level per service, a sampling rule for noisy lines, and retention set in code.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you get an alert before the bill arrives?
+    - Which logs must you keep longer, whatever the cost?
+
+    **Watch out for.** Turning logging off to save money. The next incident then has nothing to read.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design the telemetry path for a service running on VMs in one cloud and containers in another." level="Senior" category="Cloud">
+    **Short answer.** Instrument the code once with OpenTelemetry. Run a collector next to each workload: an agent on each VM, and a sidecar or one agent per node for the containers. Send everything to one chosen backend, and propagate the trace id across the cloud boundary in the standard header.
+
+    **Why.** One format means one set of dashboards and one trace across both clouds. Each cloud's native store works well inside that cloud, but a trace split between two stores is two half-traces. The collector is where you add labels such as `cloud` and `zone`, drop noise, and do tail sampling. Data leaving a cloud is charged, so sample before sending: every slow or failed trace, and a share of the rest.
+
+    <AnimatedDiagram spec="animated/cloud/telemetry-pipeline" step={3} highlight={["shop", "order", "print", "collector", "metrics"]} caption="Every workload sends to a collector first; the collector decides where the data goes." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which backend would you pick, and what does it cost to leave it later?
+    - How do you keep log fields the same across two teams?
+
+    **Watch out for.** Using each cloud's own tracing library on its side. The two halves of a request will never join.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [SLIs, SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call)
+- [Service-to-Service Calls on the Cloud](/cloud/networking/service-to-service)
+- [Pricing Basics](/cloud/fundamentals/pricing-basics)
+- [Identity and Access](/cloud/fundamentals/identity-and-access)
+- [Observability on AWS](/cloud/aws/observability)
+- [Observability on Google Cloud](/cloud/gcp/observability)
+- [Observability on Azure](/cloud/azure/observability)
+- [Metrics and logging](/system-design/case-studies/metrics-and-logging)
+- [Time-series databases](/system-design/databases/time-series-databases)
+
+## Further reading
+
+- [Amazon CloudWatch User Guide](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html): metrics, logs and alarms.
+- [Google Cloud Observability documentation](https://cloud.google.com/stackdriver/docs): Monitoring, Logging and Trace.
+- [Azure Monitor overview](https://learn.microsoft.com/azure/azure-monitor/overview): metrics, Log Analytics and Application Insights.
+- [OpenTelemetry documentation](https://opentelemetry.io/docs/): the open standard for all three signals.
