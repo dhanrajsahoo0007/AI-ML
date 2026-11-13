@@ -11,13 +11,15 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   Top band: "You" on the left (x 130, row 215); the control plane in the middle and right columns: controllers
 //   (400, 95), scheduler (665, 95), API server (400, 215), state store (665, 215).
 //   Bottom band: the node pool, three node zones side by side (Node 1 left, Node 2 middle, Node 3 right), each with a
-//   kubelet (y 375) and two pods (y 480): shop-web plus one other app.
+//   kubelet (y 375) and two pods drawn as glyphs (y 462): shop-web plus one other app.
 //
 // Why this order: on a phone the figure opens on its left 480 units, which hold You, the API server, the controllers
 // and nodes 1 and 2. The state store and the scheduler need a sideways scroll.
 //
-// The API server reaches the outer kubelets through bends at y 280, below "You" and the state store, so the last
-// stretch of each edge runs straight down into its node zone, right of the zone's tab and the node pool's tab.
+// The API server reaches the outer kubelets by leaving its bottom edge and turning along y 280, below "You" and the
+// state store, so the last stretch of each edge runs straight down into its node zone, right of the zone's tab and
+// the node pool's tab. Pods are glyph nodes, because "shop-web" and "checkout" do not fit beside an icon in a card
+// half a node zone wide.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. The API
 // server is sized for "EKS control plane".
 const BEND = 280;
@@ -96,12 +98,12 @@ const spec: DiagramSpec = {
     { id: "kubelet2", label: "Kubelet", sub: "zone B", icon: "node", tone: "teal", x: 400, y: 375, w: 150 },
     { id: "kubelet3", label: "Kubelet", sub: "zone C", icon: "node", tone: "teal", x: 665, y: 375, w: 150 },
 
-    { id: "web1", label: "shop-web", sub: "pod", icon: "pod", tone: "teal", x: 72, y: 480, w: 112, h: 50 },
-    { id: "app1", label: "checkout", sub: "pod", icon: "pod", tone: "neutral", x: 188, y: 480, w: 112, h: 50 },
-    { id: "web2", label: "shop-web", sub: "pod", icon: "pod", tone: "teal", x: 342, y: 480, w: 112, h: 50 },
-    { id: "app2", label: "search", sub: "pod", icon: "pod", tone: "neutral", x: 458, y: 480, w: 112, h: 50 },
-    { id: "web3", label: "shop-web", sub: "pod", icon: "pod", tone: "teal", x: 607, y: 480, w: 112, h: 50 },
-    { id: "app3", label: "checkout", sub: "pod", icon: "pod", tone: "neutral", x: 723, y: 480, w: 112, h: 50 },
+    { id: "web1", label: "shop-web", sub: "pod", icon: "pod", tone: "teal", variant: "glyph", x: 75, y: 462 },
+    { id: "app1", label: "checkout", sub: "pod", icon: "pod", tone: "neutral", variant: "glyph", x: 185, y: 462 },
+    { id: "web2", label: "shop-web", sub: "pod", icon: "pod", tone: "teal", variant: "glyph", x: 345, y: 462 },
+    { id: "app2", label: "search", sub: "pod", icon: "pod", tone: "neutral", variant: "glyph", x: 455, y: 462 },
+    { id: "web3", label: "shop-web", sub: "pod", icon: "pod", tone: "teal", variant: "glyph", x: 610, y: 462 },
+    { id: "app3", label: "checkout", sub: "pod", icon: "pod", tone: "neutral", variant: "glyph", x: 720, y: 462 },
   ],
   edges: [
     { from: "you", to: "api", label: "3 copies", packet: true },
@@ -109,11 +111,29 @@ const spec: DiagramSpec = {
     { from: "controllers", to: "api", label: "watch, fix", dashed: true, flow: true, bidirectional: true },
     { from: "scheduler", to: "api", label: "pod → node", dashed: true, flow: true, bidirectional: true },
 
-    { from: "api", to: "kubelet1", via: [[130, BEND]], packet: true, delay: 1.6 },
+    {
+      from: "api",
+      to: "kubelet1",
+      via: [
+        [340, BEND],
+        [130, BEND],
+      ],
+      packet: true,
+      delay: 1.6,
+    },
     { from: "api", to: "kubelet2", label: "run these pods", packet: true, delay: 1.6 },
-    { from: "api", to: "kubelet3", via: [[665, BEND]], packet: true, delay: 1.6 },
+    {
+      from: "api",
+      to: "kubelet3",
+      via: [
+        [460, BEND],
+        [665, BEND],
+      ],
+      packet: true,
+      delay: 1.6,
+    },
 
-    { from: "kubelet1", to: "web1", label: "starts", labelAt: 0.45 },
+    { from: "kubelet1", to: "web1", label: "starts", labelAt: 0.4 },
     { from: "kubelet1", to: "app1" },
     { from: "kubelet2", to: "web2" },
     { from: "kubelet2", to: "app2" },

@@ -74,7 +74,7 @@ A rule does nothing by itself. An ingress or gateway controller reads it, and on
 A **rolling update** replaces pods a few at a time, so the app keeps running during a release. It starts a new pod, waits until it is ready, then removes an old one. But with no check written, a pod counts as ready as soon as its container starts.
 
 <Callout tone="red" title="What breaks">
-  At 10:00 the rollout starts three new shop-web pods. Each counts as ready at once, so the Service sends shoppers to them and the old pods are removed. For the next 90 seconds the new pods are still loading 12,000 prices, and most page loads fail. Asha rolls back, and the old version has no check either, so it happens again. About 2,000 page loads fail and about 40 orders are lost.
+  At 10:00 the rollout starts a new shop-web pod. It counts as ready at once, so the Service sends shoppers to it and an old pod is removed. The other two follow within 30 seconds. For the next 90 seconds the new pods are still loading 12,000 prices, and most page loads fail. Asha rolls back, and the old version has no check either, so it happens again. About 2,000 page loads fail and about 40 orders are lost.
 </Callout>
 
 Nothing crashed, so no alarm fired. Every pod was "running" the whole time.
@@ -85,7 +85,7 @@ Nothing crashed, so no alarm fired. Every pod was "running" the whole time.
 
 A **readiness check** is a test the kubelet runs on each pod, for example an HTTP call to `/ready` every 5 seconds. Shop-web now answers OK only after its prices are loaded. Until then the pod stays off the Service's ready list, and the rollout does not move on.
 
-Asha also makes the rollout add one new pod before it removes an old one. A release now takes about 5 minutes instead of 30 seconds, and no shopper sees an error. A separate **liveness check** restarts a pod that is stuck.
+The rollout still adds one new pod before it removes an old one, but now it waits for each check to pass. A release takes about 5 minutes instead of 30 seconds, and no shopper sees an error. A separate **liveness check** restarts a pod that is stuck.
 
 ### Step 8: Requests, limits, config and secrets
 
@@ -279,7 +279,7 @@ A readiness check costs a few lines of config and makes each release slower. For
   <InterviewQuestion question="A rolling update caused errors even though every new pod started fine. What was missing?" level="Mid" category="Cloud">
     **Short answer.** A readiness check. Without one, a pod counts as ready the moment its container starts. The Service sends it traffic before it can answer, and the rollout removes old pods without waiting.
 
-    **Why.** Brightpost's shop-web needs 90 seconds to load 12,000 prices. With no check, all 3 old pods were gone within 30 seconds, and the rollback repeated it: about 2,000 failed page loads. A `/ready` check that passes only after loading fixes it. Add one pod before removing one, and a release takes about 5 minutes with no errors.
+    **Why.** Brightpost's shop-web needs 90 seconds to load 12,000 prices. With no check, all 3 old pods were gone within 30 seconds, and the rollback repeated it: about 2,000 failed page loads. A `/ready` check that passes only after loading fixes it. The rollout then waits for each new pod, and a release takes about 5 minutes with no errors.
 
     <AnimatedDiagram spec="animated/cloud/k8s-request-path" step={4} caption="The failure: the Service sends shoppers to new pods that are still warming up." />
 

@@ -45,7 +45,7 @@ const spec: DiagramSpec = {
   ],
   zones: [
     { id: "internet", title: "Internet", tone: "neutral", x: 8, y: 32, w: 232, h: 108 },
-    { id: "edge", title: "Cloud edge", tone: "blue", x: 8, y: 180, w: 232, h: 110 },
+    { id: "edge", title: "Edge", tone: "blue", x: 8, y: 180, w: 232, h: 110 },
     { id: "cluster", title: "Cluster", tone: "blue", x: 8, y: 400, w: 232, h: 300 },
     { id: "desired", title: "Desired state", tone: "orange", x: 315, y: 32, w: 210, h: 108 },
     { id: "autoscalers", title: "Autoscalers", tone: "orange", x: 552, y: 32, w: 233, h: 728 },
@@ -66,7 +66,7 @@ const spec: DiagramSpec = {
       y: 90,
       w: 176,
     },
-    { id: "pod1", label: "Pod 1", sub: "shop-web", icon: "pod", tone: "teal", x: 420, y: 207, w: 130, h: 46 },
+    { id: "pod1", label: "Pod 1", sub: "shop-web", icon: "pod", tone: "teal", x: 420, y: 207, w: 150, h: 46 },
     {
       id: "other1",
       label: "Other pods",
@@ -75,10 +75,10 @@ const spec: DiagramSpec = {
       tone: "neutral",
       x: 420,
       y: 259,
-      w: 130,
+      w: 150,
       h: 46,
     },
-    { id: "pod2", label: "Pod 2", sub: "shop-web", icon: "pod", tone: "teal", x: 420, y: 362, w: 130, h: 46 },
+    { id: "pod2", label: "Pod 2", sub: "shop-web", icon: "pod", tone: "teal", x: 420, y: 362, w: 150, h: 46 },
     {
       id: "other2",
       label: "Other pods",
@@ -87,10 +87,10 @@ const spec: DiagramSpec = {
       tone: "neutral",
       x: 420,
       y: 414,
-      w: 130,
+      w: 150,
       h: 46,
     },
-    { id: "pod3", label: "Pod 3", sub: "shop-web", icon: "pod", tone: "teal", x: 420, y: 517, w: 130, h: 46 },
+    { id: "pod3", label: "Pod 3", sub: "shop-web", icon: "pod", tone: "teal", x: 420, y: 517, w: 150, h: 46 },
     {
       id: "other3",
       label: "Other pods",
@@ -99,7 +99,7 @@ const spec: DiagramSpec = {
       tone: "neutral",
       x: 420,
       y: 569,
-      w: 130,
+      w: 150,
       h: 46,
     },
 
@@ -188,12 +188,13 @@ const spec: DiagramSpec = {
         azure: { label: "Cluster autoscaler" },
       },
     },
-    { id: "pod4", label: "Pod 4", sub: "shop-web", icon: "pod", tone: "teal", step: 7, x: 420, y: 672, w: 130, h: 46 },
-    { id: "pod5", label: "Pod 5", sub: "shop-web", icon: "pod", tone: "teal", step: 7, x: 420, y: 724, w: 130, h: 46 },
+    { id: "pod4", label: "Pod 4", sub: "shop-web", icon: "pod", tone: "teal", step: 7, x: 420, y: 672, w: 150, h: 46 },
+    { id: "pod5", label: "Pod 5", sub: "shop-web", icon: "pod", tone: "teal", step: 7, x: 420, y: 724, w: 150, h: 46 },
   ],
   edges: [
-    // Step 1: the Deployment keeps one copy on each node. Its label changes at steps 4 and 5.
-    { from: "deploy", to: "pod1", label: "keeps 3 running", until: 3 },
+    // Step 1: the Deployment keeps one copy on each node. Its label changes at steps 4 and 5; the label sits high on
+    // the edge (labelAt 0.2) so the pill clears node 1's tab.
+    { from: "deploy", to: "pod1", label: "keeps 3 running", labelAt: 0.2, until: 3 },
     {
       from: "deploy",
       to: "pod2",
@@ -215,19 +216,20 @@ const spec: DiagramSpec = {
       ],
     },
 
-    // Step 2: the Service spreads requests over every copy it knows.
+    // Step 2: the Service spreads requests over every copy it knows. The fan's one label rides the edge to pod 3, near
+    // its bend, in the open space right of the Service.
     { from: "service", to: "pod1", packet: true, via: [[SVC_BEND, 207]], step: 2, until: 3 },
+    { from: "service", to: "pod2", packet: true, via: [[SVC_BEND, 362]], step: 2, until: 3 },
     {
       from: "service",
-      to: "pod2",
+      to: "pod3",
       label: "spreads requests",
       packet: true,
-      via: [[SVC_BEND, 362]],
-      labelAt: 0.32,
+      via: [[SVC_BEND, 517]],
+      labelAt: 0.6,
       step: 2,
       until: 3,
     },
-    { from: "service", to: "pod3", packet: true, via: [[SVC_BEND, 517]], step: 2, until: 3 },
 
     // Step 3: shoppers reach the load balancer; it forwards to the Service.
     { from: "shoppers", to: "lb", label: "HTTPS", packet: true, step: 3 },
@@ -235,38 +237,38 @@ const spec: DiagramSpec = {
 
     // Step 4, the failure: new copies count as ready the moment they start. The Service sends shoppers to them while
     // they still load prices, and the rollout removes every old copy without waiting.
-    { from: "deploy", to: "pod1", label: "swap all, no waiting", tone: "red", step: 4, until: 4 },
+    { from: "deploy", to: "pod1", label: "swap all, no waiting", tone: "red", labelAt: 0.2, step: 4, until: 4 },
     { from: "lb", to: "service", label: "page errors", tone: "red", packet: true, step: 4, until: 4 },
     { from: "service", to: "pod1", tone: "red", dashed: true, via: [[SVC_BEND, 207]], step: 4, until: 4 },
+    { from: "service", to: "pod2", tone: "red", dashed: true, via: [[SVC_BEND, 362]], step: 4, until: 4 },
     {
       from: "service",
-      to: "pod2",
+      to: "pod3",
       label: "still warming",
       tone: "red",
       dashed: true,
-      via: [[SVC_BEND, 362]],
-      labelAt: 0.32,
+      via: [[SVC_BEND, 517]],
+      labelAt: 0.6,
       step: 4,
       until: 4,
     },
-    { from: "service", to: "pod3", tone: "red", dashed: true, via: [[SVC_BEND, 517]], step: 4, until: 4 },
 
     // Step 5: the kubelet calls /ready on each pod; only pods that answer join the ready list, and the rollout
     // replaces one copy at a time.
-    { from: "deploy", to: "pod1", label: "one at a time", step: 5 },
+    { from: "deploy", to: "pod1", label: "one at a time", labelAt: 0.2, step: 5 },
     { from: "ready", to: "service", label: "only these", dashed: true, step: 5 },
     { from: "lb", to: "service", label: "to the Service", packet: true, step: 5 },
     { from: "service", to: "pod1", packet: true, via: [[SVC_BEND, 207]], step: 5 },
+    { from: "service", to: "pod2", packet: true, via: [[SVC_BEND, 362]], step: 5 },
     {
       from: "service",
-      to: "pod2",
+      to: "pod3",
       label: "ready pods only",
       packet: true,
-      via: [[SVC_BEND, 362]],
-      labelAt: 0.32,
+      via: [[SVC_BEND, 517]],
+      labelAt: 0.6,
       step: 5,
     },
-    { from: "service", to: "pod3", packet: true, via: [[SVC_BEND, 517]], step: 5 },
 
     // Step 6: CPU climbs past the target, so the pod autoscaler asks for more copies.
     { from: "hpa", to: "deploy", label: "3 → 5", packet: true, step: 6 },
