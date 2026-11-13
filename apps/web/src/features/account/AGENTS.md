@@ -24,7 +24,8 @@ rate limit, and require `isFreshSession()` (signed in within 10 minutes), else 4
 
 - **Every query is filtered by the signed-in user's id**; nothing else is ever selected. Keep it that way: no admin
   or cross-user reads here.
-- Deletion relies on `ON DELETE CASCADE` for sessions, accounts, consent, progress, bookmarks, subscriptions,
+- Deletion relies on `ON DELETE CASCADE` for sessions, accounts, consent, progress, bookmarks, practice ratings and
+  stories, subscriptions,
   entitlement, customers and newsletter rows; `payment` rows stay for revenue reporting with `user_id` set to NULL.
   A new user-owned table needs a cascade (or an explicit delete) and a line in the export.
 - The deletion itself is written to `audit_log` without personal data.

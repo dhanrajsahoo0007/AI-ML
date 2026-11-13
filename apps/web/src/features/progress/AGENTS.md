@@ -40,6 +40,9 @@ Signed out: the browser writes `localStorage` only. Signed in: `GET/POST/DELETE 
 
 ## Extend it
 
+Practice ratings and interview stories are a separate feature (`apps/web/src/features/practice/`), because their
+keys are question ids and story ids, not pages.
+
 A new progress kind: add it to `progressKindSchema` and the DB enum/check (additive migration), then the store and
 tests. Planned (after stream L): DSA solved status; filling this browser's store from the account after sign-in on a new
 device (today the marks show only what this browser recorded); the provider in the other section layouts.

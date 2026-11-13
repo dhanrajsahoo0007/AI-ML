@@ -308,7 +308,8 @@ Interview questions to be matched to the principle, value or focus area each one
 
 ### StoryBuilder, StoryMatrix and MockLoop
 
-The Practice Lab tools (`/behavioral/practice-lab/*`). Each takes **no props** and is meant for a page of its own, so
+The Practice Lab tools (`/behavioral/practice-lab/*`). `StoryBuilder` and `MockLoop` take **no props**;
+`StoryMatrix` takes `builder`, the path of the page that holds the story builder. Each is meant for a page of its own, so
 an article links to the tool's page and does not embed it. All three are lazy client islands that keep the reader's
 data in the browser (`src/lib/stories.ts`, `src/lib/practice.ts`) and copy it to the account when the reader is signed
 in (`src/lib/practice-sync.ts`, `src/features/practice/`).
@@ -317,7 +318,7 @@ in (`src/lib/practice-sync.ts`, `src/features/practice/`).
   estimate against the 15/60/15/10 budget, an "I" against "we" count, and a warning when the result has no number.
   A link such as `/behavioral/practice-lab/story-builder?for=conflict` starts a new story already ticked for that
   competency (a slug from `content/question-bank/signals.yaml`, group `Competencies`).
-- `<StoryMatrix />`: the reader's stories against the signals of `signals.yaml`, one view per group. Rows with no
+- `<StoryMatrix builder="/behavioral/practice-lab/story-builder" />`: the reader's stories against the signals of `signals.yaml`, one view per group. Rows with no
   story are marked as gaps.
 - `<MockLoop />`: the reader picks a company and a level and gets five prompts drawn from the leadership-track
   question bank, each with the two-minute timer, the follow-ups one at a time, and a 1 to 5 rating. Only prompts are

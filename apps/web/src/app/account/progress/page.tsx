@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Container, PageHeader } from "@/components/ui/editorial";
 import { withPageSession } from "@/features/auth";
+import { listRatings, listStories } from "@/features/practice";
 import { listProgress } from "@/features/progress";
 import { pageInfo } from "@/features/search";
 
@@ -40,8 +41,17 @@ function ContentList({ rows, empty, testId }: { rows: Row[]; empty: string; test
 }
 
 export default async function AccountProgressPage() {
-  const data = await withPageSession(async (auth, db) => listProgress(db, auth.user.id));
-  if (!data) redirect("/sign-in?callbackURL=%2Faccount%2Fprogress");
+  const loaded = await withPageSession(async (auth, db) => {
+    const [progress, ratings, stories] = await Promise.all([
+      listProgress(db, auth.user.id),
+      listRatings(db, auth.user.id),
+      listStories(db, auth.user.id),
+    ]);
+    return { progress, ratings: Object.values(ratings), stories };
+  });
+  if (!loaded) redirect("/sign-in?callbackURL=%2Faccount%2Fprogress");
+  const { progress: data, ratings, stories } = loaded;
+  const weak = ratings.filter((r) => r.rating <= 2).length;
 
   const byNewest = (a: Row, b: Row) => (b.at?.getTime() ?? 0) - (a.at?.getTime() ?? 0);
   const completed = data.progress
@@ -68,6 +78,26 @@ export default async function AccountProgressPage() {
             testId="progress-completed"
           />
         </div>
+      </section>
+      <section aria-label="Interview practice" className="rounded-2xl border border-hairline bg-paper p-6 sm:p-8">
+        <h2 className="font-display text-2xl tracking-tight">Interview practice</h2>
+        <dl className="mt-4 grid gap-4 sm:grid-cols-3" data-testid="progress-practice">
+          <div>
+            <dt className="text-xs text-muted-foreground">Answers you have rated</dt>
+            <dd className="font-display text-2xl text-ink">{ratings.length}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">Rated 1 or 2, to practise again</dt>
+            <dd className="font-display text-2xl text-ink">{weak}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-muted-foreground">Stories saved</dt>
+            <dd className="font-display text-2xl text-ink">{stories.length}</dd>
+          </div>
+        </dl>
+        <p className="mt-4 text-[15px] text-muted-foreground">
+          Ratings come from practice mode and the mock loop. Stories come from the story builder.
+        </p>
       </section>
       <p className="text-sm text-muted-foreground">
         <Link href="/account" className="underline underline-offset-2">

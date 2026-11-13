@@ -1,10 +1,22 @@
 import { sql } from "drizzle-orm";
-import { char, check, index, jsonb, pgEnum, pgTable, primaryKey, text, uuid } from "drizzle-orm/pg-core";
+import {
+  char,
+  check,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  smallint,
+  text,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { user } from "./auth";
 import { createdAt, id, tz } from "./columns";
 import { newsletterSubscriber } from "./newsletter";
 
-// Consent, progress, bookmarks and the audit log (plan §8.2, §8.3).
+// Consent, progress, bookmarks, practice data and the audit log (plan §8.2, §8.3).
 
 export const consentKind = pgEnum("consent_kind", [
   "age_confirmation",
@@ -66,6 +78,60 @@ export const bookmark = pgTable(
   (t) => [
     primaryKey({ name: "bookmark_pkey", columns: [t.userId, t.contentKey] }),
     check("bookmark_content_key_check", contentKeyCheck("content_key")),
+  ]
+);
+
+// Practice data (features/practice): how the learner rated their own answer to an interview question, and the
+// interview stories they wrote in the story builder. The limits mirror src/lib/stories.ts (STORY_LIMITS) and the
+// zod schemas in features/practice/schema.ts; change all three together (new migration).
+
+export const practiceRating = pgTable(
+  "practice_rating",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** A question id of the interview bank, e.g. `company-meta-conflict-with-colleague`. */
+    questionId: text("question_id").notNull(),
+    rating: smallint("rating").notNull(),
+    times: integer("times").notNull().default(1),
+    practisedAt: tz("practised_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "practice_rating_pkey", columns: [t.userId, t.questionId] }),
+    check("practice_rating_question_id_check", sql.raw(`question_id ~ '^[a-z0-9][a-z0-9-]{0,199}$'`)),
+    check("practice_rating_rating_check", sql.raw("rating between 1 and 5")),
+    check("practice_rating_times_check", sql.raw("times between 1 and 100000")),
+  ]
+);
+
+export const practiceStory = pgTable(
+  "practice_story",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    /** Made in the browser (src/lib/stories.ts newStoryId), so a story keeps its id across devices. */
+    id: text("id").notNull(),
+    title: text("title").notNull().default(""),
+    situation: text("situation").notNull().default(""),
+    action: text("action").notNull().default(""),
+    result: text("result").notNull().default(""),
+    learning: text("learning").notNull().default(""),
+    /** Signal slugs (content/question-bank/signals.yaml) the story can answer. */
+    covers: jsonb("covers").$type<string[]>().notNull().default([]),
+    updatedAt: tz("updated_at").notNull().defaultNow(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ name: "practice_story_pkey", columns: [t.userId, t.id] }),
+    check("practice_story_id_check", sql.raw(`id ~ '^[a-z0-9][a-z0-9-]{5,39}$'`)),
+    check(
+      "practice_story_length_check",
+      sql.raw(
+        "char_length(title) <= 120 and char_length(situation) <= 1500 and char_length(action) <= 4000 and char_length(result) <= 1500 and char_length(learning) <= 1500"
+      )
+    ),
   ]
 );
 

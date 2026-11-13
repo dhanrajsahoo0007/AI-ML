@@ -10,6 +10,7 @@ import {
   primaryClass,
   useAnswerTimer,
 } from "@/components/practice/answer-timer.client";
+import { pushRating, syncPractice } from "@/lib/practice-sync";
 import {
   PRACTICE_EVENT,
   RATINGS,
@@ -26,7 +27,7 @@ import {
 // markup through data attributes, so answers never ship as JS props. With practice on, an opened question
 // shows a two-minute answer timer in place of its answer; the learner answers out loud, reveals the answer,
 // rates themself, and can then take the interviewer's follow-ups one at a time.
-// Ratings are kept in this browser (lib/practice.ts).
+// Ratings are kept in this browser (lib/practice.ts) and, signed in, in the account (lib/practice-sync.ts).
 
 type Order = "listed" | "weakest" | "shuffle";
 
@@ -124,7 +125,15 @@ export function PracticeController() {
     [items]
   );
 
-  const rate = useCallback((id: string, rating: Rating) => setLog(recordPractice(id, rating)), []);
+  const rate = useCallback((id: string, rating: Rating) => {
+    setLog(recordPractice(id, rating));
+    void pushRating(id, rating);
+  }, []);
+
+  // Turning practice mode on is when a signed-in learner's ratings are merged with their account's.
+  useEffect(() => {
+    if (on) void syncPractice();
+  }, [on]);
 
   const bar = on ? root?.querySelector<HTMLElement>("[data-qa-practice-bar]") : null;
   const practised = items.filter((el) => log[idOf(el)]).length;
@@ -257,8 +266,8 @@ function PracticePanel({
           </div>
           <p className="mt-2 text-xs text-muted-foreground" aria-live="polite">
             {rated
-              ? `${RATINGS[rated - 1].hint}. Saved in this browser; practised ${entry?.times ?? 1} time${(entry?.times ?? 1) === 1 ? "" : "s"}.`
-              : "1 is a blank, 5 is ready for the interview. Your ratings stay in this browser."}
+              ? `${RATINGS[rated - 1].hint}. Saved; practised ${entry?.times ?? 1} time${(entry?.times ?? 1) === 1 ? "" : "s"}.`
+              : "1 is a blank, 5 is ready for the interview. Ratings are saved in this browser, and in your account when you are signed in."}
           </p>
 
           {followUps.length > 0 && (

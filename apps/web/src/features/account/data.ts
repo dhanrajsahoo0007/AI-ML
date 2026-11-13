@@ -11,6 +11,8 @@ import {
   newsletterEvent,
   newsletterSubscriber,
   payment,
+  practiceRating,
+  practiceStory,
   progress,
   session,
   subscription,
@@ -107,6 +109,33 @@ export async function exportUserData(db: Db, userId: string, now = new Date()) {
       : Promise.resolve([]),
   ]);
 
+  // Practice data: the user's ratings of their own answers, and the interview stories they wrote.
+  const [practiceRatings, practiceStories] = await Promise.all([
+    db
+      .select({
+        questionId: practiceRating.questionId,
+        rating: practiceRating.rating,
+        times: practiceRating.times,
+        practisedAt: practiceRating.practisedAt,
+      })
+      .from(practiceRating)
+      .where(eq(practiceRating.userId, userId)),
+    db
+      .select({
+        id: practiceStory.id,
+        title: practiceStory.title,
+        situation: practiceStory.situation,
+        action: practiceStory.action,
+        result: practiceStory.result,
+        learning: practiceStory.learning,
+        covers: practiceStory.covers,
+        updatedAt: practiceStory.updatedAt,
+        createdAt: practiceStory.createdAt,
+      })
+      .from(practiceStory)
+      .where(eq(practiceStory.userId, userId)),
+  ]);
+
   return {
     format: EXPORT_FORMAT,
     exportedAt: now.toISOString(),
@@ -116,6 +145,7 @@ export async function exportUserData(db: Db, userId: string, now = new Date()) {
     consents,
     progress: progressRows,
     bookmarks,
+    practice: { ratings: practiceRatings, stories: practiceStories },
     billing: { customers, subscriptions, entitlement: entitlements[0] ?? null, payments },
     newsletter: { subscriptions: subscribers, events },
   };

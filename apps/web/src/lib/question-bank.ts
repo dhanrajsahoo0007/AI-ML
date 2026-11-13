@@ -189,7 +189,7 @@ function loadCompanies(errors: string[]): Company[] {
   return raw;
 }
 
-export interface Signal {
+interface Signal {
   slug: string;
   title: string;
   /** The family it belongs to, e.g. "Amazon Leadership Principles". */

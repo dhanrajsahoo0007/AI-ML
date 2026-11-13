@@ -151,6 +151,7 @@ only). Build outputs (src/generated/, .build-cache/, public/\_a/) are gitignored
 | API wrapper, env, logs                    | `apps/web/src/server/http.ts`, `apps/web/src/server/env.ts`, `apps/web/src/server/log.ts`          |
 | Database client, schema, migrations       | `apps/web/src/server/db/`, `apps/web/drizzle/`                                                     |
 | Sign-in, sessions, account, progress      | `apps/web/src/features/auth/`, `apps/web/src/features/account/`, `apps/web/src/features/progress/` |
+| Practice ratings and interview stories    | `apps/web/src/features/practice/`, `apps/web/src/lib/practice-sync.ts`                             |
 | SEO, headers, OG, JSON-LD                 | `apps/web/src/features/seo/`                                                                       |
 | Monitoring and analytics (off by default) | `apps/web/src/features/observability/`, `apps/web/src/features/analytics/`                         |
 | Business placeholders, crawler list       | `apps/web/src/config/business.ts`, `apps/web/src/config/crawlers.ts`                               |

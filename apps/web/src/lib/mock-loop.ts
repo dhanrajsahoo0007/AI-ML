@@ -64,7 +64,7 @@ export function drawLoop(
   return picked;
 }
 
-export interface LoopSummary {
+interface LoopSummary {
   answered: number;
   /** Mean rating to one decimal place, or null when nothing was rated. */
   average: number | null;

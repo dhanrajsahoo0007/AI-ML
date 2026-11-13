@@ -41,7 +41,7 @@ export const STORY_LIMITS = {
 const ID = /^[a-z0-9][a-z0-9-]{5,39}$/;
 const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-export const isStoryId = (v: unknown): v is string => typeof v === "string" && ID.test(v);
+const isStoryId = (v: unknown): v is string => typeof v === "string" && ID.test(v);
 
 /** A new story id from 12 random base-36 digits. `random` returns a number in [0, 1), as Math.random does. */
 export function newStoryId(random: () => number): string {
@@ -159,7 +159,7 @@ export function wordCount(text: string): number {
 
 export const speakingSeconds = (words: number) => Math.round((words / WORDS_PER_MINUTE) * 60);
 
-export interface PartTiming {
+interface PartTiming {
   part: StoryPart;
   words: number;
   seconds: number;
@@ -187,7 +187,7 @@ export function countIAndWe(text: string): { i: number; we: number } {
   return { i: (text.match(/\bI\b/g) ?? []).length, we: (text.match(/\bwe\b/gi) ?? []).length };
 }
 
-export interface StoryCheck {
+interface StoryCheck {
   id: "length" | "action-share" | "setup-share" | "i-we" | "result-number" | "learning";
   ok: boolean;
   text: string;

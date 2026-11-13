@@ -28,15 +28,44 @@ async function send(path: string, method: string, body: unknown): Promise<boolea
   }
 }
 
+/** The same number as MAX_MERGE_RATINGS in features/practice/schema.ts. */
+const RATINGS_PER_REQUEST = 200;
+
 let started: Promise<SyncState> | null = null;
 /** Whether the account stores story text (off until the site owner turns the switch on). */
 let storySync = false;
 
+// A signed-out visitor is asked once per tab, not on every page: the 401 is remembered here. The readable
+// entitlement hint cookie (features/entitlements/hint.ts, set at sign-in) lifts it again.
+const SIGNED_OUT_KEY = "tts_practice_signed_out";
+const HINT_COOKIE = "tts_ent_hint";
+
+function knownSignedOut(): boolean {
+  try {
+    if (document.cookie.split(/;\s*/).some((c) => c.startsWith(`${HINT_COOKIE}=`))) return false;
+    return window.sessionStorage.getItem(SIGNED_OUT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberSignedOut(signedOut: boolean) {
+  try {
+    if (signedOut) window.sessionStorage.setItem(SIGNED_OUT_KEY, "1");
+    else window.sessionStorage.removeItem(SIGNED_OUT_KEY);
+  } catch {
+    // Storage blocked: the next page asks again.
+  }
+}
+
 async function pull(): Promise<SyncState> {
+  if (knownSignedOut()) return "browser";
   let data: { ratings?: unknown; stories?: unknown };
   try {
     const res = await fetch("/api/practice");
+    if (res.status === 401) rememberSignedOut(true);
     if (!res.ok) return "browser";
+    rememberSignedOut(false);
     data = (await res.json()) as typeof data;
   } catch {
     return "browser";
@@ -57,12 +86,16 @@ async function pull(): Promise<SyncState> {
     if (JSON.stringify(merged.stories) !== JSON.stringify(local)) writeStories(merged.stories);
   }
 
+  // Requests stay under the API's body limit: ratings in batches, stories one at a time.
   const ratingItems = Object.entries(ratings.upload).map(([questionId, e]) => ({ questionId, ...e }));
-  if (ratingItems.length || upload.length) {
-    const stories = upload.map(storyBody);
-    const ok = await send("/api/practice/merge", "POST", { ratings: ratingItems, stories });
-    if (ok && upload.length) markSynced(upload.map((s) => s.id));
+  for (let i = 0; i < ratingItems.length; i += RATINGS_PER_REQUEST) {
+    await send("/api/practice/merge", "POST", { ratings: ratingItems.slice(i, i + RATINGS_PER_REQUEST) });
   }
+  const sent: string[] = [];
+  for (const story of upload) {
+    if (await send("/api/practice/stories", "POST", { story: storyBody(story) })) sent.push(story.id);
+  }
+  if (sent.length) markSynced(sent);
   return "account";
 }
 
@@ -82,6 +115,7 @@ export function syncPractice(): Promise<SyncState> {
 
 /** Sends one rating to the account. Resolves to where it is now kept. */
 export async function pushRating(questionId: string, rating: Rating): Promise<SyncState> {
+  if ((await syncPractice()) !== "account") return "browser";
   return (await send("/api/practice/ratings", "POST", { questionId, rating })) ? "account" : "browser";
 }
 

@@ -10,6 +10,8 @@ import path from "node:path";
 //   next.config.ts inlines the generated copy as SEARCH_INDEX for server pages that need titles (account progress).
 // - public/nav-items.json: each header-menu group's article list (titles and links only, `on` sections only). The
 //   header loads it the first time a menu opens, so the per-page header payload stays the slim HeaderNavSection list.
+// - src/generated/practice-ids.json: the ids of the interview questions a practice rating may be saved for (the
+//   leadership-track questions); next.config.ts inlines it as PRACTICE_IDS for /api/practice (features/practice).
 // Also runs in `predev` with --dev: then only the search index and nav items are written (APP_ENV defaults to local), so header
 // search works in `next dev`, while the header menu keeps reading content live.
 const devMode = process.argv.includes("--dev");
@@ -53,4 +55,16 @@ fs.writeFileSync(path.join(generated, "search-index.json"), index);
 fs.writeFileSync(path.join(process.cwd(), "public", "search-index.json"), index);
 const navItems = headerNavItems(await getNavTree());
 fs.writeFileSync(path.join(process.cwd(), "public", "nav-items.json"), `${JSON.stringify(navItems)}\n`);
+const bank = await import("../src/lib/question-bank");
+const practiceTracks = new Set(
+  bank
+    .getCategories()
+    .filter((c) => c.track === "leadership")
+    .map((c) => c.slug)
+);
+const practiceIds = bank
+  .getQuestions()
+  .filter((q) => practiceTracks.has(q.category) && !q.parent)
+  .map((q) => q.id);
+fs.writeFileSync(path.join(generated, "practice-ids.json"), `${JSON.stringify(practiceIds)}\n`);
 console.log(`runtime data: header nav ${nav.length} sections, search index ${entries.length} pages`);
