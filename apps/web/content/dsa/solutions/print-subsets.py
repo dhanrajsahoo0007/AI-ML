@@ -14,3 +14,11 @@ def subsequences(s: str) -> List[str]:
 
     dfs(0, "")
     return result
+
+
+# --- Glue (same as the starter) ---
+
+def subsequences_tests(a0):  # the entry the tests call
+    result = subsequences(a0)
+    result = sorted(result, key=repr) if isinstance(result, list) else result
+    return result

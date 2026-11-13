@@ -23,6 +23,9 @@ order: 5003004000000
 
 Given a string queryIP, return "IPv4" if it is a valid IPv4 address, "IPv6" if it
 is a valid IPv6 address, or "Neither" otherwise.
+IPv4: four decimal numbers from 0 to 255 separated by '.', with no leading zeros.
+IPv6: eight groups of 1 to 4 hexadecimal digits separated by ':'; a single '::' may
+stand for one or more groups, and no other group may be empty.
 
 ## Examples
 
@@ -142,8 +145,10 @@ class Solution:
             if queryIP.count("::") != 1:
                 return "Neither"
             left, right = queryIP.split("::", 1)
-            left_parts = [x for x in left.split(":") if x] if left else []
-            right_parts = [x for x in right.split(":") if x] if right else []
+            left_parts = left.split(":") if left else []
+            right_parts = right.split(":") if right else []
+            if "" in left_parts or "" in right_parts:  # ":::" or a stray ":" next to "::"
+                return "Neither"
             if len(left_parts) + len(right_parts) > 7:
                 return "Neither"
             for block in left_parts + right_parts:

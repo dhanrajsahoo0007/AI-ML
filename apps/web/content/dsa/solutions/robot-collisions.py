@@ -12,6 +12,7 @@ def survived_robots_healths(positions: List[int], healths: List[int], directions
         while stack and signed < 0 < stack[-1][0]:
             if abs(stack[-1][0]) < abs(signed):
                 stack.pop()
+                signed += 1  # the left-moving winner loses one health too
                 continue
             if abs(stack[-1][0]) == abs(signed):
                 stack.pop()
