@@ -1,11 +1,312 @@
 ---
 title: "Disaster Recovery: Four Tiers, RPO and RTO"
-description: "Learn RPO and RTO, then the four recovery tiers from backup and restore to active-active, and how to pick one from a requirement."
-status: outline
+description: "How much data you may lose and how long you may be down, then four recovery tiers from backup and restore to active-active, and how to pick one."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** RPO (how much data you may lose) and RTO (how long you may be down), then the four recovery tiers as one growing picture, each with its RPO, RTO and cost shape, so you learn to pick a tier from a requirement.
+<KeyIdea>
+  Pick two numbers, how much recent data you may lose and how long you may be down, then keep enough ready in a second place to meet both.
+</KeyIdea>
 
-**Related reading on this site:** [Availability, reliability and the nines](/system-design/fundamentals/availability) · [What the Cloud Is](/cloud/fundamentals/what-is-cloud) · [Databases on AWS](/cloud/aws/databases)
+## The story
+
+Brightpost runs in one <Term id="region">region</Term> near London, across three zones. Its plan for losing the whole region was one line: "Restore last night's backup in the second region; back within 2 hours." The second region is the other one its guardrail allows. One quiet Saturday the team ran a **game day**: a planned drill in which they pretended London had gone. Ten minutes in, the first surprise: the database backups lived only in London. The second region held locked copies of photos and logs, and not one order. The templates named London in 40 places, and the server image and the web certificate existed only there. The shop came back in the second region after 9 hours, not 2. A real loss of London would also have taken every order the shop had ever recorded.
+
+Every step below closes one gap that drill found, then asks how much more safety is worth paying for.
+
+## How it works
+
+Three words first. A **disaster**, here, is a failure too wide for zones to absorb: a whole region lost, or every copy of the data inside it. **Disaster recovery** (DR) is the plan, and the spare parts, for bringing the service back somewhere else. That somewhere else is the **recovery region**, region B in the pictures.
+
+### Step 1: Two numbers: how much you lose, how long you are down
+
+<AnimatedDiagram spec="animated/cloud/rpo-rto-timeline" stepper minWidth={620} caption="Put the disaster on a timeline. The RPO looks back to the last copy that survives; the RTO looks forward to the moment shoppers can order again." />
+
+Picture a phone that photographs a whiteboard every 15 minutes. If someone wipes the board, you lose what was written since the last photo, and copying it back takes time.
+
+The first gap is the <Term id="rpo">RPO</Term>, the recovery point objective: how much recent data you accept losing, measured in time. The second is the <Term id="rto">RTO</Term>, the recovery time objective: how long you accept being down. How often data is copied away sets the RPO. How much already runs in the recovery region sets the RTO. Brightpost now promises an RPO of 15 minutes and an RTO of 2 hours. Uptime percentages average over a year, as [Availability](/system-design/fundamentals/availability) explains; these two numbers describe one bad day.
+
+<PremiumBreak />
+
+### Step 2: What survives a region loss today
+
+<AnimatedDiagram spec="animated/cloud/dr-tiers" step={1} minWidth={620} caption="Today: the whole shop and its backups are in region A. Only photos and logs are copied, locked, to region B." />
+
+Inside London, Brightpost is well protected. The orders database has a standby in a second zone, a full backup at 03:00, and a change log saved every few minutes. A lost zone costs about 2 minutes. Undoing a bad deploy loses about 5 minutes of orders and takes about 30 minutes, as [Managed Relational Databases](/cloud/data/managed-relational) shows.
+
+Every one of those numbers assumes London still exists. Only photos and logs leave it, copied to a locked bucket in region B. For a region loss, the honest RPO was "every order ever", and nobody had measured the RTO.
+
+### Step 3: The game day
+
+<AnimatedDiagram spec="animated/cloud/dr-tiers" step={2} minWidth={620} caption="The failure: with London switched off, region B holds no orders, and the backups the runbook needs are in London." />
+
+A **runbook** is a written list of steps for one kind of incident, with who does each. Brightpost's had six steps and had never been run. A game day tests the runbook, the people and the copies together, before a real disaster does.
+
+<Callout tone="red" title="What breaks">
+  At 09:10 the team finds no order data in region B. They break the drill's rule and copy the 03:00 backup from London: 50 minutes. The network and servers take 3 hours, because the templates say "London" and the server image lives there. A new web certificate takes an hour. The app still points at London's buckets, so test orders fail for 2 hours. Shoppers could order again at 18:00.
+</Callout>
+
+The lesson is wider than backups. Everything the runbook touches must exist in region B, or be buildable there from code: data, images, certificates, secrets, keys and staff access.
+
+### Step 4: Tier 1: backup and restore
+
+<AnimatedDiagram spec="animated/cloud/dr-tiers" step={3} minWidth={620} caption="Backup and restore: backups and the change log reach region B every 15 minutes. Templates can build the servers there, and DNS can point at it." />
+
+In the first tier, nothing runs in region B. Only copies and instructions wait there.
+
+- **Copies.** Each backup, and the change log, is copied to region B every 15 minutes. That sets the RPO at 15 minutes.
+- **Code.** The templates take the region as a setting, so one command builds region B. Each release copies the server image there.
+- **The front door.** A certificate for region B exists ahead of time. The <Term id="dns">DNS</Term> record that shoppers look up has a 60-second <Term id="ttl">TTL</Term>, so a change spreads fast.
+
+Six weeks later a second game day takes 1 hour 45 minutes. Restoring the database and replaying the log is 45 of them. Storage and copy traffic add about 3% to Brightpost's monthly bill. [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults) explains why the copies also belong in a separate account.
+
+### Step 5: Tier 2: pilot light
+
+<AnimatedDiagram spec="animated/cloud/dr-tiers" step={4} minWidth={620} caption="Pilot light: a database replica in region B runs a few seconds behind. The servers are defined, but none is running." />
+
+The name comes from a gas boiler, whose tiny flame burns all the time so the big burner lights at once. Here the flame is the data. A <Term id="read-replica">replica</Term> of the orders database runs in region B, a few seconds behind. Servers exist only as templates and an image.
+
+To recover, promote the replica to a primary, let the templates start the servers, and move DNS. Brightpost estimates about 40 minutes, with an RPO of seconds. But a full database now runs in region B all day, and the database is one of the bill's two biggest lines: about 20% more. Keep the backups too, because a replica copies a bad delete within seconds.
+
+### Step 6: Tier 3: warm standby
+
+<AnimatedDiagram spec="animated/cloud/dr-tiers" step={5} minWidth={620} caption="Warm standby: a small load balancer and one app server run in region B and take test traffic every day." />
+
+A warm standby is a small, working copy of the whole stack: a load balancer, one app server and the replica. It takes **test traffic** every day, scripted checkouts that prove the copy works now.
+
+To recover, promote the replica, let the scaling rule grow from 1 server to 10, and move DNS. Brightpost estimates about 10 minutes, for about 35% more. The risk moves from "does it work?" to "can it grow?", so check region B's quotas before the day.
+
+### Step 7: Tier 4: active-active
+
+<AnimatedDiagram spec="animated/cloud/dr-tiers" step={6} minWidth={620} caption="Active-active: both regions serve shoppers all the time and write to one database that spans both regions." />
+
+In **active-active**, both regions serve real shoppers all the time, and routing sends each one to a healthy region. If London fails, its share moves to region B and nothing needs starting: about 2.5 minutes with Brightpost's DNS checks.
+
+The hard part is writes. Two regions taking orders need a database that accepts writes in both, or a rule for where each write goes. If it confirms each write in both regions before answering, the RPO is near zero, and every write waits for the trip between them. The bill roughly doubles, and the app must handle two shoppers buying the last poster at once. [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region) designs this in depth.
+
+### Step 8: Moving the traffic
+
+Every tier ends with shoppers reaching region B, in one of two ways.
+
+1. **DNS failover.** A health check probes the shop every 30 seconds; after 3 failures, about 90 seconds, the record answers with region B. Resolvers keep the old answer for the 60-second TTL, so the worst case is about 2.5 minutes. [DNS on the Cloud](/cloud/networking/dns) shows the arithmetic.
+2. **A global entry point.** One address, announced from many sites, sends each request to a healthy region in seconds.
+
+In tiers 1 to 3 a person decides, because failing over throws away the last RPO's worth of data. Automate the steps, not the decision. Plan **failback**, the return to London, as its own careful move.
+
+### Step 9: How the data reaches region B
+
+The data copy sets the RPO, and there are three ways to make it. [Synchronous vs asynchronous replication](/system-design/databases/sync-vs-async-replication) explains the theory.
+
+<Compare
+  columns={["", "Backup copies", "Asynchronous replica", "Synchronous or multi-region"]}
+  rows={[
+    ["How it works", "Files copied on a schedule", "Each change sent after the write commits", "Each write confirmed in both regions"],
+    ["RPO", "Minutes to a day", "Seconds", "Near zero"],
+    ["Cost to each write", "None", "None", "One trip between regions"],
+    ["Undoes a bad delete", true, false, false],
+    ["Brightpost uses it in", "Tier 1", "Tiers 2 and 3", "Tier 4"],
+  ]}
+  caption="Only a backup can go back in time. Every replica copies a mistake as fast as it copies an order."
+/>
+
+### Step 10: Test it on a game day
+
+A plan you have not run is a guess. Brightpost now holds a game day twice a year:
+
+1. **Pick a scenario and a date.** "London is gone at 09:00." Tell support and the finance lead.
+2. **Use only the runbook and region B.** Nothing may come from London, the rule the first drill broke.
+3. **Measure both numbers.** The RPO is the age of the newest order found in region B. The RTO is the time until a test order succeeds.
+4. **Fix each surprise in code.** It becomes a change to a template or the runbook, not a note in someone's head.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: copies in a second region, a way to start the stack there, and a traffic switch.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Backups to another region:** AWS Backup copies recovery points to a vault in another Region or account. RDS can replicate its automated backups to a second Region for a point-in-time restore there.
+    - **Servers:** AWS Elastic Disaster Recovery copies disks continuously into a low-cost staging area and launches full servers only for a drill or a recovery.
+    - **Database copies:** RDS cross-Region read replicas, promoted by hand. Aurora Global Database. DynamoDB global tables, which accept writes in several Regions.
+    - **Traffic switch:** Route 53 failover routing with health checks, or Global Accelerator in front of several Regions.
+    - **Choosing region B:** any Region; there are no fixed pairs.
+
+    **The difference that changes a design.** Regions share almost nothing, so each piece the runbook needs is copied on purpose. Machine images and KMS keys belong to one Region. A copied encrypted snapshot is re-encrypted with a key in the destination Region, unless you use multi-Region keys.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Backups to another region:** Backup and DR Service keeps backups in vaults in a location you choose. Cloud SQL stores backups in a multi-region location by default.
+    - **Servers:** Compute Engine snapshots and machine images are global resources, usable in any region.
+    - **Database copies:** Cloud SQL cross-region read replicas, promoted by hand. Spanner multi-region configurations, which commit each write in more than one region.
+    - **Traffic switch:** the global external Application Load Balancer, one anycast address in front of backends in many regions. Cloud DNS routing policies with health checks.
+    - **Choosing region B:** any region; there are no fixed pairs.
+
+    **The difference that changes a design.** Several building blocks are global: the VPC network, images, snapshots and the load balancer. Much of region B's skeleton already exists, and traffic moves without waiting for DNS caches. Regional pieces, such as Cloud SQL instances and subnets, still need their own copies.
+  </Tab>
+  <Tab label="Azure">
+    - **Backups to another region:** Azure Backup vaults with geo-redundant storage copy to the paired region, and Cross Region Restore restores there. PostgreSQL flexible server offers geo-redundant backups.
+    - **Servers:** Azure Site Recovery replicates VMs to another region and runs planned, unplanned and test failovers from a recovery plan.
+    - **Database copies:** cross-region read replicas for flexible server, promoted by hand. Azure SQL Database failover groups. Cosmos DB with writes in several regions.
+    - **Traffic switch:** Traffic Manager, which is DNS-based, or Front Door, one global entry point.
+    - **Choosing region B:** most regions have a paired region in the same geography; some newer ones have none.
+
+    **The difference that changes a design.** Geo-redundant copies go to the pair, not to a region you pick, so choose the pair as region B or copy the data yourself. Platform updates reach one region of a pair at a time. Site Recovery's test failover runs in an isolated network, so a game day leaves production alone.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/dr-tiers" stepper minWidth={620} caption="Brightpost's two regions, from the game day to active-active. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/dr-tiers" lead="aws" />
+
+## Try it
+
+<CloudDecisionTree topic="dr-strategy" />
+
+<Quiz>
+  <QuizItem question="Brightpost's copies reach region B every 15 minutes. The last one arrived at 14:00, and London is lost at 14:10. How much is lost, and is the RPO met?" hint="Count from the last copy that survives.">
+    Ten minutes of orders, about 4 on a normal afternoon. The promise is 15 minutes, so the RPO is met.
+  </QuizItem>
+  <QuizItem question="The replica in region B runs 3 seconds behind. A bad script deletes 500 orders in London. What does the replica hold 5 seconds later, and what brings the orders back?" hint="What does a replica copy?">
+    The replica has deleted them too, because it copies every change. Only a backup brings them back: restore to a moment before the script ran.
+  </QuizItem>
+  <QuizItem question="DNS health checks need about 90 seconds to declare London dead, and the record's TTL is 60 seconds. What is the worst case before every shopper reaches region B?">
+    About 150 seconds, or 2.5 minutes: 90 to notice, then up to 60 for the last cached answer to expire.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Backup and restore", "Pilot light", "Warm standby", "Active-active"]}
+  rows={[
+    ["Runs in region B", "Nothing; copies only", "A database replica", "Every tier, small", "Everything, full size"],
+    ["RPO for Brightpost", "15 minutes", "Seconds", "Seconds", "Near zero"],
+    ["RTO for Brightpost", "About 2 hours", "About 40 minutes", "About 10 minutes", "About 2.5 minutes"],
+    ["Added to the monthly bill", "About 3%", "About 20%", "About 35%", "About 100%, plus app work"],
+    ["The same in profit on orders", "About 9 a month", "About 60 a month", "About 105 a month", "About 300 a month"],
+    ["Who starts the recovery", "A person, with the runbook", "A person", "A person", "Health checks"],
+  ]}
+  caption="Brightpost's estimates. Its monthly cloud bill equals the profit on about 300 orders."
+/>
+
+An hour down costs about 25 orders on a normal afternoon, and about 400 at a sale-day peak. Pilot light would save about 80 minutes per disaster: about 35 orders on a normal day, about 530 at the worst sale hour. It would cost about 720 orders a year. Even a yearly region loss at the worst moment would not repay it. So Brightpost picks backup and restore, done properly, and will look again when an hour down costs more.
+
+## Common pitfalls
+
+- **Backups in the same region, or the same account.** A region loss takes them too, and an intruder can delete them. Copy them to the recovery region, in a separate account, under a lock.
+- **A runbook nobody has run.** Brightpost's said 2 hours and took 9. Hold a game day at least twice a year, and fix each surprise in code.
+- **The region written into code.** Templates and endpoints that say "London" break the restore. Make the region a setting, and build region B from the same templates in every drill.
+- **Forgetting the parts that are not data.** Server images, certificates, secrets, encryption keys, quotas and staff access must all exist in region B.
+- **Automatic failover on one health check.** A flaky probe can move every shopper and discard the last minutes of orders. In tiers 1 to 3, a person decides.
+
+## How to say it in an interview
+
+"I start from two numbers the business signs: the RPO, how much recent data we may lose, and the RTO, how long we may be down. Copy frequency sets the RPO; what already runs in the second region sets the RTO. I pick the cheapest tier that meets both: backup and restore, pilot light, warm standby or active-active. I keep backups whatever the tier, because a replica copies mistakes. And I prove the numbers with a timed game day, because a runbook that has never run is a guess."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between RPO and RTO?" level="Junior" category="Cloud">
+    **Short answer.** RPO is how much recent data you accept losing, measured in time. RTO is how long you accept being down. One looks back from the disaster, the other looks forward.
+
+    **Why.** Different parts of the design set them. How often data is copied somewhere safe sets the RPO: Brightpost copies every 15 minutes. How much already runs in the recovery region sets the RTO: with nothing running, Brightpost needs about 2 hours.
+
+    <AnimatedDiagram spec="animated/cloud/rpo-rto-timeline" step={3} caption="The RPO ends at the last surviving copy; the RTO ends when shoppers can order again." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which of the two does a nightly backup set?
+    - How do you prove the RTO you have promised?
+
+    **Watch out for.** Mixing them up, or treating them as one number. A system can lose no data and still be down for a day.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A service needs an RPO of one hour and an RTO of four hours. Which tier do you choose, and why?" level="Mid" category="Cloud">
+    **Short answer.** Backup and restore, done properly. Copy backups and the change log to the recovery region well inside an hour, keep templates that build the stack there, and prove the restore.
+
+    **Why.** Both targets are loose enough that nothing needs to run in the second region. Brightpost copies every 15 minutes and restores in 1 hour 45, for about 3% on its bill. Pilot light would cost about 20% to buy time the requirement does not ask for.
+
+    <AnimatedDiagram spec="animated/cloud/dr-tiers" step={3} highlight={["backupA", "backupB", "templates", "appB"]} caption="Copies and code in region B are enough when the targets are measured in hours." />
+
+    **Follow-ups the interviewer may ask.**
+    - What else besides the data must be in the recovery region?
+    - How would the answer change if the RTO dropped to 30 minutes?
+
+    **Watch out for.** Choosing warm standby "to be safe". It meets the targets at more than ten times the cost.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Pilot light and warm standby both replicate the database. Why is pilot light cheaper, and what does the saving cost you?" level="Mid" category="Cloud">
+    **Short answer.** Pilot light runs only the data in the second region. Warm standby also runs a small copy of every other tier. The saving costs time on the day, and confidence that the servers will start.
+
+    **Why.** Both keep a replica seconds behind, so their RPO is the same. Warm standby adds a load balancer and a server around the clock: Brightpost estimates 35% against 20%. In return its RTO is about 10 minutes, not 40. Its daily test traffic also finds a broken image before a disaster does.
+
+    <AnimatedDiagram spec="animated/cloud/dr-tiers" step={5} highlight={["lbB", "appB", "replica"]} caption="The difference between the two tiers is the load balancer and the running server, not the data." />
+
+    **Follow-ups the interviewer may ask.**
+    - How can a pilot light prove that its servers would start?
+    - What limit might stop a warm standby from growing on the day?
+
+    **Watch out for.** Saying pilot light has a worse RPO. Both replicate the data the same way; only the RTO differs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does traffic move to the recovery region, and how long does it take?" level="Mid" category="Cloud">
+    **Short answer.** Either DNS answers with the recovery region, or a global entry point sends requests there. DNS takes the health-check time plus the record's TTL; a global entry point takes seconds.
+
+    **Why.** Brightpost's health checks need 3 failures 30 seconds apart, about 90 seconds. Resolvers keep the old answer for the 60-second TTL, so the worst case is about 2.5 minutes, with a tail of clients that cache longer. A global entry point has no cached answer to expire.
+
+    <AnimatedDiagram spec="animated/cloud/dr-tiers" step={5} path="dns>lbB>appB" caption="DNS points shoppers at region B's load balancer, which sends them to its servers." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why lower a TTL before a planned failover, and how long before?
+    - Who should decide that a region is lost?
+
+    **Watch out for.** Promising a 1-minute switch with a 300-second TTL. The cache, not the check, sets the floor.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your recovery region has never served real traffic. What is most likely to fail on the day, and how do you find out first?" level="Senior" category="Cloud">
+    **Short answer.** Whatever the runbook assumes exists but does not: data copies, images, certificates, keys, quotas, access and hard-coded names of the main region. You find out with a timed game day that may use only the recovery region.
+
+    **Why.** Brightpost's runbook promised 2 hours. Its first drill took 9, because the backups, image and certificate lived in London, and the templates named it. No diagram review shows that. A drill with one rule, "nothing from the main region", does. Each surprise becomes a code change, and the second drill took 1 hour 45.
+
+    <AnimatedDiagram spec="animated/cloud/dr-tiers" step={2} caption="The game day: region B held no orders, and the backups the runbook needed were in London." />
+
+    **Follow-ups the interviewer may ask.**
+    - How often should the drill run, and who should run it?
+    - How do you drill without disturbing real shoppers?
+
+    **Watch out for.** Answering "the database". The data is usually the part people remember; the failures hide in everything around it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When is active-active worth its cost, and what does it change in the application?" level="Senior" category="Cloud">
+    **Short answer.** When an outage of even a few minutes costs more than running everything twice, or when users on two continents need nearby writes. It changes how writes work: two regions must accept them without corrupting each other.
+
+    **Why.** For Brightpost, active-active roughly doubles the bill, the profit on about 300 orders a month, while an hour down costs about 25. A payments firm would decide the other way. The app then needs a database that accepts writes in both regions, or a home region per customer, and a rule for conflicts.
+
+    <AnimatedDiagram spec="animated/cloud/dr-tiers" step={6} highlight={["appA", "appB", "globaldb", "dns"]} caption="Both regions write to one database that spans them, and routing sends each shopper to a healthy region." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does confirming each write in two regions do to checkout latency?
+    - Do you still need backups in active-active?
+
+    **Watch out for.** Calling it active-active when only one region accepts writes. That is a warm standby that serves reads.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Availability, SLAs and What Fails Together](/cloud/resilience/availability-math)
+- [High Availability Inside One Region](/cloud/resilience/ha-patterns)
+- [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults)
+- [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region)
+- [Managed Relational Databases](/cloud/data/managed-relational)
+- [DNS on the Cloud](/cloud/networking/dns)
+- [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code)
+- [Cost Models and Purchasing Options](/cloud/operations/cloud-cost-models)
+- [Synchronous vs asynchronous replication](/system-design/databases/sync-vs-async-replication)
+- [Availability](/system-design/fundamentals/availability)
+
+## Further reading
+
+- [Disaster recovery of workloads on AWS](https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-workloads-on-aws.html): the four strategies on AWS.
+- [Google Cloud disaster recovery planning guide](https://cloud.google.com/architecture/dr-scenarios-planning-guide): RPO, RTO and building blocks.
+- [Azure Site Recovery overview](https://learn.microsoft.com/azure/site-recovery/site-recovery-overview): replication, failover and drills.
+- [Azure cross-region replication and region pairs](https://learn.microsoft.com/azure/reliability/cross-region-replication-azure): how pairs work.

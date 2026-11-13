@@ -1,11 +1,344 @@
 ---
 title: "Multi-Region, Global Routing and Data Replication"
-description: "What changes when two regions serve users: routing by health and latency, how data is copied, and where writes are allowed."
-status: outline
+description: "Running in two regions: routing users by health and distance, choosing where writes go, what must be shared, and what a second region costs."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** what changes when two regions both serve users: routing by health and latency, choosing synchronous or asynchronous replication, where writes go (one home region or everywhere), and the consistency promises you can still make. Replication theory is linked, not re-taught.
+<KeyIdea>
+  A second region brings far users closer and survives a regional outage, but you must decide which region may change each piece of data.
+</KeyIdea>
 
-**Related reading on this site:** [Consistency Models and CAP](/system-design/patterns/consistency-models) · [NewSQL / Distributed SQL](/system-design/databases/newsql-databases) · [Edge, DNS & CDN on AWS](/cloud/aws/edge)
+## The story
+
+Brightpost is a small online shop that sells posters and greeting cards, about 400 orders a day. It runs in one region near London. It also ships to Australia, about 30 orders a day, and there a product page takes about 3 seconds to show. The company guardrail allows two regions, so the team plans a second one near Sydney. For a 14-day trial, both regions take orders. Each has its own copy of the orders database, and the copies swap changes about 1 second later. On the second Saturday, a signed print has one copy left. A shopper in Leeds and a shopper in Perth buy it 0.4 seconds apart. Each region sees one in stock and sells it. By the end of the trial, 3 orders had sold stock that was already gone, and Brightpost refunded all 3.
+
+Every step below follows that trial, from the first slow page to the design Brightpost will launch with.
+
+## How it works
+
+Three words first. A <Term id="region">region</Term> is a separate group of data centres in one area, such as London. **Multi-region** means one app runs in two or more regions at once. **Active-active** means every region serves real users. [Disaster Recovery](/cloud/resilience/dr-strategies) covers designs where the second region only waits; this page goes deep on active-active.
+
+### Step 1: Why go multi-region
+
+<AnimatedDiagram spec="animated/cloud/global-routing" step={1} minWidth={620} caption="Brightpost today: every shopper reaches London, and each round trip from Sydney takes about 250 ms." />
+
+There are three good reasons to run in a second region.
+
+1. **Distance.** A round trip between Sydney and London takes about 250 ms, because light in fibre needs time. A product page needs about a dozen trips, so it takes 3 seconds. The <Term id="cdn">edge cache</Term> serves photos nearby, but stock, prices and checkout still come from London.
+2. **A whole region failing.** Zones protect against one building going dark. A rare region-wide outage takes every zone at once.
+3. **Data residency.** This is a rule that data about some people must stay in one country or area. When it applies, a region there is required, not chosen.
+
+Brightpost's reason is the first. [Availability](/system-design/fundamentals/availability) explains why two independent copies fail together far less often than one.
+
+<PremiumBreak />
+
+### Step 2: Routing users with DNS
+
+<AnimatedDiagram spec="animated/cloud/global-routing" step={2} minWidth={620} caption="A stack near Sydney. DNS checks both regions and answers each shopper with the nearest healthy one." />
+
+A <Term id="dns">DNS</Term> service can answer the shop's name differently for different askers. [DNS on the cloud](/cloud/networking/dns) covers the basics.
+
+- **Latency routing** answers with the region that has the lowest measured delay from the asker.
+- **Geo routing** answers by the asker's country or continent. Use it when a rule says where someone's data must go.
+- A **health check** is a probe the DNS service sends to each region every few seconds. A region that fails it drops out of the answers.
+
+The catch is caching. Each answer carries a <Term id="ttl">TTL</Term>, how long resolvers may keep it. Brightpost uses 60 seconds. Checks every 10 seconds, with 3 misses to fail, notice an outage in 30 seconds. Cached answers then live up to 60 more. Some resolvers hold answers longer, so a few shoppers call a dead region for minutes.
+
+### Step 3: A writer in each region
+
+<AnimatedDiagram spec="animated/cloud/global-routing" step={3} minWidth={620} caption="The trial: each copy takes writes and sends them to the other, about 1 second later." />
+
+<Term id="replication">Replication</Term> is copying each change from one database to another. Across 250 ms, the copy is **asynchronous**: the database confirms the write first and sends it later. So the other copy runs behind. That gap is **replication lag**, about 1 second for Brightpost. [Synchronous vs asynchronous replication](/system-design/databases/sync-vs-async-replication) explains the choice.
+
+In the trial, both copies take writes and send them to each other. This is **multi-leader** replication; [Multi-leader replication](/system-design/databases/multi-leader-replication) teaches the theory. An Australian order commits in about 10 ms. The hidden cost: for about 1 second after each write, the copies disagree.
+
+### Step 4: When two writes collide
+
+<AnimatedDiagram spec="animated/cloud/global-routing" step={4} minWidth={620} caption="The failure: both regions sell the last poster within 0.4 seconds, and neither has heard about the other sale." />
+
+<Callout tone="red" title="What breaks">
+  At 0.0 s London reads one in stock, takes the Leeds order and writes zero. At 0.4 s Sydney still reads one, because London's change is still crossing the world. It takes the Perth order and also writes zero. Both changes arrive, both say zero, and the copies agree. Two orders now exist for one poster, and nothing looks wrong.
+</Callout>
+
+A **conflict** is two writes to the same record in two copies, before either copy has seen the other. The database must settle it. The common default is [last write wins](/system-design/databases/last-write-wins): keep the change with the later timestamp and drop the other. Here both changes said zero, so nothing was dropped. A stock count stored as "set to zero" cannot show that two sales happened. Merge rules such as counters can, and [automatic conflict resolution](/system-design/databases/automatic-conflict-resolution) covers them. None can un-sell a poster.
+
+The rule from the trial: data with a hard limit, such as stock, money or a unique username, needs exactly one place that may change it.
+
+### Step 5: Three places the writes can go
+
+<AnimatedDiagram spec="animated/cloud/write-topologies" minWidth={620} caption="Where writes go: one writer, a writer per region, or one database that spans both, each with its promise and its cost." />
+
+Each kind of data gets one of three shapes.
+
+1. **One writer.** One region takes every write; the others hold read copies, a little behind. Far shoppers pay one long trip per write.
+2. **A writer per region.** Writes are fast everywhere, and each region can work alone. Copies can disagree, and conflicts need a rule.
+3. **One global database.** Copies vote on each write, and it commits once most agree. Every read is current, but every write waits at least one long round trip. With two regions, a third location usually casts the deciding vote.
+
+A common mix gives each record a **home region**: a UK customer's account lives in London, an Australian's in Sydney. [Consistency models](/system-design/patterns/consistency-models) and [NewSQL databases](/system-design/databases/newsql-databases) explain the third shape's promise.
+
+### Step 6: One writer, local reads
+
+<AnimatedDiagram spec="animated/cloud/global-routing" step={5} minWidth={620} caption="London is the only writer. Sydney reads its local copy and sends each order to London, one 250 ms trip." />
+
+Brightpost picks one writer: London owns every order and stock count. The Sydney app reads pages, prices and stock from its local copy, about 10 ms away. Each order is one 250 ms trip to London. Sydney pages load in under 1 second.
+
+The local copy runs about 1 second behind, so a shopper who has paid might not see the order yet. That is a <Term id="stale-read">stale read</Term>. The fix is <Term id="read-your-writes">read-your-writes</Term>: for a short time after a shopper writes, their own reads go to the writer. Brightpost sends a shopper's order pages to London for 10 seconds after checkout. Stock on a product page may be 1 second old; checkout checks the real count in London.
+
+<ReplicationLagDemo lagMs={1000} readYourWrites={false} />
+
+### Step 7: A global front door
+
+<AnimatedDiagram spec="animated/cloud/global-routing" step={6} minWidth={620} caption="One anycast address for every shopper. The front door checks health itself and moves shoppers in seconds." />
+
+DNS steering has one weak spot: the cached answer. A **global load balancer** removes it. It uses an **anycast** address: one IP address announced from many edge sites, so each shopper reaches the nearest site. The front door forwards the request to the nearest healthy region.
+
+It runs its own health checks. When London fails them, the next request goes to Sydney, on the same address. [Load balancing](/cloud/networking/load-balancing) covers the regional and global kinds.
+
+<Compare
+  columns={["", "DNS routing", "Global front door"]}
+  rows={[
+    ["What a shopper connects to", "A different address per region", "One address everywhere"],
+    ["Moves shoppers after a failure", "After checks plus cached answers: about 90 s, some longer", "After checks fail: about 30 s at Brightpost's settings"],
+    ["Ends the connection near the shopper", false, true],
+    ["Works for", "Any protocol, any server", "The protocols the product supports"],
+    ["Extra bill line", "Small: queries and checks", "A fixed fee plus data carried"],
+  ]}
+  caption="Brightpost's settings: a check every 10 seconds, 3 misses to fail, and a 60-second TTL."
+/>
+
+### Step 8: What must be global, what stays regional
+
+<AnimatedDiagram spec="animated/cloud/global-routing" step={7} minWidth={620} caption="Both regions trust one identity service. Each region keeps its own copy of every secret, so Sydney can run without London." />
+
+Some things must be the same everywhere. Others must exist in each region, so that region can run alone.
+
+- **Global, one copy:** identity (who people and services are), the shop's name and the front door. Two staff lists means removing a contractor twice.
+- **Regional, a copy in each:** secrets, configuration, server images and encryption keys. If Sydney reads its database password from a London store, losing London stops Sydney too. That is a **hidden dependency**.
+- **One home, by choice:** orders and stock, in London.
+
+The test: if London vanished now, could Sydney sign people in, read its secrets and start a server?
+
+### Step 9: Failover, failback and drills
+
+A <Term id="failover">failover</Term> moves users and the writer to the other region, in two halves.
+
+1. **Move the shoppers.** The front door stops sending to London once its checks fail, in about 30 seconds.
+2. **Move the writer.** Someone promotes the Sydney copy to writer. Up to about 1 second of London's last orders may be missing, because they had not been copied yet. The most data you accept losing is your <Term id="rpo">RPO</Term>.
+
+Brightpost promotes by hand after 15 minutes of outage. Promoting during a short network break could leave two writers: the trial's bug again.
+
+**Failback** is the trip home. London's old copy holds those missing orders and none of Sydney's new ones, so never switch it back on as the writer. Rebuild it as a copy of Sydney, let it catch up, and move the writer back in a quiet hour. Add the stranded orders by hand.
+
+A failover nobody has tried is a guess. Brightpost plans a drill every 3 months, on a Sunday at 06:00 London time. The team drains London, moves the writer to Sydney and back, and counts errors.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: steer each user to a healthy region, and choose for each kind of data where writes go.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **DNS routing:** Route 53 latency, geolocation and failover policies, with health checks.
+    - **Global front door:** Global Accelerator: two fixed anycast addresses in front of regional load balancers.
+    - **One writer, copies far away:** Aurora Global Database, copied at the storage layer, usually about a second behind. RDS has cross-region read replicas.
+    - **Writers in every region:** DynamoDB global tables; by default, last writer wins.
+    - **One global database:** Aurora DSQL multi-region clusters: two writing regions and a witness region.
+
+    **The difference that changes a design.** Every load balancer is regional, so a two-region design is two full stacks joined by Route 53 or Global Accelerator. IAM is global, but Secrets Manager and KMS are regional: copy secrets and keys on purpose. Aurora separates a planned switchover, which loses nothing, from an outage failover, which can lose the lag.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **DNS routing:** Cloud DNS geolocation, weighted and failover policies.
+    - **Global front door:** the global external Application Load Balancer: one anycast address, backends in many regions.
+    - **One writer, copies far away:** Cloud SQL cross-region read replicas, which can be promoted.
+    - **Writers in every region:** Bigtable clusters in several regions, eventually consistent.
+    - **One global database:** Spanner multi-region configurations: synchronous copies in two regions and a witness in a third.
+
+    **The difference that changes a design.** Network and front door are global by design: one network spans regions, and one address fronts backends in London and Sydney. Spanner is the strongly consistent global database most designs reach for. Secret Manager can replicate each secret automatically.
+  </Tab>
+  <Tab label="Azure">
+    - **DNS routing:** Traffic Manager: by performance, priority or geography, with endpoint monitoring.
+    - **Global front door:** Front Door: layer 7 at Microsoft's edge on anycast, with health probes.
+    - **One writer, copies far away:** Azure Database for PostgreSQL replicas in another region. Azure SQL failover groups.
+    - **Writers in every region:** Cosmos DB multi-region writes; last writer wins by default, or your own procedure.
+    - **One global database:** Cosmos DB strong consistency, which needs a single write region.
+
+    **The difference that changes a design.** Each job is its own product, and Cosmos DB lets you pick a consistency level per account. Many regions have a paired region in the same geography, used for staged updates and some built-in copies. London and Sydney are not a pair, so you set up every copy yourself.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/global-routing" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/global-routing" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Where should this data be written?"
+  tree={{
+    q: "Can two regions change the same record at once, and a merge rule still give the right answer?",
+    yes: "A writer per region works. Examples: view counts, likes, a shopper's saved wishlist. Write the merge rule down and test it.",
+    no: {
+      q: "Does each region need to write it with a short delay?",
+      yes: {
+        q: "Does each record belong to one place, such as a customer's own account?",
+        yes: "Give each record a home region. It is written there and read everywhere.",
+        no: {
+          answer: "One global database with strong consistency. Every write waits one long round trip.",
+          href: "/system-design/databases/newsql-databases",
+        },
+      },
+      no: "One writer, with read copies near users. Brightpost's orders and stock live here.",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost's DNS checks need 30 seconds to mark London down, and answers carry a 60-second TTL. How long until most shoppers are sent to Sydney?" hint="Add the time to notice and the time to forget.">
+    About 90 seconds: 30 to notice, then up to 60 while cached answers expire. A global front door cuts this to about 30 seconds.
+  </QuizItem>
+  <QuizItem question="London takes an order and fails 0.5 seconds later. The Sydney copy runs about 1 second behind. Is the order in Sydney after promotion?">
+    Probably not: it had not been copied yet. It is within Brightpost's RPO of about 1 second, and waits in London's old copy.
+  </QuizItem>
+  <QuizItem question="A shopper in Perth pays and opens My orders 0.3 seconds later. Where does that read go, and does it show the order?" hint="Look at the 10-second rule.">
+    To London, because read-your-writes sends a shopper's own order pages to the writer for 10 seconds. The order is there, so it shows.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "One region and an edge cache", "Two regions, one writer", "Two regions, a writer each", "One global database"]}
+  rows={[
+    ["Sydney product page", "About 3 s", "Under 1 s", "Under 1 s", "Under 1 s"],
+    ["An Australian order write", "Many 250 ms trips", "One 250 ms trip", "About 10 ms", "About 250 ms"],
+    ["Survives losing London", false, true, true, true],
+    ["Orders lost if London dies", "Shop is down", "Up to ~1 s", "Up to ~1 s", "None committed"],
+    ["Conflicts to handle", "None", "None", "Yes: stock sold twice", "None"],
+    ["What runs", "1 stack", "2 stacks", "2 stacks", "2 stacks plus a third voting site"],
+    ["Bill", "Today's", "Roughly double, plus copy traffic", "Roughly double, plus copy traffic", "Roughly double, plus a premium database"],
+  ]}
+  caption="Brightpost's numbers between London and Sydney. Round trips, lag and bills differ by provider and design."
+/>
+
+For 30 orders a day, one writer buys the speed Sydney needs and keeps one answer per order. It also adds bill lines one region never had: changes copied across the world per gigabyte, and a second set of logs.
+
+## Common pitfalls
+
+- **Two writers for data with a limit.** Stock, money and usernames break when two regions change them at once. Brightpost sold 3 posters it did not have. Give such data one writer.
+- **A hidden dependency on the first region.** A Sydney app that reads secrets, images or settings from London fails with London. Copy them into each region, and test with London switched off.
+- **Expecting DNS failover to be instant.** Cached answers keep some users on a dead region for minutes. Use a short TTL, or a global front door when seconds matter.
+- **Promoting on a short blip.** Two writers after a brief network break is the double sale again. Promote on a written rule, and first make sure the old writer can no longer take writes.
+- **Leaving copy traffic off the budget.** Every change crosses regions and is billed per gigabyte. Logs and backups double too. Price it first.
+
+## How to say it in an interview
+
+"I add a second region for one of three reasons: far users, a regional outage, or a residency rule. Users reach the nearest healthy region through DNS routing, or through an anycast front door when failover must take seconds. Then I decide, for each kind of data, where writes go. Data with a hard limit, like stock or money, gets one writer, with read copies near users and read-your-writes for a user's own data. Identity is global; secrets, keys and images are copied into each region so it can run alone. The RPO is the replication lag, and I prove failover and failback with drills."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Give three reasons to run an app in more than one region." level="Junior" category="Cloud">
+    **Short answer.** To be closer to far-away users, to survive a whole region failing, and to meet a rule that some data must stay in one country.
+
+    **Why.** Brightpost's Sydney shoppers wait about 3 seconds a page, because each round trip to London takes about 250 ms. A stack near Sydney cuts that to under 1 second. Residency is the only reason that can make a region compulsory.
+
+    <AnimatedDiagram spec="animated/cloud/global-routing" step={1} path="syd>lapp>ldb" caption="Every Sydney request crosses the world to London and back." />
+
+    **Follow-ups the interviewer may ask.**
+    - Could an edge cache fix the latency instead?
+    - What does a second region add to the bill?
+
+    **Watch out for.** Forgetting the database. Without a copy of the data, the second region cannot take over.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="DNS failover or a global anycast load balancer: what decides?" level="Mid" category="Cloud">
+    **Short answer.** How fast users must move after a failure. DNS works for any protocol but waits for cached answers to expire. An anycast front door keeps one address and moves the next request within seconds.
+
+    **Why.** With Brightpost's settings, DNS needs 30 seconds to notice and up to 60 more for cached answers: about 90 seconds. The front door notices in about 30 seconds and never changes its address. It costs a fixed fee and carries only the protocols the product supports.
+
+    <AnimatedDiagram spec="animated/cloud/global-routing" step={6} path="syd>fd>sapp" caption="One address for every shopper; the front door picks the healthy region." />
+
+    **Follow-ups the interviewer may ask.**
+    - How low would you set the TTL, and what does a low TTL cost?
+    - Can you use both together?
+
+    **Watch out for.** Setting a TTL of 5 seconds and calling DNS failover instant. Many resolvers and apps cache answers longer than you ask.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Shoppers in Sydney place orders. Where could those writes go?" level="Mid" category="Cloud">
+    **Short answer.** To one writer in London, to a writer in Sydney that copies to London, or to one global database that both regions vote on.
+
+    **Why.** One writer costs a 250 ms trip per order and keeps one answer. A writer per region costs about 10 ms but lets copies disagree: Brightpost sold one poster twice. A global database keeps reads current, but every write waits about 250 ms.
+
+    <AnimatedDiagram spec="animated/cloud/write-topologies" step={3} caption="Three shapes, each with its promise and its cost." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which Brightpost data could safely have a writer per region?
+    - What changes if a law says Australian data must stay in Australia?
+
+    **Watch out for.** Choosing one shape for the whole app. Each kind of data can use a different one.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="In a two-region design, what must be global and what must exist in each region?" level="Mid" category="Cloud">
+    **Short answer.** Identity, the public name and the front door are global, with one copy. Secrets, configuration, server images and keys get a copy in each region.
+
+    **Why.** One identity service means removing a person is one step in one place. If Sydney read its database password from a London store, losing London would stop Sydney as well: a hidden dependency. Test it by switching London off in a drill.
+
+    <AnimatedDiagram spec="animated/cloud/global-routing" step={7} highlight={["identity", "secrets", "sapp"]} caption="One identity for both regions; a copy of every secret in each." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you keep two copies of a secret in step when it rotates?
+    - Is the identity service itself a single point of failure?
+
+    **Watch out for.** Listing only the app and the database. Most hidden dependencies sit in the small services around them.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="After failing over to Sydney, how do you fail back to London without losing the orders taken in Sydney?" level="Senior" category="Cloud">
+    **Short answer.** Never switch London's old database back on as the writer. Rebuild it as a copy of Sydney, let it catch up, then move the writer back in a quiet hour. Recover the few orders stranded in the old London copy by hand.
+
+    **Why.** London's old copy has the last second of orders that never reached Sydney, and none of Sydney's since. Making it the writer again would lose Sydney's orders, or create two writers. The planned switch back loses nothing, because nobody writes while the writer moves.
+
+    <AnimatedDiagram spec="animated/cloud/global-routing" step={5} highlight={["ldb", "sdb"]} caption="One writer and one copy; failback swaps their roles, then swaps them back." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find the orders stranded in the old copy?
+    - Who decides when to fail back?
+
+    **Watch out for.** Failing back as soon as London answers health checks. Moving traffic is quick; the data must be put right first.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="An active-active trial sold the last item in stock twice. Explain why, and design the fix." level="Senior" category="Cloud">
+    **Short answer.** Each region had a writable copy, and copies reached each other about 1 second late. Both regions read one in stock within that second and both sold it. The fix is one writer for stock and orders, with read copies near users.
+
+    **Why.** Both writes said zero, so last-writer-wins dropped nothing and no alarm fired. Brightpost moves every order and stock write to London and keeps a read copy in Sydney. An Australian order pays one 250 ms trip. View counts could still have a writer per region.
+
+    <AnimatedDiagram spec="animated/cloud/global-routing" step={4} highlight={["ldb", "sdb", "sold"]} caption="Two writers, one poster, 0.4 seconds apart." />
+
+    **Follow-ups the interviewer may ask.**
+    - Could a reservation with a timeout keep checkout fast in Sydney?
+    - How would you detect this if it happened again?
+
+    **Watch out for.** Answering "use last writer wins" or "use timestamps". The conflict is about a limit, not about which value is newer.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Disaster Recovery: Four Tiers, RPO and RTO](/cloud/resilience/dr-strategies)
+- [High Availability Inside One Region](/cloud/resilience/ha-patterns)
+- [Compliance, Data Residency and Sovereignty](/cloud/resilience/compliance-and-residency)
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [DNS on the Cloud: Public Zones, Private Zones and Routing Policies](/cloud/networking/dns)
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [Managed Relational Databases: Replicas, Standbys, Proxies and Serverless SQL](/cloud/data/managed-relational)
+- [Edge, DNS & CDN on AWS](/cloud/aws/edge)
+- [Multi-leader replication](/system-design/databases/multi-leader-replication)
+- [Consistency models](/system-design/patterns/consistency-models)
+
+## Further reading
+
+- [Amazon Route 53 routing policies](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html): latency, geolocation and failover answers.
+- [Amazon Aurora Global Database](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database.html): one writer region, read-only regions, switchover and failover.
+- [Spanner instance configurations](https://cloud.google.com/spanner/docs/instance-configurations): regional and multi-region layouts.
+- [Azure Front Door overview](https://learn.microsoft.com/azure/frontdoor/front-door-overview): the global layer 7 entry point.

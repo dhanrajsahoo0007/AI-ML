@@ -1,11 +1,326 @@
 ---
 title: "Backups, Snapshots, Vaults and Immutability"
-description: "Why a replica is not a backup, how snapshots and vaults work, and how a lock stops even an admin from deleting your last copy."
-status: outline
+description: "How to run backups across every store: one policy, a vault in another account, a lock no admin can lift, a copy in another region, and restore drills."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the difference between a replica (it copies mistakes at once) and a backup (a point you can go back to); snapshots as incremental copies; vaults that hold backups in a separate account or region; and immutability locks that stop even an administrator or ransomware from deleting them.
+<KeyIdea>
+  A backup is only worth something if the thing that destroyed your data cannot reach it, and you have proved that it restores.
+</KeyIdea>
 
-**Related reading on this site:** [Storage on AWS](/cloud/aws/storage) · [Storage on Google Cloud](/cloud/gcp/storage) · [Storage on Azure](/cloud/azure/storage)
+## The story
+
+Brightpost's customer reviews live on one disk. A contractor built the review service last spring: a virtual machine with its own database on a 100 GB disk. A <Term id="snapshot">snapshot</Term> of that disk is taken at 02:00 every night and kept for 30 days, and one a week is copied to a second region. All 34 copies sit in the shop account. The orders database is protected differently: its 03:00 backup is copied into a vault in the audit account. One Sunday at 04:20, an attacker takes over a contractor's laptop that is still signed in as an admin of the shop account. In 11 minutes a script deletes all 34 snapshots, then the review disk. It removes the delete lock on the orders database and deletes that too. It tries to delete the backups in the vault and is refused. By 07:30 Asha has restored the orders database from the 03:00 copy, and 3 later orders are rebuilt from payment records. The 4,100 reviews customers wrote over a year are gone for good.
+
+Brightpost had backups. It did not have a backup programme. Each step below adds one part of one.
+
+## How it works
+
+Four words first. A **backup** is a copy of data as it was at one moment, kept so you can go back to it. A **restore** turns a backup into a working disk or database again. **Retention** is how long each backup is kept. A **backup vault** is a store that holds backups apart from the data, with its own access rules.
+
+### Step 1: A copy you can go back to
+
+<AnimatedDiagram spec="animated/cloud/backup-chain" step={1} minWidth={620} caption="Before the attack: the review disk's snapshots stay in the shop account, while the orders backup is copied to a vault in the audit account." />
+
+A <Term id="read-replica">replica</Term> copies every change within seconds, and that includes a delete. A backup stays frozen at its moment, so it can undo a mistake. [Managed relational databases](/cloud/data/managed-relational) shows that difference for one database, and [block storage](/cloud/data/block-storage) shows how snapshots store only changed blocks.
+
+This page asks a different question: what can reach each copy? The review disk's 34 snapshots live in the shop account, next to the disk, so anyone who may delete the disk may delete them. The orders copy lives in another account, with other admins. Count copies by what could destroy them, not by how many there are.
+
+<PremiumBreak />
+
+### Step 2: One admin session, every nearby copy
+
+<AnimatedDiagram spec="animated/cloud/backup-chain" step={2} minWidth={620} caption="The failure: one admin session in the shop account deletes the disk and all 34 snapshots, but its delete on the vault is refused." />
+
+**Ransomware** is an attack that destroys or locks up your data, then asks for money to give it back. A careful attacker deletes the backups first, because a victim with backups does not pay.
+
+<Callout tone="red" title="What breaks">
+  At 04:20 the script lists every snapshot in the shop account and deletes all 34 in about 2 minutes. The 4 weekly copies in the second region go too, because they belong to the same account. Then it deletes the review disk and the orders database. The vault is in the audit account, where this session has no rights, so that one delete fails.
+</Callout>
+
+The weekly copy in another <Term id="region">region</Term> did not help. A region protects you from a region failing. Only a separate account protects you from the people, and the stolen logins, of the first account. The account is the edge of one admin's power, as [accounts and governance](/cloud/fundamentals/accounts-and-governance) explains.
+
+### Step 3: The 3-2-1 habit, in cloud terms
+
+An old rule for backups says: keep 3 copies of your data, on 2 different kinds of media, with 1 copy off-site. On a cloud, "media" and "off-site" need new meanings.
+
+<Compare
+  columns={["Rule", "What it meant on tape", "What it means on a cloud", "Brightpost now"]}
+  rows={[
+    ["3 copies", "The live data and two backups", "The live data, a nearby backup, a far backup", "Live disk, local snapshots, vault copies"],
+    ["2 kinds", "Disk and tape fail in different ways", "Two accounts with different admins", "Shop account and audit account"],
+    ["1 off-site", "A tape in another building", "A copy in another region", "Daily copy to the second allowed region"],
+    ["+1 locked", "A tape on a shelf, unplugged", "A copy nobody can delete early", "35-day lock on both vaults"],
+    ["+0 errors", "Not part of the old rule", "The last restore test passed", "Monthly drill, checked by a script"],
+  ]}
+  caption="Some teams write the modern version as 3-2-1-1-0."
+/>
+
+The nearby copy is for speed: a snapshot in the same zone restores a disk in minutes. The far copies are for the bad day. Brightpost keeps both.
+
+### Step 4: One policy for every store
+
+<AnimatedDiagram spec="animated/cloud/backup-chain" step={3} minWidth={620} caption="One backup policy, set at the organisation, now backs up every store, so the review disk reaches the vault too." />
+
+The orders backup was set up by hand, by naming one database. The review disk came later and nobody added it. A list of resources goes out of date the day someone creates a new one.
+
+A **central backup service** is one place to define schedules, retention and copy rules for disks, databases, file shares and buckets. Its **backup policy** picks what to protect, often by <Term id="tag">tag</Term>. Brightpost already tags everything with `env`, `team` and `owner`. It adds a fourth key, `backup`.
+
+The choice that matters is opt-in or opt-out. With opt-in, only stores tagged `backup=daily` are protected, and a missing tag means no backup. Brightpost chooses opt-out. The policy, set at the <Term id="organization">organisation</Term>, covers every database and disk in the shop account. Skipping one needs the tag `backup=none` and an owner who agreed. A check each morning lists any store with no backup in the last 26 hours.
+
+### Step 5: Lock the vault
+
+<AnimatedDiagram spec="animated/cloud/backup-chain" step={4} minWidth={620} caption="A vault lock refuses any delete before 35 days, from the shop account or from the audit account's own admins." />
+
+The next attacker might steal a login for the audit account itself. So the vault gets two more defences.
+
+First, its access <Term id="policy">policy</Term> denies deletes to everyone except one backup-admin role. Two people hold that role, neither works in the shop account day to day, and both sign in with <Term id="mfa">MFA</Term>.
+
+Second, a **vault lock** makes the backups immutable: nobody may delete one, or shorten its retention, before its time is up. Locks come in two strengths. One can be lifted by holders of a special permission. The other cannot be lifted by anyone, the account owner included, once a short grace period ends. [Object storage](/cloud/data/object-storage) uses the same two strengths for single files.
+
+Brightpost uses the strict lock for 35 days. Attackers often wait inside for weeks before they strike. A month and a bit means a clean copy still exists when the monthly drill notices.
+
+### Step 6: A copy in a second region
+
+<AnimatedDiagram spec="animated/cloud/backup-chain" step={5} minWidth={620} caption="Each backup in the vault is copied to a second region, still inside the audit account and locked for the same 35 days." />
+
+The far copy must survive a whole region failing. Each day the backup service copies every backup to a vault in Brightpost's second allowed region. That vault sits in the audit account too, with the same lock.
+
+Two details catch teams out. Backups are encrypted with a key from the key service, the <Term id="kms" />, and a copy in region 2 needs a key that works there. And a copy across regions is billed twice: once to move the data, once to store it.
+
+This copy is also the cheapest recovery plan: restore into region 2. [Disaster recovery](/cloud/resilience/dr-strategies) builds faster tiers on top of it.
+
+### Step 7: Retention and cost
+
+How long to keep each backup is a business question with a storage bill attached. Brightpost writes its answer into the policy.
+
+<Compare
+  columns={["Backup", "Kept for", "Copies at any time", "Where it lives"]}
+  rows={[
+    ["Daily", "35 days", "35", "Vault, standard storage, locked"],
+    ["Monthly (the 1st)", "12 months", "12", "Cold storage class after 35 days"],
+    ["Yearly (1 January)", "7 years", "7", "Cold storage class"],
+  ]}
+  caption="Brightpost's retention ladder: 54 restore points per store. The finance lead asked for the yearly copies."
+/>
+
+The bill grows with how much data **changes** and how long you keep it. It does not grow with the number of backups, because most services store only changed blocks after the first full copy. A copy to another account or region can start a new full copy, though, so check the bill line after the first week.
+
+A cold <Term id="storage-class">storage class</Term> is cheaper to keep but slower to restore, and many charge for a minimum stay. Old backups also hold customer data, so keep them no longer than the rules require.
+
+### Step 8: Restore drills, the only proof
+
+<AnimatedDiagram spec="animated/cloud/backup-chain" step={6} minWidth={620} caption="Each month a drill restores the far copy into the test account and checks the data. The orders database takes 41 minutes." />
+
+A backup nobody has restored is a hope. Brightpost runs a **restore drill** on the first Tuesday of each month. It restores the orders database and the review disk from the region-2 copy into the test account. A script then compares row counts with the live database, opens 20 random reviews, and records the time.
+
+A drill proves five things:
+
+1. The backup exists and is complete.
+2. The keys and permissions work in the place you restore to.
+3. The restore fits the <Term id="rto" />: 41 minutes for orders, against a target of 1 hour for a restore from the far copy.
+4. The data loss fits the <Term id="rpo" />: the newest backup is under 26 hours old.
+5. People know the steps, because someone different runs each drill.
+
+The drill also lists every data store in the shop account and compares it with what the policy protected. Then it deletes the restored copies, because they hold real customer data.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a central service, a policy, a vault, a lock, and a copy somewhere else.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Central service:** AWS Backup, for EBS volumes, EC2 instances, RDS and Aurora, DynamoDB, EFS, S3 and more.
+    - **Policy:** a backup plan holds rules: a schedule, a retention and copy actions. Resources are assigned by tag or by resource id. In AWS Organizations, a backup policy pushes plans to every account.
+    - **Vault:** a backup vault, encrypted with a KMS key, with its own access policy that can deny deletes.
+    - **Lock:** AWS Backup Vault Lock. Governance mode can be removed by users with a special permission. Compliance mode cannot be changed by anyone, the root user included, once its grace time ends.
+    - **Copies elsewhere:** copy actions send each backup to a vault in another region, in another account of the same organisation, or both.
+
+    **The difference that changes a design.** Copies across accounts run inside AWS Organizations. The audit account's vault must allow copies in from the shop account, and its own policy decides who may delete. Encryption follows the copy, so decide which key protects each backup before the first cross-account copy. AWS Backup can also run restore tests on a schedule and record how long each one took.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Central service:** Backup and DR Service. Its backup vaults protect Compute Engine instances and disks, Cloud SQL and other workloads. Cloud SQL and Persistent Disk also keep their own backups and snapshots.
+    - **Policy:** a backup plan: a schedule and a retention, linked to each resource it protects.
+    - **Vault:** a backup vault. The backup data is kept in storage that Google manages, not in your own disks or buckets.
+    - **Lock:** the vault's minimum enforced retention. No backup in it can be deleted earlier, not even by a project owner. After the lock's effective date, the minimum can be raised but not lowered.
+    - **Copies elsewhere:** a vault can be created in a multi-region location, which stores its data in at least two regions. Not every workload type supports one, so check yours.
+
+    **The difference that changes a design.** Much of the isolation comes built in. Backups do not sit in resources your admins can delete, and enforced retention binds every admin. Brightpost still keeps the vault and its plans in a separate backup project. A different group runs that project, so a stolen workload login cannot change the plans.
+  </Tab>
+  <Tab label="Azure">
+    - **Central service:** Azure Backup, with two kinds of vault.
+    - **Policy:** a backup policy inside each vault: a schedule and a retention. Azure Policy can turn on backup for every VM that carries a chosen tag.
+    - **Vault:** a Recovery Services vault for VMs, Azure Files and SQL Server in a VM. A Backup vault for newer types, such as Azure Disks, blobs and Azure Database for PostgreSQL.
+    - **Lock:** soft delete keeps deleted backup data recoverable for 14 days by default, and can be made impossible to turn off. An immutable vault refuses actions that would lose restore points, such as cutting retention. Once locked, that cannot be undone.
+    - **Copies elsewhere:** set a Recovery Services vault's storage to geo-redundant before the first backup. Cross Region Restore can then restore in the paired region.
+
+    **The difference that changes a design.** Multi-user authorization adds a second key holder. A Resource Guard, owned by another team and kept in another subscription or tenant, must approve risky changes such as turning off soft delete. One stolen admin login on the vault is then not enough. A vault's storage redundancy cannot change once items are protected, so choose it when you create the vault.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/backup-chain" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/backup-chain" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Is this copy a backup you can count on?"
+  tree={{
+    q: "Does a delete or a bad write in the live store reach this copy within minutes?",
+    yes: {
+      answer: "It is a replica or a sync, not a backup. It protects against broken hardware and lost zones, not mistakes. Add a real backup.",
+      href: "/cloud/data/managed-relational",
+    },
+    no: {
+      q: "Can one admin login in the data's own account delete it?",
+      yes: "It is a backup, but it dies with that account. Copy it to a vault in a separate account with different admins.",
+      no: {
+        q: "Can anyone delete it early or shorten its retention, the vault's own admins included?",
+        yes: "Turn on the vault lock. Run the liftable strength for a week, then switch to the strict one.",
+        no: {
+          q: "Has it been restored and checked in the last month?",
+          yes: "This is a backup you can count on. Keep the drill going.",
+          no: "Schedule a restore drill. Until one passes, this copy is a hope, not a backup.",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The attack started at 04:20. The orders backup was taken at 03:00 and reached the vault at about 03:40. Which orders had to be rebuilt by hand?" hint="Which moment does a backup capture?">
+    The orders placed between 03:00 and 04:20, which were 3 orders. A backup holds the data as it was when it was taken, at 03:00, not when the copy finished.
+  </QuizItem>
+  <QuizItem question="One snapshot a week was copied to a second region. Why did that not save the reviews?" hint="Who could delete it?">
+    The copy was in another region but in the same shop account. The attacker's admin session could delete anything in that account, in every region.
+  </QuizItem>
+  <QuizItem question="Next month an engineer creates a wholesale database and forgets every tag. Is it backed up?">
+    Yes. The policy is opt-out, so it covers every database in the shop account. Skipping it would need the tag `backup=none` and an owner who agreed. The monthly drill's inventory check would catch any gap.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Snapshots in the same account", "Vault in another account", "Locked vault, another account and region"]}
+  rows={[
+    ["Survives a deleted disk", true, true, true],
+    ["Survives an admin of the shop account", false, true, true],
+    ["Survives an admin of the backup account", false, false, true],
+    ["Survives a lost region", "Only a copy in another region", false, true],
+    ["Time to restore the review disk", "About 4 minutes", "About 12 minutes", "About 12 minutes, plus the move to region 2 if needed"],
+    ["Cost shape", "Changed blocks only", "Plus a copy into the vault", "Plus transfer between regions; the lock commits you to 35 days"],
+  ]}
+  caption="Brightpost's numbers. Restore times come from its monthly drills."
+/>
+
+Each column protects against more people and places. Keep the local snapshots for fast fixes, and the locked far copy for the night something goes badly wrong.
+
+## Common pitfalls
+
+- **Backing up a list.** A plan that names each resource misses the next one, as the review disk showed. Cover every store by default and make skipping one need a tag and an owner.
+- **Backups in the data's own account.** One stolen admin login deletes both. Copy to a vault in a separate account with its own admins.
+- **Locking before testing.** A strict lock on the wrong plan bills for its whole retention, and nobody can undo it. Run the liftable strength for a week, check the bill, then lock.
+- **Never restoring.** A missing key, a wrong permission or an empty backup shows up only during a restore. Restore every month, from the far copy, into a separate account.
+- **Keeping everything forever.** Old backups cost money and hold customer data you may have promised to delete. Set the shortest retention the rules allow.
+
+## How to say it in an interview
+
+"A backup is safe only from the things that cannot reach it. So I run one central backup policy that covers every data store by default, and skipping a store needs an explicit tag and an owner. Backups are copied to a vault in a separate account with different admins, so one stolen login cannot delete both. The vault is locked so nobody can delete a backup early, and each backup is copied to a second region. Retention follows a ladder, such as daily for 35 days, monthly for a year and yearly for seven. Every month I restore the far copy into a test account and check the data, because a backup nobody has restored is not proof of anything."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why isn't a replica a backup?" level="Junior" category="Cloud">
+    **Short answer.** A replica copies every change within seconds, so a delete or a bad write reaches it too. A backup is frozen at a moment in the past, so you can go back to before the mistake.
+
+    **Why.** A replica protects against a broken machine or a lost zone: if the primary dies, the copy takes over. It cannot undo a mistake, because it already holds the mistake. At Brightpost, a script that deleted the orders table would delete it on the standby within a second. The 03:00 backup in the vault would still hold every order up to 03:00.
+
+    <AnimatedDiagram spec="animated/cloud/backup-chain" step={1} highlight={["orders", "vault"]} caption="The orders backup is a frozen copy kept in another account, not a live mirror." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does a replica give you that a backup does not?
+    - How much data can you lose with only a nightly backup?
+
+    **Watch out for.** Saying "we have three copies in three zones, so we are backed up". Those three copies take every delete at the same moment.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does a vault in another account protect against an attacker with admin rights?" level="Mid" category="Cloud">
+    **Short answer.** An admin's power ends at the edge of their account. Backups copied into a vault in a separate account, with different admins and a lock, cannot be deleted from the account that was taken over.
+
+    **Why.** At Brightpost the attacker held an admin session in the shop account. It deleted all 34 snapshots there, including the copies in another region, because those still belonged to the shop account. Its delete on the vault in the audit account was refused, since the session had no rights there. A lock covers the next case: an attacker who also steals a login for the backup account still cannot delete a backup before 35 days.
+
+    <AnimatedDiagram spec="animated/cloud/backup-chain" step={2} path="attacker>vault" caption="The same admin session that deleted every nearby copy is refused at the vault." />
+
+    **Follow-ups the interviewer may ask.**
+    - Who should hold admin rights in the backup account?
+    - What if the attacker deletes the encryption key instead of the backups?
+
+    **Watch out for.** Answering "a copy in another region". A region protects against a failed region, not against a person with admin rights in your account.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you make sure a database created next month is backed up?" level="Mid" category="Cloud">
+    **Short answer.** Make the backup policy opt-out. It covers every data store in the account by default, and skipping one needs an explicit tag and an owner. Then check each day that every store has a recent backup.
+
+    **Why.** Brightpost lost its reviews because the backup rule named one database, and the review disk was created later. An opt-in rule fails in the same quiet way every time someone forgets a tag. With opt-out, forgetting means "backed up". A morning check lists any store with no backup in the last 26 hours. The monthly drill compares the full list of stores with what was protected.
+
+    <AnimatedDiagram spec="animated/cloud/backup-chain" step={3} highlight={["policy", "disk", "orders", "vault"]} caption="One policy at the organisation covers both stores, including the one created after it." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which stores would you allow to opt out, and why?
+    - How do you stop someone from tagging a production database `backup=none`?
+
+    **Watch out for.** Relying on a checklist in the deploy guide. People skip checklists, especially contractors who never saw it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What should a restore drill prove, and how often should you run one?" level="Mid" category="Cloud">
+    **Short answer.** It should prove that the backup exists, is complete, can be decrypted where you restore it, and comes back within the agreed recovery time. Run it at least monthly, from the far copy, into a separate account.
+
+    **Why.** Many failures show up only during a restore: a key that region 2 cannot use, a missing permission, an empty backup. Brightpost restores the orders database and the review disk on the first Tuesday of each month. A script compares row counts and opens 20 reviews. The orders restore takes 41 minutes against a 1-hour target. A different person runs each drill, so the steps do not live in one head.
+
+    <AnimatedDiagram spec="animated/cloud/backup-chain" step={6} path="vault>copy2>drill" caption="The drill restores the far copy, which is the one you would need on the worst day." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why restore from the copy in the second region, not the nearest one?
+    - What do you do with the restored data afterwards?
+
+    **Watch out for.** Counting a "backup succeeded" message as a test. It proves a job ran, not that the data comes back.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design a backup programme for a small shop that must survive one compromised account and one lost region." level="Senior" category="Cloud">
+    **Short answer.** One opt-out backup policy set at the organisation. Backups copied to a locked vault in a separate backup account, then to a second locked vault in another region. A retention ladder in the policy, and a monthly restore drill from the far copy.
+
+    **Why.** Each piece answers one threat. Local snapshots give fast restores after a small mistake. The separate account defeats a stolen admin login in the shop account. The lock, 35 days at Brightpost, defeats a stolen login in the backup account and an attacker who waits. The second region survives a lost region. Retention of 35 daily, 12 monthly and 7 yearly copies keeps the bill tied to how much data changes. The drill proves the rest works.
+
+    <AnimatedDiagram spec="animated/cloud/backup-chain" step={5} highlight={["policy", "vault", "lock", "copy2"]} caption="Policy, vault in another account, lock, and a copy in a second region." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you plan encryption keys across the two accounts and regions?
+    - How does this change when the recovery time must be minutes, not hours?
+
+    **Watch out for.** Designing only the copies and forgetting the people. Who can change the policy, lift the lock or delete the vault matters as much as where the copies are.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Block Storage](/cloud/data/block-storage)
+- [Object Storage](/cloud/data/object-storage)
+- [Managed Relational Databases](/cloud/data/managed-relational)
+- [Data on the Cloud](/cloud/data/data-on-the-cloud)
+- [Disaster Recovery: Four Tiers, RPO and RTO](/cloud/resilience/dr-strategies)
+- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
+- [Storage on AWS](/cloud/aws/storage)
+- [Storage on Google Cloud](/cloud/gcp/storage)
+- [Storage on Azure](/cloud/azure/storage)
+- [Synchronous vs asynchronous replication](/system-design/databases/sync-vs-async-replication)
+
+## Further reading
+
+- [AWS Backup Developer Guide](https://docs.aws.amazon.com/aws-backup/latest/devguide/whatisbackup.html): plans, vaults, Vault Lock and copies.
+- [Google Cloud backup vaults overview](https://cloud.google.com/backup-disaster-recovery/docs/concepts/backup-vault): vaults and enforced retention.
+- [Azure Backup overview](https://learn.microsoft.com/azure/backup/backup-overview): vault types and policies.
+- [Azure Backup immutable vault](https://learn.microsoft.com/azure/backup/backup-azure-immutable-vault-concept): locking restore points.
