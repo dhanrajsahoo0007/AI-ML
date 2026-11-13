@@ -38,7 +38,7 @@ const spec: DiagramSpec = {
   zones: [
     { id: "shopz", title: "Shop", tone: "teal", x: 140, y: 12, w: 200, h: 96 },
     { id: "streamz", title: "Stock stream", tone: "orange", x: 10, y: 124, w: 465, h: 128 },
-    { id: "groupz", title: "Stock group", tone: "teal", x: 10, y: 268, w: 465, h: 124 },
+    { id: "groupz", title: "Group", tone: "teal", x: 10, y: 268, w: 465, h: 124 },
     { id: "dataz", title: "Data", tone: "violet", x: 10, y: 408, w: 465, h: 134 },
     { id: "shopperz", title: "Shoppers", tone: "neutral", x: 10, y: 558, w: 465, h: 120 },
     { id: "monz", title: "Monitoring", tone: "orange", x: 490, y: 124, w: 295, h: 128 },
@@ -272,7 +272,7 @@ const spec: DiagramSpec = {
     { from: "w0", to: "counts", packet: true, delay: 2.4 },
     { from: "w1", to: "counts", label: "1 write per event", packet: true, delay: 2.4, until: 3 },
     { from: "w2", to: "counts", packet: true, delay: 2.4 },
-    { from: "counts", to: "page", label: "only N left", packet: true, delay: 3.6, labelAt: 0.72 },
+    { from: "counts", to: "page", packet: true, delay: 3.6 },
 
     // Step 2: every hero-poster event hashes to partition 2, and its one worker falls behind.
     {

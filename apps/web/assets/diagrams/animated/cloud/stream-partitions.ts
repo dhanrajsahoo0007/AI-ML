@@ -25,7 +25,7 @@ const spec: DiagramSpec = {
   zones: [
     { id: "anz", title: "Analytics group", tone: "teal", x: 110, y: 12, w: 260, h: 96 },
     { id: "streamz", title: "Stock stream", tone: "orange", x: 10, y: 130, w: 465, h: 124 },
-    { id: "groupz", title: "Stock group", tone: "teal", x: 10, y: 276, w: 645, h: 124 },
+    { id: "groupz", title: "Group", tone: "teal", x: 10, y: 276, w: 645, h: 124 },
   ],
   nodes: [
     {
