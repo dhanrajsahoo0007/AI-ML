@@ -1,11 +1,321 @@
 ---
 title: "Encryption at Rest, in Transit and Key Management"
-description: "The three states of data, the control that protects each, and how a key service encrypts huge data with small wrapped keys."
-status: outline
+description: "The three states of data and the control for each, how a key service wraps small data keys, who holds the key, and why deleting a key deletes data."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the three states of data and the control that protects each, then how a key management service encrypts a terabyte: a master key that never leaves the service wraps small data keys (envelope encryption). It also covers who owns the key, rotation, and deleting a key as the fastest way to delete data.
+<KeyIdea>
+  Encryption turns data into noise that only a key can undo, so protecting data really means deciding who holds each key and who may use it.
+</KeyIdea>
 
-**Related reading on this site:** [Encryption, hashing and secrets](/system-design/fundamentals/encryption-and-hashing) · [TLS and HTTPS](/system-design/fundamentals/tls) · [Identity & Security on AWS](/cloud/aws/security)
+## The story
+
+After the storage-key leak, Asha moved Brightpost's orders bucket to a key that Brightpost manages itself, in the cloud's key service. Every export file is now encrypted under that key. Months later, a contractor writes a clean-up script: schedule every key without an `owner` tag for deletion. The orders key was made before tags were the rule, so it goes on the list. The script picks the shortest waiting period, 7 days. While a key waits, the key service refuses to use it. For 7 nights the export fails, and 85 customers who click "download invoice" get an error. The errors land in a log nobody reads. On day 8 the key is destroyed. All 790 export files are still in the bucket, and none can ever be read again. No order is lost, because the database holds every row, but rebuilding the files takes Asha 2 days.
+
+The files were safe from strangers the whole time. They were not safe from Brightpost. Each step below shows how keys work, and where this one went wrong.
+
+## How it works
+
+Three words first. **Encryption** scrambles data so it looks like random bytes. A **key** is the secret number that scrambles it and unscrambles it again. **Decryption** is the unscrambling. The maths is old and strong; [Encryption and hashing](/system-design/fundamentals/encryption-and-hashing) covers it. This page is about the part a cloud adds: where the keys live, and who may use them.
+
+### Step 1: Three states, three controls
+
+<AnimatedDiagram spec="animated/cloud/encryption-states" stepper minWidth={620} caption="The same order on a disk, on the wire and in the processor, with the control for each place and who holds its key." />
+
+Data is always in one of three states. **At rest**, it sits on a disk or in a bucket. **In transit**, it travels over a network, such as from a phone to the shop. **In use**, it sits in memory while a program works on it.
+
+Each state has its own control. **Encryption at rest** stops someone who copies a disk or a file. <Term id="tls">TLS</Term> stops someone who listens on the wire. **Confidential computing** stops the machine's host from reading memory. Each control has a key, and the bottom row of the picture asks the question that matters most: who holds that key?
+
+<PremiumBreak />
+
+### Step 2: At rest is on by default
+
+On all three clouds, object storage encrypts every new file at rest without being asked, and most other stores do too. The provider makes the key, keeps it and changes it. You do nothing, and the default costs nothing extra.
+
+Check each store anyway. On some clouds, encryption for a disk or a database is a setting, and some databases can only get it when they are created.
+
+Know what it buys. It protects against a stolen drive, a disk the provider throws away, or a backup copied out of the data centre. It does not protect against a valid caller. When the stranger used Asha's leaked key, storage decrypted all 730 files for the stranger, because the request was allowed. Encryption at rest never replaces <Term id="iam">access control</Term>.
+
+### Step 3: In transit: TLS at the load balancer, then again
+
+<AnimatedDiagram spec="animated/cloud/tls-at-lb" stepper caption="The balancer gets a managed certificate, ends the shopper's TLS, encrypts again to the server, and the certificate renews itself." />
+
+A shopper's phone talks to the shop's <Term id="load-balancer">load balancer</Term> over TLS. A **certificate** is a signed file that proves the shop's name. The cloud's certificate service issues it to the balancer after checking that Brightpost owns the domain. Brightpost's certificate lasts 90 days and renews on day 60, with no restart. Real lifetimes differ by provider.
+
+The balancer **ends TLS**: it decrypts each request so it can read the path. Inside the private network, many teams then send plain HTTP to the servers. Brightpost does not. The balancer opens a second TLS connection to each app server, so no order travels anywhere in plain text. [Load balancing](/cloud/networking/load-balancing) covers the balancer itself. [TLS](/system-design/fundamentals/tls) covers the handshake.
+
+### Step 4: In use: confidential computing
+
+The processor must see plain data to work on it. On a normal server, the host's software could in principle read that memory. **Confidential computing** closes the gap. The processor encrypts the machine's memory with a key that lives inside the chip and never leaves it. The host, its operators and the other customers on that server see only noise. All three clouds offer confidential virtual machines. They cost a little more and run a little slower, so they are for the most sensitive work, such as health or payment data. Brightpost does not need them yet.
+
+### Step 5: A small key for each file
+
+<AnimatedDiagram spec="animated/cloud/envelope-encryption" step={1} minWidth={620} caption="The app asks the key service for a data key and gets two copies back: one plain, one wrapped." />
+
+A <Term id="kms">key service</Term> holds a **root key**, also called a key-encryption key. It never leaves the service. Nobody can download it, not even Brightpost. So how do you encrypt a 2 GB file with a key you cannot touch? Sending the file to the service would be slow, and services cap the size of what they encrypt.
+
+The answer is <Term id="envelope-encryption">envelope encryption</Term>. The app asks for a **data key**, a fresh key for one file. The service sends two copies back. One is plain. The other is **wrapped**: encrypted with the root key, like a letter sealed in an envelope that only the service can open.
+
+### Step 6: Encrypt, then keep only the envelope
+
+<AnimatedDiagram spec="animated/cloud/envelope-encryption" step={2} minWidth={620} caption="The file is encrypted with the plain data key; only the wrapped copy is stored, next to the file." />
+
+The app encrypts the night's export with the plain data key, on its own processor, at full speed. Then it throws the plain key away. It stores the wrapped key beside the file, often in the file's own header.
+
+Now the bucket holds two things: scrambled data, and a key that is itself scrambled. A thief who copies both has nothing usable. Storage services do all of this for you when you pick a key. You only write it yourself when your app encrypts before it uploads.
+
+### Step 7: Reading it back
+
+<AnimatedDiagram spec="animated/cloud/envelope-encryption" step={3} minWidth={620} caption="To read, the app sends only the small wrapped key to the key service and gets the plain data key back." />
+
+To read the file, the app fetches it with its wrapped key. It sends only the wrapped key, a few hundred bytes, to the key service. The service checks that this caller may use the root key, unwraps the data key and sends it back. The app decrypts the file locally.
+
+The design has two gifts. Only tiny keys ever cross the network to the service, so a terabyte costs the same number of calls as a kilobyte per file. And every read must ask the key service first, so one policy, and one switch, controls every file.
+
+### Step 8: Who holds the root key
+
+There are three models. The further right, the more control and the more work.
+
+<Compare
+  columns={["", "Provider-managed key", "Customer-managed key", "Key you supply or hold outside"]}
+  rows={[
+    ["Who creates it", "The provider", "You, in the key service", "You, outside the cloud"],
+    ["Who can use it", "Any allowed caller of that service", "Only identities your key policy names", "Only while you allow it"],
+    ["Can you switch it off?", false, "Yes: disable or delete", "Yes: unplug or refuse"],
+    ["Each use in your audit trail", "Not separately", true, "In your own system too"],
+    ["Rotation", "Automatic", "Automatic, on your schedule", "Yours to run"],
+    ["If the key is lost", "Cannot happen to you", "Every file under it is gone", "Every file under it is gone"],
+  ]}
+  caption="Brightpost moved from the first column to the second after the leak."
+/>
+
+A **customer-managed key** lives in the provider's key service, but you decide its policy, its rotation and its life. A key you **supply** travels with each request, and the provider uses it then forgets it. A key you **hold outside** sits in your own key manager, which the cloud must ask every time. Either way, the provider can no longer read the data without your help. You now carry the risk of losing it.
+
+### Step 9: Deleting a key deletes the data
+
+<AnimatedDiagram spec="animated/cloud/envelope-encryption" step={4} minWidth={620} caption="The failure: the clean-up script schedules the key for deletion, and after 7 days every unwrap is refused." />
+
+The key service will not destroy a key at once. It waits, and while it waits it refuses to use the key. That pause exists for one reason: so somebody notices.
+
+<Callout tone="red" title="What breaks">
+  The script runs on a Friday and puts the orders key on a 7-day wait. That night the export job asks for a data key and is refused. So is every invoice download, 85 of them that week. Nobody watches those errors, so nobody cancels the deletion. On day 8 the root key is destroyed, and the wrapped key beside each of the 790 files can never be opened again.
+</Callout>
+
+The same fact is also a feature. Deleting one key is the fastest way to destroy a huge amount of data for good. This is called **crypto-shredding**. If a customer asks to be forgotten, or a project ends, you can destroy its key instead of hunting for every copy, backup included. Use it on purpose, and never by accident.
+
+### Step 10: Key managers are not key users
+
+<AnimatedDiagram spec="animated/cloud/envelope-encryption" step={5} minWidth={620} caption="A key policy names who may use the key and who may manage it. The script's role may do neither, so its delete is denied." />
+
+A **key policy** says who may do what with one key. It separates two jobs.
+
+- **Key users** may encrypt and decrypt. The shop app is one.
+- **Key managers** may change the policy, disable the key or schedule its deletion. At Brightpost that is a security role, held by 2 people.
+
+Nobody holds both. This is **separation of duties**: no single person or program can both read the data and destroy the key. The contractor's script had a wide admin role on the whole account. Now it gets no rights on keys at all, so its delete is refused. Brightpost also sets every key's waiting period to 30 days.
+
+### Step 11: Rotation, and a record of every use
+
+<AnimatedDiagram spec="animated/cloud/envelope-encryption" step={6} minWidth={620} caption="Every use of the key goes to the audit trail, and an alarm fires when anyone disables a key or schedules its deletion." />
+
+**Rotation** makes a new version of the root key on a schedule; Brightpost's is yearly. New data keys are wrapped with the new version. Old versions stay, so old files still open. Rotation does not re-encrypt any file, and it costs nothing in downtime. It limits how much data one version protects.
+
+Every call to the key service lands in the audit trail: who asked, for which key, and whether it was allowed. Brightpost adds one alarm that pages Asha when anyone disables a key or schedules one for deletion. With that alarm, the Friday script would have paged someone within minutes, with 30 days left to cancel.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a root key that never leaves the key service, small data keys, a policy on each key, and a waiting period before a key is destroyed.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Key service:** AWS Key Management Service (KMS). AWS CloudHSM gives you a single-tenant hardware security module, a tamper-resistant box that holds keys, when you must run one yourself.
+    - **Key options:** AWS managed keys (default for many services), customer managed keys in KMS, imported key material, and an external key store that keeps the root key outside AWS. S3 also accepts a key you send with each request.
+    - **Who may use a key:** every KMS key has a key policy. IAM policies work on a key only if its key policy lets them.
+    - **Rotation and deletion:** optional automatic rotation for customer managed keys, yearly or on a period you set. Deletion is scheduled with a waiting period; until it ends, you can cancel it.
+    - **Certificates and TLS:** AWS Certificate Manager (ACM) issues certificates to load balancers and CloudFront and renews them. Load balancers can encrypt again to their targets.
+
+    **The difference that changes a design.** The key policy is the gate, not IAM alone. A key whose policy does not trust the account cannot be used, even by an administrator. AWS managed keys cannot be shared with another account. So a backup copied into the audit account needs a customer managed key whose policy names that account.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Key service:** Cloud KMS. Its protection level picks software keys, Cloud HSM (hardware-backed) or Cloud External Key Manager (EKM).
+    - **Key options:** Google default encryption, customer-managed encryption keys (CMEK) in Cloud KMS, customer-supplied keys (CSEK) for Cloud Storage and Compute Engine, and EKM for keys held with an outside partner.
+    - **Who may use a key:** IAM roles granted on the key or its key ring. The encrypter and decrypter role is for users; the admin role is for managers.
+    - **Rotation and deletion:** a rotation period makes a new primary key version; old versions still decrypt. A destroyed version waits in a "scheduled for destruction" state first.
+    - **Certificates and TLS:** Certificate Manager, with Google-managed certificates on the load balancers. Backends can be reached over HTTPS.
+
+    **The difference that changes a design.** With CMEK, the service using the key acts through its own service agent, a Google-managed identity in your project. That agent needs the encrypter and decrypter role on your key, and the key's location must suit the resource's location. Many teams keep keys in a separate project run by a different group, so the shop's admins cannot manage them.
+  </Tab>
+  <Tab label="Azure">
+    - **Key service:** Azure Key Vault, which also stores secrets and certificates. Managed HSM is a single-tenant pool of hardware security modules.
+    - **Key options:** Microsoft-managed keys by default, customer-managed keys in Key Vault or Managed HSM, and customer-provided keys sent with each Blob Storage request.
+    - **Who may use a key:** Azure RBAC on the vault or the key. A crypto officer role manages keys; crypto user roles only use them.
+    - **Rotation and deletion:** a rotation policy makes new key versions, and storage can follow the newest one. Soft delete keeps a deleted key recoverable for a retention period. Purge protection stops anyone from erasing it early.
+    - **Certificates and TLS:** App Service and Front Door issue and renew managed certificates. Application Gateway reads certificates from Key Vault and can encrypt again to the backend.
+
+    **The difference that changes a design.** A storage account using a customer-managed key requires the vault to have soft delete and purge protection on. So Brightpost's incident could not end with an early purge, even by an administrator. The storage account reaches the key through a managed identity, which needs a crypto user role on the vault.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/envelope-encryption" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/envelope-encryption" lead="aws" />
+
+## Try it
+
+Pick a column in the grid and read down it. Each row is one job, and the colour shows who does it.
+
+<ResponsibilityGrid set="encryption-controls" />
+
+<Quiz>
+  <QuizItem question="A stranger copies one of Brightpost's 790 export files and its wrapped key. What can the copy reveal?" hint="What is the wrapped key wrapped with?">
+    Nothing. The file is encrypted with the data key, and the data key is wrapped with the root key, which never leaves the key service. Only a caller the key policy allows can unwrap it.
+  </QuizItem>
+  <QuizItem question="Brightpost rotates the orders key. What happens to the 790 files already in the bucket?" hint="Rotation makes a new version of the key.">
+    Nothing visible. They stay as they are, and the old key version still unwraps their data keys. Only new files get data keys wrapped by the new version.
+  </QuizItem>
+  <QuizItem question="On day 5 of the 7-day wait, Asha sees the failed exports. What can she still do?">
+    Cancel the deletion. Until the waiting period ends, the key can be restored, and every file opens again. After day 7 nothing can bring it back.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Provider-managed key", "Customer-managed key", "Key held outside the cloud"]}
+  rows={[
+    ["Setup effort", "None", "About 1 hour per store", "Days: run your own key manager"],
+    ["Who can read the data", "Any caller the store allows", "Only callers both the store and the key policy allow", "Only while your key manager says yes"],
+    ["Proof for an auditor", "The provider's word", "An audit line for every use", "Your own logs, outside the cloud"],
+    ["Ways to lose all 790 files", "None from keys", "Delete or disable the key", "Lose your key manager or its link"],
+    ["Extra cost", "None", "A fee per key and per use", "Your hardware and staff"],
+    ["Use it for", "Most data", "Customer data, backups, anything an auditor asks about", "Rules that say the provider must never hold the key"],
+  ]}
+  caption="Brightpost's numbers. Setup times are what a small team should expect the first time."
+/>
+
+Each step to the right buys control and an audit trail. It also adds one more way to make your own data unreadable.
+
+## Common pitfalls
+
+- **Deleting keys to tidy up.** A key with no recent use may still guard old files. Disable a key first, watch for errors for a month, and only then schedule deletion with the longest wait.
+- **One role that can use and destroy keys.** An admin role over the whole account can do both. Split key managers from key users, and give scripts neither unless they need it.
+- **Plain HTTP behind the balancer.** "It's a private network" fails audits and leaks to anyone who gets inside. Encrypt again from the balancer to each server.
+- **Thinking encryption at rest stops a leak.** A valid caller gets plain data. The 730 files leaked through a key that storage obeyed. Access control does that job.
+- **Certificates on a calendar reminder.** A certificate copied onto servers by hand expires on a weekend. Use the cloud's managed certificates, which renew themselves.
+
+## How to say it in an interview
+
+"I think of data in three states: at rest, in transit and in use, each with its own control and its own key. At rest is on by default with provider keys; for customer data I use a customer-managed key in the key service, so a key policy decides who can decrypt and every use is logged. Large data uses envelope encryption: a data key per object, wrapped by a root key that never leaves the service. I split key managers from key users, set the longest waiting period on deletion and alarm on any disable or delete, because losing the key loses the data. In transit I end TLS at the load balancer with a managed certificate and encrypt again to the backend."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does encryption at rest protect against, and what does it not?" level="Junior" category="Cloud">
+    **Short answer.** It protects data whose storage leaves your control: a stolen drive, a disk the provider retires, or a raw copy of a backup. It does not protect against a caller the system allows, because storage decrypts for anyone with permission.
+
+    **Why.** The key sits in a separate key service, so the bytes on the disk alone are noise. But when a request arrives with valid credentials, the store unwraps the data key and returns plain data. Brightpost's leaked storage key copied all 730 files even though they were encrypted at rest.
+
+    <AnimatedDiagram spec="animated/cloud/encryption-states" step={2} caption="Each control stops one kind of outsider; none of them stops a caller that is allowed in." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does a customer-managed key add on top of the default?
+    - How would you protect the same data while it travels?
+
+    **Watch out for.** Saying "the data is encrypted, so a leak is harmless". Encryption at rest and access control solve different problems.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Explain envelope encryption to someone who has only heard of a password." level="Mid" category="Cloud">
+    **Short answer.** Each file is locked with its own small key. That small key is then locked with a master key that lives in a vault and never comes out. You keep the locked file and its locked key together, and ask the vault to unlock the small key when you need it.
+
+    **Why.** The master key cannot travel, so the big file never has to travel to it. Only a few hundred bytes go to the key service, and the file is encrypted locally at full speed. Every read must ask the service, so one policy controls every file, and one log records each use. Rotating the master key never touches the files.
+
+    <AnimatedDiagram spec="animated/cloud/envelope-encryption" step={2} highlight={["app", "kms", "bucket"]} caption="The plain data key is used and thrown away; only its wrapped copy is stored beside the file." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why not send the whole file to the key service to encrypt?
+    - Where is the wrapped key stored?
+
+    **Watch out for.** Saying the master key encrypts the data. It only ever encrypts data keys.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where should TLS end in a cloud web app, and when do you encrypt again behind the load balancer?" level="Mid" category="Cloud">
+    **Short answer.** End the shopper's TLS at the load balancer, with a certificate the cloud manages and renews. Encrypt again to the servers whenever the data is sensitive or an audit requires encryption everywhere, which is most of the time.
+
+    **Why.** The balancer must decrypt to route by path and to run a firewall on requests, and a managed certificate removes the renewal date nobody remembers. But plain HTTP inside the network is readable by anything that gets in. Brightpost's balancer opens a second TLS connection to each app server, so an order never travels in plain text. The extra cost is a little processor time per connection.
+
+    <AnimatedDiagram spec="animated/cloud/tls-at-lb" step={3} caption="The balancer decrypts to read the path, then opens a new TLS connection to the server." />
+
+    **Follow-ups the interviewer may ask.**
+    - When would you pass TLS straight through to the server instead?
+    - What is mutual TLS, and when is it worth it?
+
+    **Watch out for.** "It is a private network, so plain HTTP is fine." That is the assumption zero trust exists to remove.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What happens to your data when you rotate a key, and when you delete one?" level="Mid" category="Cloud">
+    **Short answer.** Rotation makes a new key version for new data keys and keeps the old versions, so every file still opens. Deletion, once the waiting period ends, makes every file whose data key was wrapped by that key unreadable for good.
+
+    **Why.** With envelope encryption, a file's data key is wrapped by one version of the root key. Rotation adds a version; it never removes one or re-encrypts files. Deletion removes all versions, so no wrapped key can be opened. Brightpost lost 790 export files that way. The waiting period is the last chance to cancel. The same mechanism is useful on purpose, as crypto-shredding.
+
+    <AnimatedDiagram spec="animated/cloud/envelope-encryption" step={4} highlight={["script", "kms", "app"]} caption="Once the key is gone, every unwrap is refused, and the files are noise." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you safely retire a key you think is unused?
+    - Does rotation help if a data key leaks?
+
+    **Watch out for.** Believing rotation re-encrypts old data. It does not, and it does not need to.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="An auditor wants proof that the provider cannot read your data. Which key model do you pick, and what do you lose?" level="Senior" category="Cloud">
+    **Short answer.** A key held outside the cloud, in your own key manager, or one you supply with each request. The provider then cannot decrypt without asking you. You lose some managed features, add latency and a new dependency, and take on the risk of losing the key.
+
+    **Why.** A customer-managed key still runs inside the provider's key service, so the provider's word is part of the proof. With an outside key manager, every unwrap calls out to your system, and you can refuse. That is strong evidence. But if your manager or its network link fails, every read in the cloud fails with it. Some services do not support outside keys at all.
+
+    <AnimatedDiagram spec="animated/cloud/encryption-states" step={3} caption="Who holds each key decides who can read the data in each state." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to the shop if your key manager is down for an hour?
+    - Is confidential computing needed too, and why?
+
+    **Watch out for.** Promising "the provider can never read it" with a customer-managed key alone. That key is still inside the provider's service.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design key management for Brightpost so that no single person or script can make the orders unreadable." level="Senior" category="Cloud">
+    **Short answer.** A customer-managed key with a key policy that separates managers from users, a long waiting period on deletion, an alarm on every disable or delete, and backups encrypted with a different key in another account.
+
+    **Why.** The shop app may only encrypt and decrypt. Two security staff may manage keys, and no script gets key rights. Deletion waits 30 days and pages someone the moment it is scheduled. Keys get tags and an owner, and a retirement rule: disable first, delete a month later. The backups in the audit account use their own key there, so one bad delete cannot reach both copies.
+
+    <AnimatedDiagram spec="animated/cloud/envelope-encryption" step={6} path="kms>trail>alarm" caption="Every key operation is logged, and a scheduled deletion pages someone at once." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you stop a key manager from also deleting the backup key?
+    - How would a planned crypto-shred of one customer's data work?
+
+    **Watch out for.** Relying on a vault lock alone. A lock keeps backups from deletion, but deleting their key makes them unreadable just the same.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Identity and Access](/cloud/fundamentals/identity-and-access)
+- [Secrets, Identity-Based Access and Rotation](/cloud/resilience/secrets-management)
+- [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults)
+- [Compliance and Data Residency](/cloud/resilience/compliance-and-residency)
+- [Load Balancing](/cloud/networking/load-balancing)
+- [Object Storage](/cloud/data/object-storage)
+- [Containers and Registries](/cloud/compute/containers-and-registries)
+- [Identity & Security on AWS](/cloud/aws/security)
+- [Identity & Security on Google Cloud](/cloud/gcp/security)
+- [Identity & Security on Azure](/cloud/azure/security)
+- [Encryption and hashing](/system-design/fundamentals/encryption-and-hashing)
+- [TLS and HTTPS](/system-design/fundamentals/tls)
+- [Security overview](/system-design/fundamentals/security)
+
+## Further reading
+
+- [AWS Key Management Service Developer Guide](https://docs.aws.amazon.com/kms/latest/developerguide/overview.html): keys, key policies and rotation.
+- [Google Cloud KMS documentation](https://cloud.google.com/kms/docs): key rings, CMEK and key versions.
+- [Azure Key Vault overview](https://learn.microsoft.com/azure/key-vault/general/overview): keys, secrets and certificates in one vault.
+- [AWS Certificate Manager User Guide](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html): managed certificates and renewal.
