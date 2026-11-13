@@ -48,6 +48,9 @@ describe("whichPrincipleSchema", () => {
     expect(drill.title).toBe("Match the principle");
     expect(drill.items.map((i) => i.answer)).toEqual([0, 1]);
     expect(drill.prompt).toBeUndefined();
+    expect(drill.instruction).toMatch(/Which one is the interviewer testing/);
+    const sorted = principleDrill(whichPrincipleSchema.parse({ ...principle, instruction: "Sort each answer." }));
+    expect(sorted.instruction).toBe("Sort each answer.");
   });
 
   it("needs at least two prompts and a known principle on each", () => {

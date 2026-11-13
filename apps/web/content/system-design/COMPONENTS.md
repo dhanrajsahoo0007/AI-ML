@@ -287,6 +287,8 @@ Interview questions to be matched to the principle, value or focus area each one
 - `prompts` (required, 2 to 8): `{ text, principle, why }[]`. `principle` must be one of `principles`; `why` says how
   to tell.
 - `title` (optional string, default `"Which principle is this?"`).
+- `instruction` (optional string): the line under the title. Set it when the items are not interview questions, for
+  example answers to sort into kinds. Default: "Read each question. Which one is the interviewer testing?"
 
 ```mdx
 <WhichPrinciple

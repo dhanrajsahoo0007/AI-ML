@@ -45,6 +45,8 @@ export const guessTheLevelSchema = z
 export const whichPrincipleSchema = z
   .object({
     title: text.optional(),
+    /** What to do, when the items are not interview questions (for example answers to sort into kinds). */
+    instruction: text.optional(),
     /** The principles, values or focus areas to choose from. */
     principles: z.array(text).min(2).max(8).refine(unique, { message: "principles must be different" }),
     prompts: z
@@ -73,7 +75,7 @@ export function levelDrill(p: z.output<typeof guessTheLevelSchema>): ChoiceDrill
 export function principleDrill(p: z.output<typeof whichPrincipleSchema>): ChoiceDrill {
   return {
     title: p.title ?? "Which principle is this?",
-    instruction: "Read each question. Which one is the interviewer testing?",
+    instruction: p.instruction ?? "Read each question. Which one is the interviewer testing?",
     options: p.principles,
     items: p.prompts.map((q) => ({ text: q.text, answer: p.principles.indexOf(q.principle), why: q.why })),
   };
