@@ -7,7 +7,7 @@ updated: 2026-11-13
 ## In one sentence
 
 <KeyIdea>
-  Write down every action in your cloud, let a program read those records day and night for anything strange, and make sure what it finds reaches a person or a fix within minutes.
+  Record every action in your cloud, let a program watch those records for anything strange, and make sure what it finds reaches a person or a fix within minutes.
 </KeyIdea>
 
 ## The story
@@ -46,26 +46,26 @@ Clouds split audit events into two kinds, and they behave differently.
   caption="Brightpost records every management event, and data events only where customer data lives."
 />
 
-The stranger's 40 machine requests were management events, so they were in the audit trail without any extra setting. Data events cost more to store, because there are far more of them. Brightpost records them only on buckets that hold customer data. After a breach, those are the lines that say what was taken.
+The stranger's 40 machine requests were management events, recorded with no extra setting. Data events are far more numerous and cost more to keep, so Brightpost records them only where customer data lives. After a breach, they say what was taken.
 
 ### Step 3: Network and DNS logs
 
 <AnimatedDiagram spec="animated/cloud/detection-pipeline" step={2} minWidth={620} caption="The network keeps two more records about the test machines: who they talked to, and which names they looked up." />
 
-The audit log sees calls to the cloud. It cannot see what a machine does once it runs. Two network logs fill that gap.
+The audit log sees calls to the cloud, not what a machine does once it runs. Two network logs fill that gap.
 
-- **Flow logs** record each connection a machine makes: source address, destination address, port, bytes and whether it was let through. They do not record the contents.
+- **Flow logs** record each connection a machine makes: source, destination, port, bytes, and whether it was allowed. Not the contents.
 - **DNS logs** record each name a machine looks up. DNS is the internet's phone book, which turns a name into an address.
 
-A mining program has to reach its pool, and malware has to reach its owner. Both look up a name first, and both show up as traffic to addresses the shop has never used. On Saturday, the 4 machines looked up a mining pool's name within 3 minutes of starting.
+A mining program must reach its pool, and malware must reach its owner. Both look up a name first, then send traffic to addresses the shop never uses. On Saturday, the 4 machines looked up a mining pool within 3 minutes of starting.
 
 ### Step 4: A detector raises findings
 
 <AnimatedDiagram spec="animated/cloud/detection-pipeline" step={3} minWidth={620} caption="The threat detector reads the audit trail, flow logs and DNS logs and sends each finding to one hub." />
 
-A **threat detector** is a managed service that reads those three streams all the time. You do not write its rules. It compares what it reads with two things: lists of known bad addresses and names, and what is normal for your account. It learns, for example, which networks each key usually calls from, and at what hours.
+A **threat detector** is a managed service that reads those three streams all the time. You do not write its rules. It compares them with lists of known bad addresses and names. It also learns what is normal, such as which networks each key calls from.
 
-Each finding names the resource, what happened, when, and a severity. Saturday's finding combined three signals: a key calling from a network it had never used, 4 new GPU machines, and lookups of a mining pool. Any one alone might be innocent. Together they made it high.
+Each finding names the resource, what happened, when, and a severity. Saturday's finding joined three signals: a key on a new network, 4 new GPU machines, and lookups of a mining pool. Any one alone might be innocent. Together they made it high.
 
 All findings go to a **findings hub**, one list for every account and every region. In the naive setup, the hub's only output is a weekly email.
 
@@ -77,7 +77,7 @@ Detection asks "is something bad happening?" Two other checks ask "could somethi
 
 A **posture check** reads your settings and compares them with a **benchmark**, a published list of safe settings such as the CIS Benchmarks. "This bucket is public" and "this database port is open to the internet" are posture findings. Brightpost's check runs every hour, as its landing zone set up.
 
-A **vulnerability scan** looks inside machines and container images. An **image** is a packaged copy of an app and everything it needs; images wait in an <Term id="image-registry">image registry</Term>. The scan lists installed software and matches each version against public lists of known flaws. Last month it flagged a flaw in the image library the resize worker uses, two days after the flaw was published.
+A **vulnerability scan** looks inside machines and container images. An **image** is a packaged copy of an app and everything it needs, kept in an <Term id="image-registry">image registry</Term>. The scan matches each installed version against public lists of known flaws. Last month it flagged the resize worker's image library, two days after the flaw was published.
 
 Posture and scans catch the open door. Detection catches someone walking through it.
 
@@ -85,80 +85,78 @@ Posture and scans catch the open door. Detection catches someone walking through
 
 <AnimatedDiagram spec="animated/cloud/detection-pipeline" step={5} minWidth={620} caption="The failure: the leaked key starts 4 GPU machines at 01:50, and the high finding raised at 02:10 waits in the weekly email." />
 
-Every part of the chain worked, except the last one.
-
 <Callout tone="red" title="What breaks">
-  At 01:50 the stranger's script asks for 40 machines and the quota lets 4 start. The audit trail records all 212 of the key's calls, including one attempt to create a second key, which its policy refused. At 02:10 the detector raises a high finding, and the hub adds it to the weekly email. Nobody is told. The machines mine for 55 hours, until Asha reads the email on Monday at 09:10.
+  At 01:50 the stranger's script asks for 40 machines and the quota lets 4 start. The audit trail records all 212 of the key's calls, including a refused attempt to create a second key. At 02:10 the detector raises a high finding, and the hub adds it to the weekly email. Nobody is told. The machines mine for 55 hours.
 </Callout>
 
-A finding that reaches nobody protects nothing. The time that matters is not "how fast did we detect it?" but "how fast did someone or something act?" Here those were 20 minutes and 55 hours.
+A finding that reaches nobody protects nothing. What matters is how fast someone or something acts: here, 55 hours after a 20-minute detection.
 
 ### Step 7: Route by severity
 
 <AnimatedDiagram spec="animated/cloud/detection-pipeline" step={6} minWidth={620} caption="An alert rule sends high findings to the on-call engineer's phone. Low findings stay in the weekly email." />
 
-An **alert rule** watches the hub and acts on each finding by its severity. Brightpost's 3 engineers now take turns being **on call**, one week each: that person's phone rings for anything urgent, day or night.
+An **alert rule** watches the hub and acts on each finding by severity. Brightpost's 3 engineers now take turns **on call**, a week each: that person's phone rings for anything urgent.
 
 1. **High:** page the on-call engineer. The phone rings within 2 minutes.
 2. **Medium:** open a ticket that the team reviews the next working day.
 3. **Low:** add it to the weekly email.
 
-Paging for everything is the opposite mistake. A phone that rings 30 times a night gets muted, and then high findings are missed again. Brightpost's hub raises about 2 high findings a month, so a page means something. More on rotas and paging in [SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call).
+Paging for everything is the opposite mistake: a phone that rings 30 times a night gets muted. Brightpost's hub raises about 2 high findings a month, so a page means something. Rotas and paging are covered in [SLOs, Alerting and On-Call](/cloud/operations/slos-alerting-and-on-call).
 
 ### Step 8: An automatic first response
 
 <AnimatedDiagram spec="animated/cloud/detection-pipeline" step={7} minWidth={620} caption="The alert rule also starts a response function. It disables the key and isolates the machines, and the stranger's next call is refused." />
 
-A person needs minutes to wake up and understand a page. A **response function** acts in seconds. It is a small program that the same alert rule starts. For a leaked key, Brightpost's runbook, its written list of steps, does four things.
+A person needs minutes to wake up and read a page. A **response function**, a small program the same alert rule starts, acts in seconds. For a leaked key, Brightpost's runbook, its written list of steps, does four things.
 
 1. **Disable the key**, not delete it. Disabling can be undone, and the key's history stays in the audit trail.
 2. **Isolate each machine:** swap its firewall rules for "deny everything", so it can no longer reach the pool or anything else.
 3. **Take a <Term id="snapshot">snapshot</Term>** of each disk, so the evidence survives.
 4. **Post a summary** to the on-call engineer: which key, which machines, what was done.
 
-Had this run on that Saturday, the key would have been disabled at about 02:11, and the stranger's next call refused. Automate only steps that are safe and reversible. Deleting the machines also deletes the evidence.
+On that Saturday, the key would have been disabled at about 02:11. Automate only steps that are safe and can be undone; deleting the machines would also delete the evidence.
 
 ### Step 9: Test your own defences
 
-A detector you have never seen fire is a guess. There are three ways to test the chain, and each needs permission first.
+A detector you have never seen fire is a guess. Three kinds of test check the chain, and each needs permission first.
 
-- **Attack simulation:** run harmless copies of real attacks, such as a call from an unusual network or a lookup of a test name that detectors know. Then check that a finding, a page and the response all happen.
+- **Attack simulation:** run harmless copies of real attacks, such as a call from an unusual network. Check that a finding, a page and the response all happen.
 - **Penetration test:** hire testers to break in on purpose, within a written scope that lists what they may touch and when.
-- **Game day:** a planned drill where the team plays out an incident, so the runbook gets tested along with the tools.
+- **Game day:** a planned drill where the team plays out an incident, testing the runbook as well as the tools.
 
-The rules come in two layers. Inside the company: written approval from the account's owner, the scope, the time window, and a warning to on-call. Outside it: the provider's own testing policy. You may test only your own resources, never other customers or the provider's shared systems. Each cloud publishes what you may test without asking, as the tabs below show. Brightpost now runs a game day every quarter in the test account.
+The rules come in two layers. Inside the company: written approval from the account's owner, a scope, a time window, and a warning to on-call. Outside it: the provider's testing policy. You may test only your own resources, never other customers or the provider's shared systems. Brightpost now runs a game day every quarter in the test account.
 
 ## On AWS, Google Cloud and Azure
 
-The chain is the same on all three clouds: an audit log, detectors that read it with network logs, posture and vulnerability checks, one place for findings, and rules that act on them.
+The chain is the same on all three clouds: audit and network logs, detectors, posture and vulnerability checks, one place for findings, and rules that act on them.
 
 <Tabs title="On each cloud">
   <Tab label="AWS">
-    - **Audit log:** AWS CloudTrail. Management events are recorded by default and kept for a short time. A trail sends them to an S3 bucket, and an organization trail covers every account. Data events are switched on per trail. S3 Object Lock locks the archive, and log file integrity validation can prove nobody edited it.
-    - **Detector:** Amazon GuardDuty reads CloudTrail events, VPC Flow Logs and DNS query logs from its own feed, so it works even if you never switched those logs on. Amazon Detective builds a graph from the same data to help investigate a finding.
-    - **Posture and scans:** AWS Security Hub checks settings against standards such as the CIS AWS Foundations Benchmark, using AWS Config rules. Amazon Inspector scans EC2 instances, container images and Lambda functions for known flaws.
-    - **Findings and response:** Security Hub gathers findings from GuardDuty, Inspector and others across accounts. An Amazon EventBridge rule matches high findings and calls Amazon SNS to page, or AWS Lambda to respond.
+    - **Audit log:** AWS CloudTrail records management events by default. An organization trail sends every account's events to an S3 bucket; data events are switched on per trail. S3 Object Lock locks the archive, and log file integrity validation proves nobody edited it.
+    - **Detector:** Amazon GuardDuty reads CloudTrail events, VPC Flow Logs and DNS query logs from its own feed, even where you never switched those logs on. Amazon Detective helps investigate a finding.
+    - **Posture and scans:** AWS Security Hub checks settings against standards such as the CIS benchmark, using AWS Config rules. Amazon Inspector scans EC2 instances, container images and Lambda functions.
+    - **Findings and response:** Security Hub gathers findings across accounts. An Amazon EventBridge rule matches high findings and calls Amazon SNS to page, or AWS Lambda to respond.
     - **Testing rules:** AWS lists services you may test without asking first. Flood tests follow a separate policy.
 
-    **The difference that changes a design.** GuardDuty and Security Hub work per Region. A Region where they are off is a Region nobody watches, and an attacker can start machines there. So turn both on in every account and every Region you allow, with one delegated administrator account to manage them, and gather findings in one Region. Brightpost's guardrail allows only 2 Regions, which keeps that list short.
+    **The difference that changes a design.** GuardDuty and Security Hub work per Region. A Region where they are off is a Region nobody watches, and an attacker can start machines there. So turn both on in every account and allowed Region, run them from one delegated administrator account, and gather findings in one Region. Brightpost's guardrail allows only 2 Regions.
   </Tab>
   <Tab label="Google Cloud">
-    - **Audit log:** Cloud Audit Logs. Admin Activity logs are always on and cannot be switched off. Data Access logs are mostly off by default and are switched on per service. An organization-level log sink copies every project's logs to a central bucket, and a bucket lock locks it.
+    - **Audit log:** Cloud Audit Logs. Admin Activity logs are always on. Data Access logs are mostly off until you switch them on per service. An organization-level log sink copies every project's logs to a central bucket, and a bucket lock locks it.
     - **Detector:** Event Threat Detection, part of Security Command Center, reads logs that reach Cloud Logging, including VPC Flow Logs and Cloud DNS logs.
-    - **Posture and scans:** Security Health Analytics, also in Security Command Center, checks settings, with reports against benchmarks such as CIS. Artifact Analysis scans container images in Artifact Registry. VM Manager can report known flaws in VM operating systems.
-    - **Findings and response:** Security Command Center lists findings for the whole organization. A notification config publishes chosen findings to Pub/Sub, and a Cloud Run function subscribed to it pages or responds.
+    - **Posture and scans:** Security Health Analytics, also in Security Command Center, checks settings and reports against benchmarks such as CIS. Artifact Analysis scans container images. VM Manager can report known flaws in VM operating systems.
+    - **Findings and response:** Security Command Center lists findings for the whole organization. A notification config publishes chosen findings to Pub/Sub, and a Cloud Run function pages or responds.
     - **Testing rules:** you need not tell Google before testing your own projects. Tests must follow its Acceptable Use Policy and terms of service.
 
-    **The difference that changes a design.** Event Threat Detection can only read what reaches Cloud Logging. Flow logs are switched on per subnet and DNS logging per network, so a subnet with flow logs off is invisible to it. Data reads are invisible until you switch on Data Access logs. So the logging plan is part of the detection plan. Activate Security Command Center at the organization, so new projects are covered on day one.
+    **The difference that changes a design.** Event Threat Detection reads only what reaches Cloud Logging. Flow logs are switched on per subnet and DNS logging per network, so a subnet with flow logs off is invisible to it. The logging plan is part of the detection plan. Activate Security Command Center at the organization, so new projects are covered on day one.
   </Tab>
   <Tab label="Azure">
-    - **Audit log:** the Azure Activity Log records management operations for each subscription and keeps them for a limited time. A diagnostic setting sends it on to a Log Analytics workspace or a storage account. Data operations are resource logs, switched on per resource. Immutable blob storage locks the archive.
-    - **Detector:** Microsoft Defender for Cloud plans, switched on per resource type such as servers, storage or Resource Manager, raise security alerts. Microsoft Sentinel is a separate service that collects logs from many sources into a Log Analytics workspace and raises incidents from rules.
-    - **Posture and scans:** Defender for Cloud scores your settings against the Microsoft cloud security benchmark and lists recommendations. Its server and container plans scan VMs and container images for known flaws.
+    - **Audit log:** the Azure Activity Log records management operations for each subscription, for a limited time. A diagnostic setting sends it to a Log Analytics workspace or a storage account. Data operations are resource logs, switched on per resource. Immutable blob storage locks the archive.
+    - **Detector:** Microsoft Defender for Cloud plans, switched on per resource type such as servers, storage or Resource Manager, raise security alerts. Microsoft Sentinel collects logs from many sources into a Log Analytics workspace and raises incidents from rules.
+    - **Posture and scans:** Defender for Cloud scores your settings against the Microsoft cloud security benchmark. Its server and container plans scan VMs and container images for known flaws.
     - **Findings and response:** Defender for Cloud lists alerts and recommendations across subscriptions. Workflow automation starts an Azure Logic App on an alert, and Sentinel playbooks do the same for incidents.
     - **Testing rules:** no advance notice is needed. Tests must follow Microsoft's rules of engagement for penetration testing.
 
-    **The difference that changes a design.** Detection and posture live in Defender for Cloud, but searching and joining logs from many sources lives in Sentinel, on top of a Log Analytics workspace. So decide early which workspace every subscription's logs go to, usually one central one. Azure Policy can add the diagnostic setting to each new subscription, so none starts unlogged.
+    **The difference that changes a design.** Posture and alerts live in Defender for Cloud. Searching and joining logs from many sources lives in Sentinel, on a Log Analytics workspace. So decide early which workspace every subscription's logs go to, usually one central one. Azure Policy can add the diagnostic setting to each new subscription.
   </Tab>
 </Tabs>
 
@@ -213,19 +211,19 @@ The chain is the same on all three clouds: an audit log, detectors that read it 
   caption="Brightpost's choices. Real response times depend on the rota and on the provider's detection delay."
 />
 
-Use all three, sorted by severity. Automate the safe, reversible first step, then let a person decide the rest.
+Use all three, sorted by severity. Automate the safe first step, then let a person decide the rest.
 
 ## Common pitfalls
 
-- **Findings with no route.** A hub that only sends a digest is a diary, not an alarm. Route every high finding to a person who can act within minutes.
+- **Findings with no route.** A hub that only sends a digest is a diary, not an alarm. Route high findings to a person who can act within minutes.
 - **Detection on in some places only.** A new account or region without it is where an attacker goes. Turn detection on from the top of the <Term id="organization">organization</Term>, so new accounts are covered from their first minute.
-- **No data events where data lives.** After a breach, management events say a key was used, but not which files it read. Record data events on every store that holds customer data.
+- **No data events where data lives.** Management events show a key was used, not which files it read. Record data events on every store of customer data.
 - **Paging for everything.** Thirty pages a night teach people to mute the phone. Page only for high findings, and review the rule every month.
-- **Automating a destructive fix.** A function that deletes a "bad" machine also deletes the evidence, and on a false alarm it deletes a working server. Disable, isolate and snapshot instead.
+- **Automating a destructive fix.** Deleting a "bad" machine deletes the evidence, and on a false alarm a working server. Disable, isolate and snapshot instead.
 
 ## How to say it in an interview
 
-"I split security monitoring into two jobs. Posture asks whether anything is configured wrongly right now, and vulnerability scans ask whether known flaws are installed. Detection asks whether something bad is happening. The detector reads the audit log, which records every call to the cloud, plus flow and DNS logs. The audit log goes to a locked archive in a separate account, and I switch on data events where customer data lives. Every finding lands in one hub for all accounts. A rule routes high findings to on-call and starts a reversible first response, such as disabling a key and isolating a machine. Then I test the whole chain with attack simulations and game days."
+"I split security monitoring into two jobs. Posture asks whether anything is configured wrongly, and vulnerability scans ask whether known flaws are installed. Detection asks whether something bad is happening. The detector reads the audit log, which records every call to the cloud, plus flow and DNS logs. The audit log goes to a locked archive in a separate account, and I switch on data events where customer data lives. Every finding lands in one hub for all accounts. A rule routes high findings to on-call and starts a reversible first response, such as disabling a key and isolating a machine. Then I test the whole chain with attack simulations and game days."
 
 ## Interview questions
 
@@ -233,7 +231,7 @@ Use all three, sorted by severity. Automate the safe, reversible first step, the
   <InterviewQuestion question="What goes in an audit log, and how is it different from an application log?" level="Junior" category="Cloud">
     **Short answer.** An audit log is the cloud's record of every call made to it: who called, what they asked for, on which resource, from where, and whether it was allowed. An application log is your own code's record of what it did. The first describes actions on your cloud; the second describes your app.
 
-    **Why.** At Brightpost, the app's logs said nothing about the stranger, because the stranger never touched the app. The audit trail recorded all 212 calls the leaked key made, including the 40 machine requests and the refused attempt to create a second key. The cloud writes audit logs for you, so a careless or hostile admin cannot skip them. That is also why they go to a locked archive in a separate account.
+    **Why.** At Brightpost, the app's logs said nothing about the stranger, who never touched the app. The audit trail recorded all 212 of the leaked key's calls, including the 40 machine requests and a refused attempt to create a second key. The cloud writes audit logs itself, and a locked archive in a separate account keeps them safe from a hostile admin.
 
     <AnimatedDiagram spec="animated/cloud/detection-pipeline" step={1} caption="The cloud writes each call to the audit trail, and a locked copy goes to the archive." />
 
@@ -247,7 +245,7 @@ Use all three, sorted by severity. Automate the safe, reversible first step, the
   <InterviewQuestion question="Posture or detection: which catches a public bucket, and which catches a stolen key in use?" level="Mid" category="Cloud">
     **Short answer.** A posture check catches the public bucket, because it is a setting that is wrong right now. Detection catches the stolen key, because the key's settings look normal and only its behaviour is strange.
 
-    **Why.** A posture check reads settings and compares them with a benchmark, so "this bucket is readable by anyone" is a finding within one scan. Brightpost scans every hour. A stolen key has no bad setting: it is a valid key. Only the pattern shows the theft. Brightpost's key called from a network it had never used, started 4 GPU machines, and those machines looked up a mining pool. The detector raises that from the audit, flow and DNS logs.
+    **Why.** A posture check compares settings with a benchmark, so "this bucket is readable by anyone" is a finding within one scan; Brightpost scans every hour. A stolen key has no bad setting: it is a valid key. Only its behaviour shows the theft. Brightpost's key called from a new network and started 4 GPU machines that looked up a mining pool. The detector saw that in the audit, flow and DNS logs.
 
     <AnimatedDiagram spec="animated/cloud/detection-pipeline" step={4} highlight={["posture", "detector", "scanner", "hub"]} caption="Posture, scans and detection are three sources that feed one hub." />
 
@@ -259,9 +257,9 @@ Use all three, sorted by severity. Automate the safe, reversible first step, the
   </InterviewQuestion>
 
   <InterviewQuestion question="Your detector raised a high finding at 02:10 on a Saturday, and nobody acted until Monday. What do you change?" level="Mid" category="Cloud">
-    **Short answer.** Detection worked; routing failed. Add an alert rule that pages the on-call engineer for high findings, keep low ones in a digest, and add an automatic first step for the kinds of finding that have a safe fix.
+    **Short answer.** Detection worked; routing failed. Page the on-call engineer for high findings and keep low ones in a digest. Add an automatic first step where a safe fix exists.
 
-    **Why.** At Brightpost, the time to detect was 20 minutes and the time to act was 55 hours. The fix sorts findings by severity. High findings page a phone within 2 minutes. Medium ones become tickets for the next working day, and low ones stay in the weekly email. Page sparingly: Brightpost gets about 2 high findings a month, so a page is never ignored. For leaked keys, a function disables the key at once.
+    **Why.** At Brightpost, detection took 20 minutes and action took 55 hours. The fix sorts findings by severity. High findings page a phone within 2 minutes, medium ones become next-day tickets, and low ones stay in the weekly email. Brightpost gets about 2 high findings a month, so a page is never ignored. For leaked keys, a function disables the key at once.
 
     <AnimatedDiagram spec="animated/cloud/detection-pipeline" step={6} path="detector>hub>rule>oncall" caption="The finding now goes from the hub through a rule to a phone." />
 
@@ -275,7 +273,7 @@ Use all three, sorted by severity. Automate the safe, reversible first step, the
   <InterviewQuestion question="How do you check that your detection really works, and what are you allowed to test on a public cloud?" level="Mid" category="Cloud">
     **Short answer.** Run harmless attack simulations and regular game days, and hire penetration testers for a wider check. Test only your own resources, with written approval and a scope, and follow the provider's published testing policy.
 
-    **Why.** A detector you have never seen fire is a guess. Every quarter, Brightpost calls the cloud with a test key from an unusual network, in the test account. It checks that a finding appears, the phone rings within 2 minutes, and the key is disabled. Inside the company, the account owner approves the scope and time window, and on-call is warned. Outside it, each cloud says what you may test without asking, and no cloud allows tests on other customers or on its shared systems.
+    **Why.** A detector you have never seen fire is a guess. Every quarter, Brightpost calls the cloud with a test key from an unusual network, in the test account. It checks that a finding appears, the phone rings within 2 minutes, and the key is disabled. The account owner approves the scope and time window, and on-call is warned. Each cloud publishes what you may test, and none allows tests on other customers.
 
     <AnimatedDiagram spec="animated/cloud/detection-pipeline" step={7} path="detector>hub>rule>responder>iam" caption="A drill follows the whole path, from finding to disabled key." />
 
@@ -289,7 +287,7 @@ Use all three, sorted by severity. Automate the safe, reversible first step, the
   <InterviewQuestion question="Design the automated response to a leaked access key." level="Senior" category="Cloud">
     **Short answer.** A high finding about a key starts a function. It disables the key, isolates every machine the key started, snapshots their disks, and pages a person with a summary. Everything it does is reversible, and a human decides the rest.
 
-    **Why.** A person needs minutes to wake up; the function acts in seconds. On Brightpost's Saturday, the key would have been disabled at about 02:11 instead of Monday morning. Disabling keeps the key's history, while deleting it makes the investigation harder. Isolating swaps the machine's firewall rules for "deny everything", so it stops mining but stays available for evidence. The function runs with least privilege of its own: it may disable keys and change firewall rules, nothing more. Afterwards, the audit trail lists every resource the key created, so nothing is left running.
+    **Why.** A person needs minutes to wake up; the function acts in seconds. On Brightpost's Saturday, the key would have been disabled at about 02:11 instead of Monday morning. Disabling keeps the key's history for the investigation. Isolating swaps the machine's firewall rules for "deny everything", so it stops mining but stays as evidence. The function has least privilege too: it may disable keys and change firewall rules, nothing more. Afterwards, the audit trail lists every resource the key created.
 
     <AnimatedDiagram spec="animated/cloud/detection-pipeline" step={7} highlight={["rule", "responder", "iam", "vms", "stranger"]} caption="The rule starts the function; it disables the key and isolates the machines, and the next call is refused." />
 
@@ -305,13 +303,10 @@ Use all three, sorted by severity. Automate the safe, reversible first step, the
 ## Related
 
 - [Landing Zones: Setting Up an Estate](/cloud/fundamentals/landing-zones)
-- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
 - [Identity and Access](/cloud/fundamentals/identity-and-access)
-- [Shared Responsibility](/cloud/fundamentals/shared-responsibility)
 - [Zero Trust, Defence in Depth and Identity-Aware Access](/cloud/resilience/zero-trust)
 - [Compliance, Data Residency and Sovereignty](/cloud/resilience/compliance-and-residency)
 - [Observability on the Cloud](/cloud/operations/observability-on-the-cloud)
-- [Containers and Registries](/cloud/compute/containers-and-registries)
 - [Identity & Security on AWS](/cloud/aws/security)
 - [Identity & Security on Google Cloud](/cloud/gcp/security)
 - [Identity & Security on Azure](/cloud/azure/security)

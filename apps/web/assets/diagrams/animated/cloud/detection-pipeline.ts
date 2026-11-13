@@ -16,7 +16,8 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Layout: three columns.
 //   Left (x 130): engineers, audit trail, log archive, posture check, vulnerability scan.
-//   Middle (x 420): the stranger, test machines, flow logs (x 350) and DNS logs (x 490), detector, hub, weekly email.
+//   Middle (x 390-400): the stranger, test machines, flow logs (x 350) and DNS logs (x 475), detector, hub, weekly
+//   email.
 //   Right (x 672): identity service, response function, alert rule, on-call engineer.
 // Rows (centres): 95 | 245 | 375 | 545 | 665 | 785.
 //
@@ -26,8 +27,9 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Zone title tabs sit on a zone's top-left corner, so titles are short and edges that enter a zone from above do so
 // right of its tab: engineers to audit trail at x 130 (the "Audit" tab ends near 95), the stranger to the machines
-// at x 420 (the "Test" tab ends near 372), the audit trail to the detector down the gutter at x 272 (the "Security"
-// tab ends near 120). The "Outside" zone uses the subnet kind (inline label, no tab). The "Response" zone starts at
+// at x 390 (the "Test" tab ends near 372), the audit trail to the detector down the gutter at x 272 (the "Security"
+// tab ends near 120). The "Outside" zone uses the subnet kind (inline label, no tab) and starts at y 30 so the NEW ring
+// clears its label. The "Response" zone starts at
 // x 556 so its tab ends left of the response-to-identity edge at x 672.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon.
 // Nodes are sized for the longest name the Services toggle puts in them ("Security Health Analytics", "Security
@@ -47,7 +49,7 @@ const spec: DiagramSpec = {
   ],
   zones: [
     { id: "people", title: "People", tone: "neutral", x: 10, y: 40, w: 240, h: 110 },
-    { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 295, y: 40, w: 255, h: 110 },
+    { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 295, y: 30, w: 255, h: 120 },
     { id: "identity", title: "Identity", tone: "red", x: 560, y: 40, w: 225, h: 110 },
     { id: "audit", title: "Audit", tone: "blue", x: 10, y: 190, w: 240, h: 270 },
     { id: "test", title: "Test", tone: "teal", x: 295, y: 190, w: 255, h: 270 },
@@ -101,7 +103,7 @@ const spec: DiagramSpec = {
       icon: "server",
       tone: "teal",
       step: 2,
-      x: 420,
+      x: 390,
       y: 245,
       w: 176,
       cloud: { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" },
@@ -109,7 +111,7 @@ const spec: DiagramSpec = {
     {
       id: "flow",
       label: "Flow logs",
-      sub: "who talked to whom",
+      sub: "connections",
       icon: "log",
       tone: "orange",
       variant: "glyph",
@@ -130,7 +132,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       variant: "glyph",
       step: 2,
-      x: 490,
+      x: 475,
       y: 375,
       cloud: {
         aws: { label: "DNS query logs" },
@@ -147,7 +149,7 @@ const spec: DiagramSpec = {
       icon: "radar",
       tone: "red",
       step: 3,
-      x: 420,
+      x: 400,
       y: 545,
       w: 212,
       cloud: {
@@ -163,9 +165,9 @@ const spec: DiagramSpec = {
       icon: "registry",
       tone: "red",
       step: 3,
-      x: 420,
+      x: 400,
       y: 665,
-      w: 220,
+      w: 230,
       cloud: { aws: "aws-security-hub", gcp: "gcp-scc", azure: "azure-defender" },
     },
     {
@@ -175,7 +177,7 @@ const spec: DiagramSpec = {
       icon: "file",
       tone: "neutral",
       step: 3,
-      x: 420,
+      x: 400,
       y: 785,
       w: 160,
     },
@@ -204,9 +206,9 @@ const spec: DiagramSpec = {
       icon: "search",
       tone: "red",
       step: 4,
-      x: 130,
+      x: 120,
       y: 665,
-      w: 190,
+      w: 180,
       cloud: {
         aws: "aws-inspector",
         gcp: { label: "Artifact Analysis" },
@@ -222,7 +224,7 @@ const spec: DiagramSpec = {
       icon: "robot",
       tone: "red",
       step: 5,
-      x: 420,
+      x: 390,
       y: 95,
       w: 170,
     },
@@ -311,7 +313,7 @@ const spec: DiagramSpec = {
 
     // Step 4: two more sources of findings.
     { from: "posture", to: "hub", label: "bad setting", packet: true, step: 4 },
-    { from: "scanner", to: "hub", label: "known flaw", packet: true, step: 4 },
+    { from: "scanner", to: "hub", label: "flaw", packet: true, step: 4 },
 
     // Step 5: the leaked key starts machines; every call is logged; the high finding waits for Monday.
     {
