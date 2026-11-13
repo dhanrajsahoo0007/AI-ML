@@ -55,10 +55,13 @@ describe("the question library (real content)", () => {
     const all = getQuestions().length;
     const ai = getQuestions({ track: "ai" });
     const sd = getQuestions({ track: "design" });
-    expect(ai.length + sd.length).toBe(all);
+    const beh = getQuestions({ track: "leadership" });
+    expect(ai.length + sd.length + beh.length).toBe(all);
     expect(sd.length).toBeGreaterThan(0);
+    expect(beh.length).toBeGreaterThan(0);
     expect(sd.every((q) => q.category.startsWith("system-design-"))).toBe(true);
     expect(ai.some((q) => q.category.startsWith("system-design-"))).toBe(false);
+    expect(beh.some((q) => q.category.startsWith("system-design-"))).toBe(false);
   });
 
   it("redirects every old distributed-systems-patterns URL to a page that exists", () => {

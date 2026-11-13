@@ -1,0 +1,133 @@
+---
+title: "Stripe & Airbnb: Rigor, Craft & Core Values Rounds"
+description: "Crack Stripe's Manager Chat (Users First, operational rigor) and Airbnb's two cross-functional Core Values interviews."
+icon: lock
+order: 6
+---
+
+## In one sentence
+
+<KeyIdea>
+High-craft product and fintech leaders like **Stripe** and **Airbnb** reject engineers who treat their job as "closing backend tickets in isolation": Stripe tests **Users First** paired with **micro-pessimistic operational rigor**, while Airbnb runs **two dedicated Core Values interviews** outside engineering to test whether you **Be a Host** and **Champion the Mission**.
+</KeyIdea>
+
+## The story
+
+At **Stripe**, moving money across global banking rails means a subtle race condition or non-idempotent webhook retry can double-charge merchants millions of dollars. In Stripe's **Manager Chat**, the interviewer digs into a system you built and asks not just *"how did it scale?"* but *"how did you guarantee zero silent data corruption during cutover, and how did you observe real developers using your API?"*
+
+At **Airbnb**, even if you ace the coding and system design rounds, you must pass **two separate 45-minute Core Values interviews** conducted by trained bar-raisers from outside engineering (e.g., Design, Trust & Safety, Operations, or Finance). Candidates who talk down to non-engineering interviewers or cannot connect their code to human belonging fail immediately.
+
+## What interviewers are really testing
+
+<AnimatedDiagram spec="animated/behavioral/incident-ownership" stepper caption="The 5-stage operational ownership lifecycle expected in Stripe, Airbnb, and high-craft fintech behavioral loops." />
+
+Compare how **Stripe** and **Airbnb** evaluate behavioral signal:
+
+| Dimension | Stripe Operating Principles | Airbnb Core Values |
+| --- | --- | --- |
+| **User Empathy** | **Users First:** Writing Friction Logs, reading merchant support tickets, sweating API ergonomics and error messages | **Be a Host:** Caring deeply for guests, hosts, and teammates; creating belonging in every interaction |
+| **Operational & Technical Rigor** | **Think Rigorously & Micro-Pessimism:** Shadow dual-writes, idempotency keys, continuous ledger reconciliation | **Champion the Mission:** Protecting marketplace trust, physical safety, and booking reliability end-to-end |
+| **Execution & Creativity** | **Move with Urgency and Focus:** Delivering high-craft increments rapidly without compromising reliability invariants | **Be a Cereal Entrepreneur & Embrace the Adventure:** Scrappy, creative problem-solving under ambiguity |
+
+<PremiumBreak />
+
+## How the bar changes by level
+
+<Compare
+  columns={["Dimension", "L2 / G8 (Mid-Level SWE)", "L3 / G9 (Senior SWE)", "L4 / G10 (Staff SWE)"]}
+  rows={[
+    ["User & API Craft", "Ships clean endpoints with actionable error messages and thorough integration tests", "Writes Friction Logs across product journeys; designs idempotent, backward-compatible APIs loved by developers", "Defines multi-year API ergonomics, reliability guarantees, and developer experience across product lines"],
+    ["Migration & Data Safety", "Executes safe schema migrations and feature-flagged rollouts with rollback plans", "Designs zero-downtime dual-write/shadow-read migrations with automated reconciliation invariants", "Architects cell-based blast-radius isolation and company-wide ledger/marketplace consistency standards"],
+    ["Cross-Functional Hosting", "Collaborates smoothly with PM, Design, and Support on sprint work", "Partners directly with Support, Risk, Legal, and Ops to solve root-cause user pain", "Aligns engineering, policy, risk, and executive roadmaps on mission-critical trust bets"],
+  ]}
+  caption="Both Stripe and Airbnb weigh how you communicate with non-engineers and how deeply you care about the end user's experience."
+/>
+
+## Interactive diagnostic: test your story
+
+<DecisionTree
+  title="Will your stories clear Stripe's Manager Chat & Airbnb's Core Values loop?"
+  tree={{
+    q: "Does your deep-dive project story begin with the concrete merchant, developer, host, or guest friction you observed firsthand (rather than just an internal latency ticket)?",
+    yes: {
+      q: "Can you explain the exact 'micro-pessimistic' verification mechanics you used during rollout (e.g., idempotency keys, shadow dual-reads, streaming checksum reconciliation)?",
+      yes: {
+        q: "Can you explain your proudest project clearly and warmly to a non-engineering interviewer (Airbnb Core Values) without hiding behind internal acronyms?",
+        yes: {
+          answer: "Ready for Stripe & Airbnb! Next: explore Uber, DoorDash & Palantir's high-velocity execution loops.",
+          href: "/behavioral/company-playbooks/uber-doordash-and-palantir",
+        },
+        no: "Practice a 90-second jargon-free framing of your project that highlights human impact, teamwork, and mission connection for Airbnb's cross-functional interviewers.",
+      },
+      no: "Stripe hiring managers always ask 'How did you know no edge-case records were silently corrupted?' Add your shadow-verification and rollback invariants.",
+    },
+    no: "Anchor your opening Situation in 'Users First' / 'Be a Host': show that you looked at support tickets, user sessions, or Friction Logs yourself.",
+  }}
+/>
+
+## Worked engineering example (STAR+L)
+
+<Tabs title="Stripe & Airbnb Signature Stories">
+  <Tab label="Stripe: Users First + Micro-Pessimistic Rigor">
+    **Prompt:** *"Tell me about a system you built or migrated where correctness and reliability were critical, and how you ensured zero user disruption."*
+
+    - **Situation & Task:** *"On our B2B payouts platform (\$1.4B annual volume), merchants were opening 40+ support tickets a week because webhook retries during transient downstream bank timeouts occasionally caused duplicate ledger holds when merchants hadn't implemented client-side deduplication properly."*
+    - **Action:** *"First, I wrote a **Friction Log** by reading 30 merchant support threads and integrating our SDK from scratch—discovering our error payload didn't distinguish between 'safe to retry with new key' and 'in-flight settlement, poll status' (**Users First**). Next, I practiced **micro-pessimism** on the backend migration: I introduced a deterministic state-transition ledger keyed by `(merchant_id, payout_fingerprint, window_bucket)`, ran shadow dual-verification for 14 days across 12M live requests, built a continuous reconciliation daemon that paged if shadow vs. primary balances diverged by \$0.01, and redesigned the API error payload to include a copy-pasteable recovery URL and `Retry-After` header."*
+    - **Result:** *"Migrated 100% of traffic with zero ledger discrepancies, cut duplicate-hold support tickets by 94%, and reduced median merchant integration time by 32%."*
+    - **Learning:** *"High-craft infrastructure engineering means owning both halves of reliability: airtight server-side invariants and an API surface so clear that developers fall into the pit of success."*
+  </Tab>
+  <Tab label="Airbnb: Be a Host + Cereal Entrepreneur">
+    **Prompt:** *"Tell me about a time you solved a major user trust problem creatively with limited time or resources."*
+
+    - **Situation & Task:** *"Heading into peak summer travel on our marketplace platform, last-minute host cancellations were spiking by 18%, leaving guests stranded at airports and costing \$220k/month in emergency rebooking credits. The data science roadmap for a full ML cancellation-risk model was 6 months away."*
+    - **Action:** *"Embracing **Be a Host** and **Be a Cereal Entrepreneur**, I spent two mornings listening to live support calls with hosts who had just canceled. I discovered 65% of those cancellations weren't malicious—they happened because seasonal hosts had forgotten to sync an external calendar after a 6-month hiatus. Instead of waiting 6 months for an ML classifier, I built a deterministic 'Dormant Host Readiness Check' in 8 days: whenever a listing received its first booking after 60+ days of inactivity, we triggered an interactive SMS + push confirmation flow within 2 hours with a 1-tap calendar verify button, and if unconfirmed within 24 hours, alerted our concierge team proactively—days before the guest boarded a flight."*
+    - **Result:** *"Last-minute airport-day cancellations dropped by 41% over the July 4th peak, saving \$95k/month in rebooking costs while improving host satisfaction scores."*
+    - **Learning:** *"Listening directly to users reveals simple human root causes that a six-month infrastructure project would have over-engineered."*
+  </Tab>
+</Tabs>
+
+## Introspect your own work
+
+<Quiz title="Audit your engineering craft for Stripe & Airbnb">
+  <QuizItem
+    question="1. Have you ever written a 'Friction Log'—stepping through your own team's product, API, or onboarding docs as a brand-new user and logging every paper cut?"
+    hint="Friction Logs are a signature cultural artifact at Stripe and high-craft developer tools companies."
+  >
+    Before your interview, think of a time you spotted a DX/UX paper cut outside your assigned ticket and fixed it end-to-end.
+  </QuizItem>
+  <QuizItem
+    question="2. In your biggest migration story, if the interviewer asks 'How did you prove zero records were corrupted before deleting the old table?', what is your exact answer?"
+    hint="'Nobody filed a bug ticket' is a red flag in fintech loops."
+  >
+    Be ready to cite **shadow dual-reads, row-level cryptographic/structural checksums, reconciliation queries, and staged canary percentages**.
+  </QuizItem>
+</Quiz>
+
+## Common red flags & how to recover
+
+- **"That was Product's / Support's job":** Drawing a hard wall between backend code and user experience is the fastest way to fail both Stripe's Manager Chat and Airbnb's Core Values rounds.
+- **Over-engineering when a scrappy solution works:** Airbnb's *Be a Cereal Entrepreneur* explicitly tests resourcefulness under constraints.
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What does Stripe mean by 'Micro-Pessimism, Macro-Optimism'?"
+    level="Senior"
+    companies={["Stripe"]}
+  >
+    **Macro-optimism** means believing ambitious multi-year infrastructure bets can transform global commerce. **Micro-pessimism** means assuming in your day-to-day system design that every network packet can drop, every third-party bank API will time out, every webhook will be delivered twice out of order, and every database migration needs automated reconciliation checks.
+  </InterviewQuestion>
+
+  <InterviewQuestion
+    question="Who conducts Airbnb's Core Values interviews, and how are they weighted?"
+    level="Senior"
+    companies={["Airbnb"]}
+  >
+    Airbnb schedules **two 45-minute Core Values interviews** with trained interviewers from outside your discipline. Their scorecard carries veto power at hiring committee: they evaluate how you embody *Champion the Mission*, *Be a Host*, *Embrace the Adventure*, and *Be a Cereal Entrepreneur* through concrete behavioral stories from your past.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Uber, DoorDash & Palantir: Ownership, Grit & Decomposition](/behavioral/company-playbooks/uber-doordash-and-palantir)
+- [Production Incidents, Outages & Owning Mistakes](/behavioral/competencies/production-incidents-and-mistakes)
+- [Project Deep-Dive Walkthrough](/behavioral/competencies/project-deep-dive-walkthrough)

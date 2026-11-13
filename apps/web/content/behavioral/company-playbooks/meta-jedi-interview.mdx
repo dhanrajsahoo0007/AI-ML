@@ -1,0 +1,142 @@
+---
+title: "Meta: The 'Jedi' Behavioral Round & Core Values"
+description: "How Meta grades E3 to E6+ scope, moving fast vs. long-term impact, direct feedback and resolving conflict."
+icon: zap
+order: 1
+access: free
+---
+
+## In one sentence
+
+<KeyIdea>
+Meta's 45-minute **Jedi** behavioral round is the primary **leveling gate** between E4, E5, and E6: it grades whether you find your own high-impact problems, resolve interpersonal conflict directly without escalating to managers, and ship fast through ambiguity.
+</KeyIdea>
+
+## The story
+
+At Meta, passing the two coding rounds and the system design round is not enough to secure a Senior (E5) or Staff (E6) offer. In post-loop calibration, the committee looks closely at the **Jedi** (behavioral) scorecard.
+
+Suppose an E5 candidate tells three polished stories where their Engineering Manager handed them a well-defined project spec, they wrote clean C++/Python code, and they escalated a cross-team disagreement to their manager to resolve. Even if their system design round was strong, the calibration committee will down-level the offer to **E4**. Why? Because at Meta, **E5 is the terminal "self-directed" level**: an E5 engineer is expected to discover problems, align peers across teams directly, and drive impact without waiting for manager air-cover.
+
+## What interviewers are really testing
+
+<AnimatedDiagram spec="animated/behavioral/faang-loop-comparison" stepper caption="Where the Jedi round sits in the Meta loop compared to Amazon, Google, and Frontier AI labs." />
+
+Every Meta Jedi interviewer grades your stories against **five core signal pillars** mapped to Meta's core values (*Move Fast*, *Focus on Long-Term Impact*, *Build Awesome Things*, *Live in the Future*, *Be Direct and Respect Your Colleagues*, *Meta, Metamates, Me*):
+
+| Jedi Pillar | What E5 (Senior) / E6 (Staff) looks like | What causes a down-level to E4 |
+| --- | --- | --- |
+| **1. Resolving Conflict** | Addressing technical or cross-functional tension 1:1 with data and empathy; building consensus | Escalating every disagreement to a manager or avoiding friction |
+| **2. Growing Continuously** | Soliciting critical feedback proactively; admitting a real blind spot and changing a habit | Giving a fake weakness (*"I work too hard"*) or blaming others for failures |
+| **3. Embracing Ambiguity** | Turning a vague metric drop or unowned pain point into a scoped roadmap and shipped win | Waiting for a PM or TL to write detailed tickets |
+| **4. Driving Results** | Moving fast with prototypes/canaries to prove impact; cutting low-leverage work | Spending months building infrastructure with no measurable user/system outcome |
+| **5. Communicating Effectively** | Crisp, structured answers; translating deep technical trade-offs for product/design peers | Rambling 4-minute monologues with no clear "I" actions |
+
+<PremiumBreak />
+
+## How the bar changes by level
+
+<Compare
+  columns={["Dimension", "E4 (Mid-Level SWE)", "E5 (Senior SWE — Terminal)", "E6 (Staff SWE)"]}
+  rows={[
+    ["Problem Origin", "Executes features/projects scoped by E5/E6 or PM", "Identifies and scopes team-level problems independently; owns end-to-end impact", "Shapes multi-team / org-level technical direction over 6–18 months"],
+    ["Conflict & Alignment", "Resolves code-review and feature-level disagreements with teammates", "Aligns cross-functional partners (PM, Design, Data Science, sibling teams) without escalation", "Breaks multi-team deadlocks; aligns competing org roadmaps and Directors"],
+    ["Mentorship & Leverage", "Helps onboard peers and reviews code thoroughly", "Mentors E3/E4 engineers and raises team operational quality", "Multiplies 20+ engineers through shared architectures, abstractions, and engineering standards"],
+  ]}
+  caption="At Meta, E5 is a 'bottom-up' culture: you are expected to propose what to build, not just how to build it."
+/>
+
+## Interactive diagnostic: test your story
+
+<DecisionTree
+  title="Will your Jedi stories clear Meta's E5/E6 bar?"
+  tree={{
+    q: "In your top 3 stories, did YOU identify the opportunity or scope the solution (rather than simply executing a spec written by your manager/PM)?",
+    yes: {
+      q: "Do you have a dedicated Conflict story AND a dedicated Critical Feedback story where you dealt with the person directly (1:1) rather than escalating?",
+      yes: {
+        q: "Does every story end with a quantified business, user, or engineering efficiency metric (Meta's 'Focus on Impact')?",
+        yes: {
+          answer: "Strong E5/E6 Jedi readiness! Next: compare with Google's Googleyness & Leadership round.",
+          href: "/behavioral/company-playbooks/google-googleyness-and-leadership",
+        },
+        no: "Meta is intensely metric-driven: add the exact before/after metric lift to every story.",
+      },
+      no: "Meta Jedi interviewers ALWAYS ask about peer conflict and critical feedback—prepare direct 1:1 resolution stories.",
+    },
+    no: "Reframe your stories around the ambiguous problem you uncovered and the direction you proposed.",
+  }}
+/>
+
+## Worked engineering example (STAR+L)
+
+<Tabs title="Meta Jedi Core Prompts: E4 vs. E5/E6 Framing">
+  <Tab label="Be Direct & Respect Your Colleagues (Feedback)">
+    **Prompt:** *"Tell me about a time you had to give difficult feedback to a teammate."*
+
+    - **Situation & Task:** *"On our Ads ranking squad, a senior peer was merging hotfix PRs directly to production branches during experiments to move faster, which broke our offline-online feature logging parity twice in one month."*
+    - **Action:** *"Instead of complaining to our EM, I scheduled a private 15-minute 1:1 the same day. I started by acknowledging why they were bypassing the staging queue—our CI pipeline took 55 minutes and blocked urgent experiment tweaks (*Respect Your Colleagues*). Then I showed the exact data impact: two weeks of corrupted training labels that invalidated three teammate experiments (*Be Direct*). Together, we built a 4-minute 'fast-lane' shadow-validation workflow for config-only experiment changes so nobody needed to bypass CI."*
+    - **Result:** *" logging parity incidents dropped to zero, experiment iteration speed actually improved by 10x (55m to 4m), and our working relationship grew stronger."*
+    - **Learning:** *"When a smart engineer bypasses a process, fix the slow process while holding the line on the data invariant."*
+  </Tab>
+  <Tab label="Move Fast & Focus on Impact (Bottom-Up Initiative)">
+    **Prompt:** *"Tell me about a time you identified an opportunity nobody asked you to work on and drove it to impact."*
+
+    - **Situation & Task:** *"While debugging a feed latency spike, I noticed our service was fetching full 40-field user profile blobs on every request even though 92% of feed rankings only used 4 fields."*
+    - **Action:** *"Nobody owned the cross-team payload contract. I spent one afternoon building a lightweight projection prototype on 1% shadow traffic to prove the bandwidth savings. Armed with real numbers, I wrote a 1-page RFC, built an auto-generated GraphQL/Thrift field-mask codemod for the 3 calling teams, and migrated the hot path over two weeks."*
+    - **Result:** *"Cut network egress between Profile and Feed by 78% (14 Gbps saved at peak), shaved 19 ms off feed <Term id="p99" />, and freed \$220k/yr in memcached RAM."*
+    - **Learning:** *"In a bottom-up engineering culture, a 1-day shadow benchmark persuades partner teams 10x faster than a slide deck."*
+  </Tab>
+</Tabs>
+
+## Introspect your own work
+
+<Quiz title="Audit your stories for the Meta Jedi rubric">
+  <QuizItem
+    question="1. Think of the last time a teammate frustrated you. Did you tell them directly in a constructive 1:1, or did you vent to someone else?"
+    hint="Meta's 'Be Direct and Respect Your Colleagues' tests candor without sharpness."
+  >
+    If you tended to avoid direct feedback, practice the **Situation – Behavior – Impact + Shared Fix** script on a real episode from your past.
+  </QuizItem>
+  <QuizItem
+    question="2. Look at your proudest project. How did you prove it was the highest-impact thing you could have spent those 6 weeks on?"
+    hint="At Meta, shipping complex code that doesn't move a metric is scored lower than a simple change that moves the needle."
+  >
+    Always include 1 sentence in your Situation/Action explaining why you prioritized this problem over lower-ROI alternatives.
+  </QuizItem>
+</Quiz>
+
+## Common red flags & how to recover
+
+- **Waiting for permission:** Saying *"I waited for my manager to tell me which option to pick"* is the #1 reason candidates get capped at E4.
+- **Building in a silo:** Meta is intensely collaborative across Product, Data Science, and Engineering; solo-hero stories where you ignored partners score poorly.
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="Does the Meta Jedi interview include coding, or is it 100% behavioral?"
+    level="Mid"
+    companies={["Meta"]}
+  >
+    Historically, some Jedi rounds included a 10-minute warm-up coding problem, which is why the round was nicknamed "Jedi" (behavioral + light technical). Today, for standard E4–E6 SWE/MLE loops, the 45-minute Behavioral round is **100% behavioral and past-project probing**, while coding stays in the dedicated Coding rounds.
+  </InterviewQuestion>
+
+  <InterviewQuestion
+    question="What are the most common prompts asked in the Meta Jedi round?"
+    level="Senior"
+    companies={["Meta"]}
+  >
+    Expect 4 to 5 prompts in 45 minutes drawn directly from the 5 pillars:
+    1. *"Tell me about the project you are most proud of and your specific role in driving it."*
+    2. *"Tell me about a time you had a conflict or disagreement with a colleague or cross-functional partner."*
+    3. *"Tell me about a piece of tough feedback you received and how it changed how you work."*
+    4. *"Tell me about a time you had to navigate severe ambiguity or shifting priorities."*
+    5. *"Tell me about a time you failed or made a mistake in production."*
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Google: Googleyness & Leadership](/behavioral/company-playbooks/google-googleyness-and-leadership)
+- [Giving & Receiving Critical Feedback](/behavioral/competencies/feedback-and-difficult-conversations)
+- [Junior-to-Senior Leveling](/behavioral/leveling-and-tracks/junior-to-senior-leveling)
+`,Path:

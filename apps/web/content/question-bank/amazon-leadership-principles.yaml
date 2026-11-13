@@ -1,0 +1,315 @@
+# Amazon Leadership Principles interview questions and Bar Raiser follow-up probes. All answers are written by TokensToScale.
+- id: lp-customer-obsession-pushback-internal-convenience
+  q: Tell me about a time you pushed back on a technically convenient shortcut because it would have hurt the end user or customer.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: customer-ownership
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
+    - /behavioral/amazon-leadership-principles/how-amazon-evaluates-lps
+  a: |-
+    **What the Bar Raiser is testing.** Amazon's first Leadership Principle—*Customer Obsession*—is easy to claim when customer needs and engineering convenience align. Interviewers test whether you still advocate for the customer when doing so costs your team extra engineering effort or delays an internal milestone.
+
+    <KeyIdea>
+    Strong *Customer Obsession* stories start with a quantified customer pain point (latency, silent data loss, confusing failure modes, or billing surprises), show the tempting internal shortcut, and prove how you found a third path that protected the user without derailing delivery.
+    </KeyIdea>
+
+    **How to structure your answer (STAR+L):**
+
+    - **Situation & Task:** Name the service, the user segment affected, and the pressure that created the shortcut (e.g., migrating an API before a quarterly freeze by breaking backward compatibility for 4% of long-tail SDK callers).
+    - **Action:** Show how you quantified the user impact using telemetry or support tickets, brought that evidence to the team, and designed a lightweight compatibility shim or phased deprecation so the team still hit its core deadline without breaking customer integrations.
+    - **Result:** State the measurable customer outcome (zero migration pages/escalations, retention of the affected cohort) alongside the engineering cost.
+    - **Learning:** What guardrail or design-review checklist item you added so user-facing regressions are surfaced before implementation starts.
+
+    **Red flags to avoid.** Painting your teammates or PM as "not caring about customers." Frame the tension around competing constraints, not villains.
+  followUps:
+    - q: How did you quantify the customer impact before raising the objection?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Explain the exact query or trace you ran—such as grouping 30 days of gateway logs by client SDK version and mapping those callers to revenue or critical workflows—so the trade-off was debated with numbers rather than opinions.
+    - q: What would you have done if your manager still overruled you because of the deadline?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Show the transition from *Customer Obsession* to *Have Backbone; Disagree and Commit*: once the risk is documented in writing and the decision owner explicitly accepts it, commit fully to executing the chosen path while adding monitoring and a fast rollback runbook to bound customer blast radius.
+
+- id: lp-ownership-outside-service-boundary
+  q: Describe a time you diagnosed and fixed a problem that lived outside your team's codebase or charter because it was blocking a larger outcome.
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: customer-ownership
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
+  a: |-
+    **What the Bar Raiser is testing.** *Ownership* ("never say 'that's not my job'") tests whether you treat your service boundary as an API contract or as an excuse to ignore systemic failures.
+
+    | Signal | Weak Ownership ("My boundary") | Strong Ownership ("End-to-end outcome") |
+    | --- | --- | --- |
+    | Diagnosis | Stops at "the upstream service returned HTTP 500" | Traces the request ID into the upstream repo, identifies the N+1 query or connection pool exhaustion |
+    | Action | Files a ticket and waits two sprints | Opens a draft PR with reproduction tests in the upstream repo and pairs with their on-call to land it safely |
+    | Follow-through | Closes the incident once the immediate fire stops | Adds contract tests and synthetic alerts across the boundary |
+
+    **Watch out for.** "Cowboy ownership"—deploying changes to another team's system without their review. True ownership pairs initiative (doing the legwork and writing the patch) with respect for the owning team's review and operational norms.
+  followUps:
+    - q: How did you get the other team to review your fix when their sprint was already full?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Explain how you lowered their cognitive load to near zero: isolating a minimal diff, attaching benchmark before/after numbers, writing the unit and integration tests yourself, and offering to shadow the deployment window.
+
+- id: lp-bias-for-action-two-way-door
+  q: Tell me about a time you had to make an important technical decision quickly with less than 70% of the data you wished you had.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results
+    - /behavioral/amazon-leadership-principles/highest-standards-vs-speed
+  a: |-
+    **What the Bar Raiser is testing.** Amazon distinguishes between **one-way doors** (irreversible or very expensive to undo, such as public API schemas, cryptographic key hierarchies, or cross-region data partitioning) and **two-way doors** (reversible within minutes or days behind a feature flag or shadow queue). *Bias for Action* tests whether you recognize two-way doors—or convert a one-way door into a two-way door—and move instead of falling into analysis paralysis.
+
+    **Key elements of a strong answer:**
+
+    1. **The uncertainty and the cost of waiting:** Explain what data was missing and why waiting two weeks to gather it carried a real cost.
+    2. **Making the decision reversible:** Show the engineering mechanism (feature flag, dual-write with dark reads, canary cohort, or adapter interface) that bounded the downside if your hypothesis proved wrong.
+    3. **The trigger metric:** Name the exact threshold you watched in production that would trigger an automatic rollback or pivot.
+  followUps:
+    - q: What was the worst-case blast radius if your assumption turned out to be wrong?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        State the concrete cap—for example, "at most 1% of non-mutating read traffic for 15 minutes, with automatic circuit-breaking back to the legacy path if p99 exceeded 120 ms."
+
+- id: lp-dive-deep-metric-anomaly
+  q: Tell me about a time when high-level dashboards looked healthy, but you noticed an anomaly in the details that uncovered a serious bug or architectural flaw.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: dive-deep-judgment
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot
+  a: |-
+    **What the Bar Raiser is testing.** *Dive Deep* requires leaders to stay connected to the details and be skeptical when metrics and anecdotes disagree. Averages and p50s hide localized failures.
+
+    **How to walk through the investigation:**
+
+    - **The discrepancy:** Contrast the green top-line metric (e.g., 99.95% overall HTTP 200 rate) with the faint signal that caught your eye (a customer anecdote, a slight dip in retry-adjusted conversion, or an unusual p99.9 tail on one availability zone).
+    - **Peeling the layers:** Walk through the exact diagnostic chain—slicing histograms by tenant/region/payload size, inspecting raw structured logs, reproducing with a flamegraph or packet capture—until you hit the root cause in code or state.
+    - **Systemic fix:** Show both the code fix and the observability change (replacing averaged gauges with sliced SLO burn-rate alerts) so no one needs heroics next time.
+  followUps:
+    - q: Why didn't your existing alerts catch that failure mode?
+      level: Mid
+      companies: [Amazon]
+      a: |-
+        Explain the structural blind spot in the alert—such as aggregating success rates across high-volume health checks and low-volume checkout calls, or measuring HTTP status codes when the response body returned a soft error.
+
+- id: lp-have-backbone-disagree-and-commit
+  q: Tell me about a time you strongly disagreed with a technical or product decision made by your manager or a senior engineer. How did you handle it, and what happened?
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: backbone-trust
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/have-backbone-and-earn-trust
+  a: |-
+    **What the Bar Raiser is testing.** *Have Backbone; Disagree and Commit* has two halves, and candidates often only prepare the first. Interviewers want to see **principled, evidence-backed dissent** before the decision is finalized, and **genuine, ungrudging ownership** once the call is made—especially in a story where the final decision did *not* go your way.
+
+    <Tabs title="Both halves of Disagree and Commit">
+    <Tab label="When you convinced them">
+    Show how you moved the debate from opinions to a 1-page trade-off doc or benchmark spike, addressed the other person's core constraint directly, and gave them an easy off-ramp without public embarrassment.
+    </Tab>
+    <Tab label="When you were overruled (strongest signal)">
+    Show that you stated your concern clearly with data, listened to why leadership weighed another constraint higher (such as time-to-market or contractual commitments), and then took ownership of making their chosen architecture succeed—without saying "I told you so" when friction appeared.
+    </Tab>
+    </Tabs>
+  followUps:
+    - q: Give me an example where you disagreed, were overruled, and had to commit to a plan you still thought was suboptimal.
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Walk through a real decision where you lost the vote, explain the concrete engineering steps you took to mitigate the risks of the chosen path (extra load tests, runbooks, or feature flags), and describe how you explained the decision to junior teammates as "our decision" rather than "management's decision."
+
+- id: lp-invent-and-simplify-frugality
+  q: Describe a time you replaced a complex, expensive, or over-engineered design with a significantly simpler one under tight resource constraints.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: invent-think-big-frugality
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/invent-simplify-and-think-big
+    - /behavioral/amazon-leadership-principles/frugality-and-curiosity
+  a: |-
+    **What the Bar Raiser is testing.** *Invent and Simplify* and *Frugality* ("constraints breed resourcefulness, self-sufficiency, and invention") test whether your instinct when facing a new problem is to add infrastructure (new microservice, new distributed cache, new queue) or to question the problem assumptions and remove moving parts.
+
+    **Structure of a high-signal answer:**
+
+    - **The proposed complexity:** Describe the initial multi-service or high-cost proposal and why it seemed necessary at first glance.
+    - **The constraint & insight:** Identify the invariant or workload property (e.g., read-to-write ratio, bounded cardinality, idempotency window, or pre-computation during off-peak hours) that let you collapse three moving parts into one.
+    - **Quantified savings:** State the reduction in monthly cloud spend, on-call pages, p99 latency, and lines of code maintained.
+
+- id: lp-hire-develop-broad-responsibility
+  q: Tell me about a time you raised the engineering bar on your team through mentorship, hiring calibration, or fixing a systemic operational risk.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/hire-develop-and-best-employer
+    - /behavioral/amazon-leadership-principles/broad-responsibility-at-scale
+  a: |-
+    **What the Bar Raiser is testing.** At L5 (Senior SDE) and L6 (Principal SDE / SDM), individual code output is no longer enough. *Hire and Develop the Best*, *Strive to be Earth's Best Employer*, and *Success and Scale Bring Broad Responsibility* test whether your presence makes the surrounding engineers sharper, safer, and more autonomous.
+
+    Focus on **mechanisms over good intentions**: Amazon culture distrusts "we tried to be more careful" and rewards repeatable mechanisms (shadow-to-reverse-shadow mentorship plans, PR review rubrics, automated chaos/canary gates, and accessibility/privacy budgets).
+
+- id: lp-customer-obsession-unasked-need
+  q: Tell me about a time you anticipated a customer or developer pain point they hadn't explicitly asked for yet, and built a solution for it.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: customer-ownership
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
+  a: |-
+    **What the Bar Raiser is testing.** Amazon's *Customer Obsession* note explicitly says: *" Leaders start with the customer and work backwards... they don't just listen to customers, they also invent on their behalf."* Customers rarely ask for a better retry-after header or a deterministic dry-run mode—they just complain that integrations feel brittle.
+
+    - **How you spotted the latent pain:** Show the forensic signal (e.g., inspecting failed API onboarding logs, shadowing developer support channels, or noticing that 35% of tenants wrote custom polling loops around your webhook).
+    - **The invention:** Explain the small, high-leverage primitive you built (such as an idempotency replay endpoint or an interactive webhook debugger) and its adoption curve.
+  followUps:
+    - q: How did you validate that your invention solved the real problem rather than becoming unused scope creep?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        State the adoption and support-deflection metrics you tracked in the first 30 days—for example, 62% of new tenant integrations adopting the dry-run flag and onboarding ticket volume falling by half.
+
+- id: lp-ownership-long-term-value-over-short-term
+  q: Describe a time you sacrificed a short-term team win or easy metric boost to protect long-term system health or company value.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: customer-ownership
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/customer-obsession-and-ownership
+  a: |-
+    **What the Bar Raiser is testing.** *Ownership* states: *"They think long term and don't sacrifice long-term value for short-term results."*
+
+    Pick an episode where shipping a quick hack would have made your current quarter look green while creating a ticking time bomb (such as hardcoding tenant-specific routing rules in the hot path, or training a recommender on clickbait engagement that eroded 30-day retention). Show how you quantified the 6-month cost of the shortcut and got buy-in for the durable path.
+
+- id: lp-deliver-results-major-midflight-blocker
+  q: Tell me about a time when a key dependency, partner team, or technical assumption failed halfway through a critical project, and you still delivered results.
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results
+  a: |-
+    **What the Bar Raiser is testing.** *Deliver Results* (*"rise to the occasion and never settle"*) tests whether you treat an external blocker as an excuse to miss your milestone or as an engineering constraint to route around.
+
+    1. **The blocker:** Name the exact dependency failure (e.g., the platform team's new streaming bus slipped by 6 weeks, or a third-party LLM API hit rate-limit ceilings).
+    2. **The decoupling shim:** Show how you built a thin interface/adapter backed by an existing boring technology (e.g., Postgres `SKIP LOCKED` queue or local batching) so your launch stayed on schedule and could swap in the upstream dependency later with a 50-line config change.
+
+- id: lp-highest-standards-refusing-to-ship-defect
+  q: Tell me about a time you insisted on holding a launch or rejecting a design because the quality, reliability, or operational readiness was not high enough.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: action-results-standards
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/highest-standards-vs-speed
+  a: |-
+    **What the Bar Raiser is testing.** *Insist on the Highest Standards* tests whether you can spot when a flaw is not "cosmetic tech debt" but an unacceptable defect (silent data corruption, missing rollback path, unthrottled fan-out, or missing audit logs)—and whether you fix it constructively rather than acting as a gatekeeper who only says no.
+  followUps:
+    - q: How did you make sure you weren't just letting perfectionism block a reversible two-way door launch?
+      level: Senior
+      companies: [Amazon]
+      a: |-
+        Distinguish between **surface polish** (which can iterate post-launch) and **state invariants** (data integrity, security, and rollback safety, which are one-way doors once production data is corrupted).
+
+- id: lp-are-right-a-lot-disconfirming-evidence
+  q: Tell me about a time you actively sought out data or perspectives that proved your own initial technical hypothesis wrong.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: dive-deep-judgment
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot
+  a: |-
+    **What the Bar Raiser is testing.** Amazon's definition of *Are Right, A Lot* is counterintuitive: it does **not** mean you are born with infallible intuition. The official text says: *"They seek diverse perspectives and work to disconfirm their beliefs."*
+
+    **Strongest story arc:**
+    - State the architectural belief you held strongly at the start of a project.
+    - Explain the specific experiment, shadow test, or dissenting engineer you consulted specifically to try to **break** your own hypothesis.
+    - Show the data that proved your initial instinct wrong, how fast you pivoted without ego, and the superior result that followed.
+
+- id: lp-earn-trust-admitting-blind-spot-early
+  q: Tell me about a time you made an architectural or estimation error that affected another team, and how you communicated it to maintain their trust.
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: backbone-trust
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/have-backbone-and-earn-trust
+  a: |-
+    **What the Bar Raiser is testing.** *Earn Trust* requires leaders to be *"vocally self-critical, even when doing so is awkward or embarrassing."*
+
+    1. **Speed of disclosure:** Show that you alerted the partner team the moment you verified the bug or slip—not three days later when their integration tests broke.
+    2. **Zero deflection:** State your mistake plainly in first person without blaming ambiguous docs or code reviewers.
+    3. **Remediation + visibility:** Show how you handed them a workaround or compatibility shim plus a live dashboard so they didn't have to chase you for status updates.
+
+- id: lp-think-big-platform-from-point-requests
+  q: Describe a time when you noticed multiple teams solving the same narrow problem and proposed a larger, unified vision.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: invent-think-big-frugality
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/invent-simplify-and-think-big
+  a: |-
+    **What the Bar Raiser is testing.** At L6 (Senior SDE / SDM), *Think Big* is the primary differentiator from L5. L5 engineers build great point solutions inside their team; L6 engineers notice horizontal duplication across 3–5 teams and author a 6-page narrative or PR/FAQ that solves the problem once at the platform layer.
+
+    Always pair your **3-year North Star** with a **4-week Tenant #0 wedge** so the interviewer sees pragmatic execution alongside vision.
+
+- id: lp-learn-and-be-curious-outside-comfort-zone
+  q: Tell me about a time you stepped far outside your primary technical stack or domain to debug a problem or ship a feature.
+  level: Mid
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/frugality-and-curiosity
+  a: |-
+    **What the Bar Raiser is testing.** *Learn and Be Curious* (*"never done learning and always seek to improve themselves"*) tests learning velocity under real constraints. Walk through:
+    - What made the domain unfamiliar (e.g., kernel networking, GPU memory layout, mobile JNI, or double-entry accounting).
+    - How you compressed a 3-month learning curve into 3 days by reading source code, setting up a fast feedback benchmark, and interviewing domain experts.
+    - How you documented what you learned so the next engineer on your team ramped in 30 minutes.
+
+- id: lp-earths-best-employer-fixing-toxic-toil
+  q: Tell me about a time you noticed your team's operational load, on-call rotation, or developer experience was hurting morale, and what mechanism you built to fix it.
+  level: Senior
+  category: amazon-leadership-principles
+  subcategory: people-curiosity-responsibility
+  companies:
+    - Amazon
+  topics:
+    - /behavioral/amazon-leadership-principles/hire-develop-and-best-employer
+  a: |-
+    **What the Bar Raiser is testing.** *Strive to be Earth's Best Employer* tests whether you treat engineer burnout and alert fatigue as **engineering systems problems** that can be measured and solved (via Pareto analysis of pager alerts, SLO burn-rate windows, and automated runbooks) rather than offering empty pep talks.

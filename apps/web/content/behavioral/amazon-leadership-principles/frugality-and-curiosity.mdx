@@ -1,0 +1,116 @@
+---
+title: "Frugality & Learn and Be Curious"
+description: "Turn tight compute, latency or headcount budgets into cleaner designs, and master unfamiliar domains fast."
+icon: dollar-sign
+order: 8
+---
+
+## In one sentence
+
+<KeyIdea>
+**Frugality** treats hard resource constraints (compute budget, headcount, GPU quota, time) as a catalyst for cleaner architecture rather than a reason to cut corners, while **Learn and Be Curious** proves you proactively master unfamiliar technical domains before a crisis forces you to.
+</KeyIdea>
+
+## The story
+
+Give an engineering team an unlimited cloud budget and eight engineers to solve a problem, and they will almost certainly build an eight-microservice system that costs \$40,000 a month.
+Give the same problem to two engineers with a \$1,500/month budget cap, and something remarkable happens: they can't afford the operational overhead of eight services, so they study the workload distribution, compress the hot dataset into a 2 GB memory-mapped bloom filter + SQLite index, and serve 15,000 QPS from two spot instances.
+
+Amazon's **Frugality** principle states: *"Accomplish more with less. Constraints breed resourcefulness, self-sufficiency, and invention. There are no extra points for growing headcount, budget size, or fixed expense."*
+
+## What interviewers are really testing
+
+<AnimatedDiagram spec="animated/behavioral/self-introspection-loop" stepper caption="Learn and Be Curious + Frugality: questioning how systems work under the hood unlocks 10x efficiency wins." />
+
+| Principle | What Bar Raisers look for | Red flag to avoid |
+| --- | --- | --- |
+| **Frugality** | Solving a scale or product challenge with existing hardware/headcount through algorithmic, caching, batching, or architectural cleverness | Being "cheap" in a way that hurts customers or burns out on-call engineers (e.g., turning off staging environments or observability) |
+| **Learn and Be Curious** | Self-directed deep dives into a new domain (e.g., eBPF, CUDA kernels, LLM quantization, Rust, or financial accounting rules) and applying it to ship a real win | Listing courses or papers you read passively without ever applying the knowledge to a real system |
+
+<PremiumBreak />
+
+## How the bar changes by level
+
+<Compare
+  columns={["Dimension", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
+  rows={[
+    ["Frugality", "Optimizes a slow query or right-sizes over-provisioned containers", "Designs a new feature to run within existing cluster headroom; cuts cloud/LLM unit cost by 40–70%", "Re-architects org-wide unit economics (cost per request / cost per tenant) so margin scales with growth"],
+    ["Learn & Be Curious", "Ramps up on a new language, framework, or codebase in days to unblock a sprint", "Masters an adjacent domain (security, ML eval, database internals) to solve a cross-boundary bottleneck", "Spots an emerging industry shift early, runs an empirical spike, and teaches the rest of the org"],
+  ]}
+  caption="Always tie Learn and Be Curious to an applied outcome: what did you learn, how fast did you learn it, and what changed in production?"
+/>
+
+## Interactive diagnostic: test your story
+
+<DecisionTree
+  title="Test your Frugality or Curiosity story"
+  tree={{
+    q: "For Frugality: Did your constraint-driven solution maintain or IMPROVE reliability and latency while saving money/headcount?",
+    yes: {
+      q: "For Learn & Be Curious: Did you apply the new skill to solve a real engineering problem (and share it with your team) rather than just reading a tutorial?",
+      yes: {
+        answer: "Strong Frugality & Curiosity signal! Next: Hire and Develop the Best.",
+        href: "/behavioral/amazon-leadership-principles/hire-develop-and-best-employer",
+      },
+      no: "Connect your learning to a shipped artifact: a benchmark, a production fix, or a brown-bag workshop that upleveled your team.",
+    },
+    no: "Never tell a Frugality story where cutting cost degraded availability or developer productivity—show how constraints forced a smarter design.",
+  }}
+/>
+
+## Worked engineering example (STAR+L)
+
+<Tabs title="Frugality vs. Learn and Be Curious">
+  <Tab label="Frugality (Doing More With Zero Extra Budget)">
+    **Prompt:** *"Tell me about a time you delivered a major result with very limited budget, time, or headcount."*
+
+    - **Situation & Task:** *"Our log-search cluster was costing \$38k/month on Elasticsearch, and CFO budget caps froze any cluster expansion even though enterprise log volume was growing 20% quarter-over-quarter."*
+    - **Action:** *"I profiled query logs over 30 days and discovered 91% of interactive searches only touched the last 6 hours of logs, while the remaining 13.5 days of retention sat on expensive NVMe SSDs for rare compliance audits. Instead of asking for more budget, I architected a two-tier storage split: kept only 12 hours in hot NVMe indices and streamed compressed Parquet blocks to S3 with an Athena/Trino on-demand query federated wrapper for historical searches older than 12h."*
+    - **Result:** *"We absorbed 2.4x log volume growth over the next year while cutting monthly cluster spend from \$38k to \$14k/month (\$288k/yr saved), and hot-window query <Term id="p99" /> actually improved by 30% due to smaller index shards."*
+    - **Learning:** *"We added cost-per-GB-queried telemetry to every storage RFC."*
+  </Tab>
+  <Tab label="Learn and Be Curious (Mastering an Unfamiliar Stack)">
+    **Prompt:** *"Tell me about a time you had to learn a completely unfamiliar technology or domain quickly to solve a problem."*
+
+    - **Situation & Task:** *"As a backend Go engineer, I was asked to rescue an on-device audio wake-word pipeline where battery drain on Android devices was blocking launch, and our sole C++/DSP specialist was on parental leave."*
+    - **Action:** *"I had zero prior DSP experience. I spent 48 hours reading the WebRTC VAD source code, set up an Android power-profiler harness on my desk, and interviewed two firmware engineers to build a mental model of CPU wake locks. Profiling showed the C++ JNI bridge was copying 16 kHz PCM buffers every 10 ms and waking the big ARM core. I learned ring-buffer SIMD intrinsics, batched inference to 80 ms windows on the efficiency core, and validated accuracy against our 10,000-clip audio test set."*
+    - **Result:** *"Battery drain dropped from 4.8%/hour to 0.6%/hour (below the 1.0% launch gate) with zero wake-word recall loss, shipping the release on schedule."*
+    - **Learning:** *"I wrote a 3-page 'Backend Engineer's Guide to JNI & Mobile Power Profiling' so any backend engineer on the team could debug mobile native traces."*
+  </Tab>
+</Tabs>
+
+## Introspect your own work
+
+<Quiz title="Audit your unit-economics & learning habits">
+  <QuizItem
+    question="1. Do you know how much your team's primary service costs per month in cloud/LLM spend—and what the #1 cost driver is?"
+    hint="Most engineers have never opened their team's AWS Cost Explorer or token-usage breakdown."
+  >
+    Spend 15 minutes this week checking your service's unit cost (\$/1,000 requests or \$/active tenant). Almost every service has one 80/20 inefficiency (uncompressed cross-AZ traffic, over-provisioned NAT gateways, unbatched embeddings) waiting to become a great *Frugality* story.
+  </QuizItem>
+  <QuizItem
+    question="2. What is one layer 'one level below' your daily abstraction (e.g., Postgres heap pages, Linux epoll, V8 garbage collection, or KV-cache paging) that you have treated as a black box?"
+    hint="Curiosity one layer below your daily job is what separates senior debuggers from average ones."
+  >
+    Pick one black box, read its core implementation or paper this weekend, and run a small benchmark to see it in action.
+  </QuizItem>
+</Quiz>
+
+## Common red flags & how to recover
+
+- **Claiming "I read Hacker News and blogs" as your Learn and Be Curious answer:** Passive reading is low signal. Always anchor on a **concrete problem** where curiosity led you to test, measure, and ship something better.
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="Tell me about a time you requested more resources (headcount or budget) and were told no. What did you do?"
+    level="Senior"
+    companies={["Amazon"]}
+  >
+    Show zero resentment over the "no." Walk through how the constraint forced you to audit the workflow, eliminate low-ROI scope, automate manual steps, or partner with another team to reuse an existing component.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Invent and Simplify & Think Big](/behavioral/amazon-leadership-principles/invent-simplify-and-think-big)
+- [Hire and Develop the Best & Earth's Best Employer](/behavioral/amazon-leadership-principles/hire-develop-and-best-employer)

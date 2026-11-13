@@ -1,0 +1,136 @@
+---
+title: "Presenting Your Past Project Deep-Dive"
+description: "Structure the 15-to-30 minute 'walk me through a system you built' round so your architecture and personal decisions shine."
+icon: presentation
+order: 8
+---
+
+## In one sentence
+
+<KeyIdea>
+In the "Past Project Deep-Dive" round (Stripe Manager Chat, Uber Bar Raiser, Apple/Google/Amazon HM rounds), spending 12 minutes reciting a tour of your company's boxes and arrows is fatal; win by spending **2 minutes on business/scale context**, **3 minutes on the architecture boundary**, and **70% of your time on the 2–3 hardest trade-offs, bottlenecks, and failure modes YOU personally owned**.
+</KeyIdea>
+
+## The story
+
+Almost every Senior (L5), Staff (L6+), and AI/ML engineering loop includes a 20-to-45 minute **Past Project Deep-Dive** ("Walk me through the most complex system you have designed or built").
+
+Here is how most strong engineers accidentally bomb this round:
+1. They pick a massive system built by 40 people over 3 years, draw 15 microservices on the whiteboard, and talk for 15 minutes without pausing—leaving the interviewer wondering: *"What did THIS candidate actually design vs. inherit?"*
+2. They only present the final happy-path architecture, omitting the dead ends, the rejected alternatives, the migration hazards, and the production bug that paged them at 3 AM.
+
+Interviewers use the Project Deep-Dive as a **live X-ray of your true seniority and ownership depth**.
+
+## What interviewers are really testing
+
+<AnimatedDiagram spec="animated/behavioral/probe-tree" stepper caption="How interviewers drill 3 layers deep into your project's constraints, rejected options, and failure recovery." />
+
+Use the **25-Minute Project Deep-Dive Blueprint** to structure your walkthrough:
+
+| Minute Mark | Section | What to Cover & Draw |
+| --- | --- | --- |
+| **Min 0–2** | **1. Business Context & Hard Constraints** | The user problem, traffic/data scale (RPS, TB, p99 SLA, team size), and **your exact role** (e.g., *"I was the Lead/DRI for the ingestion and consistency engine across a 5-person pod"*) |
+| **Min 2–5** | **2. High-Level Architecture (3–5 Boxes Max)** | Draw the clean boundary: ingress, core state/compute, storage, and external dependencies. Stop and ask: *"Would you like me to dive into the storage sharding trade-off, the zero-downtime migration, or the tail-latency control loop?"* |
+| **Min 5–15** | **3. The 2 Hardest Trade-Offs (Options A vs. B vs. C)** | Walk through the rejected alternatives, the benchmark/math that decided the winner, and the sharp edges you accepted |
+| **Min 15–20** | **4. Rollout Safety, Failure Modes & Metrics** | Shadow verification, idempotency, how the system degrades when a dependency dies, and the quantified business/latency result |
+| **Min 20–25** | **5. What You Would Change Today (Retrospective)** | What broke 6 months later as scale 10x'd, and what you would redesign with hindsight |
+
+<PremiumBreak />
+
+## How the bar changes by level
+
+<Compare
+  columns={["Dimension", "L4 (Mid-Level SWE)", "L5 (Senior SWE)", "L6+ (Staff / Principal SWE)"]}
+  rows={[
+    ["System Scope", "Owns a well-defined service component, pipeline stage, or major feature end-to-end", "Owns an end-to-end service or multi-component subsystem; drives RFC, rollout, and SLOs", "Owns multi-service / cross-org architecture, platform abstractions, or company-critical migrations"],
+    ["Trade-Off Fluency", "Explains why the team chose library/pattern X over Y with clear pros/cons", "Defends quantitative trade-offs (CAP, latency, FinOps cost, operability) across 3+ competing designs", "Explains how organizational topology (Conway's Law), multi-year product strategy, and hardware economics shaped the design"],
+    ["Self-Critique", "Identifies code/test improvements they would make next time", "Points out architectural seams that hit scaling limits at 5x load and how they evolved them", "Critiques the 18-month lifecycle of the architecture candidly, including organizational adoption friction"],
+  ]}
+  caption="When an interviewer asks 'What would you do differently if you rebuilt this today?', saying 'Nothing, it worked great' is a major missed signal."
+/>
+
+## Interactive diagnostic: test your deep-dive project
+
+<DecisionTree
+  title="Is your flagship project ready for a 30-minute Deep-Dive round?"
+  tree={{
+    q: "Can you draw the high-level architecture in under 3 minutes using 4–6 clean boxes, and state in one sentence which exact box(es) YOU personally designed vs. inherited?",
+    yes: {
+      q: "For your 2 biggest design decisions, can you present at least two rejected alternatives (Option A vs. Option B) with the exact numbers/constraints that made you reject them?",
+      yes: {
+        q: "Have you prepared a candid answer for 'What broke in production?' AND 'What would you redesign today at 10x scale?'",
+        yes: {
+          answer: "Deep-Dive ready! Next: move to Hub 5 (Leveling & Role-Specific Tracks).",
+          href: "/behavioral/leveling-and-tracks/junior-to-senior-leveling",
+        },
+        no: "Every deep-dive ends with 'What would you change today?' Prepare 1 scaling bottleneck and 1 operational simplification you discovered post-launch.",
+      },
+      no: "An architecture presentation without rejected alternatives sounds like you just followed orders. Write down a 3-column comparison table for your top 2 decisions.",
+    },
+    no: "Simplify your diagram! Group peripheral services into a single 'Upstream/Downstream' box so 80% of the visual focus stays on the subsystem you owned.",
+  }}
+/>
+
+## Worked engineering example (STAR+L)
+
+<Tabs title="Project Deep-Dive Scripts: The Opening Pitch & The Trade-Off Matrix">
+  <Tab label="The 2-Minute Opening Pitch + Interactive Menu">
+    **Prompt:** *"Walk me through the most technically challenging project you have worked on recently."*
+
+    - **1. The Hook & Scale (45 sec):** *"I'll walk you through the **Real-Time Usage Metering & Quota Engine** I architected and led for our API platform, which processes **120,000 events/sec** across 40,000 B2B customers with a hard **sub-15ms p99 enforcement budget** on the API gateway hot path and **99.995% billing accuracy**."*
+    - **2. My Exact Role vs. Team (20 sec):** *"We were a 4-engineer squad. I authored the system RFC, personally built the distributed token-bucket lease protocol and Kafka-to-ClickHouse reconciliation pipeline, and led the zero-downtime migration from our legacy Redis cluster."*
+    - **3. The 3-Box Architecture + Interviewer Menu (45 sec):** *"At a high level, the system has three planes: (1) Edge Gateway Local Lease Caches, (2) a Regional Quota Coordinator service, and (3) an Async Durable Ledger & Reconciler. **There were three really hard engineering problems here: first, preventing 'hot-tenant' Redis partition bottlenecks without allowing 10x quota overruns; second, guaranteeing exactly-once billing aggregation during regional failovers; and third, migrating 40,000 live customers with zero dropped webhooks. Which of those three would you like to dive into first?**"*
+  </Tab>
+  <Tab label="Handling 'What Would You Redesign Today?' (Hindsight Signal)">
+    **Prompt:** *"Looking back at that system 12 months later, what was its biggest flaw and how would you redesign it today?"*
+
+    - **Weak Answer:** *"Honestly it worked really well and met all our SLOs, so I wouldn't change much."* (Zero architectural growth signal.)
+    - **Strong Senior/Staff Answer:** *"While the adaptive lease protocol hit our 15 ms p99 latency and 99.995% billing accuracy targets, six months after launch we hit an operational pain point I hadn't anticipated: **Enterprise Multi-Workspace Hierarchies**. When Sales introduced parent-child organization pools where 50 sub-workspaces shared a single pooled rate limit, our flat `tenant_id` shard key required cross-partition lease coordination that doubled tail latency for hierarchical tenants. If I were designing the data model today, I would key the lease state machine by `billing_root_id` from Day 1 with hierarchical local sub-quotas, and I would replace our custom Go WAL-compaction worker with native ClickHouse `ReplacingMergeTree` materialized views—which wasn't mature in our cluster when we started, and would have saved us ~1,800 lines of custom state-recovery code."*
+  </Tab>
+</Tabs>
+
+## Introspect your own work
+
+<Quiz title="Stress-test your Project Deep-Dive readiness">
+  <QuizItem
+    question="1. Why should you offer the interviewer a '3-Door Menu' of deep-dive topics at Minute 3 instead of talking for 15 minutes straight?"
+    hint="Different interviewers have different rubrics: an SRE cares about failover, a Staff SWE cares about sharding, and an EM cares about cross-team migration."
+  >
+    Offering a 3-topic menu at Minute 3 turns a one-way monologue into a collaborative peer conversation and lets the interviewer steer straight to the competency they are assigned to grade.
+  </QuizItem>
+  <QuizItem
+    question="2. Can you draw your flagship project from memory on a blank Excalidraw or whiteboard in 180 seconds?"
+    hint="Fumbling with drawing tools eats valuable deep-dive time."
+  >
+    Practice drawing your **4-Box Context Diagram** and your **3-Column Trade-Off Table** until you can sketch both in under 3 minutes while narrating.
+  </QuizItem>
+</Quiz>
+
+## Common red flags & how to recover
+
+- **Claiming credit for inherited infrastructure:** If you joined after the storage engine was already chosen, say so upfront (*"When I joined, the team had already selected Cassandra; my scope was solving the tombstones compaction outage and designing the v2 partition key"*). Interviewers respect honesty and will probe the part you *did* own.
+- **Violating NDA with proprietary secrets:** Never paste internal code, customer names, or secret unreleased product names. Describe systems using clean architectural primitives, public scale orders of magnitude, and standard industry patterns.
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What if my most recent project was mostly glue code or product CRUD—can I present an older project from 2–3 years ago?"
+    level="Senior"
+    companies={["Google", "Meta", "Stripe", "Uber"]}
+  >
+    Yes! Choosing a slightly older project (within the last 2–4 years) where you had **deep architectural ownership, tough trade-offs, and measurable production scale** is much better than presenting a recent project that was technically shallow. Just make sure you refresh your memory on the exact numbers, schemas, and failure modes before the loop.
+  </InterviewQuestion>
+
+  <InterviewQuestion
+    question="How do I handle it when the interviewer interrupts my walkthrough every 60 seconds with skeptical questions?"
+    level="Senior"
+    companies={["Amazon", "Uber", "Apple", "Netflix"]}
+  >
+    Frequent interruptions in a Project Deep-Dive are a **good sign**, not a bad sign! It means the interviewer is engaged and testing your depth boundary. Answer their question concisely in 30–45 seconds (conclusion first), ask *"Does that answer your question on the consistency model, or should we go deeper there?"*, and then smoothly resume your arc.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Handling Follow-Up Probes & "Why Did You Do That?"](/behavioral/foundations/handling-follow-up-probes)
+- [Quantifying Engineering Impact When You Don't Have Revenue Metrics](/behavioral/foundations/quantifying-engineering-impact)
+- [Junior-to-Senior (L3–L5) Leveling Rubric](/behavioral/leveling-and-tracks/junior-to-senior-leveling)

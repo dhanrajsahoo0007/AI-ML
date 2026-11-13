@@ -21,9 +21,10 @@ export function interviewArea(name: string | undefined): InterviewArea | undefin
   return INTERVIEW_AREAS.find((a) => a.name === name);
 }
 
-// The two tracks of Interview Practice. Every category is in one (`track` in content/question-bank/taxonomy.yaml):
-// AI and ML questions, or classic system design questions. The /interviews index lists the tracks separately.
-export type InterviewTrack = "ai" | "design";
+// The tracks of Interview Practice. Every category is in one (`track` in content/question-bank/taxonomy.yaml):
+// AI and ML questions, classic system design questions, or behavioral and leadership questions.
+// The /interviews index lists the tracks separately.
+export type InterviewTrack = "ai" | "design" | "leadership";
 
 export const INTERVIEW_TRACKS: readonly { slug: InterviewTrack; title: string; noun: string; description: string }[] = [
   {
@@ -39,5 +40,12 @@ export const INTERVIEW_TRACKS: readonly { slug: InterviewTrack; title: string; n
     noun: "system design",
     description:
       "Design questions with the follow-ups interviewers ask next, and the fundamentals, databases and patterns behind them. Every question links to its topic page.",
+  },
+  {
+    slug: "leadership",
+    title: "Behavioral & leadership interviews",
+    noun: "behavioral and leadership",
+    description:
+      "FAANG behavioral questions, Amazon's 16 Leadership Principles, conflict, ownership, ambiguity and AI lab values rounds, with Bar Raiser follow-ups and level-by-level answers.",
   },
 ];

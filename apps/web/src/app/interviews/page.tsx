@@ -89,12 +89,15 @@ export default function InterviewsIndexPage() {
         <PageHeader
           className="mt-10 mb-8 border-b border-hairline pb-12"
           title="Interview questions"
-          lead={`${total.toLocaleString("en-US")} interview questions with clear answers in two tracks, AI and ML and system design, organized by topic and tagged with the companies reported to ask them. Filter by difficulty and company, search, and keep answers hidden until you are ready.`}
+          lead={`${total.toLocaleString("en-US")} interview questions with clear answers across AI and ML, system design, and behavioral and leadership, organized by topic and tagged with the companies reported to ask them. Filter by difficulty and company, search, and keep answers hidden until you are ready.`}
         />
       </FadeIn>
 
       {tracks.length > 1 && (
-        <nav aria-label="Tracks" className="mb-12 grid gap-3 sm:mb-16 sm:grid-cols-2">
+        <nav
+          aria-label="Tracks"
+          className={`mb-12 grid gap-3 sm:mb-16 ${tracks.length >= 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}
+        >
           {tracks.map((t) => (
             <a
               key={t.slug}

@@ -1,0 +1,124 @@
+---
+title: "Success and Scale Bring Broad Responsibility"
+description: "Catch privacy, security, accessibility, fairness and AI safety blind spots before they harm users at scale."
+icon: globe
+order: 10
+---
+
+## In one sentence
+
+<KeyIdea>
+**Success and Scale Bring Broad Responsibility** tests whether you proactively engineer for second-order societal, privacy, security, accessibility, environmental, and AI-safety impacts before a 1-in-10,000 edge case harms thousands of real people at scale.
+</KeyIdea>
+
+## The story
+
+At a 50-user startup, a 0.01% edge case happens once a year. At Amazon, Google, or OpenAI scale—serving 100 million requests an hour—a 0.01% edge case happens **10,000 times every single hour**.
+
+Suppose an engineer builds an LLM customer-support summarizer that logs raw prompt context to an internal analytics table so data scientists can debug bad summaries. At small scale, it looks like harmless debugging telemetry. At scale, those raw prompts contain unredacted credit-card numbers, medical disclosures, and auth tokens accessible to 400 internal analysts.
+An engineer who embodies **Success and Scale Bring Broad Responsibility** doesn't wait for a compliance audit or a data breach to care: during the initial RFC, they build a deterministic PII/secret scrubbing pipeline with differential access controls and a 7-day auto-TTL—leaving the system better, safer, and more trustworthy than they found it.
+
+## What interviewers are really testing
+
+<AnimatedDiagram spec="animated/behavioral/incident-ownership" stepper caption="Broad responsibility at scale means catching second-order privacy, security, fairness, and carbon/cost blast radius in CI before it reaches production." />
+
+| Dimension of Responsibility | Concrete Engineering Signal |
+| --- | --- |
+| **Security & Privacy by Design** | Catching PII leakage, overly permissive IAM roles, cross-tenant data bleed, or unencrypted tokens during design review |
+| **AI Safety, Fairness & Bias** | Auditing model performance across demographic/language cohorts; adding guardrails against prompt injection or hallucinated medical/financial advice |
+| **Accessibility & Inclusion** | Ensuring critical user flows work with screen readers, high contrast, low-bandwidth mobile networks, and screen-reader keyboard traps (WCAG 2.2 AA) |
+| **Resource & Carbon Footprint** | Eliminating wasteful zombie compute jobs, runaway retry storms that DDoS partner systems, or unnecessary multi-TB data duplication |
+
+<PremiumBreak />
+
+## How the bar changes by level
+
+<Compare
+  columns={["Signal", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
+  rows={[
+    ["Risk Detection", "Spots an unredacted PII log or missing auth check in a PR and fixes it", "Runs a threat model / privacy / fairness audit on a new service and builds automated guardrails", "Designs org-wide governance, multi-tenant isolation architectures, or AI evaluation gates"],
+    ["Second-Order Thinking", "Considers how a change affects immediate callers", "Bounds retry storms, downstream blast radius, and worst-case abuse vectors", "Balances capability velocity against systemic societal, regulatory, and platform trust risks"],
+  ]}
+  caption="You do not need a 'charity' story to answer this LP—security, privacy, multi-tenant safety, accessibility, and AI fairness are prime engineering stories."
+/>
+
+## Interactive diagnostic: test your story
+
+<DecisionTree
+  title="Test your Broad Responsibility story"
+  tree={{
+    q: "In your story, did you spot and mitigate a risk that affected users, privacy, security, accessibility, fairness, or downstream ecosystems BEFORE an external regulator or outage forced your hand?",
+    yes: {
+      q: "Did you embed the fix into an automated gate (CI check, IAM policy, eval suite, rate limiter) so future engineers couldn't accidentally bypass it?",
+      yes: {
+        answer: "Complete! You have now covered all 16 Amazon Leadership Principles.",
+        href: "/behavioral/company-playbooks/meta-jedi-interview",
+      },
+      no: "Show how you turned your manual audit into an automated invariant check.",
+    },
+    no: "Frame the story around the moment you asked: 'If this system scales 100x or is abused by a bad actor, who gets hurt and how do we bound it now?'",
+  }}
+/>
+
+## Worked engineering example (STAR+L)
+
+<Tabs title="Privacy/Security vs. AI Fairness & Scale">
+  <Tab label="Catching Cross-Tenant PII Leakage">
+    **Prompt:** *"Tell me about a time you identified a secondary impact or ethical/security risk of your team's work and took action."*
+
+    - **Situation & Task:** *"We were launching an AI auto-complete feature for enterprise support agents. To speed up response time, the initial design cached prompt-completion pairs in a shared Redis cluster keyed by the first 64 characters of the prompt."*
+    - **Action:** *"During a pre-launch code review, I realized that two agents at different companies typing a standard greeting ('Hi, I am following up on your account number...') could collide on the 64-character prefix and receive cached completions containing another tenant's customer name or invoice details. Even though launch was 4 days away, I flagged the cross-tenant PII risk, wrote a reproduction test proving the collision, and re-keyed the cache with an HMAC of `tenant_id + user_role + full_prompt_hash` plus an automated regex PII scrubber before any entry was written to Redis."*
+    - **Result:** *"We shipped on the original launch day with zero cross-tenant exposure, and passed our SOC2 Type II audit the following month."*
+    - **Learning:** *"I added a mandatory multi-tenant cache-key linter rule across our monorepo requiring `tenant_id` in every cache namespace."*
+  </Tab>
+  <Tab label="Preventing Downstream Ecosystem Harm">
+    **Prompt:** *"Tell me about a time you realized a technical design would negatively impact an external partner or community at scale."*
+
+    - **Situation & Task:** *"Our webhook delivery service retried failed merchant endpoints up to 20 times with fixed 5-second intervals. When small indie merchants experienced a brief database hiccup, our 50,000-webhook retry wave acted like a DDoS attack that kept their servers down for hours."*
+    - **Action:** *"I analyzed webhook failure logs and saw our aggressive retries were causing 40% of small-merchant outages. I redesigned our retry policy to use exponential backoff with full jitter, added per-destination concurrency caps and circuit breakers that paused delivery when a merchant's endpoint returned 503 for 60 seconds, and exposed a self-serve 'replay when ready' button in the merchant dashboard."*
+    - **Result:** *"Webhook recovery success rate rose from 74% to 98.6%, outbound retry bandwidth dropped by 62%, and small-merchant support tickets about webhook floods fell to zero."*
+    - **Learning:** *"At scale, an unthrottled client retry loop is indistinguishable from an attack; every outbound caller must respect the receiver's capacity."*
+  </Tab>
+</Tabs>
+
+## Introspect your own work
+
+<Quiz title="Second-order responsibility audit">
+  <QuizItem
+    question="1. If a malicious user or compromised API key sent 10,000 crafted requests to your service tonight, what is the worst thing that could happen to other users' data or availability?"
+    hint="Think about tenant isolation, PII in logs, and noisy-neighbor starvation."
+  >
+    Auditing your service's blast radius under abuse is one of the highest-leverage exercises a Senior+ engineer can run.
+  </QuizItem>
+  <QuizItem
+    question="2. Does your product or model work equally well for users on a 3G mobile connection, using a screen reader, or speaking with a non-US accent/locale?"
+    hint="Slicing error rates by locale, device tier, or accessibility mode often uncovers massive blind spots."
+  >
+    Check your metrics across the bottom 5% device/network/locale cohorts—not just the median.
+  </QuizItem>
+</Quiz>
+
+## Common red flags & how to recover
+
+- **Saying "I'm just an IC engineer, compliance/ethics is Legal's job":** Amazon added this 16th Leadership Principle specifically to ensure engineers take direct technical ownership of scale externalities.
+
+<InterviewQuestions>
+  <InterviewQuestion
+    question="What kinds of stories fit 'Success and Scale Bring Broad Responsibility' if I don't work on climate or charity projects?"
+    level="Mid"
+    companies={["Amazon"]}
+  >
+    95% of strong engineering answers to this LP come from **production software engineering**:
+    1. **Privacy & Data Protection:** Redacting PII from logs/training data, GDPR/CCPA deletion rigor, tenant isolation.
+    2. **AI Safety & Fairness:** Eliminating demographic bias in ML models, preventing prompt injection or toxic outputs.
+    3. **Accessibility (a11y):** Making interfaces usable for blind or motor-impaired users.
+    4. **Cloud Efficiency & Ecosystem Citizenship:** Cutting wasteful compute/energy usage or preventing retry storms against smaller partners.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Frontier AI Labs Values (Anthropic, OpenAI, DeepMind)](/behavioral/company-playbooks/frontier-ai-labs-values)
+- [How Amazon Evaluates the 16 LPs](/behavioral/amazon-leadership-principles/how-amazon-evaluates-lps)
+- [Amazon Leadership Principles Question Bank](/interviews/amazon-leadership-principles)
+`,Path:
