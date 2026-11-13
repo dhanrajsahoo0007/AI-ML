@@ -140,7 +140,7 @@ const spec: DiagramSpec = {
     { from: "pool", to: "meter", label: "15% busy", tone: "red", dashed: true, flow: true, until: 1 },
 
     // Step 2: everyone submits work to one queue; the GPU runs one job after another.
-    { from: "notebook", to: "queue", label: "submits runs", packet: true, step: 2 },
+    { from: "notebook", to: "queue", label: "submits runs", packet: true, labelAt: 0.3, step: 2 },
     {
       from: "tagging",
       to: "queue",
@@ -150,7 +150,7 @@ const spec: DiagramSpec = {
       labelAt: 0.35,
       step: 2,
     },
-    { from: "queue", to: "pool", label: "next job", packet: true, delay: 1.2, step: 2 },
+    { from: "queue", to: "pool", label: "next job", packet: true, delay: 1.2, labelAt: 0.3, step: 2 },
     { from: "pool", to: "meter", label: "80% busy", tone: "green", dashed: true, flow: true, step: 2 },
 
     // Step 3: training joins the queue; the batch service turns GPUs on and off with the queue length.

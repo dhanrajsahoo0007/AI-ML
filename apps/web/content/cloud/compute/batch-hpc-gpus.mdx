@@ -1,11 +1,313 @@
 ---
 title: "Batch, HPC and GPUs"
-description: "How to run piles of jobs, tightly coupled simulations and GPU work on the cloud, and how to keep costly accelerators busy."
-status: outline
+description: "How to run piles of jobs on spare capacity, when machines must sit close and talk fast, and how to keep costly GPUs busy instead of idle."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** work that is not a request: a pile of jobs to finish, a simulation that needs many machines talking fast, or a model that needs accelerators. The page explains job queues and managed batch, why placement and fast links matter for high-performance computing, what a GPU is for and the ways to pay for one, and how to keep an accelerator fleet busy.
+<KeyIdea>
+  Some work is a pile of jobs to finish, not requests to answer: cut it into small pieces, queue them, and rent machines only while work is waiting.
+</KeyIdea>
 
-**Related reading on this site:** [Compute on AWS](/cloud/aws/compute) · [AI & ML on AWS](/cloud/aws/ai-ml) · [AI & ML on Google Cloud](/cloud/gcp/ai-ml)
+## The story
+
+At the end of October, Brightpost redesigns its product pages. Each of its 2,000 products needs its main photo in 6 new sizes, so 12,000 images. Asha writes one script that resizes them in order, about 2 seconds per image, about 6.7 hours in all. To save money she runs it on spare machines that the provider can take back, as the nightly resize worker already does. The script keeps each finished image on the machine's own disk and plans to upload them all at the end. It starts on Friday at 20:00. At 01:00 the provider takes the machine back, and about 9,000 finished images vanish with its disk. Asha reruns the script on a regular machine at 08:00. The new pages, due at 9 a.m. on Saturday, go live at 3 p.m.
+
+The steps below rebuild that job so a reclaim costs a minute. Then they cover two harder kinds of heavy work: machines that must talk fast, and GPUs.
+
+## How it works
+
+Two words first. A **batch job** is work that starts, runs to the end and stops, with no person waiting on each answer. A web service is the opposite: it stays up and answers requests one by one. For a batch job, two numbers matter: <Term id="throughput">throughput</Term>, the work finished per hour, and the time the last piece finishes.
+
+### Step 1: A job, not a request
+
+<AnimatedDiagram spec="animated/cloud/batch-job-queue" step={1} minWidth={620} caption="Brightpost's first try: one script on one spot machine reads every photo and plans to upload all results at the end." />
+
+The re-render is a batch job. Nobody waits on any single image; Brightpost needs all 12,000 done before 9 a.m. So the job can run at night, wait a little for a machine, and use cheap capacity.
+
+<Term id="spot-capacity">Spot capacity</Term> fits that shape. The provider sells its spare machines for much less than the regular rate, and takes one back when a paying customer needs it. A late image costs Brightpost nothing.
+
+In the picture, one machine reads every photo and holds every result until the end. The whole 6.7-hour job is one unit of work, and every later step makes that unit smaller. Queues themselves are covered in [Message queues](/system-design/patterns/message-queues); this page covers what the cloud adds.
+
+<PremiumBreak />
+
+### Step 2: The machine is taken back
+
+<AnimatedDiagram spec="animated/cloud/batch-job-queue" step={2} minWidth={620} caption="The failure: the provider reclaims the machine after 5 hours, and the images on its local disk are lost." />
+
+A **reclaim** is the provider taking a spot machine back. It sends a short warning first, from about 30 seconds to 2 minutes depending on the cloud. Then the machine stops, and its local disk is wiped.
+
+<Callout tone="red" title="What breaks">
+  At 01:00 the script had finished about 9,000 of the 12,000 images, all on the local disk. The warning came, nothing listened for it, and the machine stopped. The thumbnails bucket held nothing new, so the rerun started again at image 1. Five hours of work were lost, and the launch slipped by 6 hours.
+</Callout>
+
+Spot did not cause the loss. The design did: one long unit of work, with all its progress in one place that could vanish. The nightly resize worker survives reclaims because each photo waits in the uploads bucket until it is done.
+
+### Step 3: Split the work into small jobs
+
+<AnimatedDiagram spec="animated/cloud/batch-job-queue" step={3} minWidth={620} caption="The work becomes 200 jobs of 10 products each, waiting in one queue." />
+
+A **job array** is one submission that creates many copies of the same job, each with its own index number. Brightpost submits an array of 200 child jobs. Child 41 uses its number to pick products 401 to 410. It writes 6 sizes of each photo and stops, after about 2 minutes.
+
+A **job queue** holds jobs that are waiting for a machine. These jobs need nothing from each other, so any machine can take any job, in any order.
+
+Size the jobs between two limits. Too small, and the seconds spent starting each job add up. Too large, and a reclaim throws away more work.
+
+### Step 4: Machines started to match the queue
+
+<AnimatedDiagram spec="animated/cloud/batch-job-queue" step={4} minWidth={620} caption="The batch service sees 200 waiting jobs and starts 20 spot machines to run them." />
+
+A **managed batch service** takes jobs from a queue, starts machines to run them, and stops the machines when the queue is empty. You describe which machines it may use: the types, spot or regular, and a maximum count. That description is the **compute environment**.
+
+Brightpost allows spot machines only, from 0 up to 20. The 200 jobs arrive, and the service starts 20 machines. Each runs 10 jobs in a row: 200 jobs × 2 minutes ÷ 20 machines is about 20 minutes, plus about 3 to start the machines. Then the queue is empty and the count drops back to 0. It is the [autoscaling](/cloud/compute/autoscaling) loop, steered by queue length instead of processor use.
+
+### Step 5: Surviving a reclaim: retries and checkpoints
+
+<AnimatedDiagram spec="animated/cloud/batch-job-queue" step={5} minWidth={620} caption="Each job saves every product as it goes. A reclaim takes 1 of the 20 machines, and its job goes back in the queue." />
+
+Each job now saves every product to the thumbnails bucket as soon as it is done, and skips any product whose 6 sizes already exist. That makes a rerun <Term id="idempotent">idempotent</Term>: doing it twice gives the same result as doing it once.
+
+During the November run, the provider reclaims 1 of the 20 machines. Its job had saved 5 of its 10 products. The job allows 3 tries, so the batch service puts it back in the queue. Another machine skips the 5 saved products and finishes the rest. The reclaim costs about 1 minute, not 5 hours.
+
+Some work cannot be cut up, such as training a model for 10 hours. Then use a **checkpoint**: the job saves its progress to <Term id="object-storage">object storage</Term> on a schedule, and a new try starts from the latest save. Brightpost checkpoints at least every 30 minutes, plus once more when the reclaim warning arrives.
+
+### Step 6: Timeouts, failed jobs and dependencies
+
+<AnimatedDiagram spec="animated/cloud/batch-job-queue" step={6} minWidth={620} caption="Jobs that fail three times are set aside. The publish job waits until all 200 jobs have succeeded." />
+
+Three rules finish the design.
+
+1. **A timeout.** Each job may run for 10 minutes, 5 times its normal 2. A job stuck in a loop is stopped instead of holding a machine all night.
+2. **A retry limit.** After its third failure a job moves to a list of failed jobs, and the queue moves on. In November one job failed 3 times because one photo was a broken file. Asha replaced the file and resubmitted that one job.
+3. **A dependency.** A job can wait for others. The publish job, which switches the pages to the new sizes, starts only after all 200 children succeed. No page ever points at an image that does not exist yet.
+
+### Step 7: HPC: when machines must talk to each other
+
+**HPC**, high-performance computing, means one large calculation spread across many machines, such as a weather forecast. Its jobs are **tightly coupled**: each machine needs results from the others many times a second. One slow link holds up all of them, and one lost machine can stop the run.
+
+<Compare
+  columns={["", "Loosely coupled batch", "Tightly coupled HPC"]}
+  rows={[
+    ["Machines talk to each other", "Never", "Many times a second"],
+    ["One machine is lost", "Its job is retried", "The whole run stops, back to the last checkpoint"],
+    ["Placement", "Anywhere, spread across zones", "Packed close together in one zone"],
+    ["Network", "Ordinary", "Low-latency, high-bandwidth links between machines"],
+    ["Storage", "Object storage", "A shared parallel file system"],
+    ["Spot", "A good fit", "Rarely: one reclaim stops every machine"],
+  ]}
+  caption="Brightpost's re-render is on the left. It has no work on the right."
+/>
+
+Three pieces make HPC fast. **Placement** asks the cloud to put the machines physically close, so each round trip is short. A **fast network** adds network cards built for many small messages. A **parallel file system** is <Term id="file-storage">file storage</Term> that spreads each file across many servers, so hundreds of machines can use it at once. Close placement has a price: one rack fault can hit many machines. Spread placement does the opposite, for services that must stay up.
+
+### Step 8: GPUs and other accelerators
+
+<AnimatedDiagram spec="animated/cloud/gpu-fleet" step={1} minWidth={620} caption="A notebook keeps one GPU machine on all week. The GPU is busy for 15% of the hours Brightpost pays for." />
+
+A **GPU**, graphics processing unit, is a chip with thousands of small cores that do the same sum on many numbers at once. That suits images and machine-learning models. An **accelerator** is any chip built for that kind of maths; some clouds design their own.
+
+**Training** teaches a model from examples. It runs for hours or weeks, so it is a batch job that needs checkpoints. **Inference** uses the trained model to answer, such as tagging one photo, in milliseconds to seconds.
+
+Brightpost tries a model that tags product photos with style words, such as "retro". Asha opens a **notebook**, an interactive coding page, on a GPU machine on Monday and leaves it open all week. The machine bills 168 hours; the GPU is busy for about 25, 15%. GPUs also idle while waiting for slow data loading.
+
+### Step 9: Keep accelerators busy
+
+<AnimatedDiagram spec="animated/cloud/gpu-fleet" step={2} minWidth={620} caption="The notebook and the tagging job send work to one queue, and a shared GPU runs the jobs back to back." />
+
+The fix is the re-render's: put a queue in front of the expensive machine. Asha's notebook moves to a small machine without a GPU and submits GPU work as jobs. Tagging all 2,000 photos is a job too. The GPU runs one job after another and is busy about 80% of its paid hours.
+
+Small jobs can take turns on one GPU, and some data-centre GPUs split into isolated slices. Priorities stop a long training run from blocking a short inference job.
+
+Then there is getting a GPU at all. A <Term id="quota">quota</Term> is a limit on how much one account may use. GPU quotas on new accounts often start low, sometimes at zero, and a raise can take days. Even with quota, a zone may have no GPU of your type free. So ask early, allow several types and zones, and reserve capacity for known dates.
+
+### Step 10: The cost shape
+
+<AnimatedDiagram spec="animated/cloud/gpu-fleet" step={3} minWidth={620} caption="Training runs join the same queue, and the batch service runs between 0 and 2 GPUs to match it." />
+
+Machines bill while they are on, busy or not, often by the second, and a GPU machine costs many times a regular one per hour. So the bill follows hours switched on, not hours of work.
+
+- **Batch on spot.** Cost follows the queue. When the last job ends, the bill stops.
+- **GPUs.** With 0 to 2 GPUs following the queue, Brightpost pays for about 30 hours a week instead of 168, about 80% less.
+- **Serving a model.** A steady stream of answers runs on a GPU fleet you size, or on a managed endpoint; [AI and ML platforms](/cloud/operations/ai-ml-platforms-on-the-cloud) compares them.
+
+[Cloud cost models](/cloud/operations/cloud-cost-models) puts these meters side by side.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a queue of jobs, machines started to match it, and spare capacity that can be taken back.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Batch service:** AWS Batch: job queues feed compute environments, with array jobs, dependencies, retries and timeouts. No charge of its own beyond the machines.
+    - **Spare capacity:** EC2 Spot Instances, with a two-minute interruption notice.
+    - **Placement and network:** cluster placement groups, and the Elastic Fabric Adapter (EFA) for low-latency links. AWS ParallelCluster builds HPC clusters.
+    - **Shared file system:** Amazon FSx for Lustre, which can link to an S3 bucket.
+    - **Accelerators:** GPU instance families G (graphics, inference) and P (training); AWS's own Inferentia and Trainium chips. SageMaker AI runs managed training and endpoints.
+
+    **The difference that changes a design.** The queue and the compute environment are separate objects, and one queue can feed several environments in order. Put a spot environment first and a regular one second. Jobs run on spot when it is free and fall back when it is not, with no change to the jobs.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Batch service:** Batch: a job holds task groups with a task count, a parallelism and a retry count. Workflows chains dependent jobs. No charge of its own beyond the machines.
+    - **Spare capacity:** Spot VMs, with about 30 seconds' notice. Older preemptible VMs also exist and stop after at most 24 hours.
+    - **Placement and network:** compact placement policies. Cluster Toolkit deploys HPC clusters with the Slurm scheduler.
+    - **Shared file system:** Filestore, and a managed Lustre service for parallel work.
+    - **Accelerators:** GPUs on accelerator-optimised machine families, and Cloud TPU, Google's own chips. Vertex AI runs managed training and endpoints.
+
+    **The difference that changes a design.** The TPU is an accelerator family the other two clouds do not offer. It runs code written with frameworks that support it, such as JAX or TensorFlow. So choosing TPUs is a code decision as well as a capacity one: make it before the training code is written.
+  </Tab>
+  <Tab label="Azure">
+    - **Batch service:** Azure Batch: you create a pool of VMs, then submit jobs made of tasks, with task dependencies and retry counts. No charge of its own beyond the machines.
+    - **Spare capacity:** Spot VMs, with about 30 seconds' notice. A pool can mix spot and dedicated nodes, and Batch requeues the tasks of a lost node.
+    - **Placement and network:** proximity placement groups, and InfiniBand on HPC and some GPU sizes. Azure CycleCloud runs schedulers such as Slurm.
+    - **Shared file system:** Azure Managed Lustre.
+    - **Accelerators:** N-series VMs: NC for compute, ND for large training, NV for graphics. Azure Machine Learning runs managed training and endpoints.
+
+    **The difference that changes a design.** The pool is yours to size. It stays fixed, or grows and shrinks by an autoscale formula that you write. A pool whose formula never reaches zero bills all night with an empty queue, so design the formula as carefully as the jobs.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/batch-job-queue" stepper minWidth={620} caption="The whole re-render in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/batch-job-queue" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Where should this heavy job run?"
+  tree={{
+    q: "While it runs, does each machine need results from the other machines?",
+    yes: "Tightly coupled HPC: close placement, a low-latency network and a shared parallel file system. Checkpoint the whole run, and keep it off spot.",
+    no: {
+      q: "Can it be cut into jobs of minutes, or save a checkpoint at least every 30 minutes?",
+      yes: {
+        q: "Does it need a GPU?",
+        yes: "A GPU job queue on a batch service, with checkpoints and spot where your quota allows. No notebook holds the machine.",
+        no: "A job array on a managed batch service with spot machines, retries and a timeout. Brightpost's re-render is this case.",
+      },
+      no: "Regular machines, or change the job so it saves progress. On spot, one reclaim would send it back to the start.",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="A machine is reclaimed 1 minute into a job that has saved 5 of its 10 products. What is lost?" hint="What does the retry find in the bucket?">
+    At most the one product in progress, about 12 seconds of work. The retry finds the 5 saved products, skips them and resizes the other 5.
+  </QuizItem>
+  <QuizItem question="The notebook's GPU machine is on for 168 hours a week and busy for 25. What share of the bill pays for waiting?">
+    About 85%. Only 25 of the 168 paid hours do work, about 15%.
+  </QuizItem>
+  <QuizItem question="Why does a simulation on 64 tightly coupled machines avoid spot, while the re-render runs well on it?" hint="Count what one reclaim stops.">
+    One reclaim in the simulation stops all 64 machines, back to the last checkpoint. One reclaim in the re-render stops one job of 2 minutes, which is retried.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "One script, one machine", "Job array on a batch service", "Tightly coupled HPC cluster"]}
+  rows={[
+    ["Brightpost's re-render takes", "6.7 hours", "About 23 minutes on 20 machines", "Not needed: the pieces never talk"],
+    ["A spot reclaim costs", "Everything so far: 5 hours in October", "One job: under 2 minutes", "The whole run since the last checkpoint"],
+    ["Setup effort", "Minutes", "About a day: image, job, queue, environment", "Days or weeks: placement, network, file system, scheduler"],
+    ["Fits spot", false, true, false],
+    ["Use it for", "A one-off job under an hour", "Many independent pieces: renders, exports, tagging", "Simulations whose machines exchange data all the time"],
+  ]}
+  caption="Brightpost's numbers. The cluster column describes HPC in general; Brightpost has no such work."
+/>
+
+The job array costs a day of setup and wins every month after. The one-machine script suits only a job whose rerun nobody would notice.
+
+## Common pitfalls
+
+- **Saving progress only at the end.** A reclaim, crash or timeout throws away everything. Save each piece as it finishes, or checkpoint every 30 minutes.
+- **No timeout.** One job stuck in a loop holds a machine all night. Set a timeout of a few times the normal run.
+- **A notebook that owns a GPU.** It keeps the machine on while its user sleeps; Brightpost's was 85% idle. Send GPU work as jobs.
+- **Asking for GPU quota the week you need it.** New accounts often start with little or none, and a raise can take days. Ask weeks before.
+- **Only one machine type allowed.** Spare capacity and GPUs run out by type and zone. Allow several of each.
+
+## How to say it in an interview
+
+"I treat batch work as a queue of small jobs, not one long script. Each job takes minutes, saves its own output and is safe to rerun, so a lost machine costs one retry. A managed batch service starts spot machines to match the queue and drops to zero when it is empty. Every job gets a timeout and a retry limit. Tightly coupled HPC is different: close placement, a fast network, a parallel file system, and checkpoints instead of spot. For GPUs I compare busy time with paid time, and put a queue in front so no notebook holds one all week."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a batch job, and how is it different from a service?" level="Junior" category="Cloud">
+    **Short answer.** A batch job starts, works through a fixed amount of work and stops. A service stays up and answers requests as they arrive. You judge a batch job by its throughput and finish time, and a service by how fast each answer comes back.
+
+    **Why.** Brightpost's month-end re-render is 12,000 images due by 9 a.m. Nobody waits on one image, so the job can queue, run at night and use spare machines. The product pages are a service: a shopper waits on every request, so the servers stay up all day. Because a batch job ends, its machines can stop too: 20 machines for about 23 minutes, then none.
+
+    <AnimatedDiagram spec="animated/cloud/batch-job-queue" step={4} path="queue>batch>machines" caption="Jobs wait in a queue; the batch service starts machines only while jobs are waiting." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you know a nightly batch job did not run at all?
+    - When does a batch job need a deadline, and what do you do when it will miss it?
+
+    **Watch out for.** Saying a batch job is "a slow service". It is a different shape: it has an end, so it needs no machine between runs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why is spot capacity a good fit for batch work but a bad fit for a database?" level="Mid" category="Cloud">
+    **Short answer.** Spot machines can be taken back with seconds to minutes of warning. Batch work built from small, rerunnable jobs loses one job and retries it. A database loses its running state, and every caller fails until it is back.
+
+    **Why.** After Brightpost split its re-render into 200 jobs of 2 minutes, a reclaim took 1 of 20 machines. The job went back in the queue, skipped its 5 saved products, and cost about 1 minute. A database is one long-lived process holding connections and writes in progress. Losing it stops checkout, and recovery takes minutes even with a standby.
+
+    <AnimatedDiagram spec="animated/cloud/batch-job-queue" step={5} highlight={["provider", "machines", "queue", "thumbs"]} caption="A reclaim takes one machine; its job returns to the queue, and saved work stays in the bucket." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would you need to run stateless web servers safely on spot?
+    - How do you stop all your spot machines from being reclaimed at once?
+
+    **Watch out for.** Saying "spot is fine with retries" without saying where progress is saved. A retry that starts from zero is Brightpost's October night again.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A 7-hour job on spot machines keeps losing its work. How do you make it survive interruptions?" level="Mid" category="Cloud">
+    **Short answer.** Make the unit of loss small. Split the job into short jobs that each save their own output. If it cannot be split, checkpoint to durable storage every 30 minutes and resume from there. Then add retries, a timeout and a handler for the reclaim warning.
+
+    **Why.** Brightpost's 6.7-hour script kept everything on the machine's disk and lost 5 hours at 01:00. As 200 jobs of 2 minutes, a reclaim costs under 2 minutes. For work that cannot be split, such as training, a checkpoint every 30 minutes caps the loss at 30 minutes. Each retry checks what is already saved, so running it twice is safe. The reclaim warning is time for one last checkpoint.
+
+    <AnimatedDiagram spec="animated/cloud/batch-job-queue" step={2} caption="One long job keeps its progress on the machine, so a reclaim sends it back to the start." />
+
+    **Follow-ups the interviewer may ask.**
+    - How often should you checkpoint, and what does checkpointing too often cost?
+    - The job has a hard deadline. When would you move it to regular machines?
+
+    **Watch out for.** Saving checkpoints to the machine's own disk. A reclaim wipes that disk with the machine.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your GPU bill is high, but the GPUs are busy only 15% of the time. What do you change?" level="Senior" category="Cloud">
+    **Short answer.** Stop letting people and notebooks hold GPUs. Put a queue in front of them, and run notebooks on small machines that submit jobs. A batch service starts GPUs when jobs wait and stops them at zero. Then fix why a running GPU waits, such as slow data loading.
+
+    **Why.** Brightpost's notebook kept one GPU machine on for 168 hours to do 25 hours of work. With a queue and 0 to 2 GPUs, it pays for about 30 hours, about 80% less. Measure busy time against paid time for each GPU. Let small jobs share a GPU, and give short inference priority over long training. Checkpoint training so it can use spot. For a steady stream of answers, compare a managed endpoint.
+
+    <AnimatedDiagram spec="animated/cloud/gpu-fleet" step={3} caption="Every kind of GPU work goes through one queue, and the batch service runs between 0 and 2 GPUs to match it." />
+
+    **Follow-ups the interviewer may ask.**
+    - The GPUs are busy 90% of the time but training is still slow. Where do you look?
+    - How do you plan for GPU quota and capacity before a launch?
+
+    **Watch out for.** Buying a long commitment for the GPUs first. A commitment lowers the hourly rate of an 85% idle machine, and you still pay for the idle hours.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines)
+- [Choosing Compute](/cloud/start-here/choosing-compute)
+- [Pricing Basics](/cloud/fundamentals/pricing-basics)
+- [Cloud Cost Models](/cloud/operations/cloud-cost-models)
+- [AI and ML Platforms on the Cloud](/cloud/operations/ai-ml-platforms-on-the-cloud)
+- [Object Storage](/cloud/data/object-storage)
+- [Compute on AWS](/cloud/aws/compute)
+- [AI & ML on Google Cloud](/cloud/gcp/ai-ml)
+- [Compute on Azure](/cloud/azure/compute)
+- [Message queues](/system-design/patterns/message-queues)
+- [GPU performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms)
+
+## Further reading
+
+- [AWS Batch User Guide](https://docs.aws.amazon.com/batch/latest/userguide/what-is-batch.html): job queues, compute environments and array jobs.
+- [Google Cloud Batch documentation](https://cloud.google.com/batch/docs/get-started): jobs, task groups and Spot VMs.
+- [Azure Batch overview](https://learn.microsoft.com/azure/batch/batch-technical-overview): pools, jobs and tasks.
+- [GPUs on Compute Engine](https://cloud.google.com/compute/docs/gpus): accelerator machine types and availability.

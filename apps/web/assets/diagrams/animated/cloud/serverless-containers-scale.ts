@@ -12,9 +12,10 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // that a later step changes is an edge with `until`: "all requests" to v1 (steps 1-2), "100% at once" to v2 (step 3)
 // and "100% back" to v1 (step 4).
 //
-// Layout: three columns. Left (x 150): customers 150,95 | front door 150,375. Middle (x 420), the platform:
-// autoscaler 420,110 | v1 420,240 | v2 420,375 | v3 420,525. Right (x 670): registry 670,110 | alert 670,375 |
-// private link 670,525 | orders database 670,650.
+// Layout: three columns. Left (x 150): customers 150,95 | front door 150,375. Middle (x 440), the platform:
+// autoscaler 440,110 | v1 440,240 | v2 440,375 | v3 440,525. Right (x 674): registry 674,110 | alert 674,375 |
+// private link 674,525 | orders database 674,650. The 107-unit gap between the front door and v2 holds the
+// "100% at once" pill; the diagonal labels sit at 0.62 of their edges, clear of the zone corners.
 // The front door sits level with v2 and fans out to the three revisions: up to v1, across to v2, down to v3. That
 // fan is the traffic split the page is about.
 //
@@ -43,10 +44,10 @@ const spec: DiagramSpec = {
   zones: [
     { id: "people", title: "Customers", tone: "neutral", x: 10, y: 40, w: 245, h: 140 },
     { id: "edge", title: "Front door", tone: "blue", x: 10, y: 300, w: 245, h: 150 },
-    { id: "platform", title: "Container platform", tone: "teal", x: 300, y: 40, w: 240, h: 560 },
-    { id: "images", title: "Images", tone: "violet", x: 552, y: 40, w: 233, h: 140 },
-    { id: "monitoring", title: "Monitoring", tone: "orange", x: 552, y: 305, w: 233, h: 140 },
-    { id: "private", title: "Private network", tone: "blue", kind: "vpc", x: 552, y: 465, w: 233, h: 255 },
+    { id: "platform", title: "Container platform", tone: "teal", x: 310, y: 40, w: 240, h: 560 },
+    { id: "images", title: "Images", tone: "violet", x: 562, y: 40, w: 223, h: 170 },
+    { id: "monitoring", title: "Monitoring", tone: "orange", x: 562, y: 305, w: 223, h: 150 },
+    { id: "private", title: "Private network", tone: "blue", kind: "vpc", x: 562, y: 470, w: 223, h: 250 },
   ],
   nodes: [
     // Step 1
@@ -81,7 +82,7 @@ const spec: DiagramSpec = {
       sub: "card maker",
       icon: "container",
       tone: "teal",
-      x: 420,
+      x: 440,
       y: 240,
       w: 176,
       cloud: {
@@ -96,7 +97,7 @@ const spec: DiagramSpec = {
       sub: "card maker images",
       icon: "image",
       tone: "violet",
-      x: 670,
+      x: 674,
       y: 110,
       w: 200,
       cloud: { aws: "aws-ecr", gcp: "gcp-artifact-registry", azure: "azure-acr" },
@@ -110,7 +111,7 @@ const spec: DiagramSpec = {
       icon: "controller",
       tone: "teal",
       step: 2,
-      x: 420,
+      x: 440,
       y: 110,
       w: 176,
       cloud: {
@@ -128,7 +129,7 @@ const spec: DiagramSpec = {
       icon: "container",
       tone: "red",
       step: 3,
-      x: 420,
+      x: 440,
       y: 375,
       w: 176,
       cloud: {
@@ -146,7 +147,7 @@ const spec: DiagramSpec = {
       icon: "container",
       tone: "teal",
       step: 5,
-      x: 420,
+      x: 440,
       y: 525,
       w: 176,
       cloud: {
@@ -162,7 +163,7 @@ const spec: DiagramSpec = {
       icon: "bell",
       tone: "orange",
       step: 5,
-      x: 670,
+      x: 674,
       y: 375,
       w: 200,
       cloud: { aws: "aws-cloudwatch", gcp: "gcp-cloud-monitoring", azure: "azure-monitor" },
@@ -176,7 +177,7 @@ const spec: DiagramSpec = {
       icon: "link",
       tone: "blue",
       step: 6,
-      x: 670,
+      x: 674,
       y: 525,
       w: 200,
       cloud: {
@@ -192,7 +193,7 @@ const spec: DiagramSpec = {
       icon: "database",
       tone: "violet",
       step: 6,
-      x: 670,
+      x: 674,
       y: 650,
       w: 200,
       cloud: {
@@ -205,8 +206,8 @@ const spec: DiagramSpec = {
   edges: [
     // Step 1: the platform gives back an HTTPS address and routes every request to the only revision.
     { from: "customers", to: "front", label: "HTTPS", packet: true },
-    { from: "front", to: "v1", label: "all requests", packet: true, delay: 1, until: 2 },
-    { from: "registry", to: "v1", label: "pull image", dashed: true, labelAt: 0.35 },
+    { from: "front", to: "v1", label: "all requests", packet: true, delay: 1, labelAt: 0.62, until: 2 },
+    { from: "registry", to: "v1", label: "pull image", dashed: true, labelAt: 0.3 },
 
     // Step 2: the autoscaler counts requests in flight per copy and adds copies.
     { from: "autoscaler", to: "v1", label: "adds copies: 1 → 3", flow: true, step: 2 },
@@ -215,12 +216,12 @@ const spec: DiagramSpec = {
     { from: "front", to: "v2", label: "100% at once", tone: "red", packet: true, step: 3, until: 3 },
 
     // Step 4: traffic moves back to v1. v2 is kept, with no traffic.
-    { from: "front", to: "v1", label: "100% back", tone: "green", packet: true, step: 4, until: 4 },
+    { from: "front", to: "v1", label: "100% back", tone: "green", packet: true, labelAt: 0.62, step: 4, until: 4 },
     { from: "front", to: "v2", label: "0%", dashed: true, step: 4 },
 
     // Step 5: the fix gets a small share first, while an alert watches each revision's errors.
-    { from: "front", to: "v1", label: "90% → 50% → 0%", dashed: true, step: 5 },
-    { from: "front", to: "v3", label: "10% → 50% → 100%", packet: true, step: 5 },
+    { from: "front", to: "v1", label: "90% → 50% → 0%", dashed: true, labelAt: 0.62, step: 5 },
+    { from: "front", to: "v3", label: "10% → 50% → 100%", packet: true, labelAt: 0.62, step: 5 },
     { from: "v3", to: "alert", label: "errors per revision", dashed: true, flow: true, labelAt: 0.62, step: 5 },
 
     // Step 6: the live revision reaches the database through a private link.

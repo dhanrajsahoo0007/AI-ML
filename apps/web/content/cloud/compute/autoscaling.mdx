@@ -1,11 +1,326 @@
 ---
 title: "Autoscaling: The Control Loop"
-description: "Autoscaling as one feedback loop: measure, compare with a target, add or remove capacity and wait, and what each setting changes."
-status: outline
+description: "Autoscaling as one feedback loop: a metric, a target, add or remove servers, then wait. Why each setting exists and how flapping starts."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** autoscaling as a feedback loop: measure, compare with a target, add or remove capacity, wait, repeat. The page teaches the loop once, then each knob (metric, target, cooldown, warm pools and hibernation, scale-in protection, schedules and prediction) as a part of that loop.
+<KeyIdea>
+  An autoscaler is a loop: it checks how busy your servers are, adds or removes servers to stay near a target, then waits to see what changed.
+</KeyIdea>
 
-**Related reading on this site:** [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning) · [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey) · [Compute on AWS](/cloud/aws/compute)
+## The story
+
+Brightpost sends its newsletter in three batches of 30,000 customers, at 18:00, 18:15 and 18:30. Each batch brings about 700 shoppers within a few minutes. At 18:00 the shop runs 2 app servers, with room for about 400 shoppers. Its <Term id="autoscaling">autoscaling</Term> rule aims for 60% processor use, so it asks for 4 more servers. Each takes about 4 minutes to start, and they are ready at about 18:05, as the first wave fades. To save money, Asha had set the rule to remove servers after 2 quiet minutes. At 18:09 it removed all 4 at once and cut off the checkouts running on them. At 18:15 the second wave met 2 servers again, and at 18:30 the third did too. In 45 minutes the shop started 12 servers and stopped 12, and about 90 orders were lost.
+
+The rule did what it was told, every time. Each step below explains one part of the loop and the setting Brightpost should have chosen.
+
+## How it works
+
+Four words first. A **metric** is a number measured again and again, such as average processor use per minute. A **target** is the value you want it to stay near. A **server group** is a set of identical servers that grows or shrinks when you change one number, the desired count. Each new server starts from an **image**: a saved disk with the operating system and app installed.
+
+### Step 1: A loop: measure, compare, act, wait
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={1} minWidth={620} caption="The loop: servers report processor use every minute, and the autoscaler compares the average with 60%." />
+
+An autoscaler does four things, over and over. It **measures**: each server reports its processor use to a metrics service every minute. It **compares** the group's average with the target, 60% for Brightpost. It **acts**: too busy, and it raises the desired count; too idle, and it lowers it. Then it **waits**, because new servers need minutes before their numbers mean anything.
+
+At 18:01 the average is near 100%. One server serves about 200 shoppers, so at 60% it carries about 120. The wave needs 700 ÷ 120, about 6 servers, so the autoscaler asks for 4 more. [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning) covers how many servers a load needs; this page covers the loop that changes the count.
+
+<PremiumBreak />
+
+### Step 2: Scaling out takes minutes
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={2} minWidth={620} caption="The autoscaler raises the count to 6. Servers 3 to 6 boot from the image and take shoppers after warm-up." />
+
+**Scaling out** means adding servers; **scaling in** means removing them. The group starts each new server from the image. The server boots, starts the app and passes the <Term id="load-balancer">load balancer</Term>'s health checks. Only then does it get shoppers.
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-1" step={1} minWidth={620} caption="A minute to measure, half a minute to decide, about 4 minutes to start: the new servers serve from 18:05:30." />
+
+Add up the lag: a minute of data, seconds to decide, about 4 minutes to start. For five and a half minutes, 700 shoppers share room for 400.
+
+**Warm-up** is the time after a server starts during which the autoscaler ignores its numbers. A booting server reports odd values, and counting them makes the loop add servers it does not need. Set warm-up to the real start time, about 4 minutes at Brightpost. Some rules use a **cooldown** instead: a fixed pause after any change.
+
+### Step 3: Minimum and maximum, the safety rails
+
+A metric can be wrong, so the desired count always stays between two hard limits.
+
+- **Minimum: 1.** If the metric stops arriving or reads zero, the shop still has a server.
+- **Maximum: 10.** A bug that spins the processor, or a flood of bots, would otherwise rent servers without end. Ten servers serve about 2,000 shoppers, Brightpost's largest crowd.
+- **Quota.** The cloud also caps how many servers an account may run; Brightpost's test account allows 4. A maximum above the quota fails quietly. [Quotas, Throttling, Retries and Backoff](/cloud/resilience/quotas-and-retries) covers raising one.
+
+### Step 4: Flapping
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={3} minWidth={620} caption="The failure: two quiet minutes after the wave, the autoscaler removes 4 servers at once, and the next wave meets 2." />
+
+**Flapping** is a group that grows and shrinks again and again, faster than demand really changes. Every cycle pays the start-up lag again. Every removal can cut someone off.
+
+<Callout tone="red" title="What breaks">
+  By 18:07 the first wave has faded to about 200 shoppers, and 6 servers sit at about 17%. Two quiet minutes later the rule cuts the count to 2. It removes 4 servers at once, without asking the balancer to drain them, and about 15 checkouts fail. At 18:15 the second wave meets 2 servers, and the 4-minute lag starts again. Each wave gets about 5 minutes of timeouts.
+</Callout>
+
+Flapping has a second cause that needs no waves: thresholds set too close. Say a rule adds 2 servers above 70% and removes 2 below 40%. Two servers at 75% become four at about 38%, so two go, and the pair is back at 75%. Keep thresholds far apart, or use one target.
+
+### Step 5: Scaling in safely
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={4} minWidth={620} caption="Scale-in now waits 15 quiet minutes, drains each server for 60 seconds and removes one at a time." />
+
+Adding a server late costs shoppers. Removing one late costs a few server-minutes. So make scale-out fast and scale-in slow. Brightpost's fix has four parts:
+
+1. **Wait longer.** The rule removes a server only after 15 quiet minutes, so the next wave arrives before any server goes.
+2. **One at a time.** One server leaves per decision, and the loop measures again before the next.
+3. **Drain first.** **Connection draining** means the balancer sends the server no new requests and lets open ones finish. Brightpost allows 60 seconds, the same as for deploys on the [load balancing](/cloud/networking/load-balancing) page. Then the server stops.
+4. **Protect busy servers.** **Scale-in protection** is a flag that tells the group not to pick this server. A server running a long job sets it on itself and clears it when done.
+
+With these settings the 18:15 wave meets 6 servers.
+
+### Step 6: Four kinds of rule
+
+<Compare
+  columns={["Kind", "How it decides", "Good for", "At Brightpost"]}
+  rows={[
+    ["Target tracking", "Keeps one metric near a target and works out the count itself", "Most web tiers", "60% processor use, every day"],
+    ["Step scaling", "Fixed jumps by how far a threshold is passed: +1 above 70%, +3 above 90%", "Explicit control of jump sizes", "Not used"],
+    ["Scheduled", "Sets the minimum or the count at a clock time", "Rushes with a known start", "10 servers from 8:30 on sale days"],
+    ["Predictive", "Learns the daily and weekly curve from past weeks and starts servers before the usual rise", "Load that repeats", "The weekday evening rise"],
+  ]}
+  caption="The first two react to load; the last two act before it arrives."
+/>
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={5} minWidth={620} caption="A schedule raises the floor before known rushes, and a forecast starts servers before the usual daily rise." />
+
+Reactive rules always run behind demand, by the lag of Step 2. Schedules and forecasts act ahead. They raise the floor, and target tracking handles anything above it. A forecast needs weeks of history, so it cannot see a one-off newsletter. Brightpost now schedules 6 servers from 17:55 to 19:00 on newsletter evenings.
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-1" step={2} minWidth={620} caption="With the schedule, 6 servers are running from 17:55, and the wave meets full room." />
+
+### Step 7: Warm pools and hibernation
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={6} minWidth={620} caption="A warm pool of 4 stopped servers, already installed, joins the group in about a minute." />
+
+A **warm pool** is a set of servers already created and installed, then stopped. On scale-out the group takes servers from the pool first. Brightpost keeps 4 in its pool, and they join in about 1 minute instead of 4.
+
+A stopped server costs its disks, not its processor time. A running spare costs everything, but joins at once. **Hibernation** goes further: the server writes its memory to disk before it stops. It resumes with the app running and its caches full, so it skips boot and warm-up. Only some server types support it.
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-1" step={3} minWidth={620} caption="With a warm pool, the start takes about a minute and 6 servers serve from 18:02:30." />
+
+Also shrink the start itself: install the app into the image, not at boot. [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines) explains baking an image.
+
+### Step 8: Choosing the signal
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={7} minWidth={620} caption="Receipt workers scale on the queue's backlog per worker, not on processor use." />
+
+The metric must rise when users start to suffer. Processor use works for Brightpost's shop servers. It fails for work that waits.
+
+<Compare
+  columns={["Signal", "Rises when", "Fits", "Misses"]}
+  rows={[
+    ["Processor use", "Servers compute harder", "App servers like the shop's", "Work that waits on slow calls or holds connections"],
+    ["Requests per server", "More requests arrive at the balancer", "Web tiers with similar requests", "Requests that cost very different amounts"],
+    ["Queue backlog per worker", "Messages wait longer", "Workers that read a queue", "Work that does not go through a queue"],
+    ["Open connections per server", "Sockets pile up", "Real-time servers: Brightpost adds one above 600", "Short requests"],
+  ]}
+  caption="Pick the number that goes up first when users wait."
+/>
+
+Paid orders go to a queue, a list of messages waiting to be handled. Receipt workers make a receipt for each order and email it. Each email call waits about 1 second, so a worker sits near 15% processor use however long the queue grows. A processor rule would never add a worker.
+
+So the workers scale on backlog per worker. One worker clears about 2 orders a second, and a receipt should arrive within 300 seconds. One worker can own 2 × 300 = 600 waiting orders, so 1,800 waiting means 3 workers. Kubernetes runs this same loop for containers; see [Kubernetes Concepts](/cloud/compute/kubernetes-concepts).
+
+## On AWS, Google Cloud and Azure
+
+The loop is the same on all three clouds: a group of identical servers, a rule on a metric, two limits, and settings for the wait.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Group:** an EC2 Auto Scaling group with a minimum, a maximum and a desired count. A launch template says what each new instance looks like.
+    - **Rules:** target tracking, step scaling and simple scaling on CloudWatch metrics: average CPU, the load balancer's request count per target, or a custom metric. A default instance warm-up keeps new instances out of the average.
+    - **Schedules and prediction:** scheduled actions change the limits or the desired count at a time or on a recurring schedule. Predictive scaling forecasts from past load and launches instances ahead of it.
+    - **Warm capacity:** a warm pool of instances kept stopped, running or hibernated beside the group.
+    - **Scale-in controls:** instance scale-in protection, termination policies that choose which instance leaves, and lifecycle hooks. A group attached to a target group waits for its deregistration delay, the drain, before it terminates.
+
+    **The difference that changes a design.** Lifecycle hooks make both ends of the loop yours. A launching instance waits in a hook until your script says the app is ready; a leaving one waits until it has finished its work. Warm-pool instances pass through the same hooks. Target tracking also scales in more gradually than it scales out, by design.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Group:** a managed instance group (MIG) built from an instance template, zonal or regional. Its autoscaler keeps the size between a minimum and a maximum number of instances.
+    - **Rules:** a target for average CPU use, for load-balancing serving capacity, or for a Cloud Monitoring metric. A Pub/Sub subscription's backlog is one such metric.
+    - **Schedules and prediction:** scaling schedules hold a minimum number of instances for a time window. Predictive autoscaling forecasts from past load, for the CPU signal.
+    - **Warm capacity:** an initialisation period tells the autoscaler how long a new VM needs before its numbers count. A group can also keep a standby pool of stopped or suspended VMs to resume.
+    - **Scale-in controls:** scale-in controls cap how many VMs may go within a time window you choose. A stabilisation period sizes scale-in for the peak of the last several minutes. A mode that only scales out turns scale-in off.
+
+    **The difference that changes a design.** One autoscaler holds every signal. It works out a size for each signal and uses the largest. So a schedule is one more signal that acts as a floor, while CPU or requests can still push the group higher.
+  </Tab>
+  <Tab label="Azure">
+    - **Group:** Virtual Machine Scale Sets, with an autoscale setting in Azure Monitor that holds a minimum, a maximum and a default count.
+    - **Rules:** a scale-out rule and a scale-in rule. Each has a metric, a time window, a threshold, an action such as "add 2", and a cooldown in minutes. The metric can come from the VMs or from another resource, such as a Service Bus queue's message count.
+    - **Schedules and prediction:** profiles. Default, recurrence (every weekday evening) and fixed-date (a sale day) profiles each carry their own limits and rules. Predictive autoscale forecasts CPU load for scale sets from past days.
+    - **Warm capacity:** standby pools keep VMs created ahead of time, stopped or running, ready to join a scale set.
+    - **Scale-in controls:** a scale-in policy picks which VM goes first, the newest or the oldest, and instance protection keeps chosen VMs from removal.
+
+    **The difference that changes a design.** Scale-out and scale-in are separate rules, so keeping their thresholds apart is your job. Before a scale-in, autoscale checks whether the smaller count would trip the scale-out rule at once. If it would, it skips the scale-in. That stops the 75%-to-38% loop of Step 4, not Brightpost's waves. For containers, Azure Container Apps scales replicas on KEDA-based rules, such as HTTP traffic or queue length, down to zero.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/autoscaling-loop" stepper minWidth={620} caption="The whole evening in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/autoscaling-loop" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which signal should you scale on?"
+  tree={{
+    q: "Does the work arrive through a queue?",
+    yes: "Backlog per worker: messages waiting divided by workers, against what one worker clears within your time limit.",
+    no: {
+      q: "Does each user hold a connection open for minutes?",
+      yes: {
+        answer: "Open connections per server, with the target set from a load test.",
+        href: "/cloud/networking/realtime-on-the-cloud",
+      },
+      no: {
+        q: "Do your requests cost about the same as each other?",
+        yes: "Requests per server, from the load balancer. It moves before processor use does.",
+        no: {
+          q: "In a load test, is the processor the first thing to run out?",
+          yes: "Processor use, aimed at about 60%, so there is room left during the start-up lag.",
+          no: "Publish a custom metric for whatever runs out first, such as memory or database connections, and scale on that.",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="One server serves about 200 shoppers, and the rule aims for 60% processor use. How many servers does a wave of 700 shoppers need?" hint="What does one server carry at 60%?">
+    About 6. At 60%, one server carries about 120 shoppers, and 700 ÷ 120 is about 5.8, so the rule rounds up to 6.
+  </QuizItem>
+  <QuizItem question="A wave arrives at 18:00. The metric covers one minute, and a new server takes about 4 minutes to start. When can new servers first take shoppers, and what are two ways to close the gap?">
+    At about 18:05, after the minute of data, the decision and the start. A schedule can start them before the wave, or a warm pool can cut the start to about a minute.
+  </QuizItem>
+  <QuizItem question="With no schedule, scale-in waits 15 quiet minutes. The last wave fades at about 18:37. When does the first server go, and how many go then?" hint="Look at Step 5.">
+    At about 18:52, and only one. The loop measures again before it removes the next one, after its drain of up to 60 seconds.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Start from the image", "Warm pool", "Running spares"]}
+  rows={[
+    ["Time until it takes shoppers", "About 4 minutes", "About 1 minute", "None: already serving"],
+    ["Paid for while idle", "Nothing", "Disks only", "The whole server"],
+    ["Needs care", "The lag during a rush", "Refresh the pool after each release", "Idle cost every hour"],
+    ["Brightpost uses it for", "The everyday rule", "The first 4 servers of a wave", "The minimum, and the schedule before known rushes"],
+  ]}
+  caption="Three ways to have a server ready, with Brightpost's numbers."
+/>
+
+Speed costs money when nobody is shopping. Pay for running spares only before a rush you can name, and let the pool and the image cover the rest.
+
+## Common pitfalls
+
+- **Scale-in as fast as scale-out.** Removing servers 2 minutes after a wave left Brightpost short for the next one. Wait 15 minutes or more, and remove one server at a time.
+- **Removing servers without draining.** Open requests die, and new ones keep arriving until the health checks notice. Let the group drain each server for longer than your slowest request.
+- **Processor use for work that waits.** Receipt workers and socket servers sit at 15% while users wait. Scale on backlog per worker or on open connections.
+- **Warm-up shorter than the real start.** The loop counts booting servers and adds more than it needs. Measure the start, about 4 minutes at Brightpost, and set warm-up to that.
+- **Waiting for the rule before a known rush.** A reactive rule is always minutes late. Schedule servers before the sale or the newsletter.
+
+## How to say it in an interview
+
+"I treat autoscaling as a control loop: measure a metric, compare it with a target, change the count, then wait for warm-up. I pick the metric that rises first when users wait: processor use for web servers, backlog per worker for queue workers, open connections for sockets. A minimum keeps the service up, and a maximum stops a bug from renting servers forever. I scale out fast and in slowly, one server at a time, with draining, which prevents flapping. New servers take minutes, so I schedule capacity before known rushes and keep a warm pool for the rest."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is target tracking, in your own words?" level="Junior" category="Cloud">
+    **Short answer.** You give the autoscaler one metric and a value to stay near, such as 60% processor use. The service works out how many servers would bring the metric back to that value, and changes the count.
+
+    **Why.** It works like a thermostat: you set the temperature, not how long the heater runs. At Brightpost, one server carries about 120 shoppers at 60%. A wave of 700 needs about 6 servers, so the autoscaler adds 4 to the 2 it has. Warm-up keeps booting servers out of the average.
+
+    <AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={1} highlight={["servers12", "metrics", "autoscaler"]} caption="The servers report a metric, and the autoscaler compares the average with the target." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why aim for 60% and not 90%?
+    - What happens if the metric stops arriving?
+
+    **Watch out for.** Saying the autoscaler reacts at once. It works from metrics that are a minute old, and new servers take minutes to start.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why scale queue workers on queue depth rather than CPU?" level="Mid" category="Cloud">
+    **Short answer.** Because the queue is where the waiting shows up. A worker that waits on another service uses little processor, so a CPU rule never fires. Scale on backlog per worker: messages waiting divided by workers, against what one worker clears in your time limit.
+
+    **Why.** Brightpost's receipt workers wait about 1 second on each email call, so they sit near 15% processor use. One worker clears about 2 orders a second, and a receipt should arrive within 5 minutes. So one worker can own 600 waiting orders, and 1,800 waiting asks for 3 workers.
+
+    <AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={7} highlight={["queue", "autoscaler", "workers"]} caption="The queue's backlog, not processor use, drives the worker count." />
+
+    **Follow-ups the interviewer may ask.**
+    - The email service slows to 2 seconds a call. What happens to the target?
+    - What stops more workers from overloading the service they call?
+
+    **Watch out for.** Scaling on the total queue length with one threshold, such as "add 1 above 1,000". It adds the same one worker at 1,001 as at 30,000.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you remove servers from a web tier without dropping requests?" level="Mid" category="Cloud">
+    **Short answer.** Drain each server before it stops, remove servers slowly and one at a time, and protect servers that are doing long work. Keep no user state on the server, so any server can finish a shopper's visit.
+
+    **Why.** Brightpost's group once removed 4 servers at once with no drain, and about 15 checkouts failed. Now the balancer stops sending a leaving server new requests and gives open ones up to 60 seconds; Pay takes about 4. Scale-in waits 15 quiet minutes and removes one server per decision. Baskets live in a shared database, so a shopper's next click works on any server.
+
+    <AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={4} path="autoscaler>servers36>lb" caption="The autoscaler picks one server, the balancer drains it, and only then does it stop." />
+
+    **Follow-ups the interviewer may ask.**
+    - What about WebSocket connections that never finish?
+    - What if a job runs longer than the drain timeout?
+
+    **Watch out for.** Relying on health checks to notice. A health check finds a dead server after about 30 seconds of failed requests. A drain avoids those failures entirely.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your fleet scales out and in every few minutes all day. Diagnose it and fix it." level="Senior" category="Cloud">
+    **Short answer.** That is flapping. I would plot the scaling history next to the metric and the incoming load, then look for one of three causes. The thresholds are too close, scale-in or warm-up is too short, or the load comes in waves shorter than the start-up lag.
+
+    **Why.** Thresholds of +2 above 70% and −2 below 40% loop by themselves: 2 servers at 75% become 4 at about 38%, and back. A warm-up shorter than the real start counts booting servers and overshoots. In Brightpost's case, a 2-minute scale-in removed 4 servers minutes before each next wave. The fixes match the causes: one target instead of a pair, 15 minutes before scaling in, warm-up set to the measured start, and schedules for waves you can predict.
+
+    <AnimatedDiagram spec="animated/cloud/autoscaling-loop" step={3} highlight={["autoscaler", "servers36", "nextwave"]} caption="Removed two minutes after one wave, the servers are missing for the next." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you show that the fix worked?
+    - What does flapping cost apart from money?
+
+    **Watch out for.** Raising the minimum to the peak to make it stop. The flapping ends, but you pay for peak capacity all day: 10 servers all year is 87,600 server-hours, against about 10,000 used.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A scale-out takes six minutes and the sale lasts five. What are your options?" level="Senior" category="Cloud">
+    **Short answer.** A reactive rule cannot help in time, so have the capacity before the sale or shorten the lag. In order: schedule servers ahead of the start, keep a warm pool, shrink the start time, and leave headroom in the target. Then protect the back end from what still gets through.
+
+    **Why.** Six minutes is a minute of metric, the decision and about 4 minutes of start. Servers that arrive after a 5-minute sale serve nobody and are paid for anyway. Brightpost schedules 10 servers from 8:30 on sale days. A warm pool cuts the start to about a minute. Aiming at 60% leaves room for a jump of about 1.6 times before servers are full.
+
+    <AnimatedDiagram spec="animated/cloud/autoscaling-1" step={3} caption="A schedule removes the wait; a warm pool cuts it from five and a half minutes to two and a half." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does the schedule cost on a day the sale is cancelled?
+    - How do you protect the database when 10 servers start at once?
+
+    **Watch out for.** Raising the maximum. The maximum is not the limit here; time is.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines)
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [Real-Time Connections on the Cloud](/cloud/networking/realtime-on-the-cloud)
+- [Kubernetes Concepts: Cluster Anatomy and the Request Path](/cloud/compute/kubernetes-concepts)
+- [Quotas, Throttling, Retries and Backoff on the Cloud](/cloud/resilience/quotas-and-retries)
+- [Compute on AWS](/cloud/aws/compute)
+- [Compute on Google Cloud](/cloud/gcp/compute)
+- [Compute on Azure](/cloud/azure/compute)
+- [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning)
+- [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
+- [Message Queues and Pub/Sub](/system-design/patterns/message-queues)
+
+## Further reading
+
+- [Amazon EC2 Auto Scaling User Guide](https://docs.aws.amazon.com/autoscaling/ec2/userguide/what-is-amazon-ec2-auto-scaling.html): groups, policies and warm pools.
+- [Google Cloud: autoscaling groups of instances](https://cloud.google.com/compute/docs/autoscaler): signals, schedules and predictive autoscaling.
+- [Azure: autoscale with Virtual Machine Scale Sets](https://learn.microsoft.com/azure/virtual-machine-scale-sets/virtual-machine-scale-sets-autoscale-overview): rules, profiles and predictive autoscale.
+- [Azure Monitor autoscale best practices](https://learn.microsoft.com/azure/azure-monitor/autoscale/autoscale-best-practices): thresholds and flapping.

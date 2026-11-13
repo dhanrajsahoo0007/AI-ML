@@ -1,11 +1,340 @@
 ---
 title: "Serverless Containers and Platforms as a Service"
-description: "The two middle options between running a cluster and writing a function: hand over a container, or hand over your code."
-status: outline
+description: "Hand the cloud a container image or your code and get a scaled HTTPS service: concurrency, CPU modes, revisions, traffic splits, jobs and private access."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the two options between running a cluster and writing a function: hand over a container and get a scaled HTTPS service, or hand over code and get a web platform. The page explains what each hides, how they scale (by requests or concurrency, down to zero or not) and the one structural difference between the clouds.
+<KeyIdea>
+  Hand the cloud your packed-up app or your code, and you get back a web address that grows with traffic and takes new versions a slice at a time.
+</KeyIdea>
 
-**Related reading on this site:** [Choosing Compute](/cloud/start-here/choosing-compute) · [Containers on Google Cloud](/cloud/gcp/containers) · [Containers on Azure](/cloud/azure/containers)
+## The story
+
+In October Brightpost launched a card maker. A customer uploads a photo and gets a greeting card with it on the front, about 120 cards a day. Between 18:00 and 21:00 about 30 photos arrive an hour, most of them 6 to 9 MB straight from a phone. The card maker runs on a serverless container platform. One Thursday at 18:00 Asha deploys version 2. It upgrades the web framework, whose new default refuses any upload over 5 MB. Within a minute the platform sends every request to the new version. Photos over 5 MB fail with "upload failed". At 20:10 the support agent forwards the eleventh angry email. Asha rebuilds the old code and deploys it, which takes 25 minutes. By 20:35, 49 of 78 uploads have failed.
+
+The platform did what it was told. The steps below show what it does for you, and how to release more carefully.
+
+## How it works
+
+Three words first. A **serverless container platform** takes a <Term id="container">container</Term> image and runs it as a web service, with no machines for you to see or patch. A **code platform**, also called a <Term id="paas">platform as a service</Term> (PaaS), takes your source code instead and builds it for you. A **revision** is one deployed version of a service: its image plus its settings, frozen.
+
+### Step 1: Hand over an image, get an HTTPS address
+
+<AnimatedDiagram spec="animated/cloud/serverless-containers-scale" step={1} minWidth={620} caption="Asha's image goes in; the platform hands back a front door that sends every request to revision v1." />
+
+Asha pushes the card maker's image to an <Term id="image-registry">image registry</Term> and tells the platform to run it. She gets back a web address. Behind it the platform runs four things she would otherwise build:
+
+1. A **front door** with a <Term id="tls">TLS</Term> certificate, which routes each request to a running copy.
+2. **Copies** of the image: started, restarted after a crash, on machines it patches.
+3. **Scaling**: more copies when traffic grows, fewer when it falls.
+4. **Revisions**: every deploy is kept, so the front door can point at any of them.
+
+The image, its libraries, the data and the settings stay hers. [The Compute Spectrum](/cloud/compute/compute-spectrum) shows where this place sits among the others.
+
+<PremiumBreak />
+
+### Step 2: One copy, many requests at once
+
+<AnimatedDiagram spec="animated/cloud/serverless-containers-scale" step={2} minWidth={620} caption="Each copy serves up to 20 requests at once. The autoscaler adds a copy when the copies are full." />
+
+A copy of the card maker is a normal web server, so it can serve many requests at the same time. Most of an upload is waiting for bytes to arrive, and a waiting request costs almost no processor time. The number of requests one copy may hold at once is its **concurrency** setting. Asha sets 20.
+
+The platform's <Term id="autoscaling">autoscaler</Term> counts the requests in flight. On a busy evening about 40 are open at once, so 2 copies are enough. On a sale evening 50 are open, so it starts a third. A platform that sends one request per copy would need 50.
+
+Set concurrency from memory. If one upload needs 100 MB, 20 at once need 2 GB on that copy. The card maker also keeps a minimum of 1 copy, for the reasons the spectrum page explains.
+
+### Step 3: CPU while a request is open, or all the time
+
+Platforms give a copy processor time (CPU) in one of two ways.
+
+<Compare
+  columns={["", "CPU during requests", "CPU always on"]}
+  rows={[
+    ["A copy has CPU", "Only while a request is open", "For as long as the copy runs"],
+    ["You pay for", "Request time", "Every second a copy exists"],
+    ["Work after the reply", "Stalls, maybe forever", "Finishes"],
+    ["Good for", "Web pages and APIs that finish before replying", "Background threads, queue readers, caches that refresh"],
+  ]}
+  caption="The two CPU modes. Some platforms offer both as a setting; others give CPU all the time."
+/>
+
+Asha's first draft replied "photo received", then built a 300-dpi print file in the background. In testing, 9 of 10 print files never appeared. The reply had closed the request, so the copy got no more CPU and the work froze. She moved the print file to a separate job instead, as Step 7 shows.
+
+### Step 4: Every deploy is a revision, and the failure
+
+<AnimatedDiagram spec="animated/cloud/serverless-containers-scale" step={3} minWidth={620} caption="The failure: revision v2, with a 5 MB upload limit, takes 100% of traffic at once." />
+
+Each deploy creates a new revision, and revisions never change. A fix is a new revision. The platform keeps the old ones, and the front door decides which get traffic.
+
+On many platforms the newest healthy revision takes all traffic by default. "Healthy" means the copy started and answered a check, not that uploads work.
+
+<Callout tone="red" title="What breaks">
+  At 18:00 revision v2 starts, passes its start-up check and takes 100% of requests. Every phone photo over 5 MB is refused. Nothing alerts, because the service is up. Over 2 hours and 35 minutes, 49 of 78 uploads fail, and 11 customers email the support agent before anyone looks.
+</Callout>
+
+### Step 5: Roll back by moving traffic, not by rebuilding
+
+<AnimatedDiagram spec="animated/cloud/serverless-containers-scale" step={4} minWidth={620} caption="Traffic moves back to v1 in about 10 seconds. v2 stays, with 0% of traffic, for the team to inspect." />
+
+Asha's rollback rebuilt the old code from scratch. That took 25 minutes, and about 8 more uploads failed while it ran.
+
+Revision v1 still existed the whole time, with its image and settings. A rollback is one instruction to the front door: send 100% to v1. On Brightpost's platform that takes about 10 seconds.
+
+Keep v2 at 0% so the team can read its logs. Many platforms can also give a revision its own test address that real customers never reach.
+
+### Step 6: Release in slices: 10%, then 50%, then 100%
+
+<AnimatedDiagram spec="animated/cloud/serverless-containers-scale" step={5} minWidth={620} caption="The fixed v3 gets 10% of traffic, then 50%, then 100%, while an alert counts failed uploads per revision." />
+
+**Traffic splitting** means the front door sends a set share of requests to each revision. Releasing a new version to a small share first is a <Term id="canary">canary release</Term>.
+
+Revision v3 raises the upload limit to 20 MB. Asha gives it 10% for an hour, then 50% for an hour, then 100%. An alert fires if one revision has 2 failed uploads in 30 minutes. Had v2 gone out this way, about 3 uploads an hour would have reached it, and about 2 would fail. The alert fires within the hour, and 2 customers see an error, not 49.
+
+Switching all traffic between two complete versions at once is a <Term id="blue-green">blue-green release</Term>. [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies) compares the release styles.
+
+### Step 7: Services and jobs
+
+A **service** waits for requests and answers them. A **job** starts, works until it is done, and stops. Many serverless container platforms run both from the same kind of image.
+
+The print-file job runs every 15 minutes. It builds a print file for each new photo and stops, usually after about 3 minutes. It has CPU the whole time it runs, plus its own timeout and retries. A background thread inside a web copy has none of these.
+
+So the card maker is now a service that answers fast and a job that does the slow work. [Choosing Compute](/cloud/start-here/choosing-compute) covers longer jobs.
+
+### Step 8: Reach private things
+
+<AnimatedDiagram spec="animated/cloud/serverless-containers-scale" step={6} minWidth={620} caption="The live revision writes card orders to the orders database through a link into Brightpost's private network." />
+
+Each card is an order, and the orders database has only a private address inside Brightpost's <Term id="vpc">virtual private network</Term> (VPC). The card maker's copies run on machines the platform owns, outside that network.
+
+Platforms solve this in one of two ways. Some start each copy inside your network. Others give you a private link for outgoing calls to private addresses.
+
+The other direction matters too. A service that only your own systems call should accept internal traffic only. [Private Endpoints](/cloud/networking/private-endpoints) covers reaching managed services without the internet.
+
+### Step 9: Hand over code instead: the code platform
+
+<AnimatedDiagram spec="animated/cloud/paas-stack" step={2} minWidth={620} caption="With a code platform, the line moves up two rows: the provider also owns the language runtime and the build." />
+
+A code platform is the older middle option. You hand over source code and a small config file. The platform builds it on a language runtime it maintains, then runs it with a front door, scaling and releases.
+
+That moves the line two rows higher. You no longer write a build recipe or patch the runtime. You also lose choices: only the runtime versions and system packages the platform supports.
+
+Most code platforms run your app on instances you size, billed every hour. Many offer a **staging slot**: a second live copy of the app at its own address. You test there, swap it with production, and swap back to roll back.
+
+### Step 10: When a code platform is still the right call
+
+<AnimatedDiagram spec="animated/cloud/paas-stack" step={3} minWidth={620} caption="Idle cost and background work: the two rows that most often decide between the two middles." />
+
+Serverless containers suit spiky traffic, quiet nights, special system packages and teams that already build images. That is the card maker. A code platform is still the better fit in four cases:
+
+1. **Plain code in a common language**, and a team that would rather not own a build recipe.
+2. **Steady traffic every hour**, so idle cost does not matter.
+3. **Background work in the same app**, through the platform's worker option.
+4. **An app already there and working.** Moving it buys little until something stops fitting.
+
+## On AWS, Google Cloud and Azure
+
+All three clouds run an image as a scaled HTTPS service and run code on a platform they maintain. They differ in how much of the front door you assemble.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Serverless containers:** Amazon ECS services on AWS Fargate. Each change to the task definition (image, CPU, memory) makes a new revision of it. Standalone or scheduled tasks run jobs.
+    - **Scaling:** Application Auto Scaling changes the desired task count, following CPU or requests per task. A task takes as many requests at once as your app allows.
+    - **Safe releases:** rolling updates by default, with a circuit breaker that can roll back a failed deployment. Blue/green deployments shift traffic between two target groups behind the load balancer.
+    - **Private access:** each task gets its own network interface in your VPC subnets, so it reaches a private database directly.
+    - **Code platform:** AWS Elastic Beanstalk. It creates EC2 instances, an Auto Scaling group and a load balancer in your account, and can deploy by rolling, immutable or traffic-splitting policies.
+
+    **The difference that changes a design.** On AWS you assemble the service from parts: ECS, Fargate, an Application Load Balancer with a certificate, and a scaling policy. Tasks live inside your VPC, so private access needs no extra link. The price is more setup, and no task starts because a request arrived, so a web service keeps at least one task.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Serverless containers:** Cloud Run services, from an image in Artifact Registry, with an HTTPS address and a managed certificate. Each deploy creates an immutable revision. Cloud Run jobs run tasks to completion.
+    - **Scaling:** instances follow requests in flight. Each takes up to the concurrency you set, and minimum and maximum instances bound the count.
+    - **Safe releases:** traffic splits by percentage across revisions. A revision can deploy with no traffic and a tag that gives it a test address. A rollback sends 100% back to an older one.
+    - **Private access:** Direct VPC egress or a Serverless VPC Access connector for outgoing calls to private addresses. The ingress setting can accept internal traffic only.
+    - **Code platform:** App Engine, standard (set runtimes, can scale to zero) or flexible (runs on VMs). Its versions split traffic too. Many teams now start new apps on Cloud Run.
+
+    **The difference that changes a design.** Cloud Run's billing setting decides CPU. With request-based billing, an instance has CPU only while it handles requests, so Asha's background print file stalls. With instance-based billing, CPU stays on and you pay for the instance's whole life. Pick per service: request-based for the card maker, a job for the print files.
+  </Tab>
+  <Tab label="Azure">
+    - **Serverless containers:** Azure Container Apps, inside an environment that apps share for networking and logs. Ingress gives each app an HTTPS address. Container Apps jobs run on demand, on a schedule or on events.
+    - **Scaling:** scale rules built on KEDA, an open-source event-driven autoscaler: concurrent HTTP requests, queue length or CPU. The minimum replica count can be zero.
+    - **Safe releases:** a change to the container or its scale rules makes a new revision. In multiple-revision mode traffic splits by percentage, and a label gives a revision its own address.
+    - **Private access:** an environment joins your virtual network when it is created, and it can be internal only.
+    - **Code platform:** Azure App Service. Code or a container runs on an App Service plan you size, billed per instance, busy or not. Deployment slots give a staging copy to swap with production.
+
+    **The difference that changes a design.** App Service is still a first choice for steady web apps on Azure. Its deployment slots run on the same plan instances as production, so a slot adds no instances but takes capacity from production. A swap warms the new version before it takes traffic, and a second swap rolls it back.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/serverless-containers-scale" stepper minWidth={620} caption="The card maker in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/serverless-containers-scale" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Image, code, or neither?"
+  tree={{
+    q: "Does it answer requests, such as a web page or an API?",
+    yes: {
+      q: "Is it plain code in a common language, with no special system packages?",
+      yes: {
+        q: "Is it busy every hour, or does the team want staging slots and no build recipe?",
+        yes: "A code platform. Size the instances for the steady load, and release through slots or versions.",
+        no: "Serverless containers. A short build recipe buys scale to zero and traffic splits by revision.",
+      },
+      no: {
+        q: "Does work continue after the reply is sent?",
+        yes: "Serverless containers with CPU always on, or move that work to a job or a queue reader.",
+        no: "Serverless containers with CPU during requests. Keep 1 copy warm if a person waits on the first reply.",
+      },
+    },
+    no: {
+      q: "Does it run to the end and stop, like a print-file batch?",
+      yes: {
+        answer: "A container job, with its own timeout and retries.",
+        href: "/cloud/start-here/choosing-compute",
+      },
+      no: {
+        answer: "A worker that reads a queue: a service with CPU always on, or a function per message.",
+        href: "/cloud/compute/serverless-functions",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="On a sale evening 50 requests are in flight and each copy takes 20 at once. How many copies run? How many on a one-request-per-copy platform?" hint="Divide, then round up.">
+    3 copies, because 50 ÷ 20 is 2.5. A one-request-per-copy platform needs 50.
+  </QuizItem>
+  <QuizItem question="If v2 had started at 10% of traffic, about how many evening uploads an hour would reach it, and about how many would fail?" hint="About 30 uploads arrive an hour, and most phone photos are over 5 MB.">
+    About 3 an hour, and about 2 of them would fail. The alert fires within the first hour, and a 10-second rollback limits the harm to 2 customers.
+  </QuizItem>
+  <QuizItem question="Rebuilding the old code took 25 minutes. Moving traffic to v1 took about 10 seconds. Why the difference?">
+    v1 was never deleted. Its image and settings already existed, so the rollback only changed where the front door sends requests. Nothing had to be built.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Serverless containers", "Code platform (PaaS)", "Your own VM fleet"]}
+  rows={[
+    ["You hand over", "An image", "Source code", "A machine image and fleet rules"],
+    ["First setup for the card maker", "About an hour: a build recipe, then deploy", "About an hour: a config file, then deploy", "About a day: image, fleet, load balancer, certificate"],
+    ["Paid while idle", "Nothing at minimum 0", "Usually the instances you keep", "Every VM, every hour"],
+    ["Release tools", "Revisions and percentage splits", "Slots or versions, swap", "Whatever you build"],
+    ["Rollback", "About 10 s: move traffic", "A swap or a traffic change", "Redeploy the old image"],
+    ["Work after the reply", "Needs CPU always on, or a job", "Built-in worker option", "Anything"],
+    ["Who patches the runtime", "You, inside the image", "The provider", "You"],
+  ]}
+  caption="Three homes for Brightpost's card maker. Setup times are what a small team should expect the first time."
+/>
+
+The two middles cost about the same to start. Choose by the traffic shape, the runtime you need and how releases must work.
+
+## Common pitfalls
+
+- **All traffic to a new revision at once.** One bad setting reached every customer. Start each release at 10%, with an alert per revision.
+- **Rolling back by rebuilding.** Asha's rebuild took 25 minutes; moving traffic takes about 10 seconds. Keep old revisions and roll back at the front door.
+- **Work after the reply on CPU during requests.** The print file froze in 9 of 10 tests. Finish the work before replying, move it to a job, or pay for CPU always on.
+- **Concurrency set without checking memory.** Twenty 100 MB uploads need 2 GB on one copy. Measure memory per request, then set concurrency so the total fits.
+- **An internal service on a public address.** Anyone can call it. Set it to accept internal traffic only.
+
+## How to say it in an interview
+
+"Between a cluster and a function there are two middles: I hand a serverless container platform an image, or a code platform my source. Either way I get TLS, routing, scaling and patched machines. I set concurrency per copy from memory per request, and I check whether a copy has CPU only during requests. Every deploy is an immutable revision, so I release at 10%, 50%, then 100%, with an alert per revision, and roll back by moving traffic. Slow work goes to a job. I pick a code platform when traffic is steady and the team wants slots, not a build recipe."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does a serverless container platform do for you that a VM fleet does not?" level="Junior" category="Cloud">
+    **Short answer.** It runs the image with no machines for you to manage. It gives you an HTTPS address, routes requests to copies, and adds or removes copies with traffic. It patches what is under them and keeps every revision for rollback.
+
+    **Why.** On a VM fleet, Brightpost would build each of those itself. On the platform Asha hands over the card maker's image and gets an address back. The image, its libraries, the data and settings such as concurrency stay hers.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-containers-scale" step={1} highlight={["registry", "front", "v1"]} caption="An image in, an HTTPS front door and running copies out." />
+
+    **Follow-ups the interviewer may ask.**
+    - Who patches a flaw in a library inside the image?
+    - What does the platform take away that a VM gives you?
+
+    **Watch out for.** Saying "the platform handles everything". The image's contents and the release settings are still yours, and they caused Brightpost's incident.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why does a platform that sends many requests to one copy need fewer copies than a one-request-per-copy platform?" level="Mid" category="Cloud">
+    **Short answer.** Most of a web request is waiting: for bytes to arrive, or for a database to answer. A copy that serves 20 requests at once fills that waiting time with other requests. So 50 requests in flight need 3 copies, not 50.
+
+    **Why.** Brightpost's card maker sets concurrency to 20. On a sale evening 50 uploads are open at once, so 3 copies run. One request per copy means 50 copies and 50 database connections. Memory sets the limit: at 100 MB per upload, 20 at once need 2 GB.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-containers-scale" step={2} highlight={["autoscaler", "v1", "front"]} caption="The autoscaler adds a copy only when the open copies are full." />
+
+    **Follow-ups the interviewer may ask.**
+    - When would you set concurrency to 1?
+    - How does high concurrency change what one slow request does to others?
+
+    **Watch out for.** Raising concurrency for CPU-heavy work. Twenty requests that each need a full processor make each one about 20 times slower on one copy.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A new revision broke uploads for every user at once. How would you release the next version?" level="Mid" category="Cloud">
+    **Short answer.** Send it a small share of traffic first, such as 10%, and watch an error alert per revision. Then raise it to 50% and 100%. If the alert fires, send all traffic back to the old revision, which takes seconds.
+
+    **Why.** Brightpost's v2 passed its start-up check, took 100% at once, and 49 of 78 uploads failed. At 10%, about 3 uploads an hour reach a new revision, and an alert on 2 failures fires within the hour. The old revision still exists, so a rollback takes about 10 seconds, not a 25-minute rebuild.
+
+    <AnimatedDiagram spec="animated/cloud/serverless-containers-scale" step={5} path="front>v3>alert" caption="The new revision gets a slice of traffic while an alert watches its errors." />
+
+    **Follow-ups the interviewer may ask.**
+    - What should the health check test, beyond "the server answered"?
+    - How would you test a revision before it gets any real traffic?
+
+    **Watch out for.** Calling a passing start-up check proof that a release works. v2 was healthy by that test and broken for most customers.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your service returns a response, then keeps working in the background, and that work never finishes. Why, and what do you change?" level="Mid" category="Cloud">
+    **Short answer.** The platform probably gives a copy CPU only while a request is open. Once the reply leaves, the background work gets no CPU and freezes. Finish the work before replying, move it to a job or a queue, or switch the service to CPU always on.
+
+    **Why.** Brightpost's first card maker replied "photo received" and then built a print file. In testing, 9 of 10 files never appeared. CPU always on fixes it but bills every second a copy exists. Asha moved the print files to a job that runs every 15 minutes, with CPU the whole time and its own retries.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to that background work when the platform removes the copy?
+    - When is CPU always on the cheaper choice?
+
+    **Watch out for.** Blaming the code or adding retries inside the same copy. The work stops because the copy has no CPU, not because it failed.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your API serves a steady 300 requests a second all day on a serverless container platform. Is that the right place for it?" level="Senior" category="Cloud">
+    **Short answer.** It may be, but check the bill and the fit. Steady load removes the main benefit, paying nothing while idle. A code platform, or containers on instances bought with a commitment, may cost less. I would keep the platform if its revisions, splits and zero patching save real team hours.
+
+    **Why.** At 300 requests a second and 100 ms each, about 30 are in flight at all times. With concurrency 20, two or three copies run around the clock. Request-driven billing then usually costs more than instances you size and keep. Brightpost's card maker is the opposite case: busy evenings, quiet nights.
+
+    <AnimatedDiagram spec="animated/cloud/paas-stack" step={3} caption="Paid while idle: the row that stops mattering when traffic never stops." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would you measure to find where the costs cross?
+    - What release features would you lose by moving, and how would you replace them?
+
+    **Watch out for.** Answering only with price. Count the engineer hours a self-run fleet costs, and the release safety you would rebuild.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [The Compute Spectrum: VMs to Functions](/cloud/compute/compute-spectrum)
+- [Choosing Compute](/cloud/start-here/choosing-compute)
+- [Containers and Registries](/cloud/compute/containers-and-registries)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [Serverless Functions](/cloud/compute/serverless-functions)
+- [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies)
+- [Private Endpoints](/cloud/networking/private-endpoints)
+- [Containers on AWS](/cloud/aws/containers)
+- [Containers on Google Cloud](/cloud/gcp/containers)
+- [Containers on Azure](/cloud/azure/containers)
+- [Load balancing patterns](/system-design/patterns/load-balancing)
+
+## Further reading
+
+- [Amazon ECS deployment types](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/deployment-types.html): rolling and blue/green releases on ECS.
+- [Cloud Run rollbacks, gradual rollouts and traffic migration](https://cloud.google.com/run/docs/rollouts-rollbacks-traffic-migration): splitting traffic across revisions.
+- [Revisions in Azure Container Apps](https://learn.microsoft.com/azure/container-apps/revisions): revision modes and labels.
+- [Azure App Service deployment slots](https://learn.microsoft.com/azure/app-service/deploy-staging-slots): staging, swap and swap back.

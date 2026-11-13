@@ -18,14 +18,14 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // servers and down to the new ones without crossing a box. Shoppers sit above the gap between zones A and B, and
 // their edge runs straight down that gap (x 185) into the load balancer. The public mirror sits below the region,
 // centred under zone B, so its edges fan up into the three bands.
-//   Right column (x 565-790): "Fleet settings" (VM group 680,300; VM template 680,410) and "Images" (golden image
-//   680,545; image build 680,690). Their vertical edges run at x 680, right of both zone tabs.
+//   Right column (x 555-790): "Fleet settings" (VM group 672,300; VM template 672,410) and "Images" (golden image
+//   672,545; image build 672,690). Their vertical edges run at x 672, right of both zone tabs.
 //
 // Why this order: on a phone the figure opens on the left ~480 units. Steps 1 and 3 happen in zones A and B and the
 // mirror below them, so the first step and the failure show without scrolling. Canvas 795 wide, under 800.
 // Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. The servers use short
-// toggle names ("EC2 instance", "VM instance", "Azure VM") to fit 150-wide bands; the group is 210 wide for
-// "Managed instance group".
+// toggle names ("EC2 instance", "VM instance", "Azure VM") to fit 150-wide bands; the right column is 224 wide for
+// "Managed instance group". The "adds 5" edge bends at 545,330 in the gutter so it passes left of the template.
 const vm = {
   aws: { id: "aws-ec2", label: "EC2 instance" },
   gcp: { id: "gcp-compute-engine", label: "VM instance" },
@@ -49,8 +49,8 @@ const spec: DiagramSpec = {
     { id: "zone-b", title: "Zone B", tone: "blue", kind: "subnet", x: 190, y: 240, w: 160, h: 355 },
     { id: "zone-c", title: "Zone C", tone: "blue", kind: "subnet", x: 360, y: 240, w: 165, h: 355 },
     { id: "internet", title: "Public internet", tone: "neutral", kind: "subnet", x: 10, y: 628, w: 525, h: 105 },
-    { id: "fleet", title: "Fleet settings", tone: "teal", x: 565, y: 228, w: 225, h: 237 },
-    { id: "images", title: "Images", tone: "violet", x: 565, y: 492, w: 225, h: 241 },
+    { id: "fleet", title: "Fleet settings", tone: "teal", x: 555, y: 228, w: 235, h: 237 },
+    { id: "images", title: "Images", tone: "violet", x: 555, y: 492, w: 235, h: 241 },
   ],
   nodes: [
     // Step 1
@@ -131,9 +131,9 @@ const spec: DiagramSpec = {
       icon: "workers",
       tone: "teal",
       step: 2,
-      x: 680,
+      x: 672,
       y: 300,
-      w: 210,
+      w: 224,
       h: 54,
       cloud: {
         aws: { label: "Auto Scaling group" },
@@ -148,9 +148,9 @@ const spec: DiagramSpec = {
       icon: "file",
       tone: "teal",
       step: 2,
-      x: 680,
+      x: 672,
       y: 410,
-      w: 210,
+      w: 224,
       h: 54,
       cloud: {
         aws: { label: "Launch template" },
@@ -206,7 +206,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       variant: "glyph",
       step: 4,
-      x: 680,
+      x: 672,
       y: 545,
       cloud: {
         aws: { label: "AMI" },
@@ -221,9 +221,9 @@ const spec: DiagramSpec = {
       icon: "pipeline",
       tone: "orange",
       step: 4,
-      x: 680,
+      x: 672,
       y: 690,
-      w: 210,
+      w: 224,
       h: 54,
       cloud: {
         aws: { label: "EC2 Image Builder" },
@@ -234,7 +234,7 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: shoppers reach the one server; at boot it downloads its packages from the internet.
-    { from: "shoppers", to: "server-a", label: "orders", packet: true, until: 1 },
+    { from: "shoppers", to: "server-a", label: "orders", packet: true, via: [[185, 250]], labelAt: 0.35, until: 1 },
     { from: "mirror", to: "server-a", label: "packages at boot", packet: true, delay: 0.6, until: 1 },
 
     // Step 2: one front door for three zones; the group keeps one copy of the template in each zone.
@@ -254,7 +254,7 @@ const spec: DiagramSpec = {
     { from: "group", to: "server-c", dashed: true, step: 2 },
 
     // Step 3: the group adds 5 servers; each waits 11 minutes on the slow mirror and is kept out of service.
-    { from: "group", to: "new-c", label: "adds 5", dashed: true, labelAt: 0.6, step: 3 },
+    { from: "group", to: "new-c", label: "adds 5", dashed: true, via: [[545, 330]], labelAt: 0.62, step: 3 },
     { from: "mirror", to: "new-a", tone: "red", packet: true, duration: 6, step: 3, until: 3 },
     { from: "mirror", to: "new-b", label: "slow: 11 min", tone: "red", packet: true, duration: 6, step: 3, until: 3 },
     { from: "mirror", to: "new-c", tone: "red", packet: true, duration: 6, step: 3, until: 3 },

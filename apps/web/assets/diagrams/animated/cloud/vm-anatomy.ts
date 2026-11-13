@@ -8,8 +8,8 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Nodes never move between steps. Layout: two stacked zones, three columns (centres x 175, 425, 675).
 //   Host zone y 40-285: VMs on row y 115, hypervisor on row y 225 under the middle VM.
-//   VM zone y 330-630: processors, memory, network card on row y 400; disks on row y 560.
-//   Images zone y 655-785: the image glyph at 425,715, straight under the boot disk.
+//   VM zone y 330-585: processors, memory, network card on row y 400; disks on row y 520.
+//   Images zone y 610-740: the image glyph at 425,670, straight under the boot disk.
 // The "opened up" edge runs straight down at x 175, right of the VM zone's tab (which ends near x 166).
 // The image edge runs straight up at x 425, right of the Images zone's tab (which ends near x 393).
 //
@@ -26,12 +26,12 @@ const disk = {
 const spec: DiagramSpec = {
   title: "A virtual machine: a slice of a host, and what the slice holds",
   width: 790,
-  height: 790,
+  height: 750,
   steps: [{ title: "A hypervisor cuts one host into VMs" }, { title: "Inside one VM" }],
   zones: [
     { id: "host", title: "Physical host", tone: "neutral", x: 15, y: 40, w: 770, h: 245 },
-    { id: "vm", title: "Inside the VM", tone: "teal", x: 15, y: 330, w: 770, h: 300 },
-    { id: "images", title: "Images", tone: "violet", x: 300, y: 655, w: 250, h: 130 },
+    { id: "vm", title: "Inside the VM", tone: "teal", x: 15, y: 330, w: 770, h: 255 },
+    { id: "images", title: "Images", tone: "violet", x: 300, y: 610, w: 250, h: 130 },
   ],
   nodes: [
     // Step 1: the host and its tenants
@@ -130,7 +130,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       step: 2,
       x: 175,
-      y: 560,
+      y: 520,
       w: 200,
       cloud: disk,
     },
@@ -142,7 +142,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       step: 2,
       x: 425,
-      y: 560,
+      y: 520,
       w: 200,
       cloud: disk,
     },
@@ -154,7 +154,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       step: 2,
       x: 675,
-      y: 560,
+      y: 520,
       w: 200,
       cloud: {
         aws: { label: "Instance store" },
@@ -171,7 +171,7 @@ const spec: DiagramSpec = {
       variant: "glyph",
       step: 2,
       x: 425,
-      y: 715,
+      y: 670,
       cloud: {
         aws: { label: "AMI" },
         gcp: { label: "Custom image" },

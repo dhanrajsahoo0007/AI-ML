@@ -19,7 +19,9 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Why this order: on a phone the figure opens on the left 480 units. Steps 1 to 4 happen in the left and middle
 // columns, so the free preview and the failure show without scrolling; only the dead-letter queue and steps 5 and 6
-// need the right column. Diagonal edges run through the gaps between zones (rows 140-190 and 300-345).
+// need the right column. Diagonal edges run through the gaps between zones (rows 140-190 and 300-345); the HTTP
+// edge leaves the endpoint upwards, right of the Front door tab, and runs left along row 322.
+// The middle zones start at x 262 so their tabs end before x 390, where the vertical edges run.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. Nodes
 // are sized for the longest name the Services toggle puts in them ("Azure Virtual Machines", "EventBridge
 // Scheduler", "Dead-letter subqueue", "Cloud Run functions").
@@ -37,11 +39,11 @@ const spec: DiagramSpec = {
   ],
   zones: [
     { id: "staff", title: "Staff", tone: "neutral", x: 10, y: 40, w: 240, h: 100 },
-    { id: "messaging", title: "Messaging", tone: "orange", x: 285, y: 40, w: 500, h: 105 },
-    { id: "storage", title: "Photo storage", tone: "violet", x: 10, y: 190, w: 240, h: 290 },
-    { id: "functions", title: "Functions", tone: "teal", x: 285, y: 190, w: 210, h: 110 },
+    { id: "messaging", title: "Messaging", tone: "orange", x: 262, y: 40, w: 523, h: 105 },
+    { id: "storage", title: "Photos", tone: "violet", x: 10, y: 190, w: 240, h: 290 },
+    { id: "functions", title: "Functions", tone: "teal", x: 262, y: 190, w: 233, h: 110 },
     { id: "schedule", title: "Schedule", tone: "orange", x: 560, y: 190, w: 225, h: 110 },
-    { id: "data", title: "Database", tone: "violet", x: 285, y: 345, w: 210, h: 300 },
+    { id: "data", title: "Database", tone: "violet", x: 262, y: 345, w: 233, h: 300 },
     { id: "front", title: "Front door", tone: "blue", x: 560, y: 345, w: 225, h: 110 },
     { id: "shopzone", title: "Shop", tone: "teal", x: 10, y: 505, w: 240, h: 110 },
     { id: "staff2", title: "Staff", tone: "neutral", x: 560, y: 505, w: 225, h: 110 },
@@ -244,7 +246,20 @@ const spec: DiagramSpec = {
 
     // Step 6: an HTTP call; the caller holds the connection open until the function replies.
     { from: "admin", to: "gateway", label: "redo one photo", packet: true, step: 6 },
-    { from: "gateway", to: "fn", label: "waits for reply", packet: true, delay: 1.2, bidirectional: true, step: 6 },
+    {
+      from: "gateway",
+      to: "fn",
+      label: "waits for reply",
+      packet: true,
+      delay: 1.2,
+      bidirectional: true,
+      via: [
+        [720, 322],
+        [500, 322],
+      ],
+      labelAt: 0.4,
+      step: 6,
+    },
   ],
 };
 

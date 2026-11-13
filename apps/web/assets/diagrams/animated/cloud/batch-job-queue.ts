@@ -45,15 +45,15 @@ const spec: DiagramSpec = {
     { id: "outside", title: "Provider", tone: "neutral", kind: "subnet", x: 290, y: 380, w: 220, h: 110 },
     { id: "aside", title: "Set aside", tone: "orange", x: 290, y: 525, w: 220, h: 115 },
     { id: "jobs", title: "Jobs", tone: "orange", x: 545, y: 40, w: 235, h: 120 },
-    { id: "sched", title: "Scheduler", tone: "teal", x: 545, y: 175, w: 235, h: 125 },
-    { id: "final", title: "Final step", tone: "teal", x: 545, y: 330, w: 235, h: 110 },
+    { id: "sched", title: "Batch", tone: "teal", x: 545, y: 175, w: 235, h: 125 },
+    { id: "final", title: "Publish", tone: "teal", x: 545, y: 330, w: 235, h: 110 },
   ],
   nodes: [
     // Step 1
     {
       id: "uploads",
       label: "Uploads bucket",
-      sub: "2,000 product photos",
+      sub: "2,000 photos",
       icon: "blob",
       tone: "violet",
       variant: "glyph",
@@ -160,7 +160,7 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: one machine reads everything and keeps the results on its own disk until the end.
-    { from: "uploads", to: "machines", label: "1 machine reads all", packet: true, labelAt: 0.42 },
+    { from: "uploads", to: "machines", label: "read all", packet: true, labelAt: 0.4 },
     { from: "machines", to: "thumbs", label: "upload at the end", dashed: true, until: 1 },
 
     // Step 2: the provider takes the machine back after 5 hours; 9,000 finished images vanish with its disk.
@@ -202,10 +202,10 @@ const spec: DiagramSpec = {
         [527, 312],
         [527, 585],
       ],
-      labelAt: 0.72,
+      labelAt: 0.8,
       step: 6,
     },
-    { from: "batch", to: "publish", label: "all succeeded", packet: true, step: 6 },
+    { from: "batch", to: "publish", label: "all done", packet: true, step: 6 },
   ],
 };
 
