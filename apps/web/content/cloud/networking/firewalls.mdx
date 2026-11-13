@@ -1,11 +1,308 @@
 ---
 title: "Firewalls: Security Groups, NACLs, NSGs & Firewall Policies"
-description: "The two places a cloud checks a packet, what stateful and stateless mean, and why rules should name groups, not IP addresses."
-status: outline
+description: "Where a cloud checks each packet, what stateful and stateless mean, and why rules should name groups, not IP addresses."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the two places a packet can be checked (on the resource, and at the subnet or network edge), stateful versus stateless in plain words, and the one habit that matters: allow by identity (group, tag or service account), not by IP address.
+<KeyIdea>
+  A cloud firewall is a list of rules saying which machines may reach which others, and on which door; everything else is turned away.
+</KeyIdea>
 
-**Related reading on this site:** [Networking basics](/system-design/fundamentals/networking) · [Common attacks and defences](/system-design/fundamentals/common-attacks) · [Networking on AWS](/cloud/aws/networking)
+## The story
+
+Brightpost's shop runs inside a private network: a load balancer at the front, two app servers behind it, the orders database at the back. When the team moved in, Asha wrote one wide rule: anything inside the network may reach anything else, on any port. One Friday at 18:40 a contractor needs to reach the servers from home. He starts a small admin server with a public address and opens remote login to anyone, until Monday. Seven minutes later a stranger's script tries its first password. By Sunday at 01:50 it has tried about 26,000, and one works. From there, the wide rule lets it reach the database port, and it starts guessing again. An alert wakes Asha at 02:35, and at 02:50 she shuts the admin server down. The database password held. Nobody can prove the app servers are clean, so the team rebuilds them and changes every password. The shop is closed for 2 hours on Sunday morning, and about 30 orders are lost.
+
+Every step below closes one of the doors that weekend left open.
+
+## How it works
+
+Three words first. A **packet** is one small piece of network traffic, with a sender's address and a receiver's address on it. A **port** is a numbered door on a machine, one per kind of service: 443 for secure web pages, 22 for remote login, 5432 for PostgreSQL. A **firewall** is the thing that reads each packet and decides, from a list of rules, whether it may pass.
+
+### Step 1: Who may talk to whom
+
+<AnimatedDiagram spec="animated/cloud/firewall-layers" step={1} minWidth={620} caption="Brightpost's first setup: shoppers reach the load balancer on 443, and one wide rule lets anything inside reach anything." />
+
+Every firewall rule answers three questions. **Which direction?** Inbound traffic arrives at a machine; outbound traffic leaves it. **Which port?** One number or a range. **From where?** The source: an address, a range of addresses, or a named group.
+
+A cloud network starts from "no": traffic from the internet is refused unless a rule allows it. Brightpost's one internet rule lets anyone reach the load balancer on 443. That door is the shop, so it stays open. The trouble is the second rule, which makes every machine inside trust every other. How packets travel between machines is covered in [Networking basics](/system-design/fundamentals/networking); this page is about who may send them.
+
+<PremiumBreak />
+
+### Step 2: One rule open to the world
+
+<AnimatedDiagram spec="animated/cloud/firewall-layers" step={2} minWidth={620} caption="The failure: port 22 is open to anyone, and once the script is inside, the wide rule lets it reach the database." />
+
+The contractor's rule said: inbound, port 22, from `0.0.0.0/0`. That last part is a <Term id="cidr">CIDR</Term> range, a short way to write a block of addresses. The `/0` means the block has no fixed part, so it covers every address on the internet. Bots try every public address all day, so an open port 22 is found within minutes.
+
+<Callout tone="red" title="What breaks">
+  The script guesses about 26,000 passwords in 31 hours, and one of them works. The admin server is now the stranger's. The wide rule never asks where a packet started, only that it comes from inside, and the admin server is inside. So the script can reach port 5432 on the orders database, holding the data of 90,000 customers.
+</Callout>
+
+Two rules caused this: one door open to the whole internet, and trust in any address inside. The next steps replace both.
+
+### Step 3: Rules on the resource, naming groups
+
+<AnimatedDiagram spec="animated/cloud/firewall-layers" step={3} minWidth={620} caption="Each tier accepts one port from one named group. The stranger and the admin server are both refused." />
+
+Most cloud firewall rules are attached to the resource itself, so a packet is checked where it arrives. Some clouds call such a list a <Term id="security-group">security group</Term>.
+
+The better habit is to name a group as the source, not an address. Brightpost makes three groups: the load balancer's, the app servers', and the database's. The app servers accept port 8080 from the load balancer's group, and nothing else. The database accepts port 5432 from the app group, and nothing else.
+
+Now membership decides. On a sale day the app tier grows from 2 servers to 10, and each new server joins the app group as it starts. The database rule needs no edit. The admin server is in no group, so the database refuses it. The port 22 rule is deleted, and the stranger gets no answer at all.
+
+<ResponsibilityGrid set="network-security" />
+
+The cloud enforces the rules on every machine. Deciding what they say stays your job.
+
+### Step 4: Stateful: the doorman who remembers you
+
+<AnimatedDiagram spec="animated/cloud/firewall-layers" step={4} minWidth={620} caption="The database's rules remember the app's connection, so the reply goes back with no rule of its own." />
+
+A connection has two halves. The app server asks for an order, and the database answers with packets going the other way.
+
+The rules from Step 3 are **stateful**. Think of a doorman who lets you in and remembers your face. When you leave, he waves you out without checking the list again. A stateful firewall keeps a short memory of each connection it allowed. A reply that belongs to a known connection passes in the other direction, with no rule written for it.
+
+So the database needs one inbound rule and nothing for its answers. Rules on a resource work this way on all three clouds.
+
+### Step 5: A second list at the subnet edge
+
+<AnimatedDiagram spec="animated/cloud/firewall-layers" step={5} minWidth={620} caption="A subnet list guards the data subnet's edge and checks traffic in and out separately." />
+
+A <Term id="subnet">subnet</Term> is a slice of the network, here one per tier. Some clouds let you put a second, coarser list on a subnet's edge. Brightpost adds one to the data subnet: allow 5432 in from the app subnet's addresses, refuse the rest. It is a backstop against a careless rule on the database.
+
+This kind of list can be **stateless**: a doorman with no memory, who checks the list every time you pass. AWS calls it a <Term id="network-acl">network ACL</Term>. It reads its rules in number order, and the first rule that matches decides.
+
+<Compare
+  columns={["", "Stateful (rules on a resource)", "Stateless (some subnet lists)"]}
+  rows={[
+    ["Remembers allowed connections", true, false],
+    ["Rules needed for one database connection", "1: in on 5432", "2: in on 5432, out for the reply"],
+    ["Can say deny, not only allow", "On some clouds", true],
+    ["Order of rules matters", "Only where it has deny rules", "Yes: first match wins"],
+    ["Typical job", "Exactly who may call this machine", "A coarse backstop for a whole subnet"],
+  ]}
+  caption="Brightpost's data subnet uses both: a stateful list on the database and a stateless one at the subnet's edge."
+/>
+
+### Step 6: How a packet is checked, in order
+
+<AnimatedDiagram spec="animated/cloud/firewall-evaluation" stepper caption="A connection passes the subnet list and the database's rules; only the list checks the reply again." />
+
+At 09:14:02 the app server connects to the database on 5432. The subnet list checks first, finds rule 100, "allow 5432 in from the app subnet", and lets it pass. The database's own rules see the app group, let it in, and note the connection.
+
+The reply meets the layers in reverse. The database's rules recognise it. The subnet list remembers nothing, so it reads its "out" rules. A reply goes to a temporary port the app picked, from about 1024 up, so out rule 100 allows that whole range.
+
+Step 3 of the figure is the classic mistake: no "out" rule. Every request gets in, every reply is dropped, and the app waits until it gives up.
+
+### Step 7: A door with no open port
+
+<AnimatedDiagram spec="animated/cloud/firewall-layers" step={6} minWidth={620} caption="The contractor signs in with MFA, and the remote access service opens a session to the private admin server." />
+
+The contractor still needs a way in. The old answer was a **bastion**: one public machine with port 22 open, used as a stepping stone. That was the admin server in Step 2.
+
+Each cloud now offers **remote access** as a managed service. The contractor signs in as himself, with <Term id="mfa">MFA</Term>, a second proof such as a code from his phone. The service checks that his role allows a session on that server, then connects him. The admin server has no public address and no port open to the internet. Each session is logged with his name. Checking the person and not the network is the idea behind [Zero Trust](/cloud/resilience/zero-trust).
+
+### Step 8: Rules above every team
+
+<AnimatedDiagram spec="animated/cloud/firewall-layers" step={7} minWidth={620} caption="An organisation policy is checked before any team's rules, and it refuses port 22 from anyone on every network." />
+
+Nothing stopped the contractor from opening port 22. Every cloud lets you set or check firewall rules on the <Term id="organization">organization</Term>, the tree that holds all of a company's accounts.
+
+Brightpost sets one such **org firewall policy**: no port 22 or 3389 (the remote desktop port) from anyone, on any network. It is checked before each team's rules, and no team can loosen it. That Friday, it would have refused the contractor's rule as he wrote it. The common attack paths these rules stop are listed in [Common attacks and defences](/system-design/fundamentals/common-attacks).
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: rules on the resource, stateful replies, groups instead of addresses, and a layer above every team.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Rules on the resource:** security groups, attached to network interfaces, so to instances, load balancers and RDS databases. Stateful, allow rules only. A new group allows no inbound traffic and all outbound.
+    - **Naming a group:** a rule's source can be another security group. Its members are the interfaces that carry it.
+    - **Subnet layer:** network ACLs, one per subnet. Stateless, numbered rules, allow and deny, lowest number first. The default ACL allows everything; a new custom ACL denies everything until you add rules.
+    - **Above every team:** AWS Firewall Manager applies and audits security group rules across an organization's accounts.
+    - **Remote access with no open port:** Systems Manager Session Manager. An agent on the instance connects out to the service, so no inbound port is needed.
+
+    **The difference that changes a design.** Security groups cannot deny, so blocking one address takes a network ACL or AWS Network Firewall. In return, a rule naming a group covers every instance autoscaling starts. Write each tier's rules with group sources, and keep ACLs coarse.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Rules on the resource:** VPC firewall rules. Each rule belongs to the whole network and picks its targets: all instances, a network tag or a service account. Stateful, allow or deny, lowest priority number first. Unless a rule says otherwise, inbound is denied and outbound allowed.
+    - **Naming a group:** sources can be network tags or service accounts, for traffic inside the network.
+    - **Subnet layer:** none. There is no subnet list; network firewall policies group rules for a whole network instead.
+    - **Above every team:** hierarchical firewall policies on the organization or a folder. They are checked first, and a rule can allow, deny or pass the decision down.
+    - **Remote access with no open port:** Identity-Aware Proxy TCP forwarding. You allow port 22 only from IAP's own published range, and IAP checks each person's identity and role.
+
+    **The difference that changes a design.** Rules are network-wide and pick machines by label. Anyone who can edit a VM can change its tags. Using a <Term id="service-account">service account</Term> needs its own permission, so target sensitive tiers by service account. The automatic `default` network allows port 22 from anywhere: delete that rule. A Cloud SQL database with a private address sits in a network Google runs, so your rules limit it only from your VMs' side.
+  </Tab>
+  <Tab label="Azure">
+    - **Rules on the resource:** network security groups (NSGs), attached to a subnet, a network interface, or both. Stateful, allow and deny, lowest priority number first.
+    - **Naming a group:** application security groups (ASGs). You place network interfaces in an ASG, then use it as a rule's source or destination.
+    - **Subnet layer:** the same NSG, attached to the subnet. It is stateful too. Inbound traffic must pass the subnet's NSG and then the interface's NSG.
+    - **Above every team:** security admin rules in Azure Virtual Network Manager, checked before NSGs. Azure Policy can refuse NSG rules that open remote login to the internet.
+    - **Remote access with no open port:** Azure Bastion, a managed service in your network. You connect through the portal or the command line, and the VM needs no public address.
+
+    **The difference that changes a design.** Every NSG starts with a default rule allowing all traffic within the virtual network: Brightpost's wide rule from Step 1. Add your own deny above it, then allow each tier by ASG. With NSGs on subnet and interface, a packet needs a yes from both.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/firewall-layers" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/firewall-layers" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="What should this rule's source be?"
+  tree={{
+    q: "Is it the public front door, such as the load balancer on 443?",
+    yes: "Allow that one port from anyone, on the front door only. Nothing behind it gets a rule from anyone.",
+    no: {
+      q: "Does the traffic come from another tier of your own system?",
+      yes: "Name that tier's group, tag or service identity as the source. No address ranges.",
+      no: {
+        q: "Is it a person who needs to log in to a machine?",
+        yes: {
+          answer: "Open no port to the internet. Use the cloud's identity-checked remote access, with MFA.",
+          href: "/cloud/resilience/zero-trust",
+        },
+        no: "A partner or an office with fixed addresses: allow their exact range on the one port they need, and review it every quarter.",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="On a sale day Brightpost runs 10 app servers instead of 2. How many database rules must change?" hint="What does the database's rule name as its source?">
+    None. The rule allows 5432 from the app group, and each new server joins that group when it starts.
+  </QuizItem>
+  <QuizItem question="A subnet list allows 5432 in from the app subnet and has no out rules. What does the app see?" hint="Does a stateless list remember the request?">
+    Its requests reach the database, but every reply is dropped at the subnet's edge. The app waits and times out. Adding an out rule for the reply ports fixes it.
+  </QuizItem>
+  <QuizItem question="With the org policy in place, the contractor tries to add 'port 22 from 0.0.0.0/0' again. What happens?">
+    The rule is refused. The organisation policy is checked before every team's rules, and no account below can loosen it.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Exact addresses", "Address range", "Group, tag or identity"]}
+  rows={[
+    ["Rule edits when app servers go from 2 to 10", "8 new entries", "0", "0"],
+    ["The admin server in the same network gets in", false, true, false],
+    ["Still right after a server gets a new address", false, true, true],
+    ["Works for callers outside the cloud", true, true, false],
+    ["Use it for", "A partner's 2 fixed addresses", "Coarse subnet lists only", "Every tier of your own system"],
+  ]}
+  caption="Three ways to write a rule's source, with Brightpost's numbers."
+/>
+
+Addresses are the only choice for callers outside your cloud. Inside it, a group follows the machine, and a range lets in whatever lands there.
+
+## Common pitfalls
+
+- **Opening a port "for the evening".** A rule from `0.0.0.0/0` on 22, 3389 or 5432 is found by bots within minutes. Use remote access instead, and let an org policy refuse such rules.
+- **Trusting the whole network.** A rule from the network's own address range lets any machine in, including the next admin server. Name the calling group.
+- **Forgetting the reply in a stateless list.** Requests pass, replies die, and it looks like a slow database. Add an out rule for the reply ports.
+- **Leaving outbound wide open.** All three clouds allow all outbound traffic by default, so a taken-over server can send data anywhere. Limit outbound on the data tier.
+- **Rules nobody owns.** Old rules pile up, and nobody dares delete them. Give each one an owner and, if temporary, an end date.
+
+## How to say it in an interview
+
+"I treat firewall rules as part of the design, and the default is deny. Each tier gets its own rules on the resource. The source is the calling tier's group, tag or service identity, never an address range inside the network. Those rules are stateful, so replies need no rule. On AWS I may add a stateless network ACL as a coarse backstop, remembering that replies need their own rule there. Nothing behind the load balancer accepts traffic from the internet. People reach servers through an identity-checked remote access service, so no admin port is open. On top, an organisation policy refuses rules like port 22 from anywhere, so no team can open one."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does a firewall rule allowing port 22 from 0.0.0.0/0 mean, and why is it dangerous?" level="Junior" category="Cloud">
+    **Short answer.** It lets anyone on the internet try to log in to that machine. `0.0.0.0/0` covers every address, and port 22 is the remote login door. Bots scan for it all day, so password guesses start within minutes.
+
+    **Why.** Brightpost's admin server with this rule got its first guess after 7 minutes and about 26,000 in 31 hours. One worked. A wide rule inside the network then let the stranger reach the database port. The fix: no admin port open to the internet, and database rules that name the app group.
+
+    <AnimatedDiagram spec="animated/cloud/firewall-layers" step={2} path="stranger>admin>db" caption="One open rule lets the script in, and a wide rule lets it walk to the database." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you give that contractor access instead?
+    - How would you find every such rule across 30 accounts?
+
+    **Watch out for.** Saying "it is fine, the server has a strong password". Passwords leak and get reused, and the server also has unpatched flaws you do not know about yet.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why reference a security group or tag as a rule's source instead of an IP range?" level="Mid" category="Cloud">
+    **Short answer.** A group follows the machine, not its address. New members are covered the moment they start, and anything outside the group is refused even inside the same network. An address range lets in whatever lands in it.
+
+    **Why.** Brightpost's database once allowed the network's whole range, so a stranger on the admin server could reach it. Now it allows 5432 from the app group only. On a sale day the app tier goes from 2 servers to 10 with no rule edit. The admin server, in the same network, is refused.
+
+    <AnimatedDiagram spec="animated/cloud/firewall-layers" step={3} highlight={["admin", "dbrules", "db", "app"]} caption="Membership, not address, decides: the app group gets in, the admin server does not." />
+
+    **Follow-ups the interviewer may ask.**
+    - On Google Cloud, why prefer a service account over a network tag?
+    - When do you still have to use an address range?
+
+    **Watch out for.** Using groups but making one "allow-all-internal" group that every machine joins. That is the wide rule again, with a new name.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do engineers get a shell on private servers without opening port 22?" level="Mid" category="Cloud">
+    **Short answer.** Through the cloud's managed remote access service. The engineer signs in with their own identity and MFA, the service checks that their role allows a session, and it connects them. The server has no public address, and no port on it is open to the internet.
+
+    **Why.** A bastion with port 22 open is a door bots try all day, and Brightpost's admin server was one. With identity-checked access, the question changes from "where does this packet come from?" to "who is this, and may they?" Each session is logged with a name. Removing someone's access is one change in the directory.
+
+    <AnimatedDiagram spec="animated/cloud/firewall-layers" step={6} path="contractor>remote>admin" caption="The contractor proves who he is; the service, not an open port, connects him." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does each cloud call this service, and how does it reach the machine?
+    - How would you limit sessions to production servers to two people?
+
+    **Watch out for.** Saying "we limit port 22 to the office's address". Laptops leave the office, and the address says nothing about who is typing.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="After someone adds a subnet list, every call to the database times out, but the database's own rules look correct. What happened?" level="Mid" category="Cloud">
+    **Short answer.** The subnet list is stateless and has no out rule for the replies. Requests reach the database, and every answer is dropped at the subnet's edge. Add an out rule for the reply port range toward the app subnet.
+
+    **Why.** The database's rules are stateful: they remember each allowed connection and let its reply pass. The subnet list remembers nothing and checks the reply like any new packet. Replies go to a temporary port from about 1024 up, so the out rule must cover that range. The app sees a timeout, not a refusal, because it never hears back.
+
+    <AnimatedDiagram spec="animated/cloud/firewall-evaluation" step={3} caption="The request passes both layers; the reply dies at the list, and the app times out." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why would you keep a stateless list at all?
+    - In what order does the list read its rules?
+
+    **Watch out for.** Opening the database's rules wider to "fix" it. They were never the problem, and the wider rule stays long after the real fix.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design org-wide firewall guardrails that no team can bypass, on Google Cloud and on Azure." level="Senior" category="Cloud">
+    **Short answer.** Set a small number of rules above every team's network, checked before their own rules. Refuse remote login and remote desktop from the internet, and refuse traffic to the data tier from anything but its known callers. Then audit what remains, and send findings to each team.
+
+    **Why.** On Google Cloud, a hierarchical firewall policy on the organization or a folder is checked before each network's rules. Its denies cannot be loosened below, and "go to next" hands other traffic to the team. On Azure, security admin rules in Virtual Network Manager come before NSGs. Azure Policy can also refuse NSG rules that open port 22 or 3389 to the internet. At Brightpost, one such rule would have refused the contractor's rule as he wrote it.
+
+    <AnimatedDiagram spec="animated/cloud/firewall-layers" step={7} highlight={["orgpol", "admin", "remote"]} caption="The org policy is checked before the team's rules and refuses port 22 from anyone." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which exceptions would you allow, and who approves them?
+    - How do you roll out a new deny rule without breaking a team's traffic?
+
+    **Watch out for.** Putting every rule at the top. An org policy that describes each team's tiers becomes a bottleneck. Keep it to a few rules that must hold everywhere.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Private Networks, Subnets and Routing](/cloud/networking/vpc-and-subnets)
+- [NAT and Leaving the Network](/cloud/networking/nat-and-egress)
+- [Private Endpoints](/cloud/networking/private-endpoints)
+- [Identity and Access](/cloud/fundamentals/identity-and-access)
+- [Shared Responsibility](/cloud/fundamentals/shared-responsibility)
+- [Zero Trust, Defence in Depth and Identity-Aware Access](/cloud/resilience/zero-trust)
+- [Networking on AWS](/cloud/aws/networking)
+- [Networking on Google Cloud](/cloud/gcp/networking)
+- [Networking on Azure](/cloud/azure/networking)
+- [Security overview](/system-design/fundamentals/security)
+- [Common attacks and defences](/system-design/fundamentals/common-attacks)
+
+## Further reading
+
+- [Amazon VPC security groups](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html): rules, sources and defaults.
+- [Amazon VPC network ACLs](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-network-acls.html): the stateless subnet layer.
+- [Google Cloud VPC firewall rules](https://cloud.google.com/firewall/docs/firewalls): targets, priorities and hierarchical policies.
+- [Azure network security groups](https://learn.microsoft.com/azure/virtual-network/network-security-groups-overview): NSGs, ASGs and how rules are processed.
