@@ -1,0 +1,121 @@
+---
+title: "Search Suggestions System"
+description: "Given products and searchWord, after each typed character suggest up to three product names sharing that prefix; if more than three match, return the three l…"
+difficulty: medium
+patterns: [design-questions]
+topics: [design-questions]
+companies: []
+languages: [python]
+entry: { python: suggested_products }
+starter:
+  python: |
+    def suggested_products(products: list[str], searchWord: str) -> list[list[str]]:
+        # Your code here
+        pass
+tests: { public: tests/search-suggestions-system.public.json, hidden: tests/search-suggestions-system.hidden.json }
+complexity: { time: "O(P log P + S * P) worst case; with two-pointer O(P log P + S + matches).", space: "O(P) for output aside from input; tries use O(total characters) if used." }
+number: "04"
+leetcode: search-suggestions-system
+leetcodeId: 1268
+order: 25004000000000
+---
+
+Given products and searchWord, after each typed character suggest up to three product
+names sharing that prefix; if more than three match, return the three lexicographically smallest.
+
+## Examples
+
+````text
+Example 1:
+Input: products = ["mobile","mouse","moneypot","monitor","mousepad"], searchWord = "mouse"
+Output: [["mobile","moneypot","monitor"],["mobile","moneypot","monitor"],
+         ["mouse","mousepad"],["mouse","mousepad"],["mouse","mousepad"]]
+````
+
+## Constraints
+
+````text
+- 1 <= len(products) <= 1000; unique lowercase strings; searchWord lowercase.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sort + two-pointer / Trie
+Sort products once; for each prefix, advance pointers to the first and matching range, take three.
+
+1. Sort products lexicographically.
+2. For each i in range(len(searchWord)), filter or scan from the range that matched i-1.
+3. Collect up to three strings that start with searchWord\[: i + 1\].
+
+## Complexity
+
+**Time:** O(P log P + S \* P) worst case; with two-pointer O(P log P + S + matches).
+
+**Space:** O(P) for output aside from input; tries use O(total characters) if used.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+Search Suggestions System
+Solved
+Medium
+Topics
+Companies
+Hint
+You are given an array of strings products and a string searchWord.
+
+Design a system that suggests at most three product names from products after each character of searchWord is typed. Suggested products should have common prefix with searchWord. If there are more than three products with a common prefix return the three lexicographically minimums products.
+
+Return a list of lists of the suggested products after each character of searchWord is typed.
+
+
+
+Example 1:
+
+Input: products = ["mobile","mouse","moneypot","monitor","mousepad"], searchWord = "mouse"
+Output: [["mobile","moneypot","monitor"],["mobile","moneypot","monitor"],["mouse","mousepad"],["mouse","mousepad"],["mouse","mousepad"]]
+Explanation: products sorted lexicographically = ["mobile","moneypot","monitor","mouse","mousepad"].
+After typing m and mo all products match and we show user ["mobile","moneypot","monitor"].
+After typing mou, mous and mouse the system suggests ["mouse","mousepad"].
+Example 2:
+
+Input: products = ["havana"], searchWord = "havana"
+Output: [["havana"],["havana"],["havana"],["havana"],["havana"],["havana"]]
+Explanation: The only word "havana" will be always suggested while typing the search word.
+
+
+Constraints:
+
+1 <= products.length <= 1000
+1 <= products[i].length <= 3000
+1 <= sum(products[i].length) <= 2 * 104
+All the strings of products are unique.
+products[i] consists of lowercase English letters.
+1 <= searchWord.length <= 1000
+searchWord consists of lowercase English letters.
+````
+
+## Solution
+
+````python
+import bisect
+from typing import List
+
+
+class Solution:
+    def suggestedProducts(self, products: List[str], searchWord: str) -> List[List[str]]:
+        products.sort()
+        res: List[List[str]] = []
+        left, right = 0, len(products)
+        prefix = ""
+        for c in searchWord:
+            prefix += c
+            left = bisect.bisect_left(products, prefix, left, right)
+            right = bisect.bisect_right(products, prefix + "{", left, right)
+            res.append(products[left : min(left + 3, right)])
+        return res
+````

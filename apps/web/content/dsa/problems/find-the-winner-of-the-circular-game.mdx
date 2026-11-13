@@ -1,0 +1,77 @@
+---
+title: "Find the Winner of the Circular Game"
+description: "n friends sit in a circle labeled 1..n."
+difficulty: medium
+patterns: [game-theory-and-circular-problem]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: find_the_winner }
+starter:
+  python: |
+    def find_the_winner(n: int, k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/find-the-winner-of-the-circular-game.public.json, hidden: tests/find-the-winner-of-the-circular-game.hidden.json }
+complexity: { time: "O(n^2) - list pop is linear", space: "O(n) for the working list" }
+group: "06. Game Theory and Circular Problem"
+number: "01"
+leetcode: find-the-winner-of-the-circular-game
+leetcodeId: 1823
+order: 11006001000000
+---
+
+n friends sit in a circle labeled 1..n. Starting at friend 1, repeatedly count k
+friends clockwise (including the current friend as the first count) and eliminate
+the k-th friend until one remains. Return the winner's label.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 5, k = 2
+    Output: 3
+
+Example 2:
+    Input: n = 6, k = 5
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 20 in tests; 1 <= k <= 20
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Simulation / Josephus-style elimination
+Model the circle as a list, advance with modular indexing after each removal.
+
+1. Maintain friends in traversal order.
+2. While more than one player, advance index by (k - 1) modulo length and pop.
+3. Return the surviving label.
+
+## Complexity
+
+**Time:** O(n^2) - list pop is linear
+
+**Space:** O(n) for the working list
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def find_the_winner(self, n: int, k: int) -> int:
+        friends: List[int] = list(range(1, n + 1))
+        index = 0
+        while len(friends) > 1:
+            index = (index + k - 1) % len(friends)
+            friends.pop(index)
+        return friends[0]
+````

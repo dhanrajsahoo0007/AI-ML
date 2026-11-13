@@ -1,0 +1,101 @@
+---
+title: "Pascals Triangle"
+description: "Given an integer numRows, return the first numRows of Pascal's triangle."
+difficulty: easy
+patterns: [mathematical-array-problems]
+topics: [arrays]
+companies: []
+languages: [python]
+entry: { python: generate }
+starter:
+  python: |
+    def generate(numRows: int) -> list[list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/pascals-triangle.public.json, hidden: tests/pascals-triangle.hidden.json }
+complexity: { time: "O(numRows^2) - Row i has O(i) work; sum 1..numRows is quadratic.", space: "O(numRows^2) - Store all generated entries in the triangle." }
+group: "04. Mathematical Array Problems"
+number: "02"
+leetcode: pascals-triangle
+leetcodeId: 118
+order: 1004002000000
+---
+
+Given an integer numRows, return the first numRows of Pascal's triangle. Each row starts and ends
+with 1, and each interior value is the sum of the two values above it from the previous row.
+
+## Examples
+
+````text
+Example 1:
+    Input: numRows = 5
+    Output: [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1]]
+Example 2:
+    Input: numRows = 1
+    Output: [[1]]
+````
+
+## Constraints
+
+````text
+- 1 <= numRows <= 30
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Iterative row construction
+Build each row from the previous row using adjacent sums.
+
+1. Start with triangle = \[\[1\]\].
+2. For i from 1 to numRows - 1, form a new row beginning with 1.
+3. For j from 1 to i - 1, append triangle\[i - 1\]\[j - 1\] + triangle\[i - 1\]\[j\].
+4. Append 1 to finish the row and add it to triangle.
+5. Return triangle.
+
+## Complexity
+
+**Time:** O(numRows^2) - Row i has O(i) work; sum 1..numRows is quadratic.
+
+**Space:** O(numRows^2) - Store all generated entries in the triangle.
+
+## Original notes
+
+````text
+(preamble)
+Each interior entry is the sum of the two entries above it (same property as ``C(n,k)`` rows).
+Step-by-step (original notes):
+
+Visual (first five rows)::
+1
+               1 1
+              1 2 1
+             1 3 3 1
+            1 4 6 4 1
+
+
+1. Seed with ``[1]``.
+2. For each new row, start and end with ``1``.
+3. Middle positions ``j`` satisfy ``row[j] = previous[j-1] + previous[j]``.
+4. Append the finished row and repeat until ``numRows`` rows exist.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def generate(self, numRows: int) -> List[List[int]]:
+        triangle: List[List[int]] = [[1]]  # first row is always [1]
+        for i in range(1, numRows):
+            row = [1]  # left boundary
+            for j in range(1, i):
+                # Pascal rule: sum of the two parents from the prior row
+                row.append(triangle[i - 1][j - 1] + triangle[i - 1][j])
+            row.append(1)  # right boundary
+            triangle.append(row)
+        return triangle
+````

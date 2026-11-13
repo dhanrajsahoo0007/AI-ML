@@ -1,0 +1,129 @@
+---
+title: "Longest Common Suffix"
+description: "Given a list of strings and a list of query strings, for each query find the strings that share the longest common suffix with it, and return the length of t…"
+difficulty: medium
+patterns: [string-prefix-suffix-problem]
+topics: [tries]
+companies: []
+languages: [python]
+entry: { python: longest_common_suffix_queries }
+starter:
+  python: |
+    def longest_common_suffix_queries(strings: list[str], queries: list[str]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/longest-common-suffix.public.json, hidden: tests/longest-common-suffix.hidden.json }
+complexity: { time: "O(N * L + Q * M) — N words of average length L, Q queries of average length M.", space: "O(N * L) for trie nodes in the worst case." }
+group: "02. String Prefix - Suffix Problem"
+number: "02"
+order: 16002002000000
+---
+
+Given a list of strings and a list of query strings, for each query find the strings that share the longest common suffix with it,
+and return the length of the longest of those strings (0 when no string shares a suffix).
+
+## Examples
+
+````text
+Example 1:
+Input: strings = ["apple", "banana", "cherry", "date"], queries = ["pple", "ana", "ry", "e"]
+Output: [5, 6, 6, 5]
+````
+
+## Constraints
+
+````text
+- Strings and queries are non-empty sequences of characters (lowercase in typical usage)
+- Multiple dictionary words may share suffixes with a query; we need the longest match length
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Reversed trie (suffix trie)
+Insert each word reversed so shared suffixes share a path; each node stores the longest word length ending there.
+
+1. Build a trie by inserting each word from last character to first.
+2. While inserting, update each node's longest\_word\_length with max(current, len(word)).
+3. For each query, walk from the last character until a mismatch; return longest\_word\_length at the deepest matched node.
+
+## Complexity
+
+**Time:** O(N \* L + Q \* M) — N words of average length L, Q queries of average length M.
+
+**Space:** O(N \* L) for trie nodes in the worst case.
+Restored (original notes, diagrams, and walkthrough):
+Problem: Longest Common Suffix Queries
+
+Given a list of strings and a list of query strings, for each query string,
+find the length of the longest common suffix it shares with any string in the original list.
+
+Example:
+Input:
+strings = \["apple", "banana", "cherry", "date"\]
+queries = \["pple", "ana", "ry", "e"\]
+
+Output: \[5, 6, 6, 5\]
+
+Explanation:
+- "pple" shares the suffix "pple" with "apple" (length 5)
+- "ana" shares the suffix "ana" with "banana" (length 6)
+- "ry" shares the suffix "ry" with "cherry" (length 6)
+- "e" shares the suffix "e" with "apple", "date" (length 5)
+
+Approach:
+1. Build a reverse Trie (suffix Trie) from the given strings.
+2. For each query, traverse the Trie to find the longest matching suffix.
+
+Time Complexity:
+- Building the Trie: O(N \* L), where N is the number of strings and L is the average length of strings.
+- Querying: O(M \* L), where M is the number of queries and L is the average length of query strings.
+
+Space Complexity: O(N \* L) for storing the Trie.
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List
+
+
+class TrieNode:
+    def __init__(self) -> None:
+        self.children: dict[str, TrieNode] = {}
+        self.longest_word_length: int = 0
+
+
+class SuffixTrie:
+    def __init__(self) -> None:
+        self.root = TrieNode()
+
+    def insert(self, word: str) -> None:
+        node = self.root
+        for char in reversed(word):
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            node = node.children[char]
+            if len(word) > node.longest_word_length:
+                node.longest_word_length = len(word)
+
+    def longest_common_suffix_length(self, query: str) -> int:
+        node = self.root
+        for char in reversed(query):
+            if char not in node.children:
+                break
+            node = node.children[char]
+        return node.longest_word_length
+
+
+class Solution:
+    def longest_common_suffix_queries(
+        self, strings: List[str], queries: List[str]
+    ) -> List[int]:
+        trie = SuffixTrie()
+        for s in strings:
+            trie.insert(s)
+        return [trie.longest_common_suffix_length(q) for q in queries]
+````

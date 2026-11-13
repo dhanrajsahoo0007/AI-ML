@@ -1,0 +1,105 @@
+---
+title: "Data Stream as Disjoint Intervals"
+description: "Implement a data structure that accepts integers and always represents the set of distinct values as a sorted list of disjoint closed intervals."
+difficulty: hard
+patterns: [advanced-interval-problems]
+topics: [intervals]
+companies: []
+languages: [python]
+entry: { python: Solution }
+mode: class
+starter:
+  python: |
+    class Solution:
+        def __init__(self) -> None:
+            pass
+
+        def addNum(self, value: int) -> None:
+            # Your code here
+            pass
+
+        def getIntervals(self) -> list[list[int]]:
+            # Your code here
+            pass
+tests: { public: tests/data-stream-as-disjoint-intervals.public.json, hidden: tests/data-stream-as-disjoint-intervals.hidden.json }
+complexity: { time: "O(n) per add in the worst case for list shifts; O(n) for getIntervals copy.", space: "O(k) for k disjoint intervals." }
+group: "04. Advanced Interval Problems"
+number: "02"
+leetcode: data-stream-as-disjoint-intervals
+leetcodeId: 352
+order: 19004002000000
+---
+
+Implement a data structure that accepts integers and always represents the set of
+distinct values as a sorted list of disjoint closed intervals. Support addNum to
+insert a value (no effect if it already exists) and getIntervals to return the
+current partition.
+
+## Examples
+
+````text
+Example 1:
+    Input: addNum(1), addNum(3), addNum(7), getIntervals()
+    Output: [[1,1],[3,3],[7,7]]
+
+Example 2:
+    Input: addNum(2), getIntervals()
+    Output: [[1,3],[7,7]]
+````
+
+## Constraints
+
+````text
+- At most 3 * 10^4 total calls to addNum and getIntervals combined
+- 0 <= value <= 10^9
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sorted map merge
+Keeping intervals sorted by start lets each insertion merge only with its neighbors in
+constant time after locating the insertion point with binary search.
+
+1. Store intervals in a sorted list (bisect on starts).
+2. On addNum, locate neighbors and merge overlapping or touching intervals into one.
+3. On getIntervals, return a shallow copy of the maintained list.
+
+## Complexity
+
+**Time:** O(n) per add in the worst case for list shifts; O(n) for getIntervals copy.
+
+**Space:** O(k) for k disjoint intervals.
+
+## Solution
+
+````python
+from bisect import bisect_left
+from typing import List
+
+
+class Solution:
+    def __init__(self) -> None:
+        self._intervals: List[List[int]] = []
+
+    def addNum(self, value: int) -> None:
+        intervals = self._intervals
+        idx = bisect_left(intervals, [value, value])
+
+        left_touch = idx > 0 and intervals[idx - 1][1] + 1 >= value
+        right_touch = idx < len(intervals) and intervals[idx][0] - 1 <= value
+
+        if left_touch and right_touch:
+            intervals[idx - 1][1] = intervals[idx][1]
+            intervals.pop(idx)
+        elif left_touch:
+            intervals[idx - 1][1] = max(intervals[idx - 1][1], value)
+        elif right_touch:
+            intervals[idx][0] = min(intervals[idx][0], value)
+        else:
+            intervals.insert(idx, [value, value])
+
+    def getIntervals(self) -> List[List[int]]:
+        return [interval[:] for interval in self._intervals]
+````

@@ -1,0 +1,91 @@
+---
+title: "Push Dominoes"
+description: "There is a row of n dominoes represented by a string dominoes where '.' means standing, 'L' means pushed left, and 'R' means pushed right."
+difficulty: medium
+patterns: [miscellaneous]
+topics: [two-pointers]
+companies: []
+languages: [python]
+entry: { python: push_dominoes }
+starter:
+  python: |
+    def push_dominoes(dominoes: str) -> str:
+        # Your code here
+        pass
+tests: { public: tests/push-dominoes.public.json, hidden: tests/push-dominoes.hidden.json }
+complexity: { time: "O(n) - Two linear passes over the dominoes.", space: "O(n) - Stores per-index force totals separate from the output string builder." }
+group: "06. Miscellaneous"
+number: "02"
+leetcode: push-dominoes
+leetcodeId: 838
+order: 6006002000000
+---
+
+There is a row of n dominoes represented by a string dominoes where '.' means standing, 'L' means pushed left,
+and 'R' means pushed right. When a domino receives force from an adjacent neighbor, it falls that direction in
+one second. Return the final state after all forces resolve.
+
+## Examples
+
+````text
+Example 1:
+    Input: dominoes = "RR.L"
+    Output: "RR.L"
+Example 2:
+    Input: dominoes = ".L.R...LR..L.."
+    Output: "LL.RR.LLRRLL.."
+````
+
+## Constraints
+
+````text
+- n == len(dominoes)
+- 1 <= n <= 10^5
+- dominoes[i] is either 'L', 'R', or '.'.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two-pass force accumulation
+Propagate rightward forces from 'R' and leftward forces from 'L', then compare net force at each dot.
+
+1. Create an array of net forces initialized to zero.
+2. Sweep left to right carrying a decaying right-bias that resets on 'L' and strengthens on 'R'.
+3. Sweep right to left subtracting left-bias symmetrically.
+4. Emit 'R', 'L', or '.' depending on whether the net force is positive, negative, or zero.
+
+## Complexity
+
+**Time:** O(n) - Two linear passes over the dominoes.
+
+**Space:** O(n) - Stores per-index force totals separate from the output string builder.
+
+## Solution
+
+````python
+class Solution:
+    def pushDominoes(self, dominoes: str) -> str:
+        n = len(dominoes)
+        forces = [0] * n
+        strength = 0
+        for i in range(n):
+            if dominoes[i] == "R":
+                strength = n
+            elif dominoes[i] == "L":
+                strength = 0
+            else:
+                strength = max(strength - 1, 0)
+            forces[i] += strength
+        strength = 0
+        for i in range(n - 1, -1, -1):
+            if dominoes[i] == "L":
+                strength = n
+            elif dominoes[i] == "R":
+                strength = 0
+            else:
+                strength = max(strength - 1, 0)
+            forces[i] -= strength
+        return "".join("." if f == 0 else "R" if f > 0 else "L" for f in forces)
+````

@@ -1,0 +1,5 @@
+title: A webhook receiver that answers fast and never pays twice
+alt: An architecture diagram built in seven steps in which a payment provider first posts a payment event straight to Brightpost's payment handler, which marks the order paid in the orders database and sends a print job to the printing partner while the provider waits, then on a slow morning the provider gets no reply within 10 seconds and resends, so orders are marked paid twice and printed twice, then a public webhook endpoint checks each request's signature with a secret from the secret store, adds the event to a queue and replies at once while the handler reads from the queue, the handler records each event id in a processed-events table in the same commit and skips one it has seen, events that fail five times move to a dead-letter queue and are replayed after a fix, and in the other direction an outbox row written with each shipped order feeds a delivery worker that sends signed posts to about 300 gift shops.
+caption: Brightpost's payment webhooks, from inline handling to a queue and an event-id check, plus the sending side
+tags: [cloud, networking, webhooks]
+created: 2026-11-13

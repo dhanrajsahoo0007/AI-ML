@@ -1,0 +1,83 @@
+---
+title: "Minimum Number of K Consecutive Bit Flips"
+description: "In an array nums of 0/1, a k-bit flip sets nums[i..i+k-1] to 1 - nums[j]."
+difficulty: hard
+patterns: [bit-manipulation]
+topics: [prefix-sum]
+companies: []
+languages: [python]
+entry: { python: min_k_bit_flips }
+starter:
+  python: |
+    def min_k_bit_flips(nums: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-number-of-k-consecutive-bit-flips.public.json, hidden: tests/minimum-number-of-k-consecutive-bit-flips.hidden.json }
+complexity: { time: "O(n).", space: "O(n) for the hint array (can be optimized to O(k))." }
+group: "10. Bit Manipulation"
+number: "01"
+leetcode: minimum-number-of-k-consecutive-bit-flips
+leetcodeId: 995
+order: 2010001000000
+---
+
+In an array nums of 0/1, a k-bit flip sets nums\[i..i+k-1\] to 1 - nums\[j\]. Return
+the minimum flips to make all ones, or -1 if impossible.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [0, 1, 0], k = 1
+Output: 2
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 10^5
+- nums[i] is 0 or 1
+- 1 <= k <= len(nums)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy with Implicit Difference / Prefix Flip
+Track parity of flips ending at each index and schedule cancellations k steps ahead.
+
+1. Walk left to right maintaining current flip parity from pending operations.
+2. If the effective bit is 0, flip if i + k &lt;= n is possible; toggle parity and mark end.
+3. Accumulate flip count or return -1 when blocked.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(n) for the hint array (can be optimized to O(k)).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def minKBitFlips(self, nums: List[int], k: int) -> int:
+        n = len(nums)
+        hint = [0] * n
+        flips = 0
+        parity = 0
+        for i, v in enumerate(nums):
+            parity ^= hint[i]
+            cur = v ^ parity
+            if cur == 0:
+                if i + k > n:
+                    return -1
+                flips += 1
+                parity ^= 1
+                if i + k < n:
+                    hint[i + k] ^= 1
+        return flips
+````

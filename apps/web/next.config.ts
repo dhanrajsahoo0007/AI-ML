@@ -74,6 +74,22 @@ function beforeBuild() {
   });
 }
 
+// `next dev` started without `npm run dev` (for example `npx next dev -p 5095`) skips the `predev` script, so
+// public/nav-items.json and the search index were never written: every header menu then showed only an "Open ..."
+// link. Write them when the dev server starts unless `predev` already did (it runs first and sets nothing in this
+// process, so check the file's age instead: anything older than this server start is regenerated).
+function ensureDevRuntimeData() {
+  if (process.env.DEV_RUNTIME_DATA_DONE) return;
+  process.env.DEV_RUNTIME_DATA_DONE = "1";
+  const file = path.join(__dirname, "public", "nav-items.json");
+  const fresh = fs.existsSync(file) && Date.now() - fs.statSync(file).mtimeMs < 60_000;
+  if (fresh) return;
+  execFileSync(process.execPath, ["--import", "./scripts/ts-hooks.mjs", "scripts/gen-runtime-data.ts", "--dev"], {
+    cwd: __dirname,
+    stdio: "inherit",
+  });
+}
+
 function readGenerated(file: string): string {
   const p = path.join(__dirname, "src", "generated", file);
   return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
@@ -81,7 +97,10 @@ function readGenerated(file: string): string {
 
 function nextConfig(phase: string): NextConfig {
   if (phase === PHASE_PRODUCTION_BUILD) beforeBuild();
-  if (phase === PHASE_DEVELOPMENT_SERVER) writeManifests();
+  if (phase === PHASE_DEVELOPMENT_SERVER) {
+    writeManifests();
+    ensureDevRuntimeData();
+  }
   return {
     output: "standalone",
     poweredByHeader: false,

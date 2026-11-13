@@ -1,0 +1,97 @@
+---
+title: "Jump Game I"
+description: "You are given an integer array nums where nums[i] is the maximum jump length from index i."
+difficulty: medium
+patterns: [interval-and-scheduling-problems]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: can_jump }
+starter:
+  python: |
+    def can_jump(nums: list[int]) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/jump-game-i.public.json, hidden: tests/jump-game-i.hidden.json }
+complexity: { time: "O(n) - One reverse pass.", space: "O(1) - Goal index only." }
+group: "03. Interval and Scheduling Problems"
+number: "01"
+leetcode: jump-game
+leetcodeId: 55
+order: 18003001000000
+---
+
+You are given an integer array nums where nums\[i\] is the maximum jump length from index i.
+Starting at index 0, determine whether you can reach the last index.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [2,3,1,1,4]
+    Output: True
+
+Example 2:
+    Input: nums = [3,2,1,0,4]
+    Output: False
+
+Example 3:
+    Input: nums = [0]
+    Output: True
+````
+
+## Constraints
+
+````text
+- 1 <= nums.length <= 10^4
+- 0 <= nums[i] <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Reachability
+Work backwards: shrink the required goal index whenever the current index can reach the goal.
+
+1. Set goal to the last index.
+2. Scan indices from right to left; if i + nums\[i\] &gt;= goal, move goal to i.
+3. Return whether goal equals 0.
+
+## Complexity
+
+**Time:** O(n) - One reverse pass.
+
+**Space:** O(1) - Goal index only.
+
+## Original notes
+
+````text
+(preamble)
+Forward variant (not implemented here, but useful to compare mentally):
+
+Backwards walk intuition (from original notes):
+Think of `goal` as "the leftmost index from which we still know we can finish to the end".
+If index `i` can jump at least to `goal`, then `i` becomes the new left anchor. When the
+sweep finishes, `goal == 0` means the start can still "see" a safe path to the last cell.
+
+Track the farthest index reachable with jumps from the prefix processed so far; if you
+ever cannot extend past your iterator, stop. Both passes are linear — pick whichever
+matches your mental model.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def canJump(self, nums: List[int]) -> bool:
+        goal = len(nums) - 1
+        for i in range(len(nums) - 1, -1, -1):
+            # nums[i] is the maximum forward jump length from position i.
+            if i + nums[i] >= goal:
+                goal = i
+        return goal == 0
+````

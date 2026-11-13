@@ -1,0 +1,77 @@
+---
+title: "Subarray Sums Divisible by K"
+description: "Given an integer array nums and an integer k, count the number of non-empty subarrays whose sum is divisible by k."
+difficulty: medium
+patterns: [subarray-sum-problems]
+topics: [prefix-sum]
+companies: []
+languages: [python]
+entry: { python: subarrays_div_by_k }
+starter:
+  python: |
+    def subarrays_div_by_k(nums: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/subarray-sums-divisible-by-k.public.json, hidden: tests/subarray-sums-divisible-by-k.hidden.json }
+complexity: { time: "O(n).", space: "O(k) for the remainder frequency array or dict." }
+group: "04. Subarray Sum Problems"
+number: "03"
+leetcode: subarray-sums-divisible-by-k
+leetcodeId: 974
+order: 2004003000000
+---
+
+Given an integer array nums and an integer k, count the number of non-empty
+subarrays whose sum is divisible by k.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [4, 5, 0, -2, -3, 1], k = 5
+Output: 7
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 3 * 10^4
+- -10^4 <= nums[i] <= 10^4
+- 2 <= k <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum + Modulo Counting
+Subarray sum divisible by k iff prefix remainders match after normalizing mods.
+
+1. Track cumulative sum mod k, normalized to \[0, k-1\].
+2. Add freq\[cur\] to answer, then increment freq\[cur\].
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(k) for the remainder frequency array or dict.
+
+## Solution
+
+````python
+from collections import defaultdict
+from typing import List
+
+
+class Solution:
+    def subarraysDivByK(self, nums: List[int], k: int) -> int:
+        freq: defaultdict[int, int] = defaultdict(int)
+        freq[0] = 1
+        cur = 0
+        ans = 0
+        for x in nums:
+            cur = (cur + x) % k
+            ans += freq[cur]
+            freq[cur] += 1
+        return ans
+````

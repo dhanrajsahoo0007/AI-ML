@@ -1,0 +1,79 @@
+---
+title: "Reverse Stack Recursion"
+description: "Reverse a stack represented as a list (top at the end) using only recursion—no loops—and only stack operations for reordering."
+difficulty: medium
+patterns: [basic-recursion-concepts]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: reverse_stack }
+starter:
+  python: |
+    def reverse_stack(stack: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/reverse-stack-recursion.public.json, hidden: tests/reverse-stack-recursion.hidden.json }
+complexity: { time: "O(n^2) - each insert-at-bottom scans the stack", space: "O(n) - recursion depth" }
+group: "01. Basic Recursion Concepts"
+number: "04"
+order: 11001004000000
+---
+
+Reverse a stack represented as a list (top at the end) using only recursion—no
+loops—and only stack operations for reordering.
+
+## Examples
+
+````text
+Example 1:
+Input: [1, 2, 3] (bottom -> top)
+Output: [3, 2, 1]
+````
+
+## Constraints
+
+````text
+- Stack elements are arbitrary; tests use integers
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Reverse via insert-at-bottom
+Pop the top, reverse the remainder, then recursively push the saved element to the
+bottom of the smaller stack.
+
+1. Base: size &lt;= 1 is already reversed.
+2. Pop top, reverse the rest.
+3. Insert the popped value at the bottom using a second recursion.
+
+## Complexity
+
+**Time:** O(n^2) - each insert-at-bottom scans the stack
+
+**Space:** O(n) - recursion depth
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def reverse_stack(self, stack: List[int]) -> List[int]:
+        if len(stack) <= 1:
+            return stack
+        top = stack.pop()
+        self.reverse_stack(stack)
+        self._insert_at_bottom(stack, top)
+        return stack
+
+    def _insert_at_bottom(self, stack: List[int], value: int) -> None:
+        if not stack:
+            stack.append(value)
+            return
+        temp = stack.pop()
+        self._insert_at_bottom(stack, value)
+        stack.append(temp)
+````

@@ -1,0 +1,115 @@
+---
+title: "Number of Enclaves"
+description: "You are given an m x n binary matrix grid, where 0 is sea and 1 is land."
+difficulty: medium
+patterns: [graph-properties-and-connectivity]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: num_enclaves }
+starter:
+  python: |
+    def num_enclaves(grid: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/number-of-enclaves.public.json, hidden: tests/number-of-enclaves.hidden.json }
+complexity: { time: "O(m * n) — each cell visited a constant number of times.", space: "O(m * n) — visited matrix and recursion stack in worst case." }
+group: "03. DFS Story Based › 02. Graph Properties and Connectivity"
+number: "04"
+leetcode: number-of-enclaves
+leetcodeId: 1020
+order: 17003002004000
+---
+
+You are given an m x n binary matrix grid, where 0 is sea and 1 is land. A move walks between
+4-adjacent land cells or off the boundary. Return the number of land cells from which you cannot
+reach the boundary in any number of moves (enclaves).
+
+## Examples
+
+````text
+Example 1:
+    Input: grid = [[0,0,0,0],[1,0,1,0],[0,1,1,0],[0,0,0,0]]
+    Output: 3
+Example 2:
+    Input: grid = [[0,1,1,0],[0,0,1,0],[0,0,1,0],[0,0,0,0]]
+    Output: 0
+````
+
+## Constraints
+
+````text
+- m == grid.length, n == grid[i].length
+- 1 <= m, n <= 500
+- grid[i][j] is 0 or 1
+````
+
+**Also in the notes under:** [17. Graphs/13. Flood Fill](/dsa/problems/number-of-enclaves-flood-fill).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph DFS (flood fill from boundary land)
+
+1. DFS from every boundary cell that is land; mark visited cells reachable from the edge.
+2. Count grid cells with value 1 that were never visited — these are enclaves.
+
+## Complexity
+
+**Time:** O(m \* n) — each cell visited a constant number of times.
+
+**Space:** O(m \* n) — visited matrix and recursion stack in worst case.
+
+## Original notes
+
+````text
+Original inline notes (preserved in implementation):
+DFS from the boundary 1's, mark their paths as visited, then count unvisited 1's.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def numEnclaves(self, grid: List[List[int]]) -> int:
+        if not grid or not grid[0]:
+            return 0
+        row_len = len(grid)
+        col_len = len(grid[0])
+        DIRECTIONS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        visited = [[0 for _ in range(col_len)] for _ in range(row_len)]
+
+        def dfs(row: int, col: int) -> None:
+            for x, y in DIRECTIONS:
+                nrow = x + row
+                ncol = y + col
+                if nrow < 0 or ncol < 0 or nrow >= row_len or ncol >= col_len:
+                    continue
+                if grid[nrow][ncol] == 0 or visited[nrow][ncol] == 1:
+                    continue
+                visited[nrow][ncol] = 1
+                dfs(nrow, ncol)
+
+        # Boundary 1's
+        for row in range(row_len):
+            for col in range(col_len):
+                if (
+                    (row == 0 or row == row_len - 1 or col == 0 or col == col_len - 1)
+                    and grid[row][col] == 1
+                    and visited[row][col] == 0
+                ):
+                    visited[row][col] = 1
+                    dfs(row, col)
+
+        # Check the number of unvisited 1's
+        lands_surrounded = 0
+        for row in range(row_len):
+            for col in range(col_len):
+                if grid[row][col] == 1 and visited[row][col] == 0:
+                    lands_surrounded += 1
+        return lands_surrounded
+````

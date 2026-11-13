@@ -1,0 +1,77 @@
+---
+title: "Island Perimeter"
+description: "Given row x col binary grid where 1 is land and 0 is water, there is exactly one island (connected 4-dir)."
+difficulty: easy
+patterns: [flood-fill]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: island_perimeter }
+starter:
+  python: |
+    def island_perimeter(grid: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/island-perimeter.public.json, hidden: tests/island-perimeter.hidden.json }
+complexity: { time: "O(m * n)", space: "O(1) extra space." }
+group: "13. Flood Fill"
+number: "04"
+leetcode: island-perimeter
+leetcodeId: 463
+order: 17013004000000
+---
+
+Given row x col binary grid where 1 is land and 0 is water, there is exactly one island (connected 4-dir).
+Return the perimeter of the island.
+
+## Examples
+
+````text
+Example 1:
+Input: grid = [[0,1,0,0],[1,1,1,0],[0,1,0,0],[1,1,0,0]]
+Output: 16
+````
+
+## Constraints
+
+````text
+- row == len(grid), col == len(grid[0])
+- 1 <= row, col <= 100
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Grid traversal with edge counting
+Each land cell contributes 4 minus the number of land neighbors (shared edges remove perimeter twice).
+
+1. For each land cell, add 4 and subtract 2 for every land neighbor to avoid double counting shared edges.
+
+## Complexity
+
+**Time:** O(m \* n)
+
+**Space:** O(1) extra space.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def islandPerimeter(self, grid: List[List[int]]) -> int:
+        m, n = len(grid), len(grid[0])
+        perimeter = 0
+        for r in range(m):
+            for c in range(n):
+                if grid[r][c] == 0:
+                    continue
+                perimeter += 4
+                if r > 0 and grid[r - 1][c] == 1:
+                    perimeter -= 2
+                if c > 0 and grid[r][c - 1] == 1:
+                    perimeter -= 2
+        return perimeter
+````

@@ -1,0 +1,54 @@
+---
+title: "Partition Array for Maximum Sum"
+description: "Partition arr into contiguous subarrays of length at most k; replace each subarray by its maximum value repeated over its length."
+difficulty: medium
+patterns: [matrix-chain-multiplication]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: max_sum_after_partitioning }
+starter:
+  python: |
+    def max_sum_after_partitioning(arr: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/partition-array-for-maximum-sum.public.json, hidden: tests/partition-array-for-maximum-sum.hidden.json }
+complexity: { time: "O(n*k).", space: "See the notes" }
+group: "07. Matrix Chain Multiplication"
+number: "13"
+leetcode: partition-array-for-maximum-sum
+leetcodeId: 1043
+order: 20007013000000
+---
+
+Partition arr into contiguous subarrays of length at most k; replace each subarray
+by its maximum value repeated over its length. Maximize sum.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 1D DP knapsack-like
+dp\[i\] best for first i elements.
+
+## Complexity
+
+**Time:** O(n\*k).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxSumAfterPartitioning(self, arr: List[int], k: int) -> int:
+        n = len(arr)
+        dp = [0] * (n + 1)
+        for i in range(1, n + 1):
+            cur_max = 0
+            for j in range(1, min(k, i) + 1):
+                cur_max = max(cur_max, arr[i - j])
+                dp[i] = max(dp[i], dp[i - j] + cur_max * j)
+        return dp[n]
+````

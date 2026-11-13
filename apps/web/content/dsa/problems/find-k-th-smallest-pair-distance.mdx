@@ -1,0 +1,103 @@
+---
+title: "Find K-th Smallest Pair Distance | Bucket Sort"
+description: "Given an integer array nums and an integer k, return the k-th smallest absolute difference among all unordered pairs (i, j) with i < j."
+difficulty: hard
+patterns: [bucket-sort]
+topics: [sorting]
+companies: []
+languages: [python]
+entry: { python: smallest_distance_pair_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def smallest_distance_pair_tests(a0, a1):  # the entry the tests call
+        result = smallest_distance_pair(a0, a1)
+        result = sorted(result, key=repr) if isinstance(result, list) else result
+        return result
+
+
+    # --- Your code ---
+    def smallest_distance_pair(nums: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/find-k-th-smallest-pair-distance.public.json, hidden: tests/find-k-th-smallest-pair-distance.hidden.json }
+complexity: { time: "O(n log W) with W value range after sorting O(n log n) once", space: "O(1) extra besides sorting buffer" }
+group: "01. Bucket Sort"
+number: "02"
+leetcode: find-k-th-smallest-pair-distance
+leetcodeId: 719
+order: 23001002000000
+---
+
+Given an integer array nums and an integer k, return the k-th smallest absolute
+difference among all unordered pairs (i, j) with i &lt; j.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1,3,1], k = 1
+    Output: 0
+Example 2:
+    Input: nums = [1,1,1], k = 2
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 2 <= len(nums) <= 10^4
+- 0 <= nums[i] <= 10^6
+- 1 <= k <= n*(n-1)//2
+````
+
+**Order.** Any order is accepted: the tests sort your result before comparing it.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary search on answer + two pointers count
+Sort nums; count pairs with distance &lt;= mid in linear time; binary search the
+smallest distance with at least k pairs.
+
+1. Sort nums.
+2. Binary search D in \[0, max-min\]; count pairs with diff &lt;= D using two pointers.
+3. Return minimal D with count &gt;= k.
+
+## Complexity
+
+**Time:** O(n log W) with W value range after sorting O(n log n) once
+
+**Space:** O(1) extra besides sorting buffer
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def smallestDistancePair(self, nums: List[int], k: int) -> int:
+        nums.sort()
+        n = len(nums)
+
+        def count_leq(limit: int) -> int:
+            cnt = 0
+            j = 0
+            for i in range(n):
+                while j < n and nums[j] - nums[i] <= limit:
+                    j += 1
+                cnt += j - i - 1
+            return cnt
+
+        lo, hi = 0, nums[-1] - nums[0]
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if count_leq(mid) >= k:
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+````

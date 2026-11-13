@@ -1,0 +1,142 @@
+---
+title: "Palindrome in LL"
+description: "Return whether values of a singly linked list form a palindrome."
+difficulty: medium
+patterns: [two-pointer-technique]
+topics: [linked-lists]
+companies: []
+languages: [python]
+entry: { python: is_palindrome_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class ListNode:
+        def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+            self.val = val
+            self.next = next
+
+
+    def _build_list(values):
+        head = None
+        for v in reversed(values or []):
+            node = ListNode(v)
+            node.next = head
+            head = node
+        return head
+
+
+    def _list_values(node):
+        out = []
+        while node is not None:
+            out.append(node.val)
+            node = node.next
+        return out
+
+
+    def is_palindrome_tests(a0):  # the entry the tests call
+        result = is_palindrome(_build_list(a0))
+        return result
+
+
+    # --- Your code ---
+    def is_palindrome(head: ListNode | None) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/palindrome-in-ll.public.json, hidden: tests/palindrome-in-ll.hidden.json }
+complexity: { time: "O(n).", space: "O(1)." }
+group: "03. Two-Pointer Technique"
+number: "03"
+order: 13003003000000
+---
+
+Return whether values of a singly linked list form a palindrome.
+
+## Examples
+
+````text
+Example 1:
+    Input: head = [1,2,2,1]
+    Output: True
+
+Example 2:
+    Input: head = [1,2]
+    Output: False
+````
+
+## Constraints
+
+````text
+- 0 <= n <= 10^5
+- 0 <= Node.val <= 9
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Find middle + reverse second half
+Compare first half with reversed tail; list may be structurally altered unless restored.
+
+1. Use slow/fast to find middle (slow ends before second middle for even length).
+2. Reverse nodes after slow.
+3. Compare head with reversed half.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1).
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+class Solution:
+    def isPalindrome(self, head: Optional[ListNode]) -> bool:
+        if not head or not head.next:
+            return True
+
+        slow = fast = head
+        while fast.next and fast.next.next:
+            slow = slow.next
+            fast = fast.next.next
+
+        def reverse(h: Optional[ListNode]) -> Optional[ListNode]:
+            prev, cur = None, h
+            while cur:
+                nxt = cur.next
+                cur.next = prev
+                prev, cur = cur, nxt
+            return prev
+
+        second = reverse(slow.next)
+        first = head
+        while second:
+            if first.val != second.val:
+                return False
+            first = first.next
+            second = second.next
+        return True
+````

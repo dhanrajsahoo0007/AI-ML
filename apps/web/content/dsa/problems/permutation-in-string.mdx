@@ -1,0 +1,96 @@
+---
+title: "Permutation In String"
+description: "Given two strings s1 and s2, return True if s2 contains a permutation of s1 as a contiguous substring; otherwise return False."
+difficulty: medium
+patterns: [string-manipulation-with-sliding-window]
+topics: [sliding-window]
+companies: []
+languages: [python]
+entry: { python: check_inclusion }
+starter:
+  python: |
+    def check_inclusion(s1: str, s2: str) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/permutation-in-string.public.json, hidden: tests/permutation-in-string.hidden.json }
+complexity: { time: "O(n) - Linear scan over s2 with constant-time updates per character.", space: "O(1) - Twenty-six counters for lowercase English letters." }
+group: "02. String Manipulation with Sliding Window"
+number: "04"
+leetcode: permutation-in-string
+leetcodeId: 567
+order: 7002004000000
+---
+
+Given two strings s1 and s2, return True if s2 contains a permutation of s1 as a
+contiguous substring; otherwise return False.
+
+## Examples
+
+````text
+Example 1:
+    Input: s1 = "ab", s2 = "eidbaooo"
+    Output: True
+Example 2:
+    Input: s1 = "ab", s2 = "eidboaoo"
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= len(s1), len(s2) <= 10^4 in typical statements
+- s1 and s2 consist of lowercase English letters.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Fixed-size sliding window with frequency equality
+Slide a window of length len(s1) over s2 and compare frequency signatures.
+
+1. Count characters in s1 and in the first window of s2.
+2. Slide the window across s2, updating counts in O(1) per step.
+3. Return True if any window matches the s1 counts.
+
+## Complexity
+
+**Time:** O(n) - Linear scan over s2 with constant-time updates per character.
+
+**Space:** O(1) - Twenty-six counters for lowercase English letters.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def checkInclusion(self, s1: str, s2: str) -> bool:
+        m, n = len(s1), len(s2)
+        if m > n:
+            return False
+
+        need: List[int] = [0] * 26
+        window: List[int] = [0] * 26
+
+        def ci(ch: str) -> int:
+            return ord(ch) - ord("a")
+
+        for ch in s1:
+            need[ci(ch)] += 1
+
+        for j in range(m):
+            window[ci(s2[j])] += 1
+
+        if window == need:
+            return True
+
+        for j in range(m, n):
+            window[ci(s2[j - m])] -= 1
+            window[ci(s2[j])] += 1
+            if window == need:
+                return True
+
+        return False
+````

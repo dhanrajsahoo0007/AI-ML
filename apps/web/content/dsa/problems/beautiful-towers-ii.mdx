@@ -1,0 +1,113 @@
+---
+title: "Beautiful Towers II"
+description: "Same as Beautiful Towers I but with n up to 10^5, requiring an O(n) monotonic stack strategy to sum capped mountain heights."
+difficulty: medium
+patterns: [monotonic-stack-applications]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: maximum_sum_of_heights }
+starter:
+  python: |
+    def maximum_sum_of_heights(maxHeights: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/beautiful-towers-ii.public.json, hidden: tests/beautiful-towers-ii.hidden.json }
+complexity: { time: "O(n) - Each index enters and leaves the stacks a constant number of times.", space: "O(n) - Auxiliary arrays and stack storage." }
+group: "05. Monotonic Stack Applications"
+number: "05"
+leetcode: beautiful-towers-ii
+leetcodeId: 2866
+order: 9005005000000
+---
+
+Same as Beautiful Towers I but with n up to 10^5, requiring an O(n) monotonic stack strategy to sum
+capped mountain heights.
+
+## Examples
+
+````text
+Example 1:
+Input: [5, 3, 4, 1, 1]
+Output: 13
+````
+
+## Constraints
+
+````text
+- 1 <= len(maxHeights) <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two-Pass Monotonic Stack Prefix/Suffix
+Compute left-to-right and right-to-left capped prefix sums, then combine at each peak.
+
+1. Use increasing stacks to build left\[i\], the total if peak i caps the right side of the left half.
+2. Mirror from the right to fill right\[i\].
+3. Answer is max(left\[i\] + right\[i\] - maxHeights\[i\]).
+
+Restored notes (archived workbook):
+
+Problem Statement:
+Given an array maxHeights, find the maximum possible sum of heights for a beautiful configuration of towers.
+A beautiful configuration must satisfy:
+1. 1 &lt;= heights\[i\] &lt;= maxHeights\[i\]
+2. heights is a mountain array (increasing then decreasing)
+
+Time Complexity: O(n), where n is the length of maxHeights
+Space Complexity: O(n) for the stack
+
+Approach:
+1. We use two passes: left-to-right and right-to-left.
+2. In each pass, we maintain a monotonic stack to keep track of the indices of potential peaks.
+3. We calculate the sum of heights for each possible peak and keep track of the maximum sum.
+
+The key idea is that for each element, we want to find the maximum height it can have while still
+maintaining the mountain property with all elements to its left (in the left-to-right pass) or
+to its right (in the right-to-left pass).
+
+## Complexity
+
+**Time:** O(n) - Each index enters and leaves the stacks a constant number of times.
+
+**Space:** O(n) - Auxiliary arrays and stack storage.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maximumSumOfHeights(self, maxHeights: List[int]) -> int:
+        n = len(maxHeights)
+        left = [0] * n
+        right = [0] * n
+        stack: List[int] = []
+
+        for i in range(n):
+            while stack and maxHeights[stack[-1]] > maxHeights[i]:
+                stack.pop()
+            if not stack:
+                left[i] = (i + 1) * maxHeights[i]
+            else:
+                j = stack[-1]
+                left[i] = left[j] + (i - j) * maxHeights[i]
+            stack.append(i)
+
+        stack.clear()
+        for i in range(n - 1, -1, -1):
+            while stack and maxHeights[stack[-1]] > maxHeights[i]:
+                stack.pop()
+            if not stack:
+                right[i] = (n - i) * maxHeights[i]
+            else:
+                j = stack[-1]
+                right[i] = right[j] + (j - i) * maxHeights[i]
+            stack.append(i)
+
+        return max(left[i] + right[i] - maxHeights[i] for i in range(n))
+````

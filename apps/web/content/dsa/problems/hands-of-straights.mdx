@@ -1,0 +1,104 @@
+---
+title: "Hands of Straights"
+description: "Given an array of integers and a positive integer k, determine if the array can be divided into sets of k consecutive numbers."
+difficulty: medium
+patterns: [heap-with-other-ds-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: is_possible_divide }
+starter:
+  python: |
+    def is_possible_divide(nums: list[int], k: int) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/hands-of-straights.public.json, hidden: tests/hands-of-straights.hidden.json }
+complexity: { time: "O(n log n)", space: "O(n)" }
+group: "07. Heap with Other DS Pattern"
+number: "05"
+order: 10007005000000
+---
+
+Given an array of integers and a positive integer k, determine if the array
+can be divided into sets of k consecutive numbers.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1,2,3,3,4,4,5,6], k = 4
+    Output: True
+    Explanation: [1,2,3,4] and [3,4,5,6]
+
+Example 2:
+    Input: nums = [1,2,3,4], k = 3
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= nums.length <= 10^4
+- 0 <= nums[i] <= 10^9
+- 1 <= k <= nums.length
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Heap with Other DS (Heap + Counter)
+Use a Counter for occurrences and a min-heap for ordering.
+Always try to form groups starting from the smallest available number.
+
+1. If len(nums) % k != 0, return False.
+2. Count occurrences. Build a min-heap of unique keys.
+3. While heap is non-empty: try to form a group of k consecutive from the smallest.
+4. Decrement counts; if any needed number is missing, return False.
+
+## Complexity
+
+**Time:** O(n log n)
+
+**Space:** O(n)
+
+## Original notes
+
+````text
+Original notes (restored):
+Also framed as "Hand of Straights" / "Divide Array Into Sets of K Consecutive Numbers". Always start a
+new group from the current global minimum key; greedily consume `start..start+k-1` from the `Counter`.
+Heap property: if a count hits zero while it is no longer the heap minimum, arrangement is impossible —
+mirrors the `num != min_heap[0]` guard from the user's reference implementation.
+````
+
+## Solution
+
+````python
+import heapq
+from collections import Counter
+from typing import List
+
+
+class Solution:
+    def isPossibleDivide(self, nums: List[int], k: int) -> bool:
+        if len(nums) % k != 0:
+            return False
+
+        counts = Counter(nums)
+        heap = list(counts.keys())
+        heapq.heapify(heap)
+
+        while heap:
+            start = heap[0]
+            for num in range(start, start + k):
+                if num not in counts:
+                    return False
+                counts[num] -= 1
+                if counts[num] == 0:
+                    if num != heap[0]:
+                        return False
+                    heapq.heappop(heap)
+
+        return True
+````

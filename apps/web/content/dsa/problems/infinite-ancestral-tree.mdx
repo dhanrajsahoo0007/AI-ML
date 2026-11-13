@@ -1,0 +1,129 @@
+---
+title: "Infinite Ancestral Tree"
+description: "Every person has two parents in an infinite genealogical graph."
+difficulty: hard
+patterns: [design-questions]
+topics: [design-questions]
+companies: []
+languages: [python]
+entry: { python: InfiniteAncestralTree }
+mode: class
+starter:
+  python: |
+    class InfiniteAncestralTree:
+        def __init__(self, parents: dict[PersonId, tuple[PersonId | None, PersonId | None]]) -> None:
+            pass
+
+        def parents_of(self, pid: PersonId) -> set[PersonId]:
+            # Your code here
+            pass
+
+        def are_siblings(self, a: PersonId, b: PersonId) -> bool:
+            # Your code here
+            pass
+
+        def are_first_cousins(self, a: PersonId, b: PersonId) -> bool:
+            # Your code here
+            pass
+
+        def lowest_common_ancestor(self, a: PersonId, b: PersonId) -> PersonId | None:
+            # Your code here
+            pass
+tests: { public: tests/infinite-ancestral-tree.public.json, hidden: tests/infinite-ancestral-tree.hidden.json }
+complexity: { time: "O(depth * branching) bounded by ancestor set sizes for practical trees.", space: "O(number of visited ancestors)." }
+number: "16"
+order: 25016000000000
+---
+
+Every person has two parents in an infinite genealogical graph. Support queries: are two
+nodes siblings (share a parent), first cousins (parents are siblings but they are not
+siblings), and lowest common ancestor in the parent-closure sense.
+
+## Examples
+
+````text
+Example 1:
+Parents of A are P and Q; parents of B are P and R -> siblings (share P).
+````
+
+## Constraints
+
+````text
+- Node ids are hashable; parent pointers may be None for roots.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph reachability / BFS upward
+Walk ancestors level by level to compare parent sets or meet in the middle for LCA.
+
+1. Siblings: parent sets intersect.
+2. First cousins: not siblings; collect parents' ids for each side; check if any parent of A
+is sibling of any parent of B.
+3. LCA: BFS layers upward from both nodes until a node is seen from both sides.
+
+## Complexity
+
+**Time:** O(depth \* branching) bounded by ancestor set sizes for practical trees.
+
+**Space:** O(number of visited ancestors).
+
+## Solution
+
+````python
+from typing import Dict, Optional, Set, Tuple
+
+
+PersonId = str
+
+
+class InfiniteAncestralTree:
+    def __init__(self, parents: Dict[PersonId, Tuple[Optional[PersonId], Optional[PersonId]]]) -> None:
+        self._p = parents
+
+    def parents_of(self, pid: PersonId) -> Set[PersonId]:
+        a, b = self._p.get(pid, (None, None))
+        return {x for x in (a, b) if x is not None}
+
+    def are_siblings(self, a: PersonId, b: PersonId) -> bool:
+        if a == b:
+            return False
+        return bool(self.parents_of(a) & self.parents_of(b))
+
+    def are_first_cousins(self, a: PersonId, b: PersonId) -> bool:
+        if self.are_siblings(a, b):
+            return False
+        pa = self.parents_of(a)
+        pb = self.parents_of(b)
+        for pa_i in pa:
+            for pb_j in pb:
+                if self.are_siblings(pa_i, pb_j):
+                    return True
+        return False
+
+    def lowest_common_ancestor(self, a: PersonId, b: PersonId) -> Optional[PersonId]:
+        seen_a: Set[PersonId] = set()
+        seen_b: Set[PersonId] = set()
+        frontier_a = {a}
+        frontier_b = {b}
+        while frontier_a or frontier_b:
+            if frontier_a & frontier_b:
+                return min(frontier_a & frontier_b)
+            if frontier_a & seen_b:
+                return min(frontier_a & seen_b)
+            if frontier_b & seen_a:
+                return min(frontier_b & seen_a)
+            seen_a |= frontier_a
+            seen_b |= frontier_b
+            nxt_a: Set[PersonId] = set()
+            for pid in frontier_a:
+                nxt_a |= self.parents_of(pid)
+            nxt_b: Set[PersonId] = set()
+            for pid in frontier_b:
+                nxt_b |= self.parents_of(pid)
+            frontier_a = nxt_a - seen_a
+            frontier_b = nxt_b - seen_b
+        return None
+````

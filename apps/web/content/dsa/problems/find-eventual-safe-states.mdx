@@ -1,0 +1,98 @@
+---
+title: "Find eventual safe states( Eliminating all the nodes that are in cycle )"
+description: "You have a directed graph of n nodes labeled 0..n-1."
+difficulty: medium
+patterns: [dfs]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: eventual_safe_nodes }
+starter:
+  python: |
+    def eventual_safe_nodes(graph: list[list[int]]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/find-eventual-safe-states.public.json, hidden: tests/find-eventual-safe-states.hidden.json }
+complexity: { time: "O(n + e) where e is total edges.", space: "O(n + e) for graph implicit in input plus O(n) for state and recursion." }
+group: "01. DFS"
+number: "04"
+leetcode: find-eventual-safe-states
+leetcodeId: 802
+order: 17001004000000
+---
+
+You have a directed graph of n nodes labeled 0..n-1. graph\[i\] lists nodes j such that an edge i -&gt; j exists.
+A terminal node has no outgoing edges. A node is safe if every path starting from it eventually reaches a terminal node.
+Return all safe nodes in ascending order. Nodes on cycles or leading into cycles are unsafe.
+
+## Examples
+
+````text
+Example 1:
+    Input: graph = [[1,2],[2,3],[5],[0],[5],[],[]]
+    Output: [2,4,5,6]
+Example 2:
+    Input: graph = [[1,2,3,4],[1,2],[3,4],[0,4],[]]
+    Output: [4]
+````
+
+## Constraints
+
+````text
+- n == len(graph)
+- 1 <= n <= 10^4
+- 0 <= len(graph[i]) <= n
+````
+
+**Also in the notes under:** [17. Graphs/05. Topological Sort](/dsa/problems/find-eventual-safe-states-topological-sort).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS state labeling (tri-color) / cycle detection
+Mark nodes as visiting, then safe after all successors are safe; revisiting a visiting node implies a cycle.
+
+1. For each node, run DFS with states: 0 unvisited, 1 visiting, 2 safe.
+2. If DFS hits state 1 on a successor, not safe; on success set state 2.
+3. Collect all nodes with state 2.
+
+## Complexity
+
+**Time:** O(n + e) where e is total edges.
+
+**Space:** O(n + e) for graph implicit in input plus O(n) for state and recursion.
+
+## Original notes
+
+````text
+See also: Reverse graph + Kahn's approach in `05. Topological Sort/05. Find eventual safe states( Eliminating all the nodes that are in cycle ).py`
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def eventualSafeNodes(self, graph: List[List[int]]) -> List[int]:
+        n = len(graph)
+        state = [0] * n
+
+        def dfs(u: int) -> bool:
+            if state[u] == 1:
+                return False
+            if state[u] == 2:
+                return True
+            state[u] = 1
+            for v in graph[u]:
+                if not dfs(v):
+                    return False
+            state[u] = 2
+            return True
+
+        for i in range(n):
+            dfs(i)
+        return [i for i in range(n) if state[i] == 2]
+````

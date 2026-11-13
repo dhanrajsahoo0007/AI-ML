@@ -1,0 +1,99 @@
+---
+title: "Sum Between K1 and K2 Smallest"
+description: "Given an array of integers and two numbers k1 and k2, find the sum of all elements between the k1'th smallest and k2'th smallest elements of the array (exclu…"
+difficulty: medium
+patterns: [top-k-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: sum_between_k1_k2 }
+starter:
+  python: |
+    def sum_between_k1_k2(arr: list[int], k1: int, k2: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/sum-between-k1-and-k2-smallest.public.json, hidden: tests/sum-between-k1-and-k2-smallest.hidden.json }
+complexity: { time: "O(n log k2)", space: "O(k2) for the heap" }
+group: "01. Top-K Pattern"
+number: "08"
+order: 10001008000000
+---
+
+Given an array of integers and two numbers k1 and k2, find the sum of all elements
+between the k1'th smallest and k2'th smallest elements of the array (exclusive).
+Assume k1 &lt; k2 and there are at least k2 elements in the array.
+
+## Examples
+
+````text
+Example 1:
+    Input: arr = [20, 8, 22, 4, 12, 10, 14], k1 = 3, k2 = 6
+    Output: 26
+    Explanation: 3rd smallest = 10, 6th smallest = 20. Elements between: 12 + 14 = 26.
+
+Example 2:
+    Input: arr = [1, 2, 3, 4, 5], k1 = 1, k2 = 5
+    Output: 9
+    Explanation: 1st smallest = 1, 5th smallest = 5. Elements between: 2 + 3 + 4 = 9.
+````
+
+## Constraints
+
+````text
+- 1 <= k1 < k2 <= arr.length
+- 1 <= arr.length <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Top-K
+We use the Top-K pattern twice: once to find the k1'th smallest and once for
+the k2'th smallest, then sum elements strictly between these two values.
+
+1. Find the k1'th smallest element using a max-heap of size k1.
+2. Find the k2'th smallest element using a max-heap of size k2.
+3. Sum all elements in the array that are strictly between these two values.
+
+## Complexity
+
+**Time:** O(n log k2)
+- find\_kth\_smallest is called twice: O(n log k1 + n log k2)
+- Final summation: O(n)
+
+**Space:** O(k2) for the heap
+
+## Original notes
+
+````text
+Original notes (restored):
+Worked example from the original notes: arr = [20, 8, 22, 4, 12, 10, 14], k1=3, k2=6 →
+3rd smallest = 10, 6th smallest = 20, strict between gives 12 + 14 = 26.
+You can sum with a comprehension: `sum(x for x in arr if k1_smallest < x < k2_smallest)` — same result.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def sumBetweenK1K2(self, arr: List[int], k1: int, k2: int) -> int:
+        k1_smallest = self._find_kth_smallest(arr, k1)
+        k2_smallest = self._find_kth_smallest(arr, k2)
+
+        return sum(x for x in arr if k1_smallest < x < k2_smallest)
+
+    def _find_kth_smallest(self, arr: List[int], k: int) -> int:
+        max_heap = [-x for x in arr[:k]]
+        heapq.heapify(max_heap)
+
+        for i in range(k, len(arr)):
+            if arr[i] < -max_heap[0]:
+                heapq.heapreplace(max_heap, -arr[i])
+
+        return -max_heap[0]
+````

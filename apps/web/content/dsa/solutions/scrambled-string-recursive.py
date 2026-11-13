@@ -1,0 +1,12 @@
+def is_scramble(s1: str, s2: str) -> bool:
+    if s1 == s2:
+        return True
+    if sorted(s1) != sorted(s2):
+        return False
+    n = len(s1)
+    for i in range(1, n):
+        if (is_scramble(s1[:i], s2[:i]) and is_scramble(s1[i:], s2[i:])) or (
+            is_scramble(s1[:i], s2[n - i :]) and is_scramble(s1[i:], s2[: n - i])
+        ):
+            return True
+    return False

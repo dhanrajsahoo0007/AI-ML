@@ -1,0 +1,130 @@
+---
+title: "[Hard] Split Message Based on Limit"
+description: "Split message into as few parts as possible."
+difficulty: hard
+patterns: [advanced-array-problems]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: split_message }
+starter:
+  python: |
+    def split_message(message: str, limit: int) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/hard-split-message-based-on-limit.public.json, hidden: tests/hard-split-message-based-on-limit.hidden.json }
+complexity: { time: "O(n^2) in worst case - n tries each O(n) simulate.", space: "O(n) - Output list of strings." }
+group: "11. Advanced Array Problems"
+number: "07"
+order: 8011007000000
+---
+
+Split message into as few parts as possible. Part i ends with suffix "&lt;i/b&gt;" where b is total parts.
+Each part length must equal limit except the last, which may be shorter. If impossible, return \[\].
+
+## Examples
+
+````text
+Example 1:
+Input: message = "short message", limit = 15
+Output: ["short mess<1/2>", "age<2/2>"]
+````
+
+## Constraints
+
+````text
+- 1 <= len(message) <= 10^4
+- 1 <= limit <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Brute-Force Parts Count + Greedy Packing
+Try increasing part count b; greedily consume exactly (limit - suffix\_len) characters on non-final parts.
+
+1. For b from 1 to len(message), simulate building parts with required widths.
+2. Return first successful partition.
+
+## Complexity
+
+**Time:** O(n^2) in worst case - n tries each O(n) simulate.
+
+**Space:** O(n) - Output list of strings.
+Restored (original notes, diagrams, and walkthrough):
+2468. Split Message Based on Limit
+Hard
+Topics
+Companies
+Hint
+You are given a string, message, and a positive integer, limit.
+
+You must split message into one or more parts based on limit. Each resulting part should have the suffix "&lt;a/b&gt;", where "b" is to be replaced with the total number of parts and "a" is to be replaced with the index of the part, starting from 1 and going up to b. Additionally, the length of each resulting part (including its suffix) should be equal to limit, except for the last part whose length can be at most limit.
+
+The resulting parts should be formed such that when their suffixes are removed and they are all concatenated in order, they should be equal to message. Also, the result should contain as few parts as possible.
+
+Return the parts message would be split into as an array of strings. If it is impossible to split message as required, return an empty array.
+
+Example 1:
+
+Input: message = "this is really a very awesome message", limit = 9
+Output: \["thi&lt;1/14&gt;","s i&lt;2/14&gt;","s r&lt;3/14&gt;","eal&lt;4/14&gt;","ly &lt;5/14&gt;","a v&lt;6/14&gt;","ery&lt;7/14&gt;"," aw&lt;8/14&gt;","eso&lt;9/14&gt;","me&lt;10/14&gt;"," m&lt;11/14&gt;","es&lt;12/14&gt;","sa&lt;13/14&gt;","ge&lt;14/14&gt;"\]
+Explanation:
+The first 9 parts take 3 characters each from the beginning of message.
+The next 5 parts take 2 characters each to finish splitting message.
+In this example, each part, including the last, has length 9.
+It can be shown it is not possible to split message into less than 14 parts.
+Example 2:
+
+Input: message = "short message", limit = 15
+Output: \["short mess&lt;1/2&gt;","age&lt;2/2&gt;"\]
+Explanation:
+Under the given constraints, the string can be split into two parts:
+- The first part comprises of the first 10 characters, and has a length 15.
+- The next part comprises of the last 3 characters, and has a length 8.
+
+Constraints:
+
+1 &lt;= message.length &lt;= 104
+message consists only of lowercase English letters and ' '.
+1 &lt;= limit &lt;= 104
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def splitMessage(self, message: str, limit: int) -> List[str]:
+        n = len(message)
+        for b in range(1, n + 1):
+            w = len(str(b))
+            idx = 0
+            out: List[str] = []
+            ok = True
+            for a in range(1, b + 1):
+                suf = f"<{a}/{b}>"
+                room = limit - len(suf)
+                if room < 1:
+                    ok = False
+                    break
+                if a < b:
+                    if idx + room > n:
+                        ok = False
+                        break
+                    chunk = message[idx : idx + room]
+                    out.append(chunk + suf)
+                    idx += room
+                else:
+                    chunk = message[idx:]
+                    if len(chunk) > room:
+                        ok = False
+                        break
+                    out.append(chunk + suf)
+                    idx += len(chunk)
+            if ok and idx == n:
+                return out
+        return []
+````

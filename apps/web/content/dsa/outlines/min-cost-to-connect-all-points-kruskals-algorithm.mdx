@@ -1,0 +1,141 @@
+---
+title: "Min Cost to Connect All Points"
+description: "Same as the Prim version: connect all given 2D points with minimum total Manhattan edge cost so the result is a tree (MST of the complete graph)."
+topics: [graphs]
+group: "08. Minimum Spanning Tree › 02. Kruskal's Algorithm"
+number: "02"
+leetcode: min-cost-to-connect-all-points
+leetcodeId: 1584
+order: 17008002002000
+status: outline
+---
+
+Same as the Prim version: connect all given 2D points with minimum total Manhattan edge
+cost so the result is a tree (MST of the complete graph).
+
+## Examples
+
+````text
+Example 1:
+    Input: points = [[0,0],[2,2],[3,10],[5,2],[7,0]]
+    Output: 20
+Example 2:
+    Input: points = [[3,12],[-2,5],[-4,1]]
+    Output: 18
+````
+
+## Constraints
+
+````text
+- 1 <= len(points) <= 1000
+- Coordinates fit in 32-bit signed range; all points distinct.
+````
+
+**Also in the notes under:** [17. Graphs/08. Minimum Spanning Tree/01. Prim's Algorithm](/dsa/problems/min-cost-to-connect-all-points).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Minimum Spanning Tree — Kruskal with explicit O(n^2) edges + DSU
+
+1. Enumerate every pair (i, j), i &lt; j, with weight = Manhattan distance.
+2. Sort edges by weight ascending.
+3. Kruskal: union endpoints until n-1 edges are accepted.
+
+## Complexity
+
+**Time:** O(n^2 log(n^2)) = O(n^2 log n) for sorting Theta(n^2) edges.
+
+**Space:** O(n^2) edge list plus O(n) DSU.
+
+Note: For this dense problem, the O(n^2) Prim implementation in the sibling folder is
+asymptotically faster; Kruskal is kept here to mirror the filename and show both classics.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    # --- Original teaching notes ---
+    # Kruskal's global ordering vs Prim's local frontier — same MST weight on any connected
+    # undirected weighted graph (cut property / cycle property).
+    # --- end notes ---
+
+    class _DSU:
+        __slots__ = ("parent", "rank")
+
+        def __init__(self, n: int) -> None:
+            self.parent = list(range(n))
+            self.rank = [0] * n
+
+        def find(self, x: int) -> int:
+            while self.parent[x] != x:
+                self.parent[x] = self.parent[self.parent[x]]
+                x = self.parent[x]
+            return x
+
+        def union(self, a: int, b: int) -> bool:
+            ra, rb = self.find(a), self.find(b)
+            if ra == rb:
+                return False
+            if self.rank[ra] < self.rank[rb]:
+                ra, rb = rb, ra
+            self.parent[rb] = ra
+            if self.rank[ra] == self.rank[rb]:
+                self.rank[ra] += 1
+            return True
+
+    def minCostConnectPoints(self, points: List[List[int]]) -> int:
+        n = len(points)
+        if n <= 1:
+            return 0
+
+        edge_list: List[tuple] = []
+        for i in range(n):
+            xi, yi = points[i]
+            for j in range(i + 1, n):
+                xj, yj = points[j]
+                w = abs(xi - xj) + abs(yi - yj)
+                edge_list.append((w, i, j))
+
+        edge_list.sort(key=lambda t: t[0])
+        dsu = self._DSU(n)
+        total = 0
+        used = 0
+
+        for w, u, v in edge_list:
+            if dsu.union(u, v):
+                total += w
+                used += 1
+                if used == n - 1:
+                    break
+
+        return total
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    p1 = [[0, 0], [2, 2], [3, 10], [5, 2], [7, 0]]
+    assert sol.minCostConnectPoints(p1) == 20, "Test 1 Failed"
+    print("Test 1 Passed: Kruskal matches Prim total on sample 1")
+
+    p2 = [[3, 12], [-2, 5], [-4, 1]]
+    assert sol.minCostConnectPoints(p2) == 18, "Test 2 Failed"
+    print("Test 2 Passed: sample 2")
+
+    p3 = [[0, 0]]
+    assert sol.minCostConnectPoints(p3) == 0, "Test 3 Failed"
+    print("Test 3 Passed: single point")
+
+    p4 = [[0, 0], [1, 1]]
+    assert sol.minCostConnectPoints(p4) == 2, "Test 4 Failed"
+    print("Test 4 Passed: two points")
+
+    print("\nAll tests passed!")
+````

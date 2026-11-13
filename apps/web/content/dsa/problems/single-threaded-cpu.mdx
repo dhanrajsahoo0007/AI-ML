@@ -1,0 +1,106 @@
+---
+title: "Single Threaded CPU"
+description: "Given n tasks with [enqueueTime, processingTime], process them on a single-threaded CPU."
+difficulty: medium
+patterns: [scheduling-and-simulation-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: get_order }
+starter:
+  python: |
+    def get_order(tasks: list[list[int]]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/single-threaded-cpu.public.json, hidden: tests/single-threaded-cpu.hidden.json }
+complexity: { time: "O(n log n)", space: "O(n)" }
+group: "05. Scheduling and Simulation Pattern"
+number: "02"
+leetcode: single-threaded-cpu
+leetcodeId: 1834
+order: 10005002000000
+---
+
+Given n tasks with \[enqueueTime, processingTime\], process them on a single-threaded CPU.
+The CPU picks the shortest processing time task (ties broken by smallest index).
+Return the order in which tasks are processed.
+
+## Examples
+
+````text
+Example 1:
+    Input: tasks = [[1,2],[2,4],[3,2],[4,1]]
+    Output: [0,2,3,1]
+
+Example 2:
+    Input: tasks = [[7,10],[7,12],[7,5],[7,4],[7,2]]
+    Output: [4,3,2,0,1]
+````
+
+## Constraints
+
+````text
+- tasks.length == n
+- 1 <= n <= 10^5
+- 1 <= enqueueTime_i, processingTime_i <= 10^9
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Scheduling and Simulation
+Sort by enqueue time, use a min-heap keyed by (processingTime, originalIndex)
+to always pick the shortest available task.
+
+1. Attach original indices and sort by enqueue time.
+2. Process tasks: enqueue all available tasks at current time into the heap.
+3. Pop the shortest task, advance time by its processing duration.
+4. If heap is empty and tasks remain, jump time to next enqueue time.
+
+## Complexity
+
+**Time:** O(n log n)
+
+**Space:** O(n)
+
+## Original notes
+
+````text
+Original notes (restored):
+LC 1834: timeline simulation — push every task whose `enqueueTime <= current_time` into a heap
+ordered by `(processingTime, index)`. If CPU idle and heap empty, fast-forward `current_time`
+to the next unseen enqueue time. Original complexity bullets: sort dominates; heap ops amortize
+to O(n log n) overall.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def getOrder(self, tasks: List[List[int]]) -> List[int]:
+        indexed_tasks = sorted((t[0], t[1], i) for i, t in enumerate(tasks))
+        heap = []
+        result = []
+        task_idx = 0
+        current_time = indexed_tasks[0][0]
+
+        while len(result) < len(tasks):
+            while task_idx < len(tasks) and indexed_tasks[task_idx][0] <= current_time:
+                enqueue, process, orig_idx = indexed_tasks[task_idx]
+                heapq.heappush(heap, (process, orig_idx))
+                task_idx += 1
+
+            if heap:
+                process_time, orig_idx = heapq.heappop(heap)
+                result.append(orig_idx)
+                current_time += process_time
+            else:
+                current_time = indexed_tasks[task_idx][0]
+
+        return result
+````

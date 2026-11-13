@@ -1,0 +1,86 @@
+---
+title: "Reorder Routes to Make All Paths Lead to the City Zero"
+description: "There are n cities with n-1 roads; connections[i] = [ai, bi] means there exists a directed road ai -> bi."
+difficulty: medium
+patterns: [others]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: min_reorder }
+starter:
+  python: |
+    def min_reorder(n: int, connections: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/reorder-routes-to-make-all-paths-lead-to-the-city-zero.public.json, hidden: tests/reorder-routes-to-make-all-paths-lead-to-the-city-zero.hidden.json }
+complexity: { time: "O(n).", space: "O(n)." }
+group: "11. Others"
+leetcode: reorder-routes-to-make-all-paths-lead-to-the-city-zero
+leetcodeId: 1466
+order: 17011999000000
+---
+
+There are n cities with n-1 roads; connections\[i\] = \[ai, bi\] means there exists a directed
+road ai -&gt; bi. Reorient some roads so every city can reach city 0. Return the minimum number
+of edges that must be reoriented.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 6, connections = [[0,1],[1,3],[2,3],[4,0],[4,5]]
+    Output: 3
+Example 2:
+    Input: n = 5, connections = [[1,0],[1,2],[3,2],[3,4]]
+    Output: 2
+````
+
+## Constraints
+
+````text
+- 2 <= n <= 5 * 10^4
+- len(connections) == n - 1
+````
+
+**Also in the notes under:** [17. Graphs/03. DFS Story Based/03. Path Finding and Cycles](/dsa/problems/reorder-routes-to-make-all-paths-lead-to-the-city-zero-path-finding-and-cycles) (placeholder).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Tree DFS / count wrong-way edges from root 0
+
+1. Build adjacency with a flag: original direction away from parent counts as needing flip.
+2. DFS/BFS from 0 on the undirected view, accumulating flips when traversing an edge in the
+original forward direction away from the root.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(n).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def minReorder(self, n: int, connections: List[List[int]]) -> int:
+        g = defaultdict(list)
+        for a, b in connections:
+            g[a].append((b, 1))
+            g[b].append((a, 0))
+        ans = 0
+        stack = [(0, -1)]
+        while stack:
+            u, p = stack.pop()
+            for v, needs in g[u]:
+                if v == p:
+                    continue
+                ans += needs
+                stack.append((v, u))
+        return ans
+````

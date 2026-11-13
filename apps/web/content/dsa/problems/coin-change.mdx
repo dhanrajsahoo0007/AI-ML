@@ -1,0 +1,80 @@
+---
+title: "Coin Change"
+description: "You are given an integer array coins of distinct positive coin denominations and an integer amount."
+difficulty: medium
+patterns: [1d-dp]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: coin_change }
+starter:
+  python: |
+    def coin_change(coins: list[int], amount: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/coin-change.public.json, hidden: tests/coin-change.hidden.json }
+complexity: { time: "O(amount * len(coins)) - nested loops over amount and coins.", space: "O(amount) - one DP array." }
+group: "01. 1D DP"
+number: "04"
+leetcode: coin-change
+leetcodeId: 322
+order: 20001004000000
+---
+
+You are given an integer array coins of distinct positive coin denominations and
+an integer amount. Return the fewest number of coins needed to make up that
+amount, or -1 if it cannot be made.
+
+## Examples
+
+````text
+Example 1:
+    Input: coins = [1,2,5], amount = 11
+    Output: 3
+Example 2:
+    Input: coins = [2], amount = 3
+    Output: -1
+````
+
+## Constraints
+
+````text
+- 1 <= coins.length <= 12
+- 1 <= coins[i] <= 2^31 - 1
+- 0 <= amount <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Unbounded Knapsack / 1D DP
+For each value up to amount, relax using any coin that fits (reuse allowed).
+
+1. Initialize dp\[0\]=0 and dp\[v\]=infinity for v&gt;0.
+2. For v from 1 to amount, dp\[v\] = min over coins c of (1 + dp\[v-c\]) if v&gt;=c.
+3. Return dp\[amount\] if finite else -1.
+
+## Complexity
+
+**Time:** O(amount \* len(coins)) - nested loops over amount and coins.
+
+**Space:** O(amount) - one DP array.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def coinChange(self, coins: List[int], amount: int) -> int:
+        inf = amount + 1
+        dp = [inf] * (amount + 1)
+        dp[0] = 0
+        for v in range(1, amount + 1):
+            for c in coins:
+                if c <= v:
+                    dp[v] = min(dp[v], dp[v - c] + 1)
+        return dp[amount] if dp[amount] <= amount else -1
+````

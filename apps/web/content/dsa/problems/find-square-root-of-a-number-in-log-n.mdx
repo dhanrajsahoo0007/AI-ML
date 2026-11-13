@@ -1,0 +1,103 @@
+---
+title: "Find square root of a number in log n"
+description: "Given a non-negative integer x, return the integer part of its square root (truncate toward zero) without using library pow/sqrt."
+difficulty: medium
+patterns: [basic]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: my_sqrt }
+starter:
+  python: |
+    def my_sqrt(x: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/find-square-root-of-a-number-in-log-n.public.json, hidden: tests/find-square-root-of-a-number-in-log-n.hidden.json }
+complexity: { time: "O(log x) - Search range halves in the typical analysis of this loop.", space: "O(1) - Only a few integers." }
+group: "01. Basic"
+number: "09"
+order: 8001009000000
+---
+
+Given a non-negative integer x, return the integer part of its square root (truncate toward zero)
+without using library pow/sqrt.
+
+## Examples
+
+````text
+Example 1:
+    Input: x = 8
+    Output: 2
+
+Example 2:
+    Input: x = 16
+    Output: 4
+````
+
+## Constraints
+
+````text
+- 0 <= x <= 2^31 - 1
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer
+Search the answer in \[0, x\]; the largest m with m\*m &lt;= x is floor(sqrt(x)).
+
+1. Handle x &lt; 2 by returning x.
+2. Set left = 1, right = x, ans = 0.
+3. While left &lt;= right, if mid\*mid == x return mid; if mid\*mid &gt; x search left else update ans and go right.
+4. Return ans.
+
+## Complexity
+
+**Time:** O(log x) - Search range halves in the typical analysis of this loop.
+
+**Space:** O(1) - Only a few integers.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given a non-negative integer x, compute and return the square root of x.
+Since the return type is an integer, the decimal digits are truncated, and only the integer part of the result is returned.
+
+Note: You are not allowed to use any built-in exponent function or operator.
+
+Algorithm (Binary Search):
+1. If x is 0 or 1, return x.
+2. Initialize the search range: left = 1, right = x.
+3. While left &lt;= right:
+a. Calculate mid = (left + right) // 2
+b. If mid \* mid == x, return mid (exact square root found)
+c. If mid \* mid &gt; x, search in the lower half: right = mid - 1
+d. If mid \* mid &lt; x, search in the upper half: left = mid + 1, but keep track of this as a potential result
+4. Return the last value where mid \* mid &lt; x (integer part of square root)
+
+Time Complexity: O(log x), where x is the input number
+Space Complexity: O(1), as we only use a constant amount of extra space
+
+Note: This algorithm finds the integer part of the square root. For a more precise result,
+you can modify it to work with floating-point numbers and specify a precision.
+
+## Solution
+
+````python
+class Solution:
+    def mySqrt(self, x: int) -> int:
+        if x < 2:
+            return x
+        left, right = 1, x
+        ans = 0
+        while left <= right:
+            mid = left + (right - left) // 2
+            sq = mid * mid
+            if sq == x:
+                return mid
+            if sq > x:
+                right = mid - 1
+            else:
+                ans = mid
+                left = mid + 1
+        return ans
+````

@@ -1,0 +1,110 @@
+---
+title: "Sliding Window Median"
+description: "Given an integer array nums and an integer k, there is a sliding window of size k that moves from left to right."
+difficulty: hard
+patterns: [heap]
+topics: [sliding-window]
+companies: []
+languages: [python]
+entry: { python: median_sliding_window_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def _rounded(x):
+        if isinstance(x, float):
+            return round(x, 5)
+        if isinstance(x, list):
+            return [_rounded(v) for v in x]
+        return x
+
+
+    def median_sliding_window_tests(a0, a1):  # the entry the tests call
+        result = median_sliding_window(a0, a1)
+        result = _rounded(result)
+        return result
+
+
+    # --- Your code ---
+    def median_sliding_window(nums: list[int], k: int) -> list[float]:
+        # Your code here
+        pass
+tests: { public: tests/sliding-window-median-heap.public.json, hidden: tests/sliding-window-median-heap.hidden.json }
+complexity: { time: "O(n * k) - Each slide may shift O(k) elements when using a plain sorted list.", space: "O(k) - The sorted window stores k numbers." }
+group: "05. Heap"
+number: "03"
+leetcode: sliding-window-median
+leetcodeId: 480
+order: 7005003000000
+---
+
+Given an integer array nums and an integer k, there is a sliding window of size k
+that moves from left to right. Return the median array for each window position.
+The median of an even-length window is the mean of the two middle values after sorting.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 3, -1, -3, 5, 3, 6, 7], k = 3
+    Output: [1.0, -1.0, -1.0, 3.0, 5.0, 6.0]
+Example 2:
+    Input: nums = [1, 2], k = 2
+    Output: [1.5]
+````
+
+## Constraints
+
+````text
+- 1 <= k <= len(nums) <= 10^5 in general; the reference implementation sorts each window.
+````
+
+**Precision.** The tests round your result to 5 decimal places before comparing it.
+
+**Also in the notes under:** [10. Heap/03. Two Heaps Pattern](/dsa/problems/sliding-window-median).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sliding window with ordered multiset view
+Maintain the multiset of values inside the window; extract the median from its sorted order.
+
+1. Build the sorted window for indices \[0, k - 1\].
+2. Slide: remove the outgoing value with bisect, insert the incoming value with bisect.
+3. Read the median from the middle of the sorted window list.
+
+## Complexity
+
+**Time:** O(n \* k) - Each slide may shift O(k) elements when using a plain sorted list.
+
+**Space:** O(k) - The sorted window stores k numbers.
+
+## Solution
+
+````python
+import bisect
+from typing import List
+
+
+class Solution:
+    def medianSlidingWindow(self, nums: List[int], k: int) -> List[float]:
+        window = sorted(nums[:k])
+        out: List[float] = []
+
+        def median(values: List[int]) -> float:
+            mid = k // 2
+            if k % 2:
+                return float(values[mid])
+            return (values[mid - 1] + values[mid]) / 2.0
+
+        out.append(median(window))
+
+        for i in range(k, len(nums)):
+            left_val = nums[i - k]
+            window.pop(bisect.bisect_left(window, left_val))
+            bisect.insort(window, nums[i])
+            out.append(median(window))
+
+        return out
+````

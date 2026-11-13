@@ -1,0 +1,80 @@
+---
+title: "Memoized Knapsack"
+description: "0-1 Knapsack with memoization: maximize value for capacity W using each item at most once."
+difficulty: medium
+patterns: [0-1-knapsack]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: knapsack }
+starter:
+  python: |
+    def knapsack(W: int, wt: list[int], val: list[int], n: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/memoized-knapsack.public.json, hidden: tests/memoized-knapsack.hidden.json }
+complexity: { time: "O(n * W).", space: "O(n * W) memo plus O(n) stack." }
+group: "02. 0-1 Knapsack"
+number: "02"
+order: 20002002000000
+---
+
+0-1 Knapsack with memoization: maximize value for capacity W using each item at most once.
+
+## Examples
+
+````text
+Example 1:
+Input: W=50, wt=[10,20,30], val=[60,100,120]
+Output: 220
+````
+
+## Constraints
+
+````text
+- n * W manageable for memo table
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Top-down DP
+State (i, w): best value using first i items with capacity w.
+
+1. Memoize recursive knapsack on (n, W).
+2. Same transitions as recursion but store results in dict or 2D table.
+
+## Complexity
+
+**Time:** O(n \* W).
+
+**Space:** O(n \* W) memo plus O(n) stack.
+
+## Solution
+
+````python
+from typing import Dict, List, Tuple
+
+
+class Solution:
+    def knapsack(self, W: int, wt: List[int], val: List[int], n: int) -> int:
+        memo: Dict[Tuple[int, int], int] = {}
+
+        def dfs(i: int, cap: int) -> int:
+            if i == 0 or cap == 0:
+                return 0
+            key = (i, cap)
+            if key in memo:
+                return memo[key]
+            if wt[i - 1] > cap:
+                memo[key] = dfs(i - 1, cap)
+            else:
+                memo[key] = max(
+                    val[i - 1] + dfs(i - 1, cap - wt[i - 1]),
+                    dfs(i - 1, cap),
+                )
+            return memo[key]
+
+        return dfs(n, W)
+````

@@ -170,10 +170,13 @@ describe("getQuestionsForTopic", () => {
   });
 
   it("returns only questions tagged to the page, never a follow-up whose parent is already in the list", () => {
-    for (const q of getQuestions().filter((x) => x.topics.length > 0)) {
-      const list = getQuestionsForTopic(q.topics[0].href);
+    // Each tagged page once: many questions share a page, and checking it once per question made this test
+    // quadratic in the size of the library (over 5 s on a CI runner).
+    const pages = new Set(getQuestions().flatMap((x) => (x.topics.length > 0 ? [x.topics[0].href] : [])));
+    for (const href of pages) {
+      const list = getQuestionsForTopic(href);
       const ids = new Set(list.map((x) => x.id));
-      expect(list.every((x) => x.topics.some((t) => t.href === q.topics[0].href))).toBe(true);
+      expect(list.every((x) => x.topics.some((t) => t.href === href))).toBe(true);
       expect(list.every((x) => !x.parent || !ids.has(x.parent.id))).toBe(true);
     }
   });

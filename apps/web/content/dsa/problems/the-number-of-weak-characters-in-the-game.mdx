@@ -1,0 +1,85 @@
+---
+title: "The Number of Weak Characters in the Game"
+description: "Each character has attack and defense stats as [attack, defense]."
+difficulty: medium
+patterns: [greedy-with-dp-elements]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: number_of_weak_characters }
+starter:
+  python: |
+    def number_of_weak_characters(properties: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/the-number-of-weak-characters-in-the-game.public.json, hidden: tests/the-number-of-weak-characters-in-the-game.hidden.json }
+complexity: { time: "O(n log n) - Sorting dominates.", space: "O(1) extra beyond the sort buffer." }
+group: "07. Greedy with DP Elements"
+number: "03"
+leetcode: the-number-of-weak-characters-in-the-game
+leetcodeId: 1996
+order: 18007003000000
+---
+
+Each character has attack and defense stats as \[attack, defense\]. A character is weak if there exists
+another character with strictly greater attack and strictly greater defense. Return the number of weak characters.
+
+## Examples
+
+````text
+Example 1:
+    Input: properties = [[5,5],[6,3],[3,6]]
+    Output: 0
+
+Example 2:
+    Input: properties = [[2,2],[3,3]]
+    Output: 1
+
+Example 3:
+    Input: properties = [[1,5],[10,4],[4,3]]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 2 <= len(properties) <= 10^5
+- 1 <= attack[i], defense[i] <= 10^5
+````
+
+**Also in the notes under:** [09. Stack and Queue/05. Monotonic Stack Applications](/dsa/problems/the-number-of-weak-characters-in-the-game-monotonic-stack-applications) (placeholder).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Sorting Sweep
+Sort by attack descending and defense ascending so earlier characters dominate attack while minimizing defense traps.
+
+1. Sort properties by (-attack, defense).
+2. Track the maximum defense seen while scanning; a character is weak if its defense is less than that max.
+3. Update the running maximum defense after each step.
+
+## Complexity
+
+**Time:** O(n log n) - Sorting dominates.
+
+**Space:** O(1) extra beyond the sort buffer.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def numberOfWeakCharacters(self, properties: List[List[int]]) -> int:
+        properties.sort(key=lambda x: (-x[0], x[1]))
+        ans = 0
+        max_def = 0
+        for _, d in properties:
+            if d < max_def:
+                ans += 1
+            max_def = max(max_def, d)
+        return ans
+````

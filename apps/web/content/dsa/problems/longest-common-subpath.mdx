@@ -1,0 +1,104 @@
+---
+title: "Longest Common Subpath"
+description: "You are given n cities labeled 0..n-1 and a list paths where paths[i] is a path in city i as a sequence of nodes."
+difficulty: hard
+patterns: [rabin-karp-rolling-hash]
+topics: [strings]
+companies: []
+languages: [python]
+entry: { python: longest_common_subpath }
+starter:
+  python: |
+    def longest_common_subpath(n: int, paths: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/longest-common-subpath.public.json, hidden: tests/longest-common-subpath.hidden.json }
+complexity: { time: "O(S log M) where S is total path length and M is min path length (tuple hashing cost per L).", space: "O(S) - Sets for one candidate length." }
+group: "07. Rabin-Karp | Rolling hash"
+number: "04"
+leetcode: longest-common-subpath
+leetcodeId: 1923
+order: 5007004000000
+---
+
+You are given n cities labeled 0..n-1 and a list paths where paths\[i\] is a path in
+city i as a sequence of nodes. Return the length of the longest common contiguous
+subpath shared by every path. If none exists, return 0.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 5, paths = [[0, 1, 2, 3, 4], [2, 3, 4], [4, 0, 1, 2, 3]]
+    Output: 2
+    Explanation: [2, 3] appears as a contiguous segment in every path.
+
+Example 2:
+    Input: n = 2, paths = [[0], [0]]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 10^5
+- sum(len(paths[i])) <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary search on length plus multiset intersection of tuple hashes
+If length L works, try longer; check each candidate by hashing every length-L window per path and intersecting sets.
+
+1. Binary search L from 0 to min path length.
+2. For candidate L, build a set of length-L tuples for the first path, then intersect with sets from other paths.
+3. The first L with empty intersection lowers the search; otherwise continue upward.
+
+## Complexity
+
+**Time:** O(S log M) where S is total path length and M is min path length (tuple hashing cost per L).
+
+**Space:** O(S) - Sets for one candidate length.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def longestCommonSubpath(self, n: int, paths: List[List[int]]) -> int:
+        if not paths:
+            return 0
+        min_len = min(len(p) for p in paths)
+
+        def has_common(length: int) -> bool:
+            if length == 0:
+                return True
+            common: set[tuple[int, ...]] | None = None
+            for path in paths:
+                cur = {
+                    tuple(path[i : i + length])
+                    for i in range(len(path) - length + 1)
+                }
+                if common is None:
+                    common = cur
+                else:
+                    common &= cur
+                if not common:
+                    return False
+            return True
+
+        lo, hi = 0, min_len
+        best = 0
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if has_common(mid):
+                best = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return best
+````

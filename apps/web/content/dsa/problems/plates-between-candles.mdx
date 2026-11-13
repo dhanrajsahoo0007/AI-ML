@@ -1,0 +1,92 @@
+---
+title: "Plates Between Candles"
+description: "Given a string s of '*' and '|', answer queries [left, right]: count plates '*' that lie strictly between the nearest candles '|' bounding the interval."
+difficulty: medium
+patterns: [advanced-array-manipulation]
+topics: [prefix-sum]
+companies: []
+languages: [python]
+entry: { python: plates_between_candles }
+starter:
+  python: |
+    def plates_between_candles(s: str, queries: list[list[int]]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/plates-between-candles.public.json, hidden: tests/plates-between-candles.hidden.json }
+complexity: { time: "O(n + q) for n = len(s) and q = len(queries).", space: "O(n) auxiliary." }
+group: "11. Advanced Array Manipulation"
+number: "01"
+leetcode: plates-between-candles
+leetcodeId: 2055
+order: 2011001000000
+---
+
+Given a string s of '\*' and '\|', answer queries \[left, right\]: count plates '\*'
+that lie strictly between the nearest candles '\|' bounding the interval.
+
+## Examples
+
+````text
+Example 1:
+Input: s = "**|**|***|", queries = [[2, 5], [5, 9]]
+Output: [2, 3]
+````
+
+## Constraints
+
+````text
+- 3 <= len(s) <= 10^5
+- 1 <= len(queries) <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum + Nearest Index Arrays
+Precompute prefix plate counts and nearest candle to the left and right of each index.
+
+1. Prefix count plates before each index.
+2. nearest\_left\[i\] is last candle at or before i; nearest\_right\[i\] is first candle at or after i.
+3. For each query, clamp to inner candles and subtract prefix counts.
+
+## Complexity
+
+**Time:** O(n + q) for n = len(s) and q = len(queries).
+
+**Space:** O(n) auxiliary.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def platesBetweenCandles(self, s: str, queries: List[List[int]]) -> List[int]:
+        n = len(s)
+        plate_pref = [0] * (n + 1)
+        for i, ch in enumerate(s):
+            plate_pref[i + 1] = plate_pref[i] + (ch == "*")
+        nearest_left = [-1] * n
+        last = -1
+        for i, ch in enumerate(s):
+            if ch == "|":
+                last = i
+            nearest_left[i] = last
+        nearest_right = [n] * n
+        nxt = n
+        for i in range(n - 1, -1, -1):
+            if s[i] == "|":
+                nxt = i
+            nearest_right[i] = nxt
+        out: List[int] = []
+        for left, right in queries:
+            lc = nearest_right[left]
+            rc = nearest_left[right]
+            if lc == n or rc == -1 or lc > rc:
+                out.append(0)
+            else:
+                out.append(plate_pref[rc + 1] - plate_pref[lc + 1])
+        return out
+````

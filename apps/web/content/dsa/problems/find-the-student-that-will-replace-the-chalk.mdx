@@ -1,0 +1,78 @@
+---
+title: "Find the Student that Will Replace the Chalk"
+description: "Students numbered 0..n-1 use chalk in order; student i uses chalk[i] pieces."
+difficulty: medium
+patterns: [binary-search-and-prefix-sum]
+topics: [prefix-sum]
+companies: []
+languages: [python]
+entry: { python: chalk_replacer }
+starter:
+  python: |
+    def chalk_replacer(chalk: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/find-the-student-that-will-replace-the-chalk.public.json, hidden: tests/find-the-student-that-will-replace-the-chalk.hidden.json }
+complexity: { time: "O(n) for the scan plus O(n) for sum.", space: "O(1) extra." }
+group: "06. Binary Search and Prefix Sum"
+number: "01"
+leetcode: find-the-student-that-will-replace-the-chalk
+leetcodeId: 1894
+order: 2006001000000
+---
+
+Students numbered 0..n-1 use chalk in order; student i uses chalk\[i\] pieces.
+Starting with k pieces, return the index of the first student who cannot finish
+their turn because chalk runs out mid-use.
+
+## Examples
+
+````text
+Example 1:
+Input: chalk = [5, 1, 5], k = 22
+Output: 0
+````
+
+## Constraints
+
+````text
+- chalk.length == n
+- 1 <= n <= 10^5
+- 1 <= chalk[i] <= 10^5
+- 1 <= k <= 10^9
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum + Modular Arithmetic
+Reduce k modulo one full round of usage, then simulate one partial round.
+
+1. total = sum(chalk); set k = k % total, using total if remainder is 0.
+2. Walk students subtracting usage until k &lt; chalk\[i\], return i.
+
+## Complexity
+
+**Time:** O(n) for the scan plus O(n) for sum.
+
+**Space:** O(1) extra.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def chalkReplacer(self, chalk: List[int], k: int) -> int:
+        total = sum(chalk)
+        k %= total
+        if k == 0:
+            k = total
+        for i, use in enumerate(chalk):
+            if k < use:
+                return i
+            k -= use
+        return 0
+````

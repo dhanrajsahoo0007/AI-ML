@@ -1,0 +1,76 @@
+---
+title: "Distinct Subsequences"
+description: "Given strings s and t, count how many distinct subsequences of s equal t (modulo 10^9 + 7)."
+difficulty: hard
+patterns: [longest-common-subsequence]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: num_distinct }
+starter:
+  python: |
+    def num_distinct(s: str, t: str) -> int:
+        # Your code here
+        pass
+tests: { public: tests/distinct-subsequences.public.json, hidden: tests/distinct-subsequences.hidden.json }
+complexity: { time: "O(m * n).", space: "O(m * n); can compress to O(n)." }
+group: "04. Longest Common Subsequence"
+number: "07"
+leetcode: distinct-subsequences
+leetcodeId: 115
+order: 20004007000000
+---
+
+Given strings s and t, count how many distinct subsequences of s equal t
+(modulo 10^9 + 7).
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "rabbbit", t = "rabbit"
+    Output: 3
+Example 2:
+    Input: s = "babgbag", t = "bag"
+    Output: 5
+````
+
+## Constraints
+
+````text
+- 1 <= len(s), len(t) <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 2D counting DP
+dp\[i\]\[j\] = ways to form t\[:j\] as subsequence of s\[:i\].
+
+1. dp\[i\]\[0\]=1 for all i; dp\[0\]\[j&gt;0\]=0.
+2. If s\[i-1\]==t\[j-1\]: dp\[i\]\[j\]=dp\[i-1\]\[j-1\]+dp\[i-1\]\[j\]; else dp\[i\]\[j\]=dp\[i-1\]\[j\].
+
+## Complexity
+
+**Time:** O(m \* n).
+
+**Space:** O(m \* n); can compress to O(n).
+
+## Solution
+
+````python
+class Solution:
+    def numDistinct(self, s: str, t: str) -> int:
+        mod = 10**9 + 7
+        m, n = len(s), len(t)
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+        for i in range(m + 1):
+            dp[i][0] = 1
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                dp[i][j] = dp[i - 1][j]
+                if s[i - 1] == t[j - 1]:
+                    dp[i][j] = (dp[i][j] + dp[i - 1][j - 1]) % mod
+        return dp[m][n]
+````

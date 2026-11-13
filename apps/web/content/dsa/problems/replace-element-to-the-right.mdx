@@ -1,0 +1,77 @@
+---
+title: "Replace Element to the right"
+description: "Given an array arr, replace every element arr[i] with the greatest element among indices strictly to its right."
+difficulty: easy
+patterns: [basic-array-manipulation]
+topics: [arrays]
+companies: []
+languages: [python]
+entry: { python: replace_elements }
+starter:
+  python: |
+    def replace_elements(arr: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/replace-element-to-the-right.public.json, hidden: tests/replace-element-to-the-right.hidden.json }
+complexity: { time: "O(n) - One pass over the array.", space: "O(1) - Only a few scalar variables besides the reused input array." }
+group: "01. Basic Array Manipulation"
+number: "02"
+order: 1001002000000
+---
+
+Given an array arr, replace every element arr\[i\] with the greatest element among indices
+strictly to its right. Replace the last element with -1.
+
+## Examples
+
+````text
+Example 1:
+    Input: arr = [17, 18, 5, 4, 6, 1]
+    Output: [18, 6, 6, 6, 1, -1]
+Example 2:
+    Input: arr = [400]
+    Output: [-1]
+````
+
+## Constraints
+
+````text
+- 1 <= len(arr) <= 10^4
+- 1 <= arr[i] <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Right-to-left scan / suffix maximum
+Track the best value seen to the right while walking from the end of the array.
+
+1. Initialize max\_right to -1.
+2. Iterate indices from n - 1 down to 0.
+3. For each index, set arr\[i\] to max\_right, then update max\_right with max(max\_right, old arr\[i\]).
+4. Return arr (modified in place per problem convention).
+
+## Complexity
+
+**Time:** O(n) - One pass over the array.
+
+**Space:** O(1) - Only a few scalar variables besides the reused input array.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def replaceElements(self, arr: List[int]) -> List[int]:
+        n = len(arr)
+        max_right = -1
+        # Walk right to left: each position becomes the max seen strictly to its right.
+        for i in range(n - 1, -1, -1):
+            current = arr[i]  # keep old value before overwriting
+            arr[i] = max_right  # replace with best on the right (starts as -1 for last index)
+            max_right = max(max_right, current)  # suffix max moves left with us
+        return arr
+````

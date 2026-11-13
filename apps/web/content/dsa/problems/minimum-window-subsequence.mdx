@@ -1,0 +1,121 @@
+---
+title: "Minimum Window Subsequence"
+description: "Given strings s1 and s2, return the shortest contiguous substring of s1 such that s2 is a subsequence of that substring."
+difficulty: hard
+patterns: [variable-size]
+topics: [sliding-window]
+companies: []
+languages: [python]
+entry: { python: min_window }
+starter:
+  python: |
+    def min_window(s1: str, s2: str) -> str:
+        # Your code here
+        pass
+tests: { public: tests/minimum-window-subsequence.public.json, hidden: tests/minimum-window-subsequence.hidden.json }
+complexity: { time: "O(len(s1) * len(s2)) - Each phase may scan large portions of s1 for each start advance.", space: "O(1) - Only indices and lengths are stored beyond the input strings." }
+group: "03. Variable size"
+number: "05"
+leetcode: minimum-window-subsequence
+leetcodeId: 727
+order: 7003005000000
+---
+
+Given strings s1 and s2, return the shortest contiguous substring of s1 such that
+s2 is a subsequence of that substring. If no window exists, return "". If multiple
+answers have the same length, return the one with the smallest starting index.
+
+## Examples
+
+````text
+Example 1:
+    Input: s1 = "abcdebdde", s2 = "bde"
+    Output: "bcde"
+Example 2:
+    Input: s1 = "jmeqksfrsdcmsiwbatv", s2 = "u"
+    Output: ""
+````
+
+## Constraints
+
+````text
+- Matching must respect the order of characters in s2.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy extension with back-trimming
+Repeatedly find the earliest end index where s2 can be matched as a subsequence, then tighten the start from the right.
+
+1. From a start index, scan forward to embed s2 as a subsequence and record the inclusive end index.
+2. Walk backward from that end to drop unnecessary prefix characters while still embedding s2.
+3. Compare window length with the best answer, then restart the search just after the chosen start.
+
+Restored notes (archived workbook):
+
+Given strings s1 and s2, return the minimum contiguous substring part of s1, so that s2 is a subsequence of the part.
+
+If there is no such window in s1 that covers all characters in s2, return the empty string "".
+If there are multiple such minimum-length windows, return the one with the left-most starting index.
+
+Example 1:
+
+Input: s1 = "abcdebdde", s2 = "bde"
+Output: "bcde"
+Explanation:
+"bcde" is the answer because it occurs before "bdde" which has the same length.
+"deb" is not a smaller window because the elements of s2 in the window must occur in order.
+
+## Complexity
+
+**Time:** O(len(s1) \* len(s2)) - Each phase may scan large portions of s1 for each start advance.
+
+**Space:** O(1) - Only indices and lengths are stored beyond the input strings.
+
+## Solution
+
+````python
+class Solution:
+    def minWindow(self, s1: str, s2: str) -> str:
+        s, t = s1, s2
+        if not t or not s:
+            return ""
+
+        def find_end(start: int):
+            ti = 0
+            pos = start
+            while pos < len(s) and ti < len(t):
+                if s[pos] == t[ti]:
+                    ti += 1
+                pos += 1
+            return pos - 1 if ti == len(t) else None
+
+        def tighten_start(end_pos: int) -> int:
+            ti = len(t) - 1
+            pos = end_pos
+            while pos >= 0 and ti >= 0:
+                if s[pos] == t[ti]:
+                    ti -= 1
+                pos -= 1
+            return pos + 1
+
+        start = 0
+        best_len = float("inf")
+        best = ""
+
+        while start < len(s):
+            end = find_end(start)
+            if end is None:
+                break
+
+            real_start = tighten_start(end)
+            if end - real_start + 1 < best_len:
+                best_len = end - real_start + 1
+                best = s[real_start : end + 1]
+
+            start = real_start + 1
+
+        return best
+````

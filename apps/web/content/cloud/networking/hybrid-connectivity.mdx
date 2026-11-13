@@ -1,11 +1,283 @@
 ---
 title: "VPN, Direct Connect, Interconnect & ExpressRoute"
-description: "How to join an office or data centre to the cloud: an encrypted tunnel first, then a dedicated line when you need steady speed."
-status: outline
+description: "How to join a factory or office to a cloud network: encrypted tunnels first, a private line when speed must be steady, and the VPN kept as the backup."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** joining an office or data centre to the cloud: encrypted tunnels over the internet first, a dedicated line when bandwidth or predictability matter, and why you keep the tunnel as the backup.
+<KeyIdea>
+  A building you run can reach your cloud network privately, through encrypted tunnels over the internet or a line of your own.
+</KeyIdea>
 
-**Related reading on this site:** [Networking basics](/system-design/fundamentals/networking) · [Networking on AWS](/cloud/aws/networking) · [Networking on Azure](/cloud/azure/networking)
+## The story
+
+Brightpost's posters are printed by a partner in its own factory. The shop's print API used to send print orders across the public internet, from three addresses the partner allow-listed. A poster's print file is about 25 MB, and at busy hours one took up to 40 seconds. The partner also wanted its print server off the internet. So Asha set up a site-to-site VPN in one afternoon. The cloud offered two tunnels; she configured one and planned the second for "later". On the next sale day, at 9:40 a.m., the cloud's end of that tunnel moved to new hardware during planned maintenance. The factory router never reconnected, and the partner's IT person restarted it at 11:55. By then 1,100 print jobs were waiting, and 600 posters missed the 4 p.m. courier.
+
+Every step below follows those print jobs, from the open internet to a link that gets slower, not stopped, when one part fails.
+
+## How it works
+
+Three words first. **On-premises** means a site you run yourself, outside the cloud: an office, a warehouse or, here, a factory. A **site-to-site** connection joins the network at one site to a network in the cloud, so machines on each side reach the other by private address. A **router** is the box at each end that decides where each packet goes next.
+
+### Step 1: Over the open internet
+
+<AnimatedDiagram spec="animated/cloud/hybrid-link" step={1} minWidth={620} caption="The first setup: print orders leave through the NAT gateway and cross the public internet to the factory." />
+
+The shop's print API calls a public address at the factory. The call leaves through the NAT gateway, so the factory sees one of three fixed addresses on its allow-list. Each call is encrypted with <Term id="tls" />. [NAT & Leaving the Network](/cloud/networking/nat-and-egress) tells that part.
+
+Two things are wrong with this path. The print server keeps a door open to the whole internet, and the partner's logs show scans against it every day. And the internet is shared: nobody promises how fast a packet crosses it. A 25 MB print file took 4 seconds at 7 a.m. and up to 40 at busy hours. [Networking basics](/system-design/fundamentals/networking) covers how packets find their way.
+
+<PremiumBreak />
+
+### Step 2: An encrypted tunnel
+
+<AnimatedDiagram spec="animated/cloud/hybrid-link" step={2} minWidth={620} caption="One encrypted tunnel joins the cloud's VPN gateway to the factory router. Print jobs now go to a private address." />
+
+A <Term id="vpn">site-to-site VPN</Term> builds a private path on top of the public one. One end is a managed **VPN gateway** in the cloud; the other is the factory's router. The two ends agree on keys. Then each wraps every packet inside an encrypted outer packet, addressed to the other end. Strangers see only scrambled packets between two addresses. That wrapped path is the **tunnel**, and its standard is called **IPsec**.
+
+Inside the tunnel, both sides use private addresses. The factory's network is 10.50.0.0/16 and Brightpost's is 10.0.0.0/16, in <Term id="cidr" /> form. The ranges must not overlap, or a packet for 10.0.11.7 could belong to either side. The print server closes its public door, and the shop sends jobs to 10.50.4.20 instead.
+
+The tunnel's cloud end attaches to Brightpost's <Term id="transit-hub">network hub</Term>, so every account reaches the factory through one place. The bill is a gateway charged by the hour, plus the gigabytes sent. The tunnel still crosses the internet, so its speed still varies.
+
+### Step 3: One tunnel, one point of failure
+
+<AnimatedDiagram spec="animated/cloud/hybrid-link" step={3} minWidth={620} caption="The failure: the only tunnel drops at 9:40 a.m., and print jobs have no other way to the factory." />
+
+A tunnel is a session between two exact endpoints. If either end restarts, moves or loses its internet line, the tunnel drops until both ends agree on keys again. That is why cloud VPN services offer a second endpoint. Brightpost used one.
+
+<Callout tone="red" title="What breaks">
+  At 9:40 a.m. on the sale day, the cloud end of the tunnel moves to new hardware during planned maintenance. The factory router keeps waiting on the old session and never rebuilds it. The hub has no other route to 10.50.0.0/16, so the print API queues each job and retries. The router is restarted at 11:55, after 2 hours 15 minutes. By then 1,100 jobs are waiting, and 600 posters miss the 4 p.m. courier.
+</Callout>
+
+The problem was the count: one tunnel, one router, one internet line. Any one of them failing stops the link.
+
+### Step 4: Two tunnels, and routes that move by themselves
+
+<AnimatedDiagram spec="animated/cloud/hybrid-link" step={4} minWidth={620} caption="Two tunnels to two cloud endpoints, each with its own BGP session. When one goes quiet, traffic stays on the other." />
+
+The fix is a second tunnel to the cloud's second endpoint, with both up at once. Now something must pick a tunnel for each packet and notice when one dies. That is **BGP**, the Border Gateway Protocol: the way routers tell each other which addresses they can reach.
+
+In plain words, two routers talk inside each tunnel. The factory router says: "send anything for 10.50.0.0/16 to me." The cloud side says the same for 10.0.0.0/16. Each side writes what it hears into its <Term id="route-table">route table</Term>. They also trade a short "still here" message every few seconds. If one side goes quiet for longer than an agreed **hold time**, the other forgets the routes it learned there. Traffic moves to the tunnel that still talks.
+
+Brightpost's test moved traffic in under a minute, with nobody touching anything. The partner also added a second internet line from another provider for tunnel B, because two tunnels over one line fail together.
+
+### Step 5: A private line of your own
+
+<AnimatedDiagram spec="animated/cloud/hybrid-link" step={5} minWidth={620} caption="A private line runs from the factory, through a meeting site, into the cloud. The hub prefers it, and the two tunnels wait as the backup." />
+
+The tunnels fixed the outage, not the speed. On a sale day about 2,000 print files, 50 GB, cross the link, and each still took up to 40 seconds. A <Term id="dedicated-connection" /> fixes that: a physical line that carries only your traffic, so nobody else's rush hour slows it. Its <Term id="latency" /> stays about the same all day.
+
+Real cable needs a real place. A cloud provider meets telecom carriers at **meeting sites**, buildings where many networks plug into each other. There are two ways in:
+
+1. **Your own port.** You rent a port at the meeting site and run a line from your building to it.
+2. **A carrier's share.** A carrier already connected there sells you part of its line. This suits smaller needs and far-away sites.
+
+The factory is 40 km from the nearest meeting site, so Brightpost buys from a carrier. The order took 7 weeks: contracts, a new cable to the factory, and tests at both ends. Now a print file takes about 2 seconds, at 7 a.m. and on a sale day alike.
+
+The bill changes shape: a fixed monthly fee for the port or circuit, and usually a lower rate per gigabyte leaving the cloud. The line is private, not encrypted, so Brightpost keeps TLS on every call.
+
+### Step 6: Which path wins, and why the VPN stays
+
+Now the hub knows two ways to 10.50.0.0/16: the line and the tunnels. Routers pick a path in this order:
+
+1. **The most specific range wins.** A route for 10.50.4.0/24 beats one for 10.50.0.0/16, whichever path it came from.
+2. **Then a preference.** For equal ranges, BGP compares preference values. Some clouds prefer the private line by default; on others you set it.
+3. **Then sharing.** If everything is still equal, traffic may be spread across both paths.
+
+Each direction decides on its own: the cloud picks the way to the factory, the factory router the way back. Set the preference on both sides.
+
+Brightpost keeps both tunnels up, idle, beside the line. If a digger cuts the cable, the line's BGP session goes quiet and its routes are withdrawn. Within a minute the tunnels carry everything, and print files take 4 to 40 seconds again. The link is slower, not down: a <Term id="failover" /> nobody has to start.
+
+A bigger company adds a second line at a second meeting site, so losing a whole site still leaves full speed. Brightpost can run on the tunnels for a day or two, so one line plus the VPN is enough. This is the "single link" to the partner on [Landing Zones](/cloud/fundamentals/landing-zones): one place where the factory connects, with more than one path inside it. [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks) covers the hub itself.
+
+### Step 7: Names on both sides
+
+<AnimatedDiagram spec="animated/cloud/hybrid-link" step={6} minWidth={620} caption="Each side forwards lookups for the other side's names across the link, and answers its own." />
+
+<Term id="dns" /> turns names into addresses, and each side has names the other cannot see. The shop calls `press.factory.internal`; the print server reports back to `print-api.brightpost.internal`. **Hybrid DNS** forwards each question to the side that knows the answer. The cloud's resolver gets a rule: names ending in `factory.internal` go to the factory's DNS server, over the link. The factory's DNS server gets the mirror rule, pointing at an inbound address of the cloud's resolver. [DNS on the Cloud](/cloud/networking/dns) covers private zones and forwarding.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: two tunnels, a private line for steady traffic, BGP to choose, and DNS forwarded both ways.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Tunnel service:** AWS Site-to-Site VPN. Your router is the customer gateway; the cloud end is a virtual private gateway on one VPC, or a transit gateway.
+    - **Two tunnels:** every VPN connection comes with two tunnels to two AWS endpoints. Configure both.
+    - **Private line:** AWS Direct Connect: a dedicated connection on your own port at a Direct Connect location, or a hosted connection through a partner.
+    - **Routing (BGP):** Direct Connect always uses BGP; the VPN can use BGP or static routes. For the same range, AWS prefers Direct Connect over the VPN.
+    - **Hybrid DNS:** Route 53 Resolver inbound endpoints take lookups from your site; outbound endpoints with forwarding rules send lookups out.
+
+    **The difference that changes a design.** Where the link ends decides how far it reaches. A virtual private gateway serves one VPC. A transit gateway, with a Direct Connect gateway in front, lets one link serve many VPCs and accounts. The built-in preference makes a VPN backup work without tuning, if both paths announce the same ranges.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Tunnel service:** Cloud VPN. An HA VPN gateway has two interfaces, each with its own external address; your router is the peer VPN gateway.
+    - **Two tunnels:** HA VPN's availability promise holds only with tunnels on both interfaces.
+    - **Private line:** Cloud Interconnect: Dedicated Interconnect is your own circuit at a colocation facility; Partner Interconnect comes through a service provider.
+    - **Routing (BGP):** Cloud Router runs BGP for HA VPN and Interconnect. Routes for the same range compete on priority, and equal priorities share the traffic.
+    - **Hybrid DNS:** Cloud DNS forwarding zones send lookups to your DNS servers; an inbound server policy lets your site ask Cloud DNS.
+
+    **The difference that changes a design.** Priority, not the kind of path, decides between line and tunnels. Leave both equal and traffic spreads across them, so give the VPN's routes a worse priority, in both directions. The VPC network is global: with global dynamic routing, one link in one region reaches subnets in every region.
+  </Tab>
+  <Tab label="Azure">
+    - **Tunnel service:** Azure VPN Gateway, in a subnet named GatewaySubnet; your router is the local network gateway.
+    - **Two tunnels:** the gateway runs two instances. In active-active mode each has its own public address, and your router builds a tunnel to each.
+    - **Private line:** ExpressRoute: a circuit from a connectivity provider at a peering location, or ExpressRoute Direct ports of your own, joined by an ExpressRoute gateway.
+    - **Routing (BGP):** ExpressRoute always uses BGP; the VPN can use BGP or static routes. For the same range, Azure prefers ExpressRoute over the VPN.
+    - **Hybrid DNS:** Azure DNS Private Resolver: an inbound endpoint takes lookups from your site; an outbound endpoint with a forwarding ruleset sends them out.
+
+    **The difference that changes a design.** Every ExpressRoute circuit has two connections, so one cable or router can fail without an outage. Both sit in the same peering location, though. To survive losing a whole site, add a circuit at a second peering location, or keep the VPN as the backup. Both gateways live in GatewaySubnet, so size it early.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/hybrid-link" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/hybrid-link" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="How should this site join the cloud?"
+  tree={{
+    q: "Must machines at the site reach private addresses in your cloud network?",
+    no: "Keep calling public endpoints over TLS, with an allow-list and a key. You need no link.",
+    yes: {
+      q: "Is the traffic modest, and can it live with speed that varies?",
+      yes: "A site-to-site VPN with two tunnels and BGP. It can work the same day.",
+      no: {
+        q: "Could the site run on the slower VPN for a day or two if the line failed?",
+        yes: "A private line, with two VPN tunnels kept up as the backup. Order the line weeks ahead.",
+        no: {
+          answer: "Two private lines at two meeting sites, with the VPN as a last resort.",
+          href: "/cloud/resilience/dr-strategies",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="During a sale, tunnel A's BGP session goes quiet at 10:00. What happens to print jobs?" hint="What does the cloud side do with routes from a router that stops talking?">
+    After the hold time, the routes learned through tunnel A are withdrawn. Jobs keep flowing through tunnel B, and Brightpost's test showed the switch in under a minute. No queue builds up.
+  </QuizItem>
+  <QuizItem question="The private line carries 10.50.0.0/16. A leftover test setting on the VPN still announces 10.50.4.0/24. Where do jobs for 10.50.4.20 go?" hint="Which rule comes before every preference?">
+    Over the VPN. The most specific range wins before any preference is compared, and /24 is narrower than /16. Announce the same ranges on both paths.
+  </QuizItem>
+  <QuizItem question="A digger cuts the private line on a sale day. How long does a 25 MB print file take now, and is the shop affected?">
+    Between 4 and 40 seconds again, because the tunnels cross the internet. Print jobs still arrive, so the link is slower, not down.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Internet + allow-list", "VPN, one tunnel", "VPN, two tunnels", "Private line + VPN backup"]}
+  rows={[
+    ["Time to set up", "Already running", "One afternoon", "About a day", "7 weeks"],
+    ["Print server open to the internet", "Yes", "No", "No", "No"],
+    ["One 25 MB print file", "4–40 s", "4–40 s", "4–40 s", "About 2 s"],
+    ["Encryption", "TLS on each call", "Tunnel + TLS", "Tunnel + TLS", "TLS on each call"],
+    ["One tunnel or endpoint fails", "No tunnel to fail", "Link down", "Other tunnel carries on", "Line carries on"],
+    ["The line is cut", "No line", "No line", "No line", "Tunnels carry on, slower"],
+    ["The sale-day maintenance", "No effect", "2 h 15 min down, 600 posters late", "Under 1 minute", "No effect"],
+    ["Cost shape", "NAT hours and gigabytes", "Gateway hours and gigabytes", "The same, two tunnels", "Monthly port or circuit fee, lower per-GB rate, plus the VPN"],
+  ]}
+  caption="Brightpost's numbers. Rates, speeds and lead times differ by cloud and by carrier."
+/>
+
+The single tunnel wins only on the first afternoon. Two tunnels cost almost nothing more, and the line is worth its fee once steady speed matters.
+
+## Common pitfalls
+
+- **One tunnel "for now".** Planned maintenance on one endpoint becomes an outage. Configure both tunnels the cloud offers, with BGP, on the first day.
+- **Two paths through one weak point.** Two tunnels over one internet line, or two lines into one building, fail together. Give each path its own line, and its own site when you can.
+- **A more specific route on the backup.** A /24 announced over the VPN beats a /16 on the line, so the line sits idle. Announce the same ranges on both paths, then set the preference.
+- **A backup nobody tests.** A VPN that never carries traffic may fail on the day it is needed. Move traffic to it on purpose, at a quiet hour, every quarter.
+- **Treating the line as encrypted.** Anyone who taps a private line reads plain packets. Keep TLS on every call, or run encryption over the line.
+
+## How to say it in an interview
+
+"To join a site to the cloud, I start with a site-to-site VPN: encrypted tunnels over the internet that can work the same day. I always configure two tunnels to two cloud endpoints, with BGP, so maintenance or one failure moves traffic in under a minute. When traffic is large or must be steady, I add a dedicated private line through a meeting site, ordered weeks ahead. TLS stays on every call. I keep the VPN as the backup, announce the same ranges on both paths, and set preferences on both sides. Finally, I forward DNS both ways, so each side resolves the other's private names."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="A 10-person office needs to reach private servers in the cloud. Would you use a VPN or a dedicated line?" level="Junior" category="Cloud">
+    **Short answer.** A site-to-site VPN with two tunnels. It works the same day, costs little, and an office's traffic fits on it. A dedicated line takes weeks and a monthly fee, for steadiness the office does not need.
+
+    **Why.** The choice turns on volume, steadiness and lead time. An office's logins and documents can live with speed that varies, and Brightpost's VPN took one afternoon. A line suits large, steady flows, like the factory's 50 GB on a sale day. Either way, use two tunnels with BGP: Brightpost's single tunnel cost 600 late posters.
+
+    <AnimatedDiagram spec="animated/cloud/hybrid-link" step={4} highlight={["vpngw", "router", "hub"]} caption="Two tunnels to two cloud endpoints are enough for most offices." />
+
+    **Follow-ups the interviewer may ask.**
+    - What changes if the office grows to 200 people with video calls into the cloud?
+    - How would you connect 30 small shops instead of one office?
+
+    **Watch out for.** Choosing the line "because it is more secure". A line is private but not encrypted; the VPN is the encrypted one.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The dedicated line is live, but traffic to the site still goes over the VPN. Why?" level="Mid" category="Cloud">
+    **Short answer.** Routing still prefers the tunnels. Usually the VPN announces a more specific range, the preference was never set, or only one direction was changed.
+
+    **Why.** Routers take the most specific range first, whatever the path. If the VPN announces 10.50.4.0/24 and the line 10.50.0.0/16, every job for 10.50.4.20 takes the VPN. Next comes preference: some clouds prefer the line by default, others share traffic until you set a priority. And each direction decides alone, so the factory router may still send replies through the tunnels. Read the route tables on both sides.
+
+    <AnimatedDiagram spec="animated/cloud/hybrid-link" step={5} path="api>hub>linkgw>meet>router>printsrv" caption="The path the jobs should take: hub, private line, meeting site, factory router." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you prove which path a packet really took?
+    - Why can different paths in the two directions break a stateful firewall?
+
+    **Watch out for.** Shutting the VPN down to force traffic onto the line. That removes the backup the line depends on.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The dedicated line is cut. What happens to traffic, and how do you know the backup will work?" level="Mid" category="Cloud">
+    **Short answer.** The line's BGP session goes quiet, its routes are withdrawn after the hold time, and traffic falls back to the VPN tunnels. You know the backup works only because you tested it: fail the line on purpose and watch.
+
+    **Why.** At Brightpost the fallback takes under a minute, and print files go back to 4 to 40 seconds: slower, not down. The backup must announce the same ranges, have room for the traffic, and stay up while idle. Each quarter, at a quiet hour, disable the line's BGP session, send a print job, then restore it. Alert on BGP session state, so a dead tunnel shows up early.
+
+    <AnimatedDiagram spec="animated/cloud/hybrid-link" step={5} highlight={["hub", "vpngw", "router", "linkgw"]} caption="The line carries the traffic; the two tunnels stand by with the same routes." />
+
+    **Follow-ups the interviewer may ask.**
+    - When would you buy a second line instead of relying on the VPN?
+    - How do you keep sale-day traffic within what the tunnels can carry?
+
+    **Watch out for.** Assuming the provider's built-in redundancy covers everything. It protects one cable or one router, often in one building; the whole site can still fail.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design hybrid DNS so the factory resolves private cloud names and the cloud resolves factory names." level="Senior" category="Cloud">
+    **Short answer.** Each side stays the authority for its own names and forwards the other side's names over the link. The cloud's resolver gets an outbound rule: `factory.internal` goes to the factory's DNS servers. The factory's DNS gets a forwarder: `brightpost.internal` goes to the cloud resolver's inbound addresses.
+
+    **Why.** A private zone answers only inside its own network, so the factory cannot see `brightpost.internal` by itself. Inbound addresses give the factory a private place to ask; outbound rules let cloud servers ask the factory. Use two addresses on each side, in two zones, and forward over the private link. Keep record lifetimes short for names that may move during a migration. Give each side its own domain, so no lookup is ambiguous.
+
+    <AnimatedDiagram spec="animated/cloud/hybrid-link" step={6} highlight={["fdns", "router", "hub", "resolver"]} caption="Lookups cross the link in both directions; each side answers its own names." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does this extend to five accounts behind the network hub?
+    - If the link is down, do cloud names still resolve inside the cloud?
+
+    **Watch out for.** Pointing the factory at a public DNS resolver for cloud names. A private zone never answers from the internet, so every lookup fails.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks)
+- [DNS on the Cloud](/cloud/networking/dns)
+- [NAT & Leaving the Network](/cloud/networking/nat-and-egress)
+- [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets)
+- [Landing Zones: Setting Up an Estate](/cloud/fundamentals/landing-zones)
+- [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region)
+- [Disaster Recovery: Four Tiers, RPO and RTO](/cloud/resilience/dr-strategies)
+- [Migration and Modernization](/cloud/operations/migration-and-modernization)
+- [Networking on AWS](/cloud/aws/networking)
+- [Networking on Google Cloud](/cloud/gcp/networking)
+- [Networking on Azure](/cloud/azure/networking)
+- [Networking basics](/system-design/fundamentals/networking)
+
+## Further reading
+
+- [AWS Site-to-Site VPN User Guide](https://docs.aws.amazon.com/vpn/latest/s2svpn/VPC_VPN.html): tunnels, customer gateways and routing.
+- [AWS Direct Connect User Guide](https://docs.aws.amazon.com/directconnect/latest/UserGuide/Welcome.html): connections and virtual interfaces.
+- [Google Cloud Interconnect overview](https://cloud.google.com/network-connectivity/docs/interconnect): Dedicated and Partner Interconnect.
+- [Azure ExpressRoute overview](https://learn.microsoft.com/azure/expressroute/expressroute-introduction): circuits, peering locations and redundancy.

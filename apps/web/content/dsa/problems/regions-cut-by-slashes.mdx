@@ -1,0 +1,100 @@
+---
+title: "Regions Cut By Slashes"
+description: "An n x n grid contains characters ' ', '/', or '\\'."
+difficulty: medium
+patterns: [flood-fill]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: regions_by_slashes }
+starter:
+  python: |
+    def regions_by_slashes(grid: list[str]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/regions-cut-by-slashes.public.json, hidden: tests/regions-cut-by-slashes.hidden.json }
+complexity: { time: "O(n^2) on the expanded grid (constant factor 9).", space: "O(n^2)." }
+group: "13. Flood Fill"
+number: "07"
+leetcode: regions-cut-by-slashes
+leetcodeId: 959
+order: 17013007000000
+---
+
+An n x n grid contains characters ' ', '/', or '\\'. These slashes partition the square into regions.
+Return the number of resulting regions.
+
+## Examples
+
+````text
+Example 1:
+    Input: grid = [" /"]
+    Output: 2
+Example 2:
+    Input: grid = ["/"]
+    Output: 2
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 30
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Refined grid / flood fill on expanded maze
+Expand each cell to 3x3 with walls matching the slash geometry, then count connected components of empty cells.
+
+1. Build a (3n)x(3n) binary wall grid from each original character pattern.
+2. Count 4-directional connected components of cells that remain 0 after carving walls.
+
+## Complexity
+
+**Time:** O(n^2) on the expanded grid (constant factor 9).
+
+**Space:** O(n^2).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def regionsBySlashes(self, grid: List[str]) -> int:
+        n = len(grid)
+        size = n * 3
+        g = [[0] * size for _ in range(size)]
+        for i in range(n):
+            for j in range(n):
+                base_r, base_c = i * 3, j * 3
+                ch = grid[i][j]
+                if ch == "/":
+                    g[base_r][base_c + 2] = 1
+                    g[base_r + 1][base_c + 1] = 1
+                    g[base_r + 2][base_c] = 1
+                elif ch == "\\":
+                    g[base_r][base_c] = 1
+                    g[base_r + 1][base_c + 1] = 1
+                    g[base_r + 2][base_c + 2] = 1
+
+        dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+
+        def dfs(r: int, c: int) -> None:
+            g[r][c] = 1
+            for dr, dc in dirs:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < size and 0 <= nc < size and g[nr][nc] == 0:
+                    dfs(nr, nc)
+
+        regions = 0
+        for r in range(size):
+            for c in range(size):
+                if g[r][c] == 0:
+                    dfs(r, c)
+                    regions += 1
+        return regions
+````

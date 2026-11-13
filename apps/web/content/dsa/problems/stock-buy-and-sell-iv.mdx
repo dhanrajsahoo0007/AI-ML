@@ -1,0 +1,54 @@
+---
+title: "Stock Buy and Sell IV"
+description: "At most k stock transactions."
+difficulty: medium
+patterns: [dp-on-stock]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: max_profit }
+starter:
+  python: |
+    def max_profit(k: int, prices: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/stock-buy-and-sell-iv.public.json, hidden: tests/stock-buy-and-sell-iv.hidden.json }
+complexity: { time: "O(k*n).", space: "See the notes" }
+group: "09. DP on Stock"
+number: "04"
+order: 20009004000000
+---
+
+At most k stock transactions.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DP over transactions and days.
+
+## Complexity
+
+**Time:** O(k\*n).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxProfit(self, k: int, prices: List[int]) -> int:
+        if not prices:
+            return 0
+        n = len(prices)
+        if k >= n // 2:
+            return sum(max(0, prices[i] - prices[i - 1]) for i in range(1, n))
+        dp = [[0] * n for _ in range(k + 1)]
+        for t in range(1, k + 1):
+            maxdiff = -prices[0]
+            for i in range(1, n):
+                dp[t][i] = max(dp[t][i - 1], prices[i] + maxdiff)
+                maxdiff = max(maxdiff, dp[t - 1][i] - prices[i])
+        return dp[k][-1]
+````

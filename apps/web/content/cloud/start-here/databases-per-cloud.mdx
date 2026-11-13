@@ -1,53 +1,292 @@
 ---
 title: "Databases on Each Cloud"
-description: "The managed service for each database family on AWS, Google Cloud and Azure, and the differences that change a design."
+description: "Start from what you do with the data, pick the database family, then the managed service on AWS, Google Cloud and Azure, and the differences that matter."
+updated: 2026-11-13
 ---
 
-Every database family from the [database guides](/system-design/databases/choosing-a-database) has a managed service on each cloud. The names differ, and so do a few behaviours that matter in an interview: how far one writer scales, whether writes can happen in several Regions, and how consistency is chosen. Pick the family from the access pattern first, then look up the service here.
+## In one sentence
 
-## TL;DR
+<KeyIdea>
+  Ask what you do with each kind of data; that picks the kind of database, and only then do you look up its name on your cloud.
+</KeyIdea>
 
-- **Relational:** RDS / Aurora on AWS, Cloud SQL / AlloyDB on Google Cloud, Azure SQL / Azure Database for PostgreSQL on Azure.
-- **Global strongly consistent SQL:** Spanner (since 2017) and Aurora DSQL (since 2025). Azure has no direct equivalent.
-- **Serverless key-value / document:** DynamoDB, Firestore (or Bigtable for very high write rates), Cosmos DB.
-- **Cosmos DB is several databases in one:** NoSQL, MongoDB, Cassandra, Gremlin and Table APIs, with five consistency levels.
-- **Search:** OpenSearch Service and Azure AI Search are managed; Google Cloud relies on Vertex AI Search or Elastic through the Marketplace.
+## The story
 
-## Family by family
+Brightpost keeps almost everything in one managed PostgreSQL database: the orders, the basket of every shopper who is browsing, and the 2,000 products. Last month Asha added a search box. It finds products with a `LIKE '%word%'` query, which reads every product's name and description. Then it sorts the matches by best sellers, counting through about 600,000 past order lines. Each search uses about 0.3 seconds of the database's processor time, and on a quiet day nobody notices. On the next sale day, 2,000 shoppers arrive at 9 a.m. and search about 40 times a second. By 9:05 the database's 4 processors are at 100%. Placing an order, normally 30 ms, now waits up to 9 seconds, and shoppers give up at the payment page. At 10:20 Asha switches search off. In those 75 minutes about 310 orders were lost.
+
+Nothing was broken. Three different jobs shared one database. The steps below give each job a store that fits it.
+
+## How it works
+
+Three words first. An **access pattern** is how a program uses one kind of data: what it looks things up by, how often, and what must stay correct. A **database family** is a group of databases built for one access pattern, such as relational or key-value. A **managed database** is one the provider installs, patches, backs up and fails over for you.
+
+### Step 1: Ask what you do with the data
+
+<AnimatedDiagram spec="animated/cloud/brightpost-data-tier" step={1} minWidth={620} caption="Brightpost today: one database serves orders, baskets and search; photos already sit in a bucket." />
+
+Brightpost has four kinds of data, and the shop uses each one differently.
+
+1. **Orders.** An order, its lines and the stock count must change together or not at all. That is a <Term id="transaction">transaction</Term>. An order must never be lost.
+2. **Baskets and sessions.** The app reads a shopper's basket on every page, always by one id. It changes often, and a lost basket can be rebuilt.
+3. **Product search.** Shoppers type words, and the shop must find products that contain them, best match first.
+4. **Photos.** Whole files, fetched by name. About 300 new ones arrive each week.
+
+The photos already live in <Term id="object-storage">object storage</Term>, because nobody puts image files into table rows. The other three share one database, and on a normal day of 400 orders that works. [Choosing a Database](/system-design/databases/choosing-a-database) teaches how each family stores data and why. This page picks the family and then the service.
+
+<PremiumBreak />
+
+### Step 2: One database, three jobs
+
+<AnimatedDiagram spec="animated/cloud/brightpost-data-tier" step={2} minWidth={620} caption="The failure: 40 slow searches a second fill the database, and checkout waits behind them." />
+
+A database has a fixed number of processors, and every query waits for a turn. Most queries are cheap because an <Term id="index">index</Term>, a sorted list that points to rows, takes them straight to the answer. A search for `'%word%'` cannot use an ordinary index, because the word can sit anywhere in the text. So every search reads all 2,000 products, then counts order lines to rank them.
+
+<Callout tone="red" title="What breaks">
+  At 9 a.m., 40 searches a second each need 0.3 seconds of processor time. That is 12 seconds of work every second for 4 processors, three times what they can do. Checkout queries wait in the same line, and placing an order climbs from 30 ms to 9 seconds. The standby in the second zone does nothing, because it takes over only when the main copy dies. About 310 orders are lost before search is switched off.
+</Callout>
+
+A bigger database would buy one sale day, not a fix. The real problem: three access patterns with different needs share one line of processors.
+
+### Step 3: From access pattern to family
+
+Each family is built around one question about the data. Find the question first; the family follows.
+
+<Compare caption="What you do with the data decides the family. Each family links to the page that teaches it.">
+
+| What you do with the data | Family | Brightpost's example |
+| --- | --- | --- |
+| Change related rows together, and ask new questions in SQL | [Relational](/system-design/databases/relational-databases) | Orders, order lines, stock |
+| Read and write one item by its key, at any volume | [Key-value](/system-design/databases/key-value-stores) or [document](/system-design/databases/document-databases) | Baskets and sessions, kept in memory |
+| Find items by the words in them, ranked | [Search engine](/system-design/databases/search-engines) | Product search |
+| Keep hot answers in memory for under 1 ms | [Cache](/system-design/patterns/caching) | Baskets (Step 5) |
+| Store whole files and fetch them by name | [Object storage](/system-design/databases/object-storage) | Product photos |
+| Ask questions across years of history | [Analytical](/system-design/databases/analytical-databases) | Reports, later |
+| Write in several regions with no stale reads | [Distributed SQL](/system-design/databases/newsql-databases) | Not needed yet |
+| Append readings in time order, read by time range | [Wide-column](/system-design/databases/wide-column-stores) or [time-series](/system-design/databases/time-series-databases) | Not needed |
+
+</Compare>
+
+Most apps need two to four of these, and that is normal. [Polyglot Persistence](/system-design/databases/polyglot-persistence) covers the idea. One store, the source of truth, keeps the real data; the others hold copies shaped for one job.
+
+### Step 4: Search goes to a search engine
+
+<AnimatedDiagram spec="animated/cloud/brightpost-data-tier" step={3} minWidth={620} caption="Searches go to a search engine. The database sends it every product change." />
+
+A **search engine** keeps an inverted index: for every word, the list of products that contain it. A search for "fox" looks up one word and reads one short list. It also ranks the matches and forgives typos, which `LIKE` never did.
+
+The orders database stays the source of truth for products. Each time a product changes, a small job writes the change into the search engine, within about 5 seconds. Best-seller counts are worked out once a night and stored with each product, so no search counts order lines any more. A search now takes about 20 ms, and the orders database never sees it. The catch is that results can trail the database by those 5 seconds, so prices shown in search are a preview. Checkout always reads the real price from the database.
+
+### Step 5: Baskets go to a cache
+
+<AnimatedDiagram spec="animated/cloud/brightpost-data-tier" step={4} minWidth={620} caption="Baskets and sessions move to an in-memory cache, read by id and kept for 7 days." />
+
+A <Term id="cache">cache</Term> is a store that keeps data in memory, so a read takes well under a millisecond. Baskets fit it well: every page reads one basket by its id, and nothing ever joins baskets to other tables. On a sale morning that is about 150 basket reads a second that leave the orders database.
+
+Each basket gets a <Term id="ttl">TTL</Term>, a time to live: 7 days after the last change, the cache deletes it. The cache keeps a copy in a second zone, so one failed node loses nothing. Memory is still less safe than a database disk. So the rule is firm: a basket may live in the cache, an order never does. The moment a shopper pays, the order is written to the database. Any app server still serves any shopper, because the cache is shared.
+
+### Step 6: Reports read a copy
+
+<AnimatedDiagram spec="animated/cloud/brightpost-data-tier" step={5} minWidth={620} caption="The finance lead's monthly report reads a copy that trails the database by a few seconds." />
+
+On the first day of each month the finance lead runs a report across all 290,000 past orders. It takes about 20 minutes, and for those 20 minutes the shop is slower.
+
+A <Term id="read-replica">read replica</Term> is a second copy of the database that takes every change from the main copy and accepts only reads. Brightpost's copy is asynchronous: the main copy does not wait for it, so it trails by a few seconds. A monthly report does not mind. The report now runs on the copy, and the shop does not notice. Note the difference from the standby of Step 2: the standby waits to take over, and the replica serves reads. When the reports grow into questions across years, the next stop is a warehouse, covered in [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines).
+
+### Step 7: One store stays the source of truth
+
+Now Brightpost runs four stores. Ask of each one: what happens if it is lost?
+
+1. **The search engine.** Search stops working, and orders carry on. A job rebuilds the index from the database in about 10 minutes.
+2. **The cache.** Shoppers find their baskets empty and add items again. Every order is safe.
+3. **The reporting copy.** Reports wait while a new copy is built from the main one.
+4. **The orders database.** Its standby in the second zone takes over in about 2 minutes, with no paid order lost.
+
+Only the last one must never lose a write, so it gets the standby, the nightly backup and the delete lock. The other three are copies or rebuildable, which keeps them cheap to run.
+
+## On AWS, Google Cloud and Azure
+
+Every family has a managed service on all three clouds. What differs is how far one database grows, how you choose consistency, and what happens when writes land in several regions.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Relational:** Amazon RDS for the common engines, including PostgreSQL and MySQL, with a standby in a second zone. Amazon Aurora, compatible with PostgreSQL and MySQL, for heavier work.
+    - **Key-value and document:** Amazon DynamoDB. You pay per request or for capacity you set in advance. A read is eventually consistent unless the request asks for a strongly consistent one.
+    - **Cache:** Amazon ElastiCache, running Valkey, Redis OSS or Memcached.
+    - **Search:** Amazon OpenSearch Service.
+    - **Writes in several regions:** Amazon Aurora DSQL for SQL. DynamoDB global tables, where the last write wins by default and a strongly consistent mode can be chosen when the table is set up.
+
+    **The difference that changes a design.** The relational family is two products with different storage. RDS gives each copy its own disk, and a replica receives changes over the network. Aurora's copies all read one shared storage layer, spread over three zones. So an Aurora replica copies no data when you add it, trails by very little, and can take over from the main copy.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Relational:** Cloud SQL for PostgreSQL, MySQL and SQL Server. AlloyDB, compatible with PostgreSQL, for heavier work and pools of read copies.
+    - **Key-value and document:** Firestore for documents. Bigtable for huge tables written at very high rates.
+    - **Cache:** Memorystore, running Valkey, Redis or Memcached.
+    - **Search:** no managed OpenSearch or Elasticsearch of Google's own. Vertex AI Search is Google's managed search product, and Elasticsearch is offered by a partner through the Marketplace.
+    - **Writes in several regions:** Spanner, relational and strongly consistent, in a multi-region configuration.
+
+    **The difference that changes a design.** Spanner is relational and grows by adding compute, and it is strongly consistent by default. It splits each table into ranges of its key. So a key that always grows, such as a timestamp or a counting order number, sends every new write to the same range. Pick keys that spread writes, such as random ids.
+  </Tab>
+  <Tab label="Azure">
+    - **Relational:** Azure SQL Database for the SQL Server engine. Azure Database for PostgreSQL and for MySQL, with a standby in a second zone.
+    - **Key-value and document:** Azure Cosmos DB. One service with several interfaces: its own NoSQL one, MongoDB, Cassandra, Gremlin and Table.
+    - **Cache:** Azure Managed Redis.
+    - **Search:** Azure AI Search.
+    - **Writes in several regions:** Cosmos DB with writes in several regions. When two regions change the same item, the last write wins by default.
+
+    **The difference that changes a design.** Cosmos DB makes consistency a setting. Five levels run from strong to eventual; you set one for the account and can relax it per request. You pay in request units: every read and write costs some, whether you reserve them, let them scale or pay per use. Strong consistency needs a single write region, so writes in several regions are never strongly consistent.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/brightpost-data-tier" stepper minWidth={620} caption="The whole story in five steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/brightpost-data-tier" lead="aws" />
+
+### Family by family
+
+Every database service on the three clouds, grouped by job.
 
 <CloudGroupTable group="databases" lead="aws" />
 
-## Caches next to the database
+### Caches next to the database
 
 <CloudGroupTable group="caching" lead="aws" />
 
-## Differences that change a design
+## Try it
 
-| Question | AWS | Google Cloud | Azure |
-|---|---|---|---|
-| **Writes in several Regions with strong consistency?** | Aurora DSQL; DynamoDB global tables (multi-Region strong consistency, chosen at creation) | Spanner (multi-region configurations) | Cosmos DB multi-Region writes are eventually consistent; strong consistency needs a single write Region |
-| **How do I choose consistency?** | Per read (DynamoDB strongly consistent reads) or per product | Spanner is strong by default; stale reads are opt-in | Per account or request: strong, bounded staleness, session, consistent prefix, eventual |
-| **How do I pay for NoSQL?** | DynamoDB on-demand per request or provisioned capacity | Firestore per operation; Bigtable per node | Cosmos DB request units (provisioned, autoscale or serverless) |
-| **PostgreSQL beyond one big primary?** | Aurora Limitless (sharded), Aurora DSQL | AlloyDB read pools, Spanner PostgreSQL interface | Cosmos DB for PostgreSQL (Citus); HorizonDB in preview |
+Pick what you do with the data and see the family, then the service on each cloud.
 
-## Mapping a case study
+<CloudDecisionTree topic="database" />
 
-| Component (Messenger) | AWS | Google Cloud | Azure |
-|---|---|---|---|
-| Messages by conversation | DynamoDB or Keyspaces | Bigtable | Cosmos DB (NoSQL or Cassandra API) |
-| Users, groups, metadata | Aurora PostgreSQL | Cloud SQL or AlloyDB | Azure Database for PostgreSQL |
-| Session registry, presence | ElastiCache (Valkey) | Memorystore for Valkey | Azure Managed Redis |
-| Media | S3 | Cloud Storage | Blob Storage |
+<Quiz>
+  <QuizItem question="At 9 a.m. Brightpost gets 40 searches a second, each needing 0.3 seconds of processor time. The database has 4 processors. How overloaded is it?" hint="Work per second against processors.">
+    Three times over. 40 × 0.3 is 12 seconds of work every second, and 4 processors can do 4. Every other query, checkout included, waits in the same line.
+  </QuizItem>
+  <QuizItem question="A product's price changes at 10:00:00. A shopper searches at 10:00:02 and buys at 10:00:30. Which price do they see, and which do they pay?">
+    Search may still show the old price, because the index trails by about 5 seconds. Checkout reads the price from the orders database, so they pay the new one.
+  </QuizItem>
+  <QuizItem question="The whole basket cache is lost on a Tuesday afternoon. What do shoppers lose, and what is safe?" hint="Which store is the source of truth?">
+    Shoppers lose the baskets they are building and add the items again. Every placed order is safe, because orders are written only to the orders database.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "One database for all", "Database, search engine and cache", "Plus a reporting copy"]}
+  rows={[
+    ["Stores to run", "1", "3", "4"],
+    ["Checkout at the 9 a.m. sale peak", "Up to 9 s; about 310 orders lost", "About 30 ms", "About 30 ms"],
+    ["A search", "About 300 ms, always current", "About 20 ms, up to 5 s behind", "About 20 ms, up to 5 s behind"],
+    ["The monthly report", "Slows the shop for 20 minutes", "Slows the shop for 20 minutes", "No effect on the shop"],
+    ["If an extra store fails", "No extra store", "Search or baskets stop; orders carry on", "Reports wait; orders carry on"],
+    ["New work for the team", "None", "Keep the index in step; set expiries", "Watch how far the copy trails"],
+  ]}
+  caption="Brightpost's numbers before and after it gave each job its own store."
+/>
+
+Each new store adds a copy to keep in step and one more thing to watch. Add one when an access pattern hurts the others, as search did, not before.
+
+## Common pitfalls
+
+- **One database for every job "because it is already there".** Search, baskets and orders compete for the same processors, and the sale day finds out. Give each heavy access pattern its own store once it slows the others.
+- **Treating the search engine as the truth.** The index trails the database and can be rebuilt. Read prices and stock for checkout from the database, never from search results.
+- **Keeping what must not be lost in the cache.** Memory can vanish on a restart. Put baskets and sessions there; write orders and payments to the database first.
+- **Expecting a standby to share the load.** A standby waits for the main copy to die, and on some clouds it serves no reads at all. Use a read replica for reads.
+- **Reading your own write from a replica.** A shopper who has paid may not see the order on a copy that trails by seconds. Send "show my order" right after a write to the main copy.
+
+## How to say it in an interview
+
+"I start from what the app does with each kind of data, not from a product name. Rows that must change together go to a relational database, and items read by one key go to a key-value store or a cache. Text search goes to a search engine, and files go to object storage. One store is the source of truth; the others are copies shaped for one job and can be rebuilt. Only then do I name the service on the cloud we use. I check three things that differ between clouds: how far one writer grows, how consistency is chosen, and what happens when writes land in more than one region. And I add a store only when one access pattern starts to hurt another."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Which of Brightpost's data belongs in a cache, and why not all of it?" level="Junior" category="Cloud">
+    **Short answer.** Baskets and sessions. They are read on every page by one id, change often, and can be rebuilt if lost. Orders stay in the database, because memory can vanish and an order must never be lost.
+
+    **Why.** At the sale peak, basket reads are about 150 a second, all by id, with no joins. A cache answers each one in well under a millisecond and takes that load off the orders database. Each basket expires 7 days after its last change, and the cache keeps a copy in a second zone. If the whole cache is lost, shoppers add items again and no paid order is touched.
+
+    <AnimatedDiagram spec="animated/cloud/brightpost-data-tier" step={4} highlight={["app", "cache", "db"]} caption="Baskets in memory, orders in the database: the app writes the order the moment a shopper pays." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would you cache next, and how would you keep it fresh?
+    - How long should a basket live, and who decides?
+
+    **Watch out for.** "Cache everything to make it fast." A cache in front of orders adds a stale copy of the data that matters most.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is the Azure equivalent of DynamoDB, and what is different?" level="Mid" category="Cloud">
+    **Short answer.** Azure Cosmos DB, used through its NoSQL interface. Both are managed key-value and document stores that spread data across partitions by a key you choose, with no servers to size. They differ in how you pay, how you pick consistency, and what happens with writes in several regions.
+
+    **Why.** DynamoDB bills per request or for capacity you set in advance, and lets each read ask to be strongly consistent. Cosmos DB bills in request units and offers five consistency levels, set for the account and relaxable per request. With writes in several regions, Cosmos DB is never strongly consistent. DynamoDB global tables let the last write win by default and offer a strongly consistent mode chosen at setup. On both, the partition key decides whether load spreads evenly.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to a store like this when one key gets most of the traffic?
+    - Which Cosmos DB level would you pick for a shopping basket, and why?
+
+    **Watch out for.** Saying "they are the same thing with a different name". The billing unit and the consistency model change both the design and the bill.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Product search runs as LIKE queries on the main database, and checkout slows down on sale days. What do you change?" level="Mid" category="Cloud">
+    **Short answer.** Move search to a search engine and keep the database as the source of truth. A job copies each product change into the index within seconds. Checkout keeps reading prices and stock from the database.
+
+    **Why.** A `LIKE '%word%'` query cannot use an ordinary index, so each search reads every product. At Brightpost, 40 a second at 0.3 seconds each made 12 seconds of work per second for 4 processors, and checkout waited 9 seconds. An inverted index finds a word in one lookup, about 20 ms, on separate machines. The service is OpenSearch Service on AWS, Azure AI Search on Azure, and Vertex AI Search or a partner's Elasticsearch on Google Cloud.
+
+    <AnimatedDiagram spec="animated/cloud/brightpost-data-tier" step={3} path="app>search" caption="Searches go to the search engine; the database only sends it product changes." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you rebuild the index if it gets out of step?
+    - Would a full-text index inside the database have been enough for 2,000 products?
+
+    **Watch out for.** Only buying a bigger database. It survives one sale, and the next one brings more searches.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A 20-minute monthly report slows the orders database. Where should it run?" level="Mid" category="Cloud">
+    **Short answer.** On a read replica: an asynchronous copy that accepts only reads. The report reads data a few seconds old, which it does not mind, and the main copy keeps serving checkout. When reports span years of history, move them to a warehouse.
+
+    **Why.** The report scans all 290,000 orders and takes the processors the shop needs. A replica takes every change from the main copy without making it wait, so it costs the shop almost nothing. All three clouds offer read replicas on their managed relational services. The standby is not the answer: it exists to take over, and on some services it serves no reads.
+
+    <AnimatedDiagram spec="animated/cloud/brightpost-data-tier" step={5} highlight={["db", "replica", "finance"]} caption="The finance lead reads the copy; the orders database serves the shop." />
+
+    **Follow-ups the interviewer may ask.**
+    - The finance lead now wants live numbers. What changes?
+    - What do you watch on the replica so the report is not silently stale?
+
+    **Watch out for.** Sending the shop's own reads to the replica too. A shopper who has paid may not see the new order there.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Spanner or Aurora DSQL, and what would you do on Azure?" level="Senior" category="Cloud">
+    **Short answer.** Both give SQL with strong consistency across regions, so the cloud you already run on usually decides. Spanner is the older, proven option, and you size its compute. Aurora DSQL is serverless and compatible with PostgreSQL, with fewer features. Azure has no direct equivalent, so I would design around one write region.
+
+    **Why.** Spanner has a long record, its own SQL dialect plus a PostgreSQL interface, and needs keys that spread writes. Aurora DSQL handles conflicts at commit: a clashing transaction fails and the app retries it. It supports only part of PostgreSQL, so check your features first. On Azure, Cosmos DB is strongly consistent only with one write region. Either way every write waits for a second region; London to Sydney adds roughly a quarter of a second. Brightpost's 30 Australian orders a day do not justify that.
+
+    **Follow-ups the interviewer may ask.**
+    - Which data truly needs writes in two regions, and which can be copied later?
+    - How does each database behave when one region is cut off?
+
+    **Watch out for.** Saying "Cosmos DB with writes in several regions is Azure's Spanner". Those writes are not strongly consistent.
+  </InterviewQuestion>
+</InterviewQuestions>
 
 ## Related
 
-[Databases on AWS](/cloud/aws/databases) · [Caching on AWS](/cloud/aws/caching) · [Choosing a Database](/system-design/databases/choosing-a-database) · [Consistency Models and CAP](/system-design/patterns/consistency-models) · [Polyglot Persistence](/system-design/databases/polyglot-persistence)
+- [Managed Relational Databases](/cloud/data/managed-relational)
+- [Managed NoSQL](/cloud/data/managed-nosql)
+- [Managed Caches](/cloud/data/managed-caches)
+- [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines)
+- [Database Migration](/cloud/data/database-migration)
+- [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region)
+- [Choosing Compute](/cloud/start-here/choosing-compute)
+- [Databases on AWS](/cloud/aws/databases)
+- [Databases on Google Cloud](/cloud/gcp/databases)
+- [Databases on Azure](/cloud/azure/databases)
+- [Choosing a Database](/system-design/databases/choosing-a-database)
+- [Polyglot Persistence](/system-design/databases/polyglot-persistence)
+- [Consistency Models and CAP](/system-design/patterns/consistency-models)
 
-<InterviewQuestions>
-  <InterviewQuestion question="What is the Azure equivalent of DynamoDB, and what is different?" category="Cloud" level="Mid">
-    Azure Cosmos DB for NoSQL. Both are serverless-feeling key-value and document stores partitioned by a key. Cosmos DB bills in request units, offers five consistency levels, and supports multi-Region writes (eventually consistent). DynamoDB bills per request or provisioned capacity and offers strongly consistent reads plus global tables, including a multi-Region strongly consistent mode.
-  </InterviewQuestion>
-  <InterviewQuestion question="Spanner or Aurora DSQL?" category="Architecture" level="Senior">
-    Both give strongly consistent SQL across Regions. Spanner is the mature option with a long track record, interleaved tables and its own SQL dialect or a PostgreSQL interface, and you size compute. Aurora DSQL is serverless and PostgreSQL-compatible with optimistic concurrency, but supports a subset of PostgreSQL features and pairs Regions within a Region set. In practice the choice usually follows the cloud you are already on.
-  </InterviewQuestion>
-</InterviewQuestions>
+## Further reading
+
+- [Choosing an AWS database service](https://docs.aws.amazon.com/decision-guides/latest/databases-on-aws-how-to-choose/databases-on-aws-how-to-choose.html): AWS's own decision guide.
+- [Google Cloud databases](https://cloud.google.com/products/databases): the managed databases on Google Cloud.
+- [Review your data store options](https://learn.microsoft.com/azure/architecture/guide/technology-choices/data-store-overview): Azure's guide to choosing a store.
+- [Consistency levels in Azure Cosmos DB](https://learn.microsoft.com/azure/cosmos-db/consistency-levels): the five levels explained.

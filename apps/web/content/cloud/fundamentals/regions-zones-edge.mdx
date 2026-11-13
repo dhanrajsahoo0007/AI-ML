@@ -1,11 +1,315 @@
 ---
 title: "Regions, Zones and the Edge"
 description: "Where a cloud physically runs, which parts fail together, and how to choose a region for speed, data rules and cost."
-status: outline
+updated: 2026-11-12
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** where a cloud physically runs, what fails together, and how to pick a region (latency, data residency, service availability, cost and pairing). It defines region, zone, edge location, latency and failure domain.
+<KeyIdea>
+  A cloud is many buildings in many places: you choose where your system runs, and copies in separate buildings keep it running when one building goes dark.
+</KeyIdea>
 
-**Related reading on this site:** [Cloud Basics](/cloud/start-here/cloud-basics) · [Availability, reliability and the nines](/system-design/fundamentals/availability) · [CDNs and edge](/system-design/fundamentals/cdn)
+## The story
+
+Brightpost is a small online shop that sells posters and greeting cards, about 400 orders a day. Most of its customers live in the UK, so the shop runs in a cloud region near London. The app server and the orders database sit in the same building. One Thursday at 7 pm, a fault cuts the power to that building, and its backup power fails too. The shop is gone for 3 hours, and about 70 evening orders never arrive. A few kilometres away, other buildings of the same cloud run without a flicker.
+
+Every step below asks one question: what fails together, and how far apart should the copies be?
+
+## How it works
+
+Five words first. A **data centre** is a building full of servers. A <Term id="region" /> is a geographic area, such as one city, where a cloud runs several data centres. A region is split into <Term id="availability-zone">zones</Term>: groups of data centres with their own power, cooling and network. An <Term id="edge-location" /> is a small site near users that keeps copies and answers first. A **failure domain** is everything that breaks together when one part fails.
+
+### Step 1: A region holds several zones
+
+<AnimatedDiagram spec="animated/cloud/region-zone-edge" step={1} minWidth={620} caption="Brightpost's first setup: one app server and its database, both in zone A of the home region." />
+
+You pick a region from a list when you create a server or a database. Each region holds several zones, and the zones sit kilometres apart. That is far enough that one fire, flood or power fault should not reach two of them. It is close enough that a round trip between zones takes a few milliseconds or less.
+
+Brightpost let the cloud choose one zone for everything, so the whole shop is one failure domain. How much downtime a target allows is covered in [Availability, reliability and the nines](/system-design/fundamentals/availability).
+
+<PremiumBreak />
+
+### Step 2: What fails together
+
+Failures come in sizes. Each size is a failure domain, and each one takes more with it than the one before.
+
+<Compare
+  columns={["What fails", "What goes with it", "What survives it"]}
+  rows={[
+    ["One server", "The app on that machine, and anything kept only on its disk", "A second server, and no data kept only on a server"],
+    ["One zone", "Every server, disk and database copy in its buildings", "Copies in two or three zones"],
+    ["One region", "Every zone in it. Rare: a wide disaster or a bad change rolled out across the region", "A copy in a second region, far away"],
+    ["A global service", "Some services, such as DNS or sign-in, serve every region. A bad change there can reach all of them", "Knowing which ones you use, and how you would cope without them"],
+  ]}
+  caption="Bigger failure domains fail less often, but take more with them."
+/>
+
+A good design names the biggest failure it must survive. Then it keeps copies in separate domains of that size. Brightpost writes down its new goal: lose a zone and keep selling.
+
+### Step 3: Two zones behind one load balancer
+
+<AnimatedDiagram spec="animated/cloud/region-zone-edge" step={2} minWidth={620} caption="A load balancer that spans both zones shares the requests, and every write is copied to a standby in zone B." />
+
+Brightpost adds a second app server in zone B. A <Term id="load-balancer" /> now shares every request between the two servers. The cloud runs it in several zones, so no single building holds it. Every few seconds it sends each server a small test request, a **health check**. A server that stops answering gets no more customers.
+
+The database gets a **standby**, a second copy in zone B. Each write goes to both copies before the shop says "order placed". This is a **synchronous** copy, one kind of <Term id="replication" />, and it adds a millisecond or two to each write. Running copies in several zones like this is called <Term id="multi-az">multi-AZ</Term>.
+
+### Step 4: A zone goes dark
+
+<AnimatedDiagram spec="animated/cloud/region-zone-edge" step={3} minWidth={620} caption="The failure: zone A loses power. The load balancer gets no answer from server A, and the standby in zone B becomes the primary." />
+
+Replay that Thursday with the new setup. At 7 pm zone A loses power, and server A stops answering health checks. After three missed checks, about 30 seconds in Brightpost's settings, the load balancer sends every request to server B.
+
+<Callout tone="red" title="What breaks">
+  The primary database goes dark with zone A. The cloud notices and promotes the standby: it becomes the primary, and the database's address now points at it. This <Term id="failover" /> takes about 2 minutes in Brightpost's setup. Orders placed in those 2 minutes fail, and customers retry. No saved order is lost, because each one was already in zone B.
+</Callout>
+
+Three hours of downtime became about 2 minutes. When zone A comes back, the old primary rejoins as the new standby. But server B carried the whole evening alone, which is the subject of step 5.
+
+### Step 5: Why three zones, not two
+
+At its 4,000-order peak, Brightpost needs the power of 2 app servers. Count what each layout must run so that losing a zone changes nothing.
+
+<Compare
+  columns={["", "Two zones", "Three zones"]}
+  rows={[
+    ["Servers in each zone", "2", "1"],
+    ["Servers in total", "4", "3"],
+    ["Servers left with one zone dark", "2: enough", "2: enough"],
+    ["Spare capacity you pay for", "100% extra", "50% extra"],
+  ]}
+  caption="Each layout must still carry the 4,000-order peak with one zone dark."
+/>
+
+With two zones, each zone must carry the whole peak alone, so you pay for double. With three, the two survivors share the load. Some databases also keep three copies that vote on which one is in charge, a <Term id="quorum" />, and losing one still leaves a majority. Brightpost moves to three zones before its next sale day; the picture keeps two so it stays readable.
+
+### Step 6: The edge: close to the customer
+
+<AnimatedDiagram spec="animated/cloud/region-zone-edge" step={4} minWidth={620} caption="Customers in Sydney get product photos from an edge site 10 ms away. Only misses travel to London." />
+
+Brightpost also ships to Australia, about 30 orders a day. For those customers a product page takes about 3 seconds to show, against under 1 second in the UK. The cause is distance, measured as <Term id="latency" />. Light in fibre covers about 200 km each millisecond. So every 100 km adds about 1 ms to a round trip. London to Sydney and back takes about 250 ms, and a page needs several round trips before the first photo shows.
+
+A <Term id="cdn" /> runs in many edge sites and keeps copies of files. The first customer in Sydney waits for London. Everyone after gets that photo from the edge, about 10 ms away. [CDNs and edge](/system-design/fundamentals/cdn) explains how copies expire.
+
+<LatencyLadder title="Inside a building versus across the world" compareTo="dc-rtt" highlight="cross-continent" windowMs={1000} />
+
+The edge holds copies, not the shop. A checkout still writes to the database in London, at 250 ms per round trip. Some clouds also place small extensions of a region inside a city, with fewer services, for work such as live video.
+
+### Step 7: Picking a region: five questions
+
+Brightpost asked these in order before it chose London, because an early answer can rule a region out.
+
+1. **Where may the data live?** **Data residency** is a rule about the country or area where data must be stored. It can come from a law, a contract or a promise to customers. If one applies, it picks the area first.
+2. **Does the region offer what you need?** Not every region has every service, machine type or zone. New services often reach a few regions first. Check each service in your design for that region.
+3. **How far is it from your users?** Use the rule of 1 ms per 100 km, then measure from where users really are.
+4. **What is the price shape?** The same server costs a different amount in each region. Data leaving a region, called <Term id="egress" />, is billed too. Price your own design in two or three regions that pass questions 1 to 3. [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics) covers the meters.
+5. **Which region is its partner?** Name a second region for recovery now, even if it stays empty. It should be far enough away not to share a disaster, inside the same data-rules area, with the same services.
+
+### Step 8: A second region, previewed
+
+<AnimatedDiagram spec="animated/cloud/region-zone-edge" step={5} minWidth={620} caption="A second region holds a copy of the data a few seconds behind, and a small fleet that could take over." />
+
+Zones protect against one building failing; a second region protects against the whole region failing. The copy there is **asynchronous**: the primary does not wait for it, because the round trip is far longer. So the copy runs a few seconds behind, and a region failure can lose those seconds. The most data you accept losing is your <Term id="rpo" />.
+
+A second region roughly doubles what you run, and adds cross-region copies, a way to move traffic, and drills. Brightpost does not need one yet. [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region) designs it in full.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: regions you choose, zones inside them that fail separately, and an edge close to users.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Regions:** named by code, such as eu-west-2 for London. Each region is isolated from the others, and most services are regional. AWS GovCloud (US) and the China regions are separate partitions with their own accounts.
+    - **Zones:** Availability Zones, such as eu-west-2a. In older accounts the same zone name can mean different buildings in two accounts. The zone ID, such as euw2-az1, names the same place in every account.
+    - **Network scope:** a VPC belongs to one region, and each subnet lives in exactly one zone.
+    - **Edge:** Amazon CloudFront, Route 53 and AWS Global Accelerator run at edge locations.
+    - **Closer than a region:** Local Zones in some cities, Wavelength Zones inside mobile 5G networks, and Outposts racks in your own building.
+
+    **The difference that changes a design.** A subnet is tied to one zone. So a three-zone design needs one subnet per tier in each zone, and each load balancer and database is told which subnets to use. Data sent between zones is billed per gigabyte, so a design that crosses zones on every call pays for it.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Regions:** named by code, such as europe-west2 for London. A resource is zonal (a VM), regional (a regional instance group), multi-regional (some storage and database settings) or global.
+    - **Zones:** named after their region, such as europe-west2-a. Treat each zone as one failure domain.
+    - **Network scope:** a VPC network is global. Its subnets are regional: one subnet covers every zone in its region.
+    - **Edge:** Cloud CDN and Media CDN serve copies from Google's edge sites. The global external Application Load Balancer takes traffic there on one anycast IP address, an address announced from many places at once.
+    - **Closer than a region:** Google Distributed Cloud runs Google-managed hardware at your own sites or at the edge.
+
+    **The difference that changes a design.** One network can span many regions, so servers in London and Belgium talk over private addresses with no peering. A global load balancer can send each user to the nearest healthy region behind one IP address. Inside a region you create one subnet per tier, not one per zone.
+  </Tab>
+  <Tab label="Azure">
+    - **Regions:** named by place, such as UK South for London. Many regions have a partner in the same geography, such as UK South and UK West. Azure Government and Azure operated by 21Vianet in China are separate clouds.
+    - **Zones:** availability zones, numbered in each region. Not every region has them. Zone numbers map to buildings differently in each subscription.
+    - **Network scope:** a virtual network (VNet) belongs to one region, and its subnets cover every zone in it.
+    - **Edge:** Azure Front Door serves cached files and takes traffic at Microsoft's edge sites.
+    - **Closer than a region:** Azure Extended Zones in some cities, and Azure Local for servers in your own building.
+
+    **The difference that changes a design.** Check for zones before you pick a region: a region without them cannot give Brightpost the step 3 design. Many services ask you to choose zonal (pinned to one zone) or zone-redundant (spread across zones for you). Pairs matter for recovery: geo-redundant storage copies data to the pair, and planned updates reach one region of a pair at a time. Some newer regions have no pair.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/region-zone-edge" stepper minWidth={620} caption="The whole story in five steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/region-zone-edge" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Where should this run?"
+  tree={{
+    q: "Does a law, contract or promise say where this data must stay?",
+    yes: {
+      q: "Does a region inside that area offer every service in your design?",
+      yes: "Pick that region. The rule decides the area; speed and price only choose between regions inside it.",
+      no: {
+        answer: "Keep the data in the area anyway. Redesign around the services that region offers, or look for a local extension or a sovereign cloud there.",
+        href: "/cloud/resilience/compliance-and-residency",
+      },
+    },
+    no: {
+      q: "Do most of your users live near one region?",
+      yes: {
+        q: "Does that region offer every service in your design?",
+        yes: "Pick it. Compare its price shape with one or two neighbours, and name a partner region for recovery.",
+        no: "Pick the nearest region that does, and put an edge cache in front for the users who are now farther away.",
+      },
+      no: {
+        answer: "Pick one home region with every service you need. Serve far users from the edge, and add a second region only when write latency hurts.",
+        href: "/cloud/resilience/multi-region",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost needs 2 servers' worth of power at its 4,000-order peak. How many servers must it run across three zones so that losing one zone changes nothing?" hint="Count what is left when one zone is dark.">
+    Three: one in each zone. With one zone dark, the other two still carry the peak. With only two zones it would need four, two in each.
+  </QuizItem>
+  <QuizItem question="A customer in Sydney opens a product page whose photo is already at the edge site. Roughly how long does the photo's round trip take, and what about the checkout?" hint="The edge holds copies, not the database.">
+    About 10 ms for the photo, because it comes from the edge site. The checkout still writes to the database in London, so each of its round trips takes about 250 ms.
+  </QuizItem>
+  <QuizItem question="Zone A goes dark 1 second after a customer's order was saved. Is that order lost?">
+    No. The copy to the standby in zone B is synchronous, so the shop confirmed the order only after both copies had it. After the 2-minute failover, the order is in the new primary.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "One zone", "Three zones, one region", "Two regions"]}
+  rows={[
+    ["App servers for the 4,000-order peak", "2", "3", "3, plus a small standby fleet"],
+    ["Down when a zone fails", "About 3 hours", "About 2 minutes", "About 2 minutes"],
+    ["Down when the region fails", "Until it returns", "Until it returns", "Tens of minutes, if the switch is practised"],
+    ["Copies of the orders data", "1", "2 or 3, in sync", "One more, a few seconds behind"],
+    ["Extra wait per write", "None", "1–2 ms", "1–2 ms: the far copy does not wait"],
+    ["New costs", "None", "One more server; traffic between zones", "A second stack, data copied between regions, drills"],
+  ]}
+  caption="Brightpost's numbers. The two-region column is a warm standby: a small fleet that grows when needed."
+/>
+
+For Brightpost, three zones buy almost all the safety for one extra server. A second region costs far more, and protects against a much rarer failure.
+
+## Common pitfalls
+
+- **Two zones for the servers, one for the database.** Every order still lives in one building. Give the database a standby in another zone, and test the failover before you need it.
+- **Assuming zone names match across accounts.** "Zone A" in one account can be a different building in another. Use the provider's zone ID when two accounts must line up.
+- **Keeping the default region.** The console opens on some region, often far from your users or outside your data rules. Choose on purpose, and write the choice into your infrastructure code.
+- **Chatty calls across regions.** A page that makes 20 calls to another region waits for 20 long round trips. Keep the chatty parts in one region, and cross only to copy data.
+- **Treating the edge as a backup.** An edge cache holds copies of files, not the shop. When the home region is down, so is checkout.
+
+## How to say it in an interview
+
+"A region is a geographic area I choose, and inside it are zones with their own power, cooling and network. A zone is my usual failure domain, so I run every tier in two or, better, three zones behind a load balancer. The database gets a synchronous standby in another zone, so losing a zone costs a failover of a minute or two, not hours. For far-away users I put a CDN at the edge, which shortens the trip for files but not for writes. I pick a region by data rules first, then services, latency, price and a partner region for recovery. I add a second region only when a requirement says the system must survive losing one."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a region and a zone?" level="Junior" category="Cloud">
+    **Short answer.** A region is a geographic area, such as London, where a provider runs several data centres. A zone is one group of those data centres, with its own power, cooling and network. You pick a region, then spread across its zones so that one building's failure is survivable.
+
+    **Why.** Zones sit kilometres apart, so a round trip between them takes a few milliseconds or less: fast enough for a synchronous database copy. Regions sit hundreds of kilometres apart, so copies between them are usually asynchronous. Brightpost lost 3 hours when its only zone went dark. With two zones, the same fault cost about 2 minutes.
+
+    <AnimatedDiagram spec="animated/cloud/region-zone-edge" step={2} caption="One region, two zones: a server in each, and the database copied between them." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which of your services are zonal, regional or global?
+    - Why not put the two copies in two regions instead?
+
+    **Watch out for.** Saying a zone is "one data centre". It can be several buildings. What matters is that it fails as one unit.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why spread across three zones rather than two?" level="Mid" category="Cloud">
+    **Short answer.** Spare capacity and voting. With two zones, each must carry the full peak alone, so you run double. With three, the two survivors share the load, so you run half again. Three copies also let a database keep a majority after losing one.
+
+    **Why.** Brightpost needs 2 servers' worth of power at its 4,000-order peak. Two zones need 2 servers each, 4 in total. Three zones need 1 each, 3 in total, and still have 2 when a zone is dark. Systems that elect a leader need a majority. With two copies and a broken link, each side sees a 1–1 tie, and neither can safely take writes.
+
+    <AnimatedDiagram spec="animated/cloud/region-zone-edge" step={3} caption="With one zone dark, the zones that remain must carry the whole peak." />
+
+    **Follow-ups the interviewer may ask.**
+    - Does every region offer three zones?
+    - What does the load balancer do in the seconds before it marks a zone unhealthy?
+
+    **Watch out for.** Saying three zones "triple the cost". For stateless servers, three zones cost less than two zones that are each sized for the full peak.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A product page is slow for customers far from your region. What do you change first?" level="Mid" category="Cloud">
+    **Short answer.** Put a CDN in front, so files come from an edge site near the customer. Then measure what is still slow: anything that reaches the database still travels home.
+
+    **Why.** Brightpost's Sydney customers waited about 3 seconds for a product page, because each round trip to London takes about 250 ms. With photos cached at an edge site about 10 ms away, only cache misses and the checkout travel to London. Put a version number in each file's name, so the edge can keep each copy for a long time.
+
+    <AnimatedDiagram spec="animated/cloud/region-zone-edge" step={4} path="sydney>cdn>lb" caption="The photo comes from the edge site; only a miss travels to the home region." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you replace a photo the edge has already cached?
+    - When would you move the whole app closer instead?
+
+    **Watch out for.** Moving the whole shop to a region near Sydney. Then the UK customers, who place most of the orders, pay the long round trip instead.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Which costs rise when you run in two regions?" level="Mid" category="Cloud">
+    **Short answer.** A second set of servers and databases, data copied between regions, a way to move traffic, and time to practise the switch. Teams most often forget the transfer.
+
+    **Why.** Every write in the home region is copied to the second region, and that traffic is billed per gigabyte. A warm standby, such as Brightpost's small fleet, keeps the server bill low but still needs the full data copy. Logs, backups and monitoring run in both regions. Drills cost hours, but an unpractised switch tends to fail when needed.
+
+    <AnimatedDiagram spec="animated/cloud/region-zone-edge" step={5} caption="The second region adds a data copy and a standby fleet, and both cost money every day." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you shrink the second region's bill and still recover within 1 hour?
+    - Which requirement would justify this spend for Brightpost?
+
+    **Watch out for.** Counting only the servers. The data copy, the transfer and the logs in the second region can cost as much as the standby fleet.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost's customers are in India and the UK. Where do you deploy, and why?" level="Senior" category="Cloud">
+    **Short answer.** First ask whether any rule requires the Indian customers' data to stay in India. If yes, that data lives in a region in India, and the UK shop stays in London. If no, keep one home region in London with a CDN in front, and add a second region only when write latency hurts sales.
+
+    **Why.** Residency decides before latency, because breaking a rule costs more than a slow page. London to India is several thousand kilometres, so each round trip takes over 100 ms. With an edge cache, Indian customers get photos from nearby, and only the checkout makes the long trip. Two home regions mean two databases, or one that takes writes in both, and both are much harder designs.
+
+    **Follow-ups the interviewer may ask.**
+    - If Indian data must stay in India, how does the UK finance lead run one report across both?
+    - What does a customer in India see while the India region is down?
+
+    **Watch out for.** Choosing by latency alone. A fast region that breaks a data rule is the wrong region.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [What the Cloud Is](/cloud/fundamentals/what-is-cloud)
+- [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics)
+- [High Availability Inside One Region](/cloud/resilience/ha-patterns)
+- [Availability, SLAs and What Fails Together](/cloud/resilience/availability-math)
+- [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region)
+- [Compliance, Data Residency and Sovereignty](/cloud/resilience/compliance-and-residency)
+- [CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf)
+- [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets)
+- [Availability, reliability and the nines](/system-design/fundamentals/availability)
+- [Networking basics](/system-design/fundamentals/networking)
+
+## Further reading
+
+- [AWS Regions and Availability Zones](https://docs.aws.amazon.com/global-infrastructure/latest/regions/aws-availability-zones.html): zone names and zone IDs.
+- [Google Cloud regions and zones](https://cloud.google.com/compute/docs/regions-zones): zonal, regional and global resources.
+- [Azure availability zones overview](https://learn.microsoft.com/azure/reliability/availability-zones-overview): zonal and zone-redundant services.
+- [Azure region pairs](https://learn.microsoft.com/azure/reliability/regions-paired): pairs and regions without one.

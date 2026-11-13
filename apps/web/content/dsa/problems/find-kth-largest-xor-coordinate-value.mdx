@@ -1,0 +1,72 @@
+---
+title: "Find Kth Largest XOR Coordinate Value"
+description: "For an m by n matrix where cell (i, j) has value i XOR j (0-indexed), return the k-th largest value among all cells when sorted in non-increasing order."
+difficulty: medium
+patterns: [heap]
+topics: [bit-manipulation]
+companies: []
+languages: [python]
+entry: { python: kth_largest_value }
+starter:
+  python: |
+    def kth_largest_value(m: int, n: int, k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/find-kth-largest-xor-coordinate-value.public.json, hidden: tests/find-kth-largest-xor-coordinate-value.hidden.json }
+complexity: { time: "O(mn log k) for the implemented path", space: "O(mn) for the value list when materialized" }
+group: "03. Heap"
+number: "01"
+leetcode: find-kth-largest-xor-coordinate-value
+leetcodeId: 1738
+order: 22003001000000
+---
+
+For an m by n matrix where cell (i, j) has value i XOR j (0-indexed), return
+the k-th largest value among all cells when sorted in non-increasing order.
+
+## Examples
+
+````text
+Example 1:
+    Input: m = 2, n = 3, k = 6
+    Output: 0
+Example 2:
+    Input: m = 1, n = 1, k = 1
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 1 <= m, n <= 10^5
+- 1 <= k <= m * n
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Brute-force generation for small grids / heap selection
+For modest m\*n, materialize all XOR values and use nlargest; for huge grids a
+bit-counting or binary-search approach is required.
+
+1. If m \* n is small enough, build all i ^ j values.
+2. Use heapq.nlargest to pick the k-th largest in O(mn log k) time.
+
+## Complexity
+
+**Time:** O(mn log k) for the implemented path
+
+**Space:** O(mn) for the value list when materialized
+
+## Solution
+
+````python
+import heapq
+
+
+class Solution:
+    def kthLargestValue(self, m: int, n: int, k: int) -> int:
+        vals = [i ^ j for i in range(m) for j in range(n)]
+        return heapq.nlargest(k, vals)[-1]
+````

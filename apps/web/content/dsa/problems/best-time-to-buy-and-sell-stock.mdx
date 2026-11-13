@@ -1,0 +1,104 @@
+---
+title: "Best Time to Buy And Sell Stock"
+description: "You are given daily stock prices."
+difficulty: easy
+patterns: [story-problem]
+topics: [sliding-window]
+companies: []
+languages: [python]
+entry: { python: max_profit }
+starter:
+  python: |
+    def max_profit(prices: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/best-time-to-buy-and-sell-stock.public.json, hidden: tests/best-time-to-buy-and-sell-stock.hidden.json }
+complexity: { time: "O(n) - Single left-to-right pass.", space: "O(1) - Only a few integers are stored." }
+group: "06. Story Problem"
+number: "01"
+leetcode: best-time-to-buy-and-sell-stock
+leetcodeId: 121
+order: 7006001000000
+---
+
+You are given daily stock prices. Choose one day to buy and a later day to sell to
+maximize profit. Return that maximum profit, or 0 if no gain is possible.
+
+## Examples
+
+````text
+Example 1:
+    Input: prices = [7, 1, 5, 3, 6, 4]
+    Output: 5
+Example 2:
+    Input: prices = [7, 6, 4, 3, 1]
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 1 <= len(prices) <= 10^5
+- 0 <= prices[i] <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** One-pass min-so-far with sliding sell day
+Track the cheapest price seen so far while scanning forward as the candidate sell day.
+
+1. Initialize buy\_index at 0 and iterate sell\_index forward.
+2. If the current price beats the tracked minimum, compute profit and update the answer.
+3. Otherwise move the buy pointer to the cheaper day.
+
+## Complexity
+
+**Time:** O(n) - Single left-to-right pass.
+
+**Space:** O(1) - Only a few integers are stored.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+You are given an array prices where prices[i] is the price of a given stock on the ith day.
+You want to maximize your profit by choosing a single day to buy one stock and choosing a different day in the future to sell that stock.
+Return the maximum profit you can achieve from this transaction. If you cannot achieve any profit, return 0.
+
+Example 1:
+Input: prices = [7,1,5,3,6,4]
+Output: 5
+Explanation: Buy on day 2 (price = 1) and sell on day 5 (price = 6), profit = 6-1 = 5.
+Note that buying on day 2 and selling on day 1 is not allowed because you must buy before you sell.
+
+Example 2:
+Input: prices = [7,6,4,3,1]
+Output: 0
+Explanation: In this case, no transactions are done and the max profit = 0.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxProfit(self, prices: List[int]) -> int:
+        if len(prices) < 2:
+            return 0
+
+        buy = 0
+        best = 0
+
+        for sell in range(1, len(prices)):
+            if prices[buy] < prices[sell]:
+                best = max(best, prices[sell] - prices[buy])
+            else:
+                buy = sell
+
+        return best
+````

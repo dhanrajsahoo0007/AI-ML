@@ -1,0 +1,79 @@
+---
+title: "Remove Duplicate Letters"
+description: "Remove duplicate letters so each letter appears once while keeping the result lexicographically smallest."
+difficulty: medium
+patterns: [string-manipulation-with-stack]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: remove_duplicate_letters }
+starter:
+  python: |
+    def remove_duplicate_letters(s: str) -> str:
+        # Your code here
+        pass
+tests: { public: tests/remove-duplicate-letters.public.json, hidden: tests/remove-duplicate-letters.hidden.json }
+complexity: { time: "O(n) - Each character is pushed and popped at most once.", space: "O(1) - At most 26 letters worth of auxiliary data." }
+group: "03. String Manipulation with Stack"
+number: "03"
+leetcode: remove-duplicate-letters
+leetcodeId: 316
+order: 9003003000000
+---
+
+Remove duplicate letters so each letter appears once while keeping the result lexicographically smallest.
+
+## Examples
+
+````text
+Example 1:
+Input: "bcabc"
+Output: "abc"
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 10^4
+- s uses lowercase English letters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Monotonic Stack
+Pop larger tail letters when they still appear later in the scan.
+
+1. Record last index of every character.
+2. Walk left to right, popping stack tops that are greater than current with future occurrences.
+3. Track membership to avoid duplicates.
+
+## Complexity
+
+**Time:** O(n) - Each character is pushed and popped at most once.
+
+**Space:** O(1) - At most 26 letters worth of auxiliary data.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def removeDuplicateLetters(self, s: str) -> str:
+        last = {ch: i for i, ch in enumerate(s)}
+        stack: List[str] = []
+        seen = [False] * 26
+        for i, ch in enumerate(s):
+            idx = ord(ch) - ord("a")
+            if seen[idx]:
+                continue
+            while stack and ch < stack[-1] and last[stack[-1]] > i:
+                top = stack.pop()
+                seen[ord(top) - ord("a")] = False
+            stack.append(ch)
+            seen[idx] = True
+        return "".join(stack)
+````

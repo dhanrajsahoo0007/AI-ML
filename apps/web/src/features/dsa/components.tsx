@@ -48,3 +48,19 @@ export function ProEditorial() {
     </div>
   );
 }
+
+/** A link to the same problem on LeetCode, for a problem whose frontmatter names its LeetCode slug. */
+export function LeetCodeLink({ slug, id }: { slug?: string; id?: number }) {
+  if (!slug) return null;
+  return (
+    <a
+      href={`https://leetcode.com/problems/${slug}/`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-sm text-ink underline underline-offset-4"
+      data-dsa-leetcode
+    >
+      {id ? `LeetCode ${id}` : "On LeetCode"}
+    </a>
+  );
+}

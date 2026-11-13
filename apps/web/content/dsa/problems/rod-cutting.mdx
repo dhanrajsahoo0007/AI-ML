@@ -1,0 +1,74 @@
+---
+title: "Rod Cutting"
+description: "Given a rod of length n and price[i] for a piece of length i (1-indexed), cut the rod into pieces to maximize total price."
+difficulty: easy
+patterns: [unbounded-knapsack]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: cut_rod }
+starter:
+  python: |
+    def cut_rod(prices: list[int], n: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/rod-cutting.public.json, hidden: tests/rod-cutting.hidden.json }
+complexity: { time: "O(n^2).", space: "O(n)." }
+group: "03. Unbounded Knapsack"
+number: "01"
+order: 20003001000000
+---
+
+Given a rod of length n and price\[i\] for a piece of length i (1-indexed),
+cut the rod into pieces to maximize total price.
+
+## Examples
+
+````text
+Example 1:
+    Input: prices = [1, 5, 8, 9, 10, 17, 17, 20], n = 8
+    Output: 22
+Example 2:
+    Input: prices = [2, 5, 9, 12, 13], n = 5
+    Output: 14
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 100
+- 0 <= prices[i] <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Unbounded knapsack
+Each length i is an item of weight i and value prices\[i-1\], unlimited copies.
+
+1. dp\[w\] = max revenue for length w.
+2. For w from 1..n, dp\[w\] = max over i&lt;=w of prices\[i-1\] + dp\[w-i\].
+
+## Complexity
+
+**Time:** O(n^2).
+
+**Space:** O(n).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def cutRod(self, prices: List[int], n: int) -> int:
+        dp = [0] * (n + 1)
+        for w in range(1, n + 1):
+            best = 0
+            for i in range(1, w + 1):
+                best = max(best, prices[i - 1] + dp[w - i])
+            dp[w] = best
+        return dp[n]
+````

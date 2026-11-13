@@ -1,0 +1,58 @@
+---
+title: "MCM Memonized"
+description: "Same as matrix chain multiplication using top-down memoization."
+difficulty: easy
+patterns: [matrix-chain-multiplication]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: matrix_chain_order }
+starter:
+  python: |
+    def matrix_chain_order(p: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/mcm-memonized.public.json, hidden: tests/mcm-memonized.hidden.json }
+complexity: { time: "O(n^3).", space: "O(n^2)." }
+group: "07. Matrix Chain Multiplication"
+number: "02"
+order: 20007002000000
+---
+
+Same as matrix chain multiplication using top-down memoization.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Interval DP with memo table.
+
+1. memo\[i\]\[j\] stores optimal cost for multiplying matrices i..j.
+
+## Complexity
+
+**Time:** O(n^3).
+
+**Space:** O(n^2).
+
+## Solution
+
+````python
+from functools import lru_cache
+from typing import List
+
+
+class Solution:
+    def matrixChainOrder(self, p: List[int]) -> int:
+        n = len(p) - 1
+
+        @lru_cache(maxsize=None)
+        def dp(i: int, j: int) -> int:
+            if i == j:
+                return 0
+            return min(
+                p[i] * p[k + 1] * p[j + 1] + dp(i, k) + dp(k + 1, j) for k in range(i, j)
+            )
+
+        return dp(0, n - 1)
+````

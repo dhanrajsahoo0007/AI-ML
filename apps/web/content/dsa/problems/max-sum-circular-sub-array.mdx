@@ -1,0 +1,96 @@
+---
+title: "Max sum Circular Sub Array"
+description: "Given a circular integer array nums, return the maximum possible sum of a non-empty subarray."
+difficulty: medium
+patterns: [kadanes-algorithm]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: max_subarray_sum_circular }
+starter:
+  python: |
+    def max_subarray_sum_circular(nums: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/max-sum-circular-sub-array.public.json, hidden: tests/max-sum-circular-sub-array.hidden.json }
+complexity: { time: "O(n) - Two linear passes.", space: "O(1) - Only running totals." }
+group: "05. Kadane's Algorithm"
+number: "02"
+order: 18005002000000
+---
+
+Given a circular integer array nums, return the maximum possible sum of a non-empty subarray.
+The array is circular, so a subarray may wrap from the end to the beginning.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1,-2,3,-2]
+    Output: 3
+
+Example 2:
+    Input: nums = [5,-3,5]
+    Output: 10
+
+Example 3:
+    Input: nums = [-3,-2,-3]
+    Output: -2
+````
+
+## Constraints
+
+````text
+- 1 <= nums.length <= 3 * 10^4
+- -3 * 10^4 <= nums[i] <= 3 * 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Kadane for Max and Min Subarray
+Best wrap-around sum equals total sum minus minimum subarray sum when not all totals are negative.
+
+1. Compute Kadane's maximum subarray sum on nums.
+2. Compute Kadane's minimum subarray sum on nums and the array total.
+3. If the maximum subarray sum is negative, every value is negative; return that maximum.
+4. Otherwise return max(maximum linear sum, total - minimum subarray sum).
+
+## Complexity
+
+**Time:** O(n) - Two linear passes.
+
+**Space:** O(1) - Only running totals.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxSubarraySumCircular(self, nums: List[int]) -> int:
+        def kadane_max(arr: List[int]) -> int:
+            best = float("-inf")
+            cur = 0
+            for x in arr:
+                cur = max(x, cur + x)
+                best = max(best, cur)
+            return best
+
+        def kadane_min(arr: List[int]) -> int:
+            worst = float("inf")
+            cur = 0
+            for x in arr:
+                cur = min(x, cur + x)
+                worst = min(worst, cur)
+            return worst
+
+        total = sum(nums)
+        max_linear = kadane_max(nums)
+        if max_linear < 0:
+            return max_linear
+        min_linear = kadane_min(nums)
+        return max(max_linear, total - min_linear)
+````

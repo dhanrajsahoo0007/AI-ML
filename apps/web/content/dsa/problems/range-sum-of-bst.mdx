@@ -1,0 +1,171 @@
+---
+title: "Range Sum of BST"
+description: "Given the root of a binary search tree and integers low and high, return the sum of values of every node whose value lies in the inclusive range [low, high]."
+difficulty: easy
+patterns: [range-based-problems]
+topics: [binary-search-trees]
+companies: []
+languages: [python]
+entry: { python: range_sum_bst_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class TreeNode:
+        def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _build_tree(values):
+        if not values:
+            return None
+        nodes = [None if v is None else TreeNode(v) for v in values]
+        queue, i = [nodes[0]], 1
+        for node in queue:
+            if node is None:
+                continue
+            for side in ("left", "right"):
+                if i < len(values):
+                    setattr(node, side, nodes[i])
+                    queue.append(nodes[i])
+                    i += 1
+            if i >= len(values):
+                break
+        return nodes[0]
+
+
+    def _tree_values(root):
+        out, queue = [], [root] if root else []
+        for node in queue:
+            if node is None:
+                out.append(None)
+            else:
+                out.append(node.val)
+                queue += [node.left, node.right]
+        while out and out[-1] is None:
+            out.pop()
+        return out
+
+
+    def range_sum_bst_tests(a0, a1, a2):  # the entry the tests call
+        result = range_sum_bst(_build_tree(a0), a1, a2)
+        return result
+
+
+    # --- Your code ---
+    def range_sum_bst(root: TreeNode | None, low: int, high: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/range-sum-of-bst.public.json, hidden: tests/range-sum-of-bst.hidden.json }
+complexity: { time: "O(n) - Worst case visits every node; pruning reduces work on average.", space: "O(h) - Recursion stack depth." }
+group: "03. Range-Based Problems"
+number: "01"
+leetcode: range-sum-of-bst
+leetcodeId: 938
+order: 15003001000000
+---
+
+Given the root of a binary search tree and integers low and high, return the sum of values
+of every node whose value lies in the inclusive range \[low, high\].
+
+## Examples
+
+````text
+Example 1:
+    Input: root = [10,5,15,3,7,null,18], low = 7, high = 15
+    Output: 32
+
+Example 2:
+    Input: empty tree, low = 1, high = 10
+    Output: 0
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 2 * 10^4].
+- 1 <= Node.val <= 10^5 (typical LeetCode bounds); low and high fit in the same range.
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** BST pruning
+Skip entire left or right subtrees when their values cannot fall inside \[low, high\].
+
+1. If root is None, return 0.
+2. If root.val &lt; low, recurse only on the right subtree.
+3. If root.val &gt; high, recurse only on the left subtree.
+4. Otherwise include root.val and recurse on both children.
+
+## Complexity
+
+**Time:** O(n) - Worst case visits every node; pruning reduces work on average.
+
+**Space:** O(h) - Recursion stack depth.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given the root node of a binary search tree and two integers low and high,
+return the sum of values of all nodes with a value in the inclusive range \[low, high\].
+
+Time Complexity: O(N), where N is the number of nodes in the tree
+Space Complexity: O(H), where H is the height of the tree (due to recursive call stack)
+
+Approach:
+1. Traverse the BST.
+2. If current node's value is less than low, only explore right subtree.
+3. If current node's value is greater than high, only explore left subtree.
+4. If current node's value is within range, add to sum and explore both subtrees.
+
+Example:
+Input: root = \[10,5,15,3,7,null,18\], low = 7, high = 15
+Output: 32
+Explanation: Nodes 7, 10, and 15 are in the range \[7, 15\]. 7 + 10 + 15 = 32.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    root = TreeNode(values[0])
+    queue: List[TreeNode] = [root]
+    i = 1
+    while queue and i < len(values):
+        node = queue.pop(0)
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            queue.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            queue.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def rangeSumBST(self, root: Optional[TreeNode], low: int, high: int) -> int:
+        if root is None:
+            return 0
+        if root.val < low:
+            return self.rangeSumBST(root.right, low, high)
+        if root.val > high:
+            return self.rangeSumBST(root.left, low, high)
+        return root.val + self.rangeSumBST(root.left, low, high) + self.rangeSumBST(root.right, low, high)
+````

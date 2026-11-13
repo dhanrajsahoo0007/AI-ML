@@ -1,0 +1,85 @@
+---
+title: "Remove All Adjacent Duplicates in String II"
+description: "Given a string s and an integer k, remove duplicates such that every k consecutive identical characters are removed."
+difficulty: medium
+patterns: [string-recursion-and-pattern-matching]
+topics: [strings]
+companies: []
+languages: [python]
+entry: { python: remove_duplicates }
+starter:
+  python: |
+    def remove_duplicates(s: str, k: int) -> str:
+        # Your code here
+        pass
+tests: { public: tests/remove-all-adjacent-duplicates-in-string-ii.public.json, hidden: tests/remove-all-adjacent-duplicates-in-string-ii.hidden.json }
+complexity: { time: "O(n) - Each character is processed a constant number of times across passes.", space: "O(n) - Stack size is bounded by the string length." }
+group: "05. String Recursion and Pattern Matching"
+number: "03"
+leetcode: remove-all-adjacent-duplicates-in-string-ii
+leetcodeId: 1209
+order: 5005003000000
+---
+
+Given a string s and an integer k, remove duplicates such that every k consecutive
+identical characters are removed. Repeat until the string no longer changes.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "deeedbbcccbdaa", k = 3
+    Output: "aa"
+    Explanation: Remove "eee" and "bbb", then "ccc", leaving "daa" -> remove "aaa" -> "aa".
+
+Example 2:
+    Input: s = "pbbcggttciiippooaais", k = 2
+    Output: "ps"
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 10^5
+- 2 <= k <= 10^4
+- s consists of lowercase English letters.
+````
+
+**Also in the notes under:** [09. Stack and Queue/03. String Manipulation with Stack](/dsa/problems/remove-all-adjacent-duplicates-in-string-ii-string-manipulation-with-stack).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Stack with run-length
+Store each character with its consecutive count; pop when count reaches k.
+
+1. Maintain a stack of \[character, run length\] for the current rightmost runs in the folded string.
+2. For each character, if it matches the stack top, increment that run length; otherwise push \[ch, 1\].
+3. When a run length reaches k, pop it so earlier neighbors can merge on future steps.
+4. Concatenate each stack entry as character repeated by its remaining count.
+
+## Complexity
+
+**Time:** O(n) - Each character is processed a constant number of times across passes.
+
+**Space:** O(n) - Stack size is bounded by the string length.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def removeDuplicates(self, s: str, k: int) -> str:
+        stack: List[list] = []
+        for ch in s:
+            if stack and stack[-1][0] == ch:
+                stack[-1][1] += 1
+                if stack[-1][1] == k:
+                    stack.pop()
+            else:
+                stack.append([ch, 1])
+        return "".join(ch * cnt for ch, cnt in stack)
+````

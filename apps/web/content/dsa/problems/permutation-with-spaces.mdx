@@ -1,0 +1,82 @@
+---
+title: "Permutation with spaces"
+description: "Given a string with no spaces, produce every way to insert spaces between characters while keeping character order (spaces never lead or trail the full strin…"
+difficulty: easy
+patterns: [permutation-problems]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: permute_with_spaces }
+starter:
+  python: |
+    def permute_with_spaces(s: str) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/permutation-with-spaces.public.json, hidden: tests/permutation-with-spaces.hidden.json }
+complexity: { time: "O(2^(n-1)) strings for length n", space: "O(n) recursion depth" }
+group: "05. Permutation Problems"
+number: "01"
+order: 11005001000000
+---
+
+Given a string with no spaces, produce every way to insert spaces between characters
+while keeping character order (spaces never lead or trail the full string).
+
+## Examples
+
+````text
+Example 1:
+    Input: "ABC"
+    Output: ["ABC", "AB C", "A BC", "A B C"]
+
+Example 2:
+    Input: "AB"
+    Output: ["AB", "A B"]
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 12 for exponential output in tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary choice between characters
+After each character except the last, either continue the token or insert a space
+before extending with the next character.
+
+1. DFS with index pointing at next character to place.
+2. At the last character, finalize the accumulated string.
+3. Otherwise branch without space and with space after the current append.
+
+## Complexity
+
+**Time:** O(2^(n-1)) strings for length n
+
+**Space:** O(n) recursion depth
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def permute_with_spaces(self, s: str) -> List[str]:
+        if not s:
+            return []
+        result: List[str] = []
+
+        def dfs(index: int, current: str) -> None:
+            if index == len(s) - 1:
+                result.append(current + s[index])
+                return
+            dfs(index + 1, current + s[index])
+            dfs(index + 1, current + s[index] + " ")
+
+        dfs(0, "")
+        return result
+````

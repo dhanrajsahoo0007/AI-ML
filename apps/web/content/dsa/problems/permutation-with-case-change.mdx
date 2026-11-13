@@ -1,0 +1,83 @@
+---
+title: "Permutation with Case Change"
+description: "Given a string of letters and digits, enumerate every combination formed by independently lowercasing or uppercasing each letter; digits are unchanged."
+difficulty: easy
+patterns: [permutation-problems]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: case_permutations }
+starter:
+  python: |
+    def case_permutations(s: str) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/permutation-with-case-change.public.json, hidden: tests/permutation-with-case-change.hidden.json }
+complexity: { time: "O(2^k * n) for k letters", space: "O(n) stack plus output list" }
+group: "05. Permutation Problems"
+number: "02"
+order: 11005002000000
+---
+
+Given a string of letters and digits, enumerate every combination formed by
+independently lowercasing or uppercasing each letter; digits are unchanged.
+
+## Examples
+
+````text
+Example 1:
+    Input: "ab"
+    Output sorted: ["AB", "Ab", "aB", "ab"]
+
+Example 2:
+    Input: "a1b2"
+    Output length: 2^2 = 4 letter branches
+````
+
+## Constraints
+
+````text
+- Letters are alphabetic ASCII in tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Letter-wise branching DFS
+Same structure as letter-case permutations: two branches per letter, one per digit.
+
+1. Depth-first traverse the string index.
+2. Letters fork into lower and upper continuations.
+3. Digits extend deterministically.
+
+## Complexity
+
+**Time:** O(2^k \* n) for k letters
+
+**Space:** O(n) stack plus output list
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def case_permutations(self, s: str) -> List[str]:
+        result: List[str] = []
+
+        def dfs(index: int, built: str) -> None:
+            if index == len(s):
+                result.append(built)
+                return
+            ch = s[index]
+            if ch.isalpha():
+                dfs(index + 1, built + ch.lower())
+                dfs(index + 1, built + ch.upper())
+            else:
+                dfs(index + 1, built + ch)
+
+        dfs(0, "")
+        return sorted(result)
+````

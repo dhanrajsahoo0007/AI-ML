@@ -1,73 +1,297 @@
 ---
 title: "Queues vs Streams"
-description: "When to use a queue, a pub/sub topic or a log-based stream, with an interactive picker and the matching service on AWS, Google Cloud and Azure."
+description: "Queue, topic or stream: what should happen to each message decides the shape and the service on each cloud. Plus duplicates, ordering keys and dead letters."
+updated: 2026-11-13
 ---
 
-"Put a queue there" is the most common move in system design, and often the wrong word. A **queue** hands each message to one worker and forgets it. A **topic** copies each message to every subscriber. A **stream** keeps an ordered log that any number of readers can replay. Each cloud has all three, under different names and with different models.
+## In one sentence
 
-## TL;DR
+<KeyIdea>
+  First decide what should happen to each message. One worker handles it once, every interested service gets a copy, or it is kept in order for readers to come back to.
+</KeyIdea>
 
-- Ask **what should happen to each message**: done once (queue), heard by several services (topic), or read in order and replayed (stream).
-- **Ordering is per key, never global.** Pick the key (order id, conversation id, user id) that must stay ordered.
-- **Everything is at-least-once.** Make consumers idempotent regardless of the product.
-- **AWS** splits these into SQS, SNS / EventBridge and Kinesis / MSK. **Google Cloud's Pub/Sub** covers all three styles with one product. **Azure** uses Service Bus for queues and topics and Event Hubs for streams.
+## The story
 
-## Try it: pick a messaging service
+Brightpost used to send each order's confirmation email inside checkout, so a slow email provider made checkout slow. Asha put a queue between them. Checkout now adds one message per order, and two email workers send the emails. Each worker takes 25 messages, sends them one by one, and confirms all 25 at the end. On the next sale day, a customer's gift message held an emoji that the email template could not handle. Every worker that reached that order crashed before confirming its batch. Five minutes later the queue handed the batch out again, and the emails sent before the crash went out again. This repeated from 9:15 to 11:15. About 300 customers got their confirmation two or more times, and 45 asked the support agent if they had been charged twice. The emoji customer got no email at all.
+
+The queue kept its promise. The steps below show what that promise is, how to build on it, and when a topic or a stream fits better.
+
+## How it works
+
+Four words first. A **message** is a small record one program sends another, such as "order 1042 was placed". The **producer** sends it; a **consumer** receives it and acts on it. A **broker** is the service in the middle that holds messages. Queues, topics and streams are three kinds of broker. They differ in what happens to a message after it is read.
+
+### Step 1: A queue: each message to one worker
+
+<AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={1} minWidth={620} caption="Checkout adds one message per order. The queue hands each message to one worker: order 1042 to worker A, order 1043 to worker B." />
+
+A **queue** holds messages until a worker takes one. Each message goes to exactly one worker. When the worker is done, it tells the queue, and the queue deletes the message. That "done" signal is an **acknowledgement**, or ack.
+
+This is how a queue shares out work: add a third worker and each takes about a third. A queue also absorbs bursts. On a sale morning checkout adds messages faster than the workers send emails, and the queue holds the backlog while shoppers carry on. The theory of queues and publish/subscribe is on [Message Queues and Pub/Sub](/system-design/patterns/message-queues); this page is about choosing one on a cloud.
+
+<PremiumBreak />
+
+### Step 2: At least once means sometimes twice
+
+<AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={2} minWidth={620} caption="The failure: worker A sends the email for order 1042, then crashes before its ack. The queue hands 1042 to worker B, which sends the same email again." />
+
+A queue cannot see inside a worker. When it hands out a message, it **locks** it: no other worker sees that message for a set time, 5 minutes at Brightpost. If the ack arrives, the queue deletes the message. If the lock runs out first, the queue assumes the worker died and offers the message again.
+
+That rule gives **at-least-once delivery**: no message is lost, but some arrive twice. Ack first and work after, and you get **at-most-once delivery**: a crash loses the message instead. Managed brokers on every cloud deliver at least once by default. Some add a deduplication window or an "exactly once" setting, each with limits.
+
+<Callout tone="red" title="What breaks">
+  At 9:15 worker A takes 25 messages, sends 11 emails and crashes on the emoji order, with no ack. At 9:20 the lock runs out and all 25 come back. Worker B sends those 11 emails again and crashes on the same order. The cycle repeats every 5 minutes for 2 hours.
+</Callout>
+
+Two fixes follow. Make a second delivery harmless, and stop one bad message from coming back for ever.
+
+### Step 3: Make a second delivery harmless
+
+<AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={3} minWidth={620} caption="Each worker looks up the order id in a sent-email table first. Order 1042 is already there, so worker B skips it." />
+
+An operation is <Term id="idempotent">idempotent</Term> when running it twice has the same effect as running it once. Sending an email is not: two runs, two emails. A worker makes its work idempotent with an **idempotency key**, a value that names the job. For Brightpost that is the order id.
+
+Each worker now does four things per message:
+
+1. Look up the order id in a sent-email table in the orders database.
+2. If it is there, ack and stop.
+3. Otherwise send the email and write the id to the table.
+4. Ack this one message, not the batch.
+
+One gap remains: a crash after sending but before writing the id repeats one email, not a batch of 11. The receiver, not the broker, decides what "once" means. [Idempotency](/system-design/patterns/idempotency) covers the pattern.
+
+### Step 4: A message that keeps failing goes aside
+
+<AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={4} minWidth={620} caption="After 5 failed tries, the queue moves a message to the dead-letter queue, and the other messages keep flowing." />
+
+The emoji order was a **poison message**: one that fails every time, whoever takes it. A queue counts how often it has delivered each message. After a set number of tries, 5 at Brightpost, it moves the message to a **dead-letter queue** (DLQ). No worker reads that side queue on its own.
+
+With this rule, the emoji order leaves the main queue at about 9:40, not 11:15. An alarm fires when the dead-letter queue holds one message. Asha fixes the template and moves the message back, and the customer gets one email.
+
+The lock needs care too. A batch takes about 50 seconds, so a 5-minute lock leaves room. A shorter lock makes a slow worker look dead. Pacing retries is on [Quotas, Throttling, Retries and Backoff](/cloud/resilience/quotas-and-retries).
+
+### Step 5: A topic: every subscriber gets a copy
+
+<AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={5} minWidth={620} caption="Checkout publishes each order once. The topic copies it to the email queue and to the stock worker." />
+
+Next, the stock count must drop when a poster sells. A second queue would make checkout send two messages, and know every service that cares about an order.
+
+A **topic** turns that around. The producer publishes once, and the topic copies the message to every **subscription**, a named feed of copies for one consumer. This is <Term id="fan-out">fan-out</Term>. Checkout publishes "order placed", and the topic copies it to the email queue and the stock worker. A third team can add a subscription without touching checkout.
+
+A topic keeps a message only until each subscription has its copy, so it is not an archive. Copies arrive at least once, so the stock worker needs its own idempotency key. A queue behind a subscription gives that subscriber its own lock, retries and dead-letter queue, so a stuck stock worker never delays an email.
+
+### Step 6: A stream: a log each reader reads at its own place
+
+<AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={6} minWidth={620} caption="The shop appends every order event to a stream. Analytics reads at event 4,180, while a new report replays from event 1." />
+
+Analytics wants every order event, in order, with the chance to read them again. A queue deletes a handled message; a topic forgets a delivered one.
+
+A **stream** is an append-only log. New events go on the end, and reading does not remove them. They stay for a **retention** period, 7 days for Brightpost. Each event has a position number, its **offset**. A **consumer group** is one reader, perhaps several workers, that saves its own offset. Analytics is at event 4,180. A new report, added on Friday, starts at event 1 and replays the whole week, and nobody sends anything again.
+
+A stream is split into <Term id="partition">partitions</Term>, separate logs that grow side by side. Within one group, each partition is read by one worker at a time. Brightpost's 3 partitions allow at most 3 busy workers per group.
+
+### Step 7: Order is per key, never global
+
+Order 1042 has three events: placed, paid and shipped. If two workers took "placed" and "paid" at once, "paid" could finish first. The fix is an **ordering key**, a value the producer attaches to each message: here, the order id.
+
+- **Same key, same line.** All messages with key 1042 go to one partition or group, one after another.
+- **Different keys, in parallel.** Order 1043's events run on another worker at the same time.
+- **Global order is one line.** One key for everything means one worker, and 4,000 sale-day orders wait behind the slowest email.
+- **A key needs many values.** Keyed by country, almost every event would land on the UK's partition, a <Term id="hot-key">hot key</Term>.
+
+Order has a price: a failing message holds up the messages behind it with the same key.
+
+### Step 8: Pick by what should happen to each message
+
+<Compare
+  columns={["", "Queue", "Topic", "Stream"]}
+  rows={[
+    ["Who gets each message", "One worker", "Every subscription, one copy each", "Every consumer group"],
+    ["After it is read", "Deleted", "Deleted from that subscription", "Kept until retention ends"],
+    ["Replay older messages", false, false, true],
+    ["Order", "Per key, if you ask for it", "Per key, if you ask for it", "Per key, inside a partition"],
+    ["A new consumer", "Shares the existing work", "Gets a new subscription", "Gets a new group, which can start at the oldest event"],
+    ["Brightpost uses it for", "Sending confirmation emails", "Telling email and stock about each order", "Analytics and new reports"],
+  ]}
+  caption="Three shapes of broker. Ask the first row's question, and the rest follows."
+/>
+
+Brightpost now uses all three, each for its own job. Pick the shape first; the product name comes last.
+
+## On AWS, Google Cloud and Azure
+
+All three clouds offer all three shapes. AWS has a product per shape, Google Cloud covers all three with one product, and Azure splits business messages from event streams.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Queue:** Amazon SQS. A received message stays hidden for the visibility timeout; the worker deletes it when done.
+    - **Topic:** Amazon SNS copies each message to every subscription, such as SQS queues or functions. Amazon EventBridge routes events by rules on their content.
+    - **Stream:** Amazon Kinesis Data Streams, split into shards, with a retention period you set. Amazon MSK runs Apache Kafka.
+    - **Order per key:** SQS FIFO queues, per message group id. Kinesis and Kafka, per partition key.
+    - **Failed messages:** a redrive policy moves a message to a dead-letter queue after a set number of receives.
+
+    **The difference that changes a design.** AWS has one product per shape, so you wire them together. The usual fan-out is an SNS topic with one SQS queue per subscriber, which gives each subscriber its own retries and dead-letter queue. Kinesis scales by shards, and in on-demand mode AWS adds them for you. Order and parallelism both follow the shard.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Queue:** Pub/Sub, one subscription that several workers pull from. The lock is the ack deadline. Cloud Tasks sends tasks to one handler at a rate you set.
+    - **Topic:** Pub/Sub, one subscription per consumer, each with its own copy. Eventarc routes events from Google Cloud services to your code.
+    - **Stream:** Pub/Sub keeps messages for a retention period you set; seek moves a subscription back to a time. Managed Service for Apache Kafka serves Kafka clients.
+    - **Order per key:** ordering keys, on a subscription with message ordering turned on.
+    - **Failed messages:** a dead-letter topic on the subscription, after a set number of delivery attempts.
+
+    **The difference that changes a design.** One product covers all three shapes, and the subscription is what you design. One subscription shared by many workers is a queue. Many subscriptions are fan-out. Retention plus seek is replay. There are no partitions to size: Pub/Sub scales by itself and orders by key. A team that needs Kafka's partitions and offsets uses the managed Kafka service.
+  </Tab>
+  <Tab label="Azure">
+    - **Queue:** Azure Service Bus queues. A received message is locked for the lock duration; the worker completes it when done. Azure Queue Storage is a simpler queue.
+    - **Topic:** Service Bus topics, where each subscription gets a copy and can filter. Azure Event Grid pushes events, such as "a file was added", to handlers.
+    - **Stream:** Azure Event Hubs, with partitions, consumer groups, checkpoints and retention. It also accepts Apache Kafka clients.
+    - **Order per key:** Service Bus sessions, by session id. Event Hubs, per partition key.
+    - **Failed messages:** after the maximum delivery count, Service Bus moves a message to the queue's built-in dead-letter subqueue.
+
+    **The difference that changes a design.** Azure separates business messages from event streams. Service Bus is for messages that must each be handled, such as orders and payments, with sessions and duplicate detection. Event Hubs is for high-volume streams that many groups read and replay. Choose an event hub's partition count with care, because changing it later is limited.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/queue-topic-stream" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every managed box." />
+
+<CloudMapping diagram="cloud/queue-topic-stream" lead="aws" />
+
+## Try it
+
+Pick what should happen to each message, and see the service that fits on each cloud.
 
 <CloudDecisionTree topic="messaging" />
 
-## The three shapes
+<Quiz>
+  <QuizItem question="Brightpost's lock is 5 minutes, and a batch of 25 emails takes about 50 seconds. One morning the email provider takes 15 seconds per email. What happens?" hint="Multiply, then compare with the lock.">
+    The batch takes 25 × 15 = 375 seconds, over 6 minutes. The lock runs out first, so the queue hands the batch to the other worker while the first is still sending. Duplicates appear with no crash at all.
+  </QuizItem>
+  <QuizItem question="The order stream has 3 partitions. Analytics runs 5 workers in one consumer group. How many of them are busy?">
+    3. Each partition is read by one worker of the group at a time, so 2 sit idle. More speed needs more partitions.
+  </QuizItem>
+  <QuizItem question="The emoji order failed at 9:15, 9:20, 9:25, 9:30 and 9:35. With Brightpost's 5-try rule, where is it at 9:45?" hint="Count the tries.">
+    In the dead-letter queue. The fifth try failed at 9:35; when that lock ran out at about 9:40, the queue moved the message aside and the alarm fired.
+  </QuizItem>
+</Quiz>
 
-```mermaid
-flowchart LR
-    subgraph Q["Queue"]
-      P1["Producer"] --> QQ[["queue"]] --> W1["Worker A"]
-      QQ --> W2["Worker B"]
-    end
-    subgraph T["Topic"]
-      P2["Producer"] --> TT(("topic")) --> S1["Billing"]
-      TT --> S2["Email"]
-      TT --> S3["Analytics"]
-    end
-    subgraph S["Stream"]
-      P3["Producer"] --> LOG[["partitioned log"]]
-      LOG -->|"offset 120"| C1["Consumer group 1"]
-      LOG -->|"offset 87"| C2["Consumer group 2"]
-    end
-```
+## Trade-offs
 
-In the queue, workers A and B **split** the messages. In the topic, every subscriber gets **every** message. In the stream, each consumer group keeps **its own position** and can rewind.
+<Compare
+  columns={["", "One queue", "Topic, a queue per subscriber", "Stream"]}
+  rows={[
+    ["Add a new consumer", "Checkout must send a second message", "Add 1 subscription; checkout unchanged", "Add 1 group; it can read the last 7 days"],
+    ["Workers per consumer", "As many as you like", "As many as you like, per queue", "At most 1 per partition: 3 for Brightpost"],
+    ["What one bad message holds up", "Nothing, once it moves aside", "Only its own subscription", "Messages behind it in its partition, for that group"],
+    ["Replay last week", false, false, true],
+    ["Duplicates possible", true, true, true],
+    ["Parts to run", "1 queue, 1 dead-letter queue", "1 topic, 2 queues, 2 dead-letter queues", "1 stream, a saved offset per group"],
+  ]}
+  caption="Brightpost's setup. Duplicates are possible in every column, so every consumer is idempotent."
+/>
 
-## The same choice on each cloud
+A queue is the least to run. A topic costs a few more parts and buys independent consumers. A stream adds history and replay, and its partitions cap how fast one group reads.
 
-| Need | AWS | Google Cloud | Azure |
-|---|---|---|---|
-| Work queue | SQS | Pub/Sub (pull) or Cloud Tasks | Service Bus queue, Queue Storage |
-| Ordered queue per key | SQS FIFO (message group id) | Pub/Sub ordering keys | Service Bus sessions |
-| Fan-out to services | SNS → SQS, EventBridge | Pub/Sub topic with many subscriptions, Eventarc | Service Bus topics, Event Grid |
-| Ordered stream with replay | Kinesis, MSK | Pub/Sub (seek), Managed Kafka | Event Hubs |
-| Kafka API | MSK | Managed Service for Apache Kafka | Event Hubs Kafka endpoint |
-| Stream into storage | Firehose | Pub/Sub BigQuery / Cloud Storage subscriptions | Event Hubs Capture |
+## Common pitfalls
 
-**Biggest model difference:** Kinesis, Kafka and Event Hubs scale by **partitions**, so ordering lives inside a partition and consumer parallelism is capped by the partition count. Pub/Sub has no partitions to manage. It orders by **ordering key** and scales subscribers automatically, which makes it simpler to operate but gives you less low-level control.
+- **Expecting exactly once.** Every broker can deliver a message twice. Give each consumer an idempotency key, such as the order id, before the first duplicate reaches a customer.
+- **Acking a whole batch at the end.** Brightpost's 25-message batch turned one crash into 11 repeated emails. Ack each message once its work is recorded.
+- **A lock shorter than the work.** A 6-minute batch under a 5-minute lock is handed out while it is still being sent. Set the lock well above the slowest normal run.
+- **Two services on one queue.** If the stock and email workers shared one queue, each order would reach one of them, never both. Different jobs need a topic with a subscription each.
+- **A queue as an archive.** A queue deletes what it delivers, so nobody can replay last Tuesday. Keep history in a stream or in storage.
 
-## Delivery guarantees in practice
+## How to say it in an interview
 
-| Guarantee | Meaning | What you do |
-|---|---|---|
-| At-most-once | May lose messages, never duplicates | Rarely acceptable; metrics sampling at most |
-| At-least-once | Never loses acknowledged messages, may duplicate | The default everywhere; make consumers idempotent |
-| Exactly-once *processing* | Effects applied once despite duplicates | Idempotency keys or transactional outbox + dedup on the consumer side; FIFO and Kafka transactions help within their scope |
+"I start from what should happen to each message. If one worker should handle it once, I use a queue. If several services each need it, I publish to a topic with a queue per subscriber. If readers need events in order and may replay them, I use a stream with consumer groups that keep their own offsets. Delivery is at least once everywhere, so each consumer is idempotent, keyed by something like the order id. Order is per key, and the partition count caps a group's parallelism. A dead-letter queue with an alarm catches messages that keep failing."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does Google Cloud use where AWS uses SQS, SNS and Kinesis?" level="Junior" category="Cloud">
+    **Short answer.** Pub/Sub, for all three. One subscription shared by several workers behaves like a queue, several subscriptions fan out like SNS, and retention with seek gives replay like Kinesis. Kafka clients use Managed Service for Apache Kafka.
+
+    **Why.** AWS has one product per shape; on Google Cloud the subscriptions decide the shape. Brightpost's email queue becomes a pull subscription shared by two workers. The topic gets one subscription per consumer. The stream keeps messages 7 days, so a new report can seek back to Monday. Ordering keys replace partition keys, and there are no partitions to size.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={6} highlight={["queue", "topic", "stream"]} caption="Three shapes of broker. On Google Cloud, Pub/Sub plays all three roles." />
+
+    **Follow-ups the interviewer may ask.**
+    - What are the same three on Azure?
+    - When would you still choose managed Kafka on Google Cloud?
+
+    **Watch out for.** Translating product names without the shape. Pub/Sub is not "Google's SNS"; it is all three, and the subscription decides which.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you keep events for one order in order while thousands of orders are processed in parallel?" level="Mid" category="Cloud">
+    **Short answer.** Give every message an ordering key: the order id. Messages with the same key go to one partition or group and are handled one after another. Different keys spread out and run in parallel.
+
+    **Why.** Two workers taking order 1042's "placed" and "paid" at once could finish "paid" first. With the order id as the key, 1042's events stay in one line while 1043's run elsewhere. Kinesis, Kafka and Event Hubs call it a partition key. SQS FIFO calls it a message group id, Pub/Sub an ordering key, Service Bus a session id. With 3 partitions, one group of Brightpost's stream works on at most 3 lines at once.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={6} path="shop>stream>analytics" caption="Each partition of the stream keeps its keys in order, and the reader keeps its place in each." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to order 1042's later events when one of them keeps failing?
+    - Why not use the customer's country as the key?
+
+    **Watch out for.** Asking for global order. It forces one worker for everything, and one slow message delays every order behind it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="For each order, Brightpost must email the customer, update stock and feed analytics. Queue, topic or stream for each?" level="Mid" category="Cloud">
+    **Short answer.** Publish "order placed" once to a topic. Email and stock each get a subscription with its own queue, because each must act once per order. Analytics reads a stream, because it needs every event in order and must replay when a report changes.
+
+    **Why.** One queue for all three would split the messages, so each order would reach only one job. Separate queues filled by checkout make checkout know every consumer. The topic removes that link, and a queue per subscriber keeps failures apart. Analytics needs history: a queue deletes and a topic forgets, while the stream keeps 7 days, so the new report replayed from event 1.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={6} highlight={["topic", "queue", "stock", "stream"]} caption="One topic feeds the two jobs done once per order; the stream keeps the history." />
+
+    **Follow-ups the interviewer may ask.**
+    - How does the shop make sure the topic and the stream both receive every event?
+    - What changes if analytics needs a year of history instead of 7 days?
+
+    **Watch out for.** "Put everything on the stream." It works, but the email job then needs its own offsets, retries and dead letters, which a queue gives for free.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What is a dead-letter queue, and what do you do with the messages that land in it?" level="Mid" category="Cloud">
+    **Short answer.** A side queue where the broker moves a message after a set number of failed tries. It stops one poison message from repeating for ever. Then someone acts: an alarm, a look, a fix, and a move back.
+
+    **Why.** Brightpost's emoji order crashed every worker that took it, every 5 minutes for 2 hours. With a 5-try rule it would have left at about 9:40. Nothing is lost: after the fix, Asha moves it back and the customer gets one email. A dead-letter queue nobody watches is a silent loss, so Brightpost's alarm fires at 1 message.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={4} highlight={["queue", "dlq"]} caption="After 5 failed tries the message moves aside, and the queue keeps flowing." />
+
+    **Follow-ups the interviewer may ask.**
+    - How many tries should a message get before it moves aside?
+    - What plays this role on a stream, where messages are not deleted?
+
+    **Watch out for.** Setting the limit to 1 try. A short network error then sends good messages aside, and the dead-letter queue fills with work that would have succeeded.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A payment worker crashed after charging the card but before it acknowledged the message. Design it so the retry never charges twice." level="Senior" category="Cloud">
+    **Short answer.** Use the order id as an idempotency key in two places: the payment provider's API and our own payments table. The retry checks the table, then calls the provider with the same key. The provider returns the first charge instead of making a new one. The ack comes last.
+
+    **Why.** The retry is certain: the lock runs out and the message comes back. A table of our own, like Brightpost's sent-email table, leaves one gap: a crash after charging but before writing the row. For an email that costs one repeat; for money it is not acceptable. Payment providers commonly accept an idempotency key and answer a repeat with the original result. A unique rule on the order id makes a second insert fail.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={3} highlight={["workerB", "sent", "dup"]} caption="The redelivered message meets a record of the work already done, and the repeat is skipped." />
+
+    **Follow-ups the interviewer may ask.**
+    - What if the provider does not accept an idempotency key?
+    - How long must you keep the keys?
+
+    **Watch out for.** Relying on a queue's deduplication or an "exactly once" setting. It drops repeated messages within its window, but this repeat came from a crash inside the worker.
+  </InterviewQuestion>
+</InterviewQuestions>
 
 ## Related
 
-[Messaging & Streaming on AWS](/cloud/aws/messaging) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Idempotency](/system-design/patterns/idempotency) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
+- [Queues, Topics, Streams, Event Buses and Workflows on the Cloud](/cloud/data/streaming-and-messaging-services)
+- [Quotas, Throttling, Retries and Backoff on the Cloud](/cloud/resilience/quotas-and-retries)
+- [Receiving and Sending Webhooks on the Cloud](/cloud/networking/webhooks-on-the-cloud)
+- [Messaging & Streaming on AWS](/cloud/aws/messaging)
+- [Messaging & Streaming on Google Cloud](/cloud/gcp/messaging)
+- [Messaging & Streaming on Azure](/cloud/azure/messaging)
+- [Message Queues and Pub/Sub](/system-design/patterns/message-queues)
+- [Fan-out: Push vs Pull](/system-design/patterns/fan-out)
+- [Idempotency](/system-design/patterns/idempotency)
+- [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
 
-<InterviewQuestions>
-  <InterviewQuestion question="What is the Google Cloud equivalent of SQS, SNS and Kinesis?" category="Cloud" level="Junior">
-    Pub/Sub covers all three: a topic with one pull subscription behaves like a queue, many subscriptions give fan-out, and ordering keys plus seek-to-time give ordered, replayable delivery. Cloud Tasks is the closer match for rate-limited task queues, and Managed Service for Apache Kafka for Kafka workloads.
-  </InterviewQuestion>
-  <InterviewQuestion question="How do you keep events for one order in order while processing many orders in parallel?" category="Architecture" level="Mid">
-    Use the order id as the ordering key: the partition key in Kinesis or Kafka, the message group id in SQS FIFO, the ordering key in Pub/Sub, or the session id in Service Bus. Events for one order stay in sequence, while different orders spread across partitions or groups and run in parallel.
-  </InterviewQuestion>
-</InterviewQuestions>
+## Further reading
+
+- [Amazon SQS Developer Guide](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/welcome.html): queues, visibility timeout and dead-letter queues.
+- [Pub/Sub overview](https://cloud.google.com/pubsub/docs/overview): topics, subscriptions, ordering and replay.
+- [Choose between Azure messaging services](https://learn.microsoft.com/azure/service-bus-messaging/compare-messaging-services): Service Bus, Event Hubs and Event Grid.
+- [Apache Kafka documentation](https://kafka.apache.org/documentation/): partitions, consumer groups and offsets.

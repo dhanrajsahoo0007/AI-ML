@@ -1,0 +1,104 @@
+---
+title: "Connecting Cities With Minimum Cost"
+description: "There are n cities numbered from 1 to n."
+difficulty: medium
+patterns: [prims-algorithm]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: minimum_cost }
+starter:
+  python: |
+    def minimum_cost(n: int, connections: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/connecting-cities-with-minimum-cost.public.json, hidden: tests/connecting-cities-with-minimum-cost.hidden.json }
+complexity: { time: "O((n + m) log n) with m = len(connections); each edge pushed twice.", space: "O(n + m) for adjacency, visited, and heap." }
+group: "08. Minimum Spanning Tree › 01. Prim's Algorithm"
+number: "03"
+leetcode: connecting-cities-with-minimum-cost
+leetcodeId: 1135
+order: 17008001003000
+---
+
+There are n cities numbered from 1 to n. You are given connections, where each
+connections\[i\] = \[city1, city2, cost\] represents the bidirectional cost to connect
+city1 and city2. Return the minimum total cost such that every city is connected
+(there is a path between every pair). If impossible, return -1.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 3, connections = [[1,2,5],[1,3,6],[2,3,1]]
+    Output: 6   (use edges (2,3) and (1,2) -> 1+5)
+Example 2:
+    Input: n = 4, connections = [[1,2,3],[3,4,4]]
+    Output: -1  (two components)
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 10^4
+- 1 <= len(connections) <= 10^4
+- connections[i].length == 3
+- 1 <= city1, city2 <= n, city1 != city2
+- 0 <= cost <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Minimum Spanning Tree — Prim or Kruskal on sparse explicit edge list
+
+1. Convert city labels to 0-based indices for the adjacency list.
+2. Run Prim: min-heap of (weight, vertex), start from city 1 (index 0).
+3. Sum weights of edges that introduce a new city; if fewer than n cities are reached,
+return -1.
+
+## Complexity
+
+**Time:** O((n + m) log n) with m = len(connections); each edge pushed twice.
+
+**Space:** O(n + m) for adjacency, visited, and heap.
+
+## Solution
+
+````python
+from typing import List, Tuple
+import heapq
+
+
+class Solution:
+    # --- Original teaching notes ---
+    # Same MST objective as Kruskal; Prim is natural when you think "grow one component
+    # from an arbitrary root" and the graph is sparse (m ~ n).
+    # --- end notes ---
+
+    def minimumCost(self, n: int, connections: List[List[int]]) -> int:
+        adj: List[List[Tuple[int, int]]] = [[] for _ in range(n)]
+        for a, b, c in connections:
+            u, v = a - 1, b - 1
+            adj[u].append((v, c))
+            adj[v].append((u, c))
+
+        visited = [False] * n
+        heap: List[Tuple[int, int]] = [(0, 0)]
+        total = 0
+        count = 0
+
+        while heap and count < n:
+            w, u = heapq.heappop(heap)
+            if visited[u]:
+                continue
+            visited[u] = True
+            total += w
+            count += 1
+            for v, wt in adj[u]:
+                if not visited[v]:
+                    heapq.heappush(heap, (wt, v))
+
+        return total if count == n else -1
+````

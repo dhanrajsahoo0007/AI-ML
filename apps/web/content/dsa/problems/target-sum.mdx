@@ -1,0 +1,83 @@
+---
+title: "Target sum"
+description: "Assign '+' or '-' to each element of nums so the resulting expression equals target."
+difficulty: medium
+patterns: [0-1-knapsack]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: find_target_sum_ways }
+starter:
+  python: |
+    def find_target_sum_ways(nums: list[int], target: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/target-sum.public.json, hidden: tests/target-sum.hidden.json }
+complexity: { time: "O(n * P).", space: "O(P) with 1D DP." }
+group: "02. 0-1 Knapsack"
+number: "09"
+leetcode: target-sum
+leetcodeId: 494
+order: 20002009000000
+---
+
+Assign '+' or '-' to each element of nums so the resulting expression equals
+target. Return the number of different assignments.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 1, 1, 1, 1], target = 3
+    Output: 5
+Example 2:
+    Input: nums = [1], target = 1
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 20
+- 0 <= nums[i] <= 1000
+- -1000 <= target <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Subset-sum counting with offset
+Let P be sum of positives; then P - (total - P) = target =&gt; 2P = total + target.
+
+1. If abs(target) &gt; total or (total + target) % 2 != 0 return 0.
+2. Let P = (total + target) // 2; count subsets of non-zero nums with sum P.
+3. Multiply by 2^(number of zeros) because each zero doubles sign choices.
+
+## Complexity
+
+**Time:** O(n \* P).
+
+**Space:** O(P) with 1D DP.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findTargetSumWays(self, nums: List[int], target: int) -> int:
+        total = sum(nums)
+        if abs(target) > total or (total + target) % 2 != 0:
+            return 0
+        p = (total + target) // 2
+        zeros = sum(1 for x in nums if x == 0)
+        arr = [x for x in nums if x != 0]
+        dp = [0] * (p + 1)
+        dp[0] = 1
+        for x in arr:
+            for j in range(p, x - 1, -1):
+                dp[j] += dp[j - x]
+        return dp[p] * (1 << zeros)
+````

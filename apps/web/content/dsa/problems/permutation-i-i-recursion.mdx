@@ -1,0 +1,181 @@
+---
+title: "Permutation I I Recursion| Backtracking"
+description: "Given a string s, return all distinct permutations of its characters (orderings that use every character exactly once)."
+difficulty: medium
+patterns: [permutation-pattern]
+topics: [backtracking]
+companies: []
+languages: [python]
+entry: { python: generate_permutations }
+starter:
+  python: |
+    def generate_permutations(s: str) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/permutation-i-i-recursion.public.json, hidden: tests/permutation-i-i-recursion.hidden.json }
+complexity: { time: "O(n * n!) worst case for distinct letters; fewer when duplicates exist.", space: "O(n) - recursion depth and swap buffer excluding output." }
+group: "01. Permutation Pattern"
+number: "01"
+order: 12001001000000
+---
+
+Given a string s, return all distinct permutations of its characters (orderings that use
+every character exactly once).
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "abc"
+    Output: ["abc","acb","bac","bca","cab","cba"] (order may vary)
+
+Example 2:
+    Input: s = "aab"
+    Output: ["aab","aba","baa"] (order may vary)
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 7
+- s contains lowercase English letters.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Permutation by swap with duplicate pruning
+Sort so equal letters group; at each position skip swapping the same value twice.
+
+1. Work on a list of chars; at index \`start\`, try swapping s\[start\] with s\[i\] for i &gt;= start.
+2. Use a set of characters already tried at this \`start\` to avoid duplicate permutations.
+3. After recursing, swap back to restore the array.
+
+## Complexity
+
+**Time:** O(n \* n!) worst case for distinct letters; fewer when duplicates exist.
+
+**Space:** O(n) - recursion depth and swap buffer excluding output.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem: Generate all permutations of a given string using recursion.
+
+Approach: We use a recursive algorithm to generate all permutations by fixing one character 
+and permuting the rest of the string.
+
+Time Complexity: O(n!), where n is the length of the string.
+Space Complexity: O(n) for the recursion stack.
+
+Explanation:
+1. We use a recursive function that fixes one character and permutes the rest.
+2. For each character in the input string, we make it the first character of the output 
+   and recursively permute the remaining characters.
+3. We use a set to store permutations to handle cases with duplicate characters in the input string.
+
+
+For example, given the string "abc", the permutations are:
+    ["abc", "acb", "bac", "bca", "cab", "cba"]
+
+Recursive Tree for input "abc":
+                    abc
+                /   |                   abc  bac  cba
+            /  \  /  \  /              abc acb bac bca cba cab
+
+---
+
+Problem Statement:
+    Given a string of length n, generate all possible permutations of its characters.
+    A permutation is an arrangement of all the characters in different orders.
+
+    For example, given the string "abc", the permutations are:
+    ["abc", "acb", "bac", "bca", "cab", "cba"]
+
+Approach:
+
+    We use a backtracking algorithm to generate all permutations:
+    1. Start with the entire string.
+    2. For each position from left to right:
+    a. Swap the character at the current position with each character to its right (including itself).
+    b. Recursively generate permutations for the rest of the string.
+    c. Backtrack by undoing the swap.
+    3. When we reach the end of the string, we've generated a complete permutation.
+
+Time Complexity: O(n * n!)
+    - We generate n! permutations (n choices for first position, n-1 for second, etc.)
+    - Each permutation takes O(n) time to construct
+
+Space Complexity: O(n * n!)
+    - We store n! permutations
+    - Each permutation is of length n
+    - The recursion stack can go up to depth n
+
+Recursive Tree for input "abc":
+
+                    abc
+                /   |                   abc  bac  cba
+            /  \  /  \  /              abc acb bac bca cba cab
+
+Explanation of the Recursive Tree:
+    - Root: The initial string "abc"
+    - Level 1: Represents choices for the first position
+        - abc: 'a' stays in place
+        - bac: 'b' is swapped to first position
+        - cba: 'c' is swapped to first position
+    - Level 2: Represents choices for the second position
+        - For "abc": 'b' stays, or 'c' is swapped
+        - For "bac": 'a' stays, or 'c' is swapped
+        - For "cba": 'b' stays, or 'a' is swapped
+    - Level 3 (Leaves): Final permutations
+
+Key Points:
+    1. Each level in the tree represents fixing a character at a specific position.
+    2. Branches represent different choices for each position.
+    3. The number of branches decreases by 1 at each level.
+    4. Leaf nodes (bottom level) represent complete permutations.
+    5. The depth of the tree is equal to the length of the string.
+    6. Total number of leaf nodes = n! (all possible permutations)
+
+Backtracking Process:
+    - Moving down the tree: Making a choice (swapping characters)
+    - Moving up the tree: Undoing a choice (backtracking)
+    - This process ensures we explore all possible combinations efficiently.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def generatePermutations(self, s: str) -> List[str]:
+        chars = list(s)
+        chars.sort()
+        result: List[str] = []
+
+        def swap(i: int, j: int) -> None:
+            """Swap two positions in the mutable char list (swap-based permutation)."""
+            chars[i], chars[j] = chars[j], chars[i]
+
+        def backtrack(start: int) -> None:
+            # Base case: fixed every position — snapshot the current ordering.
+            if start == len(chars):
+                result.append("".join(chars))
+                return
+            # At depth `start`, never place the same digit twice (handles duplicates like "aab").
+            used_at_pos: set[str] = set()
+            for i in range(start, len(chars)):
+                if chars[i] in used_at_pos:
+                    continue
+                used_at_pos.add(chars[i])
+                swap(start, i)
+                backtrack(start + 1)
+                swap(start, i)  # undo swap: classic backtrack unwind
+
+        backtrack(0)
+        return result
+````

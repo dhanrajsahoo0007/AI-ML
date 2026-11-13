@@ -1,0 +1,69 @@
+---
+title: "Minimum-Maximum Falling Path Sum"
+description: "Given n x n matrix, choose a falling path (start any column, each step go to adjacent column index +/-1 or same) minimizing total sum."
+difficulty: medium
+patterns: [2d-3d-dp]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: min_falling_path_sum }
+starter:
+  python: |
+    def min_falling_path_sum(matrix: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-maximum-falling-path-sum.public.json, hidden: tests/minimum-maximum-falling-path-sum.hidden.json }
+complexity: { time: "O(n^2).", space: "See the notes" }
+group: "06. 2D-3D DP"
+number: "06"
+order: 20006006000000
+---
+
+Given n x n matrix, choose a falling path (start any column, each step go to
+adjacent column index +/-1 or same) minimizing total sum.
+
+## Examples
+
+````text
+Example 1: matrix=[[2,1,3],[6,5,4],[7,8,9]] -> 13
+````
+
+## Constraints
+
+````text
+- n <= 100
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Row-wise DP with 3 predecessors
+dp\[i\]\[j\]=matrix\[i\]\[j\]+min(dp\[i-1\]\[k\]) for k in &#123;j-1,j,j+1&#125;.
+
+## Complexity
+
+**Time:** O(n^2). Space: O(n).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def minFallingPathSum(self, matrix: List[List[int]]) -> int:
+        n = len(matrix)
+        prev = matrix[0][:]
+        for i in range(1, n):
+            cur = [0] * n
+            for j in range(n):
+                best = prev[j]
+                if j:
+                    best = min(best, prev[j - 1])
+                if j + 1 < n:
+                    best = min(best, prev[j + 1])
+                cur[j] = matrix[i][j] + best
+            prev = cur
+        return min(prev)
+````

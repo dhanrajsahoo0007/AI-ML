@@ -1,0 +1,86 @@
+---
+title: "Longest Repeating Substring"
+description: "Given a string s, return the length of the longest substring that appears at least twice (the two occurrences may overlap)."
+difficulty: medium
+patterns: [sorting]
+topics: [sorting]
+companies: []
+languages: [python]
+entry: { python: longest_repeating_substring }
+starter:
+  python: |
+    def longest_repeating_substring(s: str) -> int:
+        # Your code here
+        pass
+tests: { public: tests/longest-repeating-substring.public.json, hidden: tests/longest-repeating-substring.hidden.json }
+complexity: { time: "O(n log n) average with hashing", space: "O(n) for the hash set per check" }
+leetcode: longest-repeating-substring
+leetcodeId: 1062
+order: 23999000000000
+---
+
+Given a string s, return the length of the longest substring that appears at
+least twice (the two occurrences may overlap).
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "abcd"
+    Output: 0
+Example 2:
+    Input: s = "aababa"
+    Output: 3
+````
+
+## Constraints
+
+````text
+- 2 <= len(s) <= 1500
+- s contains lowercase English letters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary search on length + rolling hash
+For candidate length L, slide a window and detect hash collisions.
+
+1. Binary search L from 0 to n.
+2. For each L, store hashes of substrings; return True on first collision.
+3. Return the largest feasible L.
+
+## Complexity
+
+**Time:** O(n log n) average with hashing
+
+**Space:** O(n) for the hash set per check
+
+## Solution
+
+````python
+class Solution:
+    def longestRepeatingSubstring(self, s: str) -> int:
+        n = len(s)
+
+        def has_repeat(L: int) -> bool:
+            if L == 0:
+                return True
+            seen = set()
+            for i in range(n - L + 1):
+                sub = s[i : i + L]
+                if sub in seen:
+                    return True
+                seen.add(sub)
+            return False
+
+        lo, hi = 0, n
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if has_repeat(mid):
+                lo = mid
+            else:
+                hi = mid - 1
+        return lo
+````

@@ -1,0 +1,82 @@
+---
+title: "Frog Jump"
+description: "Given heights of n stairs (0-indexed), start at stair 0."
+difficulty: hard
+patterns: [1d-dp]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: min_energy }
+starter:
+  python: |
+    def min_energy(height: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/frog-jump.public.json, hidden: tests/frog-jump.hidden.json }
+complexity: { time: "O(n) - single left-to-right pass.", space: "O(n) for dp; can be reduced to O(1) with two previous values." }
+group: "01. 1D DP"
+number: "03"
+leetcode: frog-jump
+leetcodeId: 403
+order: 20001003000000
+---
+
+Given heights of n stairs (0-indexed), start at stair 0. From stair i you may
+move to i+1 or i+2. Cost of a jump from i to j is abs(height\[j\] - height\[i\]).
+Return the minimum total cost to reach stair n-1.
+
+## Examples
+
+````text
+Example 1:
+    Input: height = [10, 20, 30, 10]
+    Output: 20
+Example 2:
+    Input: height = [10, 50, 10]
+    Output: 40
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 10^5
+- 1 <= height[i] <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 1D Dynamic Programming
+Minimum cost to reach i uses optimal costs at i-1 and i-2 plus jump costs.
+
+1. dp\[0\] = 0; dp\[1\] = abs(height\[1\]-height\[0\]).
+2. For i &gt;= 2, dp\[i\] = min(dp\[i-1\]+\|h\[i\]-h\[i-1\]\|, dp\[i-2\]+\|h\[i\]-h\[i-2\]\|).
+3. Return dp\[n-1\].
+
+## Complexity
+
+**Time:** O(n) - single left-to-right pass.
+
+**Space:** O(n) for dp; can be reduced to O(1) with two previous values.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def minEnergy(self, height: List[int]) -> int:
+        n = len(height)
+        if n == 1:
+            return 0
+        dp = [0] * n
+        dp[0] = 0
+        dp[1] = abs(height[1] - height[0])
+        for i in range(2, n):
+            one = dp[i - 1] + abs(height[i] - height[i - 1])
+            two = dp[i - 2] + abs(height[i] - height[i - 2])
+            dp[i] = min(one, two)
+        return dp[n - 1]
+````

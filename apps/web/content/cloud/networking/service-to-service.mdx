@@ -1,11 +1,303 @@
 ---
 title: "Service-to-Service Calls on the Cloud"
-description: "How services call each other on the cloud: gRPC through managed balancers, private DNS, service mesh and identity between services."
-status: outline
+description: "How your own services find and call each other on the cloud: private names, gRPC through managed balancers, deadlines, retries, service identity and meshes."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** gRPC and HTTP/2 through managed load balancers, service discovery and private DNS, service mesh, mutual TLS and workload identity between services. RPC theory is linked, not re-taught.
+<KeyIdea>
+  Programs that call each other need a name to find each other, a balancer that spreads every call, a limit on every wait, and proof of who is calling.
+</KeyIdea>
 
-**Related reading on this site:** [RPC and gRPC](/system-design/fundamentals/rpc) · [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries)
+## The story
+
+Brightpost is a small online shop that sells posters and greeting cards. In the spring the team moved order taking out of the shop app into an **order service** on 2 servers. When a shopper presses Pay, the order service saves the order and books a slot with the **print service**. That is 2 small servers that prepare print files for the printing partner. In October Asha switched those calls to gRPC. On this year's sale day a deploy restarts the order service at 8:50, and at 9:00 about 2,000 shoppers arrive. Print server A runs at 100% of its processor, and print server B sits at 3%. Each booking takes 9 seconds instead of 40 milliseconds, and every slow call is retried. By 9:40, about 1,100 print jobs are stuck in server A's queue, and about 150 shoppers have given up at Pay.
+
+Every step below follows one call from the order service to the print service, and ends with a sale day nobody notices.
+
+## How it works
+
+Three words first. A **service** is one program with one job, such as taking orders, that other programs call over the network. **Service discovery** is how a caller finds the current address of the service it wants. A **deadline** is the latest moment a caller will wait for an answer.
+
+### Step 1: Find each other by name
+
+<AnimatedDiagram spec="animated/cloud/grpc-call" step={1} minWidth={620} caption="The order servers ask for print.brightpost.internal, get the internal balancer's private address, and send each call through it." />
+
+Servers come and go, so a caller never holds another server's address. The order service asks for a name, `print.brightpost.internal`, kept in a private <Term id="dns" /> zone that only Brightpost's network can see. The name answers with the internal balancer's address, and the balancer knows which print servers are alive. [DNS on the Cloud](/cloud/networking/dns) covers private zones.
+
+The other way is a **registry**: a list of live servers that each one joins when it starts and leaves when it stops. Callers that pick a server themselves, as in Step 4, read the list from it.
+
+<PremiumBreak />
+
+### Step 2: gRPC: one connection, many calls
+
+<AnimatedDiagram spec="animated/cloud/grpc-call" step={2} minWidth={620} caption="With gRPC, each order server opens one HTTP/2 connection and sends every call on it. The balancer chose a print server once, when the connection opened." />
+
+**gRPC** is a way to call a function on another machine. A shared contract describes each call, generated code turns it into compact binary messages, and HTTP/2 carries them. [RPC and gRPC](/system-design/fundamentals/rpc), [Serialization](/system-design/fundamentals/serialization) and [HTTP](/system-design/fundamentals/http) teach all three; this page is about what happens to those calls on a cloud network.
+
+What matters here is the connection. With JSON over HTTP/1.1, the order servers opened a new connection for most calls. HTTP/2 runs many calls side by side on **one** connection and keeps it open for hours. That saves setup time on every call. It also means a balancer that picks a server once per connection now picks once a day.
+
+### Step 3: Both connections land on print server A
+
+<AnimatedDiagram spec="animated/cloud/grpc-call" step={3} minWidth={620} caption="The failure: after the restart, both long-lived connections land on print server A. It runs at 100%, server B sits idle, and the callers retry." />
+
+Brightpost's internal balancer works at **layer 4**: it sees addresses and ports, and picks a server when a connection opens. [Load Balancing](/cloud/networking/load-balancing) explains the layers. With 2 order servers, each with one connection, the balancer makes 2 choices. Each lands on A or B, so there is a 1 in 2 chance that both land on the same server.
+
+<Callout tone="red" title="What breaks">
+  The 8:50 restart opens two fresh connections, and both land on print server A. On a sale day each print server runs at about 60%, so one server alone needs 120% and falls behind. Calls that took 40 ms now take 9 s. The shop app gives up after 10 s and tries again, 3 times in all, and the order service also tries 3 times. One slow Pay can become 9 calls to a server that is already full.
+</Callout>
+
+This is a **retry storm**: retries add load to the server that is already failing. At 9:40 Asha restarts order server B, and its new connection happens to land on print server B. Luck fixed it; the next steps remove the luck.
+
+### Step 4: Balance every call, not every connection
+
+<AnimatedDiagram spec="animated/cloud/grpc-call" step={4} minWidth={620} caption="A layer 7 balancer reads each gRPC call and sends it to the less busy print server, so both share the sale-day load." />
+
+A **layer 7** balancer is a proxy that ends the caller's connection and reads each HTTP/2 call inside it. It picks a print server for **every call**, so 2 long-lived connections still spread over both servers. It also sends a **gRPC health check**, a small standard call asking the server if it is ready, and stops using one that says no.
+
+The second way is **client-side balancing**. The caller's gRPC library reads the print servers from a registry, holds a connection to each and spreads its own calls. That removes the middle hop, but every service in every language must get the library right. Brightpost chose the balancer: no code to change.
+
+### Step 5: One deadline for the whole chain
+
+<AnimatedDiagram spec="animated/cloud/grpc-deadline" stepper minWidth={620} caption="The Pay step gives the chain 3 seconds. Each hop passes on the time left, cuts a slow try at 1 second, and retries only while the budget allows." />
+
+On the sale day nobody set a deadline, so each caller waited as long as the slowest server. Now the shop app sets one deadline at the edge: Pay waits 3 seconds at most. gRPC sends the time left with each call. The order service starts its call 0.2 s later, so the print service sees 2.8 s left and passes 2.7 s on to the file read.
+
+When the deadline passes, every hop below it stops work on that call, so nobody prepares a print file for a shopper who has left. Each try also has its own 1-second limit, so one slow server cannot use up all 3.
+
+### Step 6: Retries with a budget
+
+Retries help with a short hiccup and hurt when a service is overloaded. Brightpost now follows four rules, taught in depth in [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries):
+
+1. **Retry at one layer only.** The order service retries; the shop app does not. One Pay is at most 2 print calls, not 9.
+2. **One retry, after a short random wait,** and only while time is left before the deadline.
+3. **A retry budget.** Retries may be at most 10% of recent calls. Above that, the service is in trouble, and more calls make it worse.
+4. **Only repeat what is safe to repeat.** Each BookPrint call carries the order number, so a second try cannot book the same poster twice. The idea is called <Term id="idempotent" />.
+
+When the budget is spent, the order service saves the order and books the print later from a queue. Pay still answers inside 3 seconds.
+
+### Step 7: Each service proves who it is
+
+<AnimatedDiagram spec="animated/cloud/grpc-call" step={5} minWidth={620} caption="The order service shows a short-lived credential from its own identity on every call. The print service checks it and refuses any other caller." />
+
+Being inside the private network proves nothing: a contractor's test script in the same network could book prints too. So each service gets its own **service identity**, the workload version of a user account. [Identity and Access](/cloud/fundamentals/identity-and-access) explains how a workload gets one without a stored key.
+
+There are two common proofs. With a **signed token**, the caller attaches a short-lived token for its identity, and the print service checks the signature and the name. With **mutual TLS (mTLS)**, both sides show a certificate when the connection opens. A layer 7 balancer ends <Term id="tls" />, so mTLS runs on each side of it, or end to end through a mesh. This idea, trusting identity rather than the network, is called <Term id="zero-trust" />.
+
+### Step 8: A service mesh, honestly
+
+A **service mesh** puts a small proxy beside every service, and a control plane tells the proxies what to do. They balance every call, add mTLS between every pair, apply retry rules and record each hop.
+
+<Compare
+  columns={["", "Without a mesh", "With a mesh"]}
+  rows={[
+    ["Per-call balancing", "A layer 7 balancer or a client library", "In the caller's proxy"],
+    ["mTLS between services", "Set up per service", "On for every pair"],
+    ["Retries and timeouts", "In each service's code", "In shared configuration"],
+    ["A record of every hop", "Added to each service", "From the proxies"],
+    ["Extra hops per call", "0 or 1", "2, one proxy at each end"],
+    ["What you run", "Balancers the cloud runs", "A control plane, a proxy beside every server, upgrades"],
+  ]}
+  caption="What a mesh adds, and what it costs. Managed meshes take over the control plane, not the thinking."
+/>
+
+A mesh pays off when dozens of services and several teams need the same rules. Brightpost has 3 services and 3 engineers, so it does not run one.
+
+## On AWS, Google Cloud and Azure
+
+On all three clouds the pieces are the same: a private name or registry, a balancer that spreads every call, a service identity, and an optional mesh.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Finding a service:** Route 53 private hosted zones for names. AWS Cloud Map is a registry, queried by API or DNS.
+    - **gRPC through a balancer:** an Application Load Balancer target group can use gRPC, so the ALB balances each call and runs gRPC health checks. A Network Load Balancer passes connections through, so it pins them.
+    - **Service identity:** IAM roles for each service. VPC Lattice can require calls signed with the caller's IAM credentials and check them against an auth policy.
+    - **Mesh or service network:** VPC Lattice is a managed service network that balances each request across networks and accounts. AWS retired App Mesh in September 2026; for ECS it points to ECS Service Connect.
+
+    **The difference that changes a design.** VPC Lattice moves the balancer and the access rules out of each service's network. Services join one service network, and callers in other networks and accounts reach them by name, with no peering. Each call is checked against an IAM auth policy on the way.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Finding a service:** Cloud DNS private zones for names. Service Directory is a registry, queried by API or DNS. Each Cloud Run service has a stable URL.
+    - **gRPC through a balancer:** the internal Application Load Balancer is a proxy that speaks HTTP/2 and gRPC to backends and balances each call. The internal passthrough Network Load Balancer forwards packets, so it pins connections.
+    - **Service identity:** a service account per service. On Cloud Run, the caller sends a signed ID token for its service account. The receiving service lets in only callers granted the invoker role.
+    - **Mesh or service network:** Cloud Service Mesh, a managed mesh for GKE and virtual machines. It can also steer gRPC clients directly, with no proxy beside them.
+
+    **The difference that changes a design.** On Cloud Run, "who may call this service" is an IAM grant, not a network rule. The print service would grant the invoker role to the order service's account alone. Any other caller is refused before it reaches the code.
+  </Tab>
+  <Tab label="Azure">
+    - **Finding a service:** Azure Private DNS zones linked to the virtual network. In Container Apps, apps in one environment call each other by app name; Dapr can also call a service by its app ID.
+    - **gRPC through a balancer:** Container Apps ingress carries HTTP/2 and gRPC. Application Gateway for Containers supports gRPC on AKS. The classic Application Gateway talks HTTP/1.1 to its backends, so it does not carry gRPC between services.
+    - **Service identity:** a managed identity per service, which gets tokens from Microsoft Entra ID. The receiving service checks the token's issuer and audience.
+    - **Mesh or service network:** the Istio-based service mesh add-on for AKS, whose control plane Microsoft upgrades. Dapr in Container Apps adds service calls with retries.
+
+    **The difference that changes a design.** For services on plain virtual machines, Azure has no managed layer 7 balancer that speaks HTTP/2 to backends. Per-call balancing for gRPC then comes from the client library or a proxy you run. Put gRPC services in Container Apps or AKS, and the platform balances each call.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/grpc-call" stepper minWidth={620} caption="The whole story in five steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/grpc-call" lead="aws" />
+
+## Try it
+
+Describe how one of your services calls another, and see what should sit between them.
+
+<DecisionTree
+  title="What should sit between two services?"
+  tree={{
+    q: "Does the caller keep one connection open for many calls, as gRPC and HTTP/2 do?",
+    yes: {
+      q: "Do more than about ten services call each other, owned by several teams?",
+      yes: {
+        answer: "A managed service network or a service mesh: per-call balancing, mTLS and retry rules in one place.",
+        href: "/cloud/compute/kubernetes-concepts",
+      },
+      no: "A private name in front of a layer 7 internal balancer that balances each call and runs gRPC health checks.",
+    },
+    no: {
+      q: "Do you need routing by path or a rule per call?",
+      yes: "A layer 7 internal balancer behind a private name.",
+      no: {
+        answer: "A layer 4 internal balancer is enough: connections are short, so spreading connections spreads the calls.",
+        href: "/cloud/networking/load-balancing",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Two order servers each open one long-lived connection through a layer 4 balancer to two print servers. What is the chance both land on the same print server?" hint="List the four ways two choices can fall.">
+    One in two. The pairs are A and A, A and B, B and A, B and B. Two of the four put both connections on one server.
+  </QuizItem>
+  <QuizItem question="On the sale day the shop app tried 3 times and the order service tried 3 times. How many print calls could one Pay cause, and how many under the new rules?">
+    Up to 9, because each of the shop's 3 tries caused 3 tries below it. Now only the order service retries, once, so one Pay causes at most 2 print calls.
+  </QuizItem>
+  <QuizItem question="Pay gives the chain 3 seconds. The order service starts 0.2 s later, and its first try is cut at 1 s. About how much time is left for the retry?" hint="Subtract as you go down.">
+    About 1.7 s: 3.0 minus 0.2 before the first try, minus 1 s for it, minus a little to send the retry. The retry lands on server B and answers in 60 ms.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Layer 4 balancer", "Layer 7 balancer", "Client-side balancing", "Service mesh"]}
+  rows={[
+    ["Picks a server", "Once per connection", "For every call", "For every call, in the caller", "For every call, in a proxy"],
+    ["2 long-lived gRPC connections", "Can both pin to 1 server", "Spread over both", "Spread over both", "Spread over both"],
+    ["Extra hops per call", "1, packets only", "1 proxy", "None", "2 proxies"],
+    ["mTLS between services", "Passes through untouched", "Ends at the balancer", "In the library", "On for every pair"],
+    ["What you run", "Nothing", "Nothing", "A library in every service", "A control plane and a proxy per server"],
+    ["Brightpost uses it for", "Nothing now", "The print service", "Nothing", "Nothing: 3 services"],
+  ]}
+  caption="Four ways to spread calls between services. Details differ by cloud and product."
+/>
+
+For a few services, a layer 7 internal balancer behind a private name does the job. Client libraries and meshes earn their cost with many services, teams and languages.
+
+## Common pitfalls
+
+- **A layer 4 balancer in front of gRPC.** It picks once per connection, and gRPC keeps connections for hours, so a few servers do all the work. Balance per call instead.
+- **No deadline.** Every caller waits as long as the slowest server, and the wait spreads up the chain. Set one deadline at the edge and pass the time left along.
+- **Retries at every layer.** Three layers that each try 3 times turn one call into 27. Retry at one layer, once, with a budget.
+- **Retrying calls that are not safe to repeat.** A second try can book a print twice. Send a key, such as the order number, so the receiver can spot a repeat.
+- **Trusting the private network.** Anything inside it can then call anything. Give each service an identity, and let receivers check it.
+
+## How to say it in an interview
+
+"Services find each other by a private DNS name or a registry, never by a fixed address. gRPC keeps one HTTP/2 connection open for hours, so a layer 4 balancer can pin all the load on one server. I use a layer 7 balancer or client-side balancing, which picks a server for every call. I set one deadline at the edge and pass the time left down the chain. Retries happen at one layer, once, inside a budget, and only for calls that are safe to repeat. Each service has its own identity, and I add a mesh only when many teams need the same rules."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="How does one service find another on the cloud?" level="Junior" category="Cloud">
+    **Short answer.** By name, never by a fixed address. Usually a private DNS name points at an internal balancer that knows which servers are alive. Or the caller asks a registry for the list of live servers and picks one itself.
+
+    **Why.** Deploys and autoscaling replace servers, so addresses change. Brightpost's order service asks for `print.brightpost.internal`, a name in a private zone. It answers with the internal balancer's address, which stays fixed while print servers come and go. A registry suits callers that balance their own calls, because they need every server's address.
+
+    <AnimatedDiagram spec="animated/cloud/grpc-call" step={1} highlight={["order-a", "dns", "ilb"]} caption="The order server asks for a private name and gets the balancer's address, not a print server's." />
+
+    **Follow-ups the interviewer may ask.**
+    - How long may a caller cache the DNS answer, and what goes wrong if it caches too long?
+    - When would you pick a registry over a private name?
+
+    **Watch out for.** Pointing a private name at each server's address. Callers cache the answers, so they keep calling servers that are gone.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why does gRPC behind a layer 4 balancer load the servers unevenly?" level="Mid" category="Cloud">
+    **Short answer.** A layer 4 balancer picks a server once, when a connection opens. gRPC runs every call on one HTTP/2 connection that stays open for hours. So all of one caller's calls go to one server, whatever the load.
+
+    **Why.** Brightpost's 2 order servers each held one connection to the print service. After a restart both landed on print server A, a 1 in 2 chance. Server A ran at 100% and server B at 3%, and calls slowed from 40 ms to 9 s. A layer 7 balancer or client-side balancing spreads each call instead.
+
+    <AnimatedDiagram spec="animated/cloud/grpc-call" step={3} path="order-b>ilb>print-a" caption="Both long-lived connections go through the layer 4 balancer to print server A." />
+
+    **Follow-ups the interviewer may ask.**
+    - Would closing connections every few minutes fix it, and what would it cost?
+    - What does a gRPC health check add over a TCP check?
+
+    **Watch out for.** Saying more callers would fix it. With few callers or many servers, the spread stays uneven, and new servers get no load until connections reopen.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design deadlines and retries for a three-hop call chain." level="Mid" category="Cloud">
+    **Short answer.** Set one deadline at the edge and pass the time left with every call. Give each try its own shorter limit. Retry at one layer only, once, inside a retry budget, and only for calls that are safe to repeat.
+
+    **Why.** Brightpost's Pay step gives the chain 3 seconds. The print service sees 2.8 s left and passes 2.7 s on, so no hop works for a shopper who has left. A 1 s limit per try leaves time for one retry on another server. Before, two layers each tried 3 times, so one Pay could become 9 calls. A budget of 10% of recent calls stops that.
+
+    <AnimatedDiagram spec="animated/cloud/grpc-deadline" step={3} caption="The first try is cut at 1 second; the retry goes to server B with 1.7 seconds left." />
+
+    **Follow-ups the interviewer may ask.**
+    - What should the order service do when the budget is spent?
+    - Where does a circuit breaker fit next to a retry budget?
+
+    **Watch out for.** A fixed timeout at every hop, such as 3 seconds each. Three hops can then wait 9 seconds, long after the shopper has gone.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does the print service know a call really comes from the order service?" level="Mid" category="Cloud">
+    **Short answer.** Each service gets its own identity from the cloud. The caller proves it on every call, with a short-lived signed token or with mutual TLS certificates. The receiver checks the identity against a rule that names who may call.
+
+    **Why.** A private network only says the call came from somewhere inside it, and a contractor's test script is inside too. With a token, the print service checks the signature, the expiry and the caller's name. With mTLS, both sides show certificates. A layer 7 balancer ends TLS, so mTLS runs on each side of it, or end to end through a mesh.
+
+    <AnimatedDiagram spec="animated/cloud/grpc-call" step={5} highlight={["identity", "order-b", "print-b"]} caption="The identity service gives the caller a short-lived credential and the receiver the keys to check it." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where do the certificates for mTLS come from, and who renews them?
+    - How would you let a second service call the print service for reads only?
+
+    **Watch out for.** Calling a firewall rule an identity check. It allows a range of addresses, and anything at those addresses passes.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your team wants a service mesh. When is it worth it, and when is it not?" level="Senior" category="Cloud">
+    **Short answer.** It is worth it when many services and several teams need the same per-call balancing, mTLS, retry rules and tracing. With a handful of services, managed balancers, service identity and a shared client library cost far less to run.
+
+    **Why.** Every call gains 2 proxy hops, every server gains a proxy to size and patch, and someone must understand the mesh when calls fail. A managed mesh runs the control plane, but the proxies and the debugging stay yours. Brightpost has 3 services and 3 engineers, so it uses a layer 7 balancer and written retry rules instead.
+
+    **Follow-ups the interviewer may ask.**
+    - How would you roll a mesh out one service at a time?
+    - What does a managed service network give you without a proxy beside every server?
+
+    **Watch out for.** Adding a mesh to fix uneven load alone. A layer 7 balancer or client-side balancing fixes that with far fewer moving parts.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [DNS on the Cloud](/cloud/networking/dns)
+- [Hosting REST and GraphQL APIs](/cloud/networking/hosting-apis)
+- [Private Endpoints: PrivateLink, Private Service Connect & Private Link](/cloud/networking/private-endpoints)
+- [Identity and Access](/cloud/fundamentals/identity-and-access)
+- [Zero Trust, Defence in Depth and Identity-Aware Access](/cloud/resilience/zero-trust)
+- [Quotas, Throttling, Retries and Backoff on the Cloud](/cloud/resilience/quotas-and-retries)
+- [Kubernetes Concepts: Cluster Anatomy and the Request Path](/cloud/compute/kubernetes-concepts)
+- [Networking on AWS](/cloud/aws/networking)
+- [Networking on Google Cloud](/cloud/gcp/networking)
+- [Networking on Azure](/cloud/azure/networking)
+- [RPC and gRPC](/system-design/fundamentals/rpc)
+- [Circuit Breaker, Retries and Timeouts](/system-design/patterns/circuit-breaker-and-retries)
+
+## Further reading
+
+- [Amazon VPC Lattice User Guide](https://docs.aws.amazon.com/vpc-lattice/latest/ug/what-is-vpc-lattice.html): service networks, auth policies and per-request routing.
+- [Cloud Service Mesh overview](https://cloud.google.com/service-mesh/docs/overview): Google Cloud's managed mesh for GKE and virtual machines.
+- [Authenticating service-to-service on Cloud Run](https://cloud.google.com/run/docs/authenticating/service-to-service): ID tokens and the invoker role.
+- [Communicate between container apps](https://learn.microsoft.com/azure/container-apps/connect-apps): names, ingress and Dapr calls in Azure Container Apps.

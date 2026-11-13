@@ -1,0 +1,101 @@
+---
+title: "Find Closest Node to Given Two Nodes"
+description: "You are given a directed graph of n nodes labeled 0..n-1 where each node has at most one outgoing edge."
+difficulty: hard
+patterns: [introduction-to-graph-traversal]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: closest_meeting_node }
+starter:
+  python: |
+    def closest_meeting_node(edges: list[int], node1: int, node2: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/find-closest-node-to-given-two-nodes.public.json, hidden: tests/find-closest-node-to-given-two-nodes.hidden.json }
+complexity: { time: "O(n) — each chain length bounded by n.", space: "O(n) — distance maps." }
+group: "03. DFS Story Based › 01. Introduction to Graph Traversal"
+number: "04"
+order: 17003001004000
+---
+
+You are given a directed graph of n nodes labeled 0..n-1 where each node has at most one outgoing edge.
+edges\[i\] is the destination of the edge from i, or -1 if none. Given node1 and node2, return the
+smallest index of a node reachable from both starts such that the maximum of the two distances
+(from node1 and from node2) is minimized. If multiple nodes tie, return the smallest index.
+
+## Examples
+
+````text
+Example 1:
+    Input: edges = [2,2,3,-1], node1 = 0, node2 = 1
+    Output: 2
+Example 2:
+    Input: edges = [1,2,-1], node1 = 0, node2 = 2
+    Output: 2
+````
+
+## Constraints
+
+````text
+- 2 <= n <= 10^5
+- edges.length == n
+- -1 <= edges[i] < n
+- edges[i] != i
+- 0 <= node1, node2 < n
+````
+
+**Also in the notes under:** [17. Graphs/04. BFS Story Based/01. Introduction to Graph Traversal with BFS](/dsa/problems/find-closest-node-to-given-two-nodes-introduction-to-graph-traversal-with-bfs) (placeholder).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Linear walk / hashing distances
+Because out-degree is at most one, walks from node1 and node2 are simple chains; intersect chains and score.
+
+1. From node1, follow edges recording distance until stop; repeat from node2.
+2. Every index appearing in both maps is a meeting node; pick minimal max(distance1, distance2), tie-break index.
+
+## Complexity
+
+**Time:** O(n) — each chain length bounded by n.
+
+**Space:** O(n) — distance maps.
+
+## Original notes
+
+````text
+See also: BFS-style walk in `04. BFS Story Based/01. Introduction to Graph Traversal with BFS/12. Find Closest Node to Given Two Nodes.py`
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def closestMeetingNode(self, edges: List[int], node1: int, node2: int) -> int:
+
+        def distances(start: int) -> dict[int, int]:
+            dist: dict[int, int] = {}
+            cur, step = start, 0
+            while cur != -1 and cur not in dist:
+                dist[cur] = step
+                step += 1
+                cur = edges[cur]
+            return dist
+
+        d1 = distances(node1)
+        d2 = distances(node2)
+        best = -1
+        best_score = 10**9
+        for i in range(len(edges)):
+            if i in d1 and i in d2:
+                score = max(d1[i], d2[i])
+                if score < best_score or (score == best_score and i < best):
+                    best_score = score
+                    best = i
+        return best
+````

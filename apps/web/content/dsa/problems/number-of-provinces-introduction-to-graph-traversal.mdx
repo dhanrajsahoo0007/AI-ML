@@ -1,0 +1,94 @@
+---
+title: "Number of provinces"
+description: "Given an n x n symmetric matrix isConnected where isConnected[i][j] is 1 if cities i and j are directly connected and 0 otherwise, return the number of provi…"
+difficulty: medium
+patterns: [introduction-to-graph-traversal]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: find_circle_num }
+starter:
+  python: |
+    def find_circle_num(isConnected: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/number-of-provinces-introduction-to-graph-traversal.public.json, hidden: tests/number-of-provinces-introduction-to-graph-traversal.hidden.json }
+complexity: { time: "O(n^2) — each cell of the matrix may be inspected when exploring neighbors.", space: "O(n) — visited array and recursion stack." }
+group: "03. DFS Story Based › 01. Introduction to Graph Traversal"
+number: "02"
+leetcode: number-of-provinces
+leetcodeId: 547
+order: 17003001002000
+---
+
+Given an n x n symmetric matrix isConnected where isConnected\[i\]\[j\] is 1 if cities i and j are directly
+connected and 0 otherwise, return the number of provinces (connected components in the undirected graph).
+
+## Examples
+
+````text
+Example 1:
+    Input: isConnected = [[1,1,0],[1,1,0],[0,0,1]]
+    Output: 2
+Example 2:
+    Input: isConnected = [[1,0,0],[0,1,0],[0,0,1]]
+    Output: 3
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 200
+- isConnected[i][j] is 0 or 1
+- isConnected[i][i] == 1
+````
+
+**Also in the notes under:** [17. Graphs/04. BFS Story Based/01. Introduction to Graph Traversal with BFS](/dsa/problems/number-of-provinces-introduction-to-graph-traversal-with-bfs); [17. Graphs/06. Disjoint Union Sets/03. Connected Components and Islands](/dsa/problems/number-of-provinces).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Connected components via DFS
+Each DFS/BFS from an unvisited city marks one province; count DFS starts.
+
+1. Track visited cities.
+2. For each unvisited i, run DFS on the matrix row i to mark all reachable cities.
+3. Increment province count after each DFS launch.
+
+## Complexity
+
+**Time:** O(n^2) — each cell of the matrix may be inspected when exploring neighbors.
+
+**Space:** O(n) — visited array and recursion stack.
+
+## Original notes
+
+````text
+See also: BFS component counting in `04. BFS Story Based/01. Introduction to Graph Traversal with BFS/02. Number of provinces.py`
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findCircleNum(self, isConnected: List[List[int]]) -> int:
+        n = len(isConnected)
+        visited = [False] * n
+        provinces = 0
+
+        def dfs(u: int) -> None:
+            visited[u] = True
+            for v in range(n):
+                if isConnected[u][v] == 1 and not visited[v]:
+                    dfs(v)
+
+        for i in range(n):
+            if not visited[i]:
+                dfs(i)
+                provinces += 1
+        return provinces
+````

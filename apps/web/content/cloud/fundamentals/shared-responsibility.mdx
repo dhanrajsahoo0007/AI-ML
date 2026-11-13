@@ -1,11 +1,282 @@
 ---
 title: "Shared Responsibility"
 description: "Where the provider's security work ends and yours begins, and how that line moves as a service becomes more managed."
-status: outline
+updated: 2026-11-12
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the line between what the provider secures and what stays yours, and how the line moves as a service becomes more managed. You leave able to list your own jobs on any stack.
+<KeyIdea>
+  The cloud company keeps its buildings, machines and services safe; keeping safe what you put on them, and how you set them up, is your job.
+</KeyIdea>
 
-**Related reading on this site:** [Cloud Basics](/cloud/start-here/cloud-basics) · [Security overview](/system-design/fundamentals/security)
+## The story
+
+Brightpost's orders database runs on a virtual machine that the team rents from a cloud provider. In the first week, Asha opened the database port to the whole internet so she could check orders from home. In March, a flaw in the machine's operating system is made public, and a fix comes out the same day. The provider patches its own servers within 3 days. Nobody patches Brightpost's machine. Thirty-eight days later, a scanning bot finds the open port, uses the flaw and locks the database. The shop is down for 7 hours. The team rebuilds from the last nightly export, which is 15 hours old, so about 250 orders are lost. Asha writes to the provider: "but the cloud is secure". The reply is polite. The provider did its part; the machine's operating system was Brightpost's.
+
+Every step below draws that line again, for a different way of running the same shop.
+
+## How it works
+
+Three words first. The **provider** is the company that runs the cloud: its buildings, servers and services. Brightpost is a <Term id="tenant">tenant</Term>, one customer among many on the same machines. A **patch** is an update that fixes a flaw in software. <Term id="shared-responsibility">Shared responsibility</Term> is the split of security work between the two.
+
+### Step 1: The line between two jobs
+
+<AnimatedDiagram spec="animated/cloud/responsibility-line" step={1} minWidth={620} caption="Brightpost's database on a virtual machine: five of the six layers are Brightpost's to secure." />
+
+Picture any workload as a stack of layers, from the building at the bottom to your data at the top. The provider secures the bottom: the buildings, the physical servers and the **hypervisor**, the software that splits one server into many virtual machines. Brightpost secures everything above that line.
+
+On a rented virtual machine, the line is low. Brightpost owns the operating system, the database engine on it, the network rules, the database users and the orders themselves. The provider never logs in to the machine. It must not, because the machine belongs to a tenant. The general ideas of keeping systems safe are in the [Security overview](/system-design/fundamentals/security); this page is about who does each job.
+
+<PremiumBreak />
+
+### Step 2: What the provider did not fix
+
+<AnimatedDiagram spec="animated/cloud/responsibility-line" step={2} minWidth={620} caption="The failure: a bot comes in through the open port, uses the 38-day-old flaw and locks the orders data." />
+
+The flaw sat in two places. The provider's own servers had it, and so did Brightpost's machine. The provider fixed its servers, because they are below the line. It could not fix the machine, because that is above the line.
+
+<Callout tone="red" title="What breaks">
+  The bot tries thousands of addresses an hour, looking for open database ports. Brightpost's port answers. The flaw is 38 days old and still unpatched, so the bot gets in and locks the data. The shop is offline for 7 hours, and 250 orders from the last 15 hours are gone.
+</Callout>
+
+Two jobs above the line were skipped: closing the port, and installing the fix. Neither was the provider's. The next steps hand some jobs over, and show which ones never move.
+
+### Step 3: A function: the line moves up
+
+<AnimatedDiagram spec="animated/cloud/responsibility-line" step={3} minWidth={620} caption="The image-resize worker as a function: the runtime and the operating system are now the provider's." />
+
+Brightpost's image-resize worker also ran on a virtual machine. The team moves it to a <Term id="serverless">serverless</Term> function: a piece of code that the provider starts each time a photo is uploaded. There is no machine to log in to. The provider patches the operating system and the **runtime**, the language engine that runs the code, such as Python or Node.js.
+
+Four jobs stay with Brightpost. The photos are its data. The function's permissions, read uploads and write thumbnails, are its rules. Who may call the function is its setting. And the code, with every **library** it bundles (code written by others that your code uses), is still its own. If the image library has a flaw, Brightpost must update it.
+
+### Step 4: A managed database: the line moves again
+
+<AnimatedDiagram spec="animated/cloud/responsibility-line" step={4} minWidth={620} caption="The orders database on a managed service: the engine and the operating system are the provider's; three layers stay Brightpost's." />
+
+Next, the orders database moves to a **managed database**, a database the provider installs, runs and patches for you. Now the provider fixes the engine and the operating system, in a weekly maintenance window Brightpost picks. The flaw from March would have been fixed on the provider's timetable, not Brightpost's.
+
+Three layers stay. The 90,000 customers' orders are still Brightpost's data. The database users and their passwords are still Brightpost's to manage. And the network rule is still Brightpost's choice: this time it says "private only", so only the shop's own servers can reach the port. A managed database with a public address and a weak password would be Brightpost's incident, not the provider's.
+
+### Step 5: Always yours, whatever you buy
+
+Look at the top of all three stacks. The same three layers are orange every time. However managed a service is, four jobs never cross the line.
+
+<Compare
+  columns={["Always yours", "What it means", "Brightpost example"]}
+  rows={[
+    ["Your data", "What you store, how long, and how you get it back", "The 730 nightly export files and the orders table"],
+    ["Who may get in", "People, programs and their permissions", "The worker may read uploads and write thumbnails, nothing else"],
+    ["How it is exposed", "Public or private, and who may call it", "The database port: open to all in March, private now"],
+    ["Your settings", "Every switch the service gives you", "Whether a storage bucket is public, whether logging is on"],
+  ]}
+  caption="The four jobs that stay with the tenant on every kind of service."
+/>
+
+A storage bucket shows this well. It is about as managed as a service gets: no machine, no engine, no patches. But "anyone on the internet may read this bucket" is a setting, and the setting is yours. Who may do what is the subject of [Identity and Access](/cloud/fundamentals/identity-and-access). Encryption keys are another setting you choose; [Encryption and keys](/cloud/resilience/encryption-and-keys) covers them.
+
+### Step 6: Reading the line for any service
+
+The same split holds from your own building to a finished app. This grid lays out five ways to run something. Read a column from the top to see your jobs.
+
+<ResponsibilityGrid set="shared-responsibility" />
+
+"Configure" means the provider runs the system and you choose the settings. Identity is the clearest case. The provider runs the sign-in system, keeps it patched and stores the passwords safely. Writing the rules about who may do what is yours. How much you operate on each rung of this ladder is the subject of [Service Models](/cloud/fundamentals/service-models). This page is only about who answers for security.
+
+### Step 7: Checking your side
+
+<AnimatedDiagram spec="animated/cloud/responsibility-line" step={5} minWidth={620} caption="A posture check reads the settings of all three services and flags what is wrong on Brightpost's side." />
+
+Your side has many settings, and a person cannot check them all every day. Each cloud offers a **posture check**: a service that reads your settings, compares them with good practice, and lists what is wrong. Your **security posture** is how well your settings match that practice.
+
+Had Brightpost turned one on in its first week, it would have flagged the open database port on day one. Most such tools also report machines that are missing patches. The tool only reports. Fixing each finding stays your job, by hand or with automation you set up.
+
+## On AWS, Google Cloud and Azure
+
+All three clouds draw the same line, under slightly different names, and each offers tools for your side of it.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Name for the idea:** the shared responsibility model.
+    - **Patching your own VMs:** AWS Systems Manager Patch Manager scans EC2 instances and installs patches on a schedule you set.
+    - **Managed database:** Amazon RDS applies engine and operating-system fixes during a maintenance window you choose.
+    - **Functions:** AWS Lambda patches the operating system and its managed runtimes. You pick the runtime version and move off old ones before support ends.
+    - **Checks your side:** AWS Security Hub collects findings and checks settings against good practice.
+
+    **The difference that changes a design.** Security Hub runs most of its checks through AWS Config, which records your resources' settings. Config must be on in every account and Region you use. A Region where nobody turned it on is a Region nobody checks. So switch both on everywhere, and gather the findings in one account.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Name for the idea:** shared responsibility and shared fate.
+    - **Patching your own VMs:** VM Manager's OS patch management installs patches on Compute Engine VMs on a schedule you set.
+    - **Managed database:** Cloud SQL applies fixes during a maintenance window you choose.
+    - **Functions:** Cloud Run functions keeps the operating system and the language runtime patched. You choose the runtime version.
+    - **Checks your side:** Security Command Center finds wrong settings, known flaws and threats.
+
+    **The difference that changes a design.** Google adds an idea it calls shared fate. Besides drawing the line, it publishes secure starting setups and recommended defaults, and expects you to start from them. Security Command Center can be turned on for the whole organization. Then every project, including next month's, is checked from the start.
+  </Tab>
+  <Tab label="Azure">
+    - **Name for the idea:** shared responsibility in the cloud.
+    - **Patching your own VMs:** Azure Update Manager checks Azure virtual machines for missing updates and installs them on a schedule.
+    - **Managed database:** Azure Database for PostgreSQL applies fixes during scheduled maintenance, and you can pick the time.
+    - **Functions:** Azure Functions patches the operating system and the Functions host. You choose the language version.
+    - **Checks your side:** Microsoft Defender for Cloud gives recommendations and a secure score.
+
+    **The difference that changes a design.** Defender for Cloud's recommendations come from Azure Policy definitions. So a rule that flags a setting can also be assigned to block it. Brightpost could first audit "storage must not be public", fix what it finds, then switch the same rule to deny.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/responsibility-line" stepper minWidth={620} caption="The whole story in five steps. The Services toggle shows each provider's name for the service in each stack." />
+
+<CloudMapping diagram="cloud/responsibility-line" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Whose job is it?"
+  tree={{
+    q: "Is it something physical: a building, a server, a cable?",
+    yes: "The provider's. You never touch the hardware.",
+    no: {
+      q: "Is it your data, a permission, or a setting you can change?",
+      yes: {
+        answer: "Yours, on every kind of service. The provider runs the switch; you decide where it points.",
+        href: "/cloud/fundamentals/identity-and-access",
+      },
+      no: {
+        q: "Can you log in to it, or do you choose its version and install updates?",
+        yes: "Yours to patch. That covers the OS on your own VMs, your container images and the libraries in your code.",
+        no: "The provider's. This is the service's own software, such as a managed database engine or a function's runtime.",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost's orders database now runs on a managed service. A new flaw in the database engine is published. Whose job is the fix?" hint="Which side of the line is the engine on in step 4?">
+    The provider's. It installs the fix in Brightpost's maintenance window. Brightpost's job is to keep that window weekly, not to postpone it for months.
+  </QuizItem>
+  <QuizItem question="The resize worker runs as a function. The image library it bundles has a known flaw. Whose job is the fix?" hint="Libraries travel inside your code.">
+    Brightpost's. The provider patches the runtime and the operating system, but the library is part of Brightpost's code. Updating it and deploying again is Brightpost's job.
+  </QuizItem>
+  <QuizItem question="In March, the bot got in 38 days after the flaw went public. Name the two things on Brightpost's side that would each have stopped it.">
+    A network rule that kept the port private, and an installed operating-system patch. Either one would have stopped the attack, and both were Brightpost's.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Database on a VM", "Function", "Managed database"]}
+  rows={[
+    ["Layers Brightpost secures (of 6)", "5", "4", "3"],
+    ["Who installs an OS fix", "Brightpost, when it remembers", "The provider", "The provider"],
+    ["In March, the flaw stayed open for", "38 days and counting", "Fixed on the provider's timetable", "Fixed in the next weekly window"],
+    ["Can log in to the machine", true, false, false],
+    ["Still Brightpost's", "Everything above the host", "Data, permissions, callers, code", "Data, users, network rules"],
+    ["What it costs in control", "Nothing: any OS, any setting", "Run-time limits, the provider's runtimes", "Only the engine versions and settings offered"],
+  ]}
+  caption="Brightpost's two workloads before and after the moves. The layers it secures fall from 5 to 3."
+/>
+
+Every layer handed over is one less patch to forget. What you give up is control over that layer, so hand over the layers you do not need to change.
+
+## Common pitfalls
+
+- **"The cloud is secure, so we are."** The provider secures its side only. Write down your side for each service you use, and give each job an owner.
+- **Ports open "for now".** A port opened for one evening stays open for years. Keep databases private, and reach them through the shop's own network instead.
+- **Forgetting what you bundle.** A function or container still carries your libraries and, for containers, a base image. Rebuild and redeploy when they get fixes.
+- **Assuming managed means private.** A managed database or bucket can still have a public address. Exposure is a setting, and the setting is yours.
+- **A posture check nobody reads.** Findings that pile up protect nothing. Send them to a person, fix the worst first, and check every account and region.
+
+## How to say it in an interview
+
+"Security in the cloud is split. The provider secures the buildings, the hardware, the virtualisation layer and its managed services' own software. I secure what I put in and how I set it up. The line moves with the service. On a VM, I patch the operating system and everything above it. On a function or a managed database, the provider patches the runtime or engine too. Four things are always mine: the data, who may get in, how it is exposed, and every setting. I list my side for each service, give each job an owner, and turn on a posture check to catch what we miss."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="On a fully serverless stack, what is still your job?" level="Junior" category="Cloud">
+    **Short answer.** Your data, who may reach it, how each function and endpoint is exposed, and your own code with its libraries. The provider runs the servers, the operating system, the runtime and the scaling.
+
+    **Why.** "Serverless" moves the bottom layers, not the top ones. Brightpost's resize worker has no machine to patch. But it still decides that the worker may read uploads and write thumbnails, and nothing else. It decides that only new uploads can start the worker. When the image library it bundles has a flaw, updating the library is Brightpost's job.
+
+    <AnimatedDiagram spec="animated/cloud/responsibility-line" step={3} highlight={["fn-data", "fn-access", "fn-callers", "fn-code"]} caption="On a function, four layers stay with Brightpost." />
+
+    **Follow-ups the interviewer may ask.**
+    - Who chooses the runtime version, and what happens when it reaches end of support?
+    - Is a function's public URL your setting or the provider's?
+
+    **Watch out for.** Answering "nothing, the provider handles security". Every serverless leak starts with a setting or a permission the tenant chose.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Who is responsible when a managed database is reachable from the internet?" level="Mid" category="Cloud">
+    **Short answer.** The tenant. The provider runs and patches the engine. Whether the database has a public address, and which network rules let traffic in, are the tenant's settings.
+
+    **Why.** Brightpost moved its orders database to a managed service, so the provider now fixes the engine and the operating system in a weekly window. The network rule stayed on Brightpost's side of the line. In March the port was open to the whole internet, and a bot found it. A managed engine would have had the flaw patched, but the open door would still be Brightpost's. Now the rule says "private only".
+
+    <AnimatedDiagram spec="animated/cloud/responsibility-line" step={4} highlight={["db-data", "db-access", "db-network"]} caption="On a managed database, the data, the users and the network rules stay with Brightpost." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do your servers reach a database that has no public address?
+    - What would a posture check report about this database?
+
+    **Watch out for.** Saying "the provider should have blocked it". Many teams need a public endpoint for good reasons, so the provider leaves the choice with you.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does the line change between managed Kubernetes (EKS, GKE, AKS) and serverless containers (Fargate, Cloud Run, Container Apps)?" level="Mid" category="Cloud">
+    **Short answer.** With managed Kubernetes in its standard form, the provider runs the control plane, but the worker nodes are virtual machines in your account. Keeping them patched is your job. With serverless containers there are no nodes, so the provider patches the hosts. In both, the container image is yours.
+
+    **Why.** A container is a package with your code, its libraries and a small base operating system inside. Whoever builds the image owns those files, so you rebuild it when its base image or a library gets a fix. The difference is the machines underneath.
+
+    <Compare
+      columns={["Layer", "Managed Kubernetes, your nodes", "Serverless containers"]}
+      rows={[
+        ["Container image and libraries", "Yours", "Yours"],
+        ["Worker machines and their OS", "Yours, with automatic upgrades you can switch on", "The provider's"],
+        ["Cluster control plane", "The provider's", "None to see"],
+        ["Who may call the service", "Yours", "Yours"],
+      ]}
+      caption="Some clusters also have a mode where the provider runs the nodes too, such as GKE Autopilot or EKS Auto Mode."
+    />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find out that a running image carries a library with a known flaw?
+    - When is it worth keeping your own nodes?
+
+    **Watch out for.** Saying a managed cluster means the provider patches everything. The control plane is managed; the nodes in standard mode are yours.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A company runs workloads in many accounts. How do you make sure nobody's side of the line is left undone?" level="Senior" category="Cloud">
+    **Short answer.** Write down the tenant's jobs for each kind of service, and give every account and service a named owner. Turn on a posture check for the whole organization, and send its findings to those owners. Use guardrails to block the most dangerous settings outright.
+
+    **Why.** Brightpost's March incident had no single villain: nobody owned "patch the database machine", and nobody was told the port was open. A posture check would have flagged the port on day one. It only helps if every account and region is covered, including ones created next month, and a person acts on what it says. For a few settings, such as public storage, a guardrail at the top of the organization blocks them before anyone has to notice. Moving workloads to more managed services shrinks the list further: Brightpost went from 5 layers to 3.
+
+    <AnimatedDiagram spec="animated/cloud/responsibility-line" step={5} highlight={["posture", "vm", "fn", "db"]} caption="One check reads every service's settings; people fix what it finds." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which findings would you fix first, and how would you decide?
+    - When would you block a setting instead of only flagging it?
+
+    **Watch out for.** Treating the posture score as the goal. A clean score with nobody owning the fixes decays within weeks.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Service Models: How Much Do You Run?](/cloud/fundamentals/service-models)
+- [Identity and Access](/cloud/fundamentals/identity-and-access)
+- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
+- [Encryption at Rest, in Transit and Key Management](/cloud/resilience/encryption-and-keys)
+- [Zero Trust, Defence in Depth and Identity-Aware Access](/cloud/resilience/zero-trust)
+- [Virtual Machines](/cloud/compute/virtual-machines)
+- [Identity & Security on AWS](/cloud/aws/security)
+- [Identity & Security on Google Cloud](/cloud/gcp/security)
+- [Identity & Security on Azure](/cloud/azure/security)
+- [Security overview](/system-design/fundamentals/security)
+
+## Further reading
+
+- [AWS shared responsibility model](https://aws.amazon.com/compliance/shared-responsibility-model/): the split as AWS describes it.
+- [Google Cloud: shared responsibilities and shared fate](https://cloud.google.com/architecture/framework/security/shared-responsibility-shared-fate): the split and Google's shared-fate idea.
+- [Shared responsibility in the cloud](https://learn.microsoft.com/azure/security/fundamentals/shared-responsibility): Microsoft's version of the split.
+- [Microsoft Defender for Cloud overview](https://learn.microsoft.com/azure/defender-for-cloud/defender-for-cloud-introduction): a posture check in practice.

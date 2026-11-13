@@ -1,0 +1,87 @@
+---
+title: "Bellman-Ford Algorithm"
+description: "Given V vertices (0..V-1), a list of directed weighted edges [u, v, w], and a source S, compute shortest distances from S to every vertex."
+difficulty: medium
+patterns: [bellman-ford-algorithm]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: bellman_ford }
+starter:
+  python: |
+    def bellman_ford(V: int, edges: list[list[int]], S: int) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/bellman-ford-algorithm.public.json, hidden: tests/bellman-ford-algorithm.hidden.json }
+complexity: { time: "O(V * E) — V-1 passes over all edges.", space: "O(V) for the distance array." }
+group: "07. Shortest Path Algorithm › 02. Bellman-Ford Algorithm"
+number: "01"
+order: 17007002001000
+---
+
+Given V vertices (0..V-1), a list of directed weighted edges \[u, v, w\], and a source S, compute shortest
+distances from S to every vertex. Negative edges are allowed; if a reachable negative cycle exists,
+return \[-1\]. Unreachable vertices are reported as -1 in the distance list.
+
+## Examples
+
+````text
+Example 1:
+    Input: V = 5, edges = [[0,1,5],[1,2,3],[2,3,1],[0,3,10],[1,3,2],[2,4,2],[3,4,6]], S = 0
+    Output: [0,5,8,7,10]
+Example 2:
+    Input: V = 3, edges = [[0,1,5],[1,2,-3],[2,0,-4]], S = 0
+    Output: [-1] (negative cycle)
+````
+
+## Constraints
+
+````text
+- 1 <= V <= 500
+- 1 <= len(edges) <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Bellman-Ford relaxation
+Relax all edges V-1 times; one more pass detecting further improvement reveals a negative cycle.
+
+1. Initialize distances to infinity except dist\[S\] = 0.
+2. Repeat V-1 relaxation rounds over all edges.
+3. If any edge still relaxes, return \[-1\]; otherwise normalize unreachable to -1.
+
+## Complexity
+
+**Time:** O(V \* E) — V-1 passes over all edges.
+
+**Space:** O(V) for the distance array.
+
+Notes: Dijkstra handles non-negative weights faster (typically O(E log V)); Bellman-Ford tolerates negatives
+and detects negative cycles that Dijkstra cannot.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def bellman_ford(self, V: int, edges: List[List[int]], S: int) -> List[int]:
+        INF = 10**18
+        dist = [INF] * V
+        dist[S] = 0
+        for _ in range(V - 1):
+            updated = False
+            for u, v, w in edges:
+                if dist[u] != INF and dist[u] + w < dist[v]:
+                    dist[v] = dist[u] + w
+                    updated = True
+            if not updated:
+                break
+        for u, v, w in edges:
+            if dist[u] != INF and dist[u] + w < dist[v]:
+                return [-1]
+        return [-1 if d == INF else d for d in dist]
+````

@@ -1,0 +1,84 @@
+---
+title: "Divide two integers without using mul,div,mod operator"
+description: "Divide two integers truncating toward zero without using *, /, or // on the operands (implement using bit shifts)."
+difficulty: medium
+patterns: [leetcode-and-alphabet-150]
+topics: [bit-manipulation]
+companies: []
+languages: [python]
+entry: { python: divide }
+starter:
+  python: |
+    def divide(dividend: int, divisor: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/divide-two-integers-without-using-mul-div-mod-operator.public.json, hidden: tests/divide-two-integers-without-using-mul-div-mod-operator.hidden.json }
+complexity: { time: "O(log^2 N) typical for this approach", space: "O(1)" }
+group: "02. Leetcode and Alphabet 150"
+number: "07"
+order: 22002007000000
+---
+
+Divide two integers truncating toward zero without using \*, /, or // on the
+operands (implement using bit shifts).
+
+## Examples
+
+````text
+Example 1:
+    Input: dividend = 10, divisor = 3
+    Output: 3
+Example 2:
+    Input: dividend = 7, divisor = -3
+    Output: -2
+````
+
+## Constraints
+
+````text
+- -2^31 <= dividend, divisor <= 2^31 - 1
+- divisor != 0
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary long division with bit shifts
+Repeatedly subtract the largest shifted divisor while preserving sign rules.
+
+1. Work with absolute values and track the result sign separately.
+2. Double divisor with shifts until it exceeds dividend, accumulate quotient bits.
+3. Clamp to 32-bit signed range.
+
+## Complexity
+
+**Time:** O(log^2 N) typical for this approach
+
+**Space:** O(1)
+
+## Solution
+
+````python
+INT_MAX = 2**31 - 1
+INT_MIN = -(2**31)
+
+
+class Solution:
+    def divide(self, dividend: int, divisor: int) -> int:
+        if dividend == INT_MIN and divisor == -1:
+            return INT_MAX
+        sign = -1 if (dividend < 0) ^ (divisor < 0) else 1
+        a, b = abs(dividend), abs(divisor)
+        ans = 0
+        while a >= b:
+            cur = b
+            mul = 1
+            while a >= (cur << 1):
+                cur <<= 1
+                mul <<= 1
+            a -= cur
+            ans += mul
+        ans *= sign
+        return min(max(ans, INT_MIN), INT_MAX)
+````

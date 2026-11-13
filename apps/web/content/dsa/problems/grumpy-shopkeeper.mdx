@@ -1,0 +1,81 @@
+---
+title: "Grumpy Shopkeeper"
+description: "Customers enter a shop minute by minute; customers[i] is how many enter on minute i."
+difficulty: medium
+patterns: [story-problem]
+topics: [sliding-window]
+companies: []
+languages: [python]
+entry: { python: max_satisfied }
+starter:
+  python: |
+    def max_satisfied(customers: list[int], grumpy: list[int], minutes: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/grumpy-shopkeeper.public.json, hidden: tests/grumpy-shopkeeper.hidden.json }
+complexity: { time: "O(n) - One pass for the baseline and one for the sliding window.", space: "O(1) - Only running totals are stored." }
+group: "06. Story Problem"
+number: "04"
+order: 7006004000000
+---
+
+Customers enter a shop minute by minute; customers\[i\] is how many enter on minute i.
+grumpy\[i\] is 1 if the owner is grumpy that minute (unhappy customers leave unsatisfied)
+or 0 otherwise. You can make the owner not grumpy for a consecutive block of minutes
+minutes. Return the maximum number of customers that can be satisfied.
+
+## Examples
+
+````text
+Example 1:
+    Input: customers = [1, 0, 1, 2, 1, 1, 7, 5], grumpy = [0, 1, 0, 1, 0, 1, 0, 1], minutes = 3
+    Output: 16
+Example 2:
+    Input: customers = [1], grumpy = [0], minutes = 1
+    Output: 1
+````
+
+## Constraints
+
+````text
+- len(customers) == len(grumpy)
+- 1 <= minutes <= len(customers)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Fixed-size sliding window on recoverable customers
+Baseline sums always-satisfied minutes; add the best window sum where grumpy == 1.
+
+1. Sum customers where grumpy is 0 as the baseline answer.
+2. Build a sliding window of length minutes over recoverable counts (grumpy\[i\] \* customers\[i\]).
+3. Track the maximum extra satisfaction and add it to the baseline.
+
+## Complexity
+
+**Time:** O(n) - One pass for the baseline and one for the sliding window.
+
+**Space:** O(1) - Only running totals are stored.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maxSatisfied(self, customers: List[int], grumpy: List[int], minutes: int) -> int:
+        base = sum(c for c, g in zip(customers, grumpy) if g == 0)
+
+        recover = [c if g == 1 else 0 for c, g in zip(customers, grumpy)]
+        window = sum(recover[:minutes])
+        extra = window
+
+        for i in range(minutes, len(recover)):
+            window += recover[i] - recover[i - minutes]
+            extra = max(extra, window)
+
+        return base + extra
+````

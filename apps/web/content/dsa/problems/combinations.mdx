@@ -1,0 +1,118 @@
+---
+title: "Combinations"
+description: "Given integers n and k, return all combinations of k numbers chosen from 1..n."
+difficulty: medium
+patterns: [combination-pattern]
+topics: [backtracking]
+companies: []
+languages: [python]
+entry: { python: combine_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def combine_tests(a0, a1):  # the entry the tests call
+        result = combine(a0, a1)
+        result = sorted(result, key=repr) if isinstance(result, list) else result
+        return result
+
+
+    # --- Your code ---
+    def combine(n: int, k: int) -> list[list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/combinations.public.json, hidden: tests/combinations.hidden.json }
+complexity: { time: "O(k * C(n, k)).", space: "O(k) auxiliary stack/path." }
+group: "03. Combination Pattern"
+number: "01"
+leetcode: combinations
+leetcodeId: 77
+order: 12003001000000
+---
+
+Given integers n and k, return all combinations of k numbers chosen from 1..n.
+
+## Examples
+
+````text
+Example 1:
+Input: n = 4, k = 2
+Output: [[1,2],[1,3],[1,4],[2,3],[2,4],[3,4]]
+````
+
+## Constraints
+
+````text
+- 1 <= k <= n <= 20
+````
+
+**Order.** Any order is accepted: the tests sort your result before comparing it.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Combination backtracking
+Choose the next value from an increasing start index so each combination appears once.
+
+1. When len(path) == k, append a copy.
+2. Loop i from start to n, push i, recurse with start = i + 1, pop.
+
+## Complexity
+
+**Time:** O(k \* C(n, k)).
+
+**Space:** O(k) auxiliary stack/path.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Generate all possible combinations of k numbers chosen from the range [1, n].
+
+Problem Statement:
+    Given two integers n and k, return all possible combinations of k numbers chosen from the range [1, n].
+    You may return the answer in any order.
+
+Args:
+    n (int): The upper bound of the range of numbers (1 to n)
+    k (int): The number of elements in each combination
+
+Returns:
+    list[list[int]]: A list of all possible combinations
+
+Time Complexity: O(k * C(n,k)), where C(n,k) is the binomial coefficient
+    - We generate C(n,k) combinations, and for each, we perform O(k) work to copy the combination
+
+Space Complexity: O(k * C(n,k))
+    - We store all C(n,k) combinations, each of size k
+    - The recursion stack can go up to depth k
+
+Example:
+    Input: n = 4, k = 2
+    Output: [[1,2],[1,3],[1,4],[2,3],[2,4],[3,4]]
+    Explanation: There are 6 possible combinations of 2 numbers from the range [1, 4].
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def combine(self, n: int, k: int) -> List[List[int]]:
+        result: List[List[int]] = []
+
+        def backtrack(start: int, path: List[int]) -> None:
+            if len(path) == k:
+                result.append(path[:])
+                return
+            for i in range(start, n + 1):
+                path.append(i)
+                backtrack(i + 1, path)
+                path.pop()
+
+        backtrack(1, [])
+        return result
+````

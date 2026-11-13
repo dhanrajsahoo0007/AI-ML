@@ -1,0 +1,175 @@
+---
+title: "Closest BST Value"
+description: "Given the root of a binary search tree and a target (floating point), return the node value whose absolute distance to target is minimum; break ties by choos…"
+difficulty: easy
+patterns: [range-based-problems]
+topics: [binary-search-trees]
+companies: []
+languages: [python]
+entry: { python: closest_value_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class TreeNode:
+        def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _build_tree(values):
+        if not values:
+            return None
+        nodes = [None if v is None else TreeNode(v) for v in values]
+        queue, i = [nodes[0]], 1
+        for node in queue:
+            if node is None:
+                continue
+            for side in ("left", "right"):
+                if i < len(values):
+                    setattr(node, side, nodes[i])
+                    queue.append(nodes[i])
+                    i += 1
+            if i >= len(values):
+                break
+        return nodes[0]
+
+
+    def _tree_values(root):
+        out, queue = [], [root] if root else []
+        for node in queue:
+            if node is None:
+                out.append(None)
+            else:
+                out.append(node.val)
+                queue += [node.left, node.right]
+        while out and out[-1] is None:
+            out.pop()
+        return out
+
+
+    def closest_value_tests(a0, a1):  # the entry the tests call
+        result = closest_value(_build_tree(a0), a1)
+        return result
+
+
+    # --- Your code ---
+    def closest_value(root: TreeNode | None, target: float) -> int:
+        # Your code here
+        pass
+tests: { public: tests/closest-bst-value.public.json, hidden: tests/closest-bst-value.hidden.json }
+complexity: { time: "O(h) - One downward path.", space: "O(1) - Iterative variables only." }
+group: "03. Range-Based Problems"
+number: "02"
+leetcode: closest-binary-search-tree-value
+leetcodeId: 270
+order: 15003002000000
+---
+
+Given the root of a binary search tree and a target (floating point), return the node value
+whose absolute distance to target is minimum; break ties by choosing the smaller value.
+
+## Examples
+
+````text
+Example 1:
+    Input: BST [4,2,5,1,3], target = 3.714286
+    Output: 4
+
+Example 2:
+    Input: BST [1], target = 4.428571
+    Output: 1
+````
+
+## Constraints
+
+````text
+- The tree is non-empty in typical tests; handle single-node trees.
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy BST descent
+Walk toward the target while tracking the closest value seen so far, refining at each step.
+
+1. Initialize closest to root.val.
+2. While current exists, update closest using absolute differences and tie-break with min value.
+3. Move left if target is smaller than current.val, else move right.
+
+## Complexity
+
+**Time:** O(h) - One downward path.
+
+**Space:** O(1) - Iterative variables only.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+Given the root of a binary search tree and a target value, return the value in the BST
+that is closest to the target. If there are multiple answers, return the smallest.
+
+Time Complexity: O(h), where h is the height of the tree
+Space Complexity: O(1) for iterative solution, O(h) for recursive solution due to call stack
+
+Approach:
+1. Traverse the BST.
+2. At each node, compare its value with the target.
+3. Update the closest value if the current node's value is closer to the target.
+4. Move left if target is smaller, right if target is larger.
+
+Example:
+Input: root = \[4,2,5,1,3\], target = 3.714286
+Output: 4
+
+Explanation:
+The closest value to 3.714286 is 4.
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: List[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+class Solution:
+    def closestValue(self, root: Optional[TreeNode], target: float) -> int:
+        closest = root.val
+        cur = root
+        while cur:
+            if abs(cur.val - target) < abs(closest - target):
+                closest = cur.val
+            elif abs(cur.val - target) == abs(closest - target):
+                closest = min(closest, cur.val)
+            cur = cur.left if target < cur.val else cur.right
+        return closest
+````

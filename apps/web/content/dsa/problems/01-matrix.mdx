@@ -1,0 +1,98 @@
+---
+title: "01 Matrix"
+description: "Given an m x n binary matrix mat, return a matrix of the same size where each cell contains the Manhattan distance from that cell to the nearest cell with va…"
+difficulty: medium
+patterns: [bfs]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: update_matrix }
+starter:
+  python: |
+    def update_matrix(mat: list[list[int]]) -> list[list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/01-matrix.public.json, hidden: tests/01-matrix.hidden.json }
+complexity: { time: "O(m * n) — each cell enqueued at most once.", space: "O(m * n) — distance matrix and queue." }
+group: "02. BFS"
+number: "04"
+leetcode: 01-matrix
+leetcodeId: 542
+order: 17002004000000
+---
+
+Given an m x n binary matrix mat, return a matrix of the same size where each cell contains the
+Manhattan distance from that cell to the nearest cell with value 0. Two cells are adjacent if they
+share an edge (4-directional). There is at least one 0 in mat.
+
+## Examples
+
+````text
+Example 1:
+    Input: mat = [[0,0,0],[0,1,0],[0,0,0]]
+    Output: [[0,0,0],[0,1,0],[0,0,0]]
+Example 2:
+    Input: mat = [[0,0,0],[0,1,0],[1,1,1]]
+    Output: [[0,0,0],[0,1,0],[1,2,1]]
+````
+
+## Constraints
+
+````text
+- 1 <= m, n <= 10^4
+- 1 <= m * n <= 10^4
+- mat[i][j] is 0 or 1
+- At least one 0 exists
+````
+
+**Also in the notes under:** [03. 2D Array - Matrix/01. Matrix Manipulation/01. Basics](/dsa/problems/01-matrix-basics) (placeholder).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Multi-source BFS
+Initialize the queue with all zeros at distance 0, then expand layer by layer to fill distances.
+
+1. Build a distance matrix initialized to -1 (unseen).
+2. Enqueue every (r,c) where mat\[r\]\[c\] == 0 with distance 0.
+3. BFS to neighbors in four directions; first visit sets shortest distance.
+
+## Complexity
+
+**Time:** O(m \* n) — each cell enqueued at most once.
+
+**Space:** O(m \* n) — distance matrix and queue.
+
+## Solution
+
+````python
+from typing import List
+from collections import deque
+
+
+class Solution:
+    def updateMatrix(self, mat: List[List[int]]) -> List[List[int]]:
+        if not mat:
+            return mat
+        rows, cols = len(mat), len(mat[0])
+        dist = [[-1] * cols for _ in range(rows)]
+        q: deque[tuple[int, int, int]] = deque()
+        for r in range(rows):
+            for c in range(cols):
+                if mat[r][c] == 0:
+                    q.appendleft((r, c, 0))
+                    dist[r][c] = 0
+        directions = ((-1, 0), (1, 0), (0, 1), (0, -1))
+        while q:
+            r, c, d = q.pop()
+            for dr, dc in directions:
+                nr, nc = r + dr, c + dc
+                if nr < 0 or nc < 0 or nr >= rows or nc >= cols:
+                    continue
+                if dist[nr][nc] != -1:
+                    continue
+                q.appendleft((nr, nc, d + 1))
+                dist[nr][nc] = d + 1
+        return dist
+````

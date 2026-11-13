@@ -1,0 +1,94 @@
+---
+title: "Course Scheduler I"
+description: "There are numCourses labeled 0..numCourses-1."
+difficulty: medium
+patterns: [topological-sort]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: can_finish }
+starter:
+  python: |
+    def can_finish(numCourses: int, prerequisites: list[list[int]]) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/course-scheduler-i-topological-sort.public.json, hidden: tests/course-scheduler-i-topological-sort.hidden.json }
+complexity: { time: "O(V + E)", space: "O(V + E)" }
+group: "05. Topological Sort"
+number: "03"
+leetcode: course-schedule
+leetcodeId: 207
+order: 17005003000000
+---
+
+There are numCourses labeled 0..numCourses-1. prerequisites\[i\] = \[a, b\] means you must take course b
+before course a. Return true if all courses can be finished; false if a prerequisite cycle exists.
+
+## Examples
+
+````text
+Example 1:
+    Input: numCourses = 2, prerequisites = [[1,0]]
+    Output: True
+Example 2:
+    Input: numCourses = 2, prerequisites = [[1,0],[0,1]]
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= numCourses <= 2000
+- 0 <= len(prerequisites) <= 5000
+````
+
+**Also in the notes under:** [17. Graphs/03. DFS Story Based/04. Scheduling and Planning](/dsa/problems/course-scheduler-i).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Cycle detection via Kahn's algorithm
+Model b -&gt; a edges; if topological peel processes all n nodes, the graph is a DAG.
+
+1. Build adjacency list for edges b -&gt; a and indegree counts for each course.
+2. BFS from indegree-zero nodes, counting processed nodes.
+3. Return whether processed count equals numCourses.
+
+## Complexity
+
+**Time:** O(V + E)
+
+**Space:** O(V + E)
+
+## Original notes
+
+````text
+See also: DFS version in `03. DFS Story Based/04. Scheduling and Planning/01. Course Scheduler I.py`
+````
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def canFinish(self, numCourses: int, prerequisites: List[List[int]]) -> bool:
+        adj = defaultdict(list)
+        indegree = [0] * numCourses
+        for a, b in prerequisites:
+            adj[b].append(a)
+            indegree[a] += 1
+        q: deque[int] = deque(i for i in range(numCourses) if indegree[i] == 0)
+        count = 0
+        while q:
+            u = q.popleft()
+            count += 1
+            for v in adj[u]:
+                indegree[v] -= 1
+                if indegree[v] == 0:
+                    q.append(v)
+        return count == numCourses
+````

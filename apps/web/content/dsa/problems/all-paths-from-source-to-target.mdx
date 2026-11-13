@@ -1,0 +1,115 @@
+---
+title: "All Paths From Source To Target"
+description: "Given a directed acyclic graph (DAG) of n nodes labeled 0..n-1, graph[i] lists nodes j with a directed edge i -> j."
+difficulty: medium
+patterns: [introduction-to-graph-traversal-with-bfs]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: all_paths_source_target_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def all_paths_source_target_tests(a0):  # the entry the tests call
+        result = all_paths_source_target(a0)
+        result = sorted(result, key=repr) if isinstance(result, list) else result
+        return result
+
+
+    # --- Your code ---
+    def all_paths_source_target(graph: list[list[int]]) -> list[list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/all-paths-from-source-to-target.public.json, hidden: tests/all-paths-from-source-to-target.hidden.json }
+complexity: { time: "O(2^n * n) worst case for path count and path copying.", space: "O(2^n * n) for the queue and stored paths." }
+group: "04. BFS Story Based › 01. Introduction to Graph Traversal with BFS"
+number: "01"
+leetcode: all-paths-from-source-to-target
+leetcodeId: 797
+order: 17004001001000
+---
+
+Given a directed acyclic graph (DAG) of n nodes labeled 0..n-1, graph\[i\] lists nodes j with a directed
+edge i -&gt; j. Return all paths from node 0 to node n-1 (in any order).
+
+## Examples
+
+````text
+Example 1:
+    Input: graph = [[1, 2], [3], [3], []]
+    Output: [[0, 1, 3], [0, 2, 3]]
+Example 2:
+    Input: graph = [[1], []]
+    Output: [[0, 1]]
+Example 3:
+    Input: graph = [[4, 3, 1], [3, 2, 4], [3], [4], []]
+    Output: five paths ending at 4 (see LeetCode 797)
+````
+
+## Constraints
+
+````text
+- n == len(graph)
+- 2 <= n <= 15
+- The graph is a DAG; edges are unique; no self-loops
+````
+
+**Order.** Any order is accepted: the tests sort your result before comparing it.
+
+**Also in the notes under:** [17. Graphs/03. DFS Story Based/01. Introduction to Graph Traversal](/dsa/problems/all-paths-from-source-to-target-introduction-to-graph-traversal).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph BFS (path enumeration with queue of partial paths)
+
+1. Initialize a queue with the path \[0\].
+2. Pop a path; if its last node is n-1, record it; else extend with each neighbor and enqueue copies.
+3. Continue until the queue is empty.
+
+## Complexity
+
+**Time:** O(2^n \* n) worst case for path count and path copying.
+
+**Space:** O(2^n \* n) for the queue and stored paths.
+
+## Original notes
+
+````text
+Explanation (preserved from original):
+BFS explores paths level-by-level using a queue of partial paths, appending neighbors to copies of the
+current path until the target node n-1 is reached.
+````
+
+## Solution
+
+````python
+from typing import List
+from collections import deque
+
+
+class Solution:
+    def allPathsSourceTarget(self, graph: List[List[int]]) -> List[List[int]]:
+        n = len(graph)
+        target = n - 1
+        result: List[List[int]] = []
+        temp = [0]  # Initial path with just the source node
+
+        que: deque[List[int]] = deque([temp])  # Initialize queue with the starting path [0]
+
+        while que:
+            currPath = que.popleft()
+            lastNode = currPath[-1]
+
+            if lastNode == target:
+                result.append(currPath)
+            else:
+                for v in graph[lastNode]:
+                    path = currPath.copy()  # Create a copy of the current path
+                    path.append(v)  # Append the new node
+                    que.append(path)
+
+        return result
+````

@@ -1,0 +1,152 @@
+---
+title: "Largest Number in Kth Swap"
+description: "Given a digit string num_str and an integer k, repeatedly swap any two positions at most k times to obtain the largest possible numeric string (lexicographic…"
+difficulty: medium
+patterns: [permutation-pattern]
+topics: [backtracking]
+companies: []
+languages: [python]
+entry: { python: find_maximum_num }
+starter:
+  python: |
+    def find_maximum_num(num_str: str, k: int) -> str:
+        # Your code here
+        pass
+tests: { public: tests/largest-number-in-kth-swap.public.json, hidden: tests/largest-number-in-kth-swap.hidden.json }
+complexity: { time: "Exponential in n and k in worst case; practical for small n.", space: "O(n) - recursion depth and digit list copy path." }
+group: "01. Permutation Pattern"
+number: "03"
+order: 12001003000000
+---
+
+Given a digit string num\_str and an integer k, repeatedly swap any two positions at most k
+times to obtain the largest possible numeric string (lexicographic maximum among digit strings).
+
+## Examples
+
+````text
+Example 1:
+    Input: num_str = "1234567", k = 4
+    Output: "7654321"
+
+Example 2:
+    Input: num_str = "1234", k = 2
+    Output: "4321"
+
+Example 3:
+    Input: num_str = "3435335", k = 3
+    Output: "5543333"
+````
+
+## Constraints
+
+````text
+- len(num_str) between 1 and 15 typically for backtracking
+- Digits are '0'..'9'
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Backtracking with greedy digit choice
+At each index, optionally swap a larger digit from the right into place, consuming one swap,
+or skip swapping and move on.
+
+1. Keep the best string seen in a mutable maximum.
+2. DFS on (index, remaining\_swaps): optionally swap index with each later position holding the max digit rightward.
+3. Always try advancing without swapping to cover cases where saving swaps helps later.
+
+## Complexity
+
+**Time:** Exponential in n and k in worst case; practical for small n.
+
+**Space:** O(n) - recursion depth and digit list copy path.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem: Largest Number with K Swaps
+
+    Given a number K and string str of digits denoting a indexitive integer, build the largest number 
+    indexsible by performing swap operations on the digits of str at most K times.
+
+Example:
+Input:
+    K = 4
+    str = "1234567"
+    Output:7654321
+
+Approach: Backtracking with Swap Method
+
+Time Complexity: O(n! / (n-k)!), where n is the length of the string and k is the number of swaps.
+Space Complexity: O(n) for the recursion stack and to store the current and maximum number.
+
+The idea remains the same as the previous backtracking approach, but we introduce a separate
+swap method for better code organization and readability.
+
+Explanation of the modified backtracking process:
+
+    1. We introduce a swap method that takes the number list and two indices to swap.
+
+    2. The main findMaximumNum function remains the same, initializing the process and keeping track of the maximum number found.
+
+    3. The backtrack function now uses the swap method:
+        - Base case: If k (remaining swaps) is 0 or we've reached the last indexition, we update the maximum number if necessary.
+        - For each indexition:
+            a. We find the maximum digit in the remaining part of the number.
+            b. If the current digit is not the maximum, we try swapping with each occurrence of the maximum digit:
+                - We use the swap method to perform the swap.
+                - We make a recursive call with k-1 swaps and move to the next indexition.
+                - We then use the swap method again to backtrack (undo the swap).
+        - We also explore the indexsibility of not swapping the current indexition.
+
+4. We keep updating self.max_num whenever we find a larger number.
+
+The swap method enhances code readability and makes it easier to understand the swapping operations. 
+It also centralizes the swapping logic, making the code more maintainable.
+
+Backtracking tree (simplified) for "1993" with k=1:
+
+                1993
+            /    |             9193  1993  1939
+                 |
+               1993
+
+This tree shows how different swap indexsibilities are explored. 
+The algorithm will find that 9931 is the largest indexsible number with 1 swap.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findMaximumNum(self, num_str: str, k: int) -> str:
+        digits: List[str] = list(num_str)
+        best = [num_str]
+
+        def swap(i: int, j: int) -> None:
+            digits[i], digits[j] = digits[j], digits[i]
+
+        def dfs(index: int, swaps: int) -> None:
+            cur = "".join(digits)
+            if cur > best[0]:
+                best[0] = cur
+            if swaps == 0 or index == len(digits):
+                return
+            max_digit = max(digits[index:])
+            if digits[index] != max_digit:
+                for j in range(index + 1, len(digits)):
+                    if digits[j] == max_digit:
+                        swap(index, j)
+                        dfs(index + 1, swaps - 1)
+                        swap(index, j)
+            dfs(index + 1, swaps)
+
+        dfs(0, k)
+        return best[0]
+````

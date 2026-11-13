@@ -1,0 +1,73 @@
+---
+title: "Check if a Straight Line"
+description: "You are given an array of coordinates where coordinates[i] = [x, y] is a point in the XY plane."
+difficulty: medium
+patterns: [leetcode-and-alphabet-150]
+topics: [math-and-geometry]
+companies: []
+languages: [python]
+entry: { python: check_straight_line }
+starter:
+  python: |
+    def check_straight_line(coordinates: list[list[int]]) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/check-if-a-straight-line.public.json, hidden: tests/check-if-a-straight-line.hidden.json }
+complexity: { time: "O(n)", space: "O(1)" }
+group: "02. Leetcode and Alphabet 150"
+number: "12"
+order: 21002012000000
+---
+
+You are given an array of coordinates where coordinates\[i\] = \[x, y\] is a point
+in the XY plane. Return True iff all points lie on the same straight line.
+
+## Examples
+
+````text
+Example 1:
+    Input: coordinates = [[1,2],[2,3],[3,4],[4,5],[5,6],[6,7]]
+    Output: True
+Example 2:
+    Input: coordinates = [[1,1],[2,2],[3,4],[4,5],[5,6],[7,7]]
+    Output: False
+````
+
+## Constraints
+
+````text
+- 2 <= len(coordinates) <= 1000
+- Coordinates are integers
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Collinearity via cross product
+All points collinear with the first two iff each point forms zero oriented area.
+
+1. Use the first point as origin and the second to define direction.
+2. For every other point, check cross product with the base vector is zero.
+
+## Complexity
+
+**Time:** O(n)
+
+**Space:** O(1)
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def checkStraightLine(self, coordinates: List[List[int]]) -> bool:
+        (x0, y0), (x1, y1) = coordinates[0], coordinates[1]
+        dx0, dy0 = x1 - x0, y1 - y0
+        for x, y in coordinates[2:]:
+            if (x - x0) * dy0 != (y - y0) * dx0:
+                return False
+        return True
+````

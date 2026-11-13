@@ -1,0 +1,101 @@
+---
+title: "Course Scheduler I"
+description: "There are numCourses courses labeled 0..numCourses-1."
+difficulty: medium
+patterns: [scheduling-and-planning]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: can_finish }
+starter:
+  python: |
+    def can_finish(numCourses: int, prerequisites: list[list[int]]) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/course-scheduler-i.public.json, hidden: tests/course-scheduler-i.hidden.json }
+complexity: { time: "O(V + E) — each vertex and edge is touched once in the DFS framing.", space: "O(V + E) — adjacency list plus O(V) for state arrays and recursion stack." }
+group: "03. DFS Story Based › 04. Scheduling and Planning"
+number: "01"
+leetcode: course-schedule
+leetcodeId: 207
+order: 17003004001000
+---
+
+There are numCourses courses labeled 0..numCourses-1. prerequisites\[i\] = \[a, b\] means course b must be
+completed before course a. Return true if every course can be finished; false if the prerequisite graph
+has a cycle.
+
+## Examples
+
+````text
+Example 1:
+    Input: numCourses = 2, prerequisites = [[1, 0]]
+    Output: True
+Example 2:
+    Input: numCourses = 2, prerequisites = [[1, 0], [0, 1]]
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= numCourses <= 2000
+- 0 <= len(prerequisites) <= 5000
+- prerequisites[i].length == 2
+````
+
+**Also in the notes under:** [17. Graphs/05. Topological Sort](/dsa/problems/course-scheduler-i-topological-sort).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DFS cycle detection on a directed graph
+Build edges b -&gt; a; three-color DFS (unvisited / in-stack / done) detects a back-edge (cycle).
+
+1. Build adjacency list with edge b -&gt; a for each \[a, b\].
+2. For each unvisited node, run DFS marking nodes on the current recursion stack.
+3. If a neighbor is already on the stack, a cycle exists; otherwise mark finished and backtrack.
+
+## Complexity
+
+**Time:** O(V + E) — each vertex and edge is touched once in the DFS framing.
+
+**Space:** O(V + E) — adjacency list plus O(V) for state arrays and recursion stack.
+
+## Original notes
+
+````text
+See also: Kahn's (BFS) version in `05. Topological Sort/03. Course Scheduler I.py`
+````
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict
+
+
+class Solution:
+    def canFinish(self, numCourses: int, prerequisites: List[List[int]]) -> bool:
+        adj = defaultdict(list)
+        for a, b in prerequisites:
+            adj[b].append(a)
+
+        state = [0] * numCourses  # 0 unvisited, 1 visiting, 2 done
+
+        def dfs(u: int) -> bool:
+            state[u] = 1
+            for v in adj[u]:
+                if state[v] == 1:
+                    return False
+                if state[v] == 0 and not dfs(v):
+                    return False
+            state[u] = 2
+            return True
+
+        for i in range(numCourses):
+            if state[i] == 0 and not dfs(i):
+                return False
+        return True
+````

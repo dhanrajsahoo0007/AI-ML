@@ -1,0 +1,98 @@
+---
+title: "Lexicographically Smallest Equivalent String"
+description: "You are given strings s1, s2, and base of equal lengths consisting of lowercase English letters."
+difficulty: medium
+patterns: [string-and-grid-based-dfs]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: smallest_equivalent_string }
+starter:
+  python: |
+    def smallest_equivalent_string(s1: str, s2: str, base: str) -> str:
+        # Your code here
+        pass
+tests: { public: tests/lexicographically-smallest-equivalent-string.public.json, hidden: tests/lexicographically-smallest-equivalent-string.hidden.json }
+complexity: { time: "O((n + m) * alpha(26)) — effectively linear in total length.", space: "O(1) — 26 letters for DSU state." }
+group: "03. DFS Story Based › 06. String and Grid-based DFS"
+number: "01"
+leetcode: lexicographically-smallest-equivalent-string
+leetcodeId: 1061
+order: 17003006001000
+---
+
+You are given strings s1, s2, and base of equal lengths consisting of lowercase English letters. Any two
+characters at the same index in s1 and s2 are equivalent (transitively). Replace each character of base
+with the lexicographically smallest character in its equivalence class. Return the resulting string.
+
+## Examples
+
+````text
+Example 1:
+    Input: s1 = "parker", s2 = "morris", base = "parser"
+    Output: "makkek"
+Example 2:
+    Input: s1 = "hello", s2 = "world", base = "hold"
+    Output: "hdld"
+````
+
+## Constraints
+
+````text
+- 1 <= s1.length, s2.length, base.length <= 1000
+- s1, s2, base consist of lowercase English letters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Union-Find on the alphabet
+Union equivalent letters; each root stores the smallest letter in its component.
+
+1. Initialize parent\[i\] = i for letters a..z (or only those seen).
+2. For each index, union the two letters from s1 and s2.
+3. For each c in base, map c to the minimum letter in find(c)'s set.
+
+## Complexity
+
+**Time:** O((n + m) \* alpha(26)) — effectively linear in total length.
+
+**Space:** O(1) — 26 letters for DSU state.
+
+## Original notes
+
+````text
+See also: DSU intro in `06. Disjoint Union Sets/01. Introduction to Disjoint Set Union (DSU)/01. DSU By Rank and Path Compression.py`
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def smallestEquivalentString(self, s1: str, s2: str, base: str) -> str:
+        parent: List[int] = list(range(26))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra == rb:
+                return
+            if ra < rb:
+                parent[rb] = ra
+            else:
+                parent[ra] = rb
+
+        for c1, c2 in zip(s1, s2):
+            union(ord(c1) - ord("a"), ord(c2) - ord("a"))
+
+        return "".join(chr(ord("a") + find(ord(c) - ord("a"))) for c in base)
+````

@@ -1,0 +1,216 @@
+---
+title: "Balance a BST"
+description: "Given the root of a binary search tree, return the balanced BST built by making the middle value of the sorted values the root (the lower middle when the cou…"
+difficulty: medium
+patterns: [bst-construction-and-modification]
+topics: [binary-search-trees]
+companies: []
+languages: [python]
+entry: { python: balance_bst_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class TreeNode:
+        def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _build_tree(values):
+        if not values:
+            return None
+        nodes = [None if v is None else TreeNode(v) for v in values]
+        queue, i = [nodes[0]], 1
+        for node in queue:
+            if node is None:
+                continue
+            for side in ("left", "right"):
+                if i < len(values):
+                    setattr(node, side, nodes[i])
+                    queue.append(nodes[i])
+                    i += 1
+            if i >= len(values):
+                break
+        return nodes[0]
+
+
+    def _tree_values(root):
+        out, queue = [], [root] if root else []
+        for node in queue:
+            if node is None:
+                out.append(None)
+            else:
+                out.append(node.val)
+                queue += [node.left, node.right]
+        while out and out[-1] is None:
+            out.pop()
+        return out
+
+
+    def balance_bst_tests(a0):  # the entry the tests call
+        result = _tree_values(balance_bst(_build_tree(a0)))
+        return result
+
+
+    # --- Your code ---
+    def balance_bst(root: TreeNode | None) -> TreeNode | None:
+        # Your code here
+        pass
+tests: { public: tests/balance-a-bst.public.json, hidden: tests/balance-a-bst.hidden.json }
+complexity: { time: "O(n) - Each node visited twice (collect and build).", space: "O(n) - Sorted list plus recursion stack O(log n) on balanced build." }
+group: "04. BST Construction and Modification"
+number: "03"
+leetcode: balance-a-binary-search-tree
+leetcodeId: 1382
+order: 15004003000000
+---
+
+Given the root of a binary search tree, return the balanced BST built by making the middle value of the sorted
+values the root (the lower middle when the count is even) and building each half the same way, that contains exactly the same
+values. A balanced tree has left and right subtree heights differing by at most one at every node.
+
+## Examples
+
+````text
+Example 1:
+    Input: skewed BST with values 1..5
+    Output: balanced BST with the same multiset of values
+
+Example 2:
+    Input: None
+    Output: None
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [1, 10^4].
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sort then build middle-root recursion
+Inorder collects sorted values; building from the middle index each time yields height-balanced BST.
+
+1. Inorder traverse to collect values in sorted order.
+2. Recursively pick mid index as root, left half builds left subtree, right half builds right subtree.
+3. Return the new root.
+
+## Complexity
+
+**Time:** O(n) - Each node visited twice (collect and build).
+
+**Space:** O(n) - Sorted list plus recursion stack O(log n) on balanced build.
+Restored (original notes, diagrams, and walkthrough):
+Problem: Balance a Binary Search Tree
+Same problem is : Convert Sorted Array to Balanced Binary Search Tree (inorder traversal is not required)
+
+Given the root of a binary search tree, return a balanced binary search tree with the same node values.
+If there is more than one answer, return any of them.
+
+A binary search tree is balanced if the depth of the two subtrees of every node never differs by more than 1.
+
+Approach:
+1. Perform an in-order traversal of the BST to get a sorted list of node values.
+2. Use the sorted list to construct a new balanced BST.
+
+Time Complexity: O(n), where n is the number of nodes in the tree.
+Space Complexity: O(n) for the list and the recursion stack.
+
+Visual representation of the binary tree before balancing:
+
+4
+/      2     6
+/ \\      1   3     7
+9
+
+Visual representation of the binary tree after balancing:
+
+4
+/        2       7
+/ \\     /  1   3   6   9
+
+## Solution
+
+````python
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_bst_insert(values: List[int]) -> Optional[TreeNode]:
+    root: Optional[TreeNode] = None
+    for v in values:
+        if root is None:
+            root = TreeNode(v)
+            continue
+        cur = root
+        while True:
+            if v < cur.val:
+                if cur.left is None:
+                    cur.left = TreeNode(v)
+                    break
+                cur = cur.left
+            else:
+                if cur.right is None:
+                    cur.right = TreeNode(v)
+                    break
+                cur = cur.right
+    return root
+
+
+def inorder_values(root: Optional[TreeNode]) -> List[int]:
+    if not root:
+        return []
+    return inorder_values(root.left) + [root.val] + inorder_values(root.right)
+
+
+def height(root: Optional[TreeNode]) -> int:
+    if not root:
+        return 0
+    return 1 + max(height(root.left), height(root.right))
+
+
+def is_balanced(root: Optional[TreeNode]) -> bool:
+    if not root:
+        return True
+    if abs(height(root.left) - height(root.right)) > 1:
+        return False
+    return is_balanced(root.left) and is_balanced(root.right)
+
+
+class Solution:
+    def balanceBST(self, root: Optional[TreeNode]) -> Optional[TreeNode]:
+        values: List[int] = []
+
+        def collect(node: Optional[TreeNode]) -> None:
+            if not node:
+                return
+            collect(node.left)
+            values.append(node.val)
+            collect(node.right)
+
+        collect(root)
+
+        def build(lo: int, hi: int) -> Optional[TreeNode]:
+            if lo > hi:
+                return None
+            mid = (lo + hi) // 2
+            node = TreeNode(values[mid])
+            node.left = build(lo, mid - 1)
+            node.right = build(mid + 1, hi)
+            return node
+
+        return build(0, len(values) - 1)
+````

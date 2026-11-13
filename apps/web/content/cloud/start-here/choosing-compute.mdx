@@ -1,74 +1,303 @@
 ---
-title: "Choosing Compute on AWS"
-description: "EC2 vs ECS vs EKS vs Fargate vs Lambda: an interactive picker, who runs what, and the matching choice on Google Cloud and Azure."
+title: "Choosing Compute"
+description: "Three facts about a workload decide where it runs on any cloud: virtual machines, managed Kubernetes, serverless containers or functions."
+updated: 2026-11-13
 ---
 
-"Where would you run this?" is a question in most cloud design interviews. On AWS the honest answer depends on three things: **how long each unit of work runs**, **how steady the load is**, and **how much platform your team wants to run**. This guide walks through those three, then gives the matching answer on Google Cloud and Azure.
+## In one sentence
 
-## TL;DR
+<KeyIdea>
+  Three facts decide where code should run: how long it runs and how steady its traffic is, how much of the machine it controls, and who looks after it.
+</KeyIdea>
 
-- **Short, spiky, event-driven work** → **Lambda**.
-- **Long-running services, no Kubernetes needed** → **ECS on Fargate** (or **ECS Express Mode** for a simple web app).
-- **Kubernetes is the requirement** → **EKS**, with **Auto Mode** unless you need custom nodes.
-- **You need the machine** (GPUs, licensed software, steady high load) → **EC2**, or ECS/EKS on EC2.
-- **Batch jobs** → **AWS Batch**, on Spot where jobs can retry.
-- On Google Cloud, **Cloud Run** covers most of what Lambda, Fargate and Express Mode do on AWS; on Azure, **Container Apps** does.
+## The story
 
-## Try it: pick a compute service
+Brightpost's shop runs on rented virtual machines, two on a normal day and up to 10 on a sale day. Its photo-resize job runs as a function. Now the team wants a "You may also like" row on every product page. Asha writes a job that reads the last 90 days of orders, about 36,000 of them. For each of the shop's 2,000 products, it picks the 6 products most often bought with it. On her laptop, with one week of orders, it finishes in 4 minutes. So she deploys it the way the resize job runs: as a function, started at 01:00 every night. On 90 days of orders the job needs about 40 minutes. The platform stops it at 15 minutes, Brightpost's time limit. The scheduler tries twice more, and each try starts from zero. For three nights the row stays empty on all 2,000 product pages. On Friday a customer asks the support agent where the suggestions went.
+
+The code was fine. It ran in the wrong place. The steps below show how to pick the right place before you deploy.
+
+## How it works
+
+Four words first. A **workload** is one job a program does, such as serving the shop or resizing photos. **Compute** is the processor time and memory a cloud rents you to run it. A **virtual machine** (VM) is a rented slice of a big computer that acts like a computer of its own. A **time limit** is the longest one run may last before the platform stops it.
+
+### Step 1: Three facts, then the place
+
+<AnimatedDiagram spec="animated/cloud/brightpost-compute-journey" step={1} minWidth={620} caption="Brightpost today: customers reach a fleet of 2 to 10 virtual machines, which the team patches, in front of a managed orders database." />
+
+Every workload has three facts that decide where it runs.
+
+1. **How long it runs, and how steady its traffic is.** A request that takes 200 ms, a job that takes 40 minutes, or a server that is busy all day.
+2. **How much of the machine it must control.** A special operating system (OS) setting, a driver, or nothing at all.
+3. **Who will operate it.** Who patches it, watches it and fixes it, and how many hours they have.
+
+Apply them to the shop app in the picture. It serves shoppers all day: about 40 at once at a normal peak, 2,000 on a sale morning. It needs nothing special from the OS. Its 3 engineers patch its VMs themselves.
+
+The facts point to one of four places, from most control to least: VMs, containers on managed Kubernetes, serverless containers, and functions. The product name comes last. [Service Models](/cloud/fundamentals/service-models) explains the ladder these places sit on.
+
+<PremiumBreak />
+
+### Step 2: Four places to run code
+
+A <Term id="container">container</Term> is a program packed with everything it needs to run, so it runs the same on any machine. <Term id="kubernetes">Kubernetes</Term> runs many containers across a group of machines, called a cluster. **Serverless containers** take one container and run it with no machines in sight. A **function** is a small piece of code that runs once each time an event happens.
+
+<Compare
+  columns={["", "VMs", "Managed Kubernetes", "Serverless containers", "Functions"]}
+  rows={[
+    ["You hand over", "A machine image", "Container images and their settings", "One container image", "The code of one task"],
+    ["Longest single run", "No limit", "No limit", "Hours, run as a job", "Minutes"],
+    ["Cost while idle", "Every hour, busy or not", "Every node, busy or not", "None once a job ends", "None"],
+    ["Control of the OS", "Full", "Some, on the nodes", "None", "None"],
+    ["Who patches the OS", "You", "You or the provider, by mode", "The provider", "The provider"],
+    ["Brightpost uses it for", "The shop app", "Nothing yet", "The recommender (Step 6)", "Photo resize"],
+  ]}
+  caption="The four places, from most control on the left to least work on the right."
+/>
+
+Each column to the right hands the provider one more layer and takes away one choice. The [Compute hub](/cloud/compute/compute-spectrum) opens up each column in depth.
+
+### Step 3: Short and started by an event: a function
+
+<AnimatedDiagram spec="animated/cloud/brightpost-compute-journey" step={2} minWidth={620} caption="Each new photo starts the resize function, which writes a thumbnail back to the photo buckets." />
+
+Run the three facts on the resize job. It takes about 2 seconds per photo, and about 300 photos arrive a week. That is 10 minutes of work a week, started by an upload. It needs only an image library, no OS settings. And nobody wants one more machine to patch.
+
+Short, event-driven and rare: that is a function. The provider starts a copy when a photo lands and stops it when the thumbnail is written. After a quiet night, the first photo waits about 1 second longer while a fresh copy starts. That wait is a <Term id="cold-start">cold start</Term>. Nobody waits on a thumbnail, so it does no harm here.
+
+It worked so well that it became the team's habit. That habit caused the next step.
+
+### Step 4: A 40-minute job in a 15-minute box
+
+<AnimatedDiagram spec="animated/cloud/brightpost-compute-journey" step={3} minWidth={620} caption="The failure: the scheduler starts the recommender as a function, and the platform stops it at 15 minutes, before it writes anything." />
+
+The recommender failed on the first fact: run time. It needs 40 minutes, and the function may run for 15.
+
+<Callout tone="red" title="What breaks">
+  At 01:00 the scheduler starts the function. It reads orders for 15 minutes, then the platform stops it. The job saves its picks only at the end, so nothing is written. Retries at 01:16 and 01:32 meet the same limit. Over three nights that is 9 runs, 135 billed minutes and zero picks. The empty row hides itself, so no page shows an error.
+</Callout>
+
+The 4-minute test hid the problem. It used one week of orders, and run time grows with the data. Brightpost now has a rule: a job must finish in under half its time limit, on a full copy of the data.
+
+### Step 5: Not a VM, and not a cluster
+
+Asha looks at the other places before she moves the job.
+
+- **A VM.** It would be busy for 40 of the 1,440 minutes in a day, under 3%. Brightpost would pay for the other 97% and patch one more machine.
+- **Managed Kubernetes.** A cluster suits a team with many services and someone to run the cluster: upgrades, node groups and add-ons. Brightpost has 3 engineers and no such person. A cluster for one nightly job is a second job for the team.
+- **A bigger function.** More memory speeds some functions up, but 40 minutes would have to fall under 7.5, and the data keeps growing.
+
+So the facts say: it runs 40 minutes once a night, it needs no OS control, and nobody has time to operate a machine. That points to serverless containers, run as a job.
+
+### Step 6: A container job that runs to the end
+
+<AnimatedDiagram spec="animated/cloud/brightpost-compute-journey" step={4} minWidth={620} caption="The scheduler starts a container job. The platform pulls its image, runs it for about 40 minutes, and the job writes its picks." />
+
+Asha packs the job into a container image: its code and its maths library in one file. The image lives in an <Term id="image-registry">image registry</Term>, a store for images. A **container job** is a container that starts, works until it is done, and stops. A web service, by contrast, stays up and waits for requests.
+
+At 01:00 the scheduler starts the job. The platform pulls the image, runs one copy for about 40 minutes, then stops it. Brightpost pays for those 40 minutes and nothing during the day. The job's own timeout is 2 hours, three times its run time. It also writes its picks every 200 products, so a retry carries on from where the last try stopped.
+
+### Step 7: Know when it did not run
+
+<AnimatedDiagram spec="animated/cloud/brightpost-compute-journey" step={5} minWidth={620} caption="If the job fails, or no fresh picks exist by 03:00, an alert goes to the engineer on call." />
+
+The empty row went unnoticed for three nights. Now an alert fires when the job fails, or when no fresh picks exist by 03:00. The engineer on call hears about it that night, not from a customer on Friday.
+
+Any rung can fail quietly. Watch the result the work should produce, not only whether it started.
+
+### Step 8: Moving along the spectrum later
+
+<AnimatedDiagram spec="animated/cloud/brightpost-compute-journey" step={6} minWidth={620} caption="The shop app is packed into an image too. It still runs on the VMs, and it can move to the container platform later." />
+
+Some moves are cheap and some are not.
+
+1. **Between serverless containers and Kubernetes:** cheap. Both run the same image; only settings change.
+2. **From a VM to a container:** packaging first. Write the image's recipe and stop saving files on the machine's own disk.
+3. **From a function to a container:** small. Add a short program that starts the code.
+4. **From a container to a function:** often the hardest. The code must fit the event format and the time limit.
+
+So Asha packs the shop app into an image as well. It still runs on the VMs. When the team is ready, the same image moves to the container platform without a rewrite. [Migration and Modernization](/cloud/operations/migration-and-modernization) covers larger moves.
+
+## On AWS, Google Cloud and Azure
+
+The four places exist on all three clouds. What differs is how each cloud groups them into products.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Virtual machines:** Amazon EC2, in an Auto Scaling group spread across zones.
+    - **Managed Kubernetes:** Amazon EKS. In Auto Mode, AWS runs and patches the nodes.
+    - **Serverless containers:** AWS Fargate, used through Amazon ECS or Amazon EKS. You describe a task: its image, CPU and memory.
+    - **Functions:** AWS Lambda. It stops any single run at 15 minutes.
+    - **Scheduled jobs:** EventBridge Scheduler starts an ECS task on Fargate at a set time. AWS Batch handles large queues of jobs.
+
+    **The difference that changes a design.** AWS splits serverless compute into two products. Lambda runs functions; Fargate runs containers, but only under ECS or EKS. ECS is AWS's own container scheduler, simpler than Kubernetes and found only on AWS. So moving a job from Lambda to a container means a new service with its own settings.
+
+    <ResponsibilityGrid set="aws-compute" />
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Virtual machines:** Compute Engine, in a managed instance group spread across zones.
+    - **Managed Kubernetes:** Google Kubernetes Engine (GKE). In Autopilot mode, Google runs the nodes.
+    - **Serverless containers:** Cloud Run services. They add copies as requests arrive and can scale to zero.
+    - **Functions:** Cloud Run functions, deployed as Cloud Run services.
+    - **Scheduled jobs:** Cloud Run jobs, started by Cloud Scheduler. Batch handles large queues of jobs.
+
+    **The difference that changes a design.** Functions, services and jobs share one platform, Cloud Run. They use the same identity, network and scaling settings. So when a function outgrows its time limit, it becomes a Cloud Run job on the same platform. One copy of a Cloud Run service can also serve many requests at once, a number you set. That changes the cost of steady traffic.
+
+    <ResponsibilityGrid set="gcp-compute" />
+  </Tab>
+  <Tab label="Azure">
+    - **Virtual machines:** Azure Virtual Machines, in a Virtual Machine Scale Set spread across zones.
+    - **Managed Kubernetes:** Azure Kubernetes Service (AKS). AKS Automatic lets Azure run the nodes.
+    - **Serverless containers:** Azure Container Apps. It runs on Kubernetes that Azure manages and you never see.
+    - **Functions:** Azure Functions. The hosting plan you pick sets its time limit and its cold starts.
+    - **Scheduled jobs:** Container Apps jobs with a schedule trigger. Azure Batch handles large queues of jobs.
+
+    **The difference that changes a design.** Azure has two middle rungs that web apps often use. App Service runs code or a container on a plan you size, billed by the hour even when idle. Container Apps adds copies with traffic and can scale to zero. The same image fits both, so the choice is about the cost shape and the features each one offers.
+
+    <ResponsibilityGrid set="azure-compute" />
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/brightpost-compute-journey" stepper minWidth={620} caption="Brightpost's compute in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/brightpost-compute-journey" lead="aws" />
+
+## Try it
+
+Pick the shape of a workload and see the place it lands on each cloud.
 
 <CloudDecisionTree topic="compute" />
 
-## Who runs what
+<Quiz>
+  <QuizItem question="A job runs 12 minutes on full data today. The data grows about 5% a month, and Brightpost's function limit is 15 minutes. Is a function safe?" hint="Use Brightpost's half-limit rule, then let the data grow.">
+    No. The rule asks for under 7.5 minutes, and 12 already fails it. At 5% a month the job passes 15 minutes in about 5 months, and then every run is stopped.
+  </QuizItem>
+  <QuizItem question="The recommender runs 40 minutes a night on a VM that is on all day. What share of the paid time is the VM busy?">
+    About 2.8%: 40 of the 1,440 minutes in a day. Brightpost would pay for the other 97% while the VM waits.
+  </QuizItem>
+  <QuizItem question="Which of the three facts ruled out managed Kubernetes for the recommender?" hint="It was not the run time.">
+    Who operates it. A cluster needs someone to upgrade and watch it. Brightpost's 3 engineers have no time for that, and one nightly job does not justify a cluster.
+  </QuizItem>
+</Quiz>
 
-Every option is the same stack. What changes is how much of it you operate. Moving right trades control for less operational work.
+## Trade-offs
 
-<ResponsibilityGrid set="aws-compute" />
+<Compare
+  columns={["How busy the work is", "Functions", "Serverless containers", "VMs with a commitment"]}
+  rows={[
+    ["Under 3% of the day, like the recommender", "Lowest, if each run fits the limit", "Lowest", "Highest: pays for 24 hours"],
+    ["About 30%, like a daytime API", "Close: measure", "Usually lowest", "Close: measure"],
+    ["Over 80%, steady all day", "Highest", "In between", "Lowest"],
+    ["Who patches the OS", "The provider", "The provider", "Your team"],
+    ["Worst surprise", "A time limit mid-run", "A slow first request after scale to zero", "A machine idle 97% of the time"],
+  ]}
+  caption="Which choice costs least at each level of use. No prices: the shape holds on all three clouds, and the crossover points differ."
+/>
 
-## The options side by side
+A **commitment** is a discount for promising to pay for capacity for one or three years; [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics) explains it. Cost alone favours VMs for steady work. Add the hours your team spends patching them before you decide.
 
-| | EC2 | ECS on EC2 | EKS | ECS on Fargate | Lambda |
-|---|---|---|---|---|---|
-| **Unit you deploy** | VM image | Container | Container (pod) | Container | Function or container image |
-| **Max run time** | Unlimited | Unlimited | Unlimited | Unlimited | 15 minutes |
-| **Scale to zero** | No | No | Nodes can; the cluster fee stays | Manually (0 tasks) | Yes, automatically |
-| **Cold start** | Minutes (boot) | Seconds to minutes | Seconds to minutes | Tens of seconds | Milliseconds to seconds |
-| **GPUs** | Yes | Yes | Yes | No | No |
-| **Billing** | Per instance-second | Per instance-second | Cluster-hour + instances | Per task vCPU and GB-second | Per request + GB-second |
-| **Ops burden** | Highest | High | High (lower with Auto Mode) | Low | Lowest |
+## Common pitfalls
 
-## The same decision on each cloud
+- **Testing with a week of data.** The recommender took 4 minutes on one week and 40 on 90 days. Time a job on full-sized data, and keep it under half the limit.
+- **Functions for steady traffic.** A function busy all day is billed for every second of it, and each copy may open its own database connection. Use containers or VMs for work that never stops.
+- **Kubernetes for three services.** A cluster brings upgrades, node groups and add-ons. A small team can run the same images on serverless containers instead.
+- **A VM for a nightly job.** A job busy 40 minutes a day leaves a VM idle 97% of the time. Run it as a job that stops when it is done.
+- **Picking the product first.** "We use X" skips the three facts. Say the facts, then the place, then the product on your cloud.
 
-| Need | AWS | Google Cloud | Azure |
-|---|---|---|---|
-| Event-driven functions | Lambda | Cloud Run functions | Azure Functions |
-| Image → HTTPS service | ECS Express Mode | Cloud Run | Container Apps |
-| Containers without Kubernetes | ECS on Fargate | Cloud Run | Container Apps |
-| Kubernetes, provider runs nodes | EKS Auto Mode | GKE Autopilot | AKS Automatic |
-| Kubernetes, you run nodes | EKS + managed node groups | GKE Standard | AKS |
-| VMs | EC2 + Auto Scaling | Compute Engine + MIGs | Virtual Machines + Scale Sets |
-| Batch | AWS Batch | Batch | Azure Batch |
+## How to say it in an interview
 
-The biggest structural difference: AWS splits serverless compute into **Lambda** (functions) and **Fargate** (containers under ECS or EKS), while Google Cloud and Azure each have **one** serverless container product (Cloud Run, Container Apps) that also runs functions.
+"I decide where code runs from three facts about the workload. First, how long one unit of work runs and how steady the traffic is. Second, how much of the OS or runtime it must control. Third, who will operate it, and how much time they have. Those facts place it on the spectrum: VMs, containers on managed Kubernetes, serverless containers, or functions. Short, event-driven work goes to functions; long or scheduled jobs go to container jobs; steady services go to containers, or VMs with a commitment when the load is high. I name the product last, and I say what would push me one step either way."
 
-## How to answer in an interview
+## Interview questions
 
-1. **Name the shape of the work:** request/response service, event handler, stream consumer, batch job, or connection-holding server.
-2. **Name the load:** spiky or steady, and roughly how many requests or connections at peak (from your estimates).
-3. **Pick the least platform that fits**, and say what would push you one step left (more control) or right (less work).
-4. **Say the trade-off out loud:** "Fargate costs more per vCPU-hour than EC2, but at our utilisation the saved ops time is worth more."
+<InterviewQuestions>
+  <InterviewQuestion question="What runs containers without servers on Google Cloud and Azure, the way ECS on Fargate does on AWS?" level="Junior" category="Cloud">
+    **Short answer.** Cloud Run on Google Cloud and Azure Container Apps on Azure. You hand over a container image, and the provider runs, scales and patches everything under it. Neither needs a cluster or a separate container service around it.
+
+    **Why.** On AWS, Fargate removes the servers, but you still define a cluster, tasks and services in ECS. Cloud Run and Container Apps are one product each: an image goes in and a running service or job comes out. Both scale to zero, and both run scheduled jobs, like Brightpost's 40-minute recommender.
+
+    <AnimatedDiagram spec="animated/cloud/brightpost-compute-journey" step={4} highlight={["registry", "job"]} caption="The container platform: an image from the registry, run as a job until it is done." />
+
+    **Follow-ups the interviewer may ask.**
+    - What would make you pick managed Kubernetes instead?
+    - How does each of them handle a job that runs for an hour?
+
+    **Watch out for.** Answering "Google Kubernetes Engine". That is managed Kubernetes, one rung down, with a cluster to look after.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="An API gets a steady 50 requests a second all day. Functions or serverless containers?" level="Mid" category="Cloud">
+    **Short answer.** Serverless containers, or VMs with a commitment if the load stays high for months. At steady load, per-request billing costs more than a few copies that are always on. Containers also keep warm database connections and avoid cold starts.
+
+    **Why.** At 200 ms each, 50 requests a second keep about 10 in flight at every moment. Some functions serve one request per copy: 10 copies billed all day, each with its own database connection. One container copy serves many requests at once, so 2 or 3 copies do the work. Functions win when traffic is spiky or idle much of the day, like Brightpost's resize job.
+
+    <AnimatedDiagram spec="animated/cloud/brightpost-compute-journey" step={1} highlight={["customers", "app", "db"]} caption="Steady traffic suits a small set of always-on copies, as on Brightpost's shop fleet." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you find the point where the two cost the same?
+    - What changes if the traffic drops to zero every night?
+
+    **Watch out for.** "Serverless is always cheaper, because you pay only for use." That holds only while use is low.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A nightly job takes 40 minutes. Functions, serverless containers or batch?" level="Mid" category="Cloud">
+    **Short answer.** A serverless container job. It is too long for most function time limits and too short to justify a VM that runs all day. A batch service fits better when there are many jobs at once, or when jobs need special machines.
+
+    **Why.** Brightpost ran this job as a function with a 15-minute limit. The platform stopped it 9 times over three nights, and it wrote nothing. A VM would be busy 40 of 1,440 minutes, under 3%. A container job starts at 01:00, runs to the end and stops, so Brightpost pays for 40 minutes. Set a timeout well above the run time, save results in parts, and alert when they are late.
+
+    <AnimatedDiagram spec="animated/cloud/brightpost-compute-journey" step={4} path="sched>job>db" caption="The schedule starts the container job; the job reads orders and writes its picks." />
+
+    **Follow-ups the interviewer may ask.**
+    - The job grows to 6 hours and needs a GPU. What changes?
+    - How do you make a retry safe if the job stopped halfway?
+
+    **Watch out for.** Raising the function's memory to make it fit. It may squeeze under the limit today, and the data keeps growing.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You inherit a Kubernetes cluster that runs three small services for a team of three. Do you keep it?" level="Mid" category="Cloud">
+    **Short answer.** Probably not. I would move the three services to serverless containers, which run the same images with no cluster to run. I keep the cluster only if the team needs something that only Kubernetes gives them.
+
+    **Why.** A cluster is a system of its own: version upgrades, node groups, add-ons and their security fixes. For three services that is a large share of three people's time. The images move as they are, because both places run containers. Reasons to keep the cluster are real but specific: tools that only run on Kubernetes, many more services on the way, or a platform team to run it.
+
+    **Follow-ups the interviewer may ask.**
+    - What would you check before you move the first service?
+    - How does a mode where the provider runs the nodes change your answer?
+
+    **Watch out for.** Keeping the cluster because "we might need it to scale". Serverless containers scale too, and the cluster's cost is paid every week until then.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="During a sale, your functions open a database connection each and the database runs out of connections. Fix it without leaving serverless." level="Senior" category="Cloud">
+    **Short answer.** Cap how many copies of the function may run at once, put a connection pooler in front of the database, and send work that can wait through a queue. The burst then lands on the queue, not on the database.
+
+    **Why.** Suppose Brightpost moved checkout to functions. At 9 a.m. on a sale day, 2,000 shoppers arrive and the platform starts hundreds of copies. Each opens its own connection, and the database allows a fixed number. A cap keeps the copies under it. A pooler shares a few connections among many callers; on AWS that is RDS Proxy. Emails and stock counts can wait, so they go to a queue that a few workers drain.
+
+    <AnimatedDiagram spec="animated/cloud/brightpost-compute-journey" step={3} highlight={["fn", "db"]} caption="Functions talk to one database. Every copy that starts can open another connection." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to a shopper whose request hits the cap?
+    - Which writes must stay in the checkout path, and which can wait?
+
+    **Watch out for.** Making the database bigger and stopping there. The next sale opens more copies, and the limit comes back.
+  </InterviewQuestion>
+</InterviewQuestions>
 
 ## Related
 
-[Compute on AWS](/cloud/aws/compute) · [Containers on AWS](/cloud/aws/containers) · [Containers on Google Cloud](/cloud/gcp/containers) · [Containers on Azure](/cloud/azure/containers) · [Load Balancing](/system-design/patterns/load-balancing)
+- [Service Models: How Much Do You Run?](/cloud/fundamentals/service-models)
+- [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics)
+- [The Compute Spectrum: VMs to Functions](/cloud/compute/compute-spectrum)
+- [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [Kubernetes Concepts](/cloud/compute/kubernetes-concepts)
+- [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas)
+- [Serverless Functions](/cloud/compute/serverless-functions)
+- [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus)
+- [Migration and Modernization](/cloud/operations/migration-and-modernization)
+- [Compute on AWS](/cloud/aws/compute)
+- [Compute on Google Cloud](/cloud/gcp/compute)
+- [Compute on Azure](/cloud/azure/compute)
+- [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
 
-<InterviewQuestions>
-  <InterviewQuestion question="Lambda or Fargate for an API that gets 50 requests per second all day?" category="Cloud" level="Mid">
-    Fargate (ECS). At steady load Lambda's per-request and per-millisecond pricing usually costs more than a few always-on tasks, and containers avoid cold starts and connection-pool problems. Lambda wins when traffic is spiky or idle much of the time.
-  </InterviewQuestion>
-  <InterviewQuestion question="What is the Google Cloud equivalent of ECS on Fargate?" category="Cloud" level="Junior">
-    Cloud Run is the usual answer: serverless containers billed by the resources they use, with no cluster to run. Google Cloud has no ECS-style orchestrator, so workloads that need more control go to GKE, often in Autopilot mode.
-  </InterviewQuestion>
-  <InterviewQuestion question="Your Lambda functions overload the database during a traffic spike. What do you change?" category="Reliability" level="Senior">
-    Cap the function's reserved concurrency to what the database can take, put RDS Proxy in front of the database to pool connections, and move non-urgent writes behind an SQS queue so a burst is absorbed rather than passed straight to the database.
-  </InterviewQuestion>
-</InterviewQuestions>
+## Further reading
+
+- [Choosing an AWS compute service](https://docs.aws.amazon.com/decision-guides/latest/compute-on-aws-how-to-choose/choosing-aws-compute.html): AWS's own decision guide.
+- [Google Cloud application hosting options](https://cloud.google.com/hosting-options): VMs, GKE and Cloud Run compared.
+- [Choose an Azure compute service](https://learn.microsoft.com/azure/architecture/guide/technology-choices/compute-decision-tree): Azure's decision tree.
+- [Jobs in Azure Container Apps](https://learn.microsoft.com/azure/container-apps/jobs): scheduled and event-driven container jobs.

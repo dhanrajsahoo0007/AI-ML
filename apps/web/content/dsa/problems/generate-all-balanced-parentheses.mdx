@@ -1,0 +1,81 @@
+---
+title: "Generate all Balanced Parentheses"
+description: "Given n pairs of parentheses, generate every well-formed (balanced) combination."
+difficulty: medium
+patterns: [pattern-problems]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: generate_parenthesis }
+starter:
+  python: |
+    def generate_parenthesis(n: int) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/generate-all-balanced-parentheses.public.json, hidden: tests/generate-all-balanced-parentheses.hidden.json }
+complexity: { time: "O(4^n / sqrt(n)) - Catalan number scale", space: "O(n) stack depth plus output" }
+group: "03. Pattern Problems"
+number: "04"
+order: 11003004000000
+---
+
+Given n pairs of parentheses, generate every well-formed (balanced) combination.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 1
+    Output: ["()"]
+
+Example 2:
+    Input: n = 3
+    Output length: 5th Catalan number = 5 strings
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 4 in tests (output grows quickly)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Build with validity constraints
+Track how many opens and closes are used; only add '(' if opens &lt; n and add ')'
+only if closes &lt; opens.
+
+1. DFS from empty string with open\_count and close\_count.
+2. When both reach n, append the built string.
+3. Branch '(' and ')' subject to the constraints above.
+
+## Complexity
+
+**Time:** O(4^n / sqrt(n)) - Catalan number scale
+
+**Space:** O(n) stack depth plus output
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def generate_parenthesis(self, n: int) -> List[str]:
+        result: List[str] = []
+
+        def dfs(open_used: int, close_used: int, path: str) -> None:
+            if open_used == n and close_used == n:
+                result.append(path)
+                return
+            if open_used < n:
+                dfs(open_used + 1, close_used, path + "(")
+            if close_used < open_used:
+                dfs(open_used, close_used + 1, path + ")")
+
+        dfs(0, 0, "")
+        return result
+````

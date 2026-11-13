@@ -1,0 +1,86 @@
+---
+title: "Stone Game II"
+description: "Alice and Bob play a stone game with piles."
+difficulty: medium
+patterns: [dynamic-programming]
+topics: [prefix-sum]
+companies: []
+languages: [python]
+entry: { python: stone_game_ii }
+starter:
+  python: |
+    def stone_game_ii(piles: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/stone-game-ii.public.json, hidden: tests/stone-game-ii.hidden.json }
+complexity: { time: "O(n^3) in worst case due to M and x loops (n <= 100).", space: "O(n^2) for memoization table." }
+group: "09. Dynamic Programming"
+number: "01"
+leetcode: stone-game-ii
+leetcodeId: 1140
+order: 2009001000000
+---
+
+Alice and Bob play a stone game with piles. Alice starts and both play optimally.
+On a turn with parameter M, the player takes between 1 and 2\*M piles from the
+left; M updates to max(M, taken). Return the maximum stones Alice can collect.
+
+## Examples
+
+````text
+Example 1:
+Input: piles = [2, 7, 9, 4, 4]
+Output: 10
+````
+
+## Constraints
+
+````text
+- 1 <= len(piles) <= 100
+- 1 <= piles[i] <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum + Minimax DP
+Suffix sums plus memoized recursion express optimal play for variable take sizes.
+
+1. Build suffix sums from the end.
+2. Define dp(i, m) as the best score the current player can obtain from index i with limit m.
+3. Transition tries all valid takes up to 2m or the end; recurse on opponent optimally.
+
+## Complexity
+
+**Time:** O(n^3) in worst case due to M and x loops (n &lt;= 100).
+
+**Space:** O(n^2) for memoization table.
+
+## Solution
+
+````python
+from functools import lru_cache
+from typing import List
+
+
+class Solution:
+    def stoneGameII(self, piles: List[int]) -> int:
+        n = len(piles)
+        suffix = [0] * (n + 1)
+        for i in range(n - 1, -1, -1):
+            suffix[i] = suffix[i + 1] + piles[i]
+
+        @lru_cache(maxsize=None)
+        def best(i: int, m: int) -> int:
+            if i == n:
+                return 0
+            if i + 2 * m >= n:
+                return suffix[i]
+            res = 0
+            for x in range(1, 2 * m + 1):
+                res = max(res, suffix[i] - best(i + x, max(m, x)))
+            return res
+
+        return best(0, 1)
+````

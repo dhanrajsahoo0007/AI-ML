@@ -1,11 +1,291 @@
 ---
 title: "NAT & Leaving the Network"
-description: "How a server with no public address still reaches the internet, what that path costs, and when a private endpoint is the better way out."
-status: outline
+description: "How a server with no public address still reaches the internet, why each zone needs its own way out, and what private endpoints and allow-lists add."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** how a server without a public address still reaches the internet, why the translation gateway is a per-zone and per-gigabyte cost, and when a private endpoint is the cheaper answer.
+<KeyIdea>
+  A server that nobody on the internet can reach can still call out, through a shared front door that lets replies back in and nothing else.
+</KeyIdea>
 
-**Related reading on this site:** [Networking basics](/system-design/fundamentals/networking) · [Networking on AWS](/cloud/aws/networking)
+## The story
+
+Brightpost's app servers have only private addresses, so nobody on the internet can reach them directly. They still need to call out: to the payment provider on every checkout, and to update servers for security patches. When Asha built the private network, she added one NAT gateway, in zone A, for all three zones. It was cheaper than three, and it worked for months. Then, on a busy Saturday at 10:20 a.m., zone A's network failed for 50 minutes. Three app servers were running, one in each zone. The load balancer dropped zone A's server within 30 seconds, and pages kept loading from zones B and C. But every checkout still had to leave through zone A, and the Pay button spun for 30 seconds, then failed. By 11:10, 31 checkouts had failed, and 13 of those customers never came back.
+
+Every step below follows the shop's traffic out of the network, and ends with a bill that was mostly avoidable.
+
+## How it works
+
+Three words first. Every machine on a network has an **IP address**, a number such as 10.0.1.25 that other machines use to reach it. A **public address** is unique on the whole internet. A **private address** comes from ranges set aside for inside networks, and internet routers do not carry traffic to it. **NAT**, network address translation, swaps one address for another as traffic passes. Data leaving a network is called <Term id="egress">egress</Term>.
+
+### Step 1: One front door, open only from the inside
+
+<AnimatedDiagram spec="animated/cloud/nat-egress" step={1} minWidth={620} caption="The app server calls the payment provider through the NAT gateway. A stranger's call from outside finds no way in." />
+
+The app server lives in a private <Term id="subnet">subnet</Term>, so it has no public address. When it calls the payment provider, the packet goes first to a <Term id="nat-gateway">NAT gateway</Term>. The gateway writes its own public address over the server's private one and notes the swap in a table. The provider answers that public address. The gateway looks up its table and passes the reply back to the server.
+
+A packet with no matching entry is dropped. That is the stranger's fate: nobody inside started that conversation. Out yes, in no. One gateway address can serve many servers, because each conversation gets its own port number. Your home router does the same trick; [IP, TCP and UDP](/system-design/fundamentals/tcp-udp) shows it from the laptop's side.
+
+<PremiumBreak />
+
+### Step 2: A route sends traffic to the gateway
+
+<AnimatedDiagram spec="animated/cloud/nat-egress" step={2} minWidth={620} caption="Zones B and C have no NAT of their own. Their routes send every outbound call across to the one in zone A." />
+
+A server does not choose the NAT. Its subnet's <Term id="route-table">route table</Term> does, with one rule: anything not inside the network goes to the NAT gateway, which needs its own way to the internet. On some clouds it sits in a **public subnet**, one whose routes lead to the internet. On others it is a managed setting on the network, with no subnet of its own.
+
+Brightpost's three private subnets all pointed at the one gateway in zone A. So every call from zones B and C crossed a zone boundary before it left, which some clouds charge for by the gigabyte. [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets) covers routes in full.
+
+### Step 3: One zone fails, and every zone loses its way out
+
+<AnimatedDiagram spec="animated/cloud/nat-egress" step={3} minWidth={620} caption="The failure: zone A goes down, and with it the only way out for zones B and C." />
+
+Brightpost spread its servers across three <Term id="availability-zone">zones</Term> so that losing one would not stop the shop. The single NAT undid that, on the way out.
+
+<Callout tone="red" title="What breaks">
+  Zone A's network fails at 10:20 a.m. Pages keep loading from zones B and C, but every checkout calls the payment provider, and every call is routed to the gateway in zone A. For 50 minutes, 31 checkouts wait 30 seconds and fail. The health checks only load the home page, so they stay green throughout.
+</Callout>
+
+The way in was built for three zones. The way out was built for one.
+
+### Step 4: One NAT gateway per zone
+
+<AnimatedDiagram spec="animated/cloud/nat-egress" step={4} minWidth={620} caption="Each zone leaves through its own NAT gateway. A failure in one zone now stops only that zone's way out." />
+
+The fix is one gateway in each zone. Each zone's private route table points at the gateway in the same zone. If zone A fails again, only zone A's servers lose their way out, and the load balancer has already stopped sending them shoppers. Zones B and C carry on. The cross-zone hop also disappears, along with its charge.
+
+The price is three gateways instead of one, each billing for every hour it runs. Brightpost also adds a health check that calls the payment provider's test address, so a broken way out turns a server red.
+
+### Step 5: What the egress bill is made of
+
+<AnimatedDiagram spec="animated/cloud/nat-egress" step={5} minWidth={620} caption="Eight in ten gigabytes through the NATs go to the cloud's own storage service, which never needed the internet." />
+
+A month after the fix, the finance lead asks why the network part of the bill has grown. About 200 GB a month pass through the three gateways. Sorted by destination, 160 GB of that, 8 in every 10, goes to the cloud's own storage service in the same region. Most of it is the shop's 2 GB release package, which every app server downloads from a bucket after each daily deploy.
+
+<Compare
+  columns={["Path out of the network", "Meters that count it"]}
+  rows={[
+    ["Server → NAT → internet", "NAT hours, NAT gigabytes, data leaving the cloud"],
+    ["Server → NAT → the cloud's own storage", "NAT hours, NAT gigabytes"],
+    ["Server in zone B → NAT in zone A", "Cross-zone gigabytes on some clouds, then the NAT meters"],
+    ["Server → private endpoint → storage", "None, or the endpoint's own hourly and per-gigabyte meters"],
+  ]}
+  caption="The shape of the bill, path by path. Real rates differ by cloud and change over time."
+/>
+
+The NAT counts every gigabyte it passes, wherever it goes. [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics) explains meters, and [Cost Models and Purchasing Options](/cloud/operations/cloud-cost-models) maps the transfer paths.
+
+### Step 6: A private path to the cloud's own services
+
+<AnimatedDiagram spec="animated/cloud/nat-egress" step={6} minWidth={620} caption="Storage calls take the private endpoint. The NATs now carry only traffic that really goes to the internet." />
+
+A <Term id="private-endpoint">private endpoint</Term> is a way to reach a provider service from inside your network, without the NAT and without the internet. It comes in two kinds:
+
+1. **The route kind.** A route-table entry sends storage traffic straight onto the provider's own network. Nothing new appears in your subnet.
+2. **The address kind.** A private address appears in your subnet, and that address leads to the service.
+
+Brightpost adds one for storage. The 160 GB a month leave the NAT bill, and the gateways carry about 40 GB. Checkout calls and patches still use the NATs, because they do go to the internet. [Private Endpoints](/cloud/networking/private-endpoints) covers both kinds and the DNS work they need.
+
+### Step 7: A fixed address a partner can trust
+
+<AnimatedDiagram spec="animated/cloud/nat-egress" step={7} path="serverC>natC>rules>partner" minWidth={620} caption="Print orders leave through a NAT whose public address the printing partner keeps on its list." />
+
+Brightpost's printing partner accepts print orders only from addresses on its **allow-list**, a list of callers it trusts. The servers' private addresses mean nothing to the partner. What the partner sees is the NAT's public address, and that address stays the same for as long as Brightpost keeps it reserved.
+
+One gateway per zone means three addresses to list. Asha sent the partner the two new addresses a week before the switch; otherwise print orders from zones B and C would have been refused. An allow-list proves only where a call came from, so the partner still checks Brightpost's API key.
+
+### Step 8: Only known destinations
+
+<AnimatedDiagram spec="animated/cloud/nat-egress" step={7} highlight={["rules", "unknown", "natC"]} minWidth={620} caption="The egress filter lets calls reach three known destinations and blocks the rest." />
+
+By default, a NAT lets a server call any address on the internet. **Egress filtering** turns that around: outbound calls may reach only destinations on a list. Brightpost's list has three: the payment provider, the printing partner and the update mirror. Everything else is blocked and logged.
+
+This is a security control. Malware calls home for orders, and an intruder who copies data needs somewhere to send it. With a filter, those calls fail and show up in a log. Filters match addresses, or domain names such as the payment provider's API name. [Firewalls](/cloud/networking/firewalls) covers the rules.
+
+### Step 9: Other ways out
+
+1. **A cache inside the network.** A mirror for packages or container images downloads each file once through the NAT, then serves every server from inside.
+2. **An outbound proxy.** A server that makes web calls for your servers, checking each one against a list of domain names.
+3. **IPv6.** Addresses are plentiful, so nothing needs translating. "Out yes, in no" then comes from a firewall rule that allows replies and refuses new inbound connections.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: private servers share a public address on the way out, and provider services need none.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Where it sits:** a NAT gateway is a resource in one public subnet. Each private subnet's route table sends internet-bound traffic to it, and the public subnet routes on to an internet gateway.
+    - **Zones:** a NAT gateway lives in one Availability Zone. One per zone, with each zone's private route table pointing at the gateway in its own zone, keeps a zone failure inside that zone.
+    - **Fixed address:** each public NAT gateway has an Elastic IP address, which stays yours until you release it.
+    - **Private path to storage:** a gateway endpoint for Amazon S3 is a route-table entry, the route kind. Interface endpoints (AWS PrivateLink) put a private address in your subnets, the address kind.
+    - **Egress filter:** AWS Network Firewall can allow traffic by domain name. Route 53 Resolver DNS Firewall can refuse lookups of names not on a list. Security groups limit outbound ports and addresses.
+
+    **The difference that changes a design.** On AWS the zone choice lives in the route tables. Nothing stops three private subnets pointing at one NAT gateway, and nothing warns you. So the design has one gateway and one private route table per zone. For IPv6, an egress-only internet gateway gives "out yes, in no" without translation.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Where it sits:** Cloud NAT is a configuration on a Cloud Router in one region. No gateway machine sits in the path: Google's network software translates the traffic for each VM. Subnets have no public or private type; a VM without an external address is private.
+    - **Zones:** Cloud NAT is regional. One configuration serves the chosen subnets in every zone of that region.
+    - **Fixed address:** reserve static external addresses and assign them to the NAT by hand, so the list a partner keeps does not change.
+    - **Private path to storage:** Private Google Access, a subnet setting, lets VMs without external addresses reach Google APIs such as Cloud Storage. Private Service Connect gives an endpoint with a private address.
+    - **Egress filter:** VPC firewall rules and firewall policies can deny all egress and allow chosen destinations, and firewall policies can match domain names. Secure Web Proxy filters outbound web traffic.
+
+    **The difference that changes a design.** With no gateway machine in one zone, "one NAT per zone" is not a decision you make. The decisions are how many external addresses the NAT gets and how many ports each VM may use on them. A VM with many connections to one destination can run out of ports.
+  </Tab>
+  <Tab label="Azure">
+    - **Where it sits:** a NAT Gateway resource attaches to one or more subnets of a virtual network. Once attached, it becomes those subnets' way out to the internet, with no route to add. No public subnet is needed.
+    - **Zones:** a NAT gateway is either zonal, pinned to one zone, or non-zonal, placed by Azure. A non-zonal gateway is not spread across zones.
+    - **Fixed address:** public IP addresses, or a public IP prefix (a block of consecutive addresses), attached to the gateway.
+    - **Private path to storage:** a service endpoint is a subnet setting that sends storage traffic over Azure's own network. A private endpoint (Azure Private Link) puts a private address in your subnet for one storage account.
+    - **Egress filter:** Azure Firewall can allow traffic by domain name, with a route that sends the subnets' outbound traffic through it. Network security groups limit outbound addresses and ports.
+
+    **The difference that changes a design.** Azure subnets span zones, and a subnet takes one NAT gateway. So one zonal gateway per zone means splitting each tier into one subnet per zone, each with its own gateway. The simpler design, one subnet and one gateway, still depends on whichever zone that gateway runs in.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/nat-egress" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/nat-egress" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="How should this traffic leave the network?"
+  tree={{
+    q: "Is the destination one of the cloud's own services, such as storage?",
+    yes: {
+      answer: "A private endpoint. The traffic stays on the provider's network and never touches the NAT or its per-gigabyte meter.",
+      href: "/cloud/networking/private-endpoints",
+    },
+    no: {
+      q: "Does the same large download happen on many servers?",
+      yes: "A cache or mirror inside the network. Download each file once through the NAT, then serve every server from inside.",
+      no: {
+        q: "Must the other side see the same address every time?",
+        yes: "A NAT gateway per zone, each with a reserved public address. Send the partner every address before you switch traffic.",
+        no: "A NAT gateway per zone, with an egress filter that allows only the destinations you know.",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="After the fix, zone B's network fails for 50 minutes. Which servers lose their way out, and do checkouts fail?" hint="Which NAT does each zone's route table point at now?">
+    Only zone B's servers lose their way out, and the load balancer drops them within 30 seconds. Zones A and C keep their own gateways, so checkouts carry on.
+  </QuizItem>
+  <QuizItem question="Before the endpoint, 200 GB a month passed through the NATs, and 160 GB of it went to storage. How much does the NAT meter count afterwards?" hint="Which traffic still needs the internet?">
+    About 40 GB, a fifth of before. Storage traffic now takes the private endpoint; only calls to the internet still pass the NATs.
+  </QuizItem>
+  <QuizItem question="A stranger sends a packet to the NAT gateway's public address, hoping to reach an app server. What happens?">
+    The gateway drops it. It passes only replies to conversations that a server inside started, and this packet matches none.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "One NAT for all zones", "One NAT per zone", "Per-zone NATs + private endpoint"]}
+  rows={[
+    ["Zones still able to call out when zone A fails", "0", "2 of 3", "2 of 3"],
+    ["Gateways billing every hour", "1", "3", "3"],
+    ["Storage traffic through the NATs", "160 GB a month", "160 GB a month", "0"],
+    ["Calls crossing zones to reach a NAT", "Every call from zones B and C", "None", "None"],
+    ["Addresses a partner must list", "1", "3", "3"],
+    ["Checkouts lost in the 50-minute fault", "31", "0", "0"],
+  ]}
+  caption="Brightpost's numbers. Rates differ by cloud; the shape does not."
+/>
+
+The shared gateway wins only on the hourly line. The endpoint then removes the largest gigabyte line.
+
+## Common pitfalls
+
+- **One NAT for every zone.** The incoming path survives a zone failure, and the outgoing path does not. Put one gateway in each zone and point each zone's routes at its own.
+- **Health checks that never leave the network.** A check that loads the home page stays green while every checkout fails. Add a check that calls a real outside dependency.
+- **The cloud's own traffic through the NAT.** Storage downloads pay the NAT meter for a trip that never needed the internet. Add a private endpoint for storage and other heavy provider services.
+- **Addresses that change.** An address the cloud picks for you can change, and a partner's allow-list then refuses you. Reserve each address, and send new ones before you switch traffic.
+- **Outbound open to anywhere.** A server that can call any address can also send stolen data anywhere. Allow known destinations, block the rest, and log what you block.
+
+## How to say it in an interview
+
+"Private servers have no public address, so they leave through a NAT gateway that swaps in its own address and lets only replies back. A route table sends traffic to it, so I check which gateway each zone's routes point at. I put one gateway per zone; one shared gateway turns a zone failure into an outage for every zone. The NAT bills per hour and per gigabyte, so I send the cloud's own services, such as storage, through private endpoints instead. If a partner allow-lists us, I reserve a fixed address per gateway and give them all of them. Finally, I filter egress to known destinations, because open egress is how stolen data leaves."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why does a server with no public address need a NAT gateway, and why can't the internet reach it through one?" level="Junior" category="Cloud">
+    **Short answer.** A private address means nothing on the internet, so replies could never find the server. The NAT gateway swaps in its own public address on the way out and remembers the swap. It forwards only replies to conversations that started inside.
+
+    **Why.** Brightpost's app server calls the payment provider from a private address. The gateway rewrites the source to its own address and notes the swap. The reply comes back to the gateway, and the table says which server gets it. A stranger's packet matches no entry, so the gateway drops it.
+
+    <AnimatedDiagram spec="animated/cloud/nat-egress" step={1} caption="Out through the NAT, and the stranger's call from outside is refused." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do many servers share one public address?
+    - How does a NAT gateway differ from a load balancer?
+
+    **Watch out for.** Calling the NAT a firewall. It refuses unsolicited inbound traffic as a side effect, but it does not filter what goes out.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why put one NAT gateway in each zone instead of sharing one?" level="Mid" category="Cloud">
+    **Short answer.** A zonal NAT gateway fails with its zone. If every zone routes through one gateway, losing that zone cuts every zone's way out, and the multi-zone design stops working for anything that calls out.
+
+    **Why.** Brightpost ran three zones behind one load balancer, with one gateway in zone A. When zone A's network failed for 50 minutes, pages still loaded from zones B and C. Every checkout still needed the payment provider, through zone A, so 31 checkouts failed. With one gateway per zone, and each zone's routes pointing at its own, a zone failure removes only servers the load balancer has already dropped. The cost is two more gateways billing by the hour.
+
+    <AnimatedDiagram spec="animated/cloud/nat-egress" step={3} highlight={["serverB", "serverC", "natA", "fault"]} caption="Zones B and C are healthy, but their only way out was in zone A." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you catch this before an outage?
+    - Does this apply on Google Cloud, where Cloud NAT is regional?
+
+    **Watch out for.** Adding gateways without changing the routes. Three gateways with every route still pointing at zone A's gateway fail the same way.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your NAT gateway bill tripled this month. What do you check?" level="Mid" category="Cloud">
+    **Short answer.** Find where the gigabytes go: break NAT traffic down by destination and source, using flow logs. Then move the cloud's own services to private endpoints, cache repeated downloads, and fix the job that started the growth.
+
+    **Why.** A NAT bills for hours and for gigabytes. Hours change only when gateways are added, so a tripled bill is nearly always gigabytes. At Brightpost, 160 of 200 GB a month went to the cloud's own storage, mostly the 2 GB release package after each deploy. A private endpoint took that off the NAT entirely. Other common causes: servers in one zone using another zone's gateway, a new job pulling container images or packages, and retry loops against an outside API.
+
+    <AnimatedDiagram spec="animated/cloud/nat-egress" step={5} highlight={["natC", "storage"]} caption="Most of the gigabytes went out through the NAT only to come back into the cloud's own storage." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you attribute the NAT bill to the teams that cause it?
+    - When does an interface-style endpoint cost more than it saves?
+
+    **Watch out for.** Removing gateways to save money. Going back to one gateway brings back the zone outage, and the gigabytes still pass through it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design egress for 200 microservices: every team's cost visible, and only known destinations reachable." level="Senior" category="Cloud">
+    **Short answer.** Central egress. Each team's network sends internet-bound traffic through a shared hub with one NAT gateway per zone and an egress filter. Cloud services are reached through private endpoints in each network. Flow logs, tagged by source network, divide the egress bill by team.
+
+    **Why.** Two hundred services with their own NATs means hundreds of gateways and public addresses, and no single place to enforce a list. A hub network joined through a transit hub gives one set of zonal gateways, a few reserved addresses, and one filter. The filter allows destinations by domain name, team by team, and logs every block. Storage and other provider services skip the hub through endpoints, so the shared NAT carries only real internet traffic. Each team's network is one source in the flow logs, so the bill splits by team. The hub is shared, so it gets its own on-call.
+
+    <AnimatedDiagram spec="animated/cloud/nat-egress" step={7} highlight={["natA", "natB", "natC", "rules", "endpoint"]} caption="Per-zone gateways, a private path for storage and one egress filter: the pieces a central hub shares." />
+
+    **Follow-ups the interviewer may ask.**
+    - What breaks if the hub's filter is down? Fail open or fail closed?
+    - How does a team add a new destination without waiting a week?
+
+    **Watch out for.** Charging the whole NAT bill to the platform team. Nobody then sees what their service sends, and the bill keeps growing.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets)
+- [Private Endpoints](/cloud/networking/private-endpoints)
+- [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks)
+- [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics)
+- [Cost Models and Purchasing Options](/cloud/operations/cloud-cost-models)
+- [Networking on AWS](/cloud/aws/networking)
+- [Networking on Google Cloud](/cloud/gcp/networking)
+- [Networking on Azure](/cloud/azure/networking)
+- [IP, TCP and UDP](/system-design/fundamentals/tcp-udp)
+
+## Further reading
+
+- [AWS NAT gateways](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html): zonal gateways, routes and Elastic IP addresses.
+- [Cloud NAT overview](https://cloud.google.com/nat/docs/overview): Google Cloud's software-defined NAT.
+- [Azure NAT Gateway overview](https://learn.microsoft.com/azure/nat-gateway/nat-overview): subnets, zones and public addresses.
+- [AWS gateway endpoints](https://docs.aws.amazon.com/vpc/latest/privatelink/gateway-endpoints.html): the route kind of private path to storage.

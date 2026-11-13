@@ -1,0 +1,107 @@
+---
+title: "Asteroid Collision"
+description: "Asteroids move in a line; positives go right, negatives go left."
+difficulty: medium
+patterns: [advanced-applications]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: asteroid_collision }
+starter:
+  python: |
+    def asteroid_collision(asteroids: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/asteroid-collision.public.json, hidden: tests/asteroid-collision.hidden.json }
+complexity: { time: "O(n) - Each asteroid is pushed and popped at most once.", space: "O(n) - Stack holds survivors." }
+group: "09. Advanced Applications"
+number: "01"
+leetcode: asteroid-collision
+leetcodeId: 735
+order: 9009001000000
+---
+
+Asteroids move in a line; positives go right, negatives go left. When opposite directions meet,
+the smaller mass explodes; equal masses destroy each other. Return surviving asteroids left to right.
+
+## Examples
+
+````text
+Example 1:
+Input: [5, 10, -5]
+Output: [5, 10]
+````
+
+## Constraints
+
+````text
+- 2 <= len(asteroids) <= 10^4
+- asteroids[i] != 0
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Stack Simulation of Collisions
+Keep a stack of survivors; repeatedly resolve left-moving rocks against right-moving tops.
+
+1. Push each asteroid while resolving with stack top when signs oppose.
+2. Compare magnitudes to decide pop, destroy both, or stop.
+3. Append the asteroid if it survives the while loop.
+
+Restored notes (archived workbook):
+
+Problem Statement:
+
+We are given an array 'asteroids' of integers representing asteroids in a row.
+For each asteroid, the absolute value represents its size, and the sign represents its direction
+(positive meaning right, negative meaning left). Each asteroid moves at the same speed.
+
+Find out the state of the asteroids after all collisions. If two asteroids meet, the smaller one
+will explode. If both are the same size, both will explode. Two asteroids moving in the same
+direction will never meet.
+
+Constraints:
+\* 2 &lt;= asteroids.length &lt;= 10^4
+\* -1000 &lt;= asteroids\[i\] &lt;= 1000
+\* asteroids\[i\] != 0
+
+Time Complexity: O(n)
+- We iterate through each asteroid once in the outer loop: O(n)
+- Each asteroid can be pushed and popped from the stack at most once: O(n)
+- Therefore, the overall time complexity is O(n)
+
+Space Complexity: O(n)
+- In the worst case, when no collisions occur, we might store all asteroids in the stack
+- Therefore, the space complexity is O(n)
+
+where n is the number of asteroids in the input list.
+
+## Complexity
+
+**Time:** O(n) - Each asteroid is pushed and popped at most once.
+
+**Space:** O(n) - Stack holds survivors.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def asteroidCollision(self, asteroids: List[int]) -> List[int]:
+        stack: List[int] = []
+        for rock in asteroids:
+            while stack and rock < 0 < stack[-1]:
+                if stack[-1] < -rock:
+                    stack.pop()
+                    continue
+                if stack[-1] == -rock:
+                    stack.pop()
+                break
+            else:
+                stack.append(rock)
+        return stack
+````
