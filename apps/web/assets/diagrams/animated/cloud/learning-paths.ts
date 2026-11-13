@@ -10,8 +10,9 @@ import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 // step 3 the three levels.
 //
 // Geometry: row labels are text in x 12-130. Columns start at x 140 and are 88 wide with a gap of 4, so the seventh
-// ends at 780 (canvas 790). Headers are boxes at y 20-64. Rows are 56 apart from y 82 (cells 46 tall); the group
-// for the three levels starts at y 184 and leaves 22 units above its first row for the group's tab.
+// ends at 780 (canvas 790). Headers are boxes at y 20-64. The first two rows sit at y 82 and 138 (cells 46
+// tall). The group for the three levels starts at y 206, 22 units below the interview row so its tab clears it, and
+// its rows sit 34 units lower and 56 apart (y 240, 296, 352).
 // Cell labels fit 88 - 8 = 80 px at 6.2 px per character: "Fundamentals" (12 characters) is the longest header.
 // The cell numbers and page counts below match the ordered lists on the page.
 
@@ -66,7 +67,7 @@ const ROWS: {
   {
     id: "found",
     label: "Foundation",
-    y: 218,
+    y: 240,
     tone: "violet",
     step: 3,
     cells: { start: ["1st, 3rd", 2], fund: ["2nd", 6] },
@@ -74,7 +75,7 @@ const ROWS: {
   {
     id: "assoc",
     label: "Associate",
-    y: 274,
+    y: 296,
     tone: "violet",
     step: 3,
     cells: { net: ["1st", 4], comp: ["2nd", 3], data: ["3rd", 4], res: ["4th", 3], ops: ["5th", 1] },
@@ -82,7 +83,7 @@ const ROWS: {
   {
     id: "pro",
     label: "Professional",
-    y: 330,
+    y: 352,
     tone: "violet",
     step: 3,
     cells: { fund: ["1st", 2], net: ["2nd", 2], res: ["3rd", 2], data: ["4th", 1], ops: ["5th", 3] },
@@ -121,8 +122,8 @@ const spec: LayoutSpec = {
   kind: "layout",
   title: "Three learning paths over the same hubs",
   width: 790,
-  height: 392,
-  groups: [{ id: "cert", title: "Certification-minded", tone: "violet", x: 6, y: 184, w: 780, h: 202 }],
+  height: 420,
+  groups: [{ id: "cert", title: "Certification-minded", tone: "violet", x: 6, y: 206, w: 780, h: 206 }],
   steps: [
     { title: "From zero: every hub, in the order Brightpost grew" },
     { title: "Interview prep: decisions and failures first" },
