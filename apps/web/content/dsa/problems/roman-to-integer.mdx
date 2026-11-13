@@ -1,0 +1,112 @@
+---
+title: "Roman to integer"
+description: "Given a Roman numeral string s, convert it to an integer."
+difficulty: easy
+patterns: [basic-string-operations]
+topics: [strings]
+companies: []
+languages: [python]
+entry: { python: roman_to_int }
+starter:
+  python: |
+    def roman_to_int(s: str) -> int:
+        # Your code here
+        pass
+tests: { public: tests/roman-to-integer.public.json, hidden: tests/roman-to-integer.hidden.json }
+complexity: { time: "O(n) - Each character is examined at most twice.", space: "O(1) - Map size is constant." }
+group: "01. Basic String Operations"
+number: "01"
+leetcode: roman-to-integer
+leetcodeId: 13
+order: 5001001000000
+---
+
+Given a Roman numeral string s, convert it to an integer. Subtractive pairs such as
+IV and CM are valid and must be interpreted correctly.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "III"
+    Output: 3
+
+Example 2:
+    Input: s = "LVIII"
+    Output: 58
+
+Example 3:
+    Input: s = "MCMXCIV"
+    Output: 1994
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 15
+- s is a valid Roman numeral in the range [1, 3999].
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Left-to-right parsing with lookahead
+Prefer two-character values when they map to a subtractive form; otherwise add one symbol.
+
+1. Build a map for single symbols and valid two-symbol subtractive forms.
+2. Scan with index i; if s\[i:i+2\] is in the map, add its value and advance by two.
+3. Otherwise add the single-symbol value and advance by one.
+4. Return the accumulated sum.
+
+## Complexity
+
+**Time:** O(n) - Each character is examined at most twice.
+
+**Space:** O(1) - Map size is constant.
+
+## Original notes
+
+````text
+Original phrasing:
+Prefer a two-character match from the map when possible (subtractive pairs), otherwise add the
+single-symbol value — one left-to-right pass.
+
+--- Restored notes (historical file) ---
+
+Problem Statement: Given a roman numeral, convert it to an integer.
+````
+
+## Solution
+
+````python
+class Solution:
+    def romanToInt(self, s: str) -> int:
+        val = {
+            "I": 1,
+            "V": 5,
+            "X": 10,
+            "L": 50,
+            "C": 100,
+            "D": 500,
+            "M": 1000,
+            "IV": 4,
+            "IX": 9,
+            "XL": 40,
+            "XC": 90,
+            "CD": 400,
+            "CM": 900,
+        }
+        amount = 0
+        i = 0
+        n = len(s)
+        while i < n:
+            # Peek two chars when possible so IV/IX/... map before single-letter fallback.
+            if i < n - 1 and s[i : i + 2] in val:
+                amount += val[s[i : i + 2]]
+                i += 2
+            else:
+                amount += val[s[i]]
+                i += 1
+        return amount
+````

@@ -1,0 +1,101 @@
+---
+title: "Minimum Area Rectangle"
+description: "Given axis-aligned integer coordinate points, return the minimum area of any rectangle formed from four distinct points, or 0 if none exists."
+difficulty: medium
+patterns: [leetcode-and-alphabet-150]
+topics: [math-and-geometry]
+companies: []
+languages: [python]
+entry: { python: min_area_rect_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def min_area_rect_tests(a0):  # the entry the tests call
+        result = min_area_rect(a0)
+        result = sorted(result, key=repr) if isinstance(result, list) else result
+        return result
+
+
+    # --- Your code ---
+    def min_area_rect(points: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-area-rectangle.public.json, hidden: tests/minimum-area-rectangle.hidden.json }
+complexity: { time: "O(n^2) in worst case over pairs per column", space: "O(n^2) - pairs keyed by (y1, y2)" }
+group: "02. Leetcode and Alphabet 150"
+number: "02"
+leetcode: minimum-area-rectangle
+leetcodeId: 939
+order: 21002002000000
+---
+
+Given axis-aligned integer coordinate points, return the minimum area of any
+rectangle formed from four distinct points, or 0 if none exists.
+
+## Examples
+
+````text
+Example 1:
+    Input: points = [[1,1],[1,3],[3,1],[3,3],[2,2]]
+    Output: 4
+Example 2:
+    Input: points = [[1,1],[1,3],[3,3],[3,1],[4,1],[4,3]]
+    Output: 2
+````
+
+## Constraints
+
+````text
+- 1 <= len(points) <= 500
+- 0 <= points[i][0], points[i][1] <= 4 * 10^4
+- All points are unique
+````
+
+**Order.** Any order is accepted: the tests sort your result before comparing it.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hash map of vertical edges
+Group points by x; for each pair of y values on a column, remember last x
+where that pair appeared to close a rectangle with width \* height.
+
+1. Map each x coordinate to sorted list of y values.
+2. For increasing x, for each unordered pair (y1, y2) on that column, if the
+pair was seen before at x2, update answer with (x - x2) \* \|y1 - y2\|.
+3. Record the current x for each pair.
+
+## Complexity
+
+**Time:** O(n^2) in worst case over pairs per column
+
+**Space:** O(n^2) - pairs keyed by (y1, y2)
+
+## Solution
+
+````python
+from collections import defaultdict
+from typing import Dict, List, Tuple
+
+
+class Solution:
+    def minAreaRect(self, points: List[List[int]]) -> int:
+        cols: dict[int, List[int]] = defaultdict(list)
+        for x, y in points:
+            cols[x].append(y)
+        for x in cols:
+            cols[x].sort()
+        last_x: Dict[Tuple[int, int], int] = {}
+        best = float("inf")
+        for x in sorted(cols):
+            ys = cols[x]
+            for i, y2 in enumerate(ys):
+                for y1 in ys[:i]:
+                    pair = (y1, y2)
+                    if pair in last_x:
+                        best = min(best, (x - last_x[pair]) * abs(y2 - y1))
+                    last_x[pair] = x
+        return int(best) if best < float("inf") else 0
+````

@@ -1,0 +1,81 @@
+---
+title: "Group Shifted Strings"
+description: "Given a list of strings of lowercase letters, group all strings that belong to the same shifting sequence."
+difficulty: medium
+patterns: [string-manipulation]
+topics: [arrays]
+companies: []
+languages: [python]
+entry: { python: group_strings }
+starter:
+  python: |
+    def group_strings(strings: list[str]) -> list[list[str]]:
+        # Your code here
+        pass
+tests: { public: tests/group-shifted-strings.public.json, hidden: tests/group-shifted-strings.hidden.json }
+complexity: { time: "O(n * L) - n strings of max length L.", space: "O(n * L) - Store every character in buckets." }
+group: "03. String Manipulation"
+number: "04"
+leetcode: group-shifted-strings
+leetcodeId: 249
+order: 1003004000000
+---
+
+Given a list of strings of lowercase letters, group all strings that belong to the same shifting
+sequence. Two strings are shifts of each other if lengths match and corresponding letters differ
+by the same offset modulo 26 between all positions.
+
+## Examples
+
+````text
+Example 1:
+Input: strings = ["abc", "bcd", "acef", "xyz", "az", "ba", "a", "z"]
+Output: [["acef"], ["a", "z"], ["abc", "bcd", "xyz"], ["az", "ba"]] (group order may vary)
+````
+
+## Constraints
+
+````text
+- 1 <= len(strings) <= 200
+- 1 <= len(strings[i]) <= 50
+- strings[i] consists of lowercase English letters.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hash map with normalized key
+For each string, key it by tuple of (ord(c) - ord(s\[0\])) % 26 for each character.
+
+1. Build a dictionary from key tuple to list of strings.
+2. For each string s, compute key = tuple((ord(c) - ord(s\[0\])) % 26 for c in s).
+3. Append s to buckets\[key\].
+4. Return list(buckets.values()).
+
+## Complexity
+
+**Time:** O(n \* L) - n strings of max length L.
+
+**Space:** O(n \* L) - Store every character in buckets.
+
+## Solution
+
+````python
+from collections import defaultdict
+from typing import List
+
+
+class Solution:
+    def groupStrings(self, strings: List[str]) -> List[List[str]]:
+        buckets: dict[tuple[int, ...], List[str]] = defaultdict(list)
+        for s in strings:
+            base = ord(s[0])
+            key = tuple((ord(c) - base) % 26 for c in s)
+            buckets[key].append(s)
+        return list(buckets.values())
+
+
+def _normalize(groups: List[List[str]]) -> List[List[str]]:
+    return sorted([sorted(g) for g in groups])
+````

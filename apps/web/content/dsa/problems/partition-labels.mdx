@@ -1,0 +1,84 @@
+---
+title: "Partition Labels"
+description: "Given a string s of lowercase English letters, partition s into as many parts as possible so that each letter appears in at most one part, and concatenate th…"
+difficulty: medium
+patterns: [basic-optimization-problems]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: partition_labels }
+starter:
+  python: |
+    def partition_labels(s: str) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/partition-labels.public.json, hidden: tests/partition-labels.hidden.json }
+complexity: { time: "O(n) - Two linear passes.", space: "O(1) - Last index array of fixed alphabet size." }
+group: "02. Basic Optimization Problems"
+number: "06"
+leetcode: partition-labels
+leetcodeId: 763
+order: 18002006000000
+---
+
+Given a string s of lowercase English letters, partition s into as many parts as possible so that
+each letter appears in at most one part, and concatenate the parts in order. Return the size of each part.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "ababcbacadefegdehijhklij"
+    Output: [9,7,8]
+
+Example 2:
+    Input: s = "eccbbbbdec"
+    Output: [10]
+
+Example 3:
+    Input: s = "abc"
+    Output: [1,1,1]
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 500
+- s contains only lowercase English letters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Interval Extension
+Track the farthest index each letter appears; extend the current partition boundary to include all letters seen so far.
+
+1. Precompute last index for every character in s.
+2. Walk left to right while tracking the farthest last index in the current chunk.
+3. When the index reaches that farthest point, close a part and reset trackers.
+
+## Complexity
+
+**Time:** O(n) - Two linear passes.
+
+**Space:** O(1) - Last index array of fixed alphabet size.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def partitionLabels(self, s: str) -> List[int]:
+        last = {c: i for i, c in enumerate(s)}
+        ans: List[int] = []
+        start = end = 0
+        for i, c in enumerate(s):
+            end = max(end, last[c])
+            if i == end:
+                ans.append(end - start + 1)
+                start = i + 1
+        return ans
+````

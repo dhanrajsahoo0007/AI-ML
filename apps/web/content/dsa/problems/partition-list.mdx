@@ -1,0 +1,196 @@
+---
+title: "Partition List"
+description: "Partition a linked list around value x so that all nodes with value < x appear before nodes >= x, preserving relative order inside each partition."
+difficulty: medium
+patterns: [grouping-and-partitioning]
+topics: [linked-lists]
+companies: []
+languages: [python]
+entry: { python: partition_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class ListNode:
+        def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+            self.val = val
+            self.next = next
+
+
+    def _build_list(values):
+        head = None
+        for v in reversed(values or []):
+            node = ListNode(v)
+            node.next = head
+            head = node
+        return head
+
+
+    def _list_values(node):
+        out = []
+        while node is not None:
+            out.append(node.val)
+            node = node.next
+        return out
+
+
+    def partition_tests(a0, a1):  # the entry the tests call
+        result = _list_values(partition(_build_list(a0), a1))
+        return result
+
+
+    # --- Your code ---
+    def partition(head: ListNode | None, x: int) -> ListNode | None:
+        # Your code here
+        pass
+tests: { public: tests/partition-list.public.json, hidden: tests/partition-list.hidden.json }
+complexity: { time: "O(n).", space: "O(1)." }
+group: "04. Grouping and Partitioning"
+number: "02"
+leetcode: partition-list
+leetcodeId: 86
+order: 13004002000000
+---
+
+Partition a linked list around value x so that all nodes with value &lt; x appear before nodes &gt;= x,
+preserving relative order inside each partition.
+
+## Examples
+
+````text
+Example 1:
+Input: head = [1,4,3,2,5,2], x = 3
+Output: [1,2,2,4,3,5]
+````
+
+## Constraints
+
+````text
+- 0 <= n <= 200
+- -100 <= Node.val <= 100
+- -200 <= x <= 200
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two chains with dummies
+Build separate before and after lists while scanning, then splice.
+
+1. before\_dummy and after\_dummy with moving tails.
+2. For each node, append to before or after partition.
+3. before.next = after\_dummy.next; end after.next = None.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1).
+Restored (original notes, diagrams, and walkthrough):
+Partition List
+
+Problem Statement:
+Given the head of a linked list and a value x, partition it such that all nodes less than x come before nodes greater than or equal to x.
+You should preserve the original relative order of the nodes in each of the two partitions.
+
+Example 1:
+Input: head = \[1,4,3,2,5,2\], x = 3
+Output: \[1,2,2,4,3,5\]
+
+Example 2:
+Input: head = \[2,1\], x = 2
+Output: \[1,2\]
+
+Constraints:
+\* The number of nodes in the list is in the range \[0, 200\].
+\* -100 &lt;= Node.val &lt;= 100
+\* -200 &lt;= x &lt;= 200
+
+Detailed Explanation:
+
+To solve this problem, we'll use a two-pointer approach to create two separate lists:
+1. A list for nodes with values less than x
+2. A list for nodes with values greater than or equal to x
+
+Here's the step-by-step approach:
+
+1. Initialize two dummy nodes:
+- 'before\_dummy' for the list of nodes with values less than x
+- 'after\_dummy' for the list of nodes with values greater than or equal to x
+
+2. Initialize two pointers:
+- 'before' pointing to 'before\_dummy'
+- 'after' pointing to 'after\_dummy'
+
+3. Traverse the original list:
+- If the current node's value is less than x:
+\* Append it to the 'before' list
+\* Move the 'before' pointer
+- If the current node's value is greater than or equal to x:
+\* Append it to the 'after' list
+\* Move the 'after' pointer
+
+4. After traversal:
+- Connect the end of the 'before' list to the start of the 'after' list
+- Set the end of the 'after' list to None (to avoid cycles)
+
+5. Return the start of the partitioned list (which is before\_dummy.next)
+
+This approach ensures that we maintain the relative order of nodes in each partition
+while separating them based on the value x.
+
+Time Complexity: O(n), where n is the number of nodes in the linked list
+Space Complexity: O(1), as we only use a constant amount of extra space
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+def linked_list_to_list(head: Optional[ListNode]) -> List[int]:
+    out: List[int] = []
+    while head:
+        out.append(head.val)
+        head = head.next
+    return out
+
+
+class Solution:
+    def partition(self, head: Optional[ListNode], x: int) -> Optional[ListNode]:
+        before_dummy = ListNode(0)
+        after_dummy = ListNode(0)
+        before = before_dummy
+        after = after_dummy
+        while head:
+            if head.val < x:
+                before.next = head
+                before = before.next
+            else:
+                after.next = head
+                after = after.next
+            head = head.next
+        after.next = None
+        before.next = after_dummy.next
+        return before_dummy.next
+````

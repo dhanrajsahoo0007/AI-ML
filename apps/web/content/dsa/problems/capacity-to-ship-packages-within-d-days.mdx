@@ -1,0 +1,106 @@
+---
+title: "Capacity to Ship Packages within D Days"
+description: "Packages must ship in order; each day load a prefix whose total weight <= capacity."
+difficulty: medium
+patterns: [minimum-maximum]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: ship_within_days }
+starter:
+  python: |
+    def ship_within_days(weights: list[int], days: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/capacity-to-ship-packages-within-d-days.public.json, hidden: tests/capacity-to-ship-packages-within-d-days.hidden.json }
+complexity: { time: "O(n log S) - S = sum of weights.", space: "O(1) - Greedy day count only." }
+group: "06. Minimum | Maximum"
+number: "06"
+leetcode: capacity-to-ship-packages-within-d-days
+leetcodeId: 1011
+order: 8006006000000
+---
+
+Packages must ship in order; each day load a prefix whose total weight &lt;= capacity. Return the
+minimum capacity to ship all weights within days days.
+
+## Examples
+
+````text
+Example 1:
+Input: weights = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], days = 5
+Output: 15
+````
+
+## Constraints
+
+````text
+- 1 <= days <= len(weights) <= 5 * 10^4
+- 1 <= weights[i] <= 500
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Answer
+Larger capacity needs fewer days; find least capacity with days\_used &lt;= days.
+
+1. Bounds: low = max(weights), high = sum(weights).
+2. Greedy count days for a trial capacity; binary search.
+
+## Complexity
+
+**Time:** O(n log S) - S = sum of weights.
+
+**Space:** O(1) - Greedy day count only.
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement: Capacity To Ship Packages Within D Days
+
+A conveyor belt has packages that must be shipped from one port to another within 'days' days.
+The ith package on the conveyor belt has a weight of weights\[i\].
+Each day, we load the ship with packages on the conveyor belt (in the order given by weights). We may not load more weight than the maximum weight capacity of the ship.
+
+Return the least weight capacity of the ship that will result in all the packages on the conveyor belt being shipped within 'days' days.
+
+Time Complexity: O(n \* log(sum(weights))), where n is the length of the weights array.
+- The binary search takes O(log(sum(weights))) iterations.
+- In each iteration, we call the can\_ship\_within\_days function which takes O(n) time.
+
+Space Complexity: O(1), as we only use a constant amount of extra space.
+
+Constraints:
+
+1 &lt;= days &lt;= weights.length &lt;= 5 \* 104
+1 &lt;= weights\[i\] &lt;= 500
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def shipWithinDays(self, weights: List[int], days: int) -> int:
+        def fits(cap: int) -> bool:
+            need = 1
+            cur = 0
+            for w in weights:
+                if cur + w > cap:
+                    need += 1
+                    cur = w
+                else:
+                    cur += w
+                if need > days:
+                    return False
+            return True
+
+        lo, hi = max(weights), sum(weights)
+        while lo < hi:
+            mid = lo + (hi - lo) // 2
+            if fits(mid):
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+````

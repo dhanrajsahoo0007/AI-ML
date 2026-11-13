@@ -1,0 +1,86 @@
+---
+title: "Find Unique Binary String"
+description: "Given an array nums of n distinct binary strings, each of length n, return any length-n binary string that does not appear in nums."
+topics: [backtracking]
+group: "05. String Pattern"
+number: "04"
+leetcode: find-unique-binary-string
+leetcodeId: 1980
+order: 12005004000000
+status: outline
+---
+
+Given an array nums of n distinct binary strings, each of length n, return any length-n binary
+string that does not appear in nums.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = ["01","10"]
+Output: "11" or "00" (either is acceptable if absent from nums)
+````
+
+## Constraints
+
+````text
+- nums.length == n
+- Each string in nums has length n
+````
+
+**Also in the notes under:** [01. Array/11. String Binary Operation](/dsa/problems/find-unique-binary-string).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Cantor / diagonal construction
+Greedy diagonal: at position i choose the bit opposite nums\[i\]\[i\] so the candidate differs from nums\[i\].
+
+1. For each index i from 0 to n-1, set answer bit to complement of nums\[i\]\[i\].
+2. Join bits into a string; diagonal argument guarantees it differs from every nums\[i\].
+
+## Complexity
+
+**Time:** O(n^2) to read inputs when building character by character.
+
+**Space:** O(n) for the output string.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findDifferentBinaryString(self, nums: List[str]) -> str:
+        return "".join("1" if nums[i][i] == "0" else "0" for i in range(len(nums)))
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    samples = ["01", "10"]
+    ans = sol.findDifferentBinaryString(samples)
+    assert ans not in samples, "Test 1 Failed"
+    assert len(ans) == 2, "Test 1 Failed"
+    print("Test 1 Passed: length-two diagonal string")
+
+    samples2 = ["00", "01"]
+    ans2 = sol.findDifferentBinaryString(samples2)
+    assert ans2 not in samples2, "Test 2 Failed"
+    print("Test 2 Passed: avoids given pair")
+
+    samples3 = ["111"]
+    ans3 = sol.findDifferentBinaryString(samples3)
+    assert ans3 not in samples3, "Test 3 Failed"
+    print("Test 3 Passed: single forbidden triple")
+
+    samples4 = ["0"]
+    assert sol.findDifferentBinaryString(samples4) == "1", "Test 4 Failed"
+    print("Test 4 Passed: n=1 flip")
+
+    print("\nAll test cases passed!")
+````

@@ -1,0 +1,70 @@
+---
+title: "Remove All Occurrences of a Substring"
+description: "Repeatedly delete every occurrence of part from s until none remain, returning the final string."
+difficulty: medium
+patterns: [string-manipulation-with-stack]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: remove_occurrences }
+starter:
+  python: |
+    def remove_occurrences(s: str, part: str) -> str:
+        # Your code here
+        pass
+tests: { public: tests/remove-all-occurrences-of-a-substring.public.json, hidden: tests/remove-all-occurrences-of-a-substring.hidden.json }
+complexity: { time: "O(n * m) - Tail checks cost O(m) per character in worst case.", space: "O(n) - Stack holds the current rebuilt string." }
+group: "03. String Manipulation with Stack"
+number: "06"
+leetcode: remove-all-occurrences-of-a-substring
+leetcodeId: 1910
+order: 9003006000000
+---
+
+Repeatedly delete every occurrence of part from s until none remain, returning the final string.
+
+## Examples
+
+````text
+Example 1:
+Input: s = "daabcbaabcbc", part = "abc"
+Output: "dab"
+````
+
+## Constraints
+
+````text
+- 1 <= len(s), len(part) <= 1000
+- Strings use lowercase English letters
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Streaming Stack Match
+Append characters and slice the tail whenever it matches part.
+
+1. Maintain a list as a stack of characters.
+2. After each push, compare the tail window to part; pop m letters on a match.
+3. Join the survivors.
+
+## Complexity
+
+**Time:** O(n \* m) - Tail checks cost O(m) per character in worst case.
+
+**Space:** O(n) - Stack holds the current rebuilt string.
+
+## Solution
+
+````python
+class Solution:
+    def removeOccurrences(self, s: str, part: str) -> str:
+        m = len(part)
+        stack: list[str] = []
+        for ch in s:
+            stack.append(ch)
+            if len(stack) >= m and "".join(stack[-m:]) == part:
+                del stack[-m:]
+        return "".join(stack)
+````

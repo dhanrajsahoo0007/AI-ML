@@ -1,0 +1,112 @@
+---
+title: "Subarray sum equals K"
+description: "Given an integer array nums and an integer k, return the number of contiguous non-empty subarrays whose sum equals k."
+difficulty: medium
+patterns: [variable-size]
+topics: [sliding-window]
+companies: []
+languages: [python]
+entry: { python: subarray_sum }
+starter:
+  python: |
+    def subarray_sum(nums: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/subarray-sum-equals-k.public.json, hidden: tests/subarray-sum-equals-k.hidden.json }
+complexity: { time: "O(n) - One pass with O(1) map operations per element.", space: "O(n) - Distinct prefix sums in the worst case." }
+group: "03. Variable size"
+number: "02"
+leetcode: subarray-sum-equals-k
+leetcodeId: 560
+order: 7003002000000
+---
+
+Given an integer array nums and an integer k, return the number of contiguous non-empty
+subarrays whose sum equals k.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 1, 1], k = 2
+    Output: 2
+Example 2:
+    Input: nums = [1, 2, 3], k = 3
+    Output: 2
+````
+
+## Constraints
+
+````text
+- nums may contain negative numbers and zeros.
+````
+
+**Also in the notes under:** [02. Prefix Sum/04. Subarray Sum Problems](/dsa/problems/subarray-sum-equals-k-subarray-sum-problems).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix sum frequency map
+The number of subarrays ending at index i with sum k equals how many prior prefix sums equal cum\_sum - k.
+
+1. Walk through nums while maintaining cumulative sum cum.
+2. Add sum\_freq\[cum - k\] to the answer (default 0 if missing).
+3. Increment sum\_freq\[cum\].
+
+Restored notes (archived workbook):
+
+Problem Statement:
+Given an array of integers 'nums' and an integer 'k', return the total number of subarrays whose sum equals to 'k'.
+A subarray is a contiguous non-empty sequence of elements within an array.
+
+Example 1:
+Input: nums = \[1,1,1\], k = 2
+Output: 2
+
+Example 2:
+Input: nums = \[1,2,3\], k = 3
+Output: 2
+
+Constraints:
+\* 1 &lt;= nums.length &lt;= 2 \* 10^4
+\* -1000 &lt;= nums\[i\] &lt;= 1000
+\* -10^7 &lt;= k &lt;= 10^7
+
+Solution:
+• This solution uses a sliding window approach with two pointers, i and j.
+• We expand the window by moving j to the right and adding nums\[j\] to the window sum.
+• If the window sum exceeds k, we shrink the window from the left by moving i.
+• When we find a window sum equal to k, we increment the count.
+• We also check for subarrays starting from i+1 to j that sum to k.
+
+Time Complexity: O(n^2) in the worst case, where n is the length of nums.
+The outer while loop runs n times, and for each iteration, we might need to run the inner while loop up to n times.
+
+Space Complexity: O(1) as we only use a constant amount of extra space.
+
+## Complexity
+
+**Time:** O(n) - One pass with O(1) map operations per element.
+
+**Space:** O(n) - Distinct prefix sums in the worst case.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def subarraySum(self, nums: List[int], k: int) -> int:
+        count = 0
+        cum = 0
+        sum_freq = {0: 1}
+
+        for num in nums:
+            cum += num
+            count += sum_freq.get(cum - k, 0)
+            sum_freq[cum] = sum_freq.get(cum, 0) + 1
+
+        return count
+````

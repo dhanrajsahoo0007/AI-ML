@@ -1,0 +1,87 @@
+---
+title: "Partition String Into Substrings With Values at Most K"
+description: "Given a binary string s (bits interpreted as a binary integer per substring) and an integer k, partition s into a minimum number of contiguous substrings suc…"
+difficulty: medium
+patterns: [string-manipulation]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: minimum_partition }
+starter:
+  python: |
+    def minimum_partition(s: str, k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/partition-string-into-substrings-with-values-at-most-k.public.json, hidden: tests/partition-string-into-substrings-with-values-at-most-k.hidden.json }
+complexity: { time: "O(n) - One pass.", space: "O(1) - Scalar trackers." }
+group: "04. String Manipulation"
+number: "03"
+order: 18004003000000
+---
+
+Given a binary string s (bits interpreted as a binary integer per substring) and an integer k,
+partition s into a minimum number of contiguous substrings such that each substring's numeric value
+is at most k. Split greedily whenever appending the next bit would exceed k.
+
+## Examples
+
+````text
+Example 1:
+    Input: s = "101110001", k = 5
+    Output: 3
+
+Example 2:
+    Input: s = "101110001", k = 10
+    Output: 3
+
+Example 3:
+    Input: s = "101110001", k = 1000000000
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 1000
+- s[i] is '0' or '1'
+- 1 <= k <= 10^9
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Extension
+Extend the current substring while the next binary value stays &lt;= k; otherwise start a new substring at the current bit.
+
+1. Initialize partition count to 1 and current value to 0.
+2. For each bit, if value\*2+bit &gt; k, increment partitions and reset current value to this bit.
+3. Otherwise extend current value; if a single bit already exceeds k, return -1 (impossible).
+
+## Complexity
+
+**Time:** O(n) - One pass.
+
+**Space:** O(1) - Scalar trackers.
+
+## Solution
+
+````python
+class Solution:
+    def minimumPartition(self, s: str, k: int) -> int:
+        parts = 1
+        val = 0
+        for ch in s:
+            d = int(ch)
+            if d > k:
+                return -1
+            nxt = val * 2 + d
+            if nxt > k:
+                parts += 1
+                val = d
+                if val > k:
+                    return -1
+            else:
+                val = nxt
+        return parts
+````

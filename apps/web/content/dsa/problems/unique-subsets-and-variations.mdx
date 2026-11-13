@@ -1,0 +1,80 @@
+---
+title: "Unique subsets and Variations"
+description: "Generate all unique subsequences of a string (set of strings, empty subsequence included) using recursion with include/exclude branching."
+difficulty: easy
+patterns: [subset-generation-problems]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: unique_subsequences }
+starter:
+  python: |
+    def unique_subsequences(s: str) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/unique-subsets-and-variations.public.json, hidden: tests/unique-subsets-and-variations.hidden.json }
+complexity: { time: "O(n * 2^n) in worst case before dedup", space: "O(2^n) distinct strings plus O(n) stack" }
+group: "04. Subset Generation Problems"
+number: "02"
+order: 11004002000000
+---
+
+Generate all unique subsequences of a string (set of strings, empty subsequence
+included) using recursion with include/exclude branching.
+
+## Examples
+
+````text
+Example 1:
+    Input: "abc"
+    Output sorted: ["", "a", "ab", "abc", "ac", "b", "bc", "c"]
+
+Example 2:
+    Input: "aa"
+    Output sorted: ["", "a", "aa"]
+````
+
+## Constraints
+
+````text
+- Characters are lowercase letters in tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Include / exclude with deduplication
+Same recursion as powerset generation, but store results in a set to collapse duplicates
+arising from repeated characters.
+
+1. DFS over indices extending or skipping the current character.
+2. At leaves insert the built string into a set.
+3. Return sorted list for deterministic tests.
+
+## Complexity
+
+**Time:** O(n \* 2^n) in worst case before dedup
+
+**Space:** O(2^n) distinct strings plus O(n) stack
+
+## Solution
+
+````python
+from typing import List, Set
+
+
+class Solution:
+    def unique_subsequences(self, s: str) -> List[str]:
+        found: Set[str] = set()
+
+        def dfs(index: int, built: str) -> None:
+            if index == len(s):
+                found.add(built)
+                return
+            dfs(index + 1, built + s[index])
+            dfs(index + 1, built)
+
+        dfs(0, "")
+        return sorted(found)
+````

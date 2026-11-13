@@ -1,0 +1,159 @@
+---
+title: "Merge in between List"
+description: "Remove nodes from index a through b (0-based) in list1 and splice list2 in their place."
+difficulty: hard
+patterns: [sorting-and-merging]
+topics: [linked-lists]
+companies: []
+languages: [python]
+entry: { python: merge_in_between_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class ListNode:
+        def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+            self.val = val
+            self.next = next
+
+
+    def _build_list(values):
+        head = None
+        for v in reversed(values or []):
+            node = ListNode(v)
+            node.next = head
+            head = node
+        return head
+
+
+    def _list_values(node):
+        out = []
+        while node is not None:
+            out.append(node.val)
+            node = node.next
+        return out
+
+
+    def merge_in_between_tests(a0, a1, a2, a3):  # the entry the tests call
+        result = _list_values(merge_in_between(_build_list(a0), a1, a2, _build_list(a3)))
+        return result
+
+
+    # --- Your code ---
+    def merge_in_between(list1: ListNode | None, a: int, b: int, list2: ListNode | None) -> ListNode | None:
+        # Your code here
+        pass
+tests: { public: tests/merge-in-between-list.public.json, hidden: tests/merge-in-between-list.hidden.json }
+complexity: { time: "O(n + m).", space: "O(1)." }
+group: "05. Sorting and Merging"
+number: "05"
+order: 13005005000000
+---
+
+Remove nodes from index a through b (0-based) in list1 and splice list2 in their place.
+
+## Examples
+
+````text
+Example 1:
+Input: list1 = [0,1,2,3,4,5], a = 3, b = 4, list2 = [1000000,1000001,1000002]
+Output: [0,1,2,1000000,1000001,1000002,5]
+````
+
+## Constraints
+
+````text
+- 3 <= list1.length <= 10^4
+- 1 <= a <= b < list1.length - 1
+- 1 <= list2.length <= 10^4
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Index walk + tail append
+Locate predecessor of a and node after b, then bridge through list2's tail.
+
+1. Walk a-1 steps from head to prev; walk b-a+2 more to node after segment.
+2. prev.next = list2 head; traverse list2 to tail.
+3. tail.next = curr after removed segment.
+
+## Complexity
+
+**Time:** O(n + m).
+
+**Space:** O(1).
+Restored (original notes, diagrams, and walkthrough):
+Problem Statement:
+You are given two linked lists: list1 and list2 of sizes n and m respectively.
+Remove list1's nodes from the ath node to the bth node, and put list2 in their place.
+
+Approach:
+1. Traverse list1 to find the (a-1)th and (b+1)th nodes.
+2. Connect the (a-1)th node to the head of list2.
+3. Find the last node of list2.
+4. Connect the last node of list2 to the (b+1)th node of list1.
+
+Example:
+Input: list1 = \[0,1,2,3,4,5\], a = 3, b = 4, list2 = \[1000000,1000001,1000002\]
+Output: \[0,1,2,1000000,1000001,1000002,5\]
+Explanation: We remove the nodes 3 and 4 and put the entire list2 in their place.
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class ListNode:
+    def __init__(self, val: int = 0, next: Optional[ListNode] = None):
+        self.val = val
+        self.next = next
+
+
+def list_to_linked_list(values: List[int]) -> Optional[ListNode]:
+    dummy = ListNode(0)
+    cur = dummy
+    for v in values:
+        cur.next = ListNode(v)
+        cur = cur.next
+    return dummy.next
+
+
+def linked_list_to_list(head: Optional[ListNode]) -> List[int]:
+    out: List[int] = []
+    while head:
+        out.append(head.val)
+        head = head.next
+    return out
+
+
+class Solution:
+    def mergeInBetween(
+        self,
+        list1: Optional[ListNode],
+        a: int,
+        b: int,
+        list2: Optional[ListNode],
+    ) -> Optional[ListNode]:
+        if not list1:
+            return list2
+        prev = list1
+        for _ in range(a - 1):
+            prev = prev.next
+        curr = prev
+        for _ in range(b - a + 2):
+            curr = curr.next
+        prev.next = list2
+        tail = list2
+        while tail and tail.next:
+            tail = tail.next
+        if tail:
+            tail.next = curr
+        return list1
+````

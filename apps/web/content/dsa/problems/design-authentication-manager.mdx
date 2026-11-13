@@ -1,0 +1,94 @@
+---
+title: "Design Authentication Manager"
+description: "Design a token manager with a fixed time-to-live (TTL)."
+difficulty: medium
+patterns: [hash-maps]
+topics: [hash-maps]
+companies: []
+languages: [python]
+entry: { python: Solution }
+mode: class
+starter:
+  python: |
+    class Solution:
+        def __init__(self, timeToLive: int) -> None:
+            pass
+
+        def generate(self, tokenId: str, currentTime: int) -> None:
+            # Your code here
+            pass
+
+        def renew(self, tokenId: str, currentTime: int) -> None:
+            # Your code here
+            pass
+
+        def countUnexpiredTokens(self, currentTime: int) -> int:
+            # Your code here
+            pass
+tests: { public: tests/design-authentication-manager.public.json, hidden: tests/design-authentication-manager.hidden.json }
+complexity: { time: "O(1) amortized per generate/renew; O(n) per count where n is live tokens", space: "O(n) - one entry per generated token" }
+number: "03"
+leetcode: design-authentication-manager
+leetcodeId: 1797
+order: 4003000000000
+---
+
+Design a token manager with a fixed time-to-live (TTL). Support generating
+tokens, renewing unexpired tokens (extending TTL from renewal time), and
+counting how many tokens are still unexpired at a query time.
+
+## Examples
+
+````text
+Example 1:
+    TTL=10; generate('a',1); renew('a',5); count at 12 -> 1
+Example 2:
+    Renew only applies if the token exists and currentTime < expiry.
+````
+
+## Constraints
+
+````text
+- 1 <= timeToLive, currentTime <= 10^8
+- tokenId are non-empty strings; at most 10^4 calls total
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Hash map (lazy expiry)
+Map each token to its expiry timestamp; count by scanning values (or periodic cleanup).
+
+1. Store tokenId -&gt; expiryTime in a dictionary.
+2. generate overwrites expiry to currentTime + TTL.
+3. renew extends only if expiry &gt; currentTime.
+4. countUnexpiredTokens returns the number of entries with expiry &gt; currentTime.
+
+## Complexity
+
+**Time:** O(1) amortized per generate/renew; O(n) per count where n is live tokens
+
+**Space:** O(n) - one entry per generated token
+
+## Solution
+
+````python
+from typing import Dict
+
+
+class Solution:
+    def __init__(self, timeToLive: int) -> None:
+        self._ttl = timeToLive
+        self._expiry: Dict[str, int] = {}
+
+    def generate(self, tokenId: str, currentTime: int) -> None:
+        self._expiry[tokenId] = currentTime + self._ttl
+
+    def renew(self, tokenId: str, currentTime: int) -> None:
+        if tokenId in self._expiry and self._expiry[tokenId] > currentTime:
+            self._expiry[tokenId] = currentTime + self._ttl
+
+    def countUnexpiredTokens(self, currentTime: int) -> int:
+        return sum(1 for t in self._expiry.values() if t > currentTime)
+````

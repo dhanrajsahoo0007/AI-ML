@@ -1,0 +1,81 @@
+---
+title: "Print N-bit binary numbers having more 1’s than 0’s for any prefix"
+description: "Generate every n-bit binary string such that in every prefix the count of ones is at least the count of zeros (so prefixes never have more zeros than ones)."
+difficulty: medium
+patterns: [pattern-problems]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: n_bit_prefix_valid }
+starter:
+  python: |
+    def n_bit_prefix_valid(n: int) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/print-n-bit-binary-numbers-having-more-1s-than-0s-for-any-prefix.public.json, hidden: tests/print-n-bit-binary-numbers-having-more-1s-than-0s-for-any-prefix.hidden.json }
+complexity: { time: "O(2^n) strings in the worst theoretical bound, heavily pruned in practice", space: "O(n) recursion depth plus output storage" }
+group: "03. Pattern Problems"
+number: "03"
+order: 11003003000000
+---
+
+Generate every n-bit binary string such that in every prefix the count of ones is
+at least the count of zeros (so prefixes never have more zeros than ones).
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 2
+    Output: ["10", "11"] (sorted lexicographically for tests)
+
+Example 2:
+    Input: n = 3
+    Output: ["101", "110", "111"]
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 10 in tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Controlled recursion / pruning
+Append '1' whenever room remains; append '0' only if ones would still dominate zeros
+after the addition.
+
+1. DFS with parameters ones, zeros, and current bitstring.
+2. When length hits n, record the string.
+3. Always try adding '1' if under length n; try '0' only if ones &gt; zeros.
+
+## Complexity
+
+**Time:** O(2^n) strings in the worst theoretical bound, heavily pruned in practice
+
+**Space:** O(n) recursion depth plus output storage
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def n_bit_prefix_valid(self, n: int) -> List[str]:
+        result: List[str] = []
+
+        def dfs(ones: int, zeros: int, path: str) -> None:
+            if len(path) == n:
+                result.append(path)
+                return
+            dfs(ones + 1, zeros, path + "1")
+            if ones > zeros:
+                dfs(ones, zeros + 1, path + "0")
+
+        dfs(0, 0, "")
+        return sorted(result)
+````

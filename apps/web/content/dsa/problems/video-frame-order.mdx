@@ -1,0 +1,108 @@
+---
+title: "Video Frame Order"
+description: "Frames arrive out of order with sequence ids or timestamps."
+difficulty: medium
+patterns: [design-questions]
+topics: [design-questions]
+companies: []
+languages: [python]
+entry: { python: VideoFrameReorderService }
+mode: class
+starter:
+  python: |
+    class VideoFrameReorderService:
+        def __init__(self) -> None:
+            pass
+
+        def SaveFrame(self, seq: int, payload: str) -> None:
+            # Your code here
+            pass
+
+        def GetFrame(self) -> tuple[int, str] | None:
+            # Your code here
+            pass
+tests: { public: tests/video-frame-order.public.json, hidden: tests/video-frame-order.hidden.json }
+complexity: { time: "O(1) amortized per Save/Get.", space: "O(buffer size) for pending frames." }
+number: "15"
+order: 25015000000000
+---
+
+Frames arrive out of order with sequence ids or timestamps. Expose SaveFrame(seq, payload)
+and GetFrame() that returns the next contiguous frame starting at the expected sequence,
+or None if it is not yet available.
+
+## Examples
+
+````text
+Example 1:
+Save 2, Save 0, Save 1 -> first Get returns frame 0, then 1, then 2.
+````
+
+## Constraints
+
+````text
+- Sequence numbers are non-negative integers; strictly increasing by one for delivery order.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Buffer + expected pointer
+Hash map from sequence to payload; advance expected while the next key exists.
+
+1. Maintain next\_expected starting at 0 (or min seen).
+2. SaveFrame stores payload by id.
+3. GetFrame pops next\_expected if present and increments the pointer.
+
+## Complexity
+
+**Time:** O(1) amortized per Save/Get.
+
+**Space:** O(buffer size) for pending frames.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+10. Video Frame out of order
+
+
+Write API's for a service which takes out of order video 
+frames but forwards them in order for processing. 
+Consider your services receives frames from another 
+service which could be out if order but your 
+service forwards them to another service always in
+ sequence (based on timestamp).
+After a lot of clarifying questions,
+ created a class with SaveFrame()
+  and GetFrame() functions using unordered_map and list. 
+
+Discussed in length about concurrency problems 
+and resolved some issues using mutexes and 
+double locking approach.
+````
+
+## Solution
+
+````python
+from typing import Dict, Optional, Tuple
+
+
+class VideoFrameReorderService:
+    def __init__(self) -> None:
+        self._buf: Dict[int, str] = {}
+        self._next = 0
+
+    def SaveFrame(self, seq: int, payload: str) -> None:
+        self._buf[seq] = payload
+
+    def GetFrame(self) -> Optional[Tuple[int, str]]:
+        if self._next not in self._buf:
+            return None
+        data = self._buf.pop(self._next)
+        out = (self._next, data)
+        self._next += 1
+        return out
+````

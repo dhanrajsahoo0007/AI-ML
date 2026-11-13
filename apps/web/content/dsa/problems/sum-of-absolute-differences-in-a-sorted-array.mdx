@@ -1,0 +1,79 @@
+---
+title: "Sum of Absolute Differences in a Sorted Array"
+description: "Given nums sorted in non-decreasing order, return an array answer of the same length where answer[i] is the sum of |nums[i] - nums[j]| for all j."
+difficulty: medium
+patterns: [basic-prefix-sum]
+topics: [prefix-sum]
+companies: []
+languages: [python]
+entry: { python: get_sum_absolute_differences }
+starter:
+  python: |
+    def get_sum_absolute_differences(nums: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/sum-of-absolute-differences-in-a-sorted-array.public.json, hidden: tests/sum-of-absolute-differences-in-a-sorted-array.hidden.json }
+complexity: { time: "O(n) - one pass for prefix and one for answers.", space: "O(n) - prefix and answer arrays." }
+group: "01. Basic Prefix Sum"
+number: "03"
+leetcode: sum-of-absolute-differences-in-a-sorted-array
+leetcodeId: 1685
+order: 2001003000000
+---
+
+Given nums sorted in non-decreasing order, return an array answer of the same
+length where answer\[i\] is the sum of \|nums\[i\] - nums\[j\]\| for all j.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [2, 3, 5]
+Output: [4, 3, 5]
+````
+
+## Constraints
+
+````text
+- 2 <= len(nums) <= 10^5
+- 1 <= nums[i] <= nums[i + 1] <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum
+Split left and right contributions using sorted order and cumulative sums.
+
+1. Build prefix sums of nums.
+2. For each index i, left part uses nums\[i\] \* i - prefix\[i\]; right part uses
+(prefix\[n\] - prefix\[i + 1\]) - nums\[i\] \* (n - 1 - i).
+3. answer\[i\] is left + right.
+
+## Complexity
+
+**Time:** O(n) - one pass for prefix and one for answers.
+
+**Space:** O(n) - prefix and answer arrays.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def getSumAbsoluteDifferences(self, nums: List[int]) -> List[int]:
+        n = len(nums)
+        prefix = [0] * (n + 1)
+        for i in range(n):
+            prefix[i + 1] = prefix[i] + nums[i]
+        total = prefix[n]
+        out: List[int] = []
+        for i in range(n):
+            left = nums[i] * i - prefix[i]
+            right = (total - prefix[i + 1]) - nums[i] * (n - 1 - i)
+            out.append(left + right)
+        return out
+````

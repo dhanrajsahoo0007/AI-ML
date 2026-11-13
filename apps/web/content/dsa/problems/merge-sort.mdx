@@ -1,0 +1,97 @@
+---
+title: "Merge Sort"
+description: "Sort an integer array using merge sort: divide the array, recursively sort halves, then merge two sorted halves into one sorted array."
+difficulty: medium
+patterns: [recursive-sorting]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: merge_sort }
+starter:
+  python: |
+    def merge_sort(arr: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/merge-sort.public.json, hidden: tests/merge-sort.hidden.json }
+complexity: { time: "O(n log n) - standard merge sort recurrence", space: "O(n) - auxiliary merged arrays and O(log n) stack" }
+group: "02. Recursive Sorting"
+number: "02"
+order: 11002002000000
+---
+
+Sort an integer array using merge sort: divide the array, recursively sort halves,
+then merge two sorted halves into one sorted array.
+
+## Examples
+
+````text
+Example 1:
+Input: [64, 34, 25, 12, 22, 11, 90]
+Output: [11, 12, 22, 25, 34, 64, 90]
+````
+
+## Constraints
+
+````text
+- Length can be zero or more; elements fit in typical integer comparisons
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Divide and conquer
+Split the problem into two independent halves of roughly equal size, solve each
+recursively, and combine sorted results with a linear merge.
+
+1. If length &lt;= 1, return a copy of the array.
+2. Split at mid, recursively merge\_sort left and right slices.
+3. Merge two sorted lists with two pointers, appending the smaller each step.
+
+Restored notes (archived workbook):
+
+The main function merge\_sort:
+Base case: If the array has 1 or fewer elements, it's already sorted, so we return it.
+Recursive case:
+We divide the array into two halves.
+We recursively call merge\_sort on both halves.
+We merge the sorted halves using the merge function.
+
+Time complexity: O(n log n) in all cases
+Space complexity: O(n) for the temporary arrays in the merge step
+
+## Complexity
+
+**Time:** O(n log n) - standard merge sort recurrence
+
+**Space:** O(n) - auxiliary merged arrays and O(log n) stack
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def merge_sort(self, arr: List[int]) -> List[int]:
+        if len(arr) <= 1:
+            return list(arr)
+        mid = len(arr) // 2
+        left = self.merge_sort(arr[:mid])
+        right = self.merge_sort(arr[mid:])
+        return self._merge(left, right)
+
+    def _merge(self, left: List[int], right: List[int]) -> List[int]:
+        result: List[int] = []
+        i = j = 0
+        while i < len(left) and j < len(right):
+            if left[i] <= right[j]:
+                result.append(left[i])
+                i += 1
+            else:
+                result.append(right[j])
+                j += 1
+        result.extend(left[i:])
+        result.extend(right[j:])
+        return result
+````

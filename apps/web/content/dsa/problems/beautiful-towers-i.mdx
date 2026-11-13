@@ -1,0 +1,98 @@
+---
+title: "Beautiful Towers I"
+description: "Given max heights per index, choose actual heights (<= caps) forming a mountain (non-decreasing then non-increasing) to maximize the total sum."
+difficulty: medium
+patterns: [monotonic-stack-applications]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: maximum_sum_of_heights }
+starter:
+  python: |
+    def maximum_sum_of_heights(heights: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/beautiful-towers-i.public.json, hidden: tests/beautiful-towers-i.hidden.json }
+complexity: { time: "O(n^2) - Each peak scans both sides.", space: "O(1) - Only counters besides input." }
+group: "05. Monotonic Stack Applications"
+number: "04"
+leetcode: beautiful-towers-i
+leetcodeId: 2865
+order: 9005004000000
+---
+
+Given max heights per index, choose actual heights (&lt;= caps) forming a mountain (non-decreasing then
+non-increasing) to maximize the total sum.
+
+## Examples
+
+````text
+Example 1:
+Input: [5, 3, 4, 1, 1]
+Output: 13
+````
+
+## Constraints
+
+````text
+- 1 <= len(heights) <= 10^3
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Enumerate Peak with Greedy Cap Trimming
+For each possible peak, sweep outward clamping heights to maintain monotonicity.
+
+1. For each index as peak, sum the peak plus leftward caps then rightward caps.
+2. Track the maximum total across peaks.
+3. Return that maximum.
+
+Restored notes (archived workbook):
+
+Problem Statement:
+Given an array heights, find the maximum possible sum of heights for a mountain-shaped tower arrangement.
+A mountain-shaped arrangement means the heights are non-decreasing up to a peak, then non-increasing.
+
+Time Complexity: O(n^2), where n is the length of heights
+Space Complexity: O(1)
+
+Approach:
+1. Iterate through each index, considering it as a potential peak.
+2. For each peak, calculate the maximum possible sum by:
+- Moving left from the peak, ensuring non-decreasing heights
+- Moving right from the peak, ensuring non-increasing heights
+3. Keep track of the maximum sum found across all potential peaks.
+
+This approach works for the given constraints (1 &lt;= n &lt;= 10^3) but may not be efficient for larger inputs.
+
+## Complexity
+
+**Time:** O(n^2) - Each peak scans both sides.
+
+**Space:** O(1) - Only counters besides input.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maximumSumOfHeights(self, heights: List[int]) -> int:
+        n = len(heights)
+        best = 0
+        for peak in range(n):
+            total = heights[peak]
+            left_cap = heights[peak]
+            for i in range(peak - 1, -1, -1):
+                left_cap = min(left_cap, heights[i])
+                total += left_cap
+            right_cap = heights[peak]
+            for i in range(peak + 1, n):
+                right_cap = min(right_cap, heights[i])
+                total += right_cap
+            best = max(best, total)
+        return best
+````

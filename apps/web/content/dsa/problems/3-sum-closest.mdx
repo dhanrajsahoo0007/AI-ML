@@ -1,0 +1,121 @@
+---
+title: "3 Sum Closest"
+description: "Given an integer array nums and an integer target, choose three distinct integers from nums whose sum is closest to target and return that sum."
+difficulty: medium
+patterns: [two-sum-variations]
+topics: [two-pointers]
+companies: []
+languages: [python]
+entry: { python: three_sum_closest }
+starter:
+  python: |
+    def three_sum_closest(nums: list[int], target: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/3-sum-closest.public.json, hidden: tests/3-sum-closest.hidden.json }
+complexity: { time: "O(n^2) - Anchors with linear two-pointer scans dominate sorting.", space: "O(1) auxiliary excluding the sort stack or temporary space used by the sort implementation." }
+group: "03. Two Sum Variations"
+number: "03"
+leetcode: 3sum-closest
+leetcodeId: 16
+order: 6003003000000
+---
+
+Given an integer array nums and an integer target, choose three distinct integers from nums whose sum is
+closest to target and return that sum.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [-1, 2, 1, -4], target = 1
+    Output: 2
+Example 2:
+    Input: nums = [0, 0, 0], target = 1
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 3 <= len(nums) <= 1000
+- -1000 <= nums[i] <= 1000
+- -10^4 <= target <= 10^4
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sort + two pointers
+For each anchor, shrink or expand a two-pointer window to approach the remaining two-sum goal.
+
+1. Sort nums to use monotonic two pointers.
+2. Track closest\_sum initialized to a large sentinel.
+3. For each anchor i, set left = i + 1 and right = n - 1, updating closest\_sum whenever a triplet is nearer to target.
+4. Move left or right depending on whether the current triplet sum is below or above target; stop early if an exact hit occurs.
+
+Restored notes (archived workbook):
+
+Problem Statement : 3Sum Closest
+
+Given an integer array nums of length n and an integer target, find three integers
+in nums such that the sum is closest to target.
+
+Return the sum of the three integers.
+
+You may assume that each input would have exactly one solution.
+
+Time Complexity: O(n^2), where n is the length of the input array.
+- Sorting takes O(n log n)
+- The nested loops (one explicit, one while loop) take O(n^2)
+
+Space Complexity: O(1) or O(n)
+- O(1) if we don't count the space for sorting (depends on the sorting algorithm used)
+- O(n) if we include the space needed for sorting
+
+Examples:
+1. Input: nums = \[-1,2,1,-4\], target = 1
+Output: 2
+Explanation: The sum that is closest to the target is 2. (-1 + 2 + 1 = 2).
+
+2. Input: nums = \[0,0,0\], target = 1
+Output: 0
+Explanation: The sum that is closest to the target is 0. (0 + 0 + 0 = 0).
+
+Constraints:
+- 3 &lt;= nums.length &lt;= 1000
+- -1000 &lt;= nums\[i\] &lt;= 1000
+- -10^4 &lt;= target &lt;= 10^4
+
+## Complexity
+
+**Time:** O(n^2) - Anchors with linear two-pointer scans dominate sorting.
+
+**Space:** O(1) auxiliary excluding the sort stack or temporary space used by the sort implementation.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def threeSumClosest(self, nums: List[int], target: int) -> int:
+        nums.sort()
+        n = len(nums)
+        closest = nums[0] + nums[1] + nums[2]
+        for i in range(n - 2):
+            left, right = i + 1, n - 1
+            while left < right:
+                current = nums[i] + nums[left] + nums[right]
+                if abs(target - current) < abs(target - closest):
+                    closest = current
+                if current == target:
+                    return current
+                if current > target:
+                    right -= 1
+                else:
+                    left += 1
+        return closest
+````

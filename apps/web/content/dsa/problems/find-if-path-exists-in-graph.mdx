@@ -1,0 +1,85 @@
+---
+title: "Find if Path Exists in Graph"
+description: "Bi-directional graph with n vertices 0..n-1 and edges[i] = [u, v]."
+difficulty: easy
+patterns: [others]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: valid_path }
+starter:
+  python: |
+    def valid_path(n: int, edges: list[list[int]], source: int, destination: int) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/find-if-path-exists-in-graph.public.json, hidden: tests/find-if-path-exists-in-graph.hidden.json }
+complexity: { time: "O(n + m).", space: "O(n + m)." }
+group: "11. Others"
+leetcode: find-if-path-exists-in-graph
+leetcodeId: 1971
+order: 17011999000000
+---
+
+Bi-directional graph with n vertices 0..n-1 and edges\[i\] = \[u, v\]. Return whether a path
+exists from source to destination.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 3, edges = [[0,1],[1,2],[2,0]], source = 0, destination = 2
+    Output: True
+Example 2:
+    Input: n = 6, edges = [[0,1],[0,2],[3,5],[5,4],[4,3]], source = 0, destination = 5
+    Output: False
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 2 * 10^5
+- 0 <= len(edges) <= 2 * 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - BFS / DFS connectivity
+
+1. Build adjacency list (undirected).
+2. BFS from source until destination is reached or queue empties.
+
+## Complexity
+
+**Time:** O(n + m).
+
+**Space:** O(n + m).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def validPath(self, n: int, edges: List[List[int]], source: int, destination: int) -> bool:
+        if source == destination:
+            return True
+        g = defaultdict(list)
+        for u, v in edges:
+            g[u].append(v)
+            g[v].append(u)
+        q = deque([source])
+        seen = {source}
+        while q:
+            u = q.popleft()
+            for v in g[u]:
+                if v == destination:
+                    return True
+                if v not in seen:
+                    seen.add(v)
+                    q.append(v)
+        return False
+````

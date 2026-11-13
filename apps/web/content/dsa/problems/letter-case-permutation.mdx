@@ -1,0 +1,85 @@
+---
+title: "Letter Case Permutation"
+description: "Given a string of letters and digits, return every string you can make by choosing lowercase or uppercase independently for each letter; digits stay fixed."
+difficulty: medium
+patterns: [subset-generation-problems]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: letter_case_permutation }
+starter:
+  python: |
+    def letter_case_permutation(s: str) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/letter-case-permutation.public.json, hidden: tests/letter-case-permutation.hidden.json }
+complexity: { time: "O(2^k * n) where k is the number of letters", space: "O(n) stack plus output" }
+group: "04. Subset Generation Problems"
+number: "03"
+leetcode: letter-case-permutation
+leetcodeId: 784
+order: 11004003000000
+---
+
+Given a string of letters and digits, return every string you can make by choosing
+lowercase or uppercase independently for each letter; digits stay fixed.
+
+## Examples
+
+````text
+Example 1:
+    Input: "a1"
+    Output sorted: ["a1", "A1"]
+
+Example 2:
+    Input: "3z4"
+    Output includes "3z4" and "3Z4"
+````
+
+## Constraints
+
+````text
+- Length modest for exponential branching in tests
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Include / exclude on letter casing
+DFS from each index; branch twice for letters, once for digits.
+
+1. Walk index i; if i == len(s), record the built string.
+2. If s\[i\] is alphabetic, recurse with lower and upper variants.
+3. Else recurse once appending the digit unchanged.
+
+## Complexity
+
+**Time:** O(2^k \* n) where k is the number of letters
+
+**Space:** O(n) stack plus output
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def letter_case_permutation(self, s: str) -> List[str]:
+        result: List[str] = []
+
+        def dfs(index: int, built: str) -> None:
+            if index == len(s):
+                result.append(built)
+                return
+            ch = s[index]
+            if ch.isalpha():
+                dfs(index + 1, built + ch.lower())
+                dfs(index + 1, built + ch.upper())
+            else:
+                dfs(index + 1, built + ch)
+
+        dfs(0, "")
+        return sorted(result)
+````

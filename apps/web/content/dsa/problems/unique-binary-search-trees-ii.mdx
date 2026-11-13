@@ -1,0 +1,147 @@
+---
+title: "Unique Binary Search Trees II"
+description: "Given n, generate every structurally unique BST that stores values 1..n."
+difficulty: medium
+patterns: [1d-dp]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: generate_trees_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class TreeNode:
+        __slots__ = ("val", "left", "right")
+
+        def __init__(self, val: int = 0, left: Optional[TreeNode] = None, right: Optional[TreeNode] = None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _build_tree(values):
+        if not values:
+            return None
+        nodes = [None if v is None else TreeNode(v) for v in values]
+        queue, i = [nodes[0]], 1
+        for node in queue:
+            if node is None:
+                continue
+            for side in ("left", "right"):
+                if i < len(values):
+                    setattr(node, side, nodes[i])
+                    queue.append(nodes[i])
+                    i += 1
+            if i >= len(values):
+                break
+        return nodes[0]
+
+
+    def _tree_values(root):
+        out, queue = [], [root] if root else []
+        for node in queue:
+            if node is None:
+                out.append(None)
+            else:
+                out.append(node.val)
+                queue += [node.left, node.right]
+        while out and out[-1] is None:
+            out.pop()
+        return out
+
+
+    def generate_trees_tests(a0):  # the entry the tests call
+        result = [_tree_values(x) for x in generate_trees(a0)]
+        return result
+
+
+    # --- Your code ---
+    def generate_trees(n: int) -> list[TreeNode | None]:
+        # Your code here
+        pass
+tests: { public: tests/unique-binary-search-trees-ii.public.json, hidden: tests/unique-binary-search-trees-ii.hidden.json }
+complexity: { time: "Exponential in n (Catalan number of trees times work per tree).", space: "O(n) recursion depth plus space for all generated trees." }
+group: "01. 1D DP"
+number: "12"
+leetcode: unique-binary-search-trees-ii
+leetcodeId: 95
+order: 20001012000000
+---
+
+Given n, generate every structurally unique BST that stores values 1..n. Return
+the list of roots (order among trees is not specified by the problem).
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 1
+    Output: a single tree with node 1
+Example 2:
+    Input: n = 3
+    Output: 5 distinct trees (Catalan number C_3)
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 8
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Divide and conquer with memoization
+For each choice of root, combine any left subtree on smaller keys with any right on larger keys.
+
+1. Define helper build(lo, hi) returning all trees for keys in \[lo, hi\].
+2. If lo &gt; hi, return \[None\]; for each root r, combine subtrees from build(lo, r-1) and build(r+1, hi).
+3. Memoize build(lo, hi) to avoid recomputing the same intervals.
+
+## Complexity
+
+**Time:** Exponential in n (Catalan number of trees times work per tree).
+
+**Space:** O(n) recursion depth plus space for all generated trees.
+
+## Solution
+
+````python
+from __future__ import annotations
+
+from typing import List, Optional
+
+
+class TreeNode:
+    __slots__ = ("val", "left", "right")
+
+    def __init__(self, val: int = 0, left: Optional[TreeNode] = None, right: Optional[TreeNode] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+class Solution:
+    def generateTrees(self, n: int) -> List[Optional[TreeNode]]:
+        memo: dict[tuple[int, int], List[Optional[TreeNode]]] = {}
+
+        def build(lo: int, hi: int) -> List[Optional[TreeNode]]:
+            if lo > hi:
+                return [None]
+            key = (lo, hi)
+            if key in memo:
+                return memo[key]
+            out: List[Optional[TreeNode]] = []
+            for r in range(lo, hi + 1):
+                for left in build(lo, r - 1):
+                    for right in build(r + 1, hi):
+                        out.append(TreeNode(r, left, right))
+            memo[key] = out
+            return out
+
+        return build(1, n)
+````

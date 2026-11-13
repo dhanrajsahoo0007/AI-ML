@@ -1,0 +1,101 @@
+---
+title: "Minimize Max Distance to Gas Station"
+description: "Gas stations are at sorted positions on a line."
+difficulty: hard
+patterns: [maximum-of-minimum-minimum-of-maximum]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: minmax_gas_dist_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def _rounded(x):
+        if isinstance(x, float):
+            return round(x, 5)
+        if isinstance(x, list):
+            return [_rounded(v) for v in x]
+        return x
+
+
+    def minmax_gas_dist_tests(a0, a1):  # the entry the tests call
+        result = minmax_gas_dist(a0, a1)
+        result = _rounded(result)
+        return result
+
+
+    # --- Your code ---
+    def minmax_gas_dist(stations: list[int], k: int) -> float:
+        # Your code here
+        pass
+tests: { public: tests/minimize-max-distance-to-gas-station.public.json, hidden: tests/minimize-max-distance-to-gas-station.hidden.json }
+complexity: { time: "O(n * ITER) - ITER ~ 50–60 for double precision.", space: "O(1) - Only gap iteration state." }
+group: "07. Maximum of Minimum | Minimum of Maximum"
+number: "05"
+leetcode: minimize-max-distance-to-gas-station
+leetcodeId: 774
+order: 8007005000000
+---
+
+Gas stations are at sorted positions on a line. Add k more stations anywhere on the line to minimize
+the largest distance between adjacent stations along the line. Return that minimized maximum distance
+(as a float with leetcode-style precision).
+
+## Examples
+
+````text
+Example 1:
+Input: stations = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], k = 9
+Output: 0.5
+````
+
+## Constraints
+
+````text
+- 10 <= len(stations) <= 1000
+- 0 <= stations[i] <= 10^6
+- 1 <= k <= 10^6
+````
+
+**Precision.** The tests round your result to 5 decimal places before comparing it.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary Search on Real Answer
+For trial distance d, stations needed on a gap g is ceil(g / d) - 1.
+
+1. Binary search d in (0, max\_gap\] with fixed iterations or epsilon.
+2. If total new stations for d is &lt;= k, d is feasible (try smaller).
+
+## Complexity
+
+**Time:** O(n \* ITER) - ITER \~ 50–60 for double precision.
+
+**Space:** O(1) - Only gap iteration state.
+
+## Solution
+
+````python
+import math
+from typing import List
+
+
+class Solution:
+    def minmaxGasDist(self, stations: List[int], k: int) -> float:
+        gaps = [stations[i + 1] - stations[i] for i in range(len(stations) - 1)]
+        lo, hi = 1e-9, max(gaps)
+
+        def need(d: float) -> int:
+            return sum(max(0, math.ceil(g / d) - 1) for g in gaps)
+
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            if need(mid) <= k:
+                hi = mid
+            else:
+                lo = mid
+        return hi
+````

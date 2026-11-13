@@ -98,18 +98,12 @@ export const problemsKind: SectionKind<DsaItem> = {
     const built = withoutDrafts(items);
     const link = (i: DsaItem) => ({ slug: i.slug, title: numberedTitle(i), href: i.href });
     return navSection(section, [
-      ...topicsOf(built).map((t) => {
-        const groups = new Map<string, DsaItem[]>();
-        const add = (title: string, item: DsaItem) => groups.set(title, [...(groups.get(title) ?? []), item]);
-        for (const p of problemsForTopic(built, t.slug)) add(WRITTEN_GROUP, p);
-        for (const o of outlinesForTopic(built, t.slug)) add(o.fm.group ?? OUTLINE_GROUP, o);
-        return {
-          slug: t.slug,
-          title: topicLabel(t),
-          href: t.href,
-          categories: [...groups].map(([title, list]) => ({ title, items: list.map(link) })),
-        };
-      }),
+      ...topicsOf(built).map((t) => ({
+        slug: t.slug,
+        title: topicLabel(t),
+        href: t.href,
+        categories: topicGroups(built, t.slug).map((g) => ({ title: g.title, items: g.items.map(link) })),
+      })),
       { slug: PROBLEMS_SEGMENT, title: "Problems", href: problemListHref(section) },
     ]);
   },
@@ -327,9 +321,32 @@ export function topicLabel(topic: { title: string; fm: { order?: number } | null
   return n === undefined ? topic.title : `${String(Math.floor(n)).padStart(2, "0")}. ${topic.title}`;
 }
 
-/** An outline's title with its number inside its group ("01. Kth Largest Element"); other items as they are. */
+/**
+ * An outline's title with its number inside its group ("01. Kth Largest Element"), marked "(to write)" when it is
+ * a placeholder; other items as they are.
+ */
 export function numberedTitle(item: DsaItem): string {
-  return item.type === "outline" && item.fm?.number ? `${item.fm.number}. ${item.title}` : item.title;
+  if (item.type === "topic" || !item.fm) return item.title;
+  const numbered = item.fm.number ? `${item.fm.number}. ${item.title}` : item.title;
+  return item.type === "outline" && item.fm.placeholder ? `${numbered} (to write)` : numbered;
+}
+
+/**
+ * A topic's problems and outlines together, under the headings of the owner's notes and in their order
+ * (`order`, then title). An item without a `group` goes under "Ready to solve" (a written problem) or "More
+ * problems" (an outline). The sidebar and the topic page both list a topic this way.
+ */
+export function topicGroups(items: DsaItem[], topic: string): { title: string; items: DsaItem[] }[] {
+  const all: DsaItem[] = [...problemsForTopic(items, topic), ...outlinesForTopic(items, topic)];
+  const orderOf = (i: DsaItem) => (i.type === "topic" ? undefined : i.fm?.order) ?? Infinity;
+  all.sort((a, b) => orderOf(a) - orderOf(b) || a.title.localeCompare(b.title));
+  const groups = new Map<string, DsaItem[]>();
+  for (const item of all) {
+    const group = item.type === "topic" ? undefined : item.fm?.group;
+    const title = group ?? (item.type === "problem" ? WRITTEN_GROUP : OUTLINE_GROUP);
+    groups.set(title, [...(groups.get(title) ?? []), item]);
+  }
+  return [...groups].map(([title, list]) => ({ title, items: list }));
 }
 
 /** A topic's statement-only outlines, in content order. */

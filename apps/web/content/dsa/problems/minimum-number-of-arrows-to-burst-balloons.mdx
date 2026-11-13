@@ -1,0 +1,121 @@
+---
+title: "Minimum Number of Arrows to Burst Balloons"
+description: "Balloons on a wall are given as points[i] = [x_start, x_end], meaning a horizontal diameter covers every x with x_start <= x <= x_end."
+difficulty: medium
+patterns: [advanced-interval-problems]
+topics: [intervals]
+companies: []
+languages: [python]
+entry: { python: find_min_arrow_shots }
+starter:
+  python: |
+    def find_min_arrow_shots(points: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-number-of-arrows-to-burst-balloons.public.json, hidden: tests/minimum-number-of-arrows-to-burst-balloons.hidden.json }
+complexity: { time: "O(n log n) - sorting dominates.", space: "O(1) extra besides the sorted input." }
+group: "04. Advanced Interval Problems"
+number: "01"
+leetcode: minimum-number-of-arrows-to-burst-balloons
+leetcodeId: 452
+order: 19004001000000
+---
+
+Balloons on a wall are given as points\[i\] = \[x\_start, x\_end\], meaning a horizontal
+diameter covers every x with x\_start &lt;= x &lt;= x\_end. An arrow shot vertically at x
+bursts every balloon whose interval contains x. Return the minimum arrows needed to
+burst every balloon.
+
+## Examples
+
+````text
+Example 1:
+    Input: points = [[10,16],[2,8],[1,6],[7,12]]
+    Output: 2
+
+Example 2:
+    Input: points = [[1,2],[3,4],[5,6],[7,8]]
+    Output: 4
+````
+
+## Constraints
+
+````text
+- 1 <= len(points) <= 10^5
+- -2^31 <= x_start < x_end <= 2^31 - 1
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy interval intersection
+Sorting by start lets one arrow burst a cluster only while the next balloon still
+overlaps the active intersection; otherwise a new arrow resets the intersection.
+
+1. Sort balloons by x\_start ascending.
+2. Track the intersection \[arrow\_lo, arrow\_hi\] implied by the current arrow cluster.
+3. When the next balloon starts past arrow\_hi, increment arrows and reset the
+intersection to that balloon.
+4. Otherwise shrink the intersection to overlap with the new balloon.
+5. Return the arrow count.
+
+## Complexity
+
+**Time:** O(n log n) - sorting dominates.
+
+**Space:** O(1) extra besides the sorted input.
+
+## Original notes
+
+````text
+Merge-style viewpoint (from original notes):
+Another way to teach the same greedy idea is to start with `clusters = len(points)` and
+subtract one whenever adjacent balloons (in sorted order) still overlap, while shrinking
+the active intersection to `[curr_start, min(curr_end, prev_end)]`. `BalloonMerger`
+below implements that pedagogy.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def findMinArrowShots(self, points: List[List[int]]) -> int:
+        if not points:
+            return 0
+
+        points.sort(key=lambda p: p[0])
+        arrows = 1
+        arrow_lo, arrow_hi = points[0]
+
+        for start, end in points[1:]:
+            if start > arrow_hi:
+                arrows += 1
+                arrow_lo, arrow_hi = start, end
+            else:
+                arrow_lo = max(arrow_lo, start)
+                arrow_hi = min(arrow_hi, end)
+
+        return arrows
+
+
+class BalloonMerger:
+    """Counts arrows by repeatedly merging overlapping neighbors (original classroom version)."""
+
+    def findMinArrowShots(self, points: List[List[int]]) -> int:
+        if not points:
+            return 0
+        points.sort()
+        res = len(points)
+        prev = points[0]
+        for curr in points[1:]:
+            if curr[0] <= prev[1]:
+                res -= 1
+                prev = [curr[0], min(curr[1], prev[1])]
+            else:
+                prev = curr
+        return res
+````

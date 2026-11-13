@@ -1,0 +1,85 @@
+---
+title: "Reverse Substrings Between Each Pair of Parentheses"
+description: "Reverse every substring between matching parentheses, processing innermost pairs first, and remove parentheses from the final string."
+difficulty: medium
+patterns: [parentheses]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: reverse_parentheses }
+starter:
+  python: |
+    def reverse_parentheses(s: str) -> str:
+        # Your code here
+        pass
+tests: { public: tests/reverse-substrings-between-each-pair-of-parentheses.public.json, hidden: tests/reverse-substrings-between-each-pair-of-parentheses.hidden.json }
+complexity: { time: "O(n) - Two linear passes over the string.", space: "O(n) - Partner array and output storage." }
+group: "02. Parentheses"
+number: "02"
+leetcode: reverse-substrings-between-each-pair-of-parentheses
+leetcodeId: 1190
+order: 9002002000000
+---
+
+Reverse every substring between matching parentheses, processing innermost pairs first, and
+remove parentheses from the final string.
+
+## Examples
+
+````text
+Example 1:
+Input: "(u(love)i)"
+Output: "iloveu"
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 2 * 10^5
+- s is valid with matching parentheses
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Jump Pointer / Direction Flip
+Pair parentheses with a stack, then walk the string toggling direction at each bracket jump.
+
+1. First pass: record the partner index for every parenthesis.
+2. Walk from index 0 with direction +1, appending letters; at '(' or ')', jump to partner and flip direction.
+3. Join collected characters.
+
+## Complexity
+
+**Time:** O(n) - Two linear passes over the string.
+
+**Space:** O(n) - Partner array and output storage.
+
+## Solution
+
+````python
+class Solution:
+    def reverseParentheses(self, s: str) -> str:
+        n = len(s)
+        pair = [0] * n
+        stack: list[int] = []
+        for i, ch in enumerate(s):
+            if ch == "(":
+                stack.append(i)
+            elif ch == ")":
+                j = stack.pop()
+                pair[i] = j
+                pair[j] = i
+        result: list[str] = []
+        direction = 1
+        i = 0
+        while i < n:
+            if s[i] in "()":
+                i = pair[i]
+                direction = -direction
+            else:
+                result.append(s[i])
+            i += direction
+        return "".join(result)
+````

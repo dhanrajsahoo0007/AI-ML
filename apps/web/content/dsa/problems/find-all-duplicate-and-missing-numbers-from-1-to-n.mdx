@@ -1,0 +1,85 @@
+---
+title: "Find all duplicate and missing numbers from 1 to N"
+description: "Given an integer array nums of length n where every value is in [1, n], some values appear twice and others once."
+difficulty: medium
+patterns: [swap-sort]
+topics: [sorting]
+companies: []
+languages: [python]
+entry: { python: find_duplicate_and_missing }
+starter:
+  python: |
+    def find_duplicate_and_missing(nums: list[int]) -> tuple[list[int], list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/find-all-duplicate-and-missing-numbers-from-1-to-n.public.json, hidden: tests/find-all-duplicate-and-missing-numbers-from-1-to-n.hidden.json }
+complexity: { time: "O(n)", space: "O(1) extra besides output lists" }
+group: "02. Swap Sort"
+number: "03"
+order: 23002003000000
+---
+
+Given an integer array nums of length n where every value is in \[1, n\], some
+values appear twice and others once. Return two lists: values that appear twice
+and values in \[1, n\] that never appear.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [4,3,2,7,8,2,3,1]
+    Output: ([2,3], [5,6])  # duplicates sorted, missing sorted
+Example 2:
+    Input: nums = [1,1]
+    Output: ([1], [2])
+````
+
+## Constraints
+
+````text
+- 2 <= len(nums) <= 10^5
+- 1 <= nums[i] <= n
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Cyclic sort / index marking
+Place each number x at index x-1 by swaps; then scan for mismatches.
+
+1. Cyclic sort: while nums\[i\] != nums\[nums\[i\] - 1\], swap nums\[i\] with nums\[nums\[i\]-1\].
+2. Indices where nums\[i\] != i+1 reveal duplicates and missing pairs.
+
+## Complexity
+
+**Time:** O(n)
+
+**Space:** O(1) extra besides output lists
+
+## Solution
+
+````python
+from typing import List, Tuple
+
+
+class Solution:
+    def findDuplicateAndMissing(self, nums: List[int]) -> Tuple[List[int], List[int]]:
+        n = len(nums)
+        i = 0
+        while i < n:
+            j = nums[i] - 1
+            if nums[i] != nums[j]:
+                nums[i], nums[j] = nums[j], nums[i]
+            else:
+                i += 1
+        dup: List[int] = []
+        miss: List[int] = []
+        for idx in range(n):
+            if nums[idx] != idx + 1:
+                dup.append(nums[idx])
+                miss.append(idx + 1)
+        dup = sorted(set(dup))
+        miss.sort()
+        return dup, miss
+````

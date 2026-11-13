@@ -1,0 +1,181 @@
+---
+title: "BFS level order traversal"
+description: "Given the root of a binary tree, return the level-order traversal of its nodes' values (left to right, level by level)."
+difficulty: medium
+patterns: [basic-tree-traversals]
+topics: [trees]
+companies: []
+languages: [python]
+entry: { python: level_order_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    class TreeNode:
+        def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+            self.val = val
+            self.left = left
+            self.right = right
+
+
+    def _build_tree(values):
+        if not values:
+            return None
+        nodes = [None if v is None else TreeNode(v) for v in values]
+        queue, i = [nodes[0]], 1
+        for node in queue:
+            if node is None:
+                continue
+            for side in ("left", "right"):
+                if i < len(values):
+                    setattr(node, side, nodes[i])
+                    queue.append(nodes[i])
+                    i += 1
+            if i >= len(values):
+                break
+        return nodes[0]
+
+
+    def _tree_values(root):
+        out, queue = [], [root] if root else []
+        for node in queue:
+            if node is None:
+                out.append(None)
+            else:
+                out.append(node.val)
+                queue += [node.left, node.right]
+        while out and out[-1] is None:
+            out.pop()
+        return out
+
+
+    def level_order_tests(a0):  # the entry the tests call
+        result = level_order(_build_tree(a0))
+        return result
+
+
+    # --- Your code ---
+    def level_order(root: TreeNode | None) -> list[list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/bfs-level-order-traversal.public.json, hidden: tests/bfs-level-order-traversal.hidden.json }
+complexity: { time: "O(n) - every node is enqueued and dequeued once.", space: "O(w) - queue holds at most one level; w is maximum width (up to O(n))." }
+group: "01. Binary Tree › 01. Basic Tree Traversals"
+number: "02"
+leetcode: binary-tree-level-order-traversal
+leetcodeId: 102
+order: 14001001002000
+---
+
+Given the root of a binary tree, return the level-order traversal of its nodes' values
+(left to right, level by level).
+
+## Examples
+
+````text
+Example 1:
+    Input: root = [3,9,20,None,None,15,7]
+    Output: [[3],[9,20],[15,7]]
+Example 2:
+    Input: root = [1]
+    Output: [[1]]
+````
+
+## Constraints
+
+````text
+- The number of nodes is in the range [0, 2000].
+- Node values fit in 32-bit signed integers.
+````
+
+**How the tests describe the input.** A linked list is written as an array of its values, head first; a binary tree as an array in level order, with `None` for a missing child. The code above the line in the editor turns those arrays into nodes and your answer back into an array: write the function below the line.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** BFS with queue
+Process nodes frontier-by-frontier using a FIFO queue and explicit level sizes.
+
+1. If root is None, return \[\].
+2. Initialize a queue with the root.
+3. While the queue is non-empty, read level\_size = len(queue), dequeue level\_size nodes,
+collect their values, and enqueue their children in left-to-right order.
+
+## Complexity
+
+**Time:** O(n) - every node is enqueued and dequeued once.
+
+**Space:** O(w) - queue holds at most one level; w is maximum width (up to O(n)).
+
+Restored (original notes, diagrams, and walkthrough):
+The original study file had no module docstring; it used top-of-file \`#\` comments plus a small
+\`BinaryTree\` teaching class. Key ideas preserved here:
+
+BFS (breadth-first / level order):
+Use a queue to visit nodes level by level, left to right.
+Seed the queue with the root; repeatedly dequeue the front, record its value, enqueue children.
+Stop when the queue is empty.
+
+DFS pre-order (from the same original file, for contrast):
+Recurse as deep as possible before backtracking: node, then entire left subtree, then right.
+A call stack gives LIFO behavior; BFS uses an explicit FIFO queue.
+
+Sample tree used in the original printouts:
+1
+/                2     3
+/ \\   /            4   5 6   7
+/ \\              8   9    10
+
+## Solution
+
+````python
+from collections import deque
+from typing import List, Optional
+
+
+class TreeNode:
+    def __init__(self, val: int = 0, left: Optional["TreeNode"] = None, right: Optional["TreeNode"] = None):
+        self.val = val
+        self.left = left
+        self.right = right
+
+
+def build_tree_from_level_order(values: List[Optional[int]]) -> Optional[TreeNode]:
+    if not values or values[0] is None:
+        return None
+    root = TreeNode(values[0])
+    q: deque[TreeNode] = deque([root])
+    i = 1
+    while q and i < len(values):
+        node = q.popleft()
+        if i < len(values) and values[i] is not None:
+            node.left = TreeNode(values[i])
+            q.append(node.left)
+        i += 1
+        if i < len(values) and values[i] is not None:
+            node.right = TreeNode(values[i])
+            q.append(node.right)
+        i += 1
+    return root
+
+
+class Solution:
+    def levelOrder(self, root: Optional[TreeNode]) -> List[List[int]]:
+        if not root:
+            return []
+        result: List[List[int]] = []
+        queue: deque[TreeNode] = deque([root])
+        while queue:
+            level_size = len(queue)
+            level: List[int] = []
+            for _ in range(level_size):
+                node = queue.popleft()
+                level.append(node.val)
+                if node.left:
+                    queue.append(node.left)
+                if node.right:
+                    queue.append(node.right)
+            result.append(level)
+        return result
+````

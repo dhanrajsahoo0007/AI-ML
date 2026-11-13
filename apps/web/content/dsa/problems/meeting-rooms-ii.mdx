@@ -1,0 +1,126 @@
+---
+title: "Meeting Rooms II"
+description: "Given meeting intervals [start_i, end_i], return the minimum number of conference rooms required so that no two overlapping meetings share a room."
+difficulty: medium
+patterns: [interval-scheduling]
+topics: [intervals]
+companies: []
+languages: [python]
+entry: { python: min_meeting_rooms }
+starter:
+  python: |
+    def min_meeting_rooms(intervals: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/meeting-rooms-ii.public.json, hidden: tests/meeting-rooms-ii.hidden.json }
+complexity: { time: "O(n log n) - each interval is pushed and popped at most once from the heap.", space: "O(n) - heap holds all active meetings in the worst case." }
+group: "03. Interval Scheduling"
+number: "02"
+leetcode: meeting-rooms-ii
+leetcodeId: 253
+order: 19003002000000
+---
+
+Given meeting intervals \[start\_i, end\_i\], return the minimum number of conference rooms
+required so that no two overlapping meetings share a room. Meetings that only touch
+at an endpoint do not overlap.
+
+## Examples
+
+````text
+Example 1:
+    Input: intervals = [[0,40],[5,10],[15,20]]
+    Output: 2
+
+Example 2:
+    Input: intervals = [[4,9]]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 0 <= len(intervals) <= 500
+- 0 <= start_i < end_i <= 10^6
+````
+
+**Also in the notes under:** [02. Prefix Sum/08. Interval Problems](/dsa/problems/meeting-rooms-ii-interval-problems).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Min-heap on end times (chronological simulation)
+Sort meetings by start and sweep forward, freeing rooms whose meetings ended before
+the current start; the heap size is the concurrent room usage at each step.
+
+1. Sort intervals by start time.
+2. Keep a min-heap of active meeting end times.
+3. For each meeting, pop every end time not strictly greater than the current start.
+4. Push the current meeting's end and track the maximum heap size.
+5. Return that maximum.
+
+## Complexity
+
+**Time:** O(n log n) - each interval is pushed and popped at most once from the heap.
+
+**Space:** O(n) - heap holds all active meetings in the worst case.
+
+## Original notes
+
+````text
+Alternate sweep (from original notes — chronological two-pointer):
+1. Sort all start times and all end times separately.
+2. Walk starts with pointer `s` and ends with pointer `e`.
+3. If the next start happens before the next end, a new meeting begins → increment the
+   active count; otherwise a meeting finished → decrement the active count.
+4. Track the maximum active meetings seen — that peak equals `minMeetingRooms`.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def minMeetingRooms(self, intervals: List[List[int]]) -> int:
+        if not intervals:
+            return 0
+
+        intervals.sort(key=lambda x: x[0])
+        heap: List[int] = []
+        max_rooms = 0
+
+        for start, end in intervals:
+            while heap and heap[0] <= start:
+                heapq.heappop(heap)
+            heapq.heappush(heap, end)
+            max_rooms = max(max_rooms, len(heap))
+
+        return max_rooms
+
+
+class MeetingRoomsTwoPointer:
+    """Second implementation from the user's original file — kept for pedagogy."""
+
+    def minMeetingRooms(self, intervals: List[List[int]]) -> int:
+        if not intervals:
+            return 0
+
+        starts = sorted(i[0] for i in intervals)
+        ends = sorted(i[1] for i in intervals)
+        active = 0
+        peak = 0
+        s = e = 0
+        while s < len(intervals):
+            if starts[s] < ends[e]:
+                active += 1
+                peak = max(peak, active)
+                s += 1
+            else:
+                active -= 1
+                e += 1
+        return peak
+````

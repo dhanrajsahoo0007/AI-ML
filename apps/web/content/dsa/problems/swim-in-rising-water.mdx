@@ -1,0 +1,125 @@
+---
+title: "Swim in rising water"
+description: "You are given an n x n integer matrix grid where each value grid[i][j] represents the elevation at that point (i, j)."
+difficulty: hard
+patterns: [dsu-with-additional-techniques]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: swim_in_water }
+starter:
+  python: |
+    def swim_in_water(grid: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/swim-in-rising-water.public.json, hidden: tests/swim-in-rising-water.hidden.json }
+complexity: { time: "O(n^2 * log(n^2)) for the binary search with DSU rebuilds.", space: "O(n^2)" }
+group: "06. Disjoint Union Sets › 05. DSU with Additional Techniques"
+number: "03"
+leetcode: swim-in-rising-water
+leetcodeId: 778
+order: 17006005003000
+---
+
+You are given an n x n integer matrix grid where each value grid\[i\]\[j\] represents the elevation at that point (i, j).
+The rain starts to fall. At time t, the depth of the water everywhere is t. You can swim from a square to another
+4-directionally adjacent square if and only if the elevation of both squares individually are at most t.
+
+Return the least time until you can reach the bottom right square (n - 1, n - 1) if you start at the top left square (0, 0).
+
+## Examples
+
+````text
+Example 1:
+    Input: grid = [[0,2],[1,3]]
+    Output: 3
+Example 2:
+    Input: grid = [[0,1,2,3,4],[24,23,22,21,5],[12,13,14,15,16],[11,17,18,19,20],[10,9,8,7,6]]
+    Output: 16
+````
+
+## Constraints
+
+````text
+- n == len(grid)
+- 1 <= n <= 50
+- Values are unique in many variants; solution works for given constraints.
+````
+
+**Also in the notes under:** [17. Graphs/07. Shortest Path Algorithm/01. Dijkstra's Algorithm/05. Dijkstra's Algorithm in 2-D Matrix](/dsa/problems/swim-in-rising-water-dijkstras-algorithm-in-2-d-matrix).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Binary search on time + DSU connectivity check
+
+1. Binary search threshold t in \[max(start,end), n\*n-1\].
+2. For candidate t, build DSU over cells with elevation &lt;= t; union 4-neighbors also &lt;= t.
+3. Minimal t where (0,0) and (n-1,n-1) share a component.
+
+## Complexity
+
+**Time:** O(n^2 \* log(n^2)) for the binary search with DSU rebuilds.
+
+**Space:** O(n^2)
+
+This solution uses a Disjoint Set Union (DSU) data structure and binary search to efficiently find the minimum time.
+
+## Solution
+
+````python
+from typing import List
+
+
+class DSU:
+    def __init__(self, n: int) -> None:
+        self.parent = list(range(n))
+        self.size = [1] * n
+        self.number_of_components = n
+
+    def find(self, x: int) -> int:
+        if self.parent[x] != x:
+            self.parent[x] = self.find(self.parent[x])
+        return self.parent[x]
+
+    def union(self, x: int, y: int) -> None:
+        x_parent, y_parent = self.find(x), self.find(y)
+        if x_parent == y_parent:
+            return
+
+        if self.size[x_parent] > self.size[y_parent]:
+            self.parent[y_parent] = x_parent
+            self.size[x_parent] += self.size[y_parent]
+        else:
+            self.parent[x_parent] = y_parent
+            self.size[y_parent] += self.size[x_parent]
+
+        self.number_of_components -= 1
+
+
+class Solution:
+    def swimInWater(self, grid: List[List[int]]) -> int:
+        n = len(grid)
+        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+        def can_reach_bottom_right(t: int) -> bool:
+            dsu = DSU(n * n)
+            for i in range(n):
+                for j in range(n):
+                    if grid[i][j] <= t:
+                        for di, dj in directions:
+                            ni, nj = i + di, j + dj
+                            if 0 <= ni < n and 0 <= nj < n and grid[ni][nj] <= t:
+                                dsu.union(i * n + j, ni * n + nj)
+            return dsu.find(0) == dsu.find(n * n - 1)
+
+        left, right = max(grid[0][0], grid[-1][-1]), n * n - 1
+        while left < right:
+            mid = (left + right) // 2
+            if can_reach_bottom_right(mid):
+                right = mid
+            else:
+                left = mid + 1
+        return left
+````

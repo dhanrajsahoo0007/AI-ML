@@ -1,0 +1,90 @@
+---
+title: "Swap Adjacent in LR String"
+description: "A string contains characters 'L', 'R', and 'X'."
+difficulty: medium
+patterns: [string-manipulation-with-two-pointers]
+topics: [two-pointers]
+companies: []
+languages: [python]
+entry: { python: can_transform }
+starter:
+  python: |
+    def can_transform(start: str, end: str) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/swap-adjacent-in-lr-string.public.json, hidden: tests/swap-adjacent-in-lr-string.hidden.json }
+complexity: { time: "O(n) - Each index moves forward at most once.", space: "O(1) - Only pointer indices are stored." }
+group: "01. String Manipulation with Two Pointers"
+number: "04"
+leetcode: swap-adjacent-in-lr-string
+leetcodeId: 777
+order: 6001004000000
+---
+
+A string contains characters 'L', 'R', and 'X'. An 'L' can move only left into an adjacent 'X', and an 'R'
+can move only right into an adjacent 'X', swapping with that 'X'. Determine whether start can be transformed
+into end using any sequence of such moves.
+
+## Examples
+
+````text
+Example 1:
+    Input: start = "RXXLRXRXL", end = "XRLXXRRLX"
+    Output: true
+Example 2:
+    Input: start = "X", end = "L"
+    Output: false
+````
+
+## Constraints
+
+````text
+- 1 <= len(start) == len(end) <= 10^4
+- start and end consist only of characters in {'L', 'R', 'X'}.
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two pointers with monotonicity rules
+Scan both strings skipping 'X' blocks; non-'X' characters must match, and their relative indices must respect
+how far each token is allowed to drift.
+
+1. Walk pointers i through start and j through end, advancing past 'X' on each side.
+2. If one string ends before the other (after skipping 'X'), return false unless both are finished.
+3. When both land on 'L' or 'R', characters must match; 'L' requires i &gt;= j, 'R' requires i &lt;= j.
+4. Increment both pointers and continue until both strings are fully consumed.
+
+## Complexity
+
+**Time:** O(n) - Each index moves forward at most once.
+
+**Space:** O(1) - Only pointer indices are stored.
+
+## Solution
+
+````python
+class Solution:
+    def canTransform(self, start: str, end: str) -> bool:
+        if len(start) != len(end):
+            return False
+        n = len(start)
+        i = j = 0
+        while i < n or j < n:
+            while i < n and start[i] == "X":
+                i += 1
+            while j < n and end[j] == "X":
+                j += 1
+            if i == n or j == n:
+                return i == n and j == n
+            if start[i] != end[j]:
+                return False
+            if start[i] == "L" and i < j:
+                return False
+            if start[i] == "R" and i > j:
+                return False
+            i += 1
+            j += 1
+        return True
+````

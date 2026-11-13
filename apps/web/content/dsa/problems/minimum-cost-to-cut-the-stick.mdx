@@ -1,0 +1,54 @@
+---
+title: "Minimum Cost to Cut the Stick"
+description: "Stick length n; cuts at positions in array cuts (sorted)."
+difficulty: medium
+patterns: [matrix-chain-multiplication]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: min_cost }
+starter:
+  python: |
+    def min_cost(n: int, cuts: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-cost-to-cut-the-stick.public.json, hidden: tests/minimum-cost-to-cut-the-stick.hidden.json }
+complexity: { time: "O(m^3) for m cuts.", space: "See the notes" }
+group: "07. Matrix Chain Multiplication"
+number: "11"
+order: 20007011000000
+---
+
+Stick length n; cuts at positions in array cuts (sorted). Cost of a cut is the
+current segment length. Minimize total cost.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Interval DP on cut positions
+Add endpoints 0 and n; dp\[i\]\[j\] on cut interval.
+
+## Complexity
+
+**Time:** O(m^3) for m cuts.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def minCost(self, n: int, cuts: List[int]) -> int:
+        pts = [0] + sorted(cuts) + [n]
+        m = len(pts)
+        dp = [[0] * m for _ in range(m)]
+        for length in range(2, m):
+            for i in range(m - length):
+                j = i + length
+                dp[i][j] = 10**9
+                for k in range(i + 1, j):
+                    dp[i][j] = min(dp[i][j], dp[i][k] + dp[k][j] + pts[j] - pts[i])
+        return dp[0][m - 1]
+````

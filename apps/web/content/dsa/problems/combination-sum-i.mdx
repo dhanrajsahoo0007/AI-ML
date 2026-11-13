@@ -1,0 +1,130 @@
+---
+title: "Combination Sum I"
+description: "Given distinct positive integers candidates and a target, return every unique combination where chosen numbers sum to target."
+difficulty: medium
+patterns: [combination-pattern]
+topics: [backtracking]
+companies: []
+languages: [python]
+entry: { python: combination_sum }
+starter:
+  python: |
+    def combination_sum(candidates: list[int], target: int) -> list[list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/combination-sum-i.public.json, hidden: tests/combination-sum-i.hidden.json }
+complexity: { time: "O(n^(target / min)) in worst case.", space: "O(target / min) recursion depth." }
+group: "03. Combination Pattern"
+number: "02"
+order: 12003002000000
+---
+
+Given distinct positive integers candidates and a target, return every unique combination
+where chosen numbers sum to target. The same candidate may be chosen unlimited times.
+
+## Examples
+
+````text
+Example 1:
+    Input: candidates = [2, 3, 6, 7], target = 7
+    Output: [[2, 2, 3], [7]]
+
+Example 2:
+    Input: candidates = [2], target = 1
+    Output: []
+````
+
+## Constraints
+
+````text
+- All elements of candidates are distinct.
+- 2 <= len(candidates) <= 40
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Unbounded combination backtracking
+Sort for pruning; recurse with the same start index to allow reuse of the last pick.
+
+1. DFS(start, remaining): if remaining == 0 store path; if &lt; 0 return.
+2. For i from start to end, append candidates\[i\], recurse with i (reuse allowed), pop.
+
+## Complexity
+
+**Time:** O(n^(target / min)) in worst case.
+
+**Space:** O(target / min) recursion depth.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem Statement:
+    Given an array of distinct positive integers (candidates) and a target integer,
+    find all unique combinations of candidates where the chosen numbers sum to the target.
+    Each number in candidates may be used an unlimited number of times.
+
+Time Complexity: O(N^(T/M)), where N is the number of candidates,
+    T is the target value, and M is the minimum value among the candidates.
+    - In the worst case, we explore all possible combinations.
+    - The maximum depth of recursion is T/M (using the smallest candidate repeatedly).
+    - At each level, we have up to N choices.
+
+Space Complexity: O(T/M)
+    - The main space usage comes from the recursion stack.
+    - The maximum depth of recursion is T/M.
+    - Each recursive call stores a constant amount of data.
+
+Example:
+    Input: candidates = [2,3,6,7], target = 7
+    Output: [[2,2,3],[7]]
+    Explanation:
+        2 and 3 are candidates, and 2 + 2 + 3 = 7. Note that 2 can be used multiple times.
+        7 is a candidate, and 7 = 7.
+        These are the only two combinations.
+
+Visual Representation of the Decision Tree:
+For candidates [2,3,6,7] and target 7, the decision tree would look like this:
+
+                       []
+              /     /     \                 [2]    [3]    [6]   [7]
+           /  \     |
+        [2,2] [2,3] [3,3]
+        /     |
+    [2,2,2] [2,3,2]
+      |       |
+  [2,2,2,2] [2,3,2]  (stop here as sum > 7)
+
+    Valid combinations: [2,2,3] and [7]
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def combinationSum(self, candidates: List[int], target: int) -> List[List[int]]:
+        candidates.sort()
+        result: List[List[int]] = []
+
+        def dfs(start: int, remaining: int, path: List[int]) -> None:
+            if remaining == 0:
+                result.append(path[:])
+                return
+            if remaining < 0:
+                return
+            for i in range(start, len(candidates)):
+                val = candidates[i]
+                if val > remaining:
+                    break
+                path.append(val)
+                dfs(i, remaining - val, path)
+                path.pop()
+
+        dfs(0, target, [])
+        return result
+````

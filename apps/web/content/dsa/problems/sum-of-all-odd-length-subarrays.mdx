@@ -1,0 +1,75 @@
+---
+title: "Sum of All Odd Length Subarrays"
+description: "Return the sum of all subarrays of arr that have odd length."
+difficulty: easy
+patterns: [advanced-prefix-sum-applications]
+topics: [prefix-sum]
+companies: []
+languages: [python]
+entry: { python: sum_odd_length_subarrays }
+starter:
+  python: |
+    def sum_odd_length_subarrays(arr: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/sum-of-all-odd-length-subarrays.public.json, hidden: tests/sum-of-all-odd-length-subarrays.hidden.json }
+complexity: { time: "O(n^2) - acceptable for n <= 100.", space: "O(1) beyond input." }
+group: "02. Advanced Prefix Sum Applications"
+number: "03"
+leetcode: sum-of-all-odd-length-subarrays
+leetcodeId: 1588
+order: 2002003000000
+---
+
+Return the sum of all subarrays of arr that have odd length.
+
+## Examples
+
+````text
+Example 1:
+Input: arr = [1, 4, 2, 5, 3]
+Output: 58
+````
+
+## Constraints
+
+````text
+- 1 <= len(arr) <= 100
+- 1 <= arr[i] <= 1000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix Sum
+Each arr\[i\] appears in one subarray of each odd center distance; count in O(1) per index.
+
+1. For each index i, count odd-length subarrays containing i using combinatorics on left/right sizes.
+2. Alternatively, prefix-sum all odd-start windows — O(n^2) is fine for n &lt;= 100.
+3. Here: for each start, extend by steps of 2 in length and add window sum via running sum.
+
+## Complexity
+
+**Time:** O(n^2) - acceptable for n &lt;= 100.
+
+**Space:** O(1) beyond input.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def sumOddLengthSubarrays(self, arr: List[int]) -> int:
+        n = len(arr)
+        total = 0
+        prefix = [0] * (n + 1)
+        for i in range(n):
+            prefix[i + 1] = prefix[i] + arr[i]
+        for i in range(n):
+            for j in range(i, n, 2):
+                total += prefix[j + 1] - prefix[i]
+        return total
+````

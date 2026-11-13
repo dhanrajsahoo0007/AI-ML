@@ -1,0 +1,59 @@
+---
+title: "Count Square Submatrices with All 1s"
+description: "Count square submatrices with all ones (LeetCode 1277)."
+difficulty: medium
+patterns: [dp-on-squares]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: count_squares }
+starter:
+  python: |
+    def count_squares(matrix: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/count-square-submatrices-with-all-1s.public.json, hidden: tests/count-square-submatrices-with-all-1s.hidden.json }
+complexity: { time: "O(m*n).", space: "See the notes" }
+group: "10. DP on Squares"
+number: "02"
+leetcode: count-square-submatrices-with-all-ones
+leetcodeId: 1277
+order: 20010002000000
+---
+
+Count square submatrices with all ones (LeetCode 1277).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** DP on square side length.
+
+## Complexity
+
+**Time:** O(m\*n).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def countSquares(self, matrix: List[List[int]]) -> int:
+        if not matrix:
+            return 0
+        m, n = len(matrix), len(matrix[0])
+        dp = [[0] * n for _ in range(m)]
+        ans = 0
+        for i in range(m):
+            for j in range(n):
+                if matrix[i][j] == 0:
+                    continue
+                if i == 0 or j == 0:
+                    dp[i][j] = 1
+                else:
+                    dp[i][j] = 1 + min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
+                ans += dp[i][j]
+        return ans
+````

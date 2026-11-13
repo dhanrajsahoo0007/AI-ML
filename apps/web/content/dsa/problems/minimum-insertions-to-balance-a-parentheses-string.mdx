@@ -1,0 +1,79 @@
+---
+title: "Minimum Insertions to Balance a Parentheses String"
+description: "A string is balanced if it is empty, concatenation of balanced strings, or of the form (A)) where A is balanced."
+difficulty: medium
+patterns: [parentheses]
+topics: [stacks-and-queues]
+companies: []
+languages: [python]
+entry: { python: min_insertions }
+starter:
+  python: |
+    def min_insertions(s: str) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-insertions-to-balance-a-parentheses-string.public.json, hidden: tests/minimum-insertions-to-balance-a-parentheses-string.hidden.json }
+complexity: { time: "O(n) - Single left-to-right scan.", space: "O(1) - Constant extra variables." }
+group: "02. Parentheses"
+number: "04"
+leetcode: minimum-insertions-to-balance-a-parentheses-string
+leetcodeId: 1541
+order: 9002004000000
+---
+
+A string is balanced if it is empty, concatenation of balanced strings, or of the form (A)) where
+A is balanced. Return the minimum insertions needed to balance the given parentheses string.
+
+## Examples
+
+````text
+Example 1:
+Input: "(()))"
+Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= len(s) <= 10^5
+- s consists of '(' and ')' only
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Balance with Need Counter
+Track how many closing symbols are still required; adjust when patterns are incomplete.
+
+1. Maintain counters for insertions and outstanding need (each '(' expects two ')').
+2. On '(', fix odd partial needs, add two to need.
+3. On ')', decrement need; if need goes negative, pay an insertion and realign.
+4. Append leftover need at the end.
+
+## Complexity
+
+**Time:** O(n) - Single left-to-right scan.
+
+**Space:** O(1) - Constant extra variables.
+
+## Solution
+
+````python
+class Solution:
+    def minInsertions(self, s: str) -> int:
+        insertions = 0
+        need = 0
+        for ch in s:
+            if ch == "(":
+                if need % 2 == 1:
+                    insertions += 1
+                    need -= 1
+                need += 2
+            else:
+                need -= 1
+                if need < 0:
+                    insertions += 1
+                    need += 2
+        return insertions + need
+````

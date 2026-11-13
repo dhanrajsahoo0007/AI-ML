@@ -1,0 +1,110 @@
+---
+title: "Top K Frequent Elements"
+description: "Given an integer array nums and an integer k, return the k most frequent elements."
+difficulty: medium
+patterns: [top-k-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: top_k_frequent_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def top_k_frequent_tests(a0, a1):  # the entry the tests call
+        result = top_k_frequent(a0, a1)
+        result = sorted(result, key=repr) if isinstance(result, list) else result
+        return result
+
+
+    # --- Your code ---
+    def top_k_frequent(nums: list[int], k: int) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/top-k-frequent-elements.public.json, hidden: tests/top-k-frequent-elements.hidden.json }
+complexity: { time: "O(n log k)", space: "O(n) for the Counter, O(k) for the heap." }
+group: "01. Top-K Pattern"
+number: "05"
+leetcode: top-k-frequent-elements
+leetcodeId: 347
+order: 10001005000000
+---
+
+Given an integer array nums and an integer k, return the k most frequent elements.
+You may return the answer in any order.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1,1,1,2,2,3], k = 2
+    Output: [1,2]
+
+Example 2:
+    Input: nums = [1], k = 1
+    Output: [1]
+````
+
+## Constraints
+
+````text
+- 1 <= nums.length <= 10^5
+- -10^4 <= nums[i] <= 10^4
+- k is in the range [1, number of unique elements]
+- The answer is guaranteed to be unique.
+````
+
+**Order.** Any order is accepted: the tests sort your result before comparing it.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Top-K
+We use a Counter to get frequencies, then maintain a min-heap of size k
+based on frequency. The heap always contains the k most frequent elements.
+
+1. Count the frequency of each number using a Counter.
+2. Maintain a min-heap of size k with (frequency, number) tuples.
+3. For each element, if frequency &gt; smallest in heap, replace it.
+4. Extract the numbers from the heap.
+
+## Complexity
+
+**Time:** O(n log k)
+- O(n) for counting frequencies.
+- O(d log k) for heap operations where d is the number of distinct elements.
+
+**Space:** O(n) for the Counter, O(k) for the heap.
+
+## Original notes
+
+````text
+Original notes (restored):
+Heap entries are `(frequency, number)`. `heapq` compares tuples lexicographically, so the
+smallest frequency sits at the root — evict it when a higher-frequency value appears.
+Counting with `Counter` is O(n); heap work is over distinct keys, O(d log k) where d is unique count.
+````
+
+## Solution
+
+````python
+import heapq
+from collections import Counter
+from typing import List
+
+
+class Solution:
+    def topKFrequent(self, nums: List[int], k: int) -> List[int]:
+        count = Counter(nums)
+        heap = []
+
+        for num, freq in count.items():
+            if len(heap) < k:
+                heapq.heappush(heap, (freq, num))
+            elif freq > heap[0][0]:
+                # Replace the least frequent of our top-k candidates.
+                heapq.heapreplace(heap, (freq, num))
+
+        return [num for freq, num in heap]
+````

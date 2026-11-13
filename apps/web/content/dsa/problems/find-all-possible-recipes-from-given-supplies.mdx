@@ -1,0 +1,94 @@
+---
+title: "Find All Possible Recipes from Given Supplies"
+description: "You have supplies of ingredients and recipes each requiring specific ingredients."
+difficulty: medium
+patterns: [advanced-problem-solving]
+topics: [arrays]
+companies: []
+languages: [python]
+entry: { python: find_all_recipes }
+starter:
+  python: |
+    def find_all_recipes(recipes: list[str], ingredients: list[list[str]], supplies: list[str]) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/find-all-possible-recipes-from-given-supplies.public.json, hidden: tests/find-all-possible-recipes-from-given-supplies.hidden.json }
+complexity: { time: "O(V + E) over recipes and ingredient edges.", space: "O(V + E) - Graph and counters." }
+group: "12. Advanced Problem Solving"
+number: "01"
+leetcode: find-all-possible-recipes-from-given-supplies
+leetcodeId: 2115
+order: 1012001000000
+---
+
+You have supplies of ingredients and recipes each requiring specific ingredients. A recipe can
+be made only when all its ingredients are available (initial supplies or previously made recipes).
+Return all recipes that can eventually be made.
+
+## Examples
+
+````text
+Example 1:
+Input: recipes = ["bread"], ingredients = [["yeast", "flour"]], supplies = ["yeast", "flour", "corn"]
+Output: ["bread"]
+````
+
+## Constraints
+
+````text
+- 1 <= len(recipes) <= 100
+- ingredients[i] contains distinct strings, same length as recipes list.
+- 1 <= len(ingredients[i]), len(supplies) <= 100
+- Each string is lowercase English letters of length 1 to 10.
+````
+
+**Also in the notes under:** [17. Graphs/12. Alphabet150](/dsa/problems/find-all-possible-recipes-from-given-supplies-alphabet150).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Topological sort / Kahn's algorithm
+Model each recipe as a node whose indegree counts missing prerequisite items; process items as they become available.
+
+1. Build indegree map for each recipe equal to its ingredient count.
+2. Build adjacency from each ingredient to recipes that list it.
+3. Initialize a queue with all supplies.
+4. Pop an item, for each dependent recipe decrement indegree; when zero, append recipe to answer and queue.
+
+## Complexity
+
+**Time:** O(V + E) over recipes and ingredient edges.
+
+**Space:** O(V + E) - Graph and counters.
+
+## Solution
+
+````python
+from collections import defaultdict, deque
+from typing import List
+
+
+class Solution:
+    def findAllRecipes(
+        self, recipes: List[str], ingredients: List[List[str]], supplies: List[str]
+    ) -> List[str]:
+        indegree: dict[str, int] = {}
+        graph: dict[str, List[str]] = defaultdict(list)
+        for r, ing in zip(recipes, ingredients):
+            indegree[r] = len(ing)
+            for x in ing:
+                graph[x].append(r)
+        q = deque(supplies)
+        result: List[str] = []
+        recipe_set = set(recipes)
+        while q:
+            cur = q.popleft()
+            for r in graph.get(cur, []):
+                indegree[r] -= 1
+                if indegree[r] == 0:
+                    result.append(r)
+                    if r in recipe_set:
+                        q.append(r)
+        return [r for r in result if r in recipe_set]
+````

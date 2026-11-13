@@ -1,0 +1,101 @@
+---
+title: "Car Pooling"
+description: "Given trips as [numPassengers, start, end] and car capacity, determine if all passengers can be picked up and dropped off without exceeding capacity."
+difficulty: medium
+patterns: [scheduling-and-simulation-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: car_pooling }
+starter:
+  python: |
+    def car_pooling(trips: list[list[int]], capacity: int) -> bool:
+        # Your code here
+        pass
+tests: { public: tests/car-pooling.public.json, hidden: tests/car-pooling.hidden.json }
+complexity: { time: "O(n log n) for sorting and heap operations", space: "O(n) for the heap" }
+group: "05. Scheduling and Simulation Pattern"
+number: "03"
+leetcode: car-pooling
+leetcodeId: 1094
+order: 10005003000000
+---
+
+Given trips as \[numPassengers, start, end\] and car capacity, determine if all
+passengers can be picked up and dropped off without exceeding capacity.
+
+## Examples
+
+````text
+Example 1:
+    Input: trips = [[2,1,5],[3,3,7]], capacity = 4
+    Output: False
+
+Example 2:
+    Input: trips = [[2,1,5],[3,3,7]], capacity = 5
+    Output: True
+````
+
+## Constraints
+
+````text
+- 1 <= trips.length <= 1000
+- 1 <= numPassengers <= 100
+- 0 <= from < to <= 1000
+- 1 <= capacity <= 10^5
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Scheduling and Simulation
+Sort trips by start. Use a min-heap to track when passengers are dropped off.
+At each pickup, first drop off passengers whose destination &lt;= current start.
+
+1. Sort trips by start location.
+2. For each trip: pop all completed trips (end &lt;= start) from the heap.
+3. Add current passengers and check capacity.
+4. Push (end, numPassengers) to the heap.
+
+## Complexity
+
+**Time:** O(n log n) for sorting and heap operations
+
+**Space:** O(n) for the heap
+
+## Original notes
+
+````text
+Original notes (restored):
+Sweep trips by start; a min-heap keyed on drop-off time evicts passengers whose `[start,end)`
+interval already ended before boarding the next group. If `passengers` ever exceeds `capacity`,
+the schedule is impossible. The backup emphasized chronological sorting + heap drops for active load.
+````
+
+## Solution
+
+````python
+import heapq
+from typing import List
+
+
+class Solution:
+    def carPooling(self, trips: List[List[int]], capacity: int) -> bool:
+        trips.sort(key=lambda x: x[1])
+        heap = []
+        passengers = 0
+
+        for num_passengers, start, end in trips:
+            while heap and heap[0][0] <= start:
+                _, drop = heapq.heappop(heap)
+                passengers -= drop
+
+            passengers += num_passengers
+            if passengers > capacity:
+                return False
+
+            heapq.heappush(heap, (end, num_passengers))
+
+        return True
+````

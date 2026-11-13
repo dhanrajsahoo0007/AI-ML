@@ -1,0 +1,61 @@
+---
+title: "Stone Game VII"
+description: "Remove ends accumulating score equal to sum of remaining stones; maximize score difference."
+difficulty: medium
+patterns: [game-strategy]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: stone_game_vii }
+starter:
+  python: |
+    def stone_game_vii(stones: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/stone-game-vii.public.json, hidden: tests/stone-game-vii.hidden.json }
+complexity: { time: "O(n^2).", space: "See the notes" }
+group: "11. Game Strategy"
+number: "03"
+leetcode: stone-game-vii
+leetcodeId: 1690
+order: 20011003000000
+---
+
+Remove ends accumulating score equal to sum of remaining stones; maximize score difference.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Minimax interval DP on sums.
+
+## Complexity
+
+**Time:** O(n^2).
+
+## Solution
+
+````python
+from functools import lru_cache
+from typing import List
+
+
+class Solution:
+    def stoneGameVII(self, stones: List[int]) -> int:
+        pre = [0]
+        for x in stones:
+            pre.append(pre[-1] + x)
+
+        def seg(i: int, j: int) -> int:
+            return pre[j + 1] - pre[i]
+
+        @lru_cache(None)
+        def dfs(i: int, j: int) -> int:
+            if i == j:
+                return 0
+            left = seg(i + 1, j) - dfs(i + 1, j)
+            right = seg(i, j - 1) - dfs(i, j - 1)
+            return max(left, right)
+
+        return dfs(0, len(stones) - 1)
+````

@@ -1,0 +1,84 @@
+---
+title: "Maximum Split of Positive Even Integers"
+description: "Given a positive even integer finalSum, split it into a maximum-length list of distinct positive even integers that sum to finalSum."
+difficulty: medium
+patterns: [mathematical-array-problems]
+topics: [arrays]
+companies: []
+languages: [python]
+entry: { python: maximum_even_split }
+starter:
+  python: |
+    def maximum_even_split(finalSum: int) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/maximum-split-of-positive-even-integers.public.json, hidden: tests/maximum-split-of-positive-even-integers.hidden.json }
+complexity: { time: "O(sqrt(finalSum)) - Roughly O(k) terms where k^2 ~ finalSum.", space: "O(k) - The list of parts." }
+group: "04. Mathematical Array Problems"
+number: "04"
+leetcode: maximum-split-of-positive-even-integers
+leetcodeId: 2178
+order: 1004004000000
+---
+
+Given a positive even integer finalSum, split it into a maximum-length list of distinct positive
+even integers that sum to finalSum. If impossible, return an empty list.
+
+## Examples
+
+````text
+Example 1:
+    Input: finalSum = 12
+    Output: [2, 4, 6]
+Example 2:
+    Input: finalSum = 7
+    Output: []
+````
+
+## Constraints
+
+````text
+- 1 <= finalSum <= 10^10
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy construction
+Take the smallest unused even numbers 2, 4, 6, ... until the next would overshoot, then adjust
+the last chosen value to absorb the remaining even sum.
+
+1. If finalSum is odd, return \[\].
+2. Build answer with 2, 4, 6, ... while the next even can still leave a positive remainder larger
+than the last pick (grow greedily).
+3. A concise approach: repeatedly append the next even i starting at 2 while i &lt;= remaining sum,
+subtract i from remaining, increase i by 2; if anything remains, add it to the last element.
+
+## Complexity
+
+**Time:** O(sqrt(finalSum)) - Roughly O(k) terms where k^2 \~ finalSum.
+
+**Space:** O(k) - The list of parts.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maximumEvenSplit(self, finalSum: int) -> List[int]:
+        if finalSum % 2:
+            return []
+        ans: List[int] = []
+        need = finalSum
+        nxt = 2
+        while nxt <= need:
+            ans.append(nxt)
+            need -= nxt
+            nxt += 2
+        if need:
+            ans[-1] += need
+        return ans
+````

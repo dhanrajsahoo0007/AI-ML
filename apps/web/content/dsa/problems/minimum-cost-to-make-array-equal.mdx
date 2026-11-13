@@ -1,0 +1,125 @@
+---
+title: "Minimum Cost to Make Array Equal"
+description: "nums[i] can be changed by 1 at cost cost[i] per unit."
+difficulty: hard
+patterns: [prefix-sum]
+topics: [binary-search]
+companies: []
+languages: [python]
+entry: { python: min_cost }
+starter:
+  python: |
+    def min_cost(nums: list[int], cost: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-cost-to-make-array-equal.public.json, hidden: tests/minimum-cost-to-make-array-equal.hidden.json }
+complexity: { time: "O(n log n) - Sort dominates.", space: "O(n) - Pairs array." }
+group: "08. Prefix Sum"
+number: "02"
+leetcode: minimum-cost-to-make-array-equal
+leetcodeId: 2448
+order: 8008002000000
+---
+
+nums\[i\] can be changed by 1 at cost cost\[i\] per unit. Choose a final common value t to minimize total
+cost to make all nums equal.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [1, 3, 5, 2], cost = [2, 3, 1, 14]
+Output: 8
+````
+
+## Constraints
+
+````text
+- len(nums) == len(cost) <= 10^5
+- 1 <= nums[i], cost[i] <= 10^6
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Weighted Median
+Cost(t) = sum cost\[i\] \* abs(nums\[i\] - t) is convex; minimizer is any weighted median of pairs (nums\[i\], cost\[i\]).
+
+1. Sort pairs by nums.
+2. Accumulate cost until running sum &gt;= total\_cost / 2; that nums value is optimal t.
+3. Evaluate cost at t.
+
+## Complexity
+
+**Time:** O(n log n) - Sort dominates.
+
+**Space:** O(n) - Pairs array.
+
+## Original notes
+
+````text
+--- Restored notes (historical file) ---
+
+2448. Minimum Cost to Make Array Equal
+Solved
+Hard
+Topics
+Companies
+Hint
+You are given two 0-indexed arrays nums and cost consisting each of n positive integers.
+
+You can do the following operation any number of times:
+
+Increase or decrease any element of the array nums by 1.
+The cost of doing one operation on the ith element is cost[i].
+
+Return the minimum total cost such that all the elements of the array nums become equal.
+
+ 
+
+Example 1:
+
+Input: nums = [1,3,5,2], cost = [2,3,1,14]
+Output: 8
+Explanation: We can make all the elements equal to 2 in the following way:
+- Increase the 0th element one time. The cost is 2.
+- Decrease the 1st element one time. The cost is 3.
+- Decrease the 2nd element three times. The cost is 1 + 1 + 1 = 3.
+The total cost is 2 + 3 + 3 = 8.
+It can be shown that we cannot make the array equal with a smaller cost.
+Example 2:
+
+Input: nums = [2,2,2,2,2], cost = [4,2,8,1,3]
+Output: 0
+Explanation: All the elements are already equal, so no operations are needed.
+ 
+
+Constraints:
+
+n == nums.length == cost.length
+1 <= n <= 105
+1 <= nums[i], cost[i] <= 106
+Test cases are generated in a way that the output doesn't exceed 253-1
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def minCost(self, nums: List[int], cost: List[int]) -> int:
+        pairs = sorted(zip(nums, cost), key=lambda x: x[0])
+        total_w = sum(c for _, c in pairs)
+        half = (total_w + 1) // 2
+        run = 0
+        target = pairs[0][0]
+        for x, w in pairs:
+            run += w
+            if run >= half:
+                target = x
+                break
+        return sum(c * abs(x - target) for x, c in zip(nums, cost))
+````

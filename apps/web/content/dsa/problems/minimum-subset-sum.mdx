@@ -1,0 +1,80 @@
+---
+title: "Minimum subset sum"
+description: "Partition nums into two non-empty subsets to minimize absolute difference of their sums."
+difficulty: medium
+patterns: [0-1-knapsack]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: min_subset_sum_difference }
+starter:
+  python: |
+    def min_subset_sum_difference(nums: list[int]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-subset-sum.public.json, hidden: tests/minimum-subset-sum.hidden.json }
+complexity: { time: "O(n * total).", space: "O(total) with 1D bitset-style DP." }
+group: "02. 0-1 Knapsack"
+number: "07"
+order: 20002007000000
+---
+
+Partition nums into two non-empty subsets to minimize absolute difference of
+their sums. Return that minimum difference.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1, 5, 11, 5]
+    Output: 0
+Example 2:
+    Input: nums = [1, 6, 11, 5]
+    Output: 1
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 200
+- 0 <= nums[i] <= 5000
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Subset-sum reachability + scan
+Any achievable subset sum s in \[0, total//2\] gives difference total - 2s.
+
+1. Build boolean dp\[j\] for sums j up to total//2 using 0-1 items.
+2. Minimize total - 2\*j over j where dp\[j\] is true.
+
+## Complexity
+
+**Time:** O(n \* total).
+
+**Space:** O(total) with 1D bitset-style DP.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def minSubsetSumDifference(self, nums: List[int]) -> int:
+        total = sum(nums)
+        half = total // 2
+        dp = [False] * (half + 1)
+        dp[0] = True
+        for x in nums:
+            for j in range(half, x - 1, -1):
+                dp[j] = dp[j] or dp[j - x]
+        best = 0
+        for j in range(half, -1, -1):
+            if dp[j]:
+                best = j
+                break
+        return total - 2 * best
+````

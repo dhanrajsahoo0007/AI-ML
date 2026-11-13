@@ -1,0 +1,88 @@
+---
+title: "Replace Array Rank with element"
+description: "Given an integer array arr, replace each element with its rank."
+difficulty: easy
+patterns: [basic-array-manipulation]
+topics: [arrays]
+companies: []
+languages: [python]
+entry: { python: array_rank_transform }
+starter:
+  python: |
+    def array_rank_transform(arr: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/replace-array-rank-with-element.public.json, hidden: tests/replace-array-rank-with-element.hidden.json }
+complexity: { time: "O(n log n) - Sorting up to n distinct values dominates.", space: "O(n) - Distinct list, rank map, and output each up to O(n)." }
+group: "01. Basic Array Manipulation"
+number: "03"
+order: 1001003000000
+---
+
+Given an integer array arr, replace each element with its rank. The rank of an element is
+one more than the number of distinct values strictly smaller than that element in the entire array.
+
+## Examples
+
+````text
+Example 1:
+    Input: arr = [100, 2, 70, 2, 8, 70, 100]
+    Output: [4, 1, 3, 1, 2, 3, 4]
+Example 2:
+    Input: arr = [5, 5, 5, 5]
+    Output: [1, 1, 1, 1]
+````
+
+## Constraints
+
+````text
+- 0 <= len(arr) <= 10^5
+- -10^9 <= arr[i] <= 10^9
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Coordinate compression / ranking
+Sort unique values to assign consecutive ranks, then map each original value to its rank.
+
+1. Build sorted list of distinct elements from arr.
+2. Map each distinct value to rank 1..k by position in sorted order.
+3. Build output by replacing each arr\[i\] with rank\_dict\[arr\[i\]\].
+
+## Complexity
+
+**Time:** O(n log n) - Sorting up to n distinct values dominates.
+
+**Space:** O(n) - Distinct list, rank map, and output each up to O(n).
+
+## Original notes
+
+````text
+(preamble)
+Example traces:
+
+Original walkthrough (coordinate compression):
+1. Sort the set of distinct values — order defines rank 1..k.
+2. Build a map from each distinct value to its rank (1-based index in that sorted list).
+3. Replace every element of the input by looking up its rank (duplicates share the same rank).
+
+[100, 2, 70, 2, 8, 70, 100] -> sorted unique [2, 8, 70, 100] -> ranks 1..4 -> [4, 1, 3, 1, 2, 3, 4]
+[5, 5, 5, 5] -> one distinct value -> all rank 1.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def arrayRankTransform(self, arr: List[int]) -> List[int]:
+        if not arr:
+            return []
+        sorted_unique = sorted(set(arr))  # ordered distinct values define rank order
+        rank = {v: i + 1 for i, v in enumerate(sorted_unique)}  # value -> 1-based rank
+        return [rank[x] for x in arr]  # project original positions to ranks
+````

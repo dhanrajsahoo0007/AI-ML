@@ -1,0 +1,71 @@
+---
+title: "Unique Paths II"
+description: "Unique paths with obstacles: grid[i][j]==1 blocks the cell."
+difficulty: medium
+patterns: [2d-3d-dp]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: unique_paths_with_obstacles }
+starter:
+  python: |
+    def unique_paths_with_obstacles(obstacleGrid: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/unique-paths-ii.public.json, hidden: tests/unique-paths-ii.hidden.json }
+complexity: { time: "O(m*n).", space: "See the notes" }
+group: "06. 2D-3D DP"
+number: "11"
+leetcode: unique-paths-ii
+leetcodeId: 63
+order: 20006011000000
+---
+
+Unique paths with obstacles: grid\[i\]\[j\]==1 blocks the cell.
+
+## Examples
+
+````text
+Example 1: obstacleGrid = [[0,0,0],[0,1,0],[0,0,0]] -> 2
+````
+
+## Constraints
+
+````text
+- 1 <= m, n <= 100
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Grid DP with zeros for blocked cells
+Same recurrence as unique paths but reset blocked positions.
+
+1. Rolling array; if obstacle set dp\[j\]=0; else accumulate from left.
+
+## Complexity
+
+**Time:** O(m\*n). Space: O(n).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def uniquePathsWithObstacles(self, obstacleGrid: List[List[int]]) -> int:
+        if obstacleGrid[0][0] == 1 or obstacleGrid[-1][-1] == 1:
+            return 0
+        n = len(obstacleGrid[0])
+        dp = [0] * n
+        dp[0] = 1
+        for i in range(len(obstacleGrid)):
+            for j in range(n):
+                if obstacleGrid[i][j] == 1:
+                    dp[j] = 0
+                elif j > 0:
+                    dp[j] += dp[j - 1]
+        return dp[-1]
+````

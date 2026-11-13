@@ -1,0 +1,143 @@
+---
+title: "Combination Sum II"
+description: "Given candidates (may include duplicates) and a target, return all unique combinations that sum to target where each candidate is used at most once in a comb…"
+difficulty: medium
+patterns: [combination-pattern]
+topics: [backtracking]
+companies: []
+languages: [python]
+entry: { python: combination_sum2 }
+starter:
+  python: |
+    def combination_sum2(candidates: list[int], target: int) -> list[list[int]]:
+        # Your code here
+        pass
+tests: { public: tests/combination-sum-ii.public.json, hidden: tests/combination-sum-ii.hidden.json }
+complexity: { time: "O(2^n) worst case.", space: "O(n) stack depth." }
+group: "03. Combination Pattern"
+number: "03"
+leetcode: combination-sum-ii
+leetcodeId: 40
+order: 12003003000000
+---
+
+Given candidates (may include duplicates) and a target, return all unique combinations that
+sum to target where each candidate is used at most once in a combination.
+
+## Examples
+
+````text
+Example 1:
+    Input: candidates = [10, 1, 2, 7, 6, 1, 5], target = 8
+    Output: [[1,1,6],[1,2,5],[1,7],[2,6]]
+
+Example 2:
+    Input: candidates = [2, 5, 2, 1, 2], target = 5
+    Output: [[1,2,2],[5]]
+````
+
+## Constraints
+
+````text
+- 1 <= len(candidates) <= 100
+- 1 <= candidates[i] <= 50
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Combination backtracking with duplicate skipping
+Sort; skip equal neighbors at the same depth; always move index forward by one after taking.
+
+1. Sort candidates.
+2. DFS(start, remaining): try each i &gt;= start; skip if i &gt; start and nums\[i\] == nums\[i-1\].
+3. Stop early when candidates\[i\] &gt; remaining because the array is sorted.
+
+## Complexity
+
+**Time:** O(2^n) worst case.
+
+**Space:** O(n) stack depth.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem Statement: Combination Sum II
+    Given an array of integers candidates (which may contain duplicates) and a target integer target,
+    find all unique combinations in candidates where the candidate numbers sum to target.
+    Each number in candidates may only be used once in the combination.
+
+    Note: The solution set must not contain duplicate combinations.
+
+Time Complexity: O(2^n), where n is the number of candidates.
+    In the worst case, we might need to explore all possible subsets.
+
+Space Complexity: O(n), where n is the number of candidates.
+    This accounts for the recursion stack and the space to store combinations.
+
+Example 1:
+    Input: candidates = [10,1,2,7,6,1,5], target = 8
+    Output: 
+    [
+    [1,1,6],
+    [1,2,5],
+    [1,7],
+    [2,6]
+    ]
+
+Example 2:
+    Input: candidates = [2,5,2,1,2], target = 5
+    Output: 
+    [
+    [1,2,2],
+    [5]
+    ]
+
+Visual Representation of the Decision Tree:
+For candidates [1,1,2,2,5] and target 5, the decision tree would look like this:
+
+               []
+        /    /    \          [1]  [1]   [2]  [5]
+     /  \    |    |
+ [1,1] [1,2] [1,2] [2,2]
+   |     |     |    |
+[1,1,2] [1,2,2] [1,2,2] [2,2,1]
+
+Valid combinations: [1,2,2] and [5]
+
+This tree shows how:
+    1. The algorithm explores combinations, handling duplicates.
+    2. Branches are pruned when the sum exceeds the target.
+    3. Duplicate combinations are avoided by skipping duplicates at the same level.
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def combinationSum2(self, candidates: List[int], target: int) -> List[List[int]]:
+        candidates.sort()
+        result: List[List[int]] = []
+
+        def dfs(start: int, remaining: int, path: List[int]) -> None:
+            if remaining == 0:
+                result.append(path[:])
+                return
+            for i in range(start, len(candidates)):
+                if i > start and candidates[i] == candidates[i - 1]:
+                    continue
+                val = candidates[i]
+                if val > remaining:
+                    break
+                path.append(val)
+                dfs(i + 1, remaining - val, path)
+                path.pop()
+
+        dfs(0, target, [])
+        return result
+````

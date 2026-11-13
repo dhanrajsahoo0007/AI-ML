@@ -1,0 +1,80 @@
+---
+title: "Minimum Additions to Make Valid String"
+description: "You may insert letters 'a', 'b', or 'c' anywhere into word."
+difficulty: medium
+patterns: [complex-problem-solving-with-greedy-approach]
+topics: [greedy]
+companies: []
+languages: [python]
+entry: { python: add_minimum }
+starter:
+  python: |
+    def add_minimum(word: str) -> int:
+        # Your code here
+        pass
+tests: { public: tests/minimum-additions-to-make-valid-string.public.json, hidden: tests/minimum-additions-to-make-valid-string.hidden.json }
+complexity: { time: "O(n) - Each character causes O(1) amortized advances.", space: "O(1) - Pointer and counter." }
+group: "08. Complex Problem Solving with Greedy Approach"
+number: "03"
+order: 18008003000000
+---
+
+You may insert letters 'a', 'b', or 'c' anywhere into word. Return the minimum insertions so that
+the final string equals some concatenation of the pattern "abc" repeated (a valid abc-string).
+
+## Examples
+
+````text
+Example 1:
+    Input: word = "b"
+    Output: 2
+
+Example 2:
+    Input: word = "aaa"
+    Output: 6
+
+Example 3:
+    Input: word = "abc"
+    Output: 0
+````
+
+## Constraints
+
+````text
+- 1 <= len(word) <= 50
+- word contains only 'a', 'b', and 'c'
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy Template Match
+Walk word while aligning to a cyclic expectation of "abc", inserting whenever the next expected letter differs.
+
+1. Maintain an index pos in &#123;0,1,2&#125; pointing to the next expected character of "abc".
+2. For each character, while it mismatches the expectation, increment answer and advance pos.
+3. After the word, add insertions to finish the current partial cycle.
+
+## Complexity
+
+**Time:** O(n) - Each character causes O(1) amortized advances.
+
+**Space:** O(1) - Pointer and counter.
+
+## Solution
+
+````python
+class Solution:
+    def addMinimum(self, word: str) -> int:
+        ans = 0
+        pos = 0
+        expected = "abc"
+        for ch in word:
+            while ch != expected[pos]:
+                ans += 1
+                pos = (pos + 1) % 3
+            pos = (pos + 1) % 3
+        ans += (3 - pos) % 3
+        return ans
+````

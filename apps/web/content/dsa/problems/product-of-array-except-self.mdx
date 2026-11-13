@@ -1,0 +1,78 @@
+---
+title: "Product of Array Except Self"
+description: "Return an array answer where answer[i] is the product of all elements of nums except nums[i], without using division and in O(n) time."
+difficulty: medium
+patterns: [prefix-suffix-techniques]
+topics: [prefix-sum]
+companies: []
+languages: [python]
+entry: { python: product_except_self }
+starter:
+  python: |
+    def product_except_self(nums: list[int]) -> list[int]:
+        # Your code here
+        pass
+tests: { public: tests/product-of-array-except-self.public.json, hidden: tests/product-of-array-except-self.hidden.json }
+complexity: { time: "O(n).", space: "O(1) extra excluding the output array." }
+group: "03. Prefix-Suffix Techniques"
+number: "03"
+leetcode: product-of-array-except-self
+leetcodeId: 238
+order: 2003003000000
+---
+
+Return an array answer where answer\[i\] is the product of all elements of nums
+except nums\[i\], without using division and in O(n) time.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [1, 2, 3, 4]
+Output: [24, 12, 8, 6]
+````
+
+## Constraints
+
+````text
+- 2 <= len(nums) <= 10^5
+- -30 <= nums[i] <= 30
+- Product of any prefix or suffix fits in 32-bit integer
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Prefix-Suffix
+Left running products and right running products combine without division.
+
+1. Build prefix products in answer: answer\[i\] = product(nums\[0..i-1\]).
+2. Multiply by a right running product scanning from the end.
+
+## Complexity
+
+**Time:** O(n).
+
+**Space:** O(1) extra excluding the output array.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def productExceptSelf(self, nums: List[int]) -> List[int]:
+        n = len(nums)
+        out = [1] * n
+        p = 1
+        for i in range(n):
+            out[i] = p
+            p *= nums[i]
+        p = 1
+        for i in range(n - 1, -1, -1):
+            out[i] *= p
+            p *= nums[i]
+        return out
+````

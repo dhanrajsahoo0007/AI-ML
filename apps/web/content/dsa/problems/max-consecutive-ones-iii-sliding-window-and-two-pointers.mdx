@@ -1,0 +1,82 @@
+---
+title: "Max Consecutive Ones III"
+description: "Given a binary array nums and an integer k, return the maximum number of consecutive 1s if you may flip at most k zeros to ones."
+difficulty: medium
+patterns: [sliding-window-and-two-pointers]
+topics: [prefix-sum]
+companies: []
+languages: [python]
+entry: { python: longest_ones }
+starter:
+  python: |
+    def longest_ones(nums: list[int], k: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/max-consecutive-ones-iii-sliding-window-and-two-pointers.public.json, hidden: tests/max-consecutive-ones-iii-sliding-window-and-two-pointers.hidden.json }
+complexity: { time: "O(n) - each index visited a constant number of times.", space: "O(1)." }
+group: "07. Sliding Window and Two Pointers"
+number: "01"
+leetcode: max-consecutive-ones-iii
+leetcodeId: 1004
+order: 2007001000000
+---
+
+Given a binary array nums and an integer k, return the maximum number of
+consecutive 1s if you may flip at most k zeros to ones.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0], k = 2
+Output: 6
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 10^5
+- nums[i] is 0 or 1
+- 0 <= k <= len(nums)
+````
+
+**Also in the notes under:** [07. Sliding Window/02. String Manipulation with Sliding Window](/dsa/problems/max-consecutive-ones-iii).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Sliding Window
+Expand the window while zero count &lt;= k, shrink from the left when it exceeds k.
+
+1. Maintain left pointer and count of zeros in the current window.
+2. For each right index, include nums\[right\]; while zeros &gt; k, shrink from left.
+3. Track maximum window length.
+
+## Complexity
+
+**Time:** O(n) - each index visited a constant number of times.
+
+**Space:** O(1).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def longestOnes(self, nums: List[int], k: int) -> int:
+        left = 0
+        zeros = 0
+        best = 0
+        for right, x in enumerate(nums):
+            if x == 0:
+                zeros += 1
+            while zeros > k:
+                if nums[left] == 0:
+                    zeros -= 1
+                left += 1
+            best = max(best, right - left + 1)
+        return best
+````

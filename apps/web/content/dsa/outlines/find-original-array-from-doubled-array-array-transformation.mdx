@@ -1,0 +1,97 @@
+---
+title: "Find Original Array From Doubled Array"
+description: "An array original becomes changed by appending twice every element of original, then shuffling."
+topics: [arrays]
+group: "06. Array Transformation"
+number: "02"
+leetcode: find-original-array-from-doubled-array
+leetcodeId: 2007
+order: 1006002000000
+status: outline
+---
+
+An array original becomes changed by appending twice every element of original, then shuffling.
+Given changed, reconstruct any valid original, or return \[\] if none exists.
+
+## Examples
+
+````text
+Example 1:
+    Input: changed = [1, 3, 4, 2, 6, 8]
+    Output: [1, 3, 4] (any order of that multiset is acceptable)
+Example 2:
+    Input: changed = [6, 3, 0, 1]
+    Output: []
+````
+
+## Constraints
+
+````text
+- 1 <= len(changed) <= 10^5
+- 0 <= changed[i] <= 10^5
+````
+
+**Also in the notes under:** [01. Array/06. Array Transformation](/dsa/problems/find-original-array-from-doubled-array); [18. Greedy/08. Complex Problem Solving with Greedy Approach](/dsa/problems/find-original-array-from-doubled-array-complex-problem-solving-with-greedy-approach).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy with frequency map
+Process sorted distinct keys; repeatedly pair x with 2x using remaining counts.
+
+1. If len(changed) is odd, return \[\].
+2. Count values with a multiset.
+3. For x in sorted keys, repeatedly consume x with 2x while counts allow; otherwise return \[\].
+4. Return collected originals.
+
+## Complexity
+
+**Time:** O(n log n) - Sorting keys dominates.
+
+**Space:** O(n) - Counter and output list.
+
+## Solution
+
+````python
+import collections
+from typing import List
+
+
+class Solution:
+    def findOriginalArray(self, changed: List[int]) -> List[int]:
+        if len(changed) % 2 == 1:
+            return []
+        freq = collections.Counter(changed)
+        result: List[int] = []
+        for x in sorted(freq.keys()):
+            while freq[x] > 0:
+                if freq[x * 2] <= 0:
+                    return []
+                freq[x] -= 1
+                freq[x * 2] -= 1
+                result.append(x)
+        return result
+
+
+def _multiset_equal(a: List[int], b: List[int]) -> bool:
+    return collections.Counter(a) == collections.Counter(b)
+````
+
+## Tests from the notes
+
+````python
+if __name__ == "__main__":
+    sol = Solution()
+    assert _multiset_equal(sol.findOriginalArray([1, 3, 4, 2, 6, 8]), [1, 3, 4]), "Test 1 Failed"
+    print("Test 1 Passed: valid doubled multiset")
+    assert sol.findOriginalArray([6, 3, 0, 1]) == [], "Test 2 Failed"
+    print("Test 2 Passed: invalid multiset")
+    assert _multiset_equal(sol.findOriginalArray([0, 0]), [0]), "Test 3 Failed"
+    print("Test 3 Passed: paired zeros")
+    assert sol.findOriginalArray([1]) == [], "Test 4 Failed"
+    print("Test 4 Passed: odd length")
+    assert _multiset_equal(sol.findOriginalArray([2, 1, 2, 4]), [1, 2]), "Test 5 Failed"
+    print("Test 5 Passed: duplicate originals")
+    print("\nAll test cases passed!")
+````

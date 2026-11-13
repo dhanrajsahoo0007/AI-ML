@@ -1,0 +1,82 @@
+---
+title: "Arithmetic Subarrays"
+description: "Given an array nums and two arrays l and r of equal length, for each query i consider the subarray nums[l[i] : r[i] + 1]."
+difficulty: medium
+patterns: [advanced-array-problems]
+topics: [arrays]
+companies: []
+languages: [python]
+entry: { python: check_arithmetic_subarrays }
+starter:
+  python: |
+    def check_arithmetic_subarrays(nums: list[int], l: list[int], r: list[int]) -> list[bool]:
+        # Your code here
+        pass
+tests: { public: tests/arithmetic-subarrays.public.json, hidden: tests/arithmetic-subarrays.hidden.json }
+complexity: { time: "O(m * k log k) - m queries, k average slice length.", space: "O(k) - Temporary slice storage per query." }
+group: "08. Advanced Array Problems"
+number: "02"
+leetcode: arithmetic-subarrays
+leetcodeId: 1630
+order: 1008002000000
+---
+
+Given an array nums and two arrays l and r of equal length, for each query i consider the
+subarray nums\[l\[i\] : r\[i\] + 1\]. Return a list of booleans indicating whether each subarray forms
+an arithmetic sequence when sorted.
+
+## Examples
+
+````text
+Example 1:
+Input: nums = [4, 6, 5, 9, 3, 7], l = [0, 3, 4], r = [2, 5, 5]
+Output: [True, False, True]  # middle slice [9, 3, 7] is not arithmetic when sorted
+````
+
+## Constraints
+
+````text
+- n == len(nums)
+- m == len(l) == len(r)
+- 2 <= n <= 500
+- 1 <= m <= 500
+- 0 <= l[i] < r[i] < n
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Local validation after sorting slices
+A sorted slice is arithmetic iff max - min == common\_difference \* (length - 1) with equal spacing
+checked via set of expected terms or pairwise constant diff.
+
+1. For each query, copy nums\[l:r+1\], sort it.
+2. If length is 2, return True.
+3. Otherwise verify consecutive differences are all equal to the first gap.
+
+## Complexity
+
+**Time:** O(m \* k log k) - m queries, k average slice length.
+
+**Space:** O(k) - Temporary slice storage per query.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def checkArithmeticSubarrays(self, nums: List[int], l: List[int], r: List[int]) -> List[bool]:
+        answer: List[bool] = []
+        for left, right in zip(l, r):
+            chunk = sorted(nums[left : right + 1])
+            if len(chunk) < 2:
+                answer.append(True)
+                continue
+            step = chunk[1] - chunk[0]
+            ok = all(chunk[i] - chunk[i - 1] == step for i in range(2, len(chunk)))
+            answer.append(ok)
+        return answer
+````

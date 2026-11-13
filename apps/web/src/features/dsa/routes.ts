@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 import { getCompanies } from "@/lib/question-bank";
 import { CONTENT_DIR, isPathVisible, sectionOfKind, routeSection } from "../sections";
 import type { SectionDef } from "../sections";
-import { outlinesForTopic, problemListHref, problemsForTopic, problemsKind } from "./kind";
+import { problemListHref, problemsForTopic, problemsKind } from "./kind";
 import { buildProblemIndex } from "./problem-index";
 import {
   loadDsaItems,
@@ -71,7 +71,6 @@ export function getTopic(slug: string) {
     ...content,
     topic,
     problems: problemsForTopic(content.items, slug),
-    topicOutlines: outlinesForTopic(content.items, slug),
   };
 }
 
@@ -100,21 +99,6 @@ export function problemIndex(section: SectionDef, problems: ValidProblem[]) {
   });
 }
 
-/**
- * A topic's practice problems grouped by pattern, for the topic page: each problem under its first pattern,
- * groups in the order their first problem appears, problems in content order (`order`, then title).
- */
-export function practiceGroups(section: SectionDef, problems: ValidProblem[]) {
-  const labels = new Map(loadPatterns(section).map((p) => [p.slug, p.label]));
-  const groups = new Map<string, { slug: string; label: string; problems: ValidProblem[] }>();
-  for (const p of problems) {
-    const slug = p.fm.patterns[0];
-    if (!groups.has(slug)) groups.set(slug, { slug, label: labels.get(slug) ?? slug, problems: [] });
-    groups.get(slug)!.problems.push(p);
-  }
-  return [...groups.values()];
-}
-
 /** Labels for a problem's patterns and companies, in the order the frontmatter lists them. */
 export function problemLabels(section: SectionDef, problem: ValidProblem) {
   const patterns = new Map(loadPatterns(section).map((p) => [p.slug, p.label]));
@@ -125,7 +109,10 @@ export function problemLabels(section: SectionDef, problem: ValidProblem) {
   };
 }
 
-/** What the in-browser workspace needs: starters, entry points and the PUBLIC tests. Never hidden tests. */
+/**
+ * What the in-browser workspace needs: starters, entry points, the PUBLIC tests and the address of the judge
+ * route. Never the hidden tests themselves.
+ */
 export function workspaceProps(section: SectionDef, problem: ValidProblem) {
   const { fm } = problem;
   return {
@@ -135,6 +122,8 @@ export function workspaceProps(section: SectionDef, problem: ValidProblem) {
     entry: fm.entry,
     mode: fm.mode,
     tests: readPublicTests(section, problem),
+    /** Where "Submit" fetches the hidden cases (app/<section>/problems/<slug>/judge). */
+    judgeHref: `${problem.href}/judge`,
   };
 }
 

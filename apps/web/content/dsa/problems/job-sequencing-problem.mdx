@@ -1,0 +1,94 @@
+---
+title: "Job sequencing Problem"
+description: "Each job has a deadline day and a profit."
+difficulty: medium
+patterns: [interval-scheduling]
+topics: [intervals]
+companies: []
+languages: [python]
+entry: { python: job_sequencing }
+starter:
+  python: |
+    def job_sequencing(jobs: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/job-sequencing-problem.public.json, hidden: tests/job-sequencing-problem.hidden.json }
+complexity: { time: "O(n * alpha(n)) for n jobs with union-find path compression.", space: "O(max_deadline) for parent array." }
+group: "03. Interval Scheduling"
+number: "04"
+order: 19003004000000
+---
+
+Each job has a deadline day and a profit. You can schedule at most one job per day,
+and a job with deadline d must finish on or before day d. Choose a subset of jobs to
+maximize total profit.
+
+## Examples
+
+````text
+Example 1:
+    Input: jobs = [[2,100],[1,19],[2,27],[1,25],[3,15]]
+    Output: 142
+    Explanation: Pick deadlines/slots greedily (classic job sequencing).
+
+Example 2:
+    Input: jobs = [[1,4],[2,10],[3,6],[4,20]]
+    Output: 40
+````
+
+## Constraints
+
+````text
+- 1 <= len(jobs) <= 10^4
+- Each job is [deadline, profit] with 1 <= deadline <= len(jobs) and 1 <= profit
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Greedy by profit with union-find for latest free slot
+Sorting jobs by descending profit and placing each job on the latest still-empty day
+before its deadline maximizes retained high-value work.
+
+1. Sort jobs by profit descending.
+2. Track parent pointers for union-find over day slots to find latest free day.
+3. For each job, locate the latest available day &lt;= deadline; if none, skip.
+4. Union that day with day-1 to mark it used and add profit.
+
+## Complexity
+
+**Time:** O(n \* alpha(n)) for n jobs with union-find path compression.
+
+**Space:** O(max\_deadline) for parent array.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def jobSequencing(self, jobs: List[List[int]]) -> int:
+        if not jobs:
+            return 0
+
+        jobs.sort(key=lambda job: job[1], reverse=True)
+        max_deadline = max(d for d, _ in jobs)
+        parent = list(range(max_deadline + 2))
+
+        def find(x: int) -> int:
+            if parent[x] != x:
+                parent[x] = find(parent[x])
+            return parent[x]
+
+        total = 0
+        for deadline, profit in jobs:
+            slot = find(deadline)
+            if slot == 0:
+                continue
+            total += profit
+            parent[slot] = find(slot - 1)
+
+        return total
+````

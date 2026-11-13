@@ -1,0 +1,82 @@
+---
+title: "Tower of Hanoi"
+description: "Solve Tower of Hanoi for n disks on three pegs labeled A (source), B (auxiliary), and C (target)."
+difficulty: easy
+patterns: [pattern-problems]
+topics: [recursion]
+companies: []
+languages: [python]
+entry: { python: tower_of_hanoi }
+starter:
+  python: |
+    def tower_of_hanoi(n: int) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/tower-of-hanoi.public.json, hidden: tests/tower-of-hanoi.hidden.json }
+complexity: { time: "O(2^n) moves generated", space: "O(n) recursion depth plus O(2^n) output list" }
+group: "03. Pattern Problems"
+number: "01"
+order: 11003001000000
+---
+
+Solve Tower of Hanoi for n disks on three pegs labeled A (source), B (auxiliary),
+and C (target). Return the sequence of moves, each move transferring the top disk
+from one peg to another following the rules: only one disk at a time, never place
+a larger disk on a smaller one.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 1
+    Output: ["A->C"]
+
+Example 2:
+    Input: n = 2
+    Output: ["A->B", "A->C", "B->C"]
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 10 for tests (exponential number of moves)
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Recursive decomposition
+Move n-1 disks from source to auxiliary, move largest from source to target, then
+move n-1 from auxiliary to target.
+
+1. If n == 0, return \[\].
+2. Recursively move n-1 from src to aux using dst as spare.
+3. Append move src-&gt;dst, then move n-1 from aux to dst using src as spare.
+
+## Complexity
+
+**Time:** O(2^n) moves generated
+
+**Space:** O(n) recursion depth plus O(2^n) output list
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def tower_of_hanoi(self, n: int) -> List[str]:
+        moves: List[str] = []
+
+        def hanoi(disks: int, src: str, aux: str, dst: str) -> None:
+            if disks == 0:
+                return
+            hanoi(disks - 1, src, dst, aux)
+            moves.append(f"{src}->{dst}")
+            hanoi(disks - 1, aux, src, dst)
+
+        hanoi(n, "A", "B", "C")
+        return moves
+````

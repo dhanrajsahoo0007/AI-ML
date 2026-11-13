@@ -1,0 +1,96 @@
+---
+title: "Number of Operations to Make Network Connected"
+description: "You have n computers and connections as undirected edges."
+difficulty: medium
+patterns: [alphabet150]
+topics: [graphs]
+companies: []
+languages: [python]
+entry: { python: make_connected }
+starter:
+  python: |
+    def make_connected(n: int, connections: list[list[int]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/number-of-operations-to-make-network-connected-alphabet150.public.json, hidden: tests/number-of-operations-to-make-network-connected-alphabet150.hidden.json }
+complexity: { time: "O(n + m * alpha(n)).", space: "O(n)." }
+group: "12. Alphabet150"
+number: "11"
+leetcode: number-of-operations-to-make-network-connected
+leetcodeId: 1319
+order: 17012011000000
+---
+
+You have n computers and connections as undirected edges. In one operation you can move any
+edge to connect two previously unconnected computers. Return the minimum operations to make
+the graph fully connected, or -1 if impossible.
+
+## Examples
+
+````text
+Example 1:
+    Input: n = 4, connections = [[0,1],[0,2],[1,2]]
+    Output: 1
+Example 2:
+    Input: n = 6, connections = [[0,1],[0,2],[0,3],[1,2],[1,3]]
+    Output: 2
+Example 3:
+    Input: n = 6, connections = [[0,1],[0,2],[0,3],[1,2]]
+    Output: -1
+````
+
+## Constraints
+
+````text
+- 1 <= n <= 10^5
+- 1 <= len(connections) <= 10^5
+````
+
+**Also in the notes under:** [17. Graphs/06. Disjoint Union Sets/01. Introduction to Disjoint Set Union (DSU)](/dsa/problems/number-of-operations-to-make-network-connected).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Graph - Union Find (count components and redundant edges)
+
+1. If fewer than n-1 edges, impossible.
+2. Union all edges counting extras when endpoints already connected.
+3. Components c after unions need c-1 cables; succeed if extra &gt;= c-1.
+
+## Complexity
+
+**Time:** O(n + m \* alpha(n)).
+
+**Space:** O(n).
+
+## Solution
+
+````python
+from typing import List
+from collections import defaultdict, deque
+
+
+class Solution:
+    def makeConnected(self, n: int, connections: List[List[int]]) -> int:
+        if len(connections) < n - 1:
+            return -1
+        parent = list(range(n))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        extra = 0
+        for a, b in connections:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+            else:
+                extra += 1
+        comps = len({find(i) for i in range(n)})
+        need = comps - 1
+        return need if extra >= need else -1
+````

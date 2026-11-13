@@ -42,12 +42,19 @@ const CODE_LINE = /^[\w\s.,:;()[\]=+\-*/%]+$/;
 const PROSE_LINE = /^[A-Za-z0-9 .,:;()-]+$/;
 
 /** The longest line of `source` of that kind, at least 20 characters, that is not in `except`. */
+/** A name of four or more letters that is not a Python keyword or builtin: what makes a code line this problem's own. */
+const OWN_NAME =
+  /\b(?!(?:return|while|range|print|False|True|None|self|lambda|elif|else|import|from|with|yield|break|continue|pass|class|sorted|reversed|enumerate|append|float|tuple|isinstance)\b)[A-Za-z_][A-Za-z0-9_]{3,}\b/;
+
 function distinctiveLine(source: string, plain: RegExp, except = ""): string | undefined {
+  // Code lines with a name of the problem's own come first: a bare formula such as a cross product can also
+  // occur in an unrelated library bundle.
+  const own = (l: string) => (plain === CODE_LINE && OWN_NAME.test(l) ? 1 : 0);
   return source
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l.length >= 20 && plain.test(l) && !except.includes(l))
-    .sort((a, b) => b.length - a.length)[0];
+    .sort((a, b) => own(b) - own(a) || b.length - a.length)[0];
 }
 
 function walk(dir: string, keep: (f: string) => boolean): string[] {
@@ -115,6 +122,7 @@ describe("hidden tests stay on the build machine", () => {
 describe("premium problems keep their solution and editorial out of the page", () => {
   const premium = problems.filter((p) => problemsKind.access(section, p) === "premium");
 
+  // Hundreds of lines against every bundle: seconds, not milliseconds.
   it("reference solutions and editorials are not in any client bundle", () => {
     const lines = premium.flatMap((p) => {
       const ref = readReferenceSolutionForValidation(section, p.slug);
@@ -128,7 +136,7 @@ describe("premium problems keep their solution and editorial out of the page", (
       for (const l of lines) if (text.includes(l)) hits.push(`${rel(file)}: ${l}`);
     }
     expect(hits).toEqual([]);
-  });
+  }, 120_000);
 
   it("a distinctive line of the reference solution and of the editorial is absent from the prerendered page", () => {
     const hits: string[] = [];
@@ -177,5 +185,28 @@ describe("outline notes stay out of built pages", () => {
     const pages = walk(pagesDir, (f) => /\.(html|rsc)$/.test(f));
     if (pages.length === 0) return; // no build in this checkout
     expect(pages.filter((f) => fs.readFileSync(f, "utf8").includes("data-dsa-outline-notes"))).toEqual([]);
+  });
+});
+
+// Submit runs the hidden cases in the browser, so they are served, but from one place only: the judge route
+// (features/dsa/judge.ts and app/<section>/problems/[slug]/judge/route.ts). Nothing else may reach them.
+describe("the judge route is the only way hidden cases are served", () => {
+  const srcDir = path.join(webRoot, "src");
+  const sources = walk(srcDir, (f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f));
+  const text = (f: string) => fs.readFileSync(f, "utf8");
+
+  it("only the judge route imports the judge module", () => {
+    const importers = sources.filter((f) => /from "(@\/features\/dsa|\.)\/judge"/.test(text(f))).map(rel);
+    expect(importers).toEqual(["src/app/dsa/problems/[slug]/judge/route.ts"]);
+  });
+
+  it("only the judge module uses the judge's reader", () => {
+    const users = sources.filter((f) => text(f).includes("readHiddenTestsForJudge")).map(rel);
+    expect(users.sort()).toEqual(["src/features/dsa/judge.ts", "src/features/dsa/source.ts"]);
+  });
+
+  it("the built judge files carry no case names", () => {
+    const bodies = walk(pagesDir, (f) => /[\\/]judge\.body$/.test(f));
+    expect(bodies.filter((f) => HIDDEN_NAME_SENTINEL.test(text(f))).map(rel)).toEqual([]);
   });
 });

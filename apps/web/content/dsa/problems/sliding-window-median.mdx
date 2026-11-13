@@ -1,0 +1,157 @@
+---
+title: "Sliding Window Median"
+description: "Given an integer array nums and an integer k, return the median array for each sliding window of size k moving from left to right."
+difficulty: hard
+patterns: [two-heaps-pattern]
+topics: [heaps]
+companies: []
+languages: [python]
+entry: { python: median_sliding_window_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def _rounded(x):
+        if isinstance(x, float):
+            return round(x, 5)
+        if isinstance(x, list):
+            return [_rounded(v) for v in x]
+        return x
+
+
+    def median_sliding_window_tests(a0, a1):  # the entry the tests call
+        result = median_sliding_window(a0, a1)
+        result = _rounded(result)
+        return result
+
+
+    # --- Your code ---
+    def median_sliding_window(nums: list[int], k: int) -> list[float]:
+        # Your code here
+        pass
+tests: { public: tests/sliding-window-median.public.json, hidden: tests/sliding-window-median.hidden.json }
+complexity: { time: "O(n log k), where n is the array length", space: "O(n) for heaps and hash table" }
+group: "03. Two Heaps Pattern"
+number: "02"
+leetcode: sliding-window-median
+leetcodeId: 480
+order: 10003002000000
+---
+
+Given an integer array nums and an integer k, return the median array for each
+sliding window of size k moving from left to right.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [1,3,-1,-3,5,3,6,7], k = 3
+    Output: [1.0,-1.0,-1.0,3.0,5.0,6.0]
+
+Example 2:
+    Input: nums = [1,2,3,4,2,3,1,4,2], k = 3
+    Output: [2.0,3.0,3.0,3.0,2.0,3.0,2.0]
+````
+
+## Constraints
+
+````text
+- 1 <= k <= nums.length <= 10^5
+- -2^31 <= nums[i] <= 2^31 - 1
+````
+
+**Precision.** The tests round your result to 5 decimal places before comparing it.
+
+**Also in the notes under:** [07. Sliding Window/05. Heap](/dsa/problems/sliding-window-median-heap).
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Two Heaps
+We maintain two heaps (max-heap for lower half, min-heap for upper half) with
+lazy deletion of outgoing elements using a hash table.
+
+1. Initialize the window with the first k elements split across two heaps.
+2. For each new window position:
+a. Record the median from the heap tops.
+b. Mark the outgoing element for lazy deletion.
+c. Add the incoming element to the appropriate heap.
+d. Rebalance and clean invalid tops.
+
+## Complexity
+
+**Time:** O(n log k), where n is the array length
+
+**Space:** O(n) for heaps and hash table
+
+## Original notes
+
+````text
+Original notes (restored):
+LC 480 walk-through table (k=3 on `[1,3,-1,-3,5,3,6,7]`) from the backup shows how medians
+evolve per window. Lazy deletion (`defaultdict` counts) avoids O(n) removal from heaps; clean
+stale tops after each rebalance. `balance` tracks whether the low max-heap needs more real elements.
+````
+
+## Solution
+
+````python
+import heapq
+from collections import defaultdict
+from typing import List
+
+
+class Solution:
+    def medianSlidingWindow(self, nums: List[int], k: int) -> List[float]:
+        left = []
+        right = []
+        lazy_delete = defaultdict(int)
+        medians = []
+
+        for i in range(k):
+            heapq.heappush(left, -nums[i])
+        for _ in range(k // 2):
+            heapq.heappush(right, -heapq.heappop(left))
+
+        idx = k
+        while True:
+            if k % 2 == 1:
+                medians.append(float(-left[0]))
+            else:
+                medians.append((-left[0] + right[0]) * 0.5)
+
+            if idx >= len(nums):
+                break
+
+            out_num = nums[idx - k]
+            in_num = nums[idx]
+            idx += 1
+            balance = 0
+
+            # Outgoing element: if it lived on the small side, the small heap loses mass.
+            balance += -1 if out_num <= -left[0] else 1
+            lazy_delete[out_num] += 1
+
+            if left and in_num <= -left[0]:
+                balance += 1
+                heapq.heappush(left, -in_num)
+            else:
+                balance -= 1
+                heapq.heappush(right, in_num)
+
+            if balance < 0:
+                heapq.heappush(left, -heapq.heappop(right))
+            elif balance > 0:
+                heapq.heappush(right, -heapq.heappop(left))
+
+            while left and lazy_delete[-left[0]]:
+                lazy_delete[-left[0]] -= 1
+                heapq.heappop(left)
+
+            while right and lazy_delete[right[0]]:
+                lazy_delete[right[0]] -= 1
+                heapq.heappop(right)
+
+        return medians
+````

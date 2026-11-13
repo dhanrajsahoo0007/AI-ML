@@ -1,0 +1,73 @@
+---
+title: "Maximal Square"
+description: "Given m x n binary matrix, return the area of the largest square of only 1's."
+difficulty: medium
+patterns: [2d-3d-dp]
+topics: [dynamic-programming]
+companies: []
+languages: [python]
+entry: { python: maximal_square }
+starter:
+  python: |
+    def maximal_square(matrix: list[list[str]]) -> int:
+        # Your code here
+        pass
+tests: { public: tests/maximal-square.public.json, hidden: tests/maximal-square.hidden.json }
+complexity: { time: "O(m*n).", space: "See the notes" }
+group: "06. 2D-3D DP"
+number: "13"
+leetcode: maximal-square
+leetcodeId: 221
+order: 20006013000000
+---
+
+Given m x n binary matrix, return the area of the largest square of only 1's.
+
+## Examples
+
+````text
+Example 1:
+Input: classic LeetCode 221 sample matrix
+Output: 4
+````
+
+## Constraints
+
+````text
+- m,n <= 300
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** 2D DP on square side
+dp\[i\]\[j\] = max side of square with bottom-right at (i,j).
+
+1. If matrix cell '1', dp\[i\]\[j\]=1+min of three neighbors in dp table.
+2. Answer is max\_side^2.
+
+## Complexity
+
+**Time:** O(m\*n). Space: O(m\*n).
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def maximalSquare(self, matrix: List[List[str]]) -> int:
+        if not matrix:
+            return 0
+        m, n = len(matrix), len(matrix[0])
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+        best = 0
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if matrix[i - 1][j - 1] == "1":
+                    dp[i][j] = 1 + min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1])
+                    best = max(best, dp[i][j])
+        return best * best
+````

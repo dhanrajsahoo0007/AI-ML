@@ -1,0 +1,114 @@
+---
+title: "Restore IP Addresses"
+description: "Given a string of digits, return all valid IPv4 addresses formed by inserting three dots so each part is in [0,255] without unnecessary leading zeros."
+difficulty: medium
+patterns: [string-pattern]
+topics: [backtracking]
+companies: []
+languages: [python]
+entry: { python: restore_ip_addresses }
+starter:
+  python: |
+    def restore_ip_addresses(s: str) -> list[str]:
+        # Your code here
+        pass
+tests: { public: tests/restore-ip-addresses.public.json, hidden: tests/restore-ip-addresses.hidden.json }
+complexity: { time: "O(1) for fixed max length 12 with constant branching.", space: "O(1) auxiliary excluding outputs." }
+group: "05. String Pattern"
+number: "05"
+leetcode: restore-ip-addresses
+leetcodeId: 93
+order: 12005005000000
+---
+
+Given a string of digits, return all valid IPv4 addresses formed by inserting three dots so
+each part is in \[0,255\] without unnecessary leading zeros.
+
+## Examples
+
+````text
+Example 1:
+Input: s = "25525511135"
+Output: ["255.255.11.135","255.255.111.35"]
+````
+
+## Constraints
+
+````text
+- 4 <= len(s) <= 12
+- s contains only digits
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Bounded-depth segmentation backtracking
+Choose 1..3 digits per segment while respecting leading-zero rules and remaining length bounds.
+
+1. DFS over segment index and start position in s.
+2. For each segment try lengths 1..3 when in bounds; reject values &gt;255 or leading zeros.
+3. When four segments consume the whole string, record the joined IP.
+
+## Complexity
+
+**Time:** O(1) for fixed max length 12 with constant branching.
+
+**Space:** O(1) auxiliary excluding outputs.
+
+## Original notes
+
+````text
+Restored notes (from original study file):
+Problem: Restore IP Addresses
+
+    Given a string containing only digits, find all possible valid IP addresses that can be formed
+    by inserting dots into the string. Cannot reorder or remove digits.
+
+Time Complexity: O(3^4) = O(1) because:
+    - Maximum length of input is 12 (constraint)
+    - For each of 4 parts, we try up to 3 digits
+    - String operations are bounded by constant length
+
+Space Complexity: O(1)
+    - Maximum number of valid IPs is bounded
+    - Input size is bounded by 12
+````
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def restoreIpAddresses(self, s: str) -> List[str]:
+        n = len(s)
+        result: List[str] = []
+
+        def valid_segment(seg: str) -> bool:
+            if not seg:
+                return False
+            if len(seg) > 1 and seg[0] == "0":
+                return False
+            return int(seg) <= 255
+
+        def dfs(start: int, parts: List[str]) -> None:
+            if len(parts) == 4:
+                if start == n:
+                    result.append(".".join(parts))
+                return
+            remaining_segments = 4 - len(parts)
+            max_take = min(3, n - start - (remaining_segments - 1))
+            for length in range(1, max_take + 1):
+                seg = s[start : start + length]
+                if not valid_segment(seg):
+                    continue
+                parts.append(seg)
+                dfs(start + length, parts)
+                parts.pop()
+
+        if 4 <= n <= 12:
+            dfs(0, [])
+        return result
+````

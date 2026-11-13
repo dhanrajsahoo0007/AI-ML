@@ -1,0 +1,114 @@
+---
+title: "Minimum Area Rectangle II"
+description: "Given distinct integer points in the plane, return the minimum area of any rectangle formed by four points (not necessarily axis-aligned)."
+difficulty: medium
+patterns: [leetcode-and-alphabet-150]
+topics: [math-and-geometry]
+companies: []
+languages: [python]
+entry: { python: min_area_free_rect_tests }
+starter:
+  python: |
+    # --- Glue: converts the test data. Leave as is. ---
+
+    def _rounded(x):
+        if isinstance(x, float):
+            return round(x, 5)
+        if isinstance(x, list):
+            return [_rounded(v) for v in x]
+        return x
+
+
+    def min_area_free_rect_tests(a0):  # the entry the tests call
+        result = min_area_free_rect(a0)
+        result = _rounded(result)
+        return result
+
+
+    # --- Your code ---
+    def min_area_free_rect(points: list[list[int]]) -> float:
+        # Your code here
+        pass
+tests: { public: tests/minimum-area-rectangle-ii.public.json, hidden: tests/minimum-area-rectangle-ii.hidden.json }
+complexity: { time: "O(n^3)", space: "O(n) - hash set of points" }
+group: "02. Leetcode and Alphabet 150"
+number: "03"
+leetcode: minimum-area-rectangle-ii
+leetcodeId: 963
+order: 21002003000000
+---
+
+Given distinct integer points in the plane, return the minimum area of any
+rectangle formed by four points (not necessarily axis-aligned). If none, 0.
+
+## Examples
+
+````text
+Example 1:
+    Input: points = [[1,2],[2,1],[1,0],[0,1]]
+    Output: 2.0
+Example 2:
+    Input: points = [[0,1],[2,1],[1,1],[1,0],[2,0]]
+    Output: 1.0
+````
+
+## Constraints
+
+````text
+- 1 <= len(points) <= 50
+- Coordinates are integers with |coord| <= 4 * 10^4
+````
+
+**Precision.** The tests round your result to 5 decimal places before comparing it.
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Enumerate right angles
+Fix one corner and two adjacent sides with perpendicular vectors; verify the
+fourth vertex exists in the point set.
+
+1. Store points in a set for O(1) lookup.
+2. Triple loop distinct i, j, k; treat i as corner, edges to j and k.
+3. Require dot product zero for perpendicular adjacent sides; compute the
+fourth corner j + k - i; if present, area is product of edge lengths.
+
+## Complexity
+
+**Time:** O(n^3)
+
+**Space:** O(n) - hash set of points
+
+## Solution
+
+````python
+import math
+from typing import List, Set, Tuple
+
+
+class Solution:
+    def minAreaFreeRect(self, points: List[List[int]]) -> float:
+        pset: Set[Tuple[int, int]] = {(x, y) for x, y in points}
+        n = len(points)
+        best = float("inf")
+        for i in range(n):
+            x1, y1 = points[i]
+            for j in range(n):
+                if i == j:
+                    continue
+                x2, y2 = points[j]
+                dx1, dy1 = x2 - x1, y2 - y1
+                for k in range(n):
+                    if k in (i, j):
+                        continue
+                    x3, y3 = points[k]
+                    dx2, dy2 = x3 - x1, y3 - y1
+                    if dx1 * dx2 + dy1 * dy2 != 0:
+                        continue
+                    x4, y4 = x2 + x3 - x1, y2 + y3 - y1
+                    if (x4, y4) in pset:
+                        area = math.hypot(dx1, dy1) * math.hypot(dx2, dy2)
+                        best = min(best, area)
+        return 0.0 if best == float("inf") else best
+````

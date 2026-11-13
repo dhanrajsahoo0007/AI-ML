@@ -1,0 +1,83 @@
+---
+title: "K Divisible Elements Subarrays"
+description: "Given an integer array nums and integers k and p, count distinct subarrays (by value sequence) where at most k elements are divisible by p."
+difficulty: medium
+patterns: [rabin-karp-rolling-hash]
+topics: [strings]
+companies: []
+languages: [python]
+entry: { python: count_distinct }
+starter:
+  python: |
+    def count_distinct(nums: list[int], k: int, p: int) -> int:
+        # Your code here
+        pass
+tests: { public: tests/k-divisible-elements-subarrays.public.json, hidden: tests/k-divisible-elements-subarrays.hidden.json }
+complexity: { time: "O(n^3) in worst case due to tuple copying (constraints keep n small).", space: "O(number of distinct subarrays) - Stored tuples." }
+group: "07. Rabin-Karp | Rolling hash"
+number: "05"
+leetcode: k-divisible-elements-subarrays
+leetcodeId: 2261
+order: 5007005000000
+---
+
+Given an integer array nums and integers k and p, count distinct subarrays (by
+value sequence) where at most k elements are divisible by p.
+
+## Examples
+
+````text
+Example 1:
+    Input: nums = [2, 3, 3, 2, 2], k = 2, p = 2
+    Output: 11
+
+Example 2:
+    Input: nums = [1, 2, 3, 4], k = 4, p = 1
+    Output: 10
+````
+
+## Constraints
+
+````text
+- 1 <= len(nums) <= 200
+- 1 <= k <= len(nums)
+- 1 <= p <= 20
+````
+
+<PremiumBreak />
+
+## Approach
+
+**Pattern:** Enumerate subarrays with divisibility count
+Extend each left index while the divisible-by-p count stays within k; store tuples in a set.
+
+1. For each start index i, maintain cnt of positions j where nums\[j\] % p == 0.
+2. Extend j from i while cnt &lt;= k, inserting tuple(nums\[i:j+1\]) into a set.
+3. Return the set size.
+
+## Complexity
+
+**Time:** O(n^3) in worst case due to tuple copying (constraints keep n small).
+
+**Space:** O(number of distinct subarrays) - Stored tuples.
+
+## Solution
+
+````python
+from typing import List
+
+
+class Solution:
+    def countDistinct(self, nums: List[int], k: int, p: int) -> int:
+        seen: set[tuple[int, ...]] = set()
+        n = len(nums)
+        for i in range(n):
+            cnt = 0
+            for j in range(i, n):
+                if nums[j] % p == 0:
+                    cnt += 1
+                if cnt > k:
+                    break
+                seen.add(tuple(nums[i : j + 1]))
+        return len(seen)
+````
