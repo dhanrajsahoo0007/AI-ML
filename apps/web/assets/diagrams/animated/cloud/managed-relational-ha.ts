@@ -14,9 +14,9 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // step to step, so each version ends with `until`; the step-4 versions stay in the full view (the app-to-primary
 // one ends at step 4, when the proxy takes its place).
 //
-// Layout: three columns (x 125 | 400 | 680) and four rows (y 90 | 245 | 400 | 550).
-//   Left, the shop side: shoppers 125,90 | app 125,245 | read replica 125,400 | paid twice 125,550.
-//   Middle, the database: backups 400,90 | primary 400,245 | standby 400,400 | lag alarm 400,550.
+// Layout: three columns (x 125 | 400 | 680) and four rows (y 90 | 245 | 400 | 560).
+//   Left, the shop side: shoppers 125,90 | app 125,245 | read replica 125,400 | paid twice 125,560.
+//   Middle, the database: backups 400,90 | primary 400,245 | standby 400,400 | lag alarm 400,560.
 //   Right, added later: connection proxy 680,245 | resize function 680,400.
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 to 4 (the free
 // preview, the failure and its fix) use only the left and middle columns; only the proxy step and the failover need
@@ -25,8 +25,9 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Edge routes: the replica sits left of the standby, so the asynchronous copy runs diagonally from the primary's
 // bottom to the replica's top through the gap between the rows (label at y 322), and the synchronous copy is a short
 // vertical edge. The lag edge leaves the replica to the right, runs down the gutter between the columns (x 265) and
-// enters the alarm from the left. The app reaches the proxy over the top of the primary (y 172, between the backups
-// zone and zone A). The failover edge runs from the proxy's bottom to the standby's top, between the zones.
+// enters the alarm from the left. The app reaches the proxy over the top of the primary (y 168, between the backups
+// zone and zone A, pill over zone A). The failover edge runs from the proxy's bottom to the standby's top; its pill
+// sits above the Functions tab. The bottom row sits 31 below its zones so the NEW ring clears the inline labels.
 // Zone tabs: vertical edges at x 125, 400 and 680 enter zones right of their tabs. The two bottom zones use the subnet
 // kind (inline label, no tab). The backups edge has no label, because the app-to-proxy route crosses it.
 // Text room: a label takes about 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. Nodes
@@ -36,7 +37,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 const spec: DiagramSpec = {
   title: "A managed database: standby, read replica, proxy and failover",
   width: 795,
-  height: 620,
+  height: 630,
   steps: [
     { title: "One managed primary, a standby and backups" },
     { title: "A read replica takes the order page" },
@@ -49,12 +50,12 @@ const spec: DiagramSpec = {
     { id: "people", title: "Shoppers", tone: "neutral", x: 10, y: 20, w: 240, h: 140 },
     { id: "shop", title: "Shop", tone: "teal", x: 10, y: 190, w: 240, h: 110 },
     { id: "zone-c", title: "Zone C", tone: "violet", x: 10, y: 345, w: 240, h: 110 },
-    { id: "sale", title: "Sale day", tone: "neutral", kind: "subnet", x: 10, y: 495, w: 240, h: 110 },
+    { id: "sale", title: "Sale day", tone: "neutral", kind: "subnet", x: 10, y: 495, w: 240, h: 120 },
     { id: "backup-zone", title: "Backups", tone: "violet", x: 290, y: 20, w: 220, h: 140 },
     { id: "zone-a", title: "Zone A", tone: "violet", x: 290, y: 190, w: 220, h: 110 },
     { id: "zone-b", title: "Zone B", tone: "violet", x: 290, y: 345, w: 220, h: 110 },
-    { id: "monitoring", title: "Monitoring", tone: "orange", kind: "subnet", x: 290, y: 495, w: 220, h: 110 },
-    { id: "connections", title: "Connections", tone: "blue", x: 560, y: 190, w: 225, h: 110 },
+    { id: "monitoring", title: "Monitoring", tone: "orange", kind: "subnet", x: 290, y: 495, w: 220, h: 120 },
+    { id: "connections", title: "Proxy", tone: "blue", x: 560, y: 190, w: 225, h: 110 },
     { id: "functions", title: "Functions", tone: "teal", x: 560, y: 345, w: 225, h: 110 },
   ],
   nodes: [
@@ -154,7 +155,7 @@ const spec: DiagramSpec = {
       tone: "red",
       step: 3,
       x: 125,
-      y: 550,
+      y: 560,
       w: 176,
     },
 
@@ -167,7 +168,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       step: 4,
       x: 400,
-      y: 550,
+      y: 560,
       w: 170,
       cloud: { aws: "aws-cloudwatch", gcp: "gcp-cloud-monitoring", azure: "azure-monitor" },
     },
@@ -229,7 +230,7 @@ const spec: DiagramSpec = {
       dashed: true,
       via: [
         [265, 400],
-        [265, 550],
+        [265, 560],
       ],
       labelAt: 0.5,
       step: 4,
@@ -242,17 +243,26 @@ const spec: DiagramSpec = {
       label: "writes, fresh",
       packet: true,
       via: [
-        [200, 172],
-        [680, 172],
+        [200, 168],
+        [680, 168],
       ],
-      labelAt: 0.74,
+      labelAt: 0.59,
       step: 5,
     },
     { from: "fn", to: "proxy", label: "20 connections", packet: true, delay: 0.6, step: 5 },
     { from: "proxy", to: "primary", label: "pooled", packet: true, delay: 1.4, step: 5 },
 
     // Step 6: in a drill the standby becomes the primary; the proxy reconnects to it and the app keeps its sockets.
-    { from: "proxy", to: "standby", label: "after failover", tone: "green", dashed: true, packet: true, step: 6 },
+    {
+      from: "proxy",
+      to: "standby",
+      label: "after failover",
+      tone: "green",
+      dashed: true,
+      packet: true,
+      labelAt: 0.42,
+      step: 6,
+    },
   ],
 };
 
