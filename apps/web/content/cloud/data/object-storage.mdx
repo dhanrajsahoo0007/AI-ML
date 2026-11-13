@@ -1,11 +1,337 @@
 ---
 title: "Object Storage: Tiers, Lifecycle, Versioning and Redundancy"
-description: "How buckets work and the four settings every cloud gives you: storage class, lifecycle rules, versioning and where copies are kept."
-status: outline
+description: "How buckets keep files: direct uploads with signed URLs, storage classes from hot to archive, lifecycle rules, versions, locks and where the copies live."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** how buckets work and the four knobs every cloud gives you: storage class (hot to archive), lifecycle rules, versioning with soft delete, and redundancy (one zone, one region or several regions). It also shows signed direct uploads, the pattern that keeps large files off the app servers.
+<KeyIdea>
+  A bucket keeps whole files under names you choose. A few settings decide what each file costs to keep, how fast it comes back, and what can still destroy it.
+</KeyIdea>
 
-**Related reading on this site:** [Object / Blob Storage](/system-design/databases/object-storage) · [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) · [Storage on AWS](/cloud/aws/storage)
+## The story
+
+Brightpost's staff add about 300 product photos a week. Each original is a 20 MB file straight from the camera, and a resize worker turns it into the small pictures the shop pages show. After two years the uploads bucket holds about 30,000 originals, about 600 GB. In September the shop gets a new design with larger pictures, so Asha writes a script to rebuild every thumbnail from its original. Two arguments are swapped. The script writes each new 60 KB thumbnail into the uploads bucket, under the original's own name. Asha stops it after 9 minutes, and by then 900 originals have been replaced. Versioning is off, so the bucket kept no older copy. A laptop used for the photo shoots still holds 610 of them. The other 290 products are photographed again, and the new design goes live 9 days late.
+
+Every step below follows one photo through its life in a bucket, and each one closes part of that gap.
+
+## How it works
+
+Four words first. A **bucket** is a named container for files, created in one location. Each file in it is an **object**: its bytes plus **metadata**, a few labelled facts such as its type and size. A **key** is the object's full name, such as `originals/poster-0412.jpg`. All three together are <Term id="object-storage">object storage</Term>.
+
+### Step 1: Buckets, keys and whole objects
+
+<AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={1} minWidth={620} caption="Brightpost's first setup: every photo passes through the app server, which writes it to the uploads bucket by key." />
+
+A program talks to a bucket with web requests. A PUT sends a whole object under a key, and a GET returns it. A DELETE removes it. A LIST returns the keys that start with a given prefix. There are no real folders: the slash in `originals/poster-0412.jpg` is part of the name, and tools draw folders from it.
+
+An object is never edited in place. A PUT to a key that already exists replaces the whole object. On all three big clouds, a read that starts after a write succeeds returns the new object, so readers stay <Term id="consistency">consistent</Term>. [Object / Blob Storage](/system-design/databases/object-storage) explains how a bucket stores and finds objects inside. This page covers the settings a cloud gives you on top.
+
+<PremiumBreak />
+
+### Step 2: An overwrite has no undo
+
+<AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={2} minWidth={620} caption="The failure: the script writes thumbnails over 900 originals, and with versioning off nothing older is kept." />
+
+The bucket did exactly what it was told: 900 valid PUTs to 900 existing keys, from an identity allowed to write there.
+
+<Callout tone="red" title="What breaks">
+  The script reads `originals/poster-0412.jpg`, makes a 60 KB thumbnail and writes it back under the same key. At about 100 writes a minute, 900 originals become thumbnails in 9 minutes. The provider's copies in other zones take each overwrite too, so they hold the thumbnail as well.
+</Callout>
+
+A bucket's many copies protect against broken disks. They do nothing against a wrong write from someone allowed to write.
+
+### Step 3: Versioning and soft delete
+
+<AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={3} minWidth={620} caption="With versioning on, the same overwrite only adds a version, and the 900 originals are copied back." />
+
+**Versioning** makes the bucket keep every version of each key. A PUT to an existing key adds a new current version. The old one becomes a previous version, still stored and still readable by its version id. A delete hides the object and keeps its versions. To undo the script, Brightpost copies each previous version back as the current one: 900 copy requests, done in minutes.
+
+**Soft delete** is a second net: a deleted object stays recoverable for a set number of days.
+
+Every version is a full object and is billed as one. So Brightpost keeps previous versions for 30 days, and a lifecycle rule (Step 7) deletes them after that. A rebuild that overwrote all 30,000 originals would now lose nothing and cost 600 GB of old versions for 30 days.
+
+### Step 4: Locks: when nobody may delete
+
+Versioning protects against mistakes. It does not stop someone with the right permission, such as an intruder holding an admin login, from deleting every version. A lock does. An **object lock**, also called immutability or WORM (write once, read many), refuses any delete of an object version until a date you set.
+
+<Compare
+  columns={["", "Versioning", "Lock that can be lifted", "Lock nobody can lift"]}
+  rows={[
+    ["Keeps the old data after a wrong write", true, true, true],
+    ["Stops an admin deleting old data", false, "Unless they hold a special permission", true],
+    ["Who can shorten it", "Anyone who may change the bucket", "Holders of that permission", "Nobody, not even the account owner"],
+    ["Brightpost uses it for", "The uploads bucket", "Trying a lock before making it final", "The log archive and the photo copy"],
+  ]}
+  caption="Three levels of protection. Each cloud names the two lock strengths differently; the tabs below give the names."
+/>
+
+A **legal hold** is a lock with no end date, removed by hand. Brightpost locks each file in the log archive for 1 year. Lock only what you must keep: a strict 7-year lock on the wrong bucket bills for 7 years.
+
+### Step 5: Direct uploads with signed URLs
+
+<AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={4} minWidth={620} caption="The app only signs a URL. The browser uploads straight to the bucket, and the bucket's event starts the resize worker." />
+
+Brightpost's app server carried every photo twice, in from the browser and out to the bucket. A batch of 50 is 1 GB, on a server that also serves shoppers. A **signed URL** takes the server out of that path. It is a web address for one action on one key, with an expiry time and a signature made with the app's own credentials.
+
+1. The browser asks the app for an upload.
+2. The app checks that the person is signed-in staff, picks the key and signs a URL for one PUT, valid for 15 minutes.
+3. The browser sends the 20 MB straight to the bucket. The app handled about 1 KB.
+
+The bucket stays private: Brightpost's guardrail forbids public buckets, and each bucket's public-access block is on. When a photo lands, the bucket sends a new-object event, which starts the resize worker. A file of many gigabytes goes as a **multipart upload**: parts sent in parallel, and only a failed part sent again.
+
+### Step 6: Storage classes: paying for access
+
+A <Term id="storage-class">storage class</Term> sets the price shape of each object: what it costs to keep, and what it costs to read back. Classes run from hot to archive. Each rung colder makes keeping cheaper and reading dearer.
+
+<AnimatedDiagram spec="animated/cloud/storage-class-ladder" stepper minWidth={620} caption="Four rungs from hot to archive. Keeping gets cheaper at each rung; reading gets dearer and, at the bottom, slower." />
+
+A **retrieval fee** is charged for each gigabyte read from a colder class. A **minimum stay** means an object deleted or moved early is billed as if it had stayed that long. Requests cost more on colder classes too. On most clouds archive is offline: you ask for a **restore**, and a readable copy appears after minutes to hours. The class belongs to each object, so one bucket can hold all four.
+
+### Step 7: Lifecycle rules
+
+<AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={5} minWidth={620} caption="A lifecycle rule moves each original to the cool class 30 days after upload." />
+
+A <Term id="lifecycle-rule">lifecycle rule</Term> changes an object's class, or deletes it, when a condition such as its age is met. The bucket applies it every day. Brightpost's uploads bucket has three rules.
+
+1. Move originals to the cool class 30 days after upload. The worker reads each one within seconds; after that, only rebuild jobs do.
+2. Delete previous versions 30 days after they stop being current.
+3. Remove unfinished multipart uploads after 7 days. Their parts are billed, but a listing does not show them.
+
+Why not archive? The September rebuild read all 30,000 originals in one afternoon. In archive, each would need a restore first: hours of waiting, and a fee on 600 GB. Pick the class for the next surprise read, not the average day.
+
+Each move is a billed request per object, and some colder classes bill a small object as if it were larger. Moving 30,000 photos of 20 MB is cheap. Moving fifty million files of 2 KB can cost more than it saves in a year.
+
+### Step 8: Redundancy: where the copies live
+
+<AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={6} minWidth={620} caption="Each new version is copied to a locked bucket in the second region, in the audit account." />
+
+Every bucket keeps several copies of each object. Standard storage on all three clouds is designed for at least eleven nines of yearly durability (99.999999999%) against broken hardware. What you choose is where the copies sit, and so what they survive.
+
+<Compare
+  columns={["Copies live in", "Survives", "Does not survive", "Use it for"]}
+  rows={[
+    ["One zone", "A failed disk or server", "A zone outage", "Data you can rebuild, at a lower price"],
+    ["Several zones of one region", "A zone outage", "A region outage", "Most buckets: the usual default"],
+    ["Two regions", "A region outage", "A wrong write, which is copied too", "Data that must outlive a region"],
+  ]}
+  caption="Redundancy choices, by what each one survives. A one-zone bucket belongs in a single zone you can name."
+/>
+
+Two regions come in two forms. The provider can keep the second copy inside the bucket or the account. Or **replication** copies each new object to a second bucket you own, which can sit in another account under its own lock. Copies to another region arrive later, usually within minutes, so the newest writes can be lost with a region.
+
+Brightpost's uploads bucket spreads its copies across the zones of its region. Since the incident it also replicates each new version to the organisation's second allowed region. The copy lands in a bucket in the audit account that locks each version for 30 days. A bad script, a stolen shop login or a lost region would each leave the photos intact.
+
+## On AWS, Google Cloud and Azure
+
+The ideas are the same on all three clouds. The names differ, and so does where each setting sits.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Classes:** S3 Standard, Standard-IA, One Zone-IA, Glacier Instant Retrieval, and the offline Glacier Flexible Retrieval and Deep Archive. Intelligent-Tiering moves objects by their reads.
+    - **Lifecycle:** bucket rules by prefix, tag or size: transition, expiration, noncurrent-version expiry, abort of incomplete multipart uploads.
+    - **Versions and locks:** S3 Versioning, which can be suspended but never removed. S3 Object Lock: governance mode, compliance mode and legal holds.
+    - **Redundancy:** a bucket lives in one region; most classes spread copies over at least three Availability Zones. Same-Region and Cross-Region Replication copy to another bucket, even in another account.
+    - **Signed links:** presigned URLs, which die at their expiry or with the credentials that signed them.
+
+    **The difference that changes a design.** Zone spread comes with the class, and a second region always means a second bucket. Replication copies only objects written after you turn it on; Batch Replication copies the rest. Standard-IA bills each object as at least 128 KB, and the offline Glacier classes add a fixed overhead per object.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Classes:** Standard, Nearline, Coldline and Archive. All four answer in milliseconds; colder ones add a retrieval fee and a longer minimum stay. Autoclass moves objects by their reads.
+    - **Lifecycle:** Object Lifecycle Management: change class or delete, by age, class, number of newer versions and more.
+    - **Versions and locks:** Object Versioning, and soft delete, on by default for new buckets. Bucket Lock makes a retention policy permanent; object retention lock works per object.
+    - **Redundancy:** the location type, fixed at creation: region (copies across its zones), dual-region or multi-region.
+    - **Signed links:** signed URLs, which a service account can sign through the IAM API with no stored key.
+
+    **The difference that changes a design.** A second region can live inside one bucket. A dual-region bucket keeps one name and one set of objects across two regions you pick, so the app needs no second bucket for reads. The location cannot change later. Archive needs no restore, but its long minimum stay bills an early delete in full.
+  </Tab>
+  <Tab label="Azure">
+    - **Classes:** access tiers hot, cool, cold and archive, with a default per account. Archive is offline: a blob is rehydrated first, which can take hours.
+    - **Lifecycle:** a lifecycle management policy on the storage account, by age or last access, for blobs, versions and snapshots.
+    - **Versions and locks:** blob versioning; soft delete for blobs and containers. Immutable storage: time-based retention, unlocked or locked, and legal holds.
+    - **Redundancy:** a storage-account setting. LRS keeps three copies in one datacenter, ZRS spreads them over three zones, and GRS or GZRS add a paired region. Object replication copies blobs to another account.
+    - **Signed links:** shared access signatures (SAS); a user delegation SAS is signed with Microsoft Entra ID instead of the account key.
+
+    **The difference that changes a design.** Redundancy belongs to the storage account, not the container. So you group data by how it must be copied, one account per group. The account key can sign a SAS for anything in the account: prefer user delegation SAS, and turn shared key access off where you can.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/object-upload-lifecycle" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which storage class?"
+  tree={{
+    q: "Do you know roughly how often this data is read?",
+    yes: {
+      q: "Is it read more than about once a month?",
+      yes: "Hot class. No retrieval fee and no minimum stay. Brightpost's thumbnails live here.",
+      no: {
+        q: "When you do need it, must it arrive within seconds?",
+        yes: {
+          q: "Will each object stay at least 90 days and be read about once a quarter or less?",
+          yes: "Cold class: cheaper to keep than cool, with a larger fee per gigabyte read.",
+          no: "Cool class: a 30-day minimum and a small fee to read. Brightpost's originals after 30 days.",
+        },
+        no: {
+          q: "Will it stay at least 180 days and be read less than once a year?",
+          yes: "Archive class. Plan each read hours ahead. Brightpost's audit logs after 1 year.",
+          no: "Cold class. Archive's minimum stay would bill you for days you never keep.",
+        },
+      },
+    },
+    no: "Let the cloud's automatic tiering move each object by its own reads, for a small fee per object. Skip it for tiny files.",
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="With versioning on and previous versions kept 30 days, the same script overwrites 900 originals. Someone notices on day 12. What can Brightpost recover? And on day 35?" hint="When does the lifecycle rule delete a previous version?">
+    On day 12, all 900: each previous version is still there, and copying it back makes it current again. On day 35, nothing from versions: the rule deleted them on day 30. The locked copy in the second region also lets deletes through after 30 days.
+  </QuizItem>
+  <QuizItem question="All 30,000 originals, 600 GB, sit in an archive class. The next redesign must rebuild every thumbnail by Friday. What happens?" hint="Look at the archive rung of the ladder.">
+    On most clouds each original needs a restore first, which takes hours, and every gigabyte read pays the largest retrieval fee. The rebuild starts late and costs more than months of keeping the photos. That is why the originals sit in cool.
+  </QuizItem>
+  <QuizItem question="A signed upload URL, valid for 15 minutes, is pasted into a team chat 20 minutes after it was made. What can a reader of the chat do with it?">
+    Nothing: it expired 5 minutes earlier. While it was valid, it allowed one PUT to one key, nothing else in the bucket.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Hot", "Cool", "Archive"]}
+  rows={[
+    ["Cost to keep 600 GB", "Highest", "Lower", "Lowest"],
+    ["Rebuild all 30,000 thumbnails", "Minutes, no read fee", "Minutes, a small fee on 600 GB", "Restore first: hours, the largest fee"],
+    ["Minimum stay billed", "None", "About 30 days", "180 days or more"],
+    ["Deleting a photo early", "No charge", "Billed up to 30 days", "Billed up to the minimum"],
+    ["Fits", "Thumbnails", "Originals after 30 days", "Audit logs after 1 year"],
+  ]}
+  caption="Where Brightpost's originals could live once the worker has read them. Shapes, not prices."
+/>
+
+Storage is the smallest line on Brightpost's bill, and 600 GB is a small part of it. A day lost waiting for a restore costs more than years of the difference.
+
+## Common pitfalls
+
+- **Archive for data you may need tomorrow.** A restore takes hours and the read fee is the largest. Archive only data whose reads can wait a day and come less than once a year.
+- **Versioning with no rule for old versions.** Every overwrite keeps a full copy. Add a rule that deletes previous versions after a set number of days.
+- **Millions of tiny objects in a cold class.** Each move is a billed request, and some classes bill a minimum size per object. Keep small files hot, or bundle them first.
+- **Signed URLs that live for days.** A link that works for a week works for whoever finds it. Sign one action on one key, for minutes.
+- **A public bucket to save a step.** One wrong policy exposes every object. Keep the public-access block on, and let an [edge cache](/cloud/networking/cdn-edge-and-waf) read the bucket with its own identity.
+
+## How to say it in an interview
+
+"A bucket stores whole objects under keys, and an overwrite replaces the whole object. I keep bytes off my servers: the app signs a short-lived URL for one key, and the client uploads straight to the bucket. I pick each object's storage class by how often and how fast it is read, and lifecycle rules move it down by age. I turn on versioning with a rule that expires old versions. I lock anything a stolen admin login must not erase. Copies across zones come by default; for a region outage I add a replicated, locked copy in another region and account."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a bucket, an object and a key?" level="Junior" category="Cloud">
+    **Short answer.** A bucket is the named container, created in one location. An object is one stored file with its metadata. A key is the object's full name inside the bucket, and it is how you write and read it.
+
+    **Why.** A program PUTs a whole object under a key and GETs it back. The namespace is flat: in `originals/poster-0412.jpg` the slash is part of the key. Location, versioning and access usually belong to the bucket; the storage class belongs to each object. A PUT to an existing key replaces the whole object, which is how Brightpost lost 900 originals.
+
+    <AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={1} highlight={["app", "uploads"]} caption="The app writes each photo to the bucket under its own key." />
+
+    **Follow-ups the interviewer may ask.**
+    - Can you change the middle of an object without rewriting it?
+    - How do you list every object under one prefix?
+
+    **Watch out for.** Calling a bucket a folder or a file system. You cannot mount it as a drive, rename a "folder" in one step, or edit a file in place.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you let a client upload a 5 GB video without it passing through your servers?" level="Mid" category="Cloud">
+    **Short answer.** The server checks who the client is and signs a short-lived URL for one upload to one key. The client sends the file straight to the bucket as a multipart upload. The bucket's new-object event starts any processing.
+
+    **Why.** Relaying 5 GB ties up a server's network and memory for minutes. A signed URL carries the permission and its expiry, so the server handles a request of about 1 KB. Multipart sends parts in parallel and resends only a failed part, which matters on a phone connection. The bucket stays private throughout.
+
+    <AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={4} path="app>staff>uploads>worker" caption="The app signs, the browser uploads directly, and the bucket starts the worker." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you stop a client from uploading a 50 GB file with that URL?
+    - What happens to parts of an upload that never finishes?
+
+    **Watch out for.** Making the bucket writable by anyone "for uploads". Then anyone can fill it, and your bill with it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A script overwrote 900 files in a bucket. What would have saved them, and what does that protection cost?" level="Mid" category="Cloud">
+    **Short answer.** Versioning. With it on, each overwrite adds a new version and keeps the old one, so you copy the previous versions back. It costs the storage of every old version for as long as you keep them.
+
+    **Why.** The bucket's copies across zones took each overwrite too, so durability did not help. Brightpost had versioning off; 290 products were photographed again. Now previous versions live 30 days, then a lifecycle rule deletes them, so a full rebuild accident adds at most 600 GB for 30 days. Versioning does not stop an admin from deleting versions; a lock does.
+
+    <AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={3} highlight={["script", "uploads", "versions"]} caption="The overwrite becomes a new version, and the old originals are copied back." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you find which 900 keys to restore?
+    - What does soft delete add on top of versioning?
+
+    **Watch out for.** Answering "the provider keeps copies, so we can ask for them back". Those copies replicate the overwrite.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Fifty million 2 KB thumbnails cost more after a lifecycle rule moved them to an archive class. Why?" level="Mid" category="Cloud">
+    **Short answer.** Archive saves money per gigabyte, and these files are tiny. Each move is a billed request per object. Some archive classes add a fixed overhead per object or bill a minimum size, and any read pays a retrieval fee.
+
+    **Why.** Fifty million files of 2 KB are only 100 GB, so the saving is small, while fifty million moves are billed once each. An overhead per object can exceed the 2 KB itself. Thumbnails are also read all day, so restores and read fees pile on. Keep small, busy files hot, or bundle them before archiving.
+
+    <AnimatedDiagram spec="animated/cloud/storage-class-ladder" step={4} caption="Archive is cheapest to keep, and the dearest and slowest to read." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you archive them cheaply if they really are never read?
+    - When does automatic tiering beat a fixed rule?
+
+    **Watch out for.** Judging a class by the price per gigabyte alone. Requests, minimum stays and retrieval fees often decide the bill.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you make audit logs in object storage impossible to delete for seven years?" level="Senior" category="Cloud">
+    **Short answer.** Put them in a bucket in a separate account, under a retention lock in its strictest mode, which nobody can lift or shorten for seven years. Replicate to a second region under the same lock. Move them down the ladder by age.
+
+    **Why.** A separate account keeps the shop's admins, and any intruder in the shop, away from the logs. The strict lock stops even the audit account's own admins. Logs older than a year go to archive, because nobody reads them often. Test the lock in its liftable mode first, since the strict mode cannot be undone.
+
+    <AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={6} highlight={["uploads", "replica"]} caption="The same shape Brightpost uses for photos: a locked copy in another region and another account." />
+
+    **Follow-ups the interviewer may ask.**
+    - A court asks you to keep one log past seven years. What do you add?
+    - What happens to the bill if you lock the wrong bucket?
+
+    **Watch out for.** Relying on "deny delete" in a policy. Whoever can edit the policy can remove the deny.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost's product photos must survive a zone outage, a bad script and a region outage. Design the storage." level="Senior" category="Cloud">
+    **Short answer.** One bucket with copies across the zones of its region, versioning on, and a lifecycle rule for old versions. Then replication of each new version to a locked bucket in a second region and another account.
+
+    **Why.** Copies across zones cover a lost zone. Versioning covers a bad script. Replication covers a lost region, and the lock covers a stolen login that deletes versions. Each layer costs something: old versions for 30 days, a second 600 GB and the transfer between regions. The last minutes of writes before a region fails may miss the copy.
+
+    <AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={6} path="uploads>replica" caption="Zones, versions and a locked copy in a second region: one layer per failure." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would the shop serve photos while its own region is down?
+    - Would a dual-region bucket or a replicated bucket fit better, and why?
+
+    **Watch out for.** Treating replication as a backup. A wrong write or a delete is copied to the second bucket too, unless versions and a lock hold the old data there.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Object, Block and File: Which One for Which Job](/cloud/data/storage-types)
+- [Where Data Lives on the Cloud](/cloud/data/data-on-the-cloud)
+- [Block Storage: Volume Types, IOPS and Snapshots](/cloud/data/block-storage)
+- [CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf)
+- [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults)
+- [Storage on AWS](/cloud/aws/storage)
+- [Storage on Google Cloud](/cloud/gcp/storage)
+- [Storage on Azure](/cloud/azure/storage)
+- [Object / Blob Storage](/system-design/databases/object-storage)
+- [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking)
+
+## Further reading
+
+- [Amazon S3 storage classes](https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html): classes, minimum stays and restores.
+- [Amazon S3 Object Lock](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html): retention modes and legal holds.
+- [Cloud Storage storage classes](https://cloud.google.com/storage/docs/storage-classes): Standard to Archive on Google Cloud.
+- [Azure Blob access tiers](https://learn.microsoft.com/azure/storage/blobs/access-tiers-overview): hot, cool, cold and archive.

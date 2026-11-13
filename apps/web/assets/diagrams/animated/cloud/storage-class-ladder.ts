@@ -12,7 +12,9 @@ import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 // Geometry: row labels are text in x 12-172. Rungs start at x 180, 332, 484, 636 and are 146 wide with a gap of 6,
 // so the last one ends at 782 (canvas 790). Headers are boxes at y 28-74. Rows start at y 84 and are 48 apart
 // (cells 44 tall), so the five rows end at 320. The Brightpost row is y 334-390; the arrow sits at y 418.
-// Cell labels fit 146 - 8 = 138 px at 6.2 px per character: "Hours, on most clouds" (21 characters) is the longest.
+// Cell labels fit 146 - 8 = 138 px at 6.2 px per character: "Under once a year" (17 characters) is the longest. The
+// archive cell of the "first byte" row carries a sub line ("on most clouds"), because one cloud reads archive in
+// milliseconds.
 
 const RUNGS = [
   { id: "hot", x: 180, label: "Hot", sub: "standard class", tone: "orange" },
@@ -27,7 +29,7 @@ const ROWS = [
   {
     id: "first",
     label: "First byte arrives in",
-    cells: ["Milliseconds", "Milliseconds", "Milliseconds", "Hours, on most clouds"],
+    cells: ["Milliseconds", "Milliseconds", "Milliseconds", "Hours"],
   },
   { id: "min", label: "Minimum stay billed", cells: ["None", "About 30 days", "About 90 days", "180 days or more"] },
   {
@@ -70,6 +72,7 @@ const shapes: LayoutShape[] = [
         w: 146,
         h: 44,
         label: r.cells[gi],
+        ...(r.id === "first" && g.id === "archive" ? { sub: "on most clouds" } : {}),
         tone: g.tone,
         step,
       })),

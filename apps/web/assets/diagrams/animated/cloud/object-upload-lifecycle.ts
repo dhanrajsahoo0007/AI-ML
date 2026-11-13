@@ -18,7 +18,9 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   Right: thumbnails bucket 672,95 | resize worker 672,250 | locked copy 672,400.
 // The bucket zone starts at y 40, so the diagonal edges from the app server and the script enter it through its
 // left side (near y 190 and y 308), well below the zone tab. The signed URL and the old "photo" edge share the
-// x 130 line but never show in the same view. The copy to the second region runs diagonally under the worker.
+// x 130 line but never show in the same view; their labels sit near the app end, clear of the Staff tab. The copy to
+// the second region leaves the bucket downwards, runs right along y 330 under the worker and drops into the region
+// zone at x 720, right of its short tab.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 to 3 (the free
 // preview, the failure and the fix) use only the left and middle columns. The canvas stays under 800 wide.
@@ -46,7 +48,7 @@ const spec: DiagramSpec = {
     { id: "uploadsz", title: "Uploads bucket", tone: "violet", x: 290, y: 40, w: 200, h: 420 },
     { id: "thumbsz", title: "Thumbnails", tone: "violet", x: 560, y: 40, w: 225, h: 110 },
     { id: "compute", title: "Worker", tone: "teal", x: 560, y: 190, w: 225, h: 115 },
-    { id: "region2", title: "Region 2, audit account", tone: "blue", x: 560, y: 345, w: 225, h: 115 },
+    { id: "region2", title: "Region 2", tone: "blue", x: 560, y: 345, w: 225, h: 115 },
   ],
   nodes: [
     // Step 1
@@ -163,7 +165,7 @@ const spec: DiagramSpec = {
     {
       id: "replica",
       label: "Locked copy",
-      sub: "no deletes for 30 days",
+      sub: "in the audit account",
       icon: "lock",
       tone: "violet",
       step: 6,
@@ -179,7 +181,7 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: every byte of every photo passes through the app server on its way to the bucket.
-    { from: "staff", to: "app", label: "photo, 20 MB", packet: true, until: 3 },
+    { from: "staff", to: "app", label: "photo, 20 MB", packet: true, labelAt: 0.65, until: 3 },
     { from: "app", to: "uploads", label: "PUT by key", packet: true, delay: 1.2, until: 3 },
 
     // Step 2: the script writes thumbnails over the originals under the same keys.
@@ -190,16 +192,28 @@ const spec: DiagramSpec = {
     { from: "versions", to: "uploads", label: "restore 900", tone: "green", packet: true, step: 3 },
 
     // Step 4: the app only signs; the bytes go straight to the bucket, and the bucket starts the worker.
-    { from: "app", to: "staff", label: "signed URL", dashed: true, packet: true, step: 4 },
+    { from: "app", to: "staff", label: "signed URL", dashed: true, packet: true, labelAt: 0.35, step: 4 },
     { from: "staff", to: "uploads", label: "PUT, direct", packet: true, delay: 1.2, step: 4 },
     { from: "uploads", to: "worker", label: "new photo", dashed: true, flow: true, step: 4 },
-    { from: "worker", to: "thumbs", label: "thumbnail", packet: true, delay: 1.2, step: 4 },
+    { from: "worker", to: "thumbs", label: "thumbnail", packet: true, delay: 1.2, labelAt: 0.65, step: 4 },
 
     // Step 5: a lifecycle rule moves originals to the cool class when they are 30 days old.
     { from: "uploads", to: "cool", label: "after 30 days", tone: "orange", flow: true, step: 5 },
 
     // Step 6: each new version is copied to a bucket in the second region, in the audit account.
-    { from: "uploads", to: "replica", label: "each new version", dashed: true, flow: true, step: 6 },
+    {
+      from: "uploads",
+      to: "replica",
+      label: "each new version",
+      dashed: true,
+      flow: true,
+      via: [
+        [520, 330],
+        [720, 330],
+      ],
+      labelAt: 0.6,
+      step: 6,
+    },
   ],
 };
 
