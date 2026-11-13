@@ -1,11 +1,315 @@
 ---
 title: "Real-Time Connections on the Cloud"
-description: "How to keep many long-lived connections open on the cloud: managed WebSocket services, idle timeouts and connection limits."
-status: outline
+description: "Running long-lived connections on the cloud: idle timeouts, connection limits, a shared channel between servers, reconnect storms and managed socket services."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** managed WebSocket and publish-subscribe services, idle timeouts on load balancers and CDNs, connection limits, and scaling long-lived connections. The transports themselves are taught in the system design section and linked.
+<KeyIdea>
+  Live updates need an open line to every user, and the cloud must be set up to hold those lines, share news across them and lose them gently.
+</KeyIdea>
 
-**Related reading on this site:** [WebSockets](/system-design/fundamentals/websockets) · [Server-Sent Events](/system-design/fundamentals/server-sent-events) · [Choosing a real-time method](/system-design/fundamentals/choosing-realtime)
+## The story
+
+Brightpost is a small online shop that sells posters and greeting cards. In March it ran a two-hour flash sale on posters, from 19:00 on a Friday. Each sale page showed a live stock counter, such as "14 left", so nobody would pay for a poster that had sold out. About 1,600 shoppers had a sale page open, and each page held one open connection to the shop's 4 app servers. At 19:40 Asha deployed a fix to the counter's wording. The deploy did what the team had learned on the [load balancing](/cloud/networking/load-balancing) page: start two new servers, then drain two old ones for up to 60 seconds. A page request finishes in about 4 seconds. A live connection never finishes. So at 19:41 the two old servers cut 800 connections in the same second. Every page reconnected at once, and each reconnect read the shopper's session and the stock list from the orders database. The database ran out of connections, and Pay failed. Failed reconnects retried at once, and the second pair of servers did the same at 19:43. Checkout failed for about 6 minutes, and about 70 shoppers left with full baskets.
+
+The code was correct. The connections were long-lived, and the cloud around them was set up for short requests. Every step below fixes one part of that.
+
+## How it works
+
+Three words first. A **long-lived connection** is an open line between a browser and a server that stays up for minutes or hours. Each end can send on it at any time. A **socket** is one such connection, as the server sees it. **Push** means the server sends news without being asked.
+
+### Step 1: Four ways to hear about news
+
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={1} minWidth={420} caption="Polling: 1,600 pages ask every 5 seconds, 320 requests a second, and most answers are 'no change'." />
+
+A browser can hear about news in four ways.
+
+<Compare
+  columns={["Method", "How it works", "Direction", "What the cloud holds"]}
+  rows={[
+    ["Short polling", "Ask again every few seconds", "Browser asks", "Many short requests"],
+    ["Long polling", "Ask once; the server holds the answer until news arrives", "Browser asks", "One waiting request per user"],
+    ["Server-sent events", "One response that never ends; the server writes events into it", "Server to browser", "One open connection per user"],
+    ["WebSocket", "One connection upgraded to a two-way channel", "Both ways", "One open connection per user"],
+  ]}
+  caption="The four methods. Full lessons: polling, long polling, server-sent events, WebSockets."
+/>
+
+Brightpost's first counter used short polling: 1,600 pages asking every 5 seconds make 320 requests a second, nearly all answered "no change". The other three methods trade those requests for open connections, and holding thousands of them is the cloud's job on this page. Read [WebSockets](/system-design/fundamentals/websockets), [server-sent events](/system-design/fundamentals/server-sent-events), [long polling](/system-design/fundamentals/long-polling) and [choosing a method](/system-design/fundamentals/choosing-realtime) for the theory.
+
+<PremiumBreak />
+
+### Step 2: Keep a quiet connection alive
+
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={2} minWidth={420} caption="Each page holds one socket through the load balancer and sends a small ping every 25 seconds." />
+
+The counter now uses a <Term id="websocket">WebSocket</Term>. Each page opens one, and the server pushes "13 left" whenever a poster sells. The [load balancer](/cloud/networking/load-balancing) in front keeps each socket on the server it first reached, for the socket's whole life.
+
+Every box on the path also has an **idle timeout**: it closes a connection that has carried nothing for a set time. Brightpost's balancer uses 60 seconds. A poster that sells once every 3 minutes leaves its socket silent, so the balancer cuts it. A <Term id="cdn">CDN</Term> or a proxy in front adds its own limit, and the shortest one on the path wins.
+
+The fix is a **keep-alive ping**: a tiny message sent on a timer. Brightpost's pages send one every 25 seconds, well under 60. A server-sent events stream does the same with a comment line.
+
+### Step 3: Which server holds the shopper?
+
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={3} minWidth={420} caption="A sale on servers 3–4 is published on a shared channel, and servers 1–2 push it to the shoppers they hold." />
+
+A shopper on servers 3–4 buys a poster. Servers 3–4 save the sale. But half the watchers are connected to servers 1–2, and those servers know nothing about it. There are two ways out.
+
+- **Sticky routing.** The balancer sends all traffic for one poster to one server. It is simple, but a busy poster overloads one machine, and that server's restart takes every watcher with it.
+- **A shared channel.** Every server listens on a **publish-subscribe channel** (pub/sub): a message sent to it reaches every listener. Servers 3–4 publish "poster 18: 13 left", and each server pushes it to its own sockets. This shared layer is often called a **backplane**.
+
+Brightpost picks the channel. Any server can hold any shopper, the same rule its shared basket database follows. Sending one message to many receivers is called <Term id="fan-out">fan-out</Term>.
+
+### Step 4: A deploy cuts every socket at once
+
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={4} minWidth={420} caption="The failure: the drain ends, 800 sockets close in one second, and all 800 come back in the next." />
+
+**Connection draining** is how a deploy retires a server: it gets no new connections, and open ones may finish, up to a timeout. A request finishes. A socket does not. So the drain runs its full 60 seconds, and then the server closes every socket it still holds, at the same moment.
+
+<Callout tone="red" title="What breaks">
+  At 19:41 servers 1–2 close 800 sockets together. Each page's code reconnects the instant it sees the close. 800 reconnects reach servers 3–4 in about 1 second, and each one reads a session and the stock list. The database's connection pool fills, so checkout's queries wait and fail. Failed reconnects retry at once, and the wave repeats at 19:43.
+</Callout>
+
+Many clients retrying in the same instant is called a **thundering herd**. A server crash, a network blip or a balancer change can start one too.
+
+### Step 5: Close slowly, come back at random
+
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={5} minWidth={420} caption="The drain closes sockets over 60 seconds, and pages wait a random 1 to 30 seconds, about 27 reconnects a second." />
+
+The repair has three parts, one at each end and one in the middle.
+
+1. **Close slowly.** When a drain starts, the server closes a few sockets each second instead of all of them at the end. It sends each page a short "please reconnect" message first.
+2. **Wait a random time.** The page waits a random time between 1 and 30 seconds before it reconnects. After each failed try, the longest wait doubles, up to 5 minutes. This is **exponential backoff with jitter**: backoff spreads retries out over time, and jitter, the random part, stops clients from moving in step.
+3. **Make a reconnect cheap.** The page sends the last count it saw. The server answers from the shared channel's latest value, not from the database.
+
+800 reconnects in 1 second become about 27 a second. The same rule protects every retry; [circuit breakers and retries](/system-design/patterns/circuit-breaker-and-retries) covers it in full.
+
+### Step 6: Count connections, not processor use
+
+<AnimatedDiagram spec="animated/cloud/realtime-transports" step={6} minWidth={420} caption="The autoscaler watches open sockets per server and adds a server above 600." />
+
+Brightpost's <Term id="autoscaling">autoscaling</Term> rule aims for about 60% processor use. A quiet socket uses almost no processor. It does hold memory and one operating-system handle, a slot in the table of open files and connections. So a server can sit at 10% processor while it runs out of room for sockets. The rule never fires.
+
+Brightpost load-tested one server: it stays fast up to about 1,000 sockets. So the team publishes the open socket count as a custom metric, and the autoscaler adds a server above 600 per server. After a drain, 1,600 sockets on two servers is 800 each, and a fifth server starts.
+
+### Step 7: Let a managed service hold the sockets
+
+<AnimatedDiagram spec="animated/cloud/managed-websockets" stepper minWidth={420} caption="The managed service holds every socket. Your code is called with a connection id and sends to that id." />
+
+Some clouds offer a **managed connection service**. It holds the sockets and answers the pings. It calls your code only when something happens: a page connected, a message arrived, a page left. Each call carries a **connection id**, a short name for one socket, such as 7f3. To push, your code asks the service to send to that id.
+
+Your code can now be a short-lived function, a <Term id="serverless">serverless</Term> one. A deploy changes the function and cuts no socket, because the function never held one. You pay per connection minute and per message instead of for idle servers. You still keep a list of which id watches which poster, unless the service has groups built in.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: hold sockets on servers or in a managed service, share news through a channel, and expect every connection to end.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Managed connection service:** API Gateway WebSocket APIs. Routes for connect, disconnect and messages call Lambda or another backend; your code sends back by connection id.
+    - **Your own servers:** the Application Load Balancer carries WebSockets and has an idle timeout you set. A Network Load Balancer passes TCP through.
+    - **Between servers:** ElastiCache pub/sub as the backplane.
+    - **Live data for apps:** AppSync subscriptions push GraphQL changes to clients, and AppSync Events offers pub/sub channels over WebSockets.
+    - **Timeouts to check:** the balancer's idle timeout, the target group's deregistration delay, and the managed service's idle and lifetime limits.
+
+    **The difference that changes a design.** API Gateway WebSocket APIs have no built-in groups. To send "13 left" to every watcher of poster 18, your code keeps its own table of connection ids, often in DynamoDB, and sends to each one. AppSync Events has channels built in, so it suits broadcast better.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Managed connection service:** none of this kind. You hold the sockets yourself on Cloud Run, GKE or Compute Engine.
+    - **Your own servers:** Cloud Run serves WebSockets; each one counts as a request, so the request timeout ends it. The Application Load Balancer carries WebSockets too.
+    - **Between servers:** Memorystore pub/sub as the backplane.
+    - **Live data for apps:** Firestore real-time listeners push document changes to app clients, if the data can live in Firestore.
+    - **Timeouts to check:** Cloud Run's request timeout, and the backend service timeout on the Application Load Balancer.
+
+    **The difference that changes a design.** The timeout limits a connection's whole life, not only its quiet time. When it runs out, the socket closes even if it is busy. So reconnect with backoff is part of the design from day one, and Cloud Run's session affinity is best-effort, not a promise.
+  </Tab>
+  <Tab label="Azure">
+    - **Managed connection service:** Azure Web PubSub for any WebSocket client. Azure SignalR Service for apps built on ASP.NET SignalR.
+    - **Your own servers:** Application Gateway carries WebSockets. App Service has a WebSockets setting to switch on. Azure Load Balancer passes TCP through, with an idle timeout you set.
+    - **Between servers:** Azure Managed Redis pub/sub as the backplane.
+    - **Live data for apps:** Web PubSub groups: send once to a group, and every member gets it.
+    - **Timeouts to check:** the balancer and gateway idle timeouts, and the drain setting.
+
+    **The difference that changes a design.** Web PubSub has groups and broadcast built in, so "send to everyone watching poster 18" is one call with no connection table. It tells your code about events by calling an HTTP endpoint you register, so a function can handle them.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/realtime-transports" stepper minWidth={420} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/realtime-transports" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which real-time setup?"
+  tree={{
+    q: "Must news arrive within a few seconds?",
+    no: "Poll every 30 to 60 seconds. It needs nothing special from the cloud, and caches can help.",
+    yes: {
+      q: "Does the browser also send a stream of messages, as in chat or games?",
+      no: {
+        answer: "Server-sent events: one-way, plain HTTP, reconnects by itself. Set pings under every idle timeout on the path.",
+        href: "/system-design/fundamentals/server-sent-events",
+      },
+      yes: {
+        q: "Will you run and patch the servers that hold the sockets?",
+        yes: "WebSockets on your own servers: a shared pub/sub channel, slow drains, jittered reconnects, and scaling on socket count.",
+        no: {
+          answer: "A managed connection service: it holds the sockets, and your function is called by connection id.",
+          href: "/system-design/fundamentals/websockets",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost's balancer cuts connections that are silent for 60 seconds. A page sends a ping every 70 seconds. What happens?" hint="Compare the two numbers.">
+    The balancer cuts the socket after 60 quiet seconds, 10 seconds before the ping. The page reconnects about once a minute and misses any sale in the gap. The ping must come well under the shortest timeout on the path, such as every 25 seconds.
+  </QuizItem>
+  <QuizItem question="800 pages reconnect after a random wait between 1 and 30 seconds. About how many reconnects arrive each second?">
+    About 27. 800 spread evenly over 30 seconds is about 27 a second, instead of 800 in one second.
+  </QuizItem>
+  <QuizItem question="After a drain, servers 3–4 hold all 1,600 sockets and run at 15% processor. Why does the old autoscaling rule add no server?" hint="What does a quiet socket use?">
+    The rule aims for 60% processor use, and quiet sockets use almost none. They use memory and connection handles instead. The rule that works counts sockets: 800 per server is over 600, so the autoscaler adds one.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Polling every 5 s", "Sockets on your own servers", "Managed connection service"]}
+  rows={[
+    ["Load from 1,600 shoppers", "320 requests a second", "1,600 open sockets", "1,600 sockets, held by the provider"],
+    ["Delay before news shows", "Up to 5 s", "Under 1 s", "Under 1 s"],
+    ["Deploy cuts sockets", "No sockets to cut", "Yes, unless drained slowly", "No; your code holds none"],
+    ["Needs a shared channel", false, true, "Only for groups the service lacks"],
+    ["You set idle pings and timeouts", false, true, "Partly; the service has its own limits"],
+    ["Cost grows with", "Requests", "Servers, mostly idle", "Connection minutes and messages"],
+  ]}
+  caption="Brightpost's flash sale, three ways. Limits and prices differ by cloud."
+/>
+
+Polling is fine for news that can wait. For news within a second, a managed service removes the hardest part, holding the sockets, at the price of its own limits and a per-message bill.
+
+## Common pitfalls
+
+- **No ping under the idle timeout.** Quiet sockets are cut every minute, and nothing logs an error. Send a ping well under the shortest timeout on the path.
+- **Reconnecting the instant a socket closes.** Every client does the same, in the same second. Wait a random time and double the cap after each failure.
+- **Autoscaling on processor alone.** Sockets fill memory and handles, not the processor. Publish the open socket count and scale on it.
+- **State only on the server that holds the socket.** A message for a shopper on another server is lost. Share news through a pub/sub channel.
+- **Proxies that hold a stream back.** Some proxies and CDNs collect a response before passing it on, which stalls server-sent events and long polling. Switch off buffering for that path and test through the real edge.
+
+## How to say it in an interview
+
+"Real-time updates turn short requests into long-lived connections, so I plan for holding, sharing and losing them. Every hop has an idle timeout, so I send a ping well under the shortest one. Servers share news through a pub/sub channel, so any server can hold any user. Deploys drain sockets slowly, and clients reconnect after exponential backoff with jitter, or a deploy becomes a thundering herd. I autoscale on open connections, because quiet sockets use memory, not processor. If I would rather not run that fleet, a managed connection service holds the sockets and calls my functions by connection id."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="A WebSocket works on a laptop, but behind a cloud load balancer it drops about once a minute. Why?" level="Junior" category="Cloud">
+    **Short answer.** The load balancer has an idle timeout. It closes any connection that carries nothing for a set time. A quiet socket hits that limit and is cut. Send a small ping on a timer, well under the timeout.
+
+    **Why.** On a laptop nothing sits between the browser and the server, so nothing times out. In the cloud, a balancer, a CDN or a proxy sits in the middle, and each has its own limit. Brightpost's balancer cuts after 60 quiet seconds, and a slow-selling poster can stay silent for 3 minutes. A ping every 25 seconds keeps the socket busy enough.
+
+    <AnimatedDiagram spec="animated/cloud/realtime-transports" step={2} path="browsers>lb>s12" caption="Every hop between the page and the server has its own idle timeout." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why not raise the timeout to an hour instead?
+    - How does the client notice that a connection died without a close message?
+
+    **Watch out for.** Blaming the server code. The server never closed the socket; a box in the middle did.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Server-sent events or WebSockets for a one-way live stock counter?" level="Mid" category="Cloud">
+    **Short answer.** Server-sent events, if the browser only listens. They run over plain HTTP, the browser reconnects by itself, and every HTTP load balancer carries them. Choose WebSockets when the browser also sends a stream of messages.
+
+    **Why.** A stock counter only flows from server to browser. The cloud work is the same for both: pings under every idle timeout, a shared channel between servers, and slow drains. One extra check for server-sent events: a proxy or CDN that buffers responses stalls the stream, so switch buffering off on that path.
+
+    **Follow-ups the interviewer may ask.**
+    - How does a server-sent events client resume after a reconnect without missing a sale?
+    - What changes if the counter must also send "I'm still looking" from the browser?
+
+    **Watch out for.** Saying WebSockets are always faster. For one-way news, both deliver in well under a second.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A sale is saved on server A, but the shopper's socket is on server B. How does the news reach them?" level="Mid" category="Cloud">
+    **Short answer.** Through a shared pub/sub channel. Server A publishes "poster 18: 13 left", every server listens, and server B pushes it to the shoppers it holds. Any server can then hold any shopper.
+
+    **Why.** A socket stays on the server it first reached, so news must travel between servers. Sticky routing puts all watchers of one poster on one server. It needs no channel, but a busy poster overloads that server, and its restart drops every watcher. A channel spreads the load and survives one server's loss.
+
+    <AnimatedDiagram spec="animated/cloud/realtime-transports" step={3} path="s34>pubsub>s12" caption="Servers 3–4 publish the sale; servers 1–2 hear it and push it to their shoppers." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to messages published while server B is restarting?
+    - When would you split one channel into many?
+
+    **Watch out for.** Saying "use sticky sessions" and stopping. It moves the problem to one server instead of solving it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why does an autoscaling rule based on processor use miss a WebSocket fleet, and what do you scale on instead?" level="Mid" category="Cloud">
+    **Short answer.** Quiet sockets use almost no processor. They use memory and connection handles. A server can run out of room at 10% processor, so the rule never fires. Scale on open connections per server.
+
+    **Why.** Brightpost's rule aimed for 60% processor use. After a drain, two servers held 800 sockets each at about 15% processor, and no server was added. A load test showed one server stays fast up to about 1,000 sockets. So the team publishes the socket count as a custom metric and adds a server above 600. New servers fill slowly, because sockets stay where they landed, so scale before a known peak.
+
+    <AnimatedDiagram spec="animated/cloud/realtime-transports" step={6} highlight={["s34", "metric", "autoscale"]} caption="The autoscaler reads open sockets per server, not processor use." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you move sockets onto a new server once it starts?
+    - What should scale-in do with the sockets on the server it removes?
+
+    **Watch out for.** Scaling on total requests. A socket is one request that lasts an hour, so request counts stay flat.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A deploy drops 100,000 WebSocket clients at once. What happens next, and how do you prevent it?" level="Senior" category="Cloud">
+    **Short answer.** They all reconnect in the same second, a thundering herd. Each reconnect costs a handshake, a sign-in check and a read, so the servers and the database behind them fall over. Prevent it at both ends: close sockets slowly, and reconnect after exponential backoff with jitter.
+
+    **Why.** A drain waits for open requests, but a socket never finishes, so the drain ends by cutting everything together. At Brightpost, 800 sockets became 800 database reads in 1 second, and checkout failed for 6 minutes. With a random wait of 1 to 30 seconds, that is about 27 a second. At 100,000 clients the same wait still gives about 3,300 a second. So also make the reconnect cheap: the client sends its last version, and the server answers from a cache.
+
+    <AnimatedDiagram spec="animated/cloud/realtime-transports" step={4} caption="The drain ends, 800 sockets close together, and all 800 come back in the next second." />
+
+    **Follow-ups the interviewer may ask.**
+    - How long should the drain run, and what decides it?
+    - How do you protect the database if clients ignore the backoff?
+
+    **Watch out for.** Fixing only the server side. Clients that reconnect instantly will turn any network blip into the same storm.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design live order tracking for 1 million concurrent users on the cloud of your choice." level="Senior" category="Cloud">
+    **Short answer.** Let a managed connection service hold the sockets. Functions handle connect and disconnect and save which connection watches which order. When an order's status changes, an event triggers a function that sends the new status to that connection id.
+
+    **Why.** A million sockets on your own servers means a large fleet, slow drains and socket-count autoscaling. A managed service turns that into connection minutes and messages, and a deploy cuts no socket. On AWS: API Gateway WebSocket APIs, Lambda, and a DynamoDB table of connection ids. On Azure: Web PubSub, one group per order, so no table. On Google Cloud, which has no such service: Cloud Run with a Memorystore channel, or Firestore listeners if order status can live there. Clients still need pings, backoff with jitter, and a resume-from-last-status step.
+
+    <AnimatedDiagram spec="animated/cloud/managed-websockets" step={3} caption="Your function hears a stock or status change and sends it to one connection id." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to a status change sent while the user's phone is offline?
+    - How do you stop a user from subscribing to someone else's order?
+
+    **Watch out for.** Forgetting that managed services have their own connection lifetime and idle limits. Clients must reconnect even when nothing failed.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Load Balancing on the Cloud](/cloud/networking/load-balancing)
+- [CDN, Edge and WAF](/cloud/networking/cdn-edge-and-waf)
+- [API Gateways](/cloud/networking/api-gateways)
+- [Webhooks on the Cloud](/cloud/networking/webhooks-on-the-cloud)
+- [Autoscaling](/cloud/compute/autoscaling)
+- [Serverless Functions](/cloud/compute/serverless-functions)
+- [Streaming and Messaging Services](/cloud/data/streaming-and-messaging-services)
+- [Networking on AWS](/cloud/aws/networking)
+- [Networking on Google Cloud](/cloud/gcp/networking)
+- [Networking on Azure](/cloud/azure/networking)
+- [Choosing a real-time method](/system-design/fundamentals/choosing-realtime)
+- [Case study: Facebook Messenger](/system-design/case-studies/facebook-messenger)
+
+## Further reading
+
+- [Amazon API Gateway WebSocket APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html): routes and connection ids.
+- [AWS AppSync Events](https://docs.aws.amazon.com/appsync/latest/eventapi/event-api-welcome.html): pub/sub channels over WebSockets.
+- [Cloud Run WebSockets](https://cloud.google.com/run/docs/triggering/websockets): timeouts and session affinity.
+- [Azure Web PubSub overview](https://learn.microsoft.com/azure/azure-web-pubsub/overview): groups and event handlers.
