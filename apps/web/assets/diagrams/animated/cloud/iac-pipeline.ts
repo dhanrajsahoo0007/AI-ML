@@ -72,7 +72,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       x: 130,
       y: 230,
-      w: 190,
+      w: 208,
       cloud: {
         aws: { label: "Management Console" },
         gcp: { label: "Cloud console" },
