@@ -7,7 +7,7 @@ import matter from "gray-matter";
 import { z } from "zod";
 import { features, type FeatureFlag } from "@/config/features";
 import { allSections, isPathVisible, sectionOfKind } from "@/features/sections/registry";
-import { checkAnswerMdx, extractInterviewQuestions } from "@/lib/question-answer";
+import { checkAnswerMdx, extractInterviewQuestions, hasInterviewQuestions } from "@/lib/question-answer";
 
 // The interview question library: every question has a category and subsection from
 // content/question-bank/taxonomy.yaml. Questions come from two places:
@@ -392,7 +392,7 @@ export function findUnmappedQuestionArticles(): UnmappedQuestionArticle[] {
       if (!rel.endsWith(".mdx")) continue;
       const href = `${section.href}/${rel.replace(/\.mdx$/, "")}`;
       const file = path.join(dir, rel);
-      if (!(href in map) && fs.readFileSync(file, "utf8").includes("<InterviewQuestion ")) {
+      if (!(href in map) && hasInterviewQuestions(fs.readFileSync(file, "utf8"))) {
         out.push({ section: section.key, href, file });
       }
     }

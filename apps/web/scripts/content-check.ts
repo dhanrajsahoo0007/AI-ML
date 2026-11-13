@@ -23,6 +23,10 @@ import type { ContentError } from "../src/features/sections/kind";
 const args = new Set(process.argv.slice(2));
 const WARN_UNMAPPED = new Set(args.has("--warn-cloud-questions") ? ["cloud"] : []);
 const STRICT = args.has("--strict");
+/** Sections whose pages must not use em dashes (house style: commas, colons or full stops instead). */
+const NO_EM_DASH = new Set(["behavioral"]);
+/** A line of tool output that has been pasted into the end of pages before; it renders as text. */
+const STRAY_TOOL_LINE = /^`,Path:\s*$/;
 
 const ROOT = process.cwd();
 const APP_DIR = path.join(ROOT, "src", "app");
@@ -222,6 +226,12 @@ async function main() {
   for (const { section, items } of docsItems) {
     for (const item of items) {
       const text = fs.readFileSync(item.file, "utf8");
+      text.split("\n").forEach((l, i) => {
+        if (STRAY_TOOL_LINE.test(l)) report(item.file, "stray tool output on its own line; delete it", "error", i + 1);
+        if (NO_EM_DASH.has(section.key) && l.includes("\u2014")) {
+          report(item.file, "em dash; use a comma, a colon or a full stop", "error", i + 1);
+        }
+      });
       const guarded = [...text.matchAll(GUARD_RE)].map((m) => [m.index!, m.index! + m[0].length]);
       for (const m of text.matchAll(LINK_RE)) {
         const raw = m[1] ?? m[2] ?? m[3];

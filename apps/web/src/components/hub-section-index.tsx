@@ -32,7 +32,8 @@ export function HubSectionIndex({ section, items }: { section: SectionDef; items
   return (
     <SectionIndex breadcrumbLabel={section.label} title={hub.title} subtitle={hub.subtitle}>
       {hubsOf(items).flatMap((h) => {
-        const childCount = articlesOf(items, h.slug).length;
+        const articles = articlesOf(items, h.slug);
+        const childCount = articles.length;
         const categories = Array.isArray(h.data.categories) ? (h.data.categories as string[]) : undefined;
         const groups = docGroupSchema.array().safeParse(h.data.groups);
         const description = h.description ?? "Architecture note.";
@@ -62,6 +63,7 @@ export function HubSectionIndex({ section, items }: { section: SectionDef; items
             description={description}
             childCount={childCount > 0 ? childCount : undefined}
             categories={categories}
+            hrefs={articles.map((a) => a.href)}
           />
         );
       })}
