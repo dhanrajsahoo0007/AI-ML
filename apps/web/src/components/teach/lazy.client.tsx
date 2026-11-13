@@ -9,4 +9,5 @@ export const TabsIsland = dynamic(() => import("./tabs.client").then((m) => m.Ta
 export const Tab = dynamic(() => import("./tabs.client").then((m) => m.Tab));
 export const DecisionTreeClient = dynamic(() => import("./decision-tree.client").then((m) => m.DecisionTreeClient));
 export const SpotTheFlagClient = dynamic(() => import("./spot-the-flag.client").then((m) => m.SpotTheFlagClient));
+export const ChoiceDrillClient = dynamic(() => import("./choice-drill.client").then((m) => m.ChoiceDrillClient));
 export const TermRoot = dynamic(() => import("./term.client").then((m) => m.TermRoot));

@@ -17,7 +17,7 @@ which fails on an invalid prop. When a prop changes, update the example here in 
 Contents:
 
 1. [Teaching components](#1-teaching-components): KeyIdea, Term, Glossary, Compare, ProsCons, Tabs/Tab, Quiz/QuizItem,
-   DecisionTree, SpotTheFlag, RequirementsTable, EstimateTable, Numbers, PatternUses, LearningPath
+   DecisionTree, SpotTheFlag, GuessTheLevel, WhichPrinciple, RequirementsTable, EstimateTable, Numbers, PatternUses, LearningPath
 2. [Interactive widgets](#2-interactive-widgets): eleven lazy islands, at most two per page
 3. [Diagrams](#3-diagrams): the `<AnimatedDiagram>` tag, sidecars, the three spec kinds, `composeSpecs`, lint rules
 4. [Glyphs](#4-glyphs): the 77 drawn icons for diagram nodes and lanes
@@ -242,6 +242,65 @@ behavioral pages, where it replaces a reveal-only `Quiz` with an exercise that h
       flag: "'We' hides what you did, and there is no reason for the choice.",
     },
     { text: "p99 fell from 900 ms to 120 ms and the error rate stayed flat." },
+  ]}
+/>
+```
+
+### GuessTheLevel
+
+Answers to one interview question, each to be matched to the level it shows. The reader picks a level for every
+answer, then checks: each answer is marked, the right level is shown with the reason, and the picks are scored. A lazy
+client island (shared with `WhichPrinciple`); counts towards the two-widgets-per-page limit.
+
+- `prompt` (required string): the interviewer's question, shown above the answers.
+- `levels` (required, 2 to 5 different strings): the choices, lowest first.
+- `answers` (required, 1 to 5): `{ text, level, why }[]`. `level` must be one of `levels`; `why` says what in the
+  answer shows that level.
+- `title` (optional string, default `"Guess the level"`).
+
+```mdx
+<GuessTheLevel
+  prompt="Tell me about a time you improved something."
+  levels={["Mid", "Senior", "Staff"]}
+  answers={[
+    {
+      text: "Our retries were hammering a slow dependency, so I added backoff and a retry budget to our client.",
+      level: "Mid",
+      why: "One person changed one component inside their own service.",
+    },
+    {
+      text: "I wrote the retry standard, built the shared client with two teams, and moved four services onto it.",
+      level: "Staff",
+      why: "Several teams changed how they work because of it.",
+    },
+  ]}
+/>
+```
+
+### WhichPrinciple
+
+Interview questions to be matched to the principle, value or focus area each one tests. Same island and scoring as
+`GuessTheLevel`; counts towards the two-widgets-per-page limit.
+
+- `principles` (required, 2 to 8 different strings): the choices.
+- `prompts` (required, 2 to 8): `{ text, principle, why }[]`. `principle` must be one of `principles`; `why` says how
+  to tell.
+- `title` (optional string, default `"Which principle is this?"`).
+
+```mdx
+<WhichPrinciple
+  principles={["Ownership", "Dive Deep", "Bias for Action"]}
+  prompts={[
+    {
+      text: "Tell me about a problem you fixed that was not your team's.",
+      principle: "Ownership",
+      why: "The words 'not your team's' ask whether you act beyond your own area.",
+    },
+    {
+      text: "Tell me about a time a metric looked fine but something was wrong.",
+      principle: "Dive Deep",
+      why: "It asks whether you check the detail behind a summary number.",
+    },
   ]}
 />
 ```

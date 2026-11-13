@@ -49,6 +49,11 @@ export interface LibraryQuestion {
   topics: LinkRef[];
   refs: QuestionRef[];
   source: QuestionSource;
+  /**
+   * What the question tests: slugs from content/question-bank/signals.yaml (an Amazon Leadership Principle, a
+   * company's focus area, a general competency). Empty on follow-ups and article questions.
+   */
+  signals: string[];
   /** Set on a follow-up: the question it follows. */
   parent?: { id: string; q: string };
   /** The follow-ups of this question, in the order an interviewer asks them. They are also in the library on their own. */
@@ -102,7 +107,7 @@ export const COMPANY_GROUPS = [
 const LEVELS: Level[] = ["Junior", "Mid", "Senior"];
 const CONTENT = path.join(process.cwd(), "content");
 const BANK_DIR = path.join(CONTENT, "question-bank");
-const DATA_FILES = new Set(["taxonomy.yaml", "articles.yaml"]);
+const DATA_FILES = new Set(["taxonomy.yaml", "articles.yaml", "signals.yaml"]);
 
 function readYaml<T>(file: string): T {
   return yaml.load(fs.readFileSync(file, "utf8")) as T;
@@ -184,6 +189,36 @@ function loadCompanies(errors: string[]): Company[] {
   return raw;
 }
 
+export interface Signal {
+  slug: string;
+  title: string;
+  /** The family it belongs to, e.g. "Amazon Leadership Principles". */
+  group: string;
+}
+
+const signalSchema = z.strictObject({
+  slug: z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/),
+  title: z.string().min(1),
+  group: z.string().min(1),
+});
+
+/** What a behavioural question tests (content/question-bank/signals.yaml). */
+function loadSignals(errors: string[]): Signal[] {
+  const raw = readYaml<unknown[]>(path.join(BANK_DIR, "signals.yaml")) ?? [];
+  const out: Signal[] = [];
+  const seen = new Set<string>();
+  raw.forEach((entry, i) => {
+    const parsed = signalSchema.safeParse(entry);
+    if (!parsed.success) errors.push(`signals.yaml entry ${i + 1}: ${parsed.error.issues[0]?.message ?? "invalid"}`);
+    else if (seen.has(parsed.data.slug)) errors.push(`signals.yaml: duplicate slug ${parsed.data.slug}`);
+    else {
+      seen.add(parsed.data.slug);
+      out.push(parsed.data);
+    }
+  });
+  return out;
+}
+
 export interface RawQuestion {
   id?: unknown;
   q?: unknown;
@@ -197,6 +232,7 @@ export interface RawQuestion {
   source?: unknown;
   topics?: unknown;
   followUps?: unknown;
+  signals?: unknown;
 }
 
 // The fields a follow-up may have (anything else, a nested `followUps` included, is an error).
@@ -205,7 +241,8 @@ const FOLLOW_UP_KEYS = new Set(Object.keys({ q: 0, a: 0, level: 0, companies: 0,
 function loadYamlQuestions(
   categories: Map<string, Pick<Category, "track" | "subsections">>,
   companySlugByName: Map<string, string>,
-  errors: string[]
+  errors: string[],
+  signalSlugs: ReadonlySet<string>
 ): LibraryQuestion[] {
   const files = fs.readdirSync(BANK_DIR).filter((f) => f.endsWith(".yaml") && !DATA_FILES.has(f));
   return files.flatMap((file) =>
@@ -214,7 +251,8 @@ function loadYamlQuestions(
       readYaml<RawQuestion[]>(path.join(BANK_DIR, file)) ?? [],
       categories,
       companySlugByName,
-      errors
+      errors,
+      signalSlugs
     )
   );
 }
@@ -225,7 +263,9 @@ export function parseYamlQuestions(
   entries: RawQuestion[],
   categories: Map<string, Pick<Category, "track" | "subsections">>,
   companySlugByName: Map<string, string>,
-  errors: string[]
+  errors: string[],
+  /** The slugs of signals.yaml. Left out (unit tests), a question's `signals` are only checked for shape. */
+  signalSlugs?: ReadonlySet<string>
 ): LibraryQuestion[] {
   const out: LibraryQuestion[] = [];
 
@@ -285,9 +325,18 @@ export function parseYamlQuestions(
     if (categories.get(category)?.track === "design" && fields.topics.length === 0) {
       errors.push(`${where}: a system design question needs at least one topic`);
     }
+    const signals: string[] = [];
+    if (r.signals !== undefined && !Array.isArray(r.signals)) errors.push(`${where}: signals must be a list`);
+    for (const slug of Array.isArray(r.signals) ? (r.signals as unknown[]) : []) {
+      if (typeof slug !== "string" || (signalSlugs && !signalSlugs.has(slug))) {
+        errors.push(`${where}: unknown signal ${String(slug)}`);
+      } else if (signals.includes(slug)) errors.push(`${where}: duplicate signal ${slug}`);
+      else signals.push(slug);
+    }
     const question: LibraryQuestion = {
       id: r.id,
       ...fields,
+      signals,
       file: `question-bank/${file}`,
       category,
       subcategory,
@@ -316,6 +365,7 @@ export function parseYamlQuestions(
         subcategory,
         related: own.topics[0] ?? question.related,
         source: "original",
+        signals: [],
         parent: { id: question.id, q: question.q },
         followUps: [],
       };
@@ -365,6 +415,7 @@ function loadArticleQuestions(
         companies,
         related,
         topics: [],
+        signals: [],
         refs: [],
         source: "article",
         followUps: [],
@@ -415,6 +466,7 @@ export function validateLibrary(): string[] {
 interface Library {
   categories: Category[];
   companies: Company[];
+  signals: Signal[];
   questions: LibraryQuestion[];
 }
 
@@ -428,9 +480,15 @@ function load(): Library {
   const subs = new Set(categories.flatMap((c) => c.subsections.map((s) => `${c.slug}/${s.slug}`)));
   const isSubsection = (cat: string, sub: string) => subs.has(`${cat}/${sub}`);
   const companySlugByName = new Map(companies.map((c) => [c.name, c.slug]));
+  const signals = loadSignals(errors);
 
   const questions = [
-    ...loadYamlQuestions(new Map(categories.map((c) => [c.slug, c])), companySlugByName, errors),
+    ...loadYamlQuestions(
+      new Map(categories.map((c) => [c.slug, c])),
+      companySlugByName,
+      errors,
+      new Set(signals.map((s) => s.slug))
+    ),
     ...loadArticleQuestions(isSubsection, companySlugByName, errors),
   ];
   const ids = new Set<string>();
@@ -444,7 +502,7 @@ function load(): Library {
   const rank = new Map<string, number>();
   categories.forEach((c, i) => c.subsections.forEach((s, j) => rank.set(`${c.slug}/${s.slug}`, i * 100 + j)));
   questions.sort((a, b) => rank.get(`${a.category}/${a.subcategory}`)! - rank.get(`${b.category}/${b.subcategory}`)!);
-  cache = { categories, companies, questions };
+  cache = { categories, companies, signals, questions };
   return cache;
 }
 
@@ -512,6 +570,10 @@ export function getQuestionsForTopic(href: string) {
   const tagged = getQuestions().filter((q) => q.topics.some((t) => t.href === href));
   const ids = new Set(tagged.map((q) => q.id));
   return tagged.filter((q) => !q.parent || !ids.has(q.parent.id));
+}
+
+export function getSignals() {
+  return load().signals;
 }
 
 export function getCompanies() {

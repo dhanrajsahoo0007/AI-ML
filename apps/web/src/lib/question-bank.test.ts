@@ -119,6 +119,23 @@ describe("parseYamlQuestions", () => {
     expect(parse({ ...base, topics: CACHING }).errors.join()).toMatch(/topics must be a list/);
   });
 
+  it("checks signals against the known list", () => {
+    const withSignals = (signals: unknown, known?: ReadonlySet<string>) => {
+      const errors: string[] = [];
+      const questions = parseYamlQuestions("sd.yaml", [{ ...base, signals }], categories, companies, errors, known);
+      return { questions, errors };
+    };
+    const known = new Set(["ownership", "conflict"]);
+    const ok = withSignals(["ownership", "conflict"], known);
+    expect(ok.errors).toEqual([]);
+    expect(ok.questions[0].signals).toEqual(["ownership", "conflict"]);
+    expect(parse(base).questions[0].signals).toEqual([]);
+    expect(withSignals(["nope"], known).errors.join()).toMatch(/unknown signal nope/);
+    expect(withSignals(["ownership", "ownership"], known).errors.join()).toMatch(/duplicate signal/);
+    expect(withSignals("ownership", known).errors.join()).toMatch(/signals must be a list/);
+    expect(withSignals([3]).errors.join()).toMatch(/unknown signal 3/);
+  });
+
   it("requires a topic on a system design question but not on an AI one", () => {
     expect(parse({ ...base, topics: undefined }).errors.join()).toMatch(/needs at least one topic/);
     const ai = parse({ ...base, category: "ai", subcategory: "rag", topics: undefined }, "ai.yaml");

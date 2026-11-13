@@ -25,6 +25,7 @@ const fixture: LibraryQuestion = {
   topics: [],
   refs: [],
   source: "original",
+  signals: [],
   followUps: [],
 };
 

@@ -6,19 +6,19 @@ tables and prose tidy by hand.
 
 ## Layout
 
-| Path                                       | What                                                                       |
-| ------------------------------------------ | -------------------------------------------------------------------------- |
-| `sections.yaml`                            | The section registry: kind, label, nav group, release state per env       |
-| `features.yaml`                            | Non-section switches (`on`/`off` per env), e.g. `mlInterviews`             |
-| `<section>/<hub>.mdx`                      | A docs hub (grid of `<ModelCategory>`/`<ModelCard>`)                       |
-| `<section>/<hub>/<slug>.mdx`               | A docs article                                                             |
-| `<section>/_index.yaml`                    | Nav index per docs section: hubs → categories → cards (sidebar, header)    |
-| `question-bank/<category>.yaml`            | Interview questions; `question-bank/taxonomy.yaml` lists the categories    |
-| `question-bank/articles.yaml`              | Article path → category/subsection for articles with interview questions  |
-| `companies/companies.yaml`                 | Company records behind company tags and `/companies`                       |
-| `dsa/`                                     | `dsa/topics/`, `dsa/problems/`, `dsa/tests/` (public + hidden), `dsa/solutions/` (Python references), `dsa/patterns.yaml` |
-| `newsletter/<yyyy>/<slug>.mdx`             | Newsletter issues                                                          |
-| `pages/`                                   | Legal, contact, security and pricing FAQ, with `{{KEY}}` placeholders      |
+| Path                            | What                                                                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `sections.yaml`                 | The section registry: kind, label, nav group, release state per env                                                       |
+| `features.yaml`                 | Non-section switches (`on`/`off` per env), e.g. `mlInterviews`                                                            |
+| `<section>/<hub>.mdx`           | A docs hub (grid of `<ModelCategory>`/`<ModelCard>`)                                                                      |
+| `<section>/<hub>/<slug>.mdx`    | A docs article                                                                                                            |
+| `<section>/_index.yaml`         | Nav index per docs section: hubs → categories → cards (sidebar, header)                                                   |
+| `question-bank/<category>.yaml` | Interview questions; `question-bank/taxonomy.yaml` lists the categories                                                   |
+| `question-bank/articles.yaml`   | Article path → category/subsection for articles with interview questions                                                  |
+| `companies/companies.yaml`      | Company records behind company tags and `/companies`                                                                      |
+| `dsa/`                          | `dsa/topics/`, `dsa/problems/`, `dsa/tests/` (public + hidden), `dsa/solutions/` (Python references), `dsa/patterns.yaml` |
+| `newsletter/<yyyy>/<slug>.mdx`  | Newsletter issues                                                                                                         |
+| `pages/`                        | Legal, contact, security and pricing FAQ, with `{{KEY}}` placeholders                                                     |
 
 Docs sections today: `ai-system-design/` (hubs `genai-system-design` and `ml-system-design`, the latter parked
 with `hubRelease`: on in local only), `system-design/`, `behavioral/`, `cloud/`.
@@ -28,14 +28,14 @@ with `hubRelease`: on in local only), `system-design/`, `behavioral/`, `cloud/`.
 Validated by `frontmatterSchema` in `apps/web/src/features/sections/schema.ts` (strict: unknown keys fail).
 
 ```yaml
-title: "Design Facebook Messenger"      # required
-description: "One line, ≤ 160 chars"    # required; used for <meta>; longer is a warning
-icon: message-circle                     # optional; must be a key in src/lib/icons.ts
-status: outline                          # outline | draft | published (default)
-access: free                             # free | premium; default from sections.yaml
-order: 3                                 # optional sort
-categories: [...]                        # hubs: category titles in display order
-updated: 2026-11-07                      # optional; otherwise taken from git history
+title: "Design Facebook Messenger" # required
+description: "One line, ≤ 160 chars" # required; used for <meta>; longer is a warning
+icon: message-circle # optional; must be a key in src/lib/icons.ts
+status: outline # outline | draft | published (default)
+access: free # free | premium; default from sections.yaml
+order: 3 # optional sort
+categories: [...] # hubs: category titles in display order
+updated: 2026-11-07 # optional; otherwise taken from git history
 ```
 
 ## Rules
@@ -71,11 +71,11 @@ Read these three before writing a `system-design/` page (all Markdown files, so 
 Rules the code enforces:
 
 - **Teaching components** (`KeyIdea`, `Term`, `Glossary`, `Compare`, `ProsCons`, `Tabs`/`Tab`, `Quiz`/`QuizItem`,
-  `DecisionTree`, `SpotTheFlag`, `RequirementsTable`, `EstimateTable`, `Numbers`, `PatternUses`, `LearningPath`; source
+  `DecisionTree`, `SpotTheFlag`, `GuessTheLevel`, `WhichPrinciple`, `RequirementsTable`, `EstimateTable`, `Numbers`, `PatternUses`, `LearningPath`; source
   `apps/web/src/components/teach/`) validate props with strict zod schemas: an unknown or misspelled prop is a red
   note in dev and fails the production build.
-- **Widgets** (eleven lazy islands in `apps/web/src/components/teach/widgets/`): at most two per page, `DecisionTree`
-  and `SpotTheFlag` included. Not yet enforced by content-check, so reviewers check it.
+- **Widgets** (eleven lazy islands in `apps/web/src/components/teach/widgets/`): at most two per page, `DecisionTree`,
+  `SpotTheFlag`, `GuessTheLevel` and `WhichPrinciple` included. Not yet enforced by content-check, so reviewers check it.
 - **Glossary**: owned by the section with `glossary: true` in `sections.yaml`. `<Term id>` ids must exist in
   `system-design/glossary.yaml` (zod-validated by `apps/web/src/lib/glossary.ts`: kebab-case unique ids, `short` at
   most 160 characters, `related` ids must exist).
