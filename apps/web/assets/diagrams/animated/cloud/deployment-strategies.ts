@@ -158,13 +158,13 @@ const spec: DiagramSpec = {
     {
       id: "migration",
       label: "Migration job",
-      sub: "changes the schema",
+      sub: "schema changes",
       icon: "workers",
       tone: "teal",
       step: 3,
       x: 130,
       y: 565,
-      w: 160,
+      w: 176,
     },
 
     // Step 6
@@ -214,7 +214,7 @@ const spec: DiagramSpec = {
     { from: "current", to: "db", label: "reads, writes", packet: true, delay: 1.2, until: 2 },
 
     // Step 2: rolling. One server at a time moves to the new version; both versions take traffic.
-    { from: "registry", to: "next", label: "1 server at a time", dashed: true, flow: true, step: 2 },
+    { from: "registry", to: "next", label: "1 server at a time", dashed: true, flow: true, labelAt: 0.62, step: 2 },
     { from: "lb", to: "current", label: "old version", packet: true, delay: 0.6, step: 2, until: 4 },
     { from: "lb", to: "next", label: "new version", packet: true, delay: 0.6, step: 2, until: 4 },
     { from: "next", to: "db", label: "reads, writes", packet: true, delay: 1.2, step: 2, until: 3 },

@@ -46,7 +46,8 @@ const spec: LayoutSpec = {
     { id: "ideal-note", type: "text", x: 598, y: 262, w: 96, h: 18, label: "burn rate 1", tone: "neutral" },
 
     // Step 2: the fast burn and its page.
-    { id: "fast", type: "arrow", x: 70, y: 60, w: 174, h: 96, via: [[244, 99]], tone: "red", step: 2 },
+    { id: "normal-1", type: "arrow", x: 70, y: 60, w: 174, h: 39, tone: "neutral", step: 2 },
+    { id: "fast", type: "arrow", x: 244, y: 99, w: 0, h: 57, tone: "red", step: 2 },
     { id: "page", type: "circle", x: 244, y: 104, w: 14, tone: "red", highlight: true, step: 2 },
     {
       id: "fast-note",
@@ -72,7 +73,8 @@ const spec: LayoutSpec = {
     },
 
     // Step 3: the slow leak and its ticket.
-    { id: "slow", type: "arrow", x: 244, y: 156, w: 193, h: 135, via: [[379, 187]], tone: "orange", step: 3 },
+    { id: "normal-2", type: "arrow", x: 244, y: 156, w: 135, h: 31, tone: "neutral", step: 3 },
+    { id: "slow", type: "arrow", x: 379, y: 187, w: 58, h: 104, tone: "orange", step: 3 },
     { id: "ticket", type: "circle", x: 399, y: 222, w: 14, tone: "orange", highlight: true, step: 3 },
     {
       id: "slow-note",

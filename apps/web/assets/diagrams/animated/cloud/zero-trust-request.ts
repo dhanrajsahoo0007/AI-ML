@@ -21,12 +21,13 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // admin 390,455 | policy 672,455 | db 390,615 | log 672,615.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 use only the
-// left and middle columns. The red step-2 edges run in a lane at x 455, beside the normal path at x 390.
+// left and middle columns. The red step-2 edges lie on the normal path at x 390; labels sit at different points.
+// The "Data" zone starts at x 262 so its tab (278-339) clears the "full access" label below the admin tool.
 //
 // Zone tabs sit centred on a zone's top edge, from x + 16 to x + 16 + 8.2 per character + 28. The "Access" zone
 // starts at y 175, so the contractor's refused edge (step 4) enters it through its left side at y 197, below the tab.
 // The segmentation edge (step 6) runs down the gutter at x 260 and its label sits at y 365, above the
-// "Admin segment" tab. The policy-to-log edge runs at x 730, right of the "Audit" tab.
+// "Segment" tab. The policy-to-log edge runs at x 730, right of the "Audit" tab.
 // Nodes are sized for the longest name the Services toggle puts in them ("Verified Access policy", "Device trust
 // provider", "Identity-Aware Proxy", "IAM Identity Center").
 const spec: DiagramSpec = {
@@ -46,8 +47,8 @@ const spec: DiagramSpec = {
     { id: "people", title: "People", tone: "neutral", x: 10, y: 40, w: 240, h: 305 },
     { id: "net", title: "Office network", tone: "blue", x: 270, y: 40, w: 240, h: 110 },
     { id: "access", title: "Access", tone: "red", x: 270, y: 175, w: 240, h: 170 },
-    { id: "seg", title: "Admin segment", tone: "teal", x: 270, y: 395, w: 240, h: 115 },
-    { id: "data", title: "Data", tone: "violet", x: 270, y: 555, w: 240, h: 120 },
+    { id: "seg", title: "Segment", tone: "teal", x: 270, y: 395, w: 240, h: 115 },
+    { id: "data", title: "Data", tone: "violet", x: 262, y: 555, w: 248, h: 120 },
     { id: "ctx", title: "Identity and context", tone: "red", x: 555, y: 40, w: 235, h: 470 },
     { id: "audit", title: "Audit", tone: "orange", x: 555, y: 555, w: 235, h: 120 },
   ],
@@ -170,7 +171,7 @@ const spec: DiagramSpec = {
     {
       id: "policy",
       label: "Access policy",
-      sub: "who, which app, which device",
+      sub: "person, app and device",
       icon: "policy",
       tone: "red",
       step: 5,
@@ -206,9 +207,10 @@ const spec: DiagramSpec = {
     // Step 1: one sign-in at the VPN, then the network itself is the permission.
     { from: "staff", to: "vpn", label: "sign in once", packet: true, until: 2 },
     { from: "vpn", to: "admin", label: "any VPN address", packet: true, delay: 1.2, labelAt: 0.3, until: 2 },
-    { from: "admin", to: "db", label: "full access", packet: true, delay: 2.4, labelAt: 0.35, until: 5 },
+    { from: "admin", to: "db", label: "full access", packet: true, delay: 2.4, labelAt: 0.75, until: 5 },
 
-    // Step 2: the malware rides the contractor's VPN session in a lane beside the normal path.
+    // Step 2: the malware rides the contractor's VPN session. The red edges lie on top of the normal path, with their
+    // labels at other points along it, so the whole figure stays inside the left 480 units on a phone.
     { from: "contractor", to: "vpn", label: "same VPN", tone: "red", packet: true, step: 2, until: 2 },
     {
       from: "vpn",
@@ -217,11 +219,7 @@ const spec: DiagramSpec = {
       tone: "red",
       packet: true,
       delay: 1.2,
-      via: [
-        [455, 124],
-        [455, 426],
-      ],
-      labelAt: 0.65,
+      labelAt: 0.7,
       step: 2,
       until: 2,
     },
@@ -232,11 +230,7 @@ const spec: DiagramSpec = {
       tone: "red",
       packet: true,
       delay: 2.4,
-      via: [
-        [455, 484],
-        [455, 586],
-      ],
-      labelAt: 0.72,
+      labelAt: 0.3,
       step: 2,
       until: 2,
     },
@@ -244,7 +238,7 @@ const spec: DiagramSpec = {
     // Step 3: the proxy is the only way in. It asks the directory who this is, then passes a signed identity on.
     { from: "staff", to: "proxy", label: "HTTPS", packet: true, step: 3 },
     { from: "proxy", to: "idp", label: "sign in", dashed: true, step: 3 },
-    { from: "proxy", to: "admin", label: "signed identity", packet: true, delay: 1.2, step: 3 },
+    { from: "proxy", to: "admin", label: "signed identity", packet: true, delay: 1.2, labelAt: 0.3, step: 3 },
 
     // Step 4: the device must pass a check; the personal laptop is refused at the proxy.
     { from: "device", to: "proxy", label: "device healthy?", dashed: true, step: 4 },
@@ -254,7 +248,7 @@ const spec: DiagramSpec = {
       label: "refused: unmanaged",
       tone: "red",
       dashed: true,
-      labelAt: 0.35,
+      labelAt: 0.25,
       step: 4,
     },
 
@@ -265,7 +259,7 @@ const spec: DiagramSpec = {
     {
       from: "vpn",
       to: "admin",
-      label: "refused: not via proxy",
+      label: "no proxy: refused",
       tone: "red",
       dashed: true,
       via: [
@@ -275,7 +269,7 @@ const spec: DiagramSpec = {
       labelAt: 0.71,
       step: 6,
     },
-    { from: "admin", to: "db", label: "own identity, one order", packet: true, delay: 2.4, step: 6 },
+    { from: "admin", to: "db", label: "own identity, one order", packet: true, delay: 2.4, labelAt: 0.4, step: 6 },
 
     // Step 7: every decision and every query is written down.
     {

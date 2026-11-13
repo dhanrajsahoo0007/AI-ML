@@ -25,9 +25,11 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // columns, so the free preview and the failure show without scrolling.
 //
 // Routing: the chat service's refund request to the workflow (step 6) runs diagonally between the guardrail and the
-// model, so its label sits at 0.66, in the gap right of the model; the guardrail-to-model label sits at 0.8, below
-// that crossing. The refused lookup of order 5122 (step 5) bends right of the straight lookup edge (via 235,516) so
-// the two labels sit side by side. Vertical edges at x 130 and x 390 enter zones right of their tabs.
+// model; its label sits at 0.24, just below the chat service, clear of the guardrail-to-model label (0.8). The AI
+// zone is a subnet (inline label, no tab) because the blocked note enters it through the top at x 390. Short zone
+// titles ("App", "Data") keep their tabs left of the vertical edges at x 130; the payment zone is a subnet too,
+// because two refund edges enter it from above. The refused lookup of order 5122 (step 5) bends right of the
+// straight lookup edge (via 235,516), so the two labels sit side by side.
 // Node tops sit at least 26 units under their zone's top so the NEW ring clears the zone tab.
 // Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Boxes fit the longest
 // names the Services toggle puts in them ("Bedrock Guardrails", "Vertex AI RAG Engine", "AWS Step Functions").
@@ -48,13 +50,13 @@ const spec: DiagramSpec = {
     { id: "customers", title: "Customers", tone: "neutral", x: 10, y: 35, w: 240, h: 140 },
     { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 290, y: 35, w: 200, h: 110 },
     { id: "content", title: "Shop content", tone: "violet", x: 545, y: 35, w: 240, h: 110 },
-    { id: "chatz", title: "Chat service", tone: "teal", x: 10, y: 195, w: 240, h: 110 },
-    { id: "ai", title: "AI service", tone: "teal", x: 290, y: 195, w: 200, h: 290 },
+    { id: "chatz", title: "App", tone: "teal", x: 10, y: 195, w: 240, h: 110 },
+    { id: "ai", title: "AI service", tone: "teal", kind: "subnet", x: 290, y: 195, w: 200, h: 290 },
     { id: "records", title: "Records", tone: "orange", x: 545, y: 195, w: 240, h: 110 },
     { id: "identity", title: "Identity", tone: "red", x: 10, y: 375, w: 240, h: 110 },
     { id: "approvals", title: "Approvals", tone: "orange", x: 545, y: 375, w: 240, h: 305 },
-    { id: "data", title: "Orders data", tone: "violet", x: 10, y: 545, w: 240, h: 135 },
-    { id: "provider", title: "Payment provider", tone: "neutral", x: 290, y: 545, w: 200, h: 110 },
+    { id: "data", title: "Data", tone: "violet", x: 10, y: 545, w: 240, h: 135 },
+    { id: "provider", title: "Provider", tone: "neutral", kind: "subnet", x: 290, y: 545, w: 200, h: 110 },
   ],
   nodes: [
     // Step 1
@@ -223,7 +225,7 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: the model reads the chat and may call both tools. Nothing limits either tool.
-    { from: "customer", to: "chat", label: "chat", packet: true, bidirectional: true, until: 6 },
+    { from: "customer", to: "chat", label: "chat", packet: true, bidirectional: true, labelAt: 0.2, until: 6 },
     { from: "chat", to: "model", label: "prompt + tools", packet: true, delay: 0.8, until: 2 },
     { from: "chat", to: "orders", label: "look up any order", dashed: true, until: 1 },
     { from: "chat", to: "payments", label: "refund, no limit", dashed: true, labelAt: 0.35, until: 1 },
@@ -267,14 +269,14 @@ const spec: DiagramSpec = {
     },
 
     // Step 6: a refund becomes a request; the workflow pays small ones and asks a person about big ones.
-    { from: "chat", to: "workflow", label: "refund request", packet: true, labelAt: 0.66, step: 6 },
+    { from: "chat", to: "workflow", label: "refund request", packet: true, labelAt: 0.24, step: 6 },
     { from: "workflow", to: "agent", label: "over £30?", bidirectional: true, step: 6 },
     { from: "workflow", to: "payments", label: "pay out", packet: true, delay: 1.2, step: 6 },
 
     // Step 7: every turn and every approval is written down; each customer has a message cap.
     { from: "guardrail", to: "log", label: "each turn", dashed: true, flow: true, step: 7 },
     { from: "workflow", to: "log", label: "decisions", dashed: true, flow: true, step: 7 },
-    { from: "customer", to: "chat", label: "20 a minute", packet: true, bidirectional: true, step: 7 },
+    { from: "customer", to: "chat", label: "20 a minute", packet: true, bidirectional: true, labelAt: 0.2, step: 7 },
   ],
 };
 

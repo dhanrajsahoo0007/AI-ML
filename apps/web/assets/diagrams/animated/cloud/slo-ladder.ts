@@ -13,7 +13,7 @@ const spec: LayoutSpec = {
   kind: "layout",
   title: "SLI, SLO and SLA",
   width: 640,
-  height: 350,
+  height: 370,
   shapes: [
     // Step 1: what was measured.
     {
@@ -96,7 +96,7 @@ const spec: LayoutSpec = {
       id: "sla-note",
       type: "text",
       x: 30,
-      y: 318,
+      y: 330,
       w: 270,
       h: 20,
       label: "Below this line, credits are owed",

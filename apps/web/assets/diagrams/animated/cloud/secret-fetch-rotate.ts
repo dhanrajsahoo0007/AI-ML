@@ -23,10 +23,10 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 happen in the
 // left and middle columns, so the free preview and the failure show without scrolling.
 //
-// Zone tabs sit on a zone's top-left corner, so vertical edges enter right of the tabs (x 130, 390 and 672). The
-// "Outside" zone is a subnet band (inline label, no tab) because the rotation job's edge reaches it from the side and
-// the straggler's edges reach it from below. The rotation job's edge to the store climbs out of its box at x 672,
-// runs left in the gap between rows (y 165) and turns up into the store, so it never cuts the Automation tab.
+// Zone tabs sit on a zone's top-left corner and reach about 145 units to the right. The service identity sits inside
+// the Application zone, so "attached" never crosses a tab. "Outside" and "People" are subnet bands (inline label, no
+// tab) because edges enter them from above and from the side. The rotation job's edge to the store leaves its box
+// right of the Automation tab (x 740), runs left in the gap between rows (y 160) and turns up into the store.
 // Text room: up to 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Nodes are sized
 // for the longest name the Services toggle shows ("Cloud Run function", "Virtual Machines", "Managed identity",
 // "Cloud Audit Logs", "Azure PostgreSQL", "Secrets Manager").
@@ -43,11 +43,10 @@ const spec: DiagramSpec = {
     { title: "Every read leaves a record" },
   ],
   zones: [
-    { id: "identity", title: "Identity", tone: "red", x: 10, y: 40, w: 240, h: 100 },
-    { id: "app", title: "Application", tone: "teal", x: 10, y: 190, w: 240, h: 275 },
+    { id: "app", title: "Application", tone: "teal", x: 10, y: 40, w: 240, h: 425 },
     { id: "secrets", title: "Secret store", tone: "red", x: 295, y: 40, w: 190, h: 100 },
     { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 295, y: 190, w: 190, h: 110 },
-    { id: "people", title: "People", tone: "neutral", x: 295, y: 345, w: 190, h: 120 },
+    { id: "people", title: "People", tone: "neutral", kind: "subnet", x: 295, y: 345, w: 190, h: 120 },
     { id: "audit", title: "Audit", tone: "orange", x: 560, y: 40, w: 225, h: 100 },
     { id: "automation", title: "Automation", tone: "teal", x: 560, y: 190, w: 225, h: 110 },
     { id: "data", title: "Data", tone: "violet", x: 560, y: 345, w: 225, h: 120 },
@@ -100,7 +99,7 @@ const spec: DiagramSpec = {
       tone: "neutral",
       x: 390,
       y: 245,
-      w: 166,
+      w: 180,
     },
 
     // Step 2: the failure
@@ -155,7 +154,7 @@ const spec: DiagramSpec = {
       step: 5,
       x: 672,
       y: 400,
-      w: 186,
+      w: 196,
       cloud: {
         aws: "aws-rds",
         gcp: "gcp-cloud-sql",
@@ -202,8 +201,9 @@ const spec: DiagramSpec = {
       packet: true,
       delay: 1.2,
       via: [
-        [672, 165],
-        [525, 165],
+        [740, 200],
+        [740, 160],
+        [525, 160],
       ],
       step: 3,
     },
@@ -211,7 +211,22 @@ const spec: DiagramSpec = {
     { from: "stale", to: "provider", label: "v1 still works", packet: true, step: 3, until: 3 },
 
     // Step 4: a refused key makes the server re-read the store at once and retry the charge one time.
-    { from: "stale", to: "store", label: "refused? re-read", tone: "green", packet: true, labelAt: 0.2, step: 4 },
+    // It runs round the left of the servers and along the gap under the service identity (y 145), because the gap
+    // between the app servers and the payment provider already holds the "charge" label.
+    {
+      from: "stale",
+      to: "store",
+      label: "re-read now",
+      tone: "green",
+      packet: true,
+      via: [
+        [28, 400],
+        [28, 145],
+        [330, 145],
+      ],
+      labelAt: 0.73,
+      step: 4,
+    },
     {
       from: "stale",
       to: "provider",

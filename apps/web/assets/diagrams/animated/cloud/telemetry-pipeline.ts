@@ -22,7 +22,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 use only the
 // left and middle columns. The order service and the collector share a row, so that fan-in edge is straight; the
 // shop and print edges enter the Telemetry zone through its left side, below its tab (tab: x 306-408, y 186-214).
-// The vertical metrics-to-alert edge keeps its label high (labelAt 0.35) so the pill clears the Alerts tab.
+// The vertical metrics-to-alert edge keeps its label high (labelAt 0.38), so the pill sits between the two zones and clears the Alerts tab.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon.
 // Nodes are sized for the longest name the Services toggle puts in them ("Azure Monitor Metrics",
 // "Application Insights", "CloudWatch dashboard", "Azure Monitor Agent").
@@ -114,7 +114,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 400,
       y: 290,
-      w: 196,
+      w: 206,
       cloud: {
         aws: { label: "CloudWatch agent" },
         gcp: { label: "Ops Agent" },
@@ -146,7 +146,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 400,
       y: 440,
-      w: 196,
+      w: 210,
       cloud: {
         aws: { id: "aws-cloudwatch", label: "CloudWatch dashboard" },
         gcp: { id: "gcp-cloud-monitoring", label: "Monitoring dashboard" },
@@ -200,7 +200,7 @@ const spec: DiagramSpec = {
       cloud: {
         aws: { id: "aws-cloudwatch", label: "CloudWatch alarm" },
         gcp: { id: "gcp-cloud-monitoring", label: "Alerting policy" },
-        azure: { id: "azure-monitor", label: "Alert rule" },
+        azure: { id: "azure-monitor", label: "Monitor alert rule" },
       },
     },
   ],
@@ -233,7 +233,7 @@ const spec: DiagramSpec = {
     { from: "collector", to: "traces", label: "spans", flow: true, labelAt: 0.72, step: 5 },
 
     // Step 6: the alert reads the metric shoppers feel and pages the person on call.
-    { from: "metrics", to: "alert", label: "p99 Pay > 2 s", labelAt: 0.35, step: 6 },
+    { from: "metrics", to: "alert", label: "p99 Pay > 2 s", labelAt: 0.38, step: 6 },
     { from: "alert", to: "asha", label: "page", packet: true, tone: "orange", step: 6 },
   ],
 };

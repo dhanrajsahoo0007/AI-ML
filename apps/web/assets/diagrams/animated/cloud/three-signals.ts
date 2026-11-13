@@ -6,8 +6,8 @@ import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 // and step 4 a note that the trace id is what joins the log line and the span.
 //
 // Geometry: header texts at y 8-28. Rows start at y 46 and are 92 apart (boxes 64 tall), so the third row ends at 290.
-// Request box: x 20-160, the full height of the rows. Signal boxes: x 200-460. Store boxes: x 490-610.
-// Question boxes: x 640-790. The note sits at y 304-324. Canvas 800 x 334.
+// Request box: x 20-160, the full height of the rows. Signal boxes: x 196-446. Store boxes: x 476-596.
+// Question boxes: x 626-790 (wide enough for "What exactly happened?" in the rendered font). The note sits at y 304-324. Canvas 800 x 334.
 // Label room: 6.2 px per character within width - 8, so a signal label fits about 40 characters and a question
 // label about 22.
 
@@ -45,9 +45,9 @@ const ROW_Y = (i: number) => 46 + i * 92;
 
 const shapes: LayoutShape[] = [
   { id: "head-req", type: "text", x: 20, y: 8, w: 140, h: 20, label: "One request", tone: "neutral" },
-  { id: "head-signal", type: "text", x: 200, y: 8, w: 260, h: 20, label: "The signal it leaves", tone: "neutral" },
-  { id: "head-store", type: "text", x: 490, y: 8, w: 120, h: 20, label: "Lands in", tone: "neutral" },
-  { id: "head-q", type: "text", x: 640, y: 8, w: 150, h: 20, label: "Answers", tone: "neutral" },
+  { id: "head-signal", type: "text", x: 196, y: 8, w: 250, h: 20, label: "The signal it leaves", tone: "neutral" },
+  { id: "head-store", type: "text", x: 476, y: 8, w: 120, h: 20, label: "Lands in", tone: "neutral" },
+  { id: "head-q", type: "text", x: 626, y: 8, w: 164, h: 20, label: "Answers", tone: "neutral" },
   {
     id: "req",
     type: "box",
@@ -63,9 +63,9 @@ const shapes: LayoutShape[] = [
     {
       id: `sig-${r.id}`,
       type: "box",
-      x: 200,
+      x: 196,
       y: ROW_Y(i),
-      w: 260,
+      w: 250,
       h: 64,
       label: r.signal,
       sub: r.signalSub,
@@ -75,7 +75,7 @@ const shapes: LayoutShape[] = [
     {
       id: `store-${r.id}`,
       type: "box",
-      x: 490,
+      x: 476,
       y: ROW_Y(i),
       w: 120,
       h: 64,
@@ -86,9 +86,9 @@ const shapes: LayoutShape[] = [
     {
       id: `q-${r.id}`,
       type: "box",
-      x: 640,
+      x: 626,
       y: ROW_Y(i),
-      w: 150,
+      w: 164,
       h: 64,
       label: r.question,
       sub: r.questionSub,

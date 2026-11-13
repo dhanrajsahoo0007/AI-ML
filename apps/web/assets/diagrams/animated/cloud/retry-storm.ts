@@ -12,12 +12,12 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Nodes never move. The edges that later steps replace (instant retries, the refused launch) end with `until`.
 //
-// Layout: three columns, rows at y 95 | 235 | 375 | 530 | 680.
+// Layout: three columns, rows at y 95 | 235 | 375 | 530 | 700.
 //   Left (x 130): the request path: shoppers, load balancer, app servers, orders database.
 //   Middle (x 400): the cloud's side: quota and autoscaler on top, the order-key table beside the database.
 //   Right (x 670): added later: the quota alert, then the email path (dead-letter queue, queue, worker, email).
 // shoppers 130,95 | quota 400,95 | alert 670,95 | lb 130,235 | autoscaler 400,235 | dlq 670,235 |
-// servers 130,375 | queue 670,375 | db 130,530 | keys 400,530 | worker 670,530 | email 670,680.
+// servers 130,375 | queue 670,375 | db 130,530 | keys 400,530 | worker 670,530 | email 670,700.
 //
 // Why this order: on a phone the figure opens on the left 480 units. Steps 1 and 2 use only the left and middle
 // columns. The long servers-to-queue edge runs along row y 375, which is empty in the middle column.
@@ -27,7 +27,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 const spec: DiagramSpec = {
   title: "A sale-day quota, a retry storm, and safe retries",
   width: 795,
-  height: 730,
+  height: 750,
   steps: [
     { title: "The sale plan: 10 servers at 8:30" },
     { title: "The quota stops at 8; instant retries triple the load" },
@@ -38,12 +38,12 @@ const spec: DiagramSpec = {
   ],
   zones: [
     { id: "shoppers-z", title: "Shoppers", tone: "neutral", x: 10, y: 40, w: 240, h: 110 },
-    { id: "shop", title: "Shop servers", tone: "teal", x: 10, y: 180, w: 240, h: 245 },
+    { id: "shop", title: "App", tone: "teal", x: 10, y: 180, w: 240, h: 245 },
     { id: "control", title: "Cloud control plane", tone: "orange", x: 290, y: 40, w: 215, h: 250 },
-    { id: "data", title: "Orders data", tone: "violet", x: 10, y: 475, w: 495, h: 140 },
+    { id: "data", title: "Data", tone: "violet", x: 10, y: 475, w: 495, h: 140 },
     { id: "alerts", title: "Alerts", tone: "orange", x: 560, y: 40, w: 225, h: 110 },
-    { id: "mail", title: "Email path", tone: "orange", x: 560, y: 180, w: 225, h: 435 },
-    { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 560, y: 625, w: 225, h: 95 },
+    { id: "mail", title: "Email path", tone: "orange", x: 560, y: 180, w: 225, h: 420 },
+    { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 560, y: 635, w: 225, h: 105 },
   ],
   nodes: [
     // Step 1: the sale plan.
@@ -71,7 +71,7 @@ const spec: DiagramSpec = {
     {
       id: "servers",
       label: "App servers",
-      sub: "4 cores, 200 shoppers each",
+      sub: "4 cores each",
       icon: "server",
       tone: "teal",
       x: 130,
@@ -199,13 +199,13 @@ const spec: DiagramSpec = {
       tone: "neutral",
       step: 6,
       x: 670,
-      y: 680,
+      y: 700,
       w: 190,
     },
   ],
   edges: [
     // Step 1: the request path and the scaling plan.
-    { from: "shoppers", to: "lb", label: "browse, Pay", packet: true, until: 1 },
+    { from: "shoppers", to: "lb", label: "browse, Pay", packet: true, until: 1, labelAt: 0.36 },
     { from: "lb", to: "servers", label: "spread", packet: true, delay: 0.6 },
     { from: "servers", to: "db", label: "write order", packet: true, delay: 1.2 },
     { from: "autoscaler", to: "servers", label: "start 10", dashed: true, labelAt: 0.62 },
@@ -220,17 +220,26 @@ const spec: DiagramSpec = {
       step: 2,
       until: 2,
     },
-    { from: "shoppers", to: "lb", label: "Pay ×4, no wait", tone: "red", packet: true, step: 2, until: 3 },
+    {
+      from: "shoppers",
+      to: "lb",
+      label: "Pay ×4, no wait",
+      tone: "red",
+      packet: true,
+      step: 2,
+      until: 3,
+      labelAt: 0.36,
+    },
 
     // Step 3: the quota was raised to 64 cores, and an alert watches usage.
     { from: "autoscaler", to: "quota", label: "10 of 16: OK", tone: "green", step: 3 },
     { from: "quota", to: "alert", label: "at 80%", dashed: true, step: 3 },
 
     // Step 4: one retry, after a wait that grows and has a random part.
-    { from: "shoppers", to: "lb", label: "retry once: 1–2 s, random", packet: true, step: 4, until: 4 },
+    { from: "shoppers", to: "lb", label: "retry once: 1–2 s, random", packet: true, step: 4, until: 4, labelAt: 0.36 },
 
     // Step 5: the same order key travels with every try.
-    { from: "shoppers", to: "lb", label: "Pay + order key", packet: true, step: 5 },
+    { from: "shoppers", to: "lb", label: "Pay + order key", packet: true, step: 5, labelAt: 0.36 },
     { from: "servers", to: "keys", label: "key seen? reuse", dashed: true, step: 5 },
 
     // Step 6: emails leave the request path and drain at the email service's pace.

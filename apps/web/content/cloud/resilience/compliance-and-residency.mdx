@@ -1,11 +1,349 @@
 ---
 title: "Compliance, Data Residency and Sovereignty"
-description: "What compliance frameworks ask of a cloud design, and three ways to keep data in one place: by region, by policy and by perimeter."
-status: outline
+description: "What compliance frameworks ask of a cloud design, the provider's part and yours, and the controls that keep data in its allowed regions."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** what a compliance framework asks of a cloud design, why the provider's certificate does not make your app compliant, and the three ways to keep data in a place: pick the region, forbid other regions by policy, and draw a perimeter so data cannot leave by API. It explains residency (where data sits) versus sovereignty (whose law and whose keys).
+<KeyIdea>
+  Compliance is a promise about your data, such as where it lives and who may read it, that you keep with controls and prove with records.
+</KeyIdea>
 
-**Related reading on this site:** [Security overview](/system-design/fundamentals/security) · [Identity & Security on Google Cloud](/cloud/gcp/security) · [Identity & Security on Azure](/cloud/azure/security)
+## The story
+
+Brightpost keeps its customers' data in two places. The orders database runs in a region near London, and a read copy runs near Sydney for the Australian shop. A guardrail on its organisation refuses every other region, and the privacy notice tells customers the same. In September the finance lead hired a contractor to set up a new analytics tool. The tool was a rented service that ran in its vendor's own cloud account. The contractor gave it read access to the orders bucket and kept the vendor's default region, in the United States. Every night the tool copied the new export file there, with about 400 names and home addresses. Twenty-six nights later, Brightpost's quarterly audit compared its list of data stores with the audit trail. It found reads by an account nobody had listed: 26 files, about 10,000 orders, in a region the guardrail had never seen.
+
+Every step below closes one part of that gap, and shows the auditor how.
+
+## How it works
+
+Four words first. **Compliance** means meeting a set of written rules, from a law, a contract or an industry. A **framework** is one such set, written as a checklist. A **control** is one thing you do to meet a rule, such as "staff sign in with MFA". **Evidence** is the record that proves a control works, the thing an **auditor**, an independent checker, asks to see.
+
+This page explains the engineering side. Which laws apply to a company, and what they require, is a question for its lawyers.
+
+### Step 1: Know where every copy lives
+
+<AnimatedDiagram spec="animated/cloud/residency-perimeter" step={1} minWidth={620} caption="Brightpost's customer data: written near London, copied to Sydney, and card numbers kept by the payment provider." />
+
+Every framework starts with one question: what data do you hold, and where? **Data residency** is the answer for place: the country or area where data is stored and processed. A <Term id="region">region</Term> sits in one area, so choosing a region is the first residency decision.
+
+Brightpost's picture has three places. Orders are written near London. A read copy near Sydney trails by about 1 second. Card numbers never arrive: they stay with the payment provider.
+
+Brightpost writes these places in a **data register**, a list of every store that holds personal data, with its region and its owner. [Where Data Lives on the Cloud](/cloud/data/data-on-the-cloud) maps every store a shop like this uses.
+
+<PremiumBreak />
+
+### Step 2: The copy nobody listed
+
+<AnimatedDiagram spec="animated/cloud/residency-perimeter" step={2} minWidth={620} caption="The failure: a rented analytics tool copies each night's export to a third region, outside every rule Brightpost set." />
+
+The analytics tool needed one permission: read the orders bucket. The contractor granted it to an identity in the vendor's account. Brightpost's guardrail caps what happens inside Brightpost's own accounts. The copy landed in someone else's account, so the guardrail never saw it.
+
+<Callout tone="red" title="What breaks">
+  Each night at about 03:30 the tool reads the newest export file and stores it in the United States. That is a third region, and the privacy notice names two. After 26 nights the vendor holds about 10,000 orders with names and home addresses. Brightpost's lawyer must now work out whom to tell. The team spends two days confirming that every copy, including the vendor's backups, is deleted.
+</Callout>
+
+Two holes let it happen. Anyone the shop account trusted could read the bucket, wherever that reader lived. And the region rule reached only Brightpost's accounts. Steps 8 and 9 close them.
+
+### Step 3: What a framework is for
+
+A framework turns "is this company careful?" into a list both sides can check. The auditor tests a sample of controls and writes a report.
+
+<Compare
+  columns={["Framework", "What it is", "What it asks of a design", "For Brightpost"]}
+  rows={[
+    ["SOC 2", "An auditor's report on a company's controls over months", "Access control, change control, monitoring, response", "A large wholesale customer may ask for one"],
+    ["ISO/IEC 27001", "A certificate for a security management system", "A risk process and a catalogue of controls", "The same customers may accept this instead"],
+    ["PCI DSS", "The card industry's standard", "Protect card numbers wherever they are stored, processed or sent", "Small scope: card numbers never enter its systems"],
+    ["Privacy laws, such as UK GDPR", "Laws about personal data", "Purpose, minimisation, retention, people's rights, transfers", "Applies: most customers are in the UK"],
+    ["Health data rules, such as HIPAA", "A US law for health records", "Strict access and audit of health data", "Does not apply"],
+  ]}
+  caption="Five common rule sets, in plain words. The real documents are long; this is what they care about."
+/>
+
+The frameworks overlap: one audit trail kept in a separate account answers questions in all of them.
+
+### Step 4: The provider's reports and your controls
+
+A provider's certificate covers the provider: its buildings, hardware, staff and services. You inherit those controls and show its reports to your own auditor. That is the <Term id="shared-responsibility">shared responsibility</Term> line, applied to proof.
+
+<Compare
+  columns={["Who proves it", "Examples", "Where the evidence comes from"]}
+  rows={[
+    ["The provider", "Locked buildings, vetted staff, wiped disks", "The provider's audit reports"],
+    ["Both", "Encryption, logging, backups: the provider builds them, you switch them on", "Your settings, plus the provider's reports"],
+    ["You", "Who has access, which region, what is copied where, how long it is kept", "Your logs, policies and records"],
+  ]}
+  caption="The provider's certificate never covers the bottom row."
+/>
+
+Brightpost's leak sat entirely in the bottom row, though every provider involved was certified. [Shared Responsibility](/cloud/fundamentals/shared-responsibility) draws the full line.
+
+### Step 5: Card numbers: keep them out
+
+The safest card number is one you never hold. At checkout, the payment provider's own form collects the card details. The provider stores the card and returns a **token**, a random reference that means "this card" only to that provider. This is **tokenisation**.
+
+Brightpost's two payment providers both work this way. Brightpost stores the token and the last four digits for receipts. A thief who copies its database gets tokens, which charge nothing anywhere else. So the card checklist touches only the checkout page and its link to the provider.
+
+### Step 6: Personal data: four rules of thumb
+
+Privacy laws differ by country, but most share four ideas.
+
+1. **Purpose.** Collect data for a stated reason, and use it only for that. Addresses are for posting orders.
+2. **Minimisation.** Keep and copy only what the purpose needs. The analytics tool needed sales by town and day, not names.
+3. **Retention.** Delete data when its purpose ends. A <Term id="lifecycle-rule">lifecycle rule</Term> does this for files.
+4. **The right to be forgotten.** A person can ask you to erase their data, in every copy.
+
+Rule 4 is where the data register earns its keep. One customer's address can sit in the database, the export files, the Sydney copy, the analytics store and the backups. A copy missing from the register is a copy nobody deletes.
+
+### Step 7: Residency and sovereignty are different questions
+
+**Sovereignty** asks whose law can reach the data. A government can order a company to hand over data it controls, sometimes even data stored abroad. So the provider's home country can matter as much as the region.
+
+<Compare
+  columns={["", "Residency", "Sovereignty"]}
+  rows={[
+    ["The question", "Where is the data stored and processed?", "Who can be forced to hand it over, or to read it?"],
+    ["Set by", "Region choice, guardrails, perimeters", "Who runs the cloud, where the company is based, who holds the keys"],
+    ["Brightpost's answer", "London and near Sydney", "Keys it holds; a sovereign cloud is not needed today"],
+  ]}
+  caption="Residency is about place. Sovereignty is about control."
+/>
+
+A **sovereign cloud** answers the second question with structure. The provider runs a separate cloud inside one country or area, operated by local staff, often through a locally owned company. Customers may hold the keys outside it. It suits governments and regulated firms, but it usually gets fewer services, later.
+
+### Step 8: A data perimeter
+
+<AnimatedDiagram spec="animated/cloud/residency-perimeter" step={3} minWidth={620} caption="A data perimeter around customer data: the vendor's identity is outside Brightpost's organisation, so its read is refused." />
+
+A **data perimeter** is a rule set around your data stores: only your own identities, from your own networks, may read them. It also works in reverse: your identities may write only to your own resources. A grant to an outsider no longer opens anything.
+
+This closes the first hole. The vendor's read comes from an account outside Brightpost's <Term id="organization">organisation</Term>, so it is refused, whatever the bucket's own <Term id="policy">policy</Term> says. A <Term id="private-endpoint">private endpoint</Term> adds the network half: the stores answer only inside Brightpost's own network. [Private Endpoints](/cloud/networking/private-endpoints) covers that part. Each refusal is logged.
+
+### Step 9: A region guardrail where the data lands
+
+<AnimatedDiagram spec="animated/cloud/residency-perimeter" step={4} minWidth={620} caption="The tool now runs in Brightpost's own analytics account, where the guardrail allows London and Sydney only." />
+
+Brightpost still wants the analytics. The vendor can run the same tool inside a customer's own account. Brightpost creates an analytics account in its organisation and installs the tool there, in London.
+
+That closes the second hole. The region guardrail reaches the new account, so the tool's default region is refused. Copies stay inside the perimeter and the two allowed regions. Following rule 2, the nightly load also drops names and street addresses: the tool receives a town, a date and a total.
+
+Write the guardrail as "refuse everything outside these regions", with a short list of global services that have no region. A list of covered services misses every new one. [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance) explains how guardrails flow down the tree.
+
+### Step 10: Keys you hold
+
+<AnimatedDiagram spec="animated/cloud/residency-perimeter" step={5} minWidth={620} caption="The bucket is encrypted with a key in Brightpost's key service near London. Every use of the key is a logged call." />
+
+Every cloud encrypts stored data by default with keys it manages. A **customer-managed key** is a key you create in the <Term id="kms">key service</Term> and control: who may use it, and when it is switched off. Brightpost's buckets and database use one, kept near London.
+
+Every read of encrypted data now needs the key, and each use is logged. Switching the key off makes every copy unreadable at once, backups included. Some clouds let the key live outside the provider entirely, the strongest answer to sovereignty. [Encryption at Rest, in Transit and Key Management](/cloud/resilience/encryption-and-keys) goes deeper.
+
+### Step 11: Evidence, collected every day
+
+<AnimatedDiagram spec="animated/cloud/residency-perimeter" step={6} minWidth={620} caption="Refusals and changes land in the audit trail. An evidence collector checks controls daily and adds the provider's reports." />
+
+An audit asks "show me", so evidence should exist before anyone asks. Brightpost keeps four kinds:
+
+- **The audit trail.** Every call and every refusal, kept in the audit account where the shop team cannot erase it. [Threat Detection](/cloud/resilience/threat-detection) covers reading it.
+- **Configuration checks.** An **evidence collector** tests settings every day, such as "no bucket is public", and saves each result against the framework rule it proves.
+- **Tags.** A `data: personal` <Term id="tag">tag</Term> marks every store in the register, so a check can find one that is missing.
+- **The provider's reports**, downloaded once a year for the inherited controls.
+
+The audit that found the leak took a week of reading logs. The next one takes an afternoon.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a region guardrail, a perimeter, your own keys and evidence. No product makes you compliant; each one helps you build and prove a control.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Provider's reports:** AWS Artifact, where you download AWS's audit reports and certificates and accept some agreements.
+    - **Region guardrail:** a service control policy (SCP) in AWS Organizations that denies requests outside the allowed Regions. Global services such as IAM need an exception. AWS Control Tower offers a ready-made Region deny control.
+    - **Data perimeter:** SCPs cap what your own identities may reach. Resource control policies (RCPs) cap who may reach your resources, for example only principals in your organisation. VPC endpoint policies limit what passes through private endpoints.
+    - **Keys you hold:** customer managed keys in AWS KMS, which are regional. An external key store keeps the key material outside AWS.
+    - **Evidence:** CloudTrail for API calls, AWS Config for configuration history, and AWS Audit Manager to collect evidence against a framework.
+
+    **The difference that changes a design.** On AWS a perimeter is built from several policy types, each covering one side of a call: identity, resource or network. An explicit deny in any of them wins. RCPs cover only some services, so check each store you protect. For sovereignty, AWS runs separate partitions, such as AWS GovCloud (US) and the AWS European Sovereign Cloud.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Provider's reports:** the compliance resource center and Compliance Reports Manager, where you download Google Cloud's certificates and audit reports.
+    - **Region guardrail:** the resource locations organization policy, set on the organization, a folder or a project. Projects below inherit it.
+    - **Data perimeter:** VPC Service Controls. A service perimeter around projects refuses calls to protected services, such as Cloud Storage and BigQuery, from outside it, and copies to projects outside it.
+    - **Keys you hold:** customer-managed encryption keys (CMEK) in Cloud KMS. Cloud External Key Manager keeps the key outside Google.
+    - **Evidence:** Cloud Audit Logs, where most data access logs must be switched on. Security Command Center can report findings against compliance standards.
+
+    **The difference that changes a design.** VPC Service Controls checks the API call itself, so a valid identity from outside the perimeter is still refused. Some resources fix their location at creation, such as a BigQuery dataset, so set the location policy first. Assured Workloads applies a package of controls, such as data location and limits on support staff access, to a folder. Google also offers sovereign clouds run with local partners in some countries.
+  </Tab>
+  <Tab label="Azure">
+    - **Provider's reports:** the Service Trust Portal for audit reports, and the Azure compliance documentation for each offering.
+    - **Region guardrail:** Azure Policy with the built-in "Allowed locations" definition, assigned at a management group with a deny effect.
+    - **Data perimeter:** private endpoints through Azure Private Link, with public network access switched off on storage and databases. Azure Policy can deny any store that leaves public access on.
+    - **Keys you hold:** customer-managed keys in Azure Key Vault or Managed HSM.
+    - **Evidence:** the Activity log for changes and resource logs for data access. Microsoft Defender for Cloud and Microsoft Purview Compliance Manager map checks to standards.
+
+    **The difference that changes a design.** Azure Policy is the one engine for guardrails: locations, public access and keys. The perimeter is mostly network-based, so plan private endpoints and private DNS for every store. For sovereignty, Microsoft runs the EU Data Boundary for its main cloud services and separate clouds such as Azure Government. It also has sovereign offerings with local partners in some countries.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/residency-perimeter" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/residency-perimeter" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="May this copy of customer data go there?"
+  tree={{
+    q: "Is the copy needed for a purpose you have stated to customers?",
+    no: "Do not make it. If a report needs the data, send totals or towns, not names and addresses.",
+    yes: {
+      q: "Will it sit in an account inside your organisation?",
+      no: {
+        answer: "Stop. Ask the vendor to run inside your own account, or send it only data that is not personal.",
+        href: "/cloud/fundamentals/accounts-and-governance",
+      },
+      yes: {
+        q: "Is its region one of your allowed regions?",
+        no: "The region guardrail should refuse it. Pick an allowed region, or change the promise to customers first.",
+        yes: "Add it to the data register with its owner and retention, tag it, and check that the perimeter covers it.",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost's guardrail allowed only two regions. Why did it not stop the analytics copy?" hint="Whose account held the copy?">
+    The copy sat in the vendor's account. A guardrail caps only the accounts inside Brightpost's own organisation, so it never saw the vendor's request.
+  </QuizItem>
+  <QuizItem question="The tool copied one export file a night for 26 nights. Roughly how many orders left, and which rule of thumb would have shrunk the damage most?" hint="About 400 orders a day.">
+    About 10,000 orders. Minimisation: the tool needed towns, dates and totals, so a copy without names and addresses would have exposed almost nothing.
+  </QuizItem>
+  <QuizItem question="An auditor asks Brightpost to prove its data centres are locked. What does it hand over?">
+    The provider's audit report. That control belongs to the provider, and Brightpost inherits it. Brightpost proves only its own controls, such as access, regions and copies.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Region guardrail", "Data perimeter", "Keys you hold", "Sovereign cloud"]}
+  rows={[
+    ["Stops", "New resources in a third region of your own accounts", "Reads and copies by anyone outside your organisation", "Any read, once you switch the key off", "Foreign operators and some legal reach"],
+    ["Misses", "Copies into someone else's account", "A copy made by your own staff into your own wrong region", "A copy made while the key was on", "Little, but services arrive late"],
+    ["Effort for Brightpost", "About an hour, once", "Several days: list every caller first", "A day, plus key access rules", "A move to a new cloud"],
+    ["Would have stopped the analytics copy", false, true, false, true],
+  ]}
+  caption="Brightpost's estimates. Each control misses something another one catches."
+/>
+
+No single control is enough. The guardrail and the perimeter together cover both holes from the story; keys and logs make the result provable.
+
+## Common pitfalls
+
+- **Treating the provider's certificate as yours.** It proves the provider's controls only. Your auditor still asks about access, regions and copies, which are yours.
+- **A guardrail that lists services.** It misses every new service. Refuse all regions except yours, with a short list of global exceptions.
+- **Granting outsiders direct access to customer data.** Each grant is a copy waiting to happen. Bring the tool into your own account, or send it totals.
+- **No data register.** Without a list of stores, a request to be forgotten misses copies. Add each new copy to the register before it exists, and tag it.
+- **Evidence gathered the week before the audit.** Screenshots prove one moment. Run checks every day and keep the results.
+
+## How to say it in an interview
+
+"I start compliance with a data register: every store with personal data, its region and its owner. The provider's certificates cover its buildings and services; access, location and copies are mine. Residency is where data is stored and processed; sovereignty is who can be forced to hand it over. To keep data in place I combine a region guardrail, a data perimeter that admits only our identities, and keys we hold. I keep card numbers out with the payment provider's tokens, and copy only what each purpose needs. Evidence is collected every day from the audit trail and configuration checks, so the audit is a reading exercise."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Does running on a certified cloud make your app compliant?" level="Junior" category="Cloud">
+    **Short answer.** No. The provider's certificate covers the provider's controls: buildings, hardware, staff and its services. Your app is compliant only when your own controls, such as access, regions and copies, meet the rules and you can prove it.
+
+    **Why.** Compliance splits along the shared responsibility line. You inherit the provider's controls and hand its reports to your auditor. Everything you configure is yours. Brightpost's providers were all certified, yet a contractor's grant sent about 10,000 orders to a third region.
+
+    <AnimatedDiagram spec="animated/cloud/residency-perimeter" step={6} highlight={["reports", "evidence", "trail"]} caption="The provider's reports cover its part. Brightpost's trail and checks cover the rest." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which controls are shared between you and the provider?
+    - What would you show an auditor for encryption at rest?
+
+    **Watch out for.** Saying "the cloud is SOC 2 certified, so we are". The report is about the provider's company, not yours.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Name three controls that keep UK customer data in its allowed regions, and what each one misses." level="Mid" category="Cloud">
+    **Short answer.** A region guardrail on the organisation, a data perimeter around the data stores, and encryption with keys you hold. The guardrail misses copies into other people's accounts. The perimeter misses copies to the wrong region inside your own accounts. Keys miss copies made while the key was on.
+
+    **Why.** Each control checks a different thing: where a resource is created, who is calling, and whether the data can be decrypted. Brightpost's guardrail was in place, but the copy went to a vendor's account, which only a perimeter would refuse. Together they cover each other's gaps, and the audit trail records every refusal as evidence.
+
+    <AnimatedDiagram spec="animated/cloud/residency-perimeter" step={5} highlight={["guardrail", "perimeter", "key", "analytics"]} caption="Three controls around one copy: region, caller and key." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you allow global services that have no region?
+    - How would you roll out a perimeter without breaking legitimate callers?
+
+    **Watch out for.** Naming "pick the right region" as a control. Choosing a region is a decision; a control is something that refuses the wrong one.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why does Brightpost keep card numbers out of its own systems?" level="Mid" category="Cloud">
+    **Short answer.** Because data you never hold cannot leak from you. The payment provider's form collects the card and returns a token. Brightpost stores the token and the last four digits, so the card industry's rules touch only its checkout page.
+
+    **Why.** The card standard applies to every system that stores, processes or sends card numbers. If card numbers passed through Brightpost's servers, the servers, database, backups and logs would all be in scope. With tokens, a stolen database charges nothing, because a token means something only to its issuer.
+
+    <AnimatedDiagram spec="animated/cloud/residency-perimeter" step={1} path="pay>app>db" caption="Only a token travels from the payment provider into Brightpost's systems." />
+
+    **Follow-ups the interviewer may ask.**
+    - What still needs protecting on the checkout page?
+    - How do refunds work when you hold only a token?
+
+    **Watch out for.** Saying "we encrypt card numbers, so we are fine". Encrypted card numbers are still card numbers, and every system holding them stays in scope.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A customer asks to be forgotten. How do you find and delete every copy of their data?" level="Mid" category="Cloud">
+    **Short answer.** Start from a data register that lists every store holding personal data, and delete from each one. Backups age out under their retention rule, and you record the request as evidence.
+
+    **Why.** One Brightpost customer's address can sit in the orders database, the Sydney read copy, the nightly export files, the analytics store and the backups. A copy missing from the register is a copy nobody deletes, which is how the vendor's copy went unseen for 26 nights. Tag each listed store, so a daily check finds stores with personal data that are not in the register.
+
+    <AnimatedDiagram spec="animated/cloud/residency-perimeter" step={4} highlight={["db", "replica", "bucket", "analytics"]} caption="Four stores that can hold one customer's address, before counting backups." />
+
+    **Follow-ups the interviewer may ask.**
+    - What do you do about backups that cannot be edited?
+    - How do you stop a deleted customer from coming back in the next restore?
+
+    **Watch out for.** Deleting only the database row. Copies made for speed or analysis live on until someone deletes them too.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Residency and sovereignty: what is the difference, and what does a sovereign cloud add?" level="Senior" category="Cloud">
+    **Short answer.** Residency is where data is stored and processed. Sovereignty is whose law can reach it and who can be forced to read it. A sovereign cloud adds local operation, often by a locally owned company, and keys held outside the provider. It costs fewer services, arriving later.
+
+    **Why.** Data can sit in a London region and still be held by a company that a foreign court can order. Guardrails and perimeters do not change that. Keys you hold do: data the provider cannot decrypt is far less useful to anyone who compels it. Brightpost's own keys are enough today; a government agency might need the sovereign cloud.
+
+    <AnimatedDiagram spec="animated/cloud/residency-perimeter" step={5} highlight={["key", "bucket", "guardrail"]} caption="The guardrail fixes the place. The key decides who can read what is there." />
+
+    **Follow-ups the interviewer may ask.**
+    - What breaks if your external key service goes down?
+    - How would you check that every service you need exists in the sovereign cloud?
+
+    **Watch out for.** Treating "the data is in our country" as the whole answer. Location says nothing about who controls the company that runs it.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Shared Responsibility](/cloud/fundamentals/shared-responsibility)
+- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
+- [Landing Zones: Setting Up an Estate](/cloud/fundamentals/landing-zones)
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [Where Data Lives on the Cloud](/cloud/data/data-on-the-cloud)
+- [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region)
+- [Encryption at Rest, in Transit and Key Management](/cloud/resilience/encryption-and-keys)
+- [Threat Detection, Audit Logs and Security Posture](/cloud/resilience/threat-detection)
+- [Private Endpoints: PrivateLink, Private Service Connect & Private Link](/cloud/networking/private-endpoints)
+- [Identity & Security on AWS](/cloud/aws/security)
+- [Identity & Security on Google Cloud](/cloud/gcp/security)
+- [Identity & Security on Azure](/cloud/azure/security)
+- [Security overview](/system-design/fundamentals/security)
+
+## Further reading
+
+- [AWS compliance programs](https://aws.amazon.com/compliance/programs/): the frameworks AWS is audited against.
+- [Data perimeters on AWS](https://aws.amazon.com/identity/data-perimeters-on-aws/): identity, resource and network controls together.
+- [Google Cloud VPC Service Controls overview](https://cloud.google.com/vpc-service-controls/docs/overview): service perimeters.
+- [Azure compliance documentation](https://learn.microsoft.com/azure/compliance/): offerings and audit reports.
