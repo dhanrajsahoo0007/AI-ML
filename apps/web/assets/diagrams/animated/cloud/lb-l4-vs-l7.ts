@@ -19,8 +19,10 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //   Row 2 (y 280): deploy script 110 | load balancer 380 | certificate 667.
 //   Row 3 (y 430): app server A 110 | app server B 380 | blog server 667.
 //   Row 4 (y 570), in the Private band: internal balancer 380 | print service 667.
-// Edge routes: the deploy script reaches server A straight down x 110 and the balancer straight right along y 280
-// (a 95-unit gap, room for the "deregister" pill). The balancer reaches server A on a diagonal that passes under the
+// Edge routes: in steps 1-5 the shoppers' edge runs right along y 100 and down x 380 into the balancer, the path
+// the front door is later inserted into. The deploy script reaches server A straight down x 110 and the balancer
+// straight right along y 280 (a 95-unit gap, room for the "deregister" pill). Server A reaches the internal balancer
+// down x 110 and right along y 570, so it enters the Private band below its inline label. The balancer reaches server A on a diagonal that passes under the
 // deploy script, server B straight down x 380, and the blog server on a diagonal that passes under the certificate.
 // The front door drops into the balancer down x 380, through the gap between the edge zone and the region tab.
 //
@@ -208,7 +210,7 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: one public address; the balancer shares shoppers between the servers.
-    { from: "shoppers", to: "lb", label: "HTTPS", packet: true, labelAt: 0.74, until: 5 },
+    { from: "shoppers", to: "lb", label: "HTTPS", packet: true, via: [[380, 100]], labelAt: 0.3, until: 5 },
     { from: "lb", to: "app-a", packet: true, delay: 1, until: 1 },
     { from: "lb", to: "app-b", packet: true, delay: 1.3 },
 
@@ -237,7 +239,7 @@ const spec: DiagramSpec = {
     { from: "lb", to: "blog", label: "/blog/*", packet: true, delay: 1.6, step: 4 },
 
     // Step 5: both app servers reach the print service through one private address.
-    { from: "app-a", to: "ilb", packet: true, delay: 0.4, step: 5 },
+    { from: "app-a", to: "ilb", packet: true, delay: 0.4, via: [[110, 570]], step: 5 },
     { from: "app-b", to: "ilb", label: "print job", packet: true, step: 5 },
     { from: "ilb", to: "print", label: "TCP", packet: true, delay: 1.2, step: 5 },
 

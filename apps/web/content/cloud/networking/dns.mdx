@@ -7,7 +7,7 @@ updated: 2026-11-13
 ## In one sentence
 
 <KeyIdea>
-  A cloud's DNS service keeps two address books, one for the whole internet and one for only the networks you choose, and it can change an answer when something breaks.
+  A cloud's DNS keeps two address books, one the internet can read and one only your chosen networks can read, and it can change an answer when something breaks.
 </KeyIdea>
 
 ## The story
@@ -58,11 +58,11 @@ A **private zone** answers only inside the networks you link it to; the internet
 
 <AnimatedDiagram spec="animated/cloud/dns-lookup" stepper caption="The built-in resolver answers private names from linked zones and sends every other question out. An unlinked network sends the private name out too." />
 
-For each question, the built-in resolver:
+For each question, the built-in resolver works in this order:
 
-1. answers from a private zone linked to this network, if one holds the name;
-2. otherwise asks public DNS, as any resolver would;
-3. keeps the answer for its TTL, so a repeat question never leaves the network.
+1. If a private zone linked to this network holds the name, it answers from that zone.
+2. Otherwise it asks public DNS, as any resolver would.
+3. It keeps the answer for its TTL, so a repeat question never leaves the network.
 
 Step 4 of the figure is Brightpost's Tuesday night. The jobs network had no linked zone, so the question went out, and public DNS has never heard of `brightpost.internal`.
 
@@ -84,7 +84,7 @@ Asha's test used the address, so it proved the path and missed the name. Test a 
 
 The fix is one link: the private zone now lists both networks. Brightpost makes two more changes. The template that creates a network now also links it to `brightpost.internal`. And if no export file appears by 04:00, an alert reaches Asha's phone.
 
-Two other places need the same care. A resolver in an office cannot see the zone either, so clouds offer resolver endpoints that forward chosen names both ways; [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity) sets them up. And a <Term id="private-endpoint" /> needs a private zone that points the service's usual name at it; [Private Endpoints](/cloud/networking/private-endpoints) covers that pairing.
+Two other places need the same care. A resolver in an office cannot see the zone either. Clouds offer resolver endpoints that forward chosen names both ways; [VPN, Direct Connect, Interconnect & ExpressRoute](/cloud/networking/hybrid-connectivity) sets them up. And a <Term id="private-endpoint" /> needs a private zone that points the service's usual name at it; [Private Endpoints](/cloud/networking/private-endpoints) covers that pairing.
 
 ### Step 7: Split-horizon: one name, two answers
 

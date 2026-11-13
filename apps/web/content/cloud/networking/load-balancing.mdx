@@ -12,13 +12,13 @@ updated: 2026-11-13
 
 ## The story
 
-Brightpost is a small online shop that sells posters and greeting cards. On a sale day it runs 10 app servers behind one load balancer, and about 2,000 shoppers arrive at 9 a.m. At 9:20 on this year's sale day, Asha ships a fix for a broken discount code. Her deploy script replaces the servers two at a time: stop two old ones, start two new ones, repeat. Each stop is instant, so requests that are halfway through are cut off. For about 30 seconds after each stop, the load balancer keeps sending new shoppers to the two servers that are gone. The deploy takes 15 minutes. About 2,400 page loads end in an error page, and 9 of them are the Pay step. Three customers are charged with no order saved, and support spends two days putting that right.
+Brightpost is a small online shop that sells posters and greeting cards. On a sale day it runs 10 app servers behind one load balancer, and about 2,000 shoppers arrive at 9 a.m. At 9:20 on this year's sale day, Asha ships a fix for a broken discount code. Her deploy script replaces the servers two at a time: stop two old ones, start two new ones, repeat. Each stop is instant, so requests halfway through are cut off. For about 30 seconds after each stop, the load balancer keeps sending new shoppers to the two servers that are gone. In the 15 minutes of the deploy, about 2,400 page loads end in an error, and 9 of them are the Pay step. Three customers are charged with no order saved, and support spends two days putting that right.
 
 Every step below follows a request through the balancer, and ends with a deploy that nobody notices.
 
 ## How it works
 
-Three words first. A **connection** is an open line between two programs, set up once and then used for many messages. A **request** is one message on it, such as "show me this page". A **backend** is a server the balancer may send work to, and the list of them is its **pool**.
+Three words first. A **connection** is an open line between two programs, set up once and used for many messages. A **request** is one message on it, such as "show me this page". The servers a balancer may send work to form its **pool**.
 
 ### Step 1: One address in front of many servers
 
@@ -49,55 +49,53 @@ Networks are described in layers. **Layer 4** is the transport layer: addresses,
   caption="What each kind of balancer can do. Exact features differ by cloud and product."
 />
 
-A layer 4 balancer **passes connections through**. It picks a server when a connection opens, then forwards its packets untouched. It is fast and does not care what protocol runs inside. A layer 7 balancer is a **proxy**, a middleman that speaks for both sides. It ends the shopper's connection, reads each request and opens its own connection to a server. That is why it can route, inspect and rewrite. Brightpost's shop is a website, so its front door is layer 7.
+A layer 4 balancer **passes connections through**: it picks a server when a connection opens, then forwards its packets untouched. A layer 7 balancer is a **proxy**, a middleman. It ends the shopper's connection, reads each request and opens its own connection to a server, which is why it can route, inspect and rewrite. Brightpost's shop is a website, so its front door is layer 7.
 
 ### Step 3: Health checks, and the deploy that cut checkouts
 
 <AnimatedDiagram spec="animated/cloud/lb-l4-vs-l7" step={2} minWidth={620} caption="The failure: the deploy script stops server A at once, and the balancer keeps sending it shoppers until three health checks fail." />
 
-A **health check** is a small test request the balancer sends each server on a timer. Brightpost's balancer asks every 10 seconds. After three misses in a row, about 30 seconds, it stops sending that server new work. After two passes, it sends work again. The checks are slow on purpose, so one slow answer does not throw out a good server.
-
-Health checks find servers that have died. They are not built for a planned stop.
+A **health check** is a small test request the balancer sends each server on a timer. Brightpost's balancer asks every 10 seconds. After three misses in a row, about 30 seconds, it stops sending that server new work. After two passes, it sends work again. The checks are slow on purpose, so one slow answer does not throw out a good server. They find servers that have died, not servers about to be stopped.
 
 <Callout tone="red" title="What breaks">
   The script stops two servers without telling the balancer. Their open requests die, including Pay steps that have already reached the payment provider. Then the balancer waits for three missed checks. For those 30 seconds, one shopper in five lands on a server that is gone. Five rounds of that add up to about 2,400 error pages and 9 failed payments.
 </Callout>
 
-The balancer cannot guess what a deploy script will do next. It has to be told before a server goes.
+The balancer has to be told before a server goes.
 
 ### Step 4: Deregister, drain, then stop
 
 <AnimatedDiagram spec="animated/cloud/lb-l4-vs-l7" step={3} minWidth={620} caption="The script deregisters server A first. The balancer sends it nothing new and lets open requests finish, then the script stops it." />
 
-**Connection draining** is the polite way out. The script first **deregisters** the server: it asks the balancer to take it out of the pool. From that moment the server gets no new requests. Requests already open may finish, up to a timeout. Brightpost sets 60 seconds, far longer than its slowest request, a Pay step of about 4 seconds. Only then does the script stop the server.
+**Connection draining** is the polite way out. The script first **deregisters** the server: it asks the balancer to take it out of the pool. From that moment the server gets no new requests, and open ones may finish, up to a timeout. Brightpost sets 60 seconds, far longer than its slowest request, a Pay step of about 4 seconds. Then the script stops the server.
 
-New servers get the same care, in the other order. One server serves about 200 shoppers at once, so 8 servers cannot carry 2,000. The script now starts two new servers first and waits until each passes two health checks. Only then does it drain two old ones. All three clouds offer draining on their managed balancers, under different names and with different defaults. The next sale-day deploy took 18 minutes and showed no error pages. [CI/CD and deployment strategies](/cloud/operations/ci-cd-and-deployment-strategies) covers rolling, blue-green and canary releases.
+The order matters for capacity too. One server serves about 200 shoppers at once, so 8 servers cannot carry 2,000. The script now starts two new servers, waits until each passes two health checks, and only then drains two old ones. The next sale-day deploy took 18 minutes and showed no error pages. [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies) covers other release styles.
 
 ### Step 5: Layer 7 at work: TLS and routing by path
 
 <AnimatedDiagram spec="animated/cloud/lb-l4-vs-l7" step={4} minWidth={620} caption="The balancer ends TLS with a certificate the cloud renews, and sends every /blog/ path to the blog server." />
 
-Shoppers connect with HTTPS: HTTP inside <Term id="tls" />, the layer that encrypts it. A **certificate** is the signed file that proves the shop's name to the browser. Brightpost's balancer **ends TLS**: it holds the certificate, decrypts each request, reads it and sends it on to a server over the private network. The cloud issues the certificate, attaches it to the balancer and renews it before it expires. Nobody has a renewal date to forget.
+Shoppers connect with HTTPS: HTTP inside <Term id="tls" />, the layer that encrypts it. A **certificate** is the signed file that proves the shop's name to the browser. Brightpost's balancer **ends TLS**: it holds the certificate, decrypts each request and sends it on over the private network. The cloud issues the certificate and renews it before it expires, so nobody has a renewal date to forget.
 
-With the request readable, the balancer can route. Brightpost moves its blog to a small server of its own, and one rule sends every path that starts with /blog/ there. Everything else goes to the app servers. Because the balancer opened a new connection, a server sees the balancer's address, not the shopper's. The balancer adds the shopper's address in a header, usually named X-Forwarded-For.
+With the request readable, the balancer can route. Brightpost moves its blog to a small server of its own, and one rule sends every path that starts with /blog/ there. A server now sees the balancer's address, not the shopper's, so the balancer adds the shopper's address in a header, usually X-Forwarded-For.
 
-A layer 7 balancer is also where a <Term id="waf">web application firewall</Term> attaches; [CDN, Edge, DDoS and WAF](/cloud/networking/cdn-edge-and-waf) covers it. If a rule says traffic must stay encrypted inside the network too, all three clouds can re-encrypt from the balancer to the server.
+This is also where a <Term id="waf">web application firewall</Term> attaches; [CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf) covers it. All three clouds can re-encrypt from the balancer to the server when a rule demands it.
 
 ### Step 6: Internal balancers between tiers
 
 <AnimatedDiagram spec="animated/cloud/lb-l4-vs-l7" step={5} minWidth={620} caption="Both app servers reach the print service through an internal balancer that has a private address only." />
 
-Not every balancer faces the internet. An **external** balancer has a public address. An **internal** one has only a private address inside the <Term id="vpc">private network</Term>, so only machines in that network can reach it. Brightpost's print service runs on 2 small servers, which pass each paid order to the printing partner. The app servers call it through an internal balancer, so they keep one private address while the print servers change.
+An **external** balancer has a public address. An **internal** one has only a private address inside the <Term id="vpc">private network</Term>, so only machines in that network can reach it. Brightpost's print service runs on 2 small servers that pass each paid order to the printing partner. The app servers call it through an internal balancer, so they keep one private address while the print servers change.
 
-Each print call is one short message, with nothing to route by path. So a layer 4 balancer is enough, and it adds almost no delay. The rules from [Firewalls](/cloud/networking/firewalls) still apply: the print servers accept the print port only from the app servers' group.
+Each print call is one short message with nothing to route by path, so layer 4 is enough and adds almost no delay. The rules from [Firewalls](/cloud/networking/firewalls) still apply: the print servers accept their port only from the app servers' group.
 
 ### Step 7: Regional or global
 
 <AnimatedDiagram spec="animated/cloud/lb-l4-vs-l7" step={6} minWidth={620} caption="An option for later: one anycast address takes each shopper at a nearby edge site and carries the request to London." />
 
-Every balancer so far is **regional**: its address and its fleet live in one <Term id="region" />, London. A shopper in Sydney opens a connection that crosses the world, and each round trip of the setup crosses it again. That is part of why a product page takes about 3 seconds in Sydney and under 1 second in the UK.
+Every balancer so far is **regional**: its address and its fleet live in one <Term id="region" />, London. A Sydney shopper's connection crosses the world, and each round trip of its setup crosses it again. That is part of why a product page takes about 3 seconds in Sydney.
 
-A **global** front door uses an **anycast** address: one IP address announced from many edge sites at once, so each shopper's packets reach the nearest site. On the HTTP kinds, TLS ends at that site too. The request then travels to London on the provider's own network. With a second region, the same address can send each shopper to the nearest healthy region. If a region fails, its shoppers move within seconds, with no DNS change. Brightpost has not built this yet; the picture shows the design it would use. [DNS on the cloud](/cloud/networking/dns) covers the other way to split traffic between regions.
+A **global** front door uses an **anycast** address: one IP address announced from many edge sites at once, so each shopper's packets reach the nearest site. On the HTTP kinds, TLS ends there too. The request then rides the provider's own network to London. With a second region, the same address sends each shopper to the nearest healthy one and moves them within seconds if it fails. Brightpost has not built this yet; the picture shows the design it would use. [DNS on the Cloud](/cloud/networking/dns) covers the other way to split traffic between regions.
 
 ## On AWS, Google Cloud and Azure
 
@@ -105,31 +103,31 @@ On all three clouds you make the same three choices: layer 4 or layer 7, interna
 
 <Tabs title="On each cloud">
   <Tab label="AWS">
-    - **Layer 7:** Application Load Balancer (ALB). It routes by host, path and header, ends TLS, and AWS WAF attaches to it. Regional, across the zones you pick.
-    - **Layer 4:** Network Load Balancer (NLB), for TCP, UDP and TLS, with a fixed IP address in each zone. Gateway Load Balancer is a third kind: it passes traffic through firewall appliances from other vendors.
-    - **Global:** Global Accelerator gives two fixed anycast IP addresses in front of balancers in one or more regions. For HTTP with caching, CloudFront sits in front of an ALB.
+    - **Layer 7:** Application Load Balancer (ALB). Routes by host, path and header, ends TLS, carries AWS WAF.
+    - **Layer 4:** Network Load Balancer (NLB), for TCP, UDP and TLS, with a fixed IP address per zone. Gateway Load Balancer passes traffic through firewall appliances.
+    - **Global:** Global Accelerator: two fixed anycast IP addresses in front of regional balancers. For HTTP with caching, CloudFront in front of an ALB.
     - **Internal:** ALB and NLB both come in an internal form, with private addresses only.
-    - **Certificates and draining:** AWS Certificate Manager issues and renews certificates for ALB, NLB and CloudFront. Draining is the target group's deregistration delay.
+    - **Certificates and draining:** AWS Certificate Manager issues and renews certificates. Draining is the target group's deregistration delay.
 
-    **The difference that changes a design.** Every Elastic Load Balancing balancer is regional, so there is no single global layer 7 balancer. A worldwide design is one ALB per region, joined by Global Accelerator, CloudFront or DNS. An ALB has no fixed IP address, so DNS points at its name. On an NLB, sending traffic to other zones is off by default, and that traffic is charged when it is on.
+    **The difference that changes a design.** Every Elastic Load Balancing balancer is regional; there is no global layer 7 balancer. A worldwide design is one ALB per region, joined by Global Accelerator, CloudFront or DNS. An ALB has no fixed IP address, so DNS points at its name. On an NLB, traffic to other zones is off by default and charged when on.
   </Tab>
   <Tab label="Google Cloud">
-    - **Layer 7:** Application Load Balancer, external or internal. It is a proxy, and a URL map routes by host and path. Cloud Armor attaches to its backend services.
-    - **Layer 4:** Network Load Balancer, in two kinds. A proxy one ends the TCP connection. A passthrough one is regional, forwards packets untouched and keeps the client's address.
-    - **Global:** the global external Application Load Balancer itself: one anycast IP address at Google's edge, with backends in any region. It uses the Premium network tier.
-    - **Internal:** internal Application Load Balancers and internal passthrough Network Load Balancers, with private addresses only.
+    - **Layer 7:** Application Load Balancer, a proxy. A URL map routes by host and path; Cloud Armor attaches to its backend services.
+    - **Layer 4:** Network Load Balancer, in two kinds. Proxy ends the TCP connection. Passthrough is regional and forwards packets untouched, keeping the client's address.
+    - **Global:** the global external Application Load Balancer: one anycast IP address at Google's edge, backends in any region, on the Premium network tier.
+    - **Internal:** internal Application and passthrough Network Load Balancers, with private addresses only.
     - **Certificates and draining:** Google-managed certificates through Certificate Manager. Draining is the backend service's connection draining timeout.
 
-    **The difference that changes a design.** Global is a mode of the same balancer, not a second product. One global external Application Load Balancer can have backends in London and in Belgium, and it sends each user to the nearest healthy one. So the two front boxes in step 6 are one service here: the anycast frontend at the edge, and the balancer's rules behind it. A second region is one more backend, not a new entry point.
+    **The difference that changes a design.** Global is a mode of the same balancer, not a second product. One global external Application Load Balancer can have backends in London and in Belgium, and it sends each user to the nearest healthy one. So the two front boxes in step 6 are one service here: the anycast frontend and the balancer's rules. A second region is one more backend.
   </Tab>
   <Tab label="Azure">
-    - **Layer 7:** Application Gateway. Regional; it routes by path and host and ends TLS. A WAF policy attaches to it.
-    - **Layer 4:** Azure Load Balancer passes TCP and UDP through, public or internal, across zones. A Gateway Load Balancer kind chains in firewall appliances.
-    - **Global:** Front Door, a global layer 7 entry at Microsoft's edge, with caching and a WAF. For layer 4, the cross-region tier of Azure Load Balancer. Traffic Manager splits traffic by DNS.
-    - **Internal:** an internal Load Balancer has a private frontend address. Application Gateway can have a private frontend too.
-    - **Certificates and draining:** Front Door can issue and renew managed certificates. Application Gateway reads its certificates from Key Vault and has a connection draining setting.
+    - **Layer 7:** Application Gateway, regional. Routes by path and host, ends TLS, carries a WAF policy.
+    - **Layer 4:** Azure Load Balancer passes TCP and UDP through, across zones. A Gateway Load Balancer kind chains in firewall appliances.
+    - **Global:** Front Door, layer 7 at Microsoft's edge, with caching and a WAF. For layer 4, the cross-region tier of Load Balancer. Traffic Manager splits by DNS.
+    - **Internal:** Load Balancer and Application Gateway can both have a private frontend address.
+    - **Certificates and draining:** Front Door issues and renews managed certificates. Application Gateway reads certificates from Key Vault and has a connection draining setting.
 
-    **The difference that changes a design.** Each layer and each scope is its own product. Load Balancer is layer 4 in one region, Application Gateway is layer 7 in one region, and Front Door is layer 7 everywhere. A common shape is Front Door in front of an Application Gateway in each region. So the design step is to name the layer and the reach first, then pick the product that has both.
+    **The difference that changes a design.** Each layer and each scope is its own product. Load Balancer is layer 4 in one region, Application Gateway is layer 7 in one region, and Front Door is layer 7 everywhere. A common shape is Front Door in front of an Application Gateway in each region. Name the layer and the reach first, then pick the product.
   </Tab>
 </Tabs>
 
@@ -139,7 +137,7 @@ On all three clouds you make the same three choices: layer 4 or layer 7, interna
 
 ## Try it
 
-Say who sends the traffic and what the balancer must understand, and see the balancer each cloud offers.
+Describe the traffic and see the balancer each cloud offers.
 
 <CloudDecisionTree topic="load-balancer" />
 
@@ -171,27 +169,27 @@ Say who sends the traffic and what the balancer must understand, and see the bal
   caption="Brightpost's three options. Capabilities differ by product; the cloud tabs above name them."
 />
 
-Most shops need one layer 7 balancer per region and nothing more. Add layer 4 when the protocol is not HTTP or a fixed address is a must. Add a global front door when users are far away or a second region exists.
+Most shops need one layer 7 balancer per region. Add layer 4 for other protocols or fixed addresses, and a global front door for far users or a second region.
 
 ## Common pitfalls
 
 - **Stopping servers before the balancer knows.** Open requests die, and new ones keep arriving until the health checks fail. Deregister first, drain for longer than your slowest request, then stop.
-- **Health checks that test everything.** A check that also queries the database fails on every server at once when the database is slow, and the balancer has nowhere left to send shoppers. Check the server itself, and give the database its own alarm.
+- **Health checks that test everything.** If the check also queries the database, a slow database fails every server at once, and the balancer has nowhere left to send shoppers. Check the server itself; give the database its own alarm.
 - **Pointing DNS at a balancer's IP address.** Some layer 7 balancers change their addresses as they grow. Point DNS at the balancer's name, or use a kind with fixed addresses.
-- **Sticky sessions by default.** **Session affinity** pins each shopper to one server. Load spreads unevenly, and a dead server takes its shoppers' sessions with it. Brightpost keeps baskets in the shared database, so any server can serve any shopper and it needs no affinity.
-- **An idle timeout shorter than the longest quiet spell.** A balancer closes a connection that sends nothing for a set time, which breaks long downloads and WebSockets. Send keep-alive messages or raise the timeout; [Real-Time Connections on the Cloud](/cloud/networking/realtime-on-the-cloud) covers this.
+- **Sticky sessions by default.** **Session affinity** pins each shopper to one server, so load spreads unevenly and a dead server takes its shoppers' sessions with it. Brightpost keeps baskets in the shared database, so it needs no affinity.
+- **An idle timeout shorter than the longest quiet spell.** A balancer closes a connection that sends nothing for a set time, which breaks long downloads and quiet WebSockets. Send keep-alive messages or raise the timeout.
 
 ## How to say it in an interview
 
-"A managed load balancer gives a fleet one stable address, and the provider runs it across zones for me. First I pick the layer. Layer 7 reads each HTTP request, so it can route by path, end TLS with a managed certificate and carry a WAF. Layer 4 forwards connections untouched, for other protocols, fixed addresses or very high connection counts. Then I pick the reach: internal or external, and regional or one global anycast address. In operation, health checks remove a dead server in about 30 seconds, and every deploy adds new servers first, then deregisters and drains the old ones before stopping them."
+"A managed load balancer gives a fleet one stable address, and the provider runs it across zones for me. First I pick the layer. Layer 7 reads each HTTP request, so it can route by path, end TLS with a managed certificate and carry a WAF. Layer 4 forwards connections untouched, for other protocols, fixed addresses or huge connection counts. Then I pick the reach: internal or external, regional or one global anycast address. Health checks remove a dead server in about 30 seconds, and every deploy adds new servers, then drains old ones before stopping them."
 
 ## Interview questions
 
 <InterviewQuestions>
   <InterviewQuestion question="What does a load balancer's health check do, and what can it not do?" level="Junior" category="Cloud">
-    **Short answer.** It sends each server a small test request on a timer, and stops sending work to a server that fails a few in a row. It finds servers that have died. It is too slow to protect a planned stop, and it cannot tell that a server returns wrong pages that still look healthy.
+    **Short answer.** It sends each server a small test request on a timer, and stops sending work to a server that fails a few in a row. It finds servers that have died. It is too slow to protect a planned stop, and it cannot spot a server that returns wrong pages.
 
-    **Why.** Brightpost's balancer checks every 10 seconds and needs three misses, so a dead server is out in about 30 seconds. When a whole zone fails, that is enough: the other zones take its share. During a deploy it is not. Brightpost's script stopped servers without warning, and for each 30-second gap one shopper in five hit a server that was gone.
+    **Why.** Brightpost's balancer checks every 10 seconds and needs three misses, so a dead server is out in about 30 seconds. When a zone fails, that is enough. During a deploy it is not: for each 30-second gap, one shopper in five hit a server that was already gone.
 
     <AnimatedDiagram spec="animated/cloud/vpc-three-tier" step={5} highlight={["lb", "app-b", "app-c"]} caption="Server A stops answering its checks, so the balancer shares the traffic between the servers in zones B and C." />
 
@@ -203,21 +201,21 @@ Most shops need one layer 7 balancer per region and nothing more. Add layer 4 wh
   </InterviewQuestion>
 
   <InterviewQuestion question="Layer 4 or layer 7 for a WebSocket chat tier?" level="Mid" category="Cloud">
-    **Short answer.** Either can work. I start with layer 7 when I want TLS at the balancer, routing by path or a WAF, and its idle timeout fits my traffic. I pick layer 4 for very high connection counts, a protocol that is not HTTP, or fixed addresses.
+    **Short answer.** Either works. Layer 7 when I want TLS at the balancer, routing by path or a WAF. Layer 4 for very high connection counts, a protocol that is not HTTP, or fixed addresses.
 
-    **Why.** A WebSocket starts as one HTTP request and then stays open for minutes or hours. The managed layer 7 balancers on all three clouds can carry it. Both kinds then keep that connection on one server for its whole life. So new servers get only new connections, and load evens out slowly. Draining a server can take as long as its longest connection. The usual fix is to close connections from the server during a deploy and let clients reconnect after a random short wait.
+    **Why.** A WebSocket starts as one HTTP request, then stays open for hours. The managed layer 7 balancers on all three clouds carry it. Either kind keeps it on one server for its whole life, so new servers fill slowly and draining lasts as long as the longest connection. During a deploy, the server closes its connections and clients reconnect after a short random wait.
 
     **Follow-ups the interviewer may ask.**
     - What happens to 50,000 open connections when one server is drained?
     - How do you stop the balancer closing a quiet connection?
 
-    **Watch out for.** Claiming a layer 7 balancer cannot carry WebSockets. All three managed ones can; the real limits are the idle timeout and the uneven spread.
+    **Watch out for.** Claiming layer 7 cannot carry WebSockets. It can; the real limits are the idle timeout and the uneven spread.
   </InterviewQuestion>
 
   <InterviewQuestion question="Where does TLS end, and what does that change for the app?" level="Mid" category="Cloud">
-    **Short answer.** With a layer 7 balancer, TLS usually ends at the balancer, which holds a certificate the cloud renews. The app gets plain HTTP over the private network, plus headers with the shopper's address and the original scheme. With a layer 4 pass-through balancer, TLS reaches the server, and the server holds the certificate.
+    **Short answer.** With layer 7, TLS usually ends at the balancer, which holds a certificate the cloud renews. The app gets plain HTTP plus headers with the shopper's address and the original scheme. With layer 4 pass-through, TLS reaches the server, which holds the certificate.
 
-    **Why.** Ending TLS at Brightpost's balancer is what lets it read the path and send /blog/ pages to the blog server. The app changes in three ways. It reads the shopper's address from X-Forwarded-For and trusts that header only from the balancer. It builds its HTTPS redirects from X-Forwarded-Proto, the header that holds the original scheme. And its firewall accepts port 8080 only from the balancer's group. If policy says traffic must stay encrypted inside the network, the balancer re-encrypts to the server.
+    **Why.** Ending TLS is what lets Brightpost's balancer read the path and send /blog/ pages to the blog server. The app changes in three ways. It reads the shopper's address from X-Forwarded-For, trusted only from the balancer. It builds HTTPS redirects from X-Forwarded-Proto, the header with the original scheme. And it accepts port 8080 only from the balancer's group. If policy demands encryption inside the network, the balancer re-encrypts to the server.
 
     <AnimatedDiagram spec="animated/cloud/lb-l4-vs-l7" step={4} highlight={["cert", "lb", "app-b", "blog"]} caption="The certificate lives at the balancer, which decrypts each request and routes it by path." />
 
@@ -229,9 +227,9 @@ Most shops need one layer 7 balancer per region and nothing more. Add layer 4 wh
   </InterviewQuestion>
 
   <InterviewQuestion question="How do you deploy behind a load balancer without dropping requests?" level="Mid" category="Cloud">
-    **Short answer.** Add new servers first and wait until they pass their health checks. Then deregister an old server, let the balancer drain it, and stop it only when it is empty or the drain timeout ends. Replace a few servers at a time.
+    **Short answer.** Add new servers first and wait for their health checks to pass. Then deregister an old server, let the balancer drain it, and stop it when it is empty or the timeout ends.
 
-    **Why.** Brightpost's first sale-day deploy stopped servers at once. Open requests died, and the balancer kept sending new ones for 30 seconds: about 2,400 error pages and 9 failed payments. The drain timeout must beat the slowest request: a Pay step takes about 4 seconds, so 60 seconds is safe. Adding first matters for capacity. One server serves about 200 shoppers, so 8 servers cannot carry a 2,000-shopper peak.
+    **Why.** Brightpost's sale-day deploy stopped servers at once, and the balancer kept sending them requests for 30 seconds: about 2,400 error pages and 9 failed payments. The drain timeout must beat the slowest request; a Pay step takes about 4 seconds, so 60 is safe. Adding first keeps capacity: at about 200 shoppers per server, 8 servers cannot carry 2,000.
 
     <AnimatedDiagram spec="animated/cloud/lb-l4-vs-l7" step={3} path="deploy>lb>app-a" caption="Deregister, drain, then stop: the balancer sends server A nothing new while its open requests finish." />
 
@@ -243,9 +241,9 @@ Most shops need one layer 7 balancer per region and nothing more. Add layer 4 wh
   </InterviewQuestion>
 
   <InterviewQuestion question="Design a two-region entry point on AWS and on Google Cloud. What differs?" level="Senior" category="Cloud">
-    **Short answer.** On Google Cloud, one global external Application Load Balancer with backends in both regions: one anycast IP address, and each user goes to the nearest healthy region. On AWS, an ALB in each region, joined by Global Accelerator for fixed anycast addresses, CloudFront for HTTP with caching, or DNS routing.
+    **Short answer.** On Google Cloud, one global external Application Load Balancer with backends in both regions, on one anycast IP address. On AWS, an ALB in each region, joined by Global Accelerator, CloudFront or DNS routing.
 
-    **Why.** The front door moves users within seconds when a region's health checks fail, with no DNS change. DNS failover instead waits for cached answers to expire, so some users stay on the dead region for minutes. On AWS the routing rules live in two ALBs, so I keep both in one template. On Google Cloud there is one set of rules. On both, the balancer moves users, not data. Each region needs its own copy of the data, and writes need a plan.
+    **Why.** An anycast front door moves users within seconds when a region fails its health checks. DNS failover waits for cached answers to expire, which can take minutes. On AWS the routing rules live in two ALBs, so one template defines both. On both clouds, the balancer moves users, not data: each region needs its own copy, and writes need a plan.
 
     <AnimatedDiagram spec="animated/cloud/lb-l4-vs-l7" step={6} highlight={["shoppers", "sydney", "frontdoor", "lb"]} caption="One anycast address for every shopper; the front door forwards each one to a regional balancer." />
 
@@ -257,9 +255,9 @@ Most shops need one layer 7 balancer per region and nothing more. Add layer 4 wh
   </InterviewQuestion>
 
   <InterviewQuestion question="A partner must allowlist fixed IP addresses, and you also need routing by path and a WAF. What do you put in front?" level="Senior" category="Cloud">
-    **Short answer.** A layer 7 balancer for the routing and the WAF, with fixed addresses at its front. On AWS an ALB has no fixed addresses, so I put Global Accelerator or an NLB in front of it. On Google Cloud and Azure the layer 7 balancer can take a reserved static address itself.
+    **Short answer.** A layer 7 balancer for the routing and the WAF, with fixed addresses at its front. On AWS that means Global Accelerator or an NLB in front of the ALB. On Google Cloud and Azure the layer 7 balancer takes a static address itself.
 
-    **Why.** An ALB's addresses change as it grows, so any list copied from it breaks later. Global Accelerator gives two anycast addresses that never change, and it forwards to the ALB. An NLB in front of an ALB gives one fixed address per zone, three for Brightpost's three zones. On Google Cloud, the forwarding rule takes a reserved external IP address. On Azure, the current Application Gateway uses a static public IP address. Each extra hop on AWS is one more component to run and pay for.
+    **Why.** An ALB's addresses change as it grows, so a list copied from it breaks later. Global Accelerator gives two fixed anycast addresses and forwards to the ALB. An NLB in front gives one fixed address per zone, three for Brightpost. On Google Cloud the forwarding rule takes a reserved IP address; the current Application Gateway on Azure uses a static public one. Each extra hop on AWS is one more thing to run and pay for.
 
     <AnimatedDiagram spec="animated/cloud/lb-l4-vs-l7" step={6} path="shoppers>frontdoor>lb" caption="A fixed address at the front, and the layer 7 balancer with its rules behind it." />
 
@@ -267,7 +265,7 @@ Most shops need one layer 7 balancer per region and nothing more. Add layer 4 wh
     - What changes if the partner's traffic is not HTTP?
     - How do you change certificates without telling the partner?
 
-    **Watch out for.** Copying the ALB's current addresses into the partner's allowlist. It works until the balancer grows, then the partner's calls fail.
+    **Watch out for.** Copying the ALB's current addresses into the allowlist. It works until the balancer grows.
   </InterviewQuestion>
 </InterviewQuestions>
 
@@ -276,10 +274,10 @@ Most shops need one layer 7 balancer per region and nothing more. Add layer 4 wh
 - [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets)
 - [Firewalls](/cloud/networking/firewalls)
 - [DNS on the Cloud](/cloud/networking/dns)
-- [CDN, Edge, DDoS and WAF](/cloud/networking/cdn-edge-and-waf)
+- [CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf)
 - [Real-Time Connections on the Cloud](/cloud/networking/realtime-on-the-cloud)
-- [Autoscaling](/cloud/compute/autoscaling)
-- [High-Availability Patterns](/cloud/resilience/ha-patterns)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [High Availability Inside One Region](/cloud/resilience/ha-patterns)
 - [Networking on AWS](/cloud/aws/networking)
 - [Networking on Google Cloud](/cloud/gcp/networking)
 - [Networking on Azure](/cloud/azure/networking)

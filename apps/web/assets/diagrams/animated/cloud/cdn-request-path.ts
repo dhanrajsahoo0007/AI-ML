@@ -12,7 +12,8 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Step 5: the scraper tries the load balancer's own address; an origin lock lets in only traffic from the edge.
 //
 // Nodes never move between steps. The flood is told by edges: the scraper's path through the edge and the twin
-// "10 of 10 busy" edge end at step 3 (`until: 3`), when the firewall replaces them.
+// "10 of 10 busy" edge end at step 3 (`until: 3`), when the firewall replaces them. The normal edge from the load
+// balancer to the servers carries no label, so the twin drawn on top of it never puts two pills in one place.
 //
 // Layout: three rows that read top to bottom, the way a request travels.
 //   Internet (y 10-140): customers 130,62 | scraper 390,75.
@@ -172,10 +173,10 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: customers reach the edge. Photos come from the bucket only on a miss; pages and checkout always pass.
-    { from: "customers", to: "cdn", label: "HTTPS", packet: true, labelAt: 0.45 },
+    { from: "customers", to: "cdn", label: "HTTPS", packet: true, labelAt: 0.37 },
     { from: "cdn", to: "bucket", label: "photos, on a miss", dashed: true, packet: true, delay: 1, labelAt: 0.4 },
     { from: "cdn", to: "lb", label: "pages, checkout", packet: true, delay: 1.4, labelAt: 0.45 },
-    { from: "lb", to: "servers", label: "requests", packet: true, delay: 2.4, labelAt: 0.3 },
+    { from: "lb", to: "servers", packet: true, delay: 2.4 },
 
     // Step 2: the scraper's requests are valid page views. Nothing at the edge stops them, and nothing caches them.
     { from: "bots", to: "cdn", label: "900 a second", tone: "red", packet: true, step: 2, until: 3 },
@@ -186,7 +187,7 @@ const spec: DiagramSpec = {
       tone: "red",
       packet: true,
       delay: 1,
-      labelAt: 0.72,
+      labelAt: 0.5,
       step: 2,
       until: 3,
     },

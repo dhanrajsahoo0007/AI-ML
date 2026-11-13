@@ -16,28 +16,30 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // takes the same line from step 4.
 //
 // Layout: three columns.
-//   Left (x 130), "the DNS service": resolver 130,95 (in Internet) | public zone 130,260 | health check 130,410 |
-//   private zone 130,560 (all three in the Managed DNS zone, x 10-250).
-//   Middle (x 420), "the networks": customer 420,95 (in Internet) | load balancer 420,260 | app server 420,410 |
-//   database 420,560 (Shop network, x 300-536) | export job 420,730 (Jobs network, x 300-536).
-//   Right (x 665): the back-soon page 665,95 (Storage), used only in step 5.
-// Vertical edges in the middle column run at x 420, right of the "Shop network" and "Jobs network" tabs (they end
-// near x 404). The resolver's edge to the public zone runs at x 130, right of the "Managed DNS" tab.
-// The app server's lookup and the export job's lookup are diagonals into the private zone; both pass below the
-// health check box. The health check's probe is a diagonal up to the load balancer, above the app server's lookup.
+//   Left (x 160), "the DNS service": resolver 160,95 (in Internet) | public zone 160,260 | health check 160,410 |
+//   private zone 160,560 (all three in the Managed DNS zone, x 10-300).
+//   Middle (x 465), "the networks": customer 465,95 (in Internet) | load balancer 465,260 | app server 465,410 |
+//   database 465,560 (Shop network, x 320-580) | export job 465,750 (Jobs network, x 320-580).
+//   Right (x 692): the back-soon page 692,95 (Storage), used only in step 5.
+// Zone tabs are about 120 units wide and start 13 units in, so the "Managed DNS" tab ends near x 142 and the
+// "Shop network" and "Jobs network" tabs near x 448. Vertical edges run at x 160 and x 465, right of those tabs, and
+// their labels sit away from the tabs (`labelAt`). The app server's lookup is a diagonal into the private zone, below
+// the health check box. The export job's lookup runs down from the private zone at x 160 and right along y 750 into
+// the job's left side, under the "Jobs network" tab, with its label left of the jobs zone. The health check's probe is a diagonal up to the load
+// balancer, above the app server's lookup.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 to 4, the free
 // preview and the failure included, happen in the left and middle columns; only step 5 adds the right column.
 // The canvas stays under 800 wide so labels are readable in the 660 px article column.
 // Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Sized for the longest
 // name the Services toggle shows: "Cloud Load Balancing" (load balancer, w 200), "Private hosted zone" (w 196),
-// "Public hosted zone" (w 190), "Virtual Machines" (servers, w 176), "Traffic Manager" (health check, w 190).
+// "Public hosted zone" (w 190), "Virtual Machines" (servers, w 176), "Route 53 health check" (health check, w 204).
 const server = { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" } as const;
 
 const spec: DiagramSpec = {
   title: "Public zones, private zones and a health-checked answer",
   width: 795,
-  height: 805,
+  height: 825,
   steps: [
     { title: "A public zone answers the internet" },
     { title: "A private zone answers inside the network" },
@@ -46,11 +48,11 @@ const spec: DiagramSpec = {
     { title: "A health check picks the answer" },
   ],
   zones: [
-    { id: "internet", title: "Internet", tone: "neutral", x: 10, y: 40, w: 526, h: 130 },
-    { id: "storage", title: "Storage", tone: "violet", x: 560, y: 40, w: 225, h: 130 },
-    { id: "dns", title: "Managed DNS", tone: "blue", x: 10, y: 200, w: 240, h: 440 },
-    { id: "shop", title: "Shop network", tone: "blue", kind: "vpc", x: 300, y: 200, w: 236, h: 440 },
-    { id: "jobs", title: "Jobs network", tone: "blue", kind: "vpc", x: 300, y: 670, w: 236, h: 120 },
+    { id: "internet", title: "Internet", tone: "neutral", x: 10, y: 40, w: 570, h: 130 },
+    { id: "storage", title: "Storage", tone: "violet", x: 600, y: 40, w: 185, h: 130 },
+    { id: "dns", title: "Managed DNS", tone: "blue", x: 10, y: 200, w: 290, h: 440 },
+    { id: "shop", title: "Shop network", tone: "blue", kind: "vpc", x: 320, y: 200, w: 260, h: 440 },
+    { id: "jobs", title: "Jobs network", tone: "blue", kind: "vpc", x: 320, y: 690, w: 260, h: 120 },
   ],
   nodes: [
     // Step 1
@@ -61,7 +63,7 @@ const spec: DiagramSpec = {
       icon: "phone",
       tone: "neutral",
       variant: "glyph",
-      x: 420,
+      x: 465,
       y: 95,
     },
     {
@@ -70,7 +72,7 @@ const spec: DiagramSpec = {
       sub: "customer's provider",
       icon: "search",
       tone: "neutral",
-      x: 130,
+      x: 160,
       y: 95,
       w: 184,
     },
@@ -80,12 +82,12 @@ const spec: DiagramSpec = {
       sub: "brightpost.example",
       icon: "dns",
       tone: "blue",
-      x: 130,
+      x: 160,
       y: 260,
       w: 190,
       cloud: {
         aws: { id: "aws-route53", label: "Public hosted zone" },
-        gcp: { id: "gcp-cloud-dns", label: "Public zone" },
+        gcp: "gcp-cloud-dns",
         azure: { id: "azure-dns", label: "Azure DNS zone" },
       },
     },
@@ -95,7 +97,7 @@ const spec: DiagramSpec = {
       sub: "public address",
       icon: "load-balancer",
       tone: "blue",
-      x: 420,
+      x: 465,
       y: 260,
       w: 200,
       cloud: { aws: "aws-elb", gcp: "gcp-cloud-load-balancing", azure: "azure-app-gateway" },
@@ -106,7 +108,7 @@ const spec: DiagramSpec = {
       sub: "shop network",
       icon: "server",
       tone: "teal",
-      x: 420,
+      x: 465,
       y: 410,
       w: 176,
       cloud: server,
@@ -120,12 +122,12 @@ const spec: DiagramSpec = {
       icon: "dns",
       tone: "blue",
       step: 2,
-      x: 130,
+      x: 160,
       y: 560,
       w: 196,
       cloud: {
         aws: { id: "aws-route53", label: "Private hosted zone" },
-        gcp: { id: "gcp-cloud-dns", label: "Private zone" },
+        gcp: "gcp-cloud-dns",
         azure: { label: "Private DNS zone" },
       },
     },
@@ -137,7 +139,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       variant: "glyph",
       step: 2,
-      x: 420,
+      x: 465,
       y: 560,
       cloud: {
         aws: "aws-rds",
@@ -154,8 +156,8 @@ const spec: DiagramSpec = {
       icon: "server",
       tone: "teal",
       step: 3,
-      x: 420,
-      y: 730,
+      x: 465,
+      y: 750,
       w: 176,
       cloud: server,
     },
@@ -168,12 +170,12 @@ const spec: DiagramSpec = {
       icon: "presence",
       tone: "blue",
       step: 5,
-      x: 130,
+      x: 160,
       y: 410,
-      w: 190,
+      w: 204,
       cloud: {
-        aws: { id: "aws-route53", label: "Health check" },
-        gcp: { label: "Health check" },
+        aws: { id: "aws-route53", label: "Route 53 health check" },
+        gcp: { label: "Cloud health check" },
         azure: "azure-traffic-manager",
       },
     },
@@ -185,7 +187,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       variant: "glyph",
       step: 5,
-      x: 665,
+      x: 692,
       y: 95,
       cloud: { aws: "aws-s3", gcp: "gcp-cloud-storage", azure: "azure-blob" },
     },
@@ -193,12 +195,20 @@ const spec: DiagramSpec = {
   edges: [
     // Step 1: one public lookup, then the connection to the address it returned.
     { from: "customer", to: "resolver", label: "look up www", packet: true },
-    { from: "public-zone", to: "resolver", label: "LB address, TTL 300 s", packet: true, delay: 1.2, until: 4 },
-    { from: "customer", to: "lb", label: "HTTPS", packet: true, delay: 2.4 },
+    {
+      from: "public-zone",
+      to: "resolver",
+      label: "LB address, TTL 300 s",
+      packet: true,
+      delay: 1.2,
+      labelAt: 0.7,
+      until: 4,
+    },
+    { from: "customer", to: "lb", label: "HTTPS", packet: true, delay: 2.4, labelAt: 0.85 },
     { from: "lb", to: "app", packet: true, delay: 3.2 },
 
     // Step 2: the app server's network can see the private zone, so the database's name has an answer.
-    { from: "app", to: "private-zone", label: "db.brightpost.internal?", packet: true, labelAt: 0.45, step: 2 },
+    { from: "app", to: "private-zone", label: "db.brightpost.internal?", packet: true, labelAt: 0.55, step: 2 },
     { from: "app", to: "db", label: "SQL to 10.0.21.5", packet: true, delay: 1.2, step: 2 },
 
     // Step 3: the jobs network is not linked to the zone, so the same question has no answer.
@@ -208,19 +218,28 @@ const spec: DiagramSpec = {
       label: "not linked: no such name",
       tone: "red",
       dashed: true,
-      labelAt: 0.5,
+      via: [[160, 750]],
+      labelAt: 0.4,
       step: 3,
       until: 3,
     },
 
     // Step 4: the zone is linked to the jobs network as well; the job reaches the database over the peering.
-    { from: "private-zone", to: "job", label: "linked: 10.0.21.5", packet: true, labelAt: 0.5, step: 4 },
-    { from: "job", to: "db", label: "over peering", packet: true, delay: 1.2, step: 4 },
+    {
+      from: "private-zone",
+      to: "job",
+      label: "linked: 10.0.21.5",
+      packet: true,
+      via: [[160, 750]],
+      labelAt: 0.6,
+      step: 4,
+    },
+    { from: "job", to: "db", label: "over peering", packet: true, delay: 1.2, labelAt: 0.75, step: 4 },
 
     // Step 5: the health check decides which answer the public zone gives, and the TTL drops to 60 seconds.
     { from: "health", to: "lb", label: "probe", dashed: true, flow: true, labelAt: 0.4, step: 5 },
     { from: "health", to: "public-zone", label: "up or down", dashed: true, step: 5 },
-    { from: "public-zone", to: "resolver", label: "LB or back-soon, TTL 60 s", packet: true, step: 5 },
+    { from: "public-zone", to: "resolver", label: "LB or back-soon, TTL 60 s", packet: true, labelAt: 0.7, step: 5 },
     { from: "customer", to: "sorry", label: "only if LB is down", dashed: true, step: 5 },
   ],
 };
