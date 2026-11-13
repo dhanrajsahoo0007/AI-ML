@@ -1,30 +1,180 @@
 ---
 title: "Service Equivalents"
-description: "Every cloud capability with its AWS, Google Cloud and Azure service: searchable, filterable by group, and sortable by the cloud you know."
+description: "Every cloud job with its AWS, Google Cloud and Azure service, how close each match is, and the differences that break a design you translate."
+updated: 2026-11-13
 ---
 
-Most cloud services exist on all three providers under different names. Some are near-identical (managed Kubernetes, object storage); some differ in ways that change a design (a global VPC on Google Cloud, no ECS-style orchestrator outside AWS). This map lists each **capability**, meaning a job you need done, with the service that does it on each cloud and how close the match is.
+## In one sentence
 
-## How to read it
+<KeyIdea>
+  Every big cloud does the same jobs under different names, but a matching name is a starting point: check how the job is done before you swap.
+</KeyIdea>
+
+## How to read the matrix
+
+A **capability** is a job you need done, such as "store files" or "run a container". The matrix below has one row per capability and one column per cloud. Each cell names the service that does that job on that cloud.
 
 - **Search** by the job ("queue", "CDN") or by a service you already know ("Fargate", "Spanner", "Cosmos") to find its counterparts.
+- **Filter** by group, such as networking or databases, to see one area at a time.
 - **List first** puts the cloud you know in the first, tinted column.
-- **The dot** shows how well each cloud covers the job. *Direct* means a first-class service built for it. *Close* means it does the job with a different model you should mention in an interview. *Partial* means a workaround or a narrower feature. *No equivalent* means you would build it or buy it from a partner.
-- **Notes** call out the differences that change a design, plus retirements and renames as of the date at the bottom.
+- **Click a service** to open its profile: what it is, when to use it and what catches people out.
+
+The coloured dot says how well each cloud covers the job. "Equivalent" is rarely exact, so the dot has four levels.
+
+<Compare
+  columns={["Fit", "What it means", "What you do in a design", "Example row"]}
+  rows={[
+    ["Direct", "A service built for this job", "Swap the name, then read the note", "Object storage on all three clouds"],
+    ["Close", "Does the job with a different model", "Name the difference out loud", "Serverless containers: Cloud Run stands alone, Fargate runs under ECS or EKS"],
+    ["Partial", "A narrower feature or a workaround", "Change the design, or accept the gap", "Strongly consistent SQL across regions on Azure"],
+    ["No equivalent", "Nothing first-party does it", "Run it yourself, or buy it from a partner", "A classic message broker on Google Cloud"],
+  ]}
+  caption="The four fit levels in the matrix, with one real row for each."
+/>
+
+Read the **note** under a cell even when the dot says direct. The private network row is direct on all three clouds. Yet a network covers one region on two of them and the whole world on the third. The notes also record renames and retirements, as of the date at the bottom of the matrix.
+
+## The matrix
 
 <CloudEquivalenceMatrix />
 
+<PremiumBreak />
+
 ## Differences that change a design
 
-| Topic | AWS | Google Cloud | Azure |
-|---|---|---|---|
-| **Network scope** | VPC per Region | One VPC spans all Regions | VNet per Region |
-| **Serverless containers** | Fargate, under ECS or EKS | Cloud Run, standalone | Container Apps, standalone |
-| **Global HTTP entry** | CloudFront or Global Accelerator in front of Regional load balancers | Global external load balancer with one anycast IP | Front Door |
-| **Distributed SQL** | Aurora DSQL (2025) | Spanner (since 2017) | No direct equivalent |
-| **Event streaming** | Kinesis or MSK: partitions and offsets | Pub/Sub: ordering keys, seek by time | Event Hubs: partitions and offsets, Kafka endpoint |
-| **Organisation model** | Accounts in an Organization | Projects in folders in an organization | Subscriptions and resource groups under management groups |
+A name swap keeps the boxes of a design. It does not always keep their settings, or the area each box covers. This section shows one design moved between clouds, where it broke, and the differences worth checking every time.
+
+### Translate a design in three steps
+
+1. **Name the job, not the product.** Say "a group of servers that keeps 3 running across zones", not the product you used last time.
+2. **Look up the row.** Read the fit dot and the note for the cloud you are moving to.
+3. **Ask each box two questions.** What area does it cover: one <Term id="availability-zone">zone</Term>, one <Term id="region">region</Term>, or the world? And where does each of its settings live?
+
+Step 3 is where translations break. Brightpost found that out on a test copy.
+
+### Brightpost's trial copy
+
+Brightpost, the small online shop that sells posters and cards, runs its shop across three zones of one region. To compare running costs, Asha builds a copy of the shop on a second provider, in a trial account. She works through the design document box by box, using a table like the one above. Every box finds a direct match, and the copy works. Then she runs a **zone drill**, a test that cuts one zone off on purpose. She sends 200 test shoppers at once and cuts zone A off for 15 minutes. All 200 get error pages for the whole 15 minutes.
+
+<AnimatedDiagram spec="animated/cloud/service-equivalents-1" stepper minWidth={620} caption="The trial copy in four steps. Pick AWS, Google Cloud or Azure on the Services toggle: the picture stays the same, and two boxes show the difference that broke it." />
+
+Step 1 is the copy as Asha built it. Switch the toggle between clouds and every box keeps its place. The **private network** box changes the most: one region on two clouds, global on the third. The **server group** is a <Term id="autoscaling">autoscaling</Term> group: it starts servers and keeps a set number running. It starts all 3 servers in zone A.
+
+### Where it broke
+
+<AnimatedDiagram spec="animated/cloud/service-equivalents-1" step={2} minWidth={620} caption="The failure: the drill cuts zone A, every server is in zone A, and every test shopper gets an error." />
+
+On each cloud, a different box decides which zones a server group uses.
+
+- **AWS:** each <Term id="subnet">subnet</Term> sits in one zone. A group spreads across the subnets it lists, so three zones need three subnets.
+- **Google Cloud:** a subnet covers every zone of its region. A **regional** instance group spreads its servers; a **zonal** one stays in one zone.
+- **Azure:** a subnet also covers every zone. The scale set spreads across the zones listed on the scale set itself.
+
+The design document said "one subnet for the app servers". Moved in one direction, that sentence became one subnet in one zone. Moved the other way, the zone list on the group would have been dropped instead. Either way, the boxes came across and the setting did not.
+
+<Callout tone="red" title="What breaks">
+  The drill cuts zone A at 10:00. All 3 servers are in zone A, so the load balancer has nobody to send requests to. The orders database fails over to its standby in zone B in about 2 minutes, but no server is left to use it. All 200 test shoppers see errors until 10:15.
+</Callout>
+
+### The fix, and the drill again
+
+<AnimatedDiagram spec="animated/cloud/service-equivalents-1" step={3} minWidth={620} caption="Zone spread is set where this cloud keeps it, and the group starts one server in each zone." />
+
+Asha puts the zone setting where the second provider keeps it. The group now starts 1 server in each of zones A, B and C. On the Services toggle, the new **zone spread** box shows the right place on each cloud: three subnets listed, a regional group, or zones on the scale set.
+
+She runs the same drill. Health checks drop zone A in about 30 seconds, and zones B and C take every request. Checkout waits about 2 minutes for the standby, then works again. The managed database moved over cleanly, because a standby in another zone is a direct match on all three clouds.
+
+### Six differences to check every time
+
+These rows are where a direct-looking swap most often changes a design.
+
+<Compare
+  columns={["", "AWS", "Google Cloud", "Azure", "What it changes"]}
+  rows={[
+    ["Private network", "VPC per region; each subnet in one zone", "One VPC network for every region; subnets per region, across its zones", "VNet per region; subnets across its zones", "Two regions are one network on Google Cloud, two networks joined by peering on the others"],
+    ["Where zone spread is set", "The subnets the group lists, one per zone", "The group: regional spreads, zonal does not", "The zone list on the scale set", "Copy the setting, not only the box"],
+    ["The account wall", "Account, in an organization", "Project, under folders in an organization", "Subscription under management groups, with resource groups inside", "A resource group is a folder inside the wall, not a wall"],
+    ["Key-value database", "DynamoDB: items found by partition key and optional sort key", "Firestore: documents in collections. Bigtable: one sorted row key for huge, write-heavy tables", "Cosmos DB: items by partition key, several APIs, five consistency levels", "Keys and queries are redesigned, not copied"],
+    ["Functions", "Lambda: one request at a time per instance", "Cloud Run functions: one instance can serve many requests", "Azure Functions: the hosting plan sets scaling, warm instances and private network access", "Database connections, cold starts and network access differ"],
+    ["Managed Kafka", "Amazon MSK", "Managed Service for Apache Kafka", "Event Hubs accepts Kafka clients, but it is not Kafka itself", "On Azure, check each Kafka feature you use, or run Kafka yourself or through a partner"],
+  ]}
+  caption="Mechanisms, not limits. Check the provider's documentation for current numbers."
+/>
+
+<CloudMapping diagram="cloud/service-equivalents-1" lead="aws" />
+
+## Try it
+
+<Quiz>
+  <QuizItem question="In the first drill, how many of the 200 test shoppers got errors, and why did the standby database not help?" hint="Where were the servers?">
+    All 200, for the whole 15 minutes. The standby took over in about 2 minutes, but every server was in zone A, so nothing was left to use the database.
+  </QuizItem>
+  <QuizItem question="A design has one private network with a subnet in London and one in Sydney. You move it to Azure. How many networks do you need, and what joins them?" hint="Which cloud has a global network?">
+    Two virtual networks, one per region, joined by peering or through a hub network. AWS needs the same. Only Google Cloud lets one network span both regions.
+  </QuizItem>
+  <QuizItem question="A row shows 'No equivalent' on the cloud you are moving to. What are your options?">
+    Run the software yourself on servers or containers, buy it from a partner, or change the design to use a job that cloud does have. Say which, and what extra work it costs.
+  </QuizItem>
+</Quiz>
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What are the Google Cloud and Azure counterparts of ECS on Fargate, and what is not the same?" level="Junior" category="Cloud">
+    **Short answer.** Cloud Run on Google Cloud and Azure Container Apps on Azure. All three run containers with no servers for you to manage. The difference is shape: Fargate is a way to run containers under ECS or EKS, while Cloud Run and Container Apps are services of their own.
+
+    **Why.** With ECS on Fargate you still define a cluster, a task definition and a service, and you usually put a load balancer in front. Cloud Run and Container Apps can give each service its own HTTPS address. They can also drop to zero copies when no requests arrive and start again on the next one. An ECS service keeps the number of tasks you set, and scaling rules change that number. That is why the matrix marks the match "close", not "direct".
+
+    **Follow-ups the interviewer may ask.**
+    - When would you pick EKS with Fargate instead of ECS?
+    - What plays the role of a task definition on the other two clouds?
+
+    **Watch out for.** Saying "they are the same thing". Name the job first, then the one difference that changes the design.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A colleague says 'use a VPC per region, like on AWS' for a Google Cloud design. What do you correct?" level="Mid" category="Cloud">
+    **Short answer.** On Google Cloud one VPC network is global. Its subnets are regional, and servers in different regions talk over private addresses inside it. So a two-region design needs one network with a subnet per region, not two networks joined by peering.
+
+    **Why.** On AWS and Azure a network belongs to one region, so a second region means a second network plus peering or a hub. Copying that onto Google Cloud adds routes to manage and peering links that do not pass traffic on to a third network. Firewall rules belong to the network, so one rule covers every region. Separate networks still make sense for isolation, such as production and test, usually in separate projects.
+
+    <AnimatedDiagram spec="animated/cloud/service-equivalents-1" step={1} highlight={["network", "app-a", "db"]} caption="One private network holds every subnet. On Google Cloud that same box spans every region." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do several projects share one network?
+    - When would you still create two networks on Google Cloud?
+
+    **Watch out for.** Thinking a global network makes the design global. Servers, disks and subnets still live in one zone or one region.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You translate a three-zone design to another cloud box by box, and one zone drill takes the whole copy down. What went wrong, and how do you check next time?" level="Mid" category="Cloud">
+    **Short answer.** The zone setting stayed behind. On AWS, zone spread comes from the subnets a group lists. On Google Cloud it comes from a regional instance group, and on Azure from the zones listed on the scale set. Renaming the boxes kept the boxes, so every server started in one zone.
+
+    **Why.** In Brightpost's trial copy, all 3 servers landed in zone A. The drill cut zone A for 15 minutes, and all 200 test shoppers got errors. The database survived, because a standby in another zone is a direct match on every cloud. Next time, ask each box what area it covers, zone, region or global, and where its settings live. Then run the drill before trusting the copy.
+
+    <AnimatedDiagram spec="animated/cloud/service-equivalents-1" step={2} highlight={["group", "app-a", "drill"]} caption="The group starts every server in zone A, so cutting zone A stops the whole copy." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which other boxes in this design have a zone setting?
+    - How do you run a zone drill without a real outage?
+
+    **Watch out for.** Blaming the new provider's zones. The zones worked; the design never used them.
+  </InterviewQuestion>
+</InterviewQuestions>
 
 ## Related
 
-[Choosing Compute](/cloud/start-here/choosing-compute) · [Containers on AWS](/cloud/aws/containers) · [Containers on Google Cloud](/cloud/gcp/containers) · [Containers on Azure](/cloud/azure/containers)
+- [Cloud in 10 Minutes](/cloud/start-here/cloud-in-10-minutes)
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
+- [Private Networks, Subnets & Routing](/cloud/networking/vpc-and-subnets)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [Choosing Compute](/cloud/start-here/choosing-compute)
+- [Queues vs Streams](/cloud/start-here/queues-vs-streams)
+- [Databases on Each Cloud](/cloud/start-here/databases-per-cloud)
+- [AWS](/cloud/aws) · [Google Cloud](/cloud/gcp) · [Azure](/cloud/azure)
+
+## Further reading
+
+- [Google Cloud for AWS and Azure professionals](https://cloud.google.com/docs/get-started/aws-azure-gcp-service-comparison): Google's own service comparison.
+- [Azure for AWS professionals](https://learn.microsoft.com/azure/architecture/aws-professional/): Microsoft's mapping from AWS.
+- [Azure for Google Cloud professionals](https://learn.microsoft.com/azure/architecture/gcp-professional/): Microsoft's mapping from Google Cloud.
