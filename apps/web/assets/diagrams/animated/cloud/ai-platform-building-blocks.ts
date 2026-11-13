@@ -15,8 +15,8 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // labels of the app-to-GPU edges, which end at steps 1, 2 and 3 (`until`).
 //
 // Layout: three columns, four rows.
-//   Left (x 130): support agent, reply drafter, GPU machines, training pipeline.
-//   Middle (x 390): vector index, hosted model API, shop data, model registry.
+//   Left (x 145): support agent, reply drafter, GPU machines, training pipeline.
+//   Middle (x 390): vector index, hosted model API, shop data; the model registry sits at x 402 to widen its gap.
 //   Right (x 665): index job, usage monitor, evaluation set.
 // Rows (centres): 95 | 245 | 400 | 550.
 // Why this order: on a phone the figure opens on the left 480 units. Steps 1 to 3 use only the left and middle
@@ -45,7 +45,7 @@ const spec: DiagramSpec = {
     { id: "people", title: "People", tone: "neutral", x: 10, y: 40, w: 240, h: 110 },
     { id: "app", title: "Application", tone: "teal", x: 10, y: 190, w: 240, h: 110 },
     { id: "gpus", title: "GPUs", tone: "teal", x: 10, y: 345, w: 240, h: 110 },
-    { id: "own", title: "Own models", tone: "teal", x: 10, y: 495, w: 490, h: 115 },
+    { id: "own", title: "Own models", tone: "teal", x: 10, y: 495, w: 500, h: 115 },
     { id: "retrieval", title: "Retrieval", tone: "violet", x: 280, y: 40, w: 505, h: 110 },
     { id: "platform", title: "Model platform", tone: "blue", x: 280, y: 190, w: 220, h: 110 },
     { id: "storage", title: "Storage", tone: "violet", x: 280, y: 345, w: 220, h: 110 },
@@ -59,7 +59,7 @@ const spec: DiagramSpec = {
       sub: "about 60 emails a day",
       icon: "users",
       tone: "neutral",
-      x: 130,
+      x: 145,
       y: 95,
       w: 176,
     },
@@ -69,7 +69,7 @@ const spec: DiagramSpec = {
       sub: "the shop's code",
       icon: "server",
       tone: "teal",
-      x: 130,
+      x: 145,
       y: 245,
       w: 166,
     },
@@ -79,13 +79,13 @@ const spec: DiagramSpec = {
       sub: "rented by the hour",
       icon: "gpu",
       tone: "teal",
-      x: 130,
+      x: 145,
       y: 400,
       w: 176,
       cloud: {
         aws: { label: "GPU instances" },
         gcp: { id: "gcp-tpu", label: "GPUs and TPUs" },
-        azure: { label: "N-series GPU VMs" },
+        azure: { label: "N-series VMs" },
       },
     },
     {
@@ -193,9 +193,9 @@ const spec: DiagramSpec = {
       icon: "pipeline",
       tone: "teal",
       step: 7,
-      x: 130,
+      x: 145,
       y: 550,
-      w: 200,
+      w: 196,
       cloud: {
         aws: { id: "aws-sagemaker", label: "SageMaker Pipelines" },
         gcp: { id: "gcp-vertex-ai", label: "Vertex AI Pipelines" },
@@ -209,7 +209,7 @@ const spec: DiagramSpec = {
       icon: "registry",
       tone: "violet",
       step: 7,
-      x: 390,
+      x: 402,
       y: 550,
       w: 196,
       cloud: {
@@ -221,16 +221,16 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: the agent asks for a draft; the app calls the tuned model on a GPU machine that is on all day.
-    { from: "agent", to: "app", label: "draft a reply", packet: true },
-    { from: "app", to: "gpu", label: "busy 2 h of 24", packet: true, bidirectional: true, until: 1 },
+    { from: "agent", to: "app", label: "draft a reply", packet: true, labelAt: 0.4 },
+    { from: "app", to: "gpu", label: "busy 2 h of 24", labelAt: 0.35, packet: true, bidirectional: true, until: 1 },
     { from: "data", to: "gpu", label: "tune", packet: true, until: 1 },
 
     // Step 2: the article changes, but nothing carries it into the model's weights; the reply has the old date.
     { from: "data", to: "gpu", label: "no way in", tone: "red", dashed: true, step: 2, until: 2 },
-    { from: "gpu", to: "app", label: "says 18 Dec", tone: "red", packet: true, step: 2, until: 2 },
+    { from: "gpu", to: "app", label: "says 18 Dec", labelAt: 0.65, tone: "red", packet: true, step: 2, until: 2 },
 
     // Step 3: the tuned endpoint is deleted; the app calls a hosted model and pays per token.
-    { from: "app", to: "gpu", label: "endpoint deleted", dashed: true, step: 3, until: 3 },
+    { from: "app", to: "gpu", label: "endpoint deleted", labelAt: 0.35, dashed: true, step: 3, until: 3 },
     { from: "app", to: "modelapi", label: "prompt", packet: true, step: 3, until: 5 },
 
     // Step 4: an index job reads each edited article and fills the vector index; the app searches it first.
@@ -251,16 +251,16 @@ const spec: DiagramSpec = {
     { from: "app", to: "vector", label: "search: top 3", packet: true, step: 4 },
 
     // Step 5: a fixed set of test questions runs against the prompt and model on every change.
-    { from: "eval", to: "modelapi", label: "80 tests", dashed: true, labelAt: 0.3, step: 5 },
+    { from: "eval", to: "modelapi", label: "80 tests", dashed: true, labelAt: 0.75, step: 5 },
 
     // Step 6: the call goes through a private endpoint in the UK region, and every token is counted.
-    { from: "app", to: "modelapi", label: "private, UK", packet: true, step: 6 },
+    { from: "app", to: "modelapi", label: "private", packet: true, step: 6 },
     { from: "modelapi", to: "monitor", label: "tokens", dashed: true, flow: true, step: 6 },
 
     // Step 7: the one model Brightpost owns is trained on the GPUs and registered only if it passes the tests.
     { from: "data", to: "trainpipe", label: "tagged photos", packet: true, step: 7 },
     { from: "trainpipe", to: "gpu", label: "training runs", packet: true, step: 7 },
-    { from: "trainpipe", to: "registry", label: "versions", packet: true, step: 7 },
+    { from: "trainpipe", to: "registry", label: "adds", packet: true, step: 7 },
     { from: "eval", to: "registry", label: "must pass", dashed: true, step: 7 },
   ],
 };

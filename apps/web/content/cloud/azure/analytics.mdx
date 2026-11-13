@@ -1,20 +1,49 @@
 ---
 title: "Analytics & Data on Azure"
 description: "Microsoft Fabric, Azure Databricks, Data Factory, Synapse, Stream Analytics and Power BI, with the AWS and Google Cloud equivalents."
+updated: 2026-11-14
 ---
 
-Azure's analytics story is **Microsoft Fabric**, a SaaS platform on one data lake (**OneLake**) that bundles a warehouse, lakehouse, Spark, pipelines, real-time analytics and **Power BI**. **Azure Databricks** is the other common choice for Spark-heavy teams, and **Data Factory** handles data integration.
+Brightpost's finance lead wants to know which posters sell best each December, and which pages people view before they buy. The orders sit in Azure Database for PostgreSQL and the click events pass through Event Hubs, so neither can answer alone. On Azure one fact shapes the design: **Microsoft Fabric** puts the lake, the engines, the pipelines and Power BI on one **capacity** you buy. A careless query adds no new line to the bill; it uses up capacity that every other job shares.
+
+## The idea
+
+Questions across years of data do not belong on the orders database. They go to files in a cheap lake, read by a query engine, or to a warehouse that keeps small, prepared tables for questions asked all day.
+
+<Callout tone="blue" title="Learn the idea">
+  New to lakes and warehouses? [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines) builds Brightpost's sales dashboard step by step, and [Queues, Topics, Streams, Event Buses and Workflows](/cloud/data/streaming-and-messaging-services) shows where the click stream comes from. This page names the Azure pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/lake-to-warehouse" stepper cloud="azure" minWidth={620} caption="Brightpost's sales dashboard on Azure in seven steps: OneLake, a SQL endpoint over its tables, the heavy refresh, Delta tables split by date, a Fabric Warehouse summary and Purview labels." />
+
+<CloudMapping diagram="cloud/lake-to-warehouse" lead="azure" />
 
 ## TL;DR
 
-- **Fabric** for an all-in-one Microsoft analytics stack, billed by shared capacity.
-- **Azure Databricks** for Spark, Delta Lake and ML engineering.
-- **Data Factory** pipelines for ingestion from databases, SaaS and on-prem.
-- **Power BI** for dashboards, reading directly from OneLake.
+- **Fabric** for an all-in-one Microsoft analytics stack on **OneLake**, one lake per organisation, billed by shared capacity.
+- **Azure Databricks** for Spark, Delta Lake and ML engineering; **Data Factory** pipelines for ingestion from databases, SaaS and on-premises.
+- **Power BI** draws the dashboards and reads Fabric tables in OneLake without copying them.
+- **Purview** catalogues and labels sensitive data across the estate; Fabric's own SQL rules hide columns and rows.
 
 ## At a glance
 
 <CloudGroupTable group="analytics" lead="azure" />
+
+## How it fits together on Azure
+
+In step 1 the finance lead's monthly report runs on a PostgreSQL read replica, and clicks pass through an event hub. In step 2 a Data Factory pipeline copies the day's clicks and orders into a Fabric lakehouse in OneLake each night. Event Hubs Capture can also write events to the lake as they arrive.
+
+In step 3 the dashboard's SQL goes to the lakehouse's **SQL analytics endpoint**, and the OneLake catalog lists the tables. Step 4 plays out differently here. The 576 heavy queries a day add no per-scan line; they use up the capacity, so nightly pipelines on it slow down or wait. In step 5 a notebook writes Delta tables split by date. In step 6 a Fabric Warehouse serves the summary table to Power BI. In step 7 Purview labels the address columns, and column-level security hides them.
+
+| The idea | On Azure | What to know |
+|---|---|---|
+| Lake | OneLake | One per organisation, under every Fabric workspace; shortcuts point at data kept elsewhere without copying it |
+| Columnar files | Delta tables | Parquet files plus a log of versions; Fabric's default table format |
+| Query engine over the lake | Lakehouse SQL analytics endpoint | Read-only SQL over a lakehouse's tables |
+| Warehouse | Fabric Warehouse | Full SQL with writes; older setups run Azure Synapse Analytics dedicated SQL pools |
+| Paying for queries | Fabric capacity | Shared by every engine; overuse slows other work instead of adding a line |
+
+Live counts come from **Azure Stream Analytics**, which runs SQL-like queries with time windows over Event Hubs streams, or from Fabric's Real-Time Intelligence. **Azure Synapse Analytics** still runs many existing warehouses; Microsoft points new projects towards Fabric.
 
 ## Services
 
@@ -22,24 +51,80 @@ Azure's analytics story is **Microsoft Fabric**, a SaaS platform on one data lak
 
 <CloudServiceProfile id="azure-fabric" />
 
+**Pick it when** a small team wants ingestion, lake, warehouse and Power BI in one product, with one bill and one set of permissions.
+
 ### Azure Databricks
 
 <CloudServiceProfile id="azure-databricks" />
+
+**Pick it when** the team writes mostly Spark code, needs fine control of clusters, or runs ML engineering on the same tables.
 
 ### Azure Data Factory
 
 <CloudServiceProfile id="azure-data-factory" />
 
-## Coming from AWS
+**Pick it when** data must be copied on a schedule from many sources, including databases inside an office network, into the lake or warehouse.
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| Redshift + Athena + Glue + Quick Sight | Fabric | One SaaS platform with one capacity bill |
-| EMR | Azure Databricks or Fabric Spark | Databricks is a first-party Azure service |
-| Managed Flink | Stream Analytics / Fabric Real-Time Intelligence | SQL-based stream processing |
-| Glue ETL | Data Factory | Hundreds of connectors, including on-prem via self-hosted runtimes |
-| S3 data lake | OneLake / Data Lake Storage | Delta tables by default |
+### Microsoft Purview
+
+<CloudServiceProfile id="azure-purview" />
+
+**Pick it when** you must know where personal data lives across Fabric, databases and other clouds, and prove it to an auditor.
+
+## Common mistakes
+
+- **One capacity for production and experiments.** A runaway notebook or dashboard slows the nightly loads on the same capacity. Give production work its own capacity.
+- **A workspace role to share one report.** Editing roles such as Contributor reach every item, including files in OneLake that SQL rules do not cover. Share the single item instead.
+- **Copying tables between lakes.** Every copy is another bill and another place to secure. A OneLake shortcut reads data where it sits.
+
+## Where this shows up in system design
+
+- **[Metrics and logging](/system-design/case-studies/metrics-and-logging):** Event Hubs carries the events; Stream Analytics or Real-Time Intelligence counts them in time windows, and history lands in OneLake.
+- **[Zillow](/system-design/case-studies/zillow) price estimates:** nightly Spark jobs on Azure Databricks train and score models over the property history.
+- **[User data export](/system-design/case-studies/user-data-export):** a Data Factory pipeline gathers one user's rows from several stores into one file.
 
 ## Related
 
-[Analytics & Data on AWS](/cloud/aws/analytics) · [Analytics & Data on Google Cloud](/cloud/gcp/analytics) · [Messaging on Azure](/cloud/azure/messaging) · [Analytical (OLAP) & Columnar](/system-design/databases/analytical-databases)
+[Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines) · [Queues, Topics, Streams, Event Buses and Workflows](/cloud/data/streaming-and-messaging-services) · [Analytics & Data on AWS](/cloud/aws/analytics) · [Analytics & Data on Google Cloud](/cloud/gcp/analytics) · [Messaging on Azure](/cloud/azure/messaging) · [Analytical (OLAP) & Columnar](/system-design/databases/analytical-databases) · [System Design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is OneLake, and how is a Fabric lakehouse different from a Fabric warehouse?" category="Cloud" level="Junior">
+    **Short answer.** OneLake is the single lake behind every Fabric workspace in an organisation. A lakehouse keeps files and Delta tables there, written mostly by Spark, with a read-only SQL endpoint. A warehouse keeps Delta tables there too, but you load and change them with SQL.
+
+    **Why.** Both store the same open format in the same lake, so Power BI and other engines read either without a copy. Brightpost's curated click tables suit a lakehouse, because a notebook writes them. The summary table suits the warehouse, because SQL rebuilds it after each nightly load.
+
+    <AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={6} cloud="azure" highlight={["curated", "warehouse", "engine"]} caption="Curated Delta tables in a lakehouse; the Fabric Warehouse holds the summary the dashboard reads." />
+
+    **Follow-ups the interviewer may ask.**
+    - What is a OneLake shortcut, and when would you use one?
+    - Can the warehouse query the lakehouse's tables directly?
+
+    **Watch out for.** Treating "lakehouse" and "warehouse" as different storage. In Fabric the difference is how you write, not where the data lives.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost's dashboard refreshes every 15 minutes on Fabric. What goes wrong, and what do you change?" category="Cloud" level="Mid">
+    **Short answer.** Nothing shows on the bill, but the 576 heavy queries a day eat the shared capacity. Nightly pipelines and other reports then slow or wait. Point the dashboard at a small summary table, and refresh it only after each load.
+
+    **Why.** Fabric bills capacity, not scans. Short bursts above the capacity are allowed and paid back over the following minutes; sustained overuse brings throttling, which delays and then refuses new work. Six charts reading two years of clicks every 15 minutes is sustained. A summary of under 1 MB a month costs the capacity almost nothing.
+
+    <AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={4} cloud="azure" highlight={["dashboard", "engine", "raw"]} caption="Six charts, every 15 minutes, each reading two years of clicks through the SQL endpoint." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find which item used the capacity?
+    - Would a bigger capacity fix it, or hide it?
+
+    **Watch out for.** Buying a larger capacity first. It hides the waste until the data doubles, then the throttling returns.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Fabric or Azure Databricks for Brightpost's analytics?" category="Cloud" level="Mid">
+    **Short answer.** Fabric, for a shop with 3 engineers, one dashboard and Power BI users. Azure Databricks earns its place when a data team writes mostly Spark, needs control over clusters, or runs ML on the same tables.
+
+    **Why.** Fabric bundles ingestion, lake, warehouse and Power BI under one capacity and one set of permissions, so there is less to run. Databricks gives more control over compute and its own catalog, Unity Catalog, at the cost of more to manage. Both store Delta tables, so a shortcut lets Fabric read Databricks tables without a copy.
+
+    **Follow-ups the interviewer may ask.**
+    - What would make you move from Fabric to Databricks later?
+    - Where would existing Synapse dedicated SQL pools fit?
+
+    **Watch out for.** Running both with two copies of every table. If both are needed, keep one copy and point the other at it.
+  </InterviewQuestion>
+</InterviewQuestions>

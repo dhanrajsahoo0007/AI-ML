@@ -27,8 +27,11 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // preview and the failure) use only the left and middle columns; the right column arrives with step 4.
 // The canvas stays under 800 wide so labels are readable in the 660 px article column.
 //
-// The commitment's edge to the servers runs diagonally between the usage node and the database; its pill sits at
-// labelAt 0.25, in the gap between the usage node and the commitment, clear of both. Zone tabs sit on a zone's
+// The commitment's edge to the servers runs up the left margin of the shop zone (x 296, left of the database and the
+// export), then into the servers from below; its pill sits between the database and the export. The usage edge is a
+// straight diagonal that passes right of the Customers zone; its pill sits at labelAt 0.7, under the customers and
+// right of the Billing tab. The "not covered" pill sits at
+// labelAt 0.3, above the Serverless tab. Zone tabs sit on a zone's
 // top-left corner; the shop zone is the vpc kind and every edge enters it from the side.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon.
 // Nodes are sized for the longest name the Services toggle puts in them ("Managed instance group" w 214,
@@ -212,7 +215,15 @@ const spec: DiagramSpec = {
     { from: "servers", to: "db", label: "SQL", packet: true, delay: 1.2 },
 
     // Step 2: the usage history counts the servers running each hour.
-    { from: "servers", to: "usage", label: "servers per hour", dashed: true, flow: true, step: 2 },
+    {
+      from: "servers",
+      to: "usage",
+      label: "servers per hour",
+      dashed: true,
+      flow: true,
+      labelAt: 0.7,
+      step: 2,
+    },
 
     // Step 3: the commitment covers 4 machines but the fleet uses 2.4 on average; the function is not covered.
     {
@@ -221,14 +232,38 @@ const spec: DiagramSpec = {
       label: "4 bought, 2.4 used",
       tone: "red",
       packet: true,
-      labelAt: 0.25,
+      via: [
+        [296, 425],
+        [296, 180],
+      ],
+      labelAt: 0.42,
       step: 3,
       until: 3,
     },
-    { from: "commit", to: "function", label: "not covered", tone: "red", dashed: true, step: 3, until: 3 },
+    {
+      from: "commit",
+      to: "function",
+      label: "not covered",
+      tone: "red",
+      dashed: true,
+      labelAt: 0.3,
+      step: 3,
+      until: 3,
+    },
 
     // Step 4: commit to the 2 servers that never switch off; extra servers on busy days stay on demand.
-    { from: "commit", to: "servers", label: "covers the 2 always on", tone: "green", labelAt: 0.25, step: 4 },
+    {
+      from: "commit",
+      to: "servers",
+      label: "covers the 2 always on",
+      tone: "green",
+      via: [
+        [296, 425],
+        [296, 180],
+      ],
+      labelAt: 0.42,
+      step: 4,
+    },
     { from: "servers", to: "extra", label: "on demand", dashed: true, step: 4 },
 
     // Step 5: the nightly export reads the orders and writes one file a night, on spot capacity.

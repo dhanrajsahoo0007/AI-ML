@@ -28,7 +28,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // landing zone on a diagonal that passes under the price service and over the dependency map. The cloud app's SQL to
 // the old database, and later the PC's export, run on the diagonal between the cloud app and the link.
 // Text room: a label takes about 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. Nodes are
-// sized for the longest name the Services toggle shows: "App Migration Service" (w 212), "SQL Managed Instance",
+// sized for the longest name the Services toggle shows: "App Migration Service" (w 204), "SQL Managed Instance",
 // "Azure landing zone" and "Site-to-Site VPN" (w 204).
 const spec: DiagramSpec = {
   title: "Moving the framing shop in waves",
@@ -65,7 +65,7 @@ const spec: DiagramSpec = {
     {
       id: "app",
       label: "Order app",
-      sub: "about 120 orders a day",
+      sub: "120 orders a day",
       icon: "server",
       tone: "teal",
       x: 130,
@@ -152,7 +152,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 405,
       y: 225,
-      w: 212,
+      w: 204,
       cloud: {
         aws: { label: "App Migration Service" },
         gcp: { label: "Migrate to VMs" },
@@ -218,7 +218,7 @@ const spec: DiagramSpec = {
       step: 5,
       x: 672,
       y: 345,
-      w: 204,
+      w: 210,
       cloud: {
         aws: { id: "aws-rds", label: "RDS for SQL Server" },
         gcp: "gcp-cloud-sql",
@@ -248,9 +248,10 @@ const spec: DiagramSpec = {
     // Step 1: the hypervisor's list is the whole inventory, so a machine outside VMware is invisible.
     { from: "vmware", to: "assess", label: "VM list", packet: true },
 
-    // Step 2: a private link joins the back office to the new account's network.
-    { from: "db", to: "link", label: "VPN tunnel", dashed: true, step: 2 },
-    { from: "link", to: "lz", label: "into the account", dashed: true, flow: true, labelAt: 0.62, step: 2 },
+    // Step 2: a private link joins the back office to the new account's network. The back-office edge has no label,
+    // because the failure edge of step 4 climbs the gutter it crosses.
+    { from: "db", to: "link", dashed: true, step: 2 },
+    { from: "link", to: "lz", label: "into the account", dashed: true, flow: true, labelAt: 0.35, step: 2 },
 
     // Step 3: copy the disk nonstop, launch the copy, point the name at it. The database is still in the back office.
     { from: "app", to: "repl", label: "disk blocks", packet: true, step: 3 },
@@ -276,9 +277,9 @@ const spec: DiagramSpec = {
 
     // Step 5: the traffic map shows the 02:00 flow; the PC stays and reads its export from the cloud app.
     { from: "ticketpc", to: "depmap", label: "02:00 flow", dashed: true, flow: true, step: 5 },
-    { from: "ticketpc", to: "link", label: "via VPN", packet: true, labelAt: 0.4, step: 5 },
+    { from: "ticketpc", to: "link", label: "via VPN", packet: true, labelAt: 0.33, step: 5 },
     { from: "link", to: "cloudapp", label: "02:00 export", packet: true, delay: 1.2, labelAt: 0.6, step: 5 },
-    { from: "link", to: "clouddb", label: "rows + changes", packet: true, step: 5 },
+    { from: "link", to: "clouddb", label: "copy", packet: true, step: 5 },
     { from: "cloudapp", to: "clouddb", label: "SQL", packet: true, delay: 1, step: 5 },
 
     // Step 6: the rebuilt price service reads the managed database.

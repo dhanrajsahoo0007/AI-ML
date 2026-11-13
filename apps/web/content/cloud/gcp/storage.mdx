@@ -1,20 +1,47 @@
 ---
 title: "Storage on Google Cloud"
 description: "Cloud Storage, Persistent Disk and Hyperdisk, Filestore and Managed Lustre, with the AWS and Azure equivalents."
+updated: 2026-11-14
 ---
 
-**Cloud Storage** is Google Cloud's object store. Its location model is the main difference from S3: a bucket can be **regional, dual-region or multi-region**, and the multi-location types replicate across Regions automatically. Block storage (**Persistent Disk** and **Hyperdisk**) and file storage (**Filestore**, **Managed Lustre**, **NetApp Volumes**) fill the same roles as EBS, EFS and FSx.
+Brightpost renders about 400 print files a day, keeps product photos in buckets and runs servers that need disks. On Google Cloud two choices shape that design. A Cloud Storage bucket has a **location type**, chosen at creation: one region, a dual-region or a multi-region. And a disk can be **regional**, written to two zones at the same moment, so a zone failure does not strand its data.
+
+## The idea
+
+A cloud keeps data in three shapes: a disk for one machine, a folder many machines mount, and a bucket of whole files fetched by key. You pick the shape by how your program reaches the data, then give each shape its own backup.
+
+<Callout tone="blue" title="Learn the idea">
+  New to the three shapes? [Object, Block and File](/cloud/data/storage-types) follows one Brightpost print file from a private disk to a share and a bucket. [Object Storage](/cloud/data/object-storage), [Block Storage](/cloud/data/block-storage), [File Shares, Hybrid Storage and Moving Bulk Data](/cloud/data/file-hybrid-and-transfer) and [Backups and Vaults](/cloud/resilience/backups-and-vaults) go deeper. This page names the Google Cloud pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/storage-three-shapes" stepper cloud="gcp" minWidth={620} caption="Brightpost's print files on Google Cloud in five steps: Persistent Disks, a retry that cannot find its file, a Filestore share, a Cloud Storage bucket and Backup and DR." />
+
+<CloudMapping diagram="cloud/storage-three-shapes" lead="gcp" />
 
 ## TL;DR
 
-- **Cloud Storage** for blobs; pick **dual- or multi-region** buckets for built-in cross-Region durability.
-- **Autoclass** moves objects between Standard, Nearline, Coldline and Archive automatically.
-- **Hyperdisk** for high-performance VM disks; **regional persistent disks** replicate across two zones.
-- **Filestore** for shared NFS; **Managed Lustre** for ML and HPC throughput.
+- **Cloud Storage** for whole files. Pick the bucket's location type first: region, dual-region or multi-region. It is fixed when you create the bucket.
+- **Four storage classes** (Standard, Nearline, Coldline, Archive) all answer in milliseconds; colder ones cost less to keep and more to read. **Autoclass** moves objects for you.
+- **Persistent Disk and Hyperdisk** for VM disks. A **regional** disk keeps a second copy in another zone.
+- **Filestore** for shared NFS folders; **Backup and DR Service** keeps backups in vaults that admins cannot empty early.
 
 ## At a glance
 
 <CloudGroupTable group="storage" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+In step 1 two Compute Engine VMs sit behind an internal passthrough Network Load Balancer, each saving print files on its own zonal Persistent Disk. In step 2 a retry lands on the other VM, which finds nothing on its disk.
+
+In step 3 both VMs mount one Filestore share over NFS at `/print`, so either can finish any job. In step 4 print files move to a Cloud Storage bucket, one object per order. The partner downloads each with a **signed URL**, which a service account can sign through the IAM API without a stored key. A lifecycle rule deletes print files after 30 days. In step 5 snapshot schedules cover the disks, Filestore keeps its own backups, and the bucket keeps old versions. Backup and DR Service holds the copies in a vault.
+
+| The idea | On Google Cloud | What to know |
+|---|---|---|
+| Bucket in a place | Location type: region, dual-region, multi-region | Chosen at creation; the multi-location types copy across regions with no rules to write |
+| Storage class | Standard, Nearline, Coldline, Archive | All read in milliseconds; colder classes have a retrieval fee and a longer minimum stay |
+| Disk for one VM | Persistent Disk or Hyperdisk, zonal or regional | Hyperdisk sets IOPS and throughput apart from size; regional disks write to two zones |
+| Signed link | Signed URL | Sign with a service account through IAM, not with a downloaded key |
+| Backup copies | Snapshot schedules, Backup and DR vaults | Snapshots are global, so a restore can happen in any region |
 
 ## Services
 
@@ -22,30 +49,90 @@ description: "Cloud Storage, Persistent Disk and Hyperdisk, Filestore and Manage
 
 <CloudServiceProfile id="gcp-cloud-storage" />
 
+**Pick it when** the data is whole files: uploads, photos, exports, logs, or a data lake for BigQuery.
+
 ### Persistent Disk and Hyperdisk
 
 <CloudServiceProfile id="gcp-persistent-disk" />
+
+**Pick it when** one VM or GKE pod needs a disk. Choose a regional disk when a self-run database must survive a zone failure.
 
 ### Filestore
 
 <CloudServiceProfile id="gcp-filestore" />
 
-## Coming from AWS
+**Pick it when** programs on several VMs or GKE pods must open the same files by path. For compute clusters, Managed Lustre is the faster choice; NetApp Volumes adds SMB.
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| S3 + Cross-Region Replication | Dual- or multi-region bucket | Cross-Region copies with no replication rules |
-| S3 Intelligent-Tiering | Autoclass | Per-bucket automatic class changes |
-| EBS (zonal) | Persistent Disk / Hyperdisk, regional option | Synchronous two-zone replication is available |
-| EFS | Filestore | Provisioned capacity by tier instead of pay-per-use elastic |
-| Pre-signed URL | Signed URL | Same pattern for direct uploads |
+### Storage Transfer Service
+
+<CloudServiceProfile id="gcp-storage-transfer" />
+
+**Pick it when** files must move into Cloud Storage from another cloud, an office file server or another bucket.
+
+### Transfer Appliance
+
+<CloudServiceProfile id="gcp-transfer-appliance" />
+
+**Pick it when** the volume would take weeks over the office link, so shipping a device is faster.
+
+### Backup and DR Service
+
+<CloudServiceProfile id="gcp-backup-dr" />
+
+**Pick it when** VMs, disks and databases across many projects need one backup policy that project owners cannot cut short.
+
+## Common mistakes
+
+- **Choosing a bucket's location in a hurry.** The location type is set at creation. Moving a bucket's data later means copying it, so decide dual-region or region before the first upload.
+- **Treating a zonal disk as zone-proof.** A zonal Persistent Disk cannot be reached while its zone is down. Use a regional disk, or snapshots you have restored in another zone at least once.
+- **Putting data you read often in Coldline or Archive.** Each read adds a retrieval fee, and deleting early still bills the full minimum stay. Use Autoclass when you cannot predict reads.
+
+## Where this shows up in system design
+
+- **Media and uploads:** photos and videos go straight to Cloud Storage with signed URLs, then a function makes thumbnails. [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking) covers the pattern.
+- **Serving two regions:** a dual-region bucket keeps one name and one set of objects in both, so the app needs no second bucket.
+- **Data platforms:** Cloud Storage is the lake that BigQuery and Dataproc read; see [Analytics on Google Cloud](/cloud/gcp/analytics).
 
 ## Related
 
-[Storage on AWS](/cloud/aws/storage) · [Storage on Azure](/cloud/azure/storage) · [Databases on Google Cloud](/cloud/gcp/databases) · [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking)
+[Object, Block and File](/cloud/data/storage-types) · [Object Storage](/cloud/data/object-storage) · [Block Storage](/cloud/data/block-storage) · [Backups and Vaults](/cloud/resilience/backups-and-vaults) · [Storage on AWS](/cloud/aws/storage) · [Storage on Azure](/cloud/azure/storage) · [Databases on Google Cloud](/cloud/gcp/databases) · [System Design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="When would you choose a dual-region Cloud Storage bucket?" category="Reliability" level="Mid">
-    When data must survive a Region outage and stay readable with low latency in two specific Regions, for example user uploads served from two Regions. Writes are replicated automatically, and turbo replication can bound the replication time, with no replication rules to manage.
+  <InterviewQuestion question="Two print servers on Compute Engine each save files on their own Persistent Disk. A retry on the second server cannot find the file. What do you change?" category="Cloud" level="Junior">
+    **Short answer.** Move the files off the private disks. Mount one Filestore share on both servers if the tool must write to a folder. Better still, write each file to a Cloud Storage bucket by key.
+
+    **Why.** A Persistent Disk attaches to one VM, so the other server cannot see its files. A Filestore share is an NFS folder both VMs mount, so any server can finish any job. A bucket goes further: any program with access can fetch the file, including the partner with a signed URL.
+
+    <AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={2} cloud="gcp" highlight={["lb", "pb", "db"]} caption="The retry reaches server B, and B's own Persistent Disk has no copy of the file." />
+
+    **Follow-ups the interviewer may ask.**
+    - Could both VMs attach the same disk instead?
+    - Who deletes old print files once they live in a bucket?
+
+    **Watch out for.** Fixing it with "sticky" balancing so retries return to the same server. That server can still fail, and its files go with it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When would you choose a dual-region Cloud Storage bucket?" category="Cloud" level="Mid">
+    **Short answer.** When data must stay readable if one region fails, and you know the two regions where it is used. One bucket name serves both regions, with no replication rules to manage.
+
+    **Why.** A dual-region bucket stores every object in two regions you pick, and both serve reads. Copying to the second region happens in the background; turbo replication, a paid option, adds a time target for it. A multi-region bucket spreads data wider, but you do not choose the regions.
+
+    **Follow-ups the interviewer may ask.**
+    - What can a reader see if one region fails seconds after a write?
+    - Which costs go up compared with a regional bucket?
+
+    **Watch out for.** Picking dual-region for data that only one region's VMs process. Those VMs gain nothing from the second copy, and you pay for it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A self-run PostgreSQL on Compute Engine must survive a zone failure. Regional disk or snapshots?" category="Cloud" level="Mid">
+    **Short answer.** A regional Persistent Disk for losing a zone, plus scheduled snapshots for going back in time. They solve different problems, so production needs both.
+
+    **Why.** A regional disk writes every block to two zones before the write completes. If a zone fails, you attach the disk to a VM in the other zone and lose nothing. A snapshot is taken at intervals, so restoring one loses recent writes. But it can undo a bad delete, which the regional disk copies at once.
+
+    **Follow-ups the interviewer may ask.**
+    - How long does it take to restore a large snapshot in another zone, and how would you measure it?
+    - Why might a managed database be simpler than either option?
+
+    **Watch out for.** Forgetting that a regional disk slows writes a little, because each one waits for both zones.
   </InterviewQuestion>
 </InterviewQuestions>

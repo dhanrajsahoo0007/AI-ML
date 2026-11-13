@@ -1,11 +1,332 @@
 ---
 title: "Configuration, Patching and Fleet Management"
-description: "What machines still need after they exist: configuration, patching, golden images and running one command across a fleet."
-status: outline
+description: "Keeping servers patched and alike over time: inventory from agents, patch baselines, image pipelines, commands without SSH and rules that catch drift."
+updated: 2026-11-14
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** what still has to be done to machines after they exist: configuration that is not secret, operating system and image patching, golden-image pipelines, and running one command on a thousand instances without logging in to each. On managed and serverless services most of this work disappears.
+<KeyIdea>
+  A server starts to age the day it starts. Keep a list of servers that the servers write themselves, fix them on a schedule, and replace them instead of repairing them.
+</KeyIdea>
 
-**Related reading on this site:** [DevOps & IaC on AWS](/cloud/aws/devops) · [Compute on AWS](/cloud/aws/compute)
+## The story
+
+Brightpost runs 9 servers in its shop account. The 3 shop servers sit in a scaling group and are replaced every week from a fresh image. The other 6 were built by hand over two years. Two of them are a reporting server for the finance lead and an upload server for the printing partner's stock lists. Once a month Asha patches those 6 with a script that logs in to each address in a shared spreadsheet. One Monday in September, a critical flaw is published in a widely used encryption library. It lets an attacker read pieces of a server's memory, where keys and passwords live. By Tuesday night the shop servers run a new image, and the script has patched 4 servers. The spreadsheet had 4 addresses. Nobody had added the reporting server or the upload server, both built months earlier in a hurry. For 21 days the upload server answers the internet with the flawed library, and its logs show probes for the flaw on 5 of them. On day 21 the team turns on scanning for running servers. It flags both machines within the hour. Nobody can prove that nothing leaked, so Brightpost replaces the upload server's certificate and the partner's password.
+
+Nothing in the cloud failed. A list that a person kept was wrong, and nothing checked it. Each step below replaces one thing that someone had to remember.
+
+## How it works
+
+A few words first. A **fleet** is every server a team runs. A **patch** is a fix the software's maker publishes for a flaw. A known flaw gets a public ID, called a **CVE**, so scanners and patch tools can name it. **Configuration** is the settings a server or app reads, such as which database to use. **Fleet management** is keeping all of it known, patched and alike over months.
+
+### Step 1: Patching from a list someone keeps
+
+<AnimatedDiagram spec="animated/cloud/image-pipeline" step={1} minWidth={620} caption="An engineer patches the 4 servers on the list over SSH. The 2 hand-built servers are on no list, so nothing reaches them." />
+
+Patching has two halves: knowing what you run, and changing it. Brightpost's first method does both by hand. The list lives in a spreadsheet. The change is a script that opens an **SSH** session, a remote login over the network, to each address in turn.
+
+The script works on every server it is given. Its weak part is the list: each server built in a hurry is one more row someone must remember. On a virtual machine the OS is yours to patch, as [Shared Responsibility](/cloud/fundamentals/shared-responsibility) explains. A server missing from the list is never patched.
+
+<PremiumBreak />
+
+### Step 2: Two servers nobody listed
+
+<AnimatedDiagram spec="animated/cloud/image-pipeline" step={2} minWidth={620} caption="The failure: on day 21 the scanner, now pointed at running servers, finds the flaw on the 2 servers the list never had." />
+
+The patch run reported success, and it was true for every server the script knew about. A script reports only what it touched.
+
+<Callout tone="red" title="What breaks">
+  The flaw is published on Monday. By Tuesday night 7 of 9 servers are fixed: 3 from a new image, 4 from the script. The upload server faces the internet with the flawed library for 21 days, and probes for the flaw reach it on 5 of them. The scan finds it only after the team turns scanning on for running servers. The cost is a new certificate, a new partner password and three weeks of not knowing.
+</Callout>
+
+The list came from a person, not from the servers. The next steps make the servers report themselves.
+
+### Step 3: Patch in place, or replace
+
+There are two ways to apply a fix to a running fleet.
+
+<Compare
+  columns={["", "Patch in place (mutable)", "Replace from an image (immutable)"]}
+  rows={[
+    ["What happens", "Install the fix on each running server", "Build a new image with the fix, start new servers, remove the old"],
+    ["After 6 months", "Each server has its own history of changes", "Every server matches one image version"],
+    ["Rollback", "Uninstall the fix, if the package allows it", "Start servers from the previous image"],
+    ["Data on the server", "Stays where it is", "Must live elsewhere, or it is lost"],
+    ["Brightpost", "The 6 hand-built servers", "The 3 shop servers"],
+  ]}
+  caption="Mutable servers are changed after they start. Immutable servers are never changed; they are replaced."
+/>
+
+[Virtual Machines](/cloud/compute/virtual-machines) shows how an image is baked; this page runs it over time. Most fleets have both kinds for a while. Brightpost's plan: a fleet manager for every server, an image pipeline for anything that can be rebuilt.
+
+### Step 4: An agent on every server, and no SSH
+
+<AnimatedDiagram spec="animated/cloud/image-pipeline" step={3} minWidth={620} caption="An agent on each of the 9 servers reports to the fleet manager and takes commands back. The scanner reads the same inventory." />
+
+A **fleet manager** is a cloud service that runs commands, installs patches and collects facts on many servers. It works through an **agent**, a small program on each server that calls out to the service. No port on the server has to accept logins.
+
+The agent sends an **inventory**: OS version and every installed package. Now the list comes from the servers. With the agent on all 9, inventory shows 9, including the upload server's old library.
+
+Commands travel the same path, to 3 servers or 300 from one screen. A person who needs a shell gets a session through the agent, checked against their cloud identity and logged. Brightpost closes port 22 on all 9 servers and deletes the SSH keys.
+
+### Step 5: Patch baselines and maintenance windows
+
+<AnimatedDiagram spec="animated/cloud/image-pipeline" step={4} minWidth={620} caption="The baseline tells the fleet manager which fixes to install, how soon, and in which weekly window." />
+
+A **patch baseline** is a written rule for which fixes are approved and how soon. A **maintenance window** is the time when installs and restarts may happen. Brightpost's rules are short:
+
+1. Critical and security fixes are approved on the day they appear and installed within 7 days.
+2. Other fixes wait 7 days, so other people find their bugs first.
+3. The window is Tuesday 02:00 to 04:00, when about 2 orders an hour arrive.
+4. For a flaw being exploited now, Asha runs the patch at once, outside the window.
+
+After each run the fleet manager reports each server as patched, failed or missing fixes. A failure is a row in a report, not a silence. The run also restarts services, because a program keeps the old library loaded until it restarts.
+
+### Step 6: The image pipeline
+
+<AnimatedDiagram spec="animated/cloud/image-pipeline" step={5} minWidth={620} caption="The pipeline starts from the newest base image, adds patches, the agent and hardening, tests the result and stores v14." />
+
+An **image pipeline** builds server images with no hand steps. It has four stages:
+
+1. **Base image.** The OS maker's newest published image, already patched to that date.
+2. **Bake.** A temporary server starts from it and installs patches, the agent and the shop's packages. It also applies **hardening**: removing what the server does not need, such as unused services.
+3. **Test.** A server boots from the result. A vulnerability scan and a smoke test must pass.
+4. **Store.** The image is saved with a version number. Brightpost keeps the last 3.
+
+The pipeline runs every Monday, and at once when a critical fix appears. The bake takes about 35 minutes and the test about 15.
+
+### Step 7: Refreshing the fleet
+
+<AnimatedDiagram spec="animated/cloud/image-pipeline" step={6} minWidth={620} caption="The scaling group replaces its 3 servers from v14, one at a time." />
+
+The scaling group's server template names an image version. Brightpost changes it from v13 to v14 and starts an **instance refresh**. The group starts one new server, waits for its health check, then removes an old one. Three servers take about 20 minutes, so a published fix reaches the shop in about 70.
+
+Rolling back is the same move with v13. The rollout follows the rolling pattern in [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies), with an image instead of an app release.
+
+### Step 8: Settings outside the image
+
+An image must work in test and in production, so it cannot hold either one's settings. Settings live in three places.
+
+<Compare
+  columns={["Kind", "Example at Brightpost", "Where it lives"]}
+  rows={[
+    ["Code", "How a basket is priced", "The image or container, from the pipeline"],
+    ["Configuration", "Database hostname, payment page address, log level", "A parameter store, read at boot"],
+    ["Secret", "Database password, payment key", "A secret store, read at boot"],
+  ]}
+  caption="The test is simple: would it hurt if a stranger read it? Then it is a secret."
+/>
+
+A **parameter store** is a managed list of named settings, such as `/shop/prod/db-host`, with versions and access rules. A new server reads its settings at boot, so v14 runs in test and in production unchanged. A <Term id="secret">secret</Term> has its own page: [Secrets, Identity-Based Access and Rotation](/cloud/resilience/secrets-management).
+
+### Step 9: Rules that catch drift
+
+<AnimatedDiagram spec="animated/cloud/image-pipeline" step={7} minWidth={620} caption="Config rules check every hour that each server still matches what it should be." />
+
+<Term id="drift">Drift</Term> is the gap between how a server should be and how it is. [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code) catches it in cloud resources. Servers also drift inside: a package installed by hand, an agent that stopped.
+
+A **config rule** checks a setting and reports anything that breaks it. Brightpost runs three every hour:
+
+- Every server reports to the fleet manager. A new hand-built server is flagged within the hour.
+- No server runs an image older than 30 days.
+- Port 22 is closed on every server.
+
+A broken rule opens a ticket for the team that owns the server, from its `owner` tag.
+
+### Step 10: Who patches what
+
+The less of the stack you ship, the less you patch. On a function, the provider patches the OS and the runtime. On a VM, all of it is yours.
+
+<ResponsibilityGrid set="patching" />
+
+Brightpost's resize worker is a function, so the library flaw needed no work there. The provider patches the managed database's engine in a window Brightpost chooses. Your code's own libraries stay yours everywhere.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: agents, a patch schedule, an image pipeline, a settings store and drift rules.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Fleet manager and agent:** AWS Systems Manager, with the SSM Agent on each instance. Run Command runs a script on many instances. Session Manager opens a shell through the agent, with no inbound port.
+    - **Patching:** Patch Manager applies a patch baseline, which approves fixes by type, severity and days since release. Maintenance windows set when it runs.
+    - **Images:** EC2 Image Builder bakes, tests and distributes AMIs on a schedule. An Auto Scaling group's instance refresh replaces instances from a new launch template version.
+    - **Inventory and drift:** Systems Manager Inventory lists software on each instance. AWS Config records resource settings over time and judges them with rules, such as "instance managed by Systems Manager".
+    - **Settings:** Parameter Store, part of Systems Manager, holds plain and encrypted values by path.
+
+    **The difference that changes a design.** One service and one agent do commands, sessions, patching, inventory and settings. The agent needs an IAM role on the instance. Without the agent or the role, an instance is invisible to all five, so a Config rule for that gap matters most.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Fleet manager and agent:** VM Manager, with the OS Config agent. For a shell, OS Login ties SSH to IAM, and Identity-Aware Proxy reaches VMs with no public address.
+    - **Patching:** VM Manager OS patch management. A patch job runs now; a patch deployment runs on a schedule, zone by zone if you choose.
+    - **Images:** custom images grouped into an image family. A managed instance group's rolling update moves VMs to a new instance template. Teams bake with their own tools, often Packer run from Cloud Build.
+    - **Inventory and drift:** VM Manager's OS inventory lists packages on each VM. OS policies declare packages, files and settings, and report or fix drift. Cloud Asset Inventory keeps a history of resource settings.
+    - **Settings:** instance and project metadata for simple values. Parameter Manager, alongside Secret Manager, for versioned settings.
+
+    **The difference that changes a design.** An image family works as a "latest" pointer: a template that names it gets the newest image each time a VM is created. So a scale-out can pick up an untested image. Publish into the family only after tests pass, or name an exact image in production.
+  </Tab>
+  <Tab label="Azure">
+    - **Fleet manager and agent:** several services on the VM agent. Run Command runs scripts in a VM. Azure Bastion opens SSH or RDP sessions without a public IP.
+    - **Patching:** Azure Update Manager assesses and installs updates. A maintenance configuration sets the schedule.
+    - **Images:** Azure VM Image Builder bakes images into Azure Compute Gallery, which keeps versions and copies them to regions. A VM scale set rolls its instances to a new image version.
+    - **Inventory and drift:** Change Tracking and Inventory lists software and changes. Azure Policy judges resource settings, and Azure Machine Configuration checks settings inside the OS.
+    - **Settings:** Azure App Configuration, with Key Vault references for secrets.
+
+    **The difference that changes a design.** Settings inside the OS are judged by the same Azure Policy as cloud resources, so one compliance view covers both. Azure Arc brings servers in your own building or on other clouds under the same policies and Update Manager.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/image-pipeline" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/image-pipeline" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Patch in place or replace?"
+  tree={{
+    q: "Does the server hold data that exists nowhere else?",
+    yes: "Patch in place on a baseline, with a snapshot before each window. Then plan to move the data to a managed database, a bucket or a separate disk, so the server can be replaced.",
+    no: {
+      q: "Can a new copy be built from an image with no hand steps?",
+      yes: {
+        q: "Does it run in a scaling group?",
+        yes: "Replace: bake, test, store, then refresh the group one server at a time. Rollback is the previous image.",
+        no: "Put it in a scaling group of 1. A refresh then rebuilds it from the image, and a lost server comes back by itself.",
+      },
+      no: "Write the hand steps into the image build first. Until then, patch in place through the fleet manager, on a baseline.",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="A critical fix appears on a Wednesday. Brightpost's baseline installs critical fixes within 7 days, and its window is Tuesday 02:00. When does it reach the in-place servers?" hint="Count to the next window.">
+    The next Tuesday at 02:00, 6 days later, inside the 7-day rule. If the flaw is being exploited now, Asha runs the patch at once instead of waiting.
+  </QuizItem>
+  <QuizItem question="v14 breaks the payment page an hour after the refresh. What is the rollback, and about how long does it take?" hint="v13 is still in the store.">
+    Point the template back at v13 and refresh again. Three servers take about 20 minutes. No server is repaired by hand.
+  </QuizItem>
+  <QuizItem question="Someone builds a tenth server by hand and never installs the agent. What notices it, and when?">
+    The hourly config rule that every server reports to the fleet manager. It flags the new server within the hour, and a ticket goes to the team in its owner tag.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Patch in place", "Replace from an image", "Provider patches (managed service)"]}
+  rows={[
+    ["From a published fix to patched (Brightpost)", "Up to 7 days, by baseline", "About 70 minutes", "The provider's schedule, in your window"],
+    ["Servers alike after 6 months", false, true, true],
+    ["Rollback", "Uninstall, if possible", "Previous image, about 20 minutes", "Usually none offered"],
+    ["Works with data on the server", true, false, "No server to hold it"],
+    ["Setup effort", "An agent and a baseline: a day", "A pipeline and a group: about a week", "Choose a window"],
+    ["Brightpost uses it for", "6 hand-built servers, for now", "3 shop servers", "The database engine and the resize worker"],
+  ]}
+  caption="Brightpost's numbers. Setup times are what a small team should expect the first time."
+/>
+
+Patching in place is cheapest to start and hardest to keep honest. Replacing costs a week, then keeps every server the same.
+
+## Common pitfalls
+
+- **An inventory kept by people.** A spreadsheet is wrong the day someone builds a server in a hurry. Take the list from the agents, and add a rule that flags any server without one.
+- **Patched on disk, still running the old code.** A program keeps the old library loaded until it restarts. Restart the service or the server in the same window, and check the version that is running.
+- **SSH left open "for emergencies".** An open port 22 is the first thing scanners try. Close it, and give people sessions through the fleet manager, checked by identity and logged.
+- **Settings and secrets baked into the image.** Then one image cannot run in test and production, and a leaked image leaks the password. Read settings and secrets at boot.
+- **A golden image nobody rebuilds.** An image baked in March carries March's flaws to every server started in June. Rebuild every week even when nothing changed, and flag servers on images older than 30 days.
+
+## How to say it in an interview
+
+"I treat a fleet as something that ages, so the work is to keep it known, patched and alike. Every server runs the fleet manager's agent, which gives me an inventory from the servers themselves and commands without SSH. Anything that can be rebuilt is immutable. A pipeline bakes the newest base image with patches, tests and stores it, and the scaling group refreshes one server at a time. Rollback is the previous image. Servers that must stay mutable get a patch baseline and a maintenance window, with a report per server. Settings live in a parameter store and secrets in a secret store, read at boot. Config rules flag drift every hour, and I move work to managed services where the provider does the patching."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Where do you keep a database hostname, and where do you keep its password?" level="Junior" category="Cloud">
+    **Short answer.** The hostname goes in a parameter store, a managed list of named settings. The password goes in a secret store, which encrypts it, controls who reads it and can rotate it. Neither goes in the image or the code.
+
+    **Why.** The hostname differs between test and production, so the image reads it at boot. A stranger who reads it learns little. The password opens the orders database, so it needs encryption, tight access and an audit of every read. With both outside the image, one tested image runs everywhere.
+
+    **Follow-ups the interviewer may ask.**
+    - How does the server prove it may read the secret?
+    - What happens to running servers when the password is rotated?
+
+    **Watch out for.** Putting everything in the secret store "to be safe". It blurs who may read what.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why replace servers with a new image instead of patching them in place?" level="Mid" category="Cloud">
+    **Short answer.** Replacing keeps every server identical to one tested image, and rollback is starting servers from the previous image. Patching in place gives each server its own history, so after a few months no two are alike.
+
+    **Why.** Brightpost's pipeline bakes the newest base image with patches and the agent, tests it and stores v14. The scaling group replaces 3 servers one at a time in about 20 minutes, and v13 stays stored for rollback. Test and production run the same bytes. In-place patching still suits a server whose data has not moved out yet.
+
+    <AnimatedDiagram spec="animated/cloud/image-pipeline" step={6} highlight={["base", "bake", "test", "store", "shop"]} caption="Bake, test, store, then refresh the group from the stored version." />
+
+    **Follow-ups the interviewer may ask.**
+    - What has to be true about a server's data before you can replace it?
+    - How do you keep a golden image from going stale?
+
+    **Watch out for.** Saying "immutable" and then logging in to fix one server by hand. The next refresh erases the fix, and the image still has the bug.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you run a command on 200 servers without opening SSH?" level="Mid" category="Cloud">
+    **Short answer.** Through the cloud's fleet manager. An agent on each server calls out to the service, picks up the command, runs it and reports the result. No inbound port is open, and each run is tied to a cloud identity and logged.
+
+    **Why.** The agent starts the connection from inside, so a firewall can block all inbound traffic. You target servers by tag, such as `env=prod`, run in batches of 10% and stop if errors pass a threshold. Brightpost closed port 22 on all 9 servers.
+
+    <AnimatedDiagram spec="animated/cloud/image-pipeline" step={3} highlight={["fleetmgr", "listed", "unlisted", "shop"]} caption="Every server's agent talks to the fleet manager; commands and results share that path." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does the server need so its agent can reach the service?
+    - How do you stop a bad command from hitting all 200 at once?
+
+    **Watch out for.** Calling a jump host with shared SSH keys "no SSH". It is still SSH, with one more server to patch.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A scan finds a critical flaw on 2 servers nobody knew you had. What do you fix besides those 2 servers?" level="Mid" category="Cloud">
+    **Short answer.** The way the fleet is listed. Patch the 2 servers today. Then take inventory from an agent on every server, flag any server without one, and scan running servers, not only images.
+
+    **Why.** Brightpost's patch script worked; its list did not. A list kept by people misses each server built in a hurry. With agents, inventory shows 9 of 9 and the scanner reads it. With an hourly rule, a new unmanaged server is flagged within an hour, not after 21 days. Also check whether the flaw was used: rotate anything the exposed server held.
+
+    <AnimatedDiagram spec="animated/cloud/image-pipeline" step={2} highlight={["scanner", "unlisted"]} caption="The scan found what the list never had." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why did the patch report say everything succeeded?
+    - Who should own a server that nobody claims?
+
+    **Watch out for.** Adding the 2 addresses to the spreadsheet and calling it done. The next hand-built server repeats the incident.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="You run 400 VMs across two clouds and a critical CVE drops. Walk through the next 24 hours." level="Senior" category="Cloud">
+    **Short answer.** Find out where it is from inventory, fix the exposed servers first, rebuild images for the rest, and prove the result with a scan. Hour 0 is a query, not a meeting.
+
+    **Why.** First, query both clouds' inventories for the package, and compare them with each cloud's list of running VMs to find unmanaged ones. Second, patch internet-facing servers now through the fleet manager, outside the window. Third, start the image pipelines and refresh immutable groups in batches; mutable servers get an emergency run with restarts. Last, rescan, report each server as fixed, failed or unknown, and rotate keys on anything exposed.
+
+    <AnimatedDiagram spec="animated/cloud/image-pipeline" step={4} path="baseline>fleetmgr>unlisted" caption="An emergency run: the baseline approves the fix and the fleet manager pushes it to each server's agent." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you get one view across two clouds' fleet managers?
+    - The fix needs a reboot and a server cannot restart today. What then?
+
+    **Watch out for.** Starting with the image pipeline. A new image protects new servers; the exposed ones already running need patching first.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines)
+- [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies)
+- [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code)
+- [Shared Responsibility](/cloud/fundamentals/shared-responsibility)
+- [Secrets, Identity-Based Access and Rotation](/cloud/resilience/secrets-management)
+- [Threat Detection, Audit Logs and Security Posture](/cloud/resilience/threat-detection)
+- [Serverless Containers and Platforms as a Service](/cloud/compute/serverless-containers-and-paas)
+- [DevOps & IaC on AWS](/cloud/aws/devops)
+- [Security overview](/system-design/fundamentals/security)
+
+## Further reading
+
+- [AWS Systems Manager User Guide](https://docs.aws.amazon.com/systems-manager/latest/userguide/what-is-systems-manager.html): commands, sessions, patching and parameters.
+- [EC2 Image Builder User Guide](https://docs.aws.amazon.com/imagebuilder/latest/userguide/what-is-image-builder.html): image pipelines.
+- [Google Cloud VM Manager](https://cloud.google.com/compute/docs/vm-manager): OS patching, inventory and OS policies.
+- [Azure Update Manager overview](https://learn.microsoft.com/azure/update-manager/overview): patch assessment and schedules.

@@ -24,7 +24,9 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Why this order: on a phone the figure opens on the left ~480 units. Steps 1 to 4 happen in the left and middle
 // columns, so the free preview and the failure show without scrolling; only steps 5 and 6 need the right column.
 // Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Left nodes are 182
-// wide for "Defender for Cloud" and "Maintenance config"; the shop node is 214 wide for "Managed instance group".
+// wide for "Defender for Cloud" and "Maintenance config"; the shop node is 224 wide for "Managed instance group".
+// The Operations and Drift checks zones use the subnet kind (inline label, no tab), because edges leave them
+// through the top: the inventory edge at x 120 and the rules edge at x 385.
 const vm = {
   aws: { id: "aws-ec2", label: "EC2 instances" },
   gcp: { id: "gcp-compute-engine", label: "VM instances" },
@@ -47,9 +49,9 @@ const spec: DiagramSpec = {
   zones: [
     { id: "people", title: "People", tone: "neutral", x: 10, y: 40, w: 218, h: 135 },
     { id: "security", title: "Security", tone: "red", x: 10, y: 200, w: 218, h: 97 },
-    { id: "ops", title: "Operations", tone: "orange", x: 10, y: 325, w: 218, h: 260 },
+    { id: "ops", title: "Operations", tone: "orange", kind: "subnet", x: 10, y: 325, w: 218, h: 260 },
     { id: "fleet", title: "Fleet: 9 servers", tone: "teal", x: 268, y: 40, w: 234, h: 405 },
-    { id: "drift", title: "Drift checks", tone: "orange", x: 268, y: 470, w: 234, h: 115 },
+    { id: "drift", title: "Drift checks", tone: "orange", kind: "subnet", x: 268, y: 470, w: 234, h: 115 },
     { id: "pipeline", title: "Image pipeline", tone: "violet", x: 588, y: 40, w: 202, h: 405 },
   ],
   nodes: [
@@ -96,7 +98,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 385,
       y: 390,
-      w: 214,
+      w: 224,
       h: 56,
       cloud: {
         aws: { label: "Auto Scaling group" },

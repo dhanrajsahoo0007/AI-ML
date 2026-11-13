@@ -1,11 +1,331 @@
 ---
 title: "AI/ML Platforms on the Cloud"
-description: "The building blocks each cloud sells for AI work, from calling a ready-made model to tuning your own, and when to buy or build."
-status: outline
+description: "The four ways to use AI on a cloud, from a ready-made service to your own model on GPUs, what each is built from and what each costs."
+updated: 2026-11-14
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the building blocks each cloud sells for AI work, from calling a pre-trained API to fine-tuning on rented accelerators, and how they fit together into a retrieval-based assistant with guardrails and a human approval step. It also covers machine learning written in SQL inside a warehouse.
+<KeyIdea>
+  Clouds sell AI as a ladder, from a finished service you call to a model you train and run yourself. Climb only as high as the job needs, because each rung up adds control, work and cost.
+</KeyIdea>
 
-**Related reading on this site:** [AI & ML on AWS](/cloud/aws/ai-ml) · [AI & ML on Google Cloud](/cloud/gcp/ai-ml) · [AI & ML on Azure](/cloud/azure/ai-ml)
+## The story
+
+Brightpost's support agent answers about 60 customer emails a day. In October, Asha builds a tool that drafts each reply for the agent to check. She wants the drafts to sound like Brightpost, so she tunes an open model on 9,000 past support emails over a weekend. The tuned model runs on its own GPU machine, switched on all day. The agent uses it for about 2 hours a day, so the machine sits idle for 22. On 2 December the printing partner moves the last order date for Christmas delivery from 18 to 15 December. Asha edits the help article in 5 minutes. The drafts keep saying 18 December, because the old date is inside the model. Over the next 6 days the agent sends 70 drafts with that date. Then 23 customers order on 16 to 18 December, their cards arrive after Christmas, and Brightpost refunds all 23 orders.
+
+The steps below walk Brightpost back down the ladder and show what each rung is built from.
+
+## How it works
+
+Three words first. A **model** is a program trained on examples to turn an input, such as text or a photo, into an output. Running a trained model to get an answer is **inference**. A **foundation model** is a large model trained on broad data and used for many tasks. [LLM serving and inference](/ai-system-design/genai-system-design/llm-serving-inference) covers how one runs.
+
+### Step 1: Four rungs, from rent to build
+
+<AnimatedDiagram spec="animated/cloud/ai-adoption-ladder" minWidth={520} caption="Four ways to use AI on a cloud. Each rung down gives you more control over the model and more of the work." />
+
+Every cloud sells AI in four forms.
+
+1. **A ready-made AI service.** You send a photo, a sound file or a document and get labels, text or a translation back. You choose no model and run nothing.
+2. **A hosted model through one API.** You pick a foundation model from the provider's **model catalog** and send it a **prompt**, the text it reads. You pay per **token**, a word piece of three or four letters.
+3. **Your data, their model.** You add your own documents through retrieval, or your own examples through tuning, to a model the provider still runs.
+4. **Your own model.** You bring data, training code and GPUs, then train, store and serve the model on a managed ML platform.
+
+Start at the lowest rung that does the job, and climb only when a test shows it falls short. Brightpost's drafter needed rung 3 and was built on rung 4.
+
+<PremiumBreak />
+
+### Step 2: Rung 1: ready-made services
+
+Ready-made services, also called pre-trained APIs, each do one task: label an image, turn speech into text, translate, or read a form. The provider trains the model and keeps it current. You pay per image, minute of audio or page.
+
+Brightpost uses one to turn the printing partner's PDF invoices, about 40 a month, into rows for the finance lead.
+
+The limit is the vocabulary. Out of the box, a vision service tags a poster "beach", not "retro", one of Brightpost's own style words. Step 9 comes back to that.
+
+### Step 3: Brightpost starts at the top: a tuned model on its own GPU
+
+<AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={1} minWidth={620} caption="Brightpost's first drafter: a model tuned on 9,000 emails runs on its own GPU machine, busy 2 hours in 24." />
+
+**Tuning**, or fine-tuning, trains an existing model further on your own examples, so its style and habits change. [Fine-tuning LLMs](/ai-system-design/genai-system-design/fine-tuning-llms) covers the method. Asha's tuning job read 9,000 emails on rented GPUs for a weekend.
+
+A tuned model is a large file of numbers called **weights**. To answer, it is loaded onto a machine with a GPU behind an **endpoint**: an address the app sends prompts to. A dedicated endpoint bills for every hour it is on, busy or not. Brightpost's ran 24 hours a day and worked for 2. That is 720 paid hours a month for about 60 hours of drafting.
+
+### Step 4: The date moves, the model does not
+
+<AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={2} minWidth={620} caption="The failure: the help article now says 15 December, but nothing carries the edit into the tuned model, so drafts still say 18." />
+
+A tuned model learns facts the way a person learns a habit, by repetition. It never reads the help articles.
+
+<Callout tone="red" title="What breaks">
+  On 2 December the article changes to 15 December in 5 minutes. The model has seen "18 December" in hundreds of old emails, and no path carries the edit into its weights. It writes the old date in 70 drafts over 6 days, and 23 customers order too late. A fix needs another weekend of tuning, and the next date change would break it again.
+</Callout>
+
+Two mistakes caused it. Tuning was used to teach facts, which change. And the model sat on a machine that idled 22 hours a day.
+
+### Step 5: Rung 2: a hosted model through one API
+
+<AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={3} minWidth={620} caption="The tuned endpoint is deleted. The drafter sends each prompt to a hosted model and pays for the tokens it uses." />
+
+A **managed model platform** hosts many foundation models behind one API. The provider runs the machines. Changing models is one setting, not a new server.
+
+Costs follow use. Brightpost pays for the tokens in and out of about 60 drafts a day, and nothing at night. For steady, heavy traffic the platforms also sell **provisioned throughput**: model capacity reserved by the hour or month and paid whether used or not. It buys predictable speed and brings back the idle hours. A hosted model on its own still knows nothing about Brightpost's dates.
+
+### Step 6: Rung 3: ground the answers with retrieval
+
+<AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={4} minWidth={620} caption="An index job turns each edited article into vectors. The drafter finds the 3 closest passages and puts them in the prompt." />
+
+**Retrieval**, or RAG (retrieval-augmented generation), finds the passages that answer a question and puts them in the prompt. An **embedding** is a list of numbers that stands for a passage's meaning, so similar passages get similar numbers. A **vector index** stores those lists and finds the closest ones fast. [RAG fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) and [Vector databases](/ai-system-design/genai-system-design/vector-databases) cover the theory.
+
+On a cloud this is three managed parts. An index job splits each article, embeds the pieces and stores them, on every edit. The vector index returns the top 3 passages. The hosted model writes the draft from them. An edit now reaches the next draft in about 5 minutes.
+
+<Compare
+  columns={["", "Retrieval", "Tuning"]}
+  rows={[
+    ["What it teaches", "Facts the model looks up each time", "Style, format and habits"],
+    ["When a fact changes", "Edit the document: live in about 5 minutes", "Tune again: a weekend for Brightpost"],
+    ["Can show its source", true, false],
+    ["Extra running cost", "An index, and a search per question", "Often a dedicated endpoint, billed by the hour"],
+    ["Brightpost uses it for", "Dates, prices, delivery rules", "Nothing: a tone guide in the prompt was enough"],
+  ]}
+  caption="Retrieval for facts, tuning for behaviour. Many teams need only the first."
+/>
+
+### Step 7: Test every change before release
+
+<AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={5} minWidth={620} caption="A fixed set of test questions runs against the prompt, the model and the articles before any change ships." />
+
+An **evaluation set** is a fixed list of test inputs with the answer each should get. Brightpost's has 80 questions taken from real emails, such as "When must I order for Christmas?". Every change to the prompt, the model or the articles runs all 80. A change that gets more of them wrong does not ship. The platforms run these tests and can use a second model to grade longer answers ([Offline evaluation benchmarks](/ai-system-design/ml-system-design/offline-evaluation-benchmarks)).
+
+Safety is a separate layer: guardrails, masked personal data and approval for refunds over £30. [AI Security](/cloud/resilience/ai-security) builds it for the customer chatbot; here, the agent reads every draft.
+
+### Step 8: Watch the tokens, keep the data at home
+
+<AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={6} minWidth={620} caption="Calls to the model go through a private endpoint in the UK region, and a usage monitor counts every token." />
+
+AI bills come in three shapes:
+
+- **Per call.** Ready-made services charge per image, page or minute.
+- **Per token.** Hosted models charge for tokens in and out. A prompt that carries 3 passages costs more than a bare question.
+- **Per hour.** Endpoints, provisioned throughput and GPU machines bill while they are on.
+
+A usage monitor counts tokens per feature and alerts at twice a normal day ([FinOps and cost tools](/cloud/operations/finops-and-cost-tools)).
+
+Data is the second check, because a prompt carries customer emails to a service Brightpost does not run. The drafter calls the model through a <Term id="private-endpoint" /> in the UK region. Any option to process in other regions is off. Each model also has a <Term id="quota">quota</Term>, such as tokens per minute; [Quotas, Throttling and Retries](/cloud/resilience/quotas-and-retries) covers raising one.
+
+### Step 9: Own a model only where it pays
+
+<AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={7} minWidth={620} caption="The photo style tagger is the one model Brightpost owns: a pipeline trains it on the GPUs, and only a version that passes its tests is registered." />
+
+Rung 4 has one use at Brightpost: the photo style tagger, because no ready-made service knows "retro". A **managed ML platform** supplies the parts:
+
+- **Notebooks** for trying ideas, and **training jobs** that rent GPUs for one run.
+- A **pipeline**: the steps from data to model, written down so they rerun the same way.
+- A **model registry**: a catalogue of model versions that records which one is approved.
+- **Endpoints or batch jobs** to serve the model.
+
+The tagger retrains each month on about 1,200 newly tagged photos and is registered only if it beats the last version on 200 test photos. It serves as batch jobs, so no GPU waits all day. [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus) covers GPU quotas and keeping them busy.
+
+### Step 10: A side door for data teams: machine learning in SQL
+
+Some data warehouses train a model with one SQL statement on tables already there, and score new rows with another. Nothing leaves the warehouse and no server runs. The finance lead uses this to forecast next week's orders from two years of history. It suits tables and forecasts, not chat ([Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines)).
+
+## On AWS, Google Cloud and Azure
+
+The ladder is the same on all three clouds: ready-made services, a catalog of hosted models, managed retrieval, and an ML platform for your own models.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Ready-made services:** Amazon Rekognition for images and video, Textract for documents, Transcribe for speech, Translate, and Comprehend for text.
+    - **Hosted models:** Amazon Bedrock, one API for models from Amazon and other companies. Pay per token, or buy Provisioned Throughput.
+    - **Retrieval:** Bedrock Knowledge Bases syncs documents from S3 into a vector store you choose, such as Amazon OpenSearch Serverless.
+    - **Your own models:** Amazon SageMaker AI: notebooks, training jobs, SageMaker Pipelines, a model registry, and real-time or batch inference.
+    - **Accelerators:** GPU instances, plus AWS Trainium for training and Inferentia for inference.
+
+    **The difference that changes a design.** Hosted models and your own models live in two separate services, Bedrock and SageMaker AI, each with its own API, quotas and bill. Teams usually start in Bedrock and move a workload to SageMaker AI only to control the model or its machines.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Ready-made services:** Cloud Vision API, Speech-to-Text, Cloud Translation, Natural Language API and Document AI.
+    - **Hosted models:** Gemini models on Vertex AI, plus Model Garden for other Google, partner and open models. Pay per token, or buy Provisioned Throughput.
+    - **Retrieval:** Vertex AI RAG Engine, with Vertex AI Vector Search as one vector store.
+    - **Your own models:** Vertex AI: Workbench notebooks, custom training, Vertex AI Pipelines, Model Registry, and online or batch prediction.
+    - **Accelerators:** GPUs, and Cloud TPU, Google's own chips.
+
+    **The difference that changes a design.** BigQuery ML is the SQL side door of Step 10. A `CREATE MODEL` statement trains on BigQuery tables and `ML.PREDICT` scores rows, without moving the data. BigQuery can also call Gemini from SQL, so a data team can classify text inside a query.
+  </Tab>
+  <Tab label="Azure">
+    - **Ready-made services:** Azure AI services: Vision, Speech, Language, Translator and Document Intelligence.
+    - **Hosted models:** Azure OpenAI and other models in Microsoft Foundry, formerly Azure AI Foundry. Pay per token, or buy provisioned throughput units.
+    - **Retrieval:** Azure AI Search for vector and keyword search over your documents, connected to a model in Foundry.
+    - **Your own models:** Azure Machine Learning: workspaces, compute clusters, pipelines, a model registry, and online or batch endpoints.
+    - **Accelerators:** N-series GPU virtual machines, also used as Azure Machine Learning compute.
+
+    **The difference that changes a design.** You call a deployment, not a model. Each deployment has a name, a region, a deployment type and its own tokens-per-minute quota. Some deployment types may process requests in any region; others keep processing in one region or a named group of regions. Choose the type for your data rules before you build.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box. The theory of retrieval is on RAG fundamentals in the AI system design section." />
+
+<CloudMapping diagram="cloud/ai-platform-building-blocks" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which rung does this job need?"
+  tree={{
+    q: "Does a ready-made service do the whole task, such as reading invoices or turning speech into text?",
+    yes: "Rung 1. Call the service and pay per item. There is no model to run.",
+    no: {
+      q: "Does the answer depend on your own facts that change, such as prices, dates or rules?",
+      yes: {
+        answer: "Rung 3 with retrieval: index your documents and let a hosted model answer from them.",
+        href: "/ai-system-design/genai-system-design/rag-fundamentals",
+      },
+      no: {
+        q: "Can a hosted model do it with a clear prompt and a few examples in that prompt?",
+        yes: "Rung 2. A hosted model through one API, paid per token. Write the evaluation set first.",
+        no: {
+          q: "Is the gap a style or format that a few thousand examples could teach?",
+          yes: "Rung 3 with tuning: tune a hosted model and let the platform serve it. Keep facts in retrieval.",
+          no: "Rung 4. Train your own model on a managed ML platform, with a pipeline, a registry and batch jobs where you can.",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The tuned endpoint was on for 720 hours in a month and busy for about 60. How many paid hours did nothing?" hint="Subtract, then compare with a per-token bill.">
+    About 660 hours, over 90% of the bill. A hosted model paid per token would have charged only for the drafts, and nothing at night.
+  </QuizItem>
+  <QuizItem question="Brightpost changes its returns window from 30 days to 14. With retrieval in place, what does Asha do, and when do drafts change?" hint="Where does the fact live now?">
+    She edits the help article. The index job runs on the edit, and drafts quote 14 days about 5 minutes later. No model is retrained.
+  </QuizItem>
+  <QuizItem question="Why does the photo style tagger stay on rung 4 when the drafter moved down?">
+    No ready-made service knows Brightpost's style words, and the tags are not facts in a document that retrieval could find. It trains once a month and serves as batch jobs, so no GPU sits idle.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Ready-made service", "Hosted model + retrieval", "Tuned hosted model", "Own model, own endpoint"]}
+  rows={[
+    ["First working version", "An afternoon", "About 2 days", "About 1 week", "Several weeks"],
+    ["You pay for", "Each image, page or minute", "Tokens, plus a small index", "Tokens, often plus hosting hours", "Every hour the GPUs are on"],
+    ["When a fact changes", "Not your facts", "Edit a document: about 5 minutes", "Tune again", "Train again"],
+    ["Cost at night with no traffic", "None", "The index only", "Depends on how it is served", "The whole machine"],
+    ["Control over the model", "None", "Prompt and documents", "Prompt and behaviour", "Everything"],
+    ["At Brightpost", "Invoice reading", "Reply drafter, chatbot", "Not used", "Photo style tagger"],
+  ]}
+  caption="Brightpost's numbers. Times are what a team of 3 engineers should expect the first time."
+/>
+
+Each column to the right adds control and a bill that runs whether or not anyone is using it. Brightpost built its drafter one rung too high and paid in 23 refunds.
+
+## Common pitfalls
+
+- **Tuning to teach facts.** Facts change and weights do not, so the model repeats old dates. Keep facts in documents and retrieve them; tune for style or format.
+- **A dedicated endpoint for light traffic.** Sixty drafts a day do not need a GPU switched on all night. Use per-token calls, batch jobs, or an endpoint that scales down.
+- **No evaluation set.** Without fixed tests, a new model or prompt that gets dates wrong ships unnoticed. Write the tests before you choose the model.
+- **Ignoring where prompts go.** A prompt carries customer data to someone else's service. Pin the region and read the provider's data terms.
+- **Asking for quota on launch day.** Token and GPU quotas often start low, and raises take time. Ask weeks ahead.
+
+## How to say it in an interview
+
+"I treat cloud AI as a ladder: ready-made services, hosted models through one API, my data on their model, then my own model. I start at the lowest rung that passes an evaluation set I write first. Facts that change go in a retrieval index that updates on every edit, not into tuned weights. I tune only for style or format, and I train my own model only when nothing below does the job. I watch the cost shape: per call, per token, or per hour for endpoints and GPUs that bill while idle. Prompts carry customer data, so I call models through a private endpoint in a region my data rules allow."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a ready-made AI service and a hosted foundation model?" level="Junior" category="Cloud">
+    **Short answer.** A ready-made service does one fixed task, such as reading a form, and you send it data, not instructions. A hosted foundation model does many tasks: you choose the model from a catalog and tell it what to do in a prompt.
+
+    **Why.** Brightpost's invoice reader is a ready-made service: a PDF goes in, rows come out, billed per page. Its reply drafter uses a hosted model: the prompt holds the email, 3 help passages and the instructions, billed per token. The service is cheaper and steadier for its one task; the model is flexible but needs a good prompt and tests.
+
+    <AnimatedDiagram spec="animated/cloud/ai-adoption-ladder" highlight={["svc1", "svc2"]} caption="Rung 1 takes your data and returns a fixed kind of answer; rung 2 takes a prompt and can do many tasks." />
+
+    **Follow-ups the interviewer may ask.**
+    - When would you replace a ready-made service with a hosted model?
+    - How is each one billed?
+
+    **Watch out for.** Saying a hosted model is always better because it is newer. For a fixed task such as speech to text, the ready-made service is usually cheaper and more predictable.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When would you choose retrieval over fine-tuning?" level="Mid" category="Cloud">
+    **Short answer.** Choose retrieval when the answers depend on facts that change or must be traced to a source. Choose fine-tuning when you need a style, format or behaviour that a prompt cannot get. Many systems need only retrieval.
+
+    **Why.** Brightpost tuned a model on 9,000 emails. When the Christmas order date moved from 18 to 15 December, the article changed in 5 minutes and the model did not: 70 wrong drafts, 23 refunds. With retrieval, the edit reaches the next draft in about 5 minutes, and each draft can name its source article.
+
+    <AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={2} caption="A tuned model has no path for an edited article, so it keeps the old date." />
+
+    **Follow-ups the interviewer may ask.**
+    - Can you use both? What would each part do?
+    - What does a tuned model cost to serve, not only to train?
+
+    **Watch out for.** Treating tuning as the way to "teach the model our data". It changes behaviour well and facts badly, and every change to the facts means tuning again.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Where does a vector index sit in a cloud AI design, and how does it stay current?" level="Mid" category="Cloud">
+    **Short answer.** It sits between your documents and the model. An index job embeds each document into vectors. At question time the app searches the index and puts the top passages in the prompt. It stays current because the index job runs on every change to the documents.
+
+    **Why.** Brightpost keeps its 120 help articles in object storage. Each edit triggers the index job, which re-embeds that article and replaces its old pieces. The drafter asks for the 3 closest passages before each call, so an edit is live in about 5 minutes. A nightly job would make a change wait up to a day.
+
+    <AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={4} highlight={["data", "indexjob", "vector", "app"]} caption="Articles flow into the index on each edit; the drafter searches the index before it calls the model." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to an article that is deleted?
+    - What changes if you switch to a different embedding model?
+
+    **Watch out for.** Forgetting deletes and embedding changes. A removed article left in the index keeps answering, and vectors from two embedding models cannot be compared.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your team pays for a GPU endpoint around the clock but uses it about 2 hours a day. What are your options?" level="Mid" category="Cloud">
+    **Short answer.** First ask whether the job needs its own model at all; a hosted model paid per token may do it. If it does, serve it as batch jobs, use an endpoint that scales down when idle, or share one GPU across several models.
+
+    **Why.** Brightpost's endpoint billed 720 hours a month for about 60 hours of drafting: over 90% bought nothing. A hosted model with retrieval removed the endpoint, and the bill now follows the tokens of about 60 drafts a day. The style tagger, which does need its own model, runs as batch jobs, so its GPUs bill only while they work.
+
+    <AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={1} highlight={["app", "gpu"]} caption="A dedicated endpoint bills all 24 hours, and the drafter used it for 2." />
+
+    **Follow-ups the interviewer may ask.**
+    - How long does an endpoint take to start from zero, and who waits for it?
+    - When does provisioned throughput beat paying per token?
+
+    **Watch out for.** Jumping to a cheaper GPU type. It cuts the hourly price but keeps paying for 22 idle hours a day.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design the cloud side of an internal AI assistant for a company with strict data rules." level="Senior" category="Cloud">
+    **Short answer.** A hosted model in an approved region, called through a private endpoint, with cross-region processing off. Company documents feed a vector index in the same region. An evaluation set gates every change, a usage monitor tracks tokens and spend per team, and every call runs under its own service identity.
+
+    **Why.** At Brightpost, prompts carry customer emails, so the region and the network path matter as much as the model. The provider's data terms say whether prompts are stored or used for training. The index holds only documents the asking user may read. Quotas and budget alerts stop one team using up shared capacity. Guardrails and approval follow the AI Security design.
+
+    <AnimatedDiagram spec="animated/cloud/ai-platform-building-blocks" step={6} highlight={["app", "modelapi", "vector", "monitor"]} caption="Private calls in one region, an index beside the model, and a monitor counting every token." />
+
+    **Follow-ups the interviewer may ask.**
+    - A team wants a model that is offered only in another region. What do you do?
+    - How do you stop the assistant showing a document the asking user may not read?
+
+    **Watch out for.** Securing the model call and forgetting the index. The vector store holds copies of every document, so it needs the same region, encryption and access rules.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [AI Security on the Cloud](/cloud/resilience/ai-security)
+- [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus)
+- [FinOps and Cost Tools](/cloud/operations/finops-and-cost-tools)
+- [Compliance and Data Residency](/cloud/resilience/compliance-and-residency)
+- [Private Endpoints](/cloud/networking/private-endpoints)
+- [AI & ML on AWS](/cloud/aws/ai-ml)
+- [AI & ML on Google Cloud](/cloud/gcp/ai-ml)
+- [AI & ML on Azure](/cloud/azure/ai-ml)
+- [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals)
+- [Fine-Tuning LLMs](/ai-system-design/genai-system-design/fine-tuning-llms)
+- [Model Registry and Governance](/ai-system-design/ml-system-design/model-registry-governance)
+
+## Further reading
+
+- [What is Amazon Bedrock?](https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html): hosted models on AWS.
+- [Vertex AI documentation](https://cloud.google.com/vertex-ai/docs): Google Cloud's ML and generative AI platform.
+- [Microsoft Foundry documentation](https://learn.microsoft.com/azure/ai-foundry/): models, deployments and evaluations on Azure.
+- [Introduction to BigQuery ML](https://cloud.google.com/bigquery/docs/bqml-introduction): machine learning in SQL.

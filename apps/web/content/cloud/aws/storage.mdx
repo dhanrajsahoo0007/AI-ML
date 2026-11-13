@@ -1,9 +1,24 @@
 ---
 title: "Storage on AWS"
 description: "S3, EBS, EFS and FSx: object, block and file storage, storage classes and backup, with the Google Cloud and Azure equivalents."
+updated: 2026-11-14
 ---
 
 AWS has three kinds of storage, and each case-study component maps to one of them. **Object storage** (S3) holds files addressed by key. **Block storage** (EBS) is a disk attached to one instance. **File storage** (EFS, FSx) is a shared file system many machines mount. Databases sit on top of these and have their own page.
+
+## The idea
+
+A cloud keeps data in three shapes: a disk for one machine, a folder many machines mount, and a bucket of whole files fetched by key. You pick the shape by how your program reaches the data, then give each shape its own backup.
+
+<Callout tone="blue" title="Learn the idea">
+  New to the three shapes? [Object, Block and File](/cloud/data/storage-types) follows one Brightpost print file from a private disk to a share and a bucket. [Object Storage](/cloud/data/object-storage), [Block Storage](/cloud/data/block-storage), [File Shares, Hybrid Storage and Moving Bulk Data](/cloud/data/file-hybrid-and-transfer) and [Backups and Vaults](/cloud/resilience/backups-and-vaults) go deeper. This page names the AWS pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/storage-three-shapes" stepper cloud="aws" minWidth={620} caption="Brightpost's print files on AWS in five steps: EBS volumes, a retry that cannot find its file, an EFS share, an S3 bucket and AWS Backup." />
+
+<CloudMapping diagram="cloud/storage-three-shapes" lead="aws" />
+
+On AWS an EBS volume lives in one Availability Zone, so the print file on disk A is out of reach for any other instance. EFS is regional by default and survives the loss of a zone. An S3 bucket lives in one Region, and most storage classes keep copies across at least three zones.
 
 ## TL;DR
 
@@ -11,12 +26,15 @@ AWS has three kinds of storage, and each case-study component maps to one of the
 - **EBS for a disk on one instance:** self-managed databases, Kafka, boot volumes. Default to **gp3**.
 - **EFS for shared NFS** across many servers or containers; **FSx** when you need Lustre for ML/HPC, Windows shares or NetApp.
 - **Lifecycle rules** move old objects to cheaper classes automatically; **Intelligent-Tiering** does it per object when access is unpredictable.
+- **AWS Backup** puts EBS, EFS, FSx and S3 under one plan, with copies in a locked vault in another account. **DataSync** moves bulk data in over the network.
 
 ## At a glance
 
 <CloudGroupTable group="storage" lead="aws" />
 
 ## S3 storage classes
+
+A <Term id="storage-class" /> trades a lower monthly price for a fee or a wait when you read. The general idea, with Brightpost's photos, is on [Object Storage](/cloud/data/object-storage).
 
 | Class | Retrieval | Use for |
 |---|---|---|
@@ -34,21 +52,11 @@ AWS has three kinds of storage, and each case-study component maps to one of the
 
 <CloudServiceProfile id="aws-s3" />
 
-S3 is the default home for blobs in almost every case study. The usual upload pattern keeps large files away from your servers:
+S3 is the default home for blobs in almost every case study. The usual upload pattern keeps large files away from your servers. The app signs a short-lived pre-signed URL, the browser sends the file straight to the bucket, and the bucket's new-object event starts a Lambda function that does the processing.
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant API as Upload service
-    participant S3 as S3
-    participant W as Worker (Lambda)
-    C->>API: POST /uploads (file name, size)
-    API-->>C: pre-signed URL (multipart for large files)
-    C->>S3: PUT parts directly
-    S3-->>W: ObjectCreated event
-    W->>S3: thumbnails / transcodes
-    W->>API: mark upload ready
-```
+<AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={4} cloud="aws" minWidth={620} caption="The app only signs a URL; the browser uploads straight to S3, and the new-object event starts the resize function." />
+
+For large files the client uses a multipart upload: it sends parts in parallel, retries only the failed ones, then completes the upload.
 
 ### Amazon EBS
 
@@ -61,6 +69,36 @@ sequenceDiagram
 ### Amazon FSx
 
 <CloudServiceProfile id="aws-fsx" />
+
+### Moving data in: DataSync, Transfer Family, Snowball and Storage Gateway
+
+These four move data between a site and AWS. [File Shares, Hybrid Storage and Moving Bulk Data](/cloud/data/file-hybrid-and-transfer) explains how to choose between a network copy, a device and a gateway.
+
+<CloudServiceProfile id="aws-datasync" />
+
+**Pick it when** a file server or NAS must move into S3, EFS or FSx over the network, once or on a schedule.
+
+<CloudServiceProfile id="aws-transfer-family" />
+
+**Pick it when** partners can only deliver files over SFTP or FTPS and the files should land in S3.
+
+<CloudServiceProfile id="aws-snow-family" />
+
+**Pick it when** you already run Snowball jobs. New projects use DataSync, or carry drives to an AWS Data Transfer Terminal.
+
+<CloudServiceProfile id="aws-storage-gateway" />
+
+**Pick it when** an office must keep its NFS or SMB shares while the files themselves live in S3.
+
+### Backup and recovery: AWS Backup and Elastic Disaster Recovery
+
+<CloudServiceProfile id="aws-backup" />
+
+**Pick it when** every volume, file system, bucket and database must follow one backup plan, with copies kept in another account.
+
+<CloudServiceProfile id="aws-elastic-disaster-recovery" />
+
+**Pick it when** a server you cannot rebuild from code must start in another zone or Region within minutes. [Disaster Recovery Strategies](/cloud/resilience/dr-strategies) compares the options.
 
 ## Where this shows up in system design
 
@@ -79,13 +117,48 @@ sequenceDiagram
 
 ## Related
 
-[Databases on AWS](/cloud/aws/databases) · [Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Object / Blob Storage](/system-design/databases/object-storage) · [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking)
+[Object, Block and File](/cloud/data/storage-types) · [Object Storage](/cloud/data/object-storage) · [Block Storage](/cloud/data/block-storage) · [File Shares, Hybrid Storage and Moving Bulk Data](/cloud/data/file-hybrid-and-transfer) · [Backups and Vaults](/cloud/resilience/backups-and-vaults) · [Storage on Google Cloud](/cloud/gcp/storage) · [Storage on Azure](/cloud/azure/storage) · [Databases on AWS](/cloud/aws/databases) · [Edge, DNS & CDN on AWS](/cloud/aws/edge) · [Object / Blob Storage](/system-design/databases/object-storage) · [Blob Storage, Chunking and Dedup](/system-design/patterns/blob-storage-and-chunking)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How do you let clients upload a 5 GB video without it passing through your servers?" category="Architecture" level="Mid">
-    The upload service authenticates the user and returns pre-signed URLs for an S3 multipart upload. The client uploads the parts in parallel straight to S3, retrying failed parts, then completes the upload. An S3 event triggers processing, and the service never handles the bytes.
-  </InterviewQuestion>
   <InterviewQuestion question="EBS, EFS or S3 for files that many containers need to read and write?" category="Cloud" level="Junior">
-    Not EBS, since a volume attaches to one instance in one zone. EFS if the application needs a shared POSIX file system. S3 if the application can use an object API, which scales further and costs less, and is usually the better choice for new code.
+    **Short answer.** Not EBS. Use EFS if the program needs a shared folder it opens by path. Use S3 if the program can read and write whole files by key, which is usually the better choice for new code.
+
+    **Why.** An EBS volume attaches to one instance in one zone, so other containers cannot see its files. EFS is an NFS share that many instances mount at once, and it spans the zones of the Region. S3 is reached over web requests, scales further and costs less per GB.
+
+    <AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={3} cloud="aws" highlight={["pa", "pb", "share"]} caption="Both print servers mount one EFS share, so a retry on either server finds the file." />
+
+    **Follow-ups the interviewer may ask.**
+    - The render tool can only write to a local path. How do you still end up with files in S3?
+    - Several instances can attach one io2 volume. Why is that not a shared folder?
+
+    **Watch out for.** Saying "EBS Multi-Attach" as the answer. Only software built for a cluster file system can share a volume safely; ordinary programs overwrite each other's changes.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you let clients upload a 5 GB video without it passing through your servers?" category="Cloud" level="Mid">
+    **Short answer.** The upload service checks the user and returns pre-signed URLs for an S3 multipart upload. The client uploads the parts in parallel straight to S3, then completes the upload. An S3 event starts the processing.
+
+    **Why.** Your servers never carry the bytes, so they need no extra bandwidth or memory for big files. Multipart upload lets the client retry one failed part instead of the whole 5 GB. Each URL is signed for one key and expires quickly, so it grants very little.
+
+    <AnimatedDiagram spec="animated/cloud/object-upload-lifecycle" step={4} cloud="aws" path="staff>uploads>worker>thumbs" caption="The browser sends the file straight to the bucket; the new-object event starts the processing." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to the parts of an upload that the client never completes?
+    - How does the client learn that processing has finished?
+
+    **Watch out for.** Forgetting incomplete multipart uploads. Their parts are stored and billed until a lifecycle rule aborts them.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="An attacker gets admin access to Brightpost's shop account. How do you make sure its storage can still be restored?" category="Cloud" level="Senior">
+    **Short answer.** Keep the copies where that admin cannot reach them. AWS Backup copies EBS snapshots, EFS and S3 backups to a vault in the audit account. Vault Lock in compliance mode stops anyone deleting them early. Then test restores on a schedule.
+
+    **Why.** Snapshots in the same account die with the account: whoever may delete the volume may delete its snapshots. A vault in another account has its own access policy, and a compliance-mode lock binds even that account's root user. S3 versioning with Object Lock protects the bucket's own history as well.
+
+    <AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={5} cloud="aws" highlight={["da", "db", "share", "bucket", "vault"]} caption="Each shape sends its own copies to one vault: snapshots, a share backup and object versions." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which KMS key encrypts the copy in the audit account, and who can use it?
+    - How do you find a new volume that nobody tagged for the backup plan?
+
+    **Watch out for.** Locking a vault in compliance mode with the wrong retention. After the grace time nobody can shorten it, so a mistake is billed for the whole period.
   </InterviewQuestion>
 </InterviewQuestions>

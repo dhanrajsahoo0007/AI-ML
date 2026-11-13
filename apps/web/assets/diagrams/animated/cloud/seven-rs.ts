@@ -10,7 +10,9 @@ import type { LayoutShape, LayoutSpec, Tone } from "@/components/diagrams/types"
 // that says which way effort grows. Relocate is the one strategy Brightpost did not use, so its example is neutral.
 //
 // Geometry: the source box sits at x 16-166, level with the second group. Groups start at x 210 and end at 780.
-// Strategy boxes are x 226-356 (130 wide); example boxes are x 368-768 (400 wide). Boxes are 48 tall and 60 apart
+// Arrows leave the source box at its middle, share a trunk at x 190, and enter each strategy box from the left at
+// its middle, so no arrow crosses a box or a group tab. Strategy boxes are x 226-366 (140 wide); example boxes are
+// x 378-768 (390 wide). Boxes are 48 tall and 60 apart
 // inside a group; each group's first box sits 28 below the group's top, so the title tab and the step's NEW ring clear
 // it, and groups are 16 apart. Box labels fit width - 8 at 6.2 px per character: example labels stay under 63
 // characters and strategy labels under 20.
@@ -36,7 +38,7 @@ const GROUPS: Group[] = [
       {
         id: "retain",
         r: "Retain",
-        rsub: "keep it where it is",
+        rsub: "keep it in place",
         ex: "Ticket PC: stays beside the workshop printer",
         exsub: "it now reads its orders from the cloud over the VPN",
         tone: "neutral",
@@ -52,7 +54,7 @@ const GROUPS: Group[] = [
       {
         id: "rehost",
         r: "Rehost",
-        rsub: "copy the server as is",
+        rsub: "copy the server",
         ex: "Order app server: copied block by block",
         exsub: "same operating system, same code, a new address",
         tone: "teal",
@@ -60,7 +62,7 @@ const GROUPS: Group[] = [
       {
         id: "relocate",
         r: "Relocate",
-        rsub: "move VMware hosts as is",
+        rsub: "move whole VMware",
         ex: "Both VMware hosts onto the provider's VMware service",
         exsub: "not chosen: built for dozens of VMs, not 6",
         tone: "teal",
@@ -77,7 +79,7 @@ const GROUPS: Group[] = [
       {
         id: "replatform",
         r: "Replatform",
-        rsub: "same app, managed parts",
+        rsub: "swap one part",
         ex: "Order database: into a managed SQL Server engine",
         exsub: "same engine and data; backups and patches run for you",
         tone: "blue",
@@ -85,7 +87,7 @@ const GROUPS: Group[] = [
       {
         id: "repurchase",
         r: "Repurchase",
-        rsub: "buy a SaaS product",
+        rsub: "rent a product",
         ex: "Accounting package: replaced by a rented SaaS tool",
         exsub: "the books exported once, the old server retired",
         tone: "blue",
@@ -101,7 +103,7 @@ const GROUPS: Group[] = [
       {
         id: "refactor",
         r: "Refactor",
-        rsub: "rewrite for the cloud",
+        rsub: "rewrite parts",
         ex: "Price calculator: rebuilt as a small service",
         exsub: "in month 9, after the move, not during it",
         tone: "violet",
@@ -109,6 +111,8 @@ const GROUPS: Group[] = [
     ],
   },
 ];
+
+const SRC_Y = 310; // vertical centre of the source box
 
 const shapes: LayoutShape[] = [
   {
@@ -128,20 +132,33 @@ for (const g of GROUPS) {
   g.rows.forEach((row, i) => {
     const y = g.y + 28 + i * 60;
     shapes.push(
-      { id: row.id, type: "box", x: 226, y, w: 130, h: 48, label: row.r, sub: row.rsub, tone: row.tone, step: g.step },
+      { id: row.id, type: "box", x: 226, y, w: 140, h: 48, label: row.r, sub: row.rsub, tone: row.tone, step: g.step },
       {
         id: `${row.id}-ex`,
         type: "box",
-        x: 368,
+        x: 378,
         y,
-        w: 400,
+        w: 390,
         h: 48,
         label: row.ex,
         sub: row.exsub,
         tone: row.exTone ?? row.tone,
         step: g.step,
       },
-      { id: `${row.id}-arrow`, type: "arrow", x: 0, y: 0, from: "src", to: row.id, tone: row.tone, step: g.step },
+      {
+        id: `${row.id}-arrow`,
+        type: "arrow",
+        x: 0,
+        y: 0,
+        from: "src",
+        to: row.id,
+        via: [
+          [190, SRC_Y],
+          [190, y + 24],
+        ],
+        tone: row.tone,
+        step: g.step,
+      }
     );
   });
 }

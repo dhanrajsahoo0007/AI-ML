@@ -1,17 +1,33 @@
 ---
 title: "Databases on AWS"
 description: "RDS, Aurora, Aurora DSQL, DynamoDB, DocumentDB, Neptune and OpenSearch: which AWS database fits each access pattern, with Google Cloud and Azure equivalents."
+updated: 2026-11-14
 ---
 
 AWS has a managed service for almost every database family. Choosing one is the same skill as choosing a database in general: **start from the access pattern, then pick the family, then the service**. This page maps each family to its AWS service. The [database guides](/system-design/databases/choosing-a-database) explain the families themselves.
 
+## The idea
+
+A managed database runs the engine, the backups and a standby in a second zone, and you still decide which copy each request reads. Read replicas take reads that may be a few seconds old, a proxy shares connections, and a failover drill proves the standby works.
+
+<Callout tone="blue" title="Learn the idea">
+  New to managed databases? [Managed Relational Databases](/cloud/data/managed-relational) tells Brightpost's double-payment sale day step by step, and [Managed NoSQL](/cloud/data/managed-nosql) covers partition keys and hot keys. [Databases on Each Cloud](/cloud/start-here/databases-per-cloud) helps you pick a family. This page names the AWS pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/managed-relational-ha" stepper cloud="aws" minWidth={620} caption="Brightpost's orders database on AWS in six steps: an RDS primary and Multi-AZ standby, a replica that falls behind, fresh reads on the primary, RDS Proxy and a failover." />
+
+<CloudMapping diagram="cloud/managed-relational-ha" lead="aws" />
+
+On AWS the relational family is two products with different storage. In RDS, the Multi-AZ standby and the read replicas are separate copies with separate jobs: the standby serves no reads, and each replica has its own endpoint. In Aurora, every copy reads one shared storage volume, and a replica is also the failover target. So in Aurora, place replicas in other zones and size one like the writer. RDS Proxy, in step 5, sits in front of either.
+
 ## TL;DR
 
 - **Default to Aurora PostgreSQL** (or RDS for smaller or commercial-engine databases) for business records.
+- **RDS Proxy** in front of the database whenever Lambda functions or many app servers connect.
 - **DynamoDB** when you know the access patterns, need any scale by key, and want nothing to operate.
 - **Aurora DSQL** when relational data must accept writes in several Regions with strong consistency.
 - **OpenSearch** for search and log queries, fed from the primary store with change data capture, never as the source of truth.
-- **Specialists:** Neptune for graphs, Keyspaces for Cassandra workloads, Timestream for InfluxDB for time series, DocumentDB for MongoDB-style apps.
+- **Specialists:** Neptune for graphs, Keyspaces for Cassandra workloads, Timestream for InfluxDB for time series, DocumentDB for MongoDB-style apps. **DMS** moves a live database in.
 
 ## At a glance
 
@@ -42,9 +58,17 @@ Amazon QLDB was discontinued on July 31, 2025 (AWS suggests Aurora PostgreSQL fo
 
 <CloudServiceProfile id="aws-aurora" />
 
+**Aurora Serverless v2** is a capacity setting on an Aurora cluster, not a separate database. Capacity moves in small steps between a minimum and a maximum you set. Recent versions can pause at zero, and the first connection then waits while the database resumes. That suits a test database used in office hours, not a shop's primary.
+
 ### Amazon RDS
 
 <CloudServiceProfile id="aws-rds" />
+
+RDS offers two ways to keep a standby. A **Multi-AZ instance** keeps one synchronous standby in another zone that serves no reads. A **Multi-AZ DB cluster** keeps two standbys that do serve reads.
+
+### Amazon RDS Proxy
+
+RDS Proxy is a managed connection pooler for RDS and Aurora. It keeps a set of database connections open and lends one to a caller for each transaction, so a burst of Lambda functions shares them. It reads database credentials from Secrets Manager, and it keeps callers' connections open through a failover while it reconnects to the new primary. A session that changes its own settings can **pin** its connection, and a pinned connection is not shared.
 
 ### Amazon DynamoDB
 
@@ -61,7 +85,9 @@ A DynamoDB table is designed from its queries. For a chat app's messages:
 --   ScanIndexForward = false, Limit = 50
 ```
 
-A very busy conversation is a hot partition. Large group chats may need the key split by time bucket (`conversation_id#2026-11`).
+A very busy conversation is a hot partition. Large group chats may need the key split by time bucket (`conversation_id#2026-11`). The same fix rescued Brightpost's sale counter, shown below.
+
+<AnimatedDiagram spec="animated/cloud/nosql-partitions" step={3} cloud="aws" minWidth={620} caption="Write sharding: one hot key becomes ten keys spread over every partition, and a reader adds the ten values up." />
 
 ### Amazon Aurora DSQL
 
@@ -79,6 +105,18 @@ A very busy conversation is a hot partition. Large group chats may need the key 
 
 <CloudServiceProfile id="aws-opensearch" />
 
+### AWS Database Migration Service
+
+<CloudServiceProfile id="aws-dms" />
+
+**Pick it when** a live database must move into RDS or Aurora with only minutes of downtime. A task does a full load, then copies changes from the source's log until you cut over. [Database Migration](/cloud/data/database-migration) walks through the whole move.
+
+### AWS DMS Schema Conversion and Schema Conversion Tool
+
+<CloudServiceProfile id="aws-sct" />
+
+**Pick it when** the move also changes engine, such as SQL Server to PostgreSQL. Convert the schema first, then let DMS load data into the tables that exist.
+
 ## Where this shows up in system design
 
 - **[Messenger](/system-design/case-studies/facebook-messenger):** messages in DynamoDB or Keyspaces partitioned by conversation; users and groups in Aurora.
@@ -91,21 +129,66 @@ A very busy conversation is a hot partition. Large group chats may need the key 
 - **Choosing DynamoDB before knowing the queries.** A new access pattern later can mean a new index or a data migration.
 - **Scans in DynamoDB.** A `Scan` reads the whole table. Design keys and indexes so every request is a `Query` or `GetItem`.
 - **Read replicas for read-your-own-writes.** Replica lag means a user may not see their own update. Read from the writer for those paths.
+- **Lambda straight to RDS.** Each function copy opens its own connection, and a burst uses them all. Put RDS Proxy in front.
 - **Search as the source of truth.** Rebuildable indexes only, fed by DynamoDB Streams or CDC.
 - **One giant RDS instance with no plan.** Know your next step: read replicas, caching, Aurora, then sharding or DynamoDB for the hottest table.
 
 ## Related
 
-[Caching on AWS](/cloud/aws/caching) · [Storage on AWS](/cloud/aws/storage) · [Choosing a Database](/system-design/databases/choosing-a-database) · [Key-Value Stores](/system-design/databases/key-value-stores) · [NewSQL / Distributed SQL](/system-design/databases/newsql-databases) · [Sharding and Partitioning](/system-design/patterns/sharding)
+[Managed Relational Databases](/cloud/data/managed-relational) · [Managed NoSQL](/cloud/data/managed-nosql) · [Databases on Each Cloud](/cloud/start-here/databases-per-cloud) · [Database Migration](/cloud/data/database-migration) · [Databases on Google Cloud](/cloud/gcp/databases) · [Databases on Azure](/cloud/azure/databases) · [Caching on AWS](/cloud/aws/caching) · [Storage on AWS](/cloud/aws/storage) · [Choosing a Database](/system-design/databases/choosing-a-database) · [Key-Value Stores](/system-design/databases/key-value-stores) · [NewSQL / Distributed SQL](/system-design/databases/newsql-databases) · [Sharding and Partitioning](/system-design/patterns/sharding)
 
 <InterviewQuestions>
   <InterviewQuestion question="DynamoDB or Aurora for an orders table?" category="Cloud" level="Mid">
-    Aurora by default: orders need transactions across order, payment and inventory rows, plus ad-hoc queries for support and reporting. DynamoDB fits when the access patterns are few and known (get order by id, list a customer's orders), scale is very high, and you accept designing indexes up front and moving reporting to an analytics store.
+    **Short answer.** Aurora, or RDS, by default. Orders need transactions across the order, payment and stock rows, and support and finance ask new questions every month. DynamoDB fits when the reads are few and known, scale is very high, and reporting moves to an analytics store.
+
+    **Why.** A relational engine answers a new question with a new query and perhaps an index. DynamoDB answers well only the questions its keys were built for, so a new access pattern can mean a new index or a data migration. Brightpost's 400 orders a day, 4,000 on its biggest sale day, fit one small primary with room to spare. DynamoDB has transactions, but they cover a limited number of items and cost more than single writes.
+
+    <AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={1} cloud="aws" caption="Brightpost's orders on AWS: one RDS primary for every query, a Multi-AZ standby and nightly backups." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which of Brightpost's data would you put in DynamoDB instead?
+    - How would you serve "my orders" pages at ten times today's traffic?
+
+    **Watch out for.** Picking DynamoDB because it "scales". The orders table's hard part is flexible queries and transactions, not scale.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you avoid hot partitions in DynamoDB?" category="Data modeling" level="Senior">
-    Choose a partition key with many distinct, evenly used values. For naturally hot keys, add a suffix (write sharding) and read across the suffixes, or bucket by time. Cache hot reads with DAX, and remember that on-demand mode raises table capacity but cannot make a single key's partition faster.
+
+  <InterviewQuestion question="Lambda functions run out of database connections on sale day. What do you add on AWS?" category="Cloud" level="Mid">
+    **Short answer.** RDS Proxy between the functions and the database, plus a cap on how many copies of the function run at once. The proxy keeps a fixed set of connections open and lends one per transaction, so a burst shares them instead of opening its own.
+
+    **Why.** Brightpost's database allows 200 connections, and the app servers need most of them on sale day. Each Lambda copy opens its own connection, so a burst of photo uploads can take the rest. Behind the proxy, the resize function borrows at most 20 of the proxy's 150. The proxy also keeps callers' connections open through a Multi-AZ failover and reconnects behind them.
+
+    <AnimatedDiagram spec="animated/cloud/managed-relational-ha" step={5} cloud="aws" highlight={["fn", "proxy", "primary", "app"]} caption="The resize function and the app servers share RDS Proxy's connections instead of opening their own." />
+
+    **Follow-ups the interviewer may ask.**
+    - What pins a connection, so the proxy cannot share it?
+    - Where would you put the limit: reserved concurrency on the function, the proxy, or both?
+
+    **Watch out for.** Raising the database's connection limit instead. Each connection costs the database memory, and the next burst is bigger.
   </InterviewQuestion>
-  <InterviewQuestion question="When is Aurora DSQL worth it over Aurora Global Database?" category="Architecture" level="Senior">
-    Global Database has one writer Region with fast replicas elsewhere; a Regional failure needs a failover and may lose the last second of writes. DSQL accepts strongly consistent writes in multiple Regions and stays available if one fails, at the cost of higher write latency, optimistic concurrency retries and partial PostgreSQL compatibility.
+
+  <InterviewQuestion question="How do you avoid hot partitions in DynamoDB?" category="Cloud" level="Senior">
+    **Short answer.** Choose a partition key with many values that are used evenly. For a key that is hot by nature, such as a sale counter, use write sharding: add a suffix, write to one of ten keys at random, and add them up on read. Cache hot reads with DAX, DynamoDB's in-memory cache.
+
+    **Why.** DynamoDB spreads capacity over partitions, and one key always lives on one partition. Brightpost's counter took 400 writes a second; its partition refused about 150 while the others sat idle. On-demand mode raises the table's capacity but not one partition's ceiling. A global secondary index with a low-spread key, such as a status, can throttle writes to the base table too.
+
+    <AnimatedDiagram spec="animated/cloud/nosql-partitions" step={3} cloud="aws" highlight={["app", "router", "reader"]} caption="Ten keys instead of one: writes reach every partition, and the banner reader adds the ten values up." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you split a busy chat conversation's key by time bucket?
+    - What does write sharding cost on the read side?
+
+    **Watch out for.** "Switch to on-demand." The ceiling is per partition, not per table.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When is Aurora DSQL worth it over Aurora Global Database?" category="Cloud" level="Senior">
+    **Short answer.** When writes must continue, strongly consistent, through the loss of a whole Region. Global Database has one writer Region; DSQL accepts writes in several Regions and stays available if one fails. Most apps, Brightpost included, are fine with one writer Region.
+
+    **Why.** Global Database copies from the writer Region asynchronously to secondary Regions that serve reads. A Regional failure needs a failover, and the last second or so of writes may be lost. DSQL commits strongly consistent writes in more than one Region. The costs: slower writes, because a commit must agree across Regions; optimistic concurrency, so conflicting transactions fail at commit and must be retried; and only partial PostgreSQL compatibility.
+
+    **Follow-ups the interviewer may ask.**
+    - What must the app do when a DSQL transaction fails at commit?
+    - Which of Brightpost's tables, if any, would justify writes in two Regions?
+
+    **Watch out for.** Treating a Global Database secondary as a second writer. Every write still lands in the one writer Region until you fail over.
   </InterviewQuestion>
 </InterviewQuestions>

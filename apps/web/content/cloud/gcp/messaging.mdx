@@ -1,20 +1,49 @@
 ---
 title: "Messaging & Streaming on Google Cloud"
 description: "Pub/Sub, Cloud Tasks and Managed Service for Apache Kafka, with the AWS and Azure equivalents."
+updated: 2026-11-14
 ---
 
-Google Cloud has one product where AWS has three: **Pub/Sub** acts as a queue, a fan-out topic and an event stream, with no partitions or shards to manage. **Cloud Tasks** adds rate-limited HTTP task queues, and **Managed Service for Apache Kafka** covers Kafka workloads.
+Every Brightpost order has to start three jobs: send the confirmation email, update the stock count and feed analytics. None of them should slow down checkout, so the shop hands each order to a messaging service and moves on. On Google Cloud one fact shapes that design: **Pub/Sub** covers the queue, the topic and the stream in one product. You design **subscriptions**, not separate services, and there are no partitions to size.
+
+## The idea
+
+A queue hands each message to one worker; a topic copies it to every subscriber; a stream keeps it, in order, for readers that replay. All three deliver at least once, so every consumer must cope with seeing a message twice.
+
+<Callout tone="blue" title="Learn the idea">
+  New to queues and streams? [Queues vs Streams](/cloud/start-here/queues-vs-streams) builds all three with Brightpost's order emails, and [Queues, Topics, Streams, Event Buses and Workflows](/cloud/data/streaming-and-messaging-services) covers partitions, lag, event buses and workflows. This page names the Google Cloud pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/queue-topic-stream" stepper cloud="gcp" minWidth={620} caption="Brightpost's order events on Google Cloud in six steps: a shared pull subscription, a duplicate email, the fix, a dead-letter topic, fan-out and replay." />
+
+<CloudMapping diagram="cloud/queue-topic-stream" lead="gcp" />
 
 ## TL;DR
 
-- **Pub/Sub** for queues (pull subscriptions), fan-out (many subscriptions) and streams (ordering keys, seek to replay).
-- **Ordering is per ordering key** and enabled per subscription; delivery is at least once, exactly-once optional on pull.
-- **Cloud Tasks** to call HTTP handlers at a controlled rate with retries.
-- **Managed Kafka** when you need the Kafka API and ecosystem.
+- **One subscription shared by many workers is a queue.** Many subscriptions on one topic is <Term id="fan-out">fan-out</Term>. Retention plus **seek** is replay.
+- **Order is per ordering key**, and only on a subscription with message ordering turned on.
+- **Delivery is at least once.** Exactly-once delivery is an option on pull subscriptions; it does not cover side effects such as an email.
+- **Cloud Tasks** calls one HTTP handler at a rate you set. **Managed Service for Apache Kafka** serves Kafka clients.
 
 ## At a glance
 
 <CloudGroupTable group="messaging" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+In step 1 the shop publishes each order to a Pub/Sub topic. Both email workers pull from one subscription, so each message goes to one of them. A pulled message must be **acknowledged** (confirmed) before its **ack deadline** runs out. The client libraries extend that deadline while a worker is still busy.
+
+Step 2 is the failure. Worker A crashes before it acknowledges order 1042, the deadline passes, and Pub/Sub delivers 1042 to worker B. Step 3 adds the sent-email table in Cloud SQL, so the second email is skipped. In step 4 the subscription gets a **dead-letter topic**: after a set number of delivery attempts, Pub/Sub moves the message there.
+
+Step 5 adds the stock worker with its own subscription on the same topic. Each subscription keeps its own backlog, retries and filter, so no extra queue is needed. Step 6 is the stream: the topic keeps messages for a retention period you set. A new report creates a subscription and **seeks** it back to a time, then reads forward.
+
+| The idea | On Google Cloud | What to know |
+|---|---|---|
+| Queue | One subscription, many workers pulling | The ack deadline plays the part of the lock |
+| Topic | One subscription per consumer | Each keeps its own backlog and can filter by attribute |
+| Stream and replay | Topic retention plus seek to a time or a snapshot | No offsets; replay is by time |
+| Order per key | Ordering key, with ordering on the subscription | One message at a time per key, so a busy key is slow |
+| Dead-letter queue | Dead-letter topic on the subscription | Pub/Sub's service agent needs permission to publish there |
 
 ## Services
 
@@ -22,32 +51,76 @@ Google Cloud has one product where AWS has three: **Pub/Sub** acts as a queue, a
 
 <CloudServiceProfile id="gcp-pubsub" />
 
-Because Pub/Sub has no partitions, consumer parallelism is not capped by a partition count. The trade-off is less control: ordering exists only per ordering key, and replay is by snapshot or timestamp rather than by offset.
+**Pick it when** services on Google Cloud need a queue, fan-out or an event stream, and you would rather not size partitions. Besides pull, a subscription can **push** each message to an HTTPS endpoint, or write straight to BigQuery or Cloud Storage.
 
 ### Cloud Tasks
 
 <CloudServiceProfile id="gcp-cloud-tasks" />
 
+**Pick it when** the sender knows exactly which handler should run the work and how fast, such as calling an email provider at most 10 times a second.
+
 ### Managed Service for Apache Kafka
 
 <CloudServiceProfile id="gcp-managed-kafka" />
 
-## Coming from AWS
+**Pick it when** your code already speaks Kafka, or you need its partitions, offsets and tools such as Kafka Connect.
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| SQS | Pub/Sub pull subscription or Cloud Tasks | Ack deadlines instead of visibility timeouts |
-| SNS → SQS fan-out | One topic, many subscriptions | No extra queue per subscriber; each subscription keeps its own backlog |
-| Kinesis | Pub/Sub | No shards; ordering keys and seek instead of partitions and offsets |
-| MSK | Managed Service for Apache Kafka | Sized by vCPU and memory |
-| Firehose | BigQuery and Cloud Storage subscriptions | Pub/Sub writes straight to the destination |
+**Eventarc** routes events from Google Cloud services to Cloud Run and Workflows; both are on [Serverless & Orchestration](/cloud/gcp/serverless#gcp-eventarc).
+
+## Common mistakes
+
+- **A dead-letter topic with no subscription.** Unless the topic itself keeps messages, a topic with no subscriptions drops what it receives, so dead-lettered orders vanish. Attach a subscription and alarm on its backlog.
+- **One ordering key for everything.** Messages with the same key are delivered one at a time, so a single key turns Pub/Sub into one slow line. Key by order or conversation id.
+- **Reading "exactly-once delivery" as exactly-once effects.** It stops a redelivery after a successful acknowledgement. A worker that sends the email and then crashes still sends a second one.
+
+## Where this shows up in system design
+
+- **[Messenger](/system-design/case-studies/facebook-messenger):** publish chat messages with the conversation id as the ordering key, so each conversation stays in order.
+- **[Metrics and logging](/system-design/case-studies/metrics-and-logging):** agents publish to Pub/Sub, and a BigQuery subscription or Dataflow lands the events for queries. See [Analytics on Google Cloud](/cloud/gcp/analytics).
+- **[Web crawler](/system-design/case-studies/web-crawler):** one Cloud Tasks queue per site, each with its own rate limit, keeps the crawler polite.
 
 ## Related
 
-[Messaging & Streaming on AWS](/cloud/aws/messaging) · [Messaging & Streaming on Azure](/cloud/azure/messaging) · [Queues vs Streams](/cloud/start-here/queues-vs-streams) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues)
+[Queues vs Streams](/cloud/start-here/queues-vs-streams) · [Queues, Topics, Streams, Event Buses and Workflows](/cloud/data/streaming-and-messaging-services) · [Messaging & Streaming on AWS](/cloud/aws/messaging) · [Messaging & Streaming on Azure](/cloud/azure/messaging) · [Serverless & Orchestration on Google Cloud](/cloud/gcp/serverless) · [System Design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How would you keep a chat conversation's messages ordered with Pub/Sub?" category="Architecture" level="Mid">
-    Publish with the conversation id as the ordering key and enable message ordering on the subscription. Messages with the same key are delivered in publish order, while different conversations are delivered in parallel.
+  <InterviewQuestion question="How would you keep a chat conversation's messages ordered with Pub/Sub?" category="Cloud" level="Mid">
+    **Short answer.** Publish every message with the conversation id as its **ordering key**, and turn on message ordering on the subscription. Messages with the same key arrive in the order they were published; different conversations arrive in parallel.
+
+    **Why.** Pub/Sub has no partitions to pick, so the key is the unit of order. Order holds per key within one region, so publishers should use a regional endpoint. If a publish for a key fails, the client library pauses that key until your code resumes it, so later messages cannot overtake.
+
+    **Follow-ups the interviewer may ask.**
+    - One group chat gets thousands of messages a minute. What happens to its delivery rate?
+    - A message for a key is delivered again. What about the messages after it?
+
+    **Watch out for.** Assuming ordering removes duplicates. A redelivery can bring later messages for the same key again, so the consumer still needs to be idempotent, safe to run twice.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost's email provider accepts at most 10 calls a second. Pub/Sub push or Cloud Tasks?" category="Cloud" level="Mid">
+    **Short answer.** Cloud Tasks. Each task names its handler, and the queue sets the maximum rate and the retries. Keep Pub/Sub for "order placed" itself, and let the email service turn each event into a task.
+
+    **Why.** A Pub/Sub publisher does not know who subscribes; it states that something happened. Push delivery slows down when the handler returns errors, but it has no fixed rate cap. Cloud Tasks is built for "do this call, at this pace". It can also schedule a task for later.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={5} cloud="gcp" highlight={["topic", "queue", "stock"]} caption="The order topic copies each event to the email queue and the stock worker; the email side controls its own pace." />
+
+    **Follow-ups the interviewer may ask.**
+    - About 4,000 orders arrive on a sale day. How long can the email backlog take to clear?
+    - How do you stop the same order creating two tasks?
+
+    **Watch out for.** Sending the emails from the stock worker's subscription. Each consumer gets its own subscription, so one slow consumer never holds back another.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Pub/Sub offers exactly-once delivery. Can Brightpost turn it on and drop its sent-email table?" category="Cloud" level="Senior">
+    **Short answer.** No. Exactly-once delivery means Pub/Sub will not deliver a message again after it was acknowledged successfully. It cannot know whether your worker sent the email before it crashed. Keep the sent-email table, keyed by order id.
+
+    **Why.** The duplicate in Brightpost's story came from a worker that sent emails and crashed before acknowledging. That message was never acknowledged, so any queue must deliver it again. Exactly-once delivery works on pull subscriptions in one region, and the worker must check the result of each acknowledgement.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={3} cloud="gcp" highlight={["workerA", "workerB", "sent", "dup"]} caption="Each worker checks the sent-email table in Cloud SQL first, so the second email for order 1042 is skipped." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does the option cost you in throughput and latency, and when is it still worth it?
+    - Dataflow also offers exactly-once processing. Where does that promise end?
+
+    **Watch out for.** Writing the order id to the table after the email with no unique key. Two workers can both pass the check; a unique key on order id makes the second insert fail.
   </InterviewQuestion>
 </InterviewQuestions>

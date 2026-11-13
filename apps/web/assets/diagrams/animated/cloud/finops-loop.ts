@@ -29,7 +29,7 @@ const spec: LayoutSpec = {
   kind: "layout",
   title: "FinOps: see, decide, act",
   width: 780,
-  height: 470,
+  height: 455,
   groups: [
     { id: "g-see", title: "Cloud tools, daily", tone: "blue", x: 20, y: 40, w: 230, h: 365 },
     { id: "g-decide", title: "Team habit, monthly", tone: "orange", x: 275, y: 40, w: 230, h: 365 },

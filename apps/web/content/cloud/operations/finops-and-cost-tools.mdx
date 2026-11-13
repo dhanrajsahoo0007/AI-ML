@@ -1,11 +1,315 @@
 ---
 title: "FinOps and the Cost Tools"
-description: "How a team keeps its cloud bill honest every month: tag everything, set budgets, act on rightsizing advice and catch anomalies."
-status: outline
+description: "How a team keeps its cloud bill honest every month: give each line an owner, export the data, catch spikes on day 1 and act on advice."
+updated: 2026-11-14
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** how a team keeps the bill honest month after month: tag everything so cost has an owner, set budgets that alert before the money is gone, act on rightsizing and storage reports, and catch anomalies the day they start. FinOps is shown as a loop (see, decide, act), not a tool.
+<KeyIdea>
+  Give every line of the cloud bill an owner, then run the same loop every month: see where the money goes, decide what to change, and change it.
+</KeyIdea>
 
-**Related reading on this site:** [What the Cloud Is](/cloud/fundamentals/what-is-cloud) · [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning)
+## The story
+
+Brightpost's October bill arrives 40% higher than September's, while orders stay flat at about 400 a day. The finance lead asks the two teams, shop and wholesale, which part grew. The cost report splits spend by account and by the `team` tag. By account, the growth sits somewhere in test. By tag, 35% of the month's spend has no team at all: servers started by hand, disks left behind, anything a script created. Both teams say the growth is not theirs. Asha spends two days listing machines, account by account. She finds a test cluster of 2 GPU machines, started to train the photo-style model. The training finished on day 2, and the cluster ran for 3 weeks. It carried no tags, so no report named an owner. The organisation's budget alert had fired on the 17th, but it told the finance lead only that the whole company was over 80%.
+
+Every step below gives one more line of that bill an owner, and makes the next forgotten cluster show up on its first day.
+
+## How it works
+
+Three words first. <Term id="finops">FinOps</Term>, short for financial operations, is the habit of engineers and finance working together so that cloud spending is seen, owned and worth it. **Cost allocation** means assigning each line of the bill to the team or product that caused it. An **owner** is the one person who answers for a line: they read it, explain it, and change it.
+
+### Step 1: See, decide, act
+
+<AnimatedDiagram spec="animated/cloud/finops-loop" minWidth={620} caption="FinOps as a monthly loop: the cloud's tools show the cost, the team decides, the owners act, and next month's numbers show the result." />
+
+FinOps is a loop, not a tool. **See**: the cloud's own tools show every day where the money goes, by account, team and service. **Decide**: once a month the owners meet, look at what changed, and pick a few actions. **Act**: each owner makes their change that week, such as switching off, shrinking or deleting. Next month's numbers show whether it worked, and the loop starts again.
+
+Brightpost had the tools in October and no loop: the data existed from the cluster's first hour, and nobody looked. What a bill is made of is on [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics); this page is about keeping it honest.
+
+<PremiumBreak />
+
+### Step 2: Every resource meters into one bill
+
+<AnimatedDiagram spec="animated/cloud/cost-allocation" step={1} minWidth={620} caption="Brightpost's servers and database meter into the provider's billing data, and the finance lead gets one number a month." />
+
+The provider writes down every meter on every resource, hour by hour. Each **billing row** says which resource, which account, which meter, how much and at what rate. It also copies the resource's tags at that moment. Reports, exports, budgets and alerts all read these rows; the invoice is only their monthly sum.
+
+A total tells you how much; only the rows can tell you whose. A tag added later usually marks only the usage from then on, so last month's rows keep the tags they had, or none.
+
+### Step 3: Spend with no owner
+
+<AnimatedDiagram spec="animated/cloud/cost-allocation" step={2} minWidth={620} caption="The failure: the GPU cluster meters into the bill with no tags, and the 40% growth reaches the finance lead with no name on it." />
+
+The cluster's rows have an account, a meter and a cost, but no `team`, `env` or `owner`. Every report that splits by team puts them in the blank column.
+
+<Callout tone="red" title="What breaks">
+  For 3 weeks the cluster runs 2 GPU machines, about 1,000 machine-hours, for training that took 2 days. Its rows sit in the billing data from the first hour. The organisation's budget alert fires at 80% on the 17th, but it watches the total and names no team. The report cannot help, because 35% of the spend carries no team tag. Untagged spend is nobody's spend, so nobody switches it off.
+</Callout>
+
+Three gaps let it happen: tags were a request, nobody read the cost data between invoices, and the only alert watched the company total.
+
+### Step 4: Tags, accounts and the unallocated line
+
+<AnimatedDiagram spec="animated/cloud/cost-allocation" step={3} minWidth={620} caption="A tag policy refuses untagged resources. The billing data splits into a view per team, and the cluster's spend lands on the unallocated line." />
+
+Allocation works in two layers. **Accounts first.** Since the [landing zone](/cloud/fundamentals/landing-zones), each team has a live and a test account, so most spend is already split by team and environment. **Tags second.** Inside an account, the <Term id="tag">tags</Term> `team` and `owner` split it further.
+
+Brightpost's tag keys were agreed long ago, but nothing enforced them. Now a **tag policy**, a guardrail at the top of the organisation, refuses to create a resource without `env`, `team` and `owner`.
+
+Whatever has no owner goes on its own **unallocated line**, reported every month with a goal: 35% in October, under 5% wanted. Costs that belong to everyone, such as the support plan, are split by a written rule or shown on one platform line.
+
+### Step 5: Showback or chargeback
+
+Once each line has an owner, the company chooses what owners do with their numbers.
+
+<Compare
+  columns={["", "Showback", "Chargeback"]}
+  rows={[
+    ["Each team sees its own cost", true, true],
+    ["Each team pays from its own budget", false, true],
+    ["Unallocated spend", "A line to shrink", "Must be near 0: every unit is billed to someone"],
+    ["Shared costs", "One platform line", "Split by an agreed rule"],
+    ["Effort to start", "A report and a monthly meeting", "A finance process, rules and a way to settle disputes"],
+    ["Right for", "Brightpost's 2 teams", "Many teams that each run their own budget"],
+  ]}
+  caption="Showback shows each team its cost; chargeback moves that cost into the team's own budget."
+/>
+
+Brightpost chooses showback. With one company budget, moving money between teams would add paperwork and change nothing. A team that sees its own line every month starts asking why.
+
+### Step 6: A billing export and cost per order
+
+<AnimatedDiagram spec="animated/cloud/cost-allocation" step={4} minWidth={620} caption="Every billing row is exported daily to a warehouse, where cost is divided by Brightpost's 12,000 orders a month." />
+
+A **billing export** copies every billing row, every day, into storage you own. From there it goes into a [data warehouse](/cloud/data/warehouses-lakes-and-query-engines), a database built for large queries. The team can then ask anything in SQL, keep years of history, and join cost with its own data. An open column format called FOCUS gives cost rows the same names on every provider.
+
+That join gives the bill meaning. A **unit cost** is cost divided by a unit of business, here orders: about 12,000 a month. In October, orders stayed flat, so cost per order rose 40%. On the biggest sale day, orders grow tenfold while the day's bill about doubles, so cost per order falls. A growing total is fine while unit cost stays flat.
+
+### Step 7: Budgets on the forecast, and anomaly alerts
+
+<AnimatedDiagram spec="animated/cloud/cost-allocation" step={5} minWidth={620} caption="Alerts read the daily spend. The anomaly alert points at the GPU cluster on its first day." />
+
+Brightpost already had budget alerts on the whole organisation. It adds a budget per team account, sent to that team's owner. It also alerts on the **forecast**: the provider projects month-end spend from the days so far. The ladder now has four rungs:
+
+1. **50% spent:** for information. Nobody acts.
+2. **80% spent:** the owner reads the team's report that week.
+3. **Forecast over 100%:** the owner finds the cause within a day.
+4. **100% spent:** act now. In a test account, an automated action can stop the machines.
+
+A budget catches slow growth. **Anomaly detection** catches sudden jumps. The provider learns each account's normal daily spend per service, then alerts when a day lands far above it. It needs a few weeks of history, but no budget. The cluster's first day was GPU spend in a test account that had never had any, so the alert would have named both on day 1. Cost alerts go to a named owner, like any other [alert](/cloud/operations/slos-alerting-and-on-call).
+
+### Step 8: Rightsizing and storage reports
+
+<AnimatedDiagram spec="animated/cloud/cost-allocation" step={6} minWidth={620} caption="Rightsizing advice reads usage and flags the GPU cluster as idle once its 2-day job is done." />
+
+<Term id="rightsizing">Rightsizing</Term> means changing a resource to the size its real use needs. Each provider reads your machines' usage metrics and suggests a smaller size, or flags an idle one. Read every week, it would have flagged the cluster. The same report finds the wholesale servers busy about 10% of the time; one size smaller roughly halves their line. Check a month that includes the busiest day before you act. Memory use often needs an agent on the machine before the advice can see it.
+
+Storage grows without anyone starting anything, so it gets its own report: which buckets grow, what is never read, which have no <Term id="lifecycle-rule">lifecycle rule</Term>. Brightpost's found 40 <Term id="snapshot">snapshots</Term> of long-deleted test servers' disks. Commitments come after this clean-up; [Cost Models and Purchasing Options](/cloud/operations/cloud-cost-models) covers them.
+
+### Step 9: The monthly review, and who owns cost
+
+<AnimatedDiagram spec="animated/cloud/finops-loop" step={2} minWidth={620} caption="The decide step: one monthly review, an owner for every line, cost per order, and three actions." />
+
+Engineers own cost, because they make the choices that create it: machine sizes, test clusters, log levels. Finance owns the plan and asks the questions. Brightpost's review takes 45 minutes on the first Tuesday of the month, with both teams' owners and the finance lead:
+
+1. The total and cost per order, against last month.
+2. The unallocated share, and who will tag what is left.
+3. The five biggest changes, each explained by its owner.
+4. Open advice from the rightsizing and storage reports.
+5. Three actions, each with a name and a date.
+
+Two months after October, the unallocated line is at 3%.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a unit of allocation, tags in the billing rows, an export, alerts and advice.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Unit of allocation:** the account, grouped in AWS Organizations, with one bill for every account. Cost categories group accounts and tags into business lines.
+    - **Tags:** tag policies keep key names and values consistent. A service control policy (SCP) can refuse a create call that lacks a required tag.
+    - **Reports and export:** Cost Explorer for reports and forecasts by account, service and tag. Data Exports delivers the Cost and Usage Report (CUR 2.0) or a FOCUS export to an S3 bucket, for Amazon Athena to query.
+    - **Alerts:** AWS Budgets on actual or forecast spend, with budget actions that can apply a policy or stop instances. Cost Anomaly Detection watches spend by service, account, cost category or tag.
+    - **Advice:** AWS Compute Optimizer for EC2, Auto Scaling groups, EBS volumes, Lambda and more. Amazon S3 Storage Lens shows storage use and activity across every account and bucket.
+
+    **The difference that changes a design.** A tag reaches Cost Explorer and the exports only after you activate it as a cost allocation tag, and activation does not reach back in time. A team can tag perfectly for a month and still see an empty column. Activate the agreed keys from the management account on day one.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Unit of allocation:** the project, under folders. Each project links to a Cloud Billing account that pays for it.
+    - **Tags:** labels on resources and projects flow into billing reports and the export. Google Cloud's separate "tags" serve policies, not cost. Require labels in infrastructure code.
+    - **Reports and export:** Cloud Billing reports by project, service, SKU and label, with a forecast. Cloud Billing export to BigQuery writes usage cost tables; the detailed one has a row per resource.
+    - **Alerts:** Cloud Billing budgets on actual or forecast spend, scoped to projects or services, by email or to Pub/Sub, where a function can act. Cloud Billing can also flag cost anomalies.
+    - **Advice:** the Recommender suggests machine types and flags idle VMs, idle disks and unused IP addresses. Storage Insights reports on Cloud Storage buckets and objects.
+
+    **The difference that changes a design.** The project is the wall for access and the unit for cost at once. A project per team and environment gives clean allocation with no labels at all. The export lands in BigQuery, so one query can join cost rows with other tables, such as orders. Turn the export on early, because it holds little history from before then.
+  </Tab>
+  <Tab label="Azure">
+    - **Unit of allocation:** the subscription, under management groups, and inside it the resource group. Every resource sits in exactly one resource group.
+    - **Tags:** on resources, resource groups and subscriptions. A resource does not copy its group's tags by itself. Azure Policy can deny a resource without a required tag, or copy one down from its group.
+    - **Reports and export:** cost analysis in Microsoft Cost Management, by subscription, resource group, service and tag, with a forecast. Exports write cost rows on a schedule to a storage account, including a FOCUS format.
+    - **Alerts:** budgets on a management group, subscription or resource group, on actual or forecast cost; an action group can start an automation. Anomaly alerts on a subscription flag unusual daily spend.
+    - **Advice:** Azure Advisor recommends resizing or shutting down underused VMs. Blob inventory lists every blob with its size and tier.
+
+    **The difference that changes a design.** For most business billing accounts, Cost Management can apply subscription and resource group tags to the usage rows of the resources inside them. That fills the `team` column without touching each resource. It changes only the cost data, so a policy that checks resource tags still sees them missing.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/cost-allocation" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/cost-allocation" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="A line of the bill grew. What now?"
+  tree={{
+    q: "Does the line have an owner, through its account or a team tag?",
+    no: "Find it in the billing export: group by account, service and resource. Tag it today, and make the tag required so the next one is refused.",
+    yes: {
+      q: "Did orders or traffic grow by about as much?",
+      yes: "Growth that follows the business is fine. Check that cost per order stayed flat, note it in the review, and move on.",
+      no: {
+        q: "Is the resource still doing useful work?",
+        no: "Switch it off or delete it today, after a snapshot if the owner wants one. Then ask why no alert caught it.",
+        yes: {
+          answer: "Read the rightsizing report for it. If it then runs steadily all year, look at a commitment.",
+          href: "/cloud/operations/cloud-cost-models",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="In October, 35% of Brightpost's spend had no team tag. Which report line holds it now, and what is the goal?" hint="Step 4.">
+    The unallocated line, reported every month. The goal is under 5%; two months later it was 3%.
+  </QuizItem>
+  <QuizItem question="Brightpost's bill grows 40% while orders stay flat. What happens to cost per order? And on a sale day, when orders grow tenfold and the day's bill doubles?" hint="Cost divided by orders.">
+    In October, cost per order rises 40%. On the sale day it falls, to about a fifth of a normal day's, because orders grow five times faster than cost.
+  </QuizItem>
+  <QuizItem question="The organisation's budget alert fired on the 17th. Why did the cluster still run for 3 weeks?">
+    The alert watched the company total and named no team, and 35% of spend had no team tag. Nobody owned the growth, so nobody switched it off. An anomaly alert per account would have named the test account and the GPU spend on day 1.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Accounts only", "Tags only", "Accounts first, then tags"]}
+  rows={[
+    ["Covers a resource nobody tagged", true, false, true],
+    ["Splits two teams inside one account", false, true, true],
+    ["What October looked like", "Growth somewhere in test", "35% with no team", "The cluster on the unallocated line, in a named account"],
+    ["Effort", "Set up once, with the landing zone", "Every resource, for ever, with a policy", "Both, each one smaller"],
+    ["Breaks when", "Two teams share an account", "Someone skips a tag", "Rarely: it needs both to fail"],
+  ]}
+  caption="Three ways to give spend an owner, with Brightpost's October."
+/>
+
+Accounts give a floor that nobody can forget; tags give detail inside it. Start with accounts, and add tags once two owners share an account.
+
+## Common pitfalls
+
+- **Tags as a request.** A wiki page that asks for tags gets 65% coverage. Make the keys a rule, enforced by a policy.
+- **Finance owns the bill alone.** Finance sees the total but cannot change a machine. Give each line an engineer as owner.
+- **One alert on the company total.** It fires late and names nobody. Add a budget per account, sent to its owner, with a forecast alert and anomaly detection.
+- **Rightsizing on a quiet week.** Advice built on two quiet weeks shrinks a server the sale day needs. Use a month that includes the busiest day, and let autoscaling handle the peak.
+- **Committing before cleaning up.** A commitment for capacity that should be off locks in the waste for years. Delete and rightsize first.
+
+## How to say it in an interview
+
+"I treat cost as a loop: see where the money goes, decide what to change, act, and look again next month. The first job is allocation. Each team and environment gets its own account, a policy requires `team`, `env` and `owner` tags, and I track the untagged share until it is under 5%. I export the billing data daily to a warehouse and divide cost by a business unit, such as orders. Each account has a forecast budget alert and anomaly detection, sent to a named owner. Engineers own their lines, and a monthly review turns rightsizing and storage advice into three actions with names and dates."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a cost allocation tag, and why does untagged spend matter?" level="Junior" category="Cloud">
+    **Short answer.** A tag is a key and a value on a resource, such as `team: shop`. A cost allocation tag is one that reaches the billing rows, so reports can split the bill by it. Untagged spend has no owner, and spend with no owner is never switched off.
+
+    **Why.** Brightpost's October bill grew 40%, and 35% of the spend had no team tag. The growth was a GPU test cluster with no tags, so no report named whose it was. It ran for 3 weeks after a 2-day job. With a policy that refuses untagged resources, the next cluster cannot be created without an owner. What slips through still shows up as its own unallocated line.
+
+    <AnimatedDiagram spec="animated/cloud/cost-allocation" step={3} highlight={["billing", "unalloc", "gpu", "tagpol"]} caption="Rows with a team tag land in that team's view. The rest land on the unallocated line." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to last month's rows if you tag a resource today?
+    - How do you split a cost that belongs to every team?
+
+    **Watch out for.** Saying "we tag everything" without saying what enforces it. Tags that depend on memory decay.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you get warned before a budget is exceeded, not after?" level="Mid" category="Cloud">
+    **Short answer.** Alert on the forecast as well as on actual spend, set a budget per account sent to its owner, and add anomaly detection for sudden jumps.
+
+    **Why.** An alert at 100% of actual spend arrives when the money is gone. A forecast alert projects month-end from the days so far, so a jump on day 3 shows up on day 3. A budget per team account names the owner; Brightpost's company-wide alert named nobody. Anomaly detection would have flagged the GPU cluster on its first day.
+
+    <AnimatedDiagram spec="animated/cloud/cost-allocation" step={5} path="billing>alerts>gpu" caption="Alerts read the daily spend and point at the cluster on day 1." />
+
+    **Follow-ups the interviewer may ask.**
+    - Should a budget ever stop resources by itself?
+    - Why does anomaly detection miss a brand-new account's first week?
+
+    **Watch out for.** Treating a budget as a spending cap. A budget warns; only an action or a person stops anything.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Showback or chargeback: which would you start with, and why?" level="Mid" category="Cloud">
+    **Short answer.** Showback. Each team sees its own cost every month, and the money stays in one budget. Move to chargeback only when teams own budgets and allocation is clean.
+
+    **Why.** Chargeback bills every unit of spend to a team, so it needs an unallocated line near zero and agreed rules for shared costs. Without them, the meeting is about the rules, not the spend. Showback needs only a report and a review. Brightpost has 2 teams and one company budget, so moving money between them would change nothing.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you split the support plan and the network hub?
+    - What changes when a third team joins with its own budget?
+
+    **Watch out for.** Choosing chargeback "to make teams care" while 35% of spend is untagged. The unallocated part becomes a fight, not a fix.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why track cost per order instead of the total bill?" level="Mid" category="Cloud">
+    **Short answer.** The total grows when the business grows, which is fine. Cost per order shows whether the system got more or less efficient.
+
+    **Why.** Brightpost exports every billing row daily to a warehouse and divides cost by about 12,000 orders a month. In October, orders were flat and the bill grew 40%, so cost per order rose 40%: that is waste. On a sale day, orders grow tenfold while the day's bill about doubles, so cost per order falls: that is healthy growth. The total alone would flag the sale day as a problem, and could not tell October's waste from real demand.
+
+    <AnimatedDiagram spec="animated/cloud/cost-allocation" step={4} path="billing>warehouse>unitcost" caption="The export brings cost into the warehouse, where it meets the order count." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which unit would you pick for the wholesale shop?
+    - How do you count a shared cost in a unit cost?
+
+    **Watch out for.** Picking a unit nobody in the business tracks. The unit must be a number the business already cares about.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A team's bill doubled overnight with no deploy. How do you find the cause across accounts?" level="Senior" category="Cloud">
+    **Short answer.** Narrow it down in the billing data: by account, then service, then meter, then resource and tag, comparing the bad day with the day before. The cause is usually something started outside the deploy pipeline, a runaway job, or traffic.
+
+    **Why.** The billing rows carry account, service, meter, resource and tags, so each cut narrows the search. An anomaly alert often names the account and service already. Then ask what changed without a deploy: resources made by hand, a stopped schedule, a retry loop, traffic, or data leaving the cloud. Brightpost found its GPU cluster by hand after two days. With the export, one query by resource and day finds it in minutes.
+
+    <AnimatedDiagram spec="animated/cloud/cost-allocation" step={5} highlight={["billing", "warehouse", "alerts", "gpu"]} caption="The anomaly alert names the account and service; the export narrows it to one resource." />
+
+    **Follow-ups the interviewer may ask.**
+    - Usage stayed the same but cost doubled. What else can change?
+    - How would you stop the same cause from recurring?
+
+    **Watch out for.** Starting with the servers' dashboards. The billing data already knows which meter grew; start there.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics)
+- [Cost Models and Purchasing Options](/cloud/operations/cloud-cost-models)
+- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
+- [Landing Zones](/cloud/fundamentals/landing-zones)
+- [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines)
+- [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus)
+- [DevOps & IaC on AWS](/cloud/aws/devops)
+- [DevOps & IaC on Google Cloud](/cloud/gcp/devops)
+- [DevOps & IaC on Azure](/cloud/azure/devops)
+- [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning)
+
+## Further reading
+
+- [AWS Cost Management documentation](https://docs.aws.amazon.com/cost-management/): Cost Explorer, Budgets and anomaly detection.
+- [Google Cloud Billing documentation](https://cloud.google.com/billing/docs): reports, budgets and the BigQuery export.
+- [Microsoft Cost Management documentation](https://learn.microsoft.com/azure/cost-management-billing/): cost analysis, budgets and exports.
+- [FinOps Foundation framework](https://www.finops.org/framework/): the practice and its common language.

@@ -1,17 +1,31 @@
 ---
 title: "Messaging & Streaming on AWS"
 description: "SQS, SNS, EventBridge, Kinesis, MSK, Amazon MQ and Firehose: queues vs topics vs streams, with the Google Cloud and Azure equivalents."
+updated: 2026-11-14
 ---
 
-Almost every case study has an "async pipeline" box. On AWS that box is one of three things: a **queue** (SQS), where each message is work for one consumer; a **topic** (SNS or EventBridge), where each message goes to every subscriber; or a **stream** (Kinesis or MSK), an ordered log many consumers read and replay. Picking the wrong one is a common interview mistake, so start with what should happen to each message.
+Almost every case study has an "async pipeline" box. On AWS that box is one of three things. A **queue** (SQS) gives each message to one consumer. A **topic** (SNS or EventBridge) sends each message to every subscriber. A **stream** (Kinesis or MSK) is an ordered log that many consumers read and replay. Picking the wrong one is a common interview mistake, so start with what should happen to each message.
+
+## The idea
+
+A queue hands each message to one worker; a topic copies it to every subscriber; a stream keeps it, in order, for readers that replay. All three deliver at least once, so every consumer must cope with seeing a message twice.
+
+<Callout tone="blue" title="Learn the idea">
+  New to queues and streams? [Queues vs Streams](/cloud/start-here/queues-vs-streams) builds all three with Brightpost's order emails, and [Queues, Topics, Streams, Event Buses and Workflows](/cloud/data/streaming-and-messaging-services) covers partitions, lag, event buses and workflows. This page names the AWS pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/queue-topic-stream" stepper cloud="aws" minWidth={620} caption="Brightpost's order events on AWS in six steps: an SQS queue, a duplicate email, the fix, a dead-letter queue, an SNS topic and a Kinesis stream." />
+
+<CloudMapping diagram="cloud/queue-topic-stream" lead="aws" />
+
+Read with AWS names, the story goes like this. The shop sends one message per order to an SQS queue, and a received message stays hidden for the **visibility timeout**. On the sale day a worker crashed before deleting its batch, so the messages reappeared and the emails went out twice. A sent-email table in RDS makes the second send harmless. A **redrive policy** moves a message that fails five times to a dead-letter queue. An SNS topic then copies "order placed" to the email queue and the stock worker, and a Kinesis stream keeps every order event for readers that replay.
 
 ## TL;DR
 
 - **Work to be done once** → **SQS**. Use **FIFO** when order per key matters.
 - **Tell several services something happened** → **SNS → SQS** for simple fan-out, **EventBridge** for content-based routing across teams.
 - **Ordered, replayable firehose of events** → **Kinesis** (simplest) or **MSK** (Kafka ecosystem).
-- **Land a stream in S3 or a warehouse** → **Firehose**.
-- **Existing AMQP/JMS apps** → **Amazon MQ**.
+- **Land a stream in S3 or a warehouse** → **Firehose**. **Existing AMQP/JMS apps** → **Amazon MQ**.
 
 ## At a glance
 
@@ -30,6 +44,20 @@ Almost every case study has an "async pipeline" box. On AWS that box is one of t
 
 <CloudDecisionTree topic="messaging" />
 
+## The settings that decide behaviour
+
+Most messaging bugs on AWS come from a handful of settings, not from the services failing.
+
+| Setting | Where | What it controls |
+|---|---|---|
+| Visibility timeout | SQS queue | How long a received message stays hidden. Too short, and a slow worker's message goes to a second worker. |
+| Redrive policy, max receive count | SQS queue | After how many receives a message moves to the dead-letter queue. |
+| Message group id, deduplication id | SQS FIFO, SNS FIFO | Order per group, and dropping a repeated send inside a short window. |
+| Partial batch response | Lambda reading SQS or Kinesis | Lambda retries only the failed messages instead of the whole batch. |
+| Partition key | Kinesis, MSK | Which shard or partition a record lands on, so what stays in order and what runs in parallel. |
+
+When Lambda reads an SQS queue, set the queue's visibility timeout to several times the function's timeout, so a retried batch does not overlap a running one.
+
 ## Services
 
 ### Amazon SQS
@@ -44,6 +72,8 @@ Almost every case study has an "async pipeline" box. On AWS that box is one of t
 
 <CloudServiceProfile id="aws-kinesis" />
 
+A reader built with the Kinesis Client Library keeps a lease and a checkpoint per shard in a DynamoDB table. Lag shows as **iterator age**, the age of the last record a reader received; it grows as the reader falls behind. Watch it per shard, as the [streaming page](/cloud/data/streaming-and-messaging-services) explains.
+
 ### Amazon MSK
 
 <CloudServiceProfile id="aws-msk" />
@@ -56,7 +86,7 @@ Almost every case study has an "async pipeline" box. On AWS that box is one of t
 
 <CloudServiceProfile id="aws-mq" />
 
-EventBridge is covered on [Serverless & Orchestration](/cloud/aws/serverless#aws-eventbridge).
+**Amazon EventBridge** (event buses routed by rules, with archive and replay) and **AWS Step Functions** (workflows with retries and waits) are covered on [Serverless & Orchestration](/cloud/aws/serverless#aws-eventbridge).
 
 ## Where this shows up in system design
 
@@ -68,24 +98,69 @@ EventBridge is covered on [Serverless & Orchestration](/cloud/aws/serverless#aws
 
 ## Common mistakes
 
-- **Using a queue for fan-out.** Two consumers on one SQS queue split the messages rather than each getting all of them. Use SNS → SQS.
+- **Using a queue for fan-out.** Two consumers on one SQS queue split the messages rather than each getting all of them. Use SNS → SQS, one queue per consumer.
 - **Non-idempotent consumers.** SQS, SNS, EventBridge and Kinesis consumers can all see a message twice. Deduplicate with an idempotency key (see [Idempotency](/system-design/patterns/idempotency)).
-- **No dead-letter queue.** One bad message retries forever and hides real failures.
-- **A hot partition key.** One busy key (a celebrity, a big group chat) overloads one shard. Spread it with a suffix or sub-key.
+- **No dead-letter queue.** One bad message retries until it expires and hides real failures. Alarm on the dead-letter queue's depth.
+- **A hot partition key.** One busy key (a celebrity, a big group chat, a hero poster) overloads one shard. Spread it with a suffix or sub-key.
 - **Visibility timeout shorter than processing time.** Messages reappear and are processed twice.
+- **An encrypted queue SNS cannot write to.** A queue encrypted with the AWS managed KMS key for SQS rejects messages from SNS, because that key's policy cannot be changed. Use a customer managed key whose policy allows SNS.
 
 ## Related
 
-[Queues vs Streams](/cloud/start-here/queues-vs-streams) · [Serverless & Orchestration on AWS](/cloud/aws/serverless) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
+[Queues vs Streams](/cloud/start-here/queues-vs-streams) · [Queues, Topics, Streams, Event Buses and Workflows](/cloud/data/streaming-and-messaging-services) · [Serverless & Orchestration on AWS](/cloud/aws/serverless) · [Messaging & Streaming on Google Cloud](/cloud/gcp/messaging) · [Messaging & Streaming on Azure](/cloud/azure/messaging) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues) · [Fan-out: Push vs Pull](/system-design/patterns/fan-out) · [Back Pressure and Load Shedding](/system-design/patterns/back-pressure)
 
 <InterviewQuestions>
   <InterviewQuestion question="SQS or Kinesis for processing order events?" category="Cloud" level="Mid">
-    If each event is a job that one service must handle once, SQS (FIFO with the order id as group id if order matters). If several services need the same events in order and may need to replay them, Kinesis or MSK keyed by order id. Many systems use both: a stream as the source of truth and SQS queues for individual jobs.
+    **Short answer.** It depends on what should happen to each event. If each event is a job one service must do once, use SQS, with a FIFO queue grouped by order id if order matters. If several services need the same events in order and may replay them, use Kinesis or MSK keyed by order id.
+
+    **Why.** SQS deletes a message once a worker finishes it, so there is nothing to replay and no second reader. Kinesis keeps every record for its retention period, and each reader keeps its own position. Many systems use both: the stream as the record of what happened, and SQS queues for individual jobs.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={6} cloud="aws" highlight={["stream", "analytics", "report"]} caption="A Kinesis stream keeps every order event; analytics and a new report each read at their own place." />
+
+    **Follow-ups the interviewer may ask.**
+    - A new report needs last month's orders. What retention do you set, and what does it change?
+    - How many Lambda copies can read one Kinesis shard at once without breaking order per key?
+
+    **Watch out for.** Choosing Kinesis for a plain job queue. You then manage shards and checkpoints for work SQS does with no setup.
   </InterviewQuestion>
-  <InterviewQuestion question="How do you guarantee a message is processed exactly once with SQS?" category="Reliability" level="Senior">
-    You can't rely on delivery alone; aim for effectively-once processing. Make the consumer idempotent by recording a message or business key in a store with a conditional write (for example DynamoDB) before applying side effects, and skip keys already seen. FIFO queues add deduplication within a five-minute window, which helps but does not replace idempotent consumers.
+
+  <InterviewQuestion question="Lambda reads Brightpost's email queue in batches of 25. One message crashes the function. What happens to the other 24, and how do you fix it?" category="Cloud" level="Mid">
+    **Short answer.** By default the whole batch fails, so all 25 messages reappear after the visibility timeout and the 24 good emails are sent again. Turn on partial batch responses and return only the failed message's id, so Lambda deletes the other 24.
+
+    **Why.** Lambda deletes a batch from SQS only when the function succeeds. One error marks every message in the batch as not done. With partial batch responses, the function reports which messages failed, and only those come back. A redrive policy then moves the one bad message to a dead-letter queue after a few tries.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={2} cloud="aws" highlight={["queue", "workerA", "workerB", "dup"]} caption="Worker A crashes before it confirms, so SQS hands order 1042 to worker B, which sends the email again." />
+
+    **Follow-ups the interviewer may ask.**
+    - What visibility timeout do you set relative to the function's timeout, and why?
+    - Partial batch responses still retry the failed message. What stops it sending an email twice?
+
+    **Watch out for.** Treating partial batch responses as the fix for duplicates. They shrink the damage; the sent-email check, keyed by order id, still has to stop the second send.
   </InterviewQuestion>
-  <InterviewQuestion question="Why does Messenger's design key the message bus by conversation id?" category="Architecture" level="Mid">
-    A partition preserves order, so putting a conversation's messages on one partition keeps them ordered for every consumer. Different conversations spread across partitions, so the bus still scales horizontally.
+
+  <InterviewQuestion question="How do you guarantee a message is processed exactly once with SQS?" category="Cloud" level="Senior">
+    **Short answer.** You cannot get it from delivery alone; aim for effectively-once processing. Make the consumer idempotent: record the order id with a conditional write before the side effect, and skip ids already recorded.
+
+    **Why.** A worker can finish the work and crash before deleting the message, so SQS delivers it again. FIFO queues drop a repeated send with the same deduplication id inside a five-minute window. That stops duplicate sends, not duplicate processing. A conditional write in DynamoDB, or a unique key in RDS, is the check that holds.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={3} cloud="aws" highlight={["workerA", "workerB", "sent", "dup"]} caption="Each worker checks the sent-email table first, so the second email for order 1042 is skipped." />
+
+    **Follow-ups the interviewer may ask.**
+    - The side effect is a card charge at a payment provider. Where does the idempotency key go?
+    - Do you write the order id before or after sending the email, and what does each choice risk?
+
+    **Watch out for.** Saying "FIFO gives exactly-once" and stopping there. FIFO's promise is about sends inside a short window; a crash after the work still causes a second run.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why does Messenger's design key the message bus by conversation id?" category="Cloud" level="Mid">
+    **Short answer.** A partition keeps order, so putting each conversation on one partition keeps its messages in order for every consumer. Different conversations spread across partitions, so the bus still scales out.
+
+    **Why.** On MSK or Kinesis the partition key is hashed to pick a partition or shard. Every message with the same conversation id lands on the same one, in the order it was written. Order across conversations is not needed, so nothing is lost by running them in parallel.
+
+    **Follow-ups the interviewer may ask.**
+    - A group chat with 5,000 members is very busy. What happens to its partition?
+    - You add partitions later. What happens to the order of conversations that move?
+
+    **Watch out for.** Keying by user id. A message then belongs to two users, and one conversation's messages can land on different partitions, out of order.
   </InterviewQuestion>
 </InterviewQuestions>

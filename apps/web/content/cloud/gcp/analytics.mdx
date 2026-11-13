@@ -1,20 +1,49 @@
 ---
 title: "Analytics & Data on Google Cloud"
 description: "BigQuery, Dataflow, Dataproc, Dataplex and Looker, with the AWS and Azure equivalents."
+updated: 2026-11-14
 ---
 
-Analytics is where Google Cloud is strongest. **BigQuery** is a serverless warehouse with no clusters to size, it queries data lake files through **BigLake**, and it takes streams straight from **Pub/Sub**. **Dataflow** runs Apache Beam pipelines in batch or streaming mode, **Dataproc** runs Spark, and **Looker** sits on top.
+Brightpost's finance lead asks which posters sell best each December, and which pages people view before buying. The orders sit in Cloud SQL and the clicks pass through Pub/Sub, so neither answers alone. On Google Cloud one fact shapes the design: **BigQuery is both the engine that reads files in a bucket and the warehouse**. Its storage and its compute are billed apart, so the choice is less "which product" and more "which kind of table, and how you pay for queries".
+
+## The idea
+
+Questions across years of data do not belong on the orders database. They go to files in a cheap bucket, read by an engine billed per byte, or to a warehouse that keeps small, prepared tables for questions asked all day.
+
+<Callout tone="blue" title="Learn the idea">
+  New to lakes and warehouses? [Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines) builds Brightpost's sales dashboard step by step, and [Queues, Topics, Streams, Event Buses and Workflows](/cloud/data/streaming-and-messaging-services) shows where the click stream comes from. This page names the Google Cloud pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/lake-to-warehouse" stepper cloud="gcp" minWidth={620} caption="Brightpost's sales dashboard on Google Cloud in seven steps: a Cloud Storage lake, BigQuery over the files, the full-scan bill, Parquet split by date, a summary table and policy tags." />
+
+<CloudMapping diagram="cloud/lake-to-warehouse" lead="gcp" />
 
 ## TL;DR
 
-- **BigQuery** for warehousing, ad-hoc SQL and BI, billed per TB scanned or by reserved slots.
-- **Dataflow** for streaming and batch ETL with one programming model (Apache Beam).
-- **Dataproc** for Spark; **Dataplex** for catalog and governance.
-- Partition and cluster large BigQuery tables; select only the columns you need.
+- **Cloud Storage is the lake; BigQuery reads it** through external or BigLake tables, and also stores its own native tables.
+- **Storage and compute are billed apart.** On demand, a query is billed by the bytes it processes. With capacity, you reserve **slots**, units of query compute.
+- **Dataflow** runs streaming and batch pipelines; **Dataproc** runs Spark; **Knowledge Catalog** (formerly Dataplex) catalogues and checks data across projects.
+- **Partition by date, cluster by common filters, name only the columns you need**, and set a maximum bytes billed on anything automated.
 
 ## At a glance
 
 <CloudGroupTable group="analytics" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+In step 1 the finance lead's monthly report runs on a Cloud SQL read replica, and clicks pass through a Pub/Sub topic. In step 2 a nightly job writes the day's clicks and orders as JSON files to a Cloud Storage bucket.
+
+In step 3 a BigQuery dataset gets a table that points at the click folder, and BigQuery reads the files where they sit. Step 4 is the bill: on demand, 576 queries a day each process all 18 GB. In step 5 a Dataflow job writes Parquet into one folder per day, so BigQuery skips the other days. In step 6 BigQuery loads the curated files into native tables, and a scheduled query rebuilds the summary each night. In step 7 policy tags hide the two address columns, on native and BigLake tables alike.
+
+| The idea | On Google Cloud | What to know |
+|---|---|---|
+| Query engine over the lake | BigQuery external table or BigLake table | A BigLake table reads the bucket for you and carries column rules to the files |
+| Warehouse | BigQuery native table | Billed for storage by size, separately from the queries |
+| Paying for queries | On-demand or capacity (slots) | On demand bills bytes processed; capacity bills reserved slots, busy or not |
+| Catalog | BigQuery datasets plus Knowledge Catalog | Datasets hold table definitions; Knowledge Catalog searches and describes data across projects |
+| Column rules | Policy tags, row access policies, data masking | Set once on the column; every query through BigQuery honours them |
+
+Clicks can also reach BigQuery without a nightly file. A Pub/Sub **BigQuery subscription** writes each message into a table, and a **Cloud Storage subscription** writes files to a bucket. Dataflow sits in between when events need cleaning, joining or counting first.
 
 ## Services
 
@@ -22,30 +51,84 @@ Analytics is where Google Cloud is strongest. **BigQuery** is a serverless wareh
 
 <CloudServiceProfile id="gcp-bigquery" />
 
+**Pick it when** you need SQL over more than one database's worth of history: dashboards, ad-hoc questions, or files in Cloud Storage.
+
 ### Dataflow
 
 <CloudServiceProfile id="gcp-dataflow" />
+
+**Pick it when** events must be cleaned, joined or counted on their way from Pub/Sub to BigQuery or Cloud Storage, or a batch job must reshape files.
 
 ### Dataproc
 
 <CloudServiceProfile id="gcp-dataproc" />
 
-## Coming from AWS
+**Pick it when** a team already has Spark or Hadoop jobs, or needs Spark libraries for feature pipelines.
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| Redshift + Athena | BigQuery | One serverless engine for both warehouse tables and lake files |
-| Managed Flink | Dataflow | Apache Beam instead of Flink; same code for batch and streaming |
-| EMR | Dataproc | Similar; Serverless for Apache Spark for jobs without clusters |
-| Glue Data Catalog | Dataplex / BigLake metastore | Catalog and governance across lake and warehouse |
-| Quick Sight | Looker | Semantic modelling layer (LookML) |
+### Knowledge Catalog
+
+<CloudServiceProfile id="gcp-dataplex" />
+
+**Pick it when** several teams own data across many projects, and people need to find tables, see their owners and trust their quality.
+
+Dashboards come from **Looker**, which defines measures such as "net sales" once in a model, or **Looker Studio**.
+
+## Common mistakes
+
+- **Trusting `LIMIT` to cut the bill.** On demand, BigQuery bills the columns it reads, not the rows it returns. Name the columns and filter on the partition date instead.
+- **Partitioned tables queried without the partition column.** A filter on another timestamp still reads every partition. Turn on "require partition filter" for large tables.
+- **Granting analysts read on the bucket behind BigLake tables.** Policy tags cover reads through BigQuery, not a file downloaded from Cloud Storage. Only BigQuery's connection should read the bucket.
+
+## Where this shows up in system design
+
+- **[Metrics and logging](/system-design/case-studies/metrics-and-logging):** recent logs in a search store; Cloud Logging routes history into BigQuery for cheap SQL over months.
+- **[Twitter](/system-design/case-studies/twitter) trends:** Dataflow counts hashtags in sliding windows from Pub/Sub and writes the top items to a cache.
+- **[YouTube](/system-design/case-studies/youtube) view counts:** views land in BigQuery for reports, while the page shows a fast counter kept elsewhere.
 
 ## Related
 
-[Analytics & Data on AWS](/cloud/aws/analytics) · [Analytics & Data on Azure](/cloud/azure/analytics) · [Messaging on Google Cloud](/cloud/gcp/messaging) · [Analytical (OLAP) & Columnar](/system-design/databases/analytical-databases)
+[Warehouses, Lakes and Query Engines](/cloud/data/warehouses-lakes-and-query-engines) · [Queues, Topics, Streams, Event Buses and Workflows](/cloud/data/streaming-and-messaging-services) · [Analytics & Data on AWS](/cloud/aws/analytics) · [Analytics & Data on Azure](/cloud/azure/analytics) · [Messaging on Google Cloud](/cloud/gcp/messaging) · [Analytical (OLAP) & Columnar](/system-design/databases/analytical-databases) · [System Design](/system-design)
 
 <InterviewQuestions>
-  <InterviewQuestion question="How do you keep BigQuery costs under control?" category="Cloud" level="Mid">
-    Partition tables by date and cluster them by common filter columns, select only needed columns, use preview instead of SELECT *, set per-user or per-project byte limits, and move steady workloads to capacity pricing with slot reservations.
+  <InterviewQuestion question="BigQuery separates storage from compute. What does that mean for Brightpost?" category="Cloud" level="Junior">
+    **Short answer.** Brightpost pays for the tables it keeps and, separately, for the queries it runs. Storing two years of clicks is a small, steady line. The query line grows with how much data the queries read, or with the capacity reserved for them.
+
+    **Why.** BigQuery keeps data in Google's storage and lends query machines from a shared pool. There are two ways to pay for them. On demand, each query is billed by the bytes it processes. With capacity, a team reserves slots, units of query compute, and pays for them whether queries run or not. A busy month-end needs no copy of the data, only more compute.
+
+    <AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={6} cloud="gcp" highlight={["warehouse", "curated", "dashboard"]} caption="BigQuery stores the curated tables and the summary; the dashboard's queries are billed apart from that storage." />
+
+    **Follow-ups the interviewer may ask.**
+    - When would Brightpost move from on demand to capacity?
+    - Does keeping old data in BigQuery slow down new queries?
+
+    **Watch out for.** Saying "serverless, so there is nothing to pay when idle". Idle compute is free on demand, but storage is billed every month, and reserved slots are billed whether used or not.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost's dashboard ran up a large BigQuery bill. How do you bring it under control?" category="Cloud" level="Mid">
+    **Short answer.** Make each query read less, then make fewer queries read anything big. Partition by date, cluster by the columns charts filter on, and name only the needed columns. Point the dashboard at a small summary table, and cap bytes per query.
+
+    **Why.** On demand, Brightpost's 6 charts refreshing every 15 minutes made 576 queries a day, each processing 18 GB of raw JSON. Parquet in date folders brings a chart to about 20 MB; a summary table, to under 1 MB. A maximum bytes billed setting fails any query that would read more, and daily quotas cap a user or project.
+
+    <AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={4} cloud="gcp" highlight={["dashboard", "engine", "raw"]} caption="Six charts, every 15 minutes, each processing all 18 GB through BigQuery." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you find which query, and which user, ran up the bill?
+    - Would capacity pricing have helped, or hidden the problem?
+
+    **Watch out for.** Moving to capacity pricing as the first fix. It caps the bill, but the same wasteful queries then queue for slots and slow every other user.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost's click events arrive on Pub/Sub. How should they reach BigQuery?" category="Cloud" level="Mid">
+    **Short answer.** If the events need no change, a Pub/Sub BigQuery subscription writes each one into a table, with no code. If they need cleaning, joining or counting first, run a Dataflow pipeline between the two.
+
+    **Why.** Today a nightly job turns 25,000 clicks into one JSON file, so reports trail by a day. A BigQuery subscription makes clicks queryable within seconds. Dataflow adds windows, joins and deduplication, at the cost of a pipeline to run. Either way, partition the target table by date.
+
+    <AnimatedDiagram spec="animated/cloud/lake-to-warehouse" step={2} cloud="gcp" highlight={["stream", "raw"]} caption="Today the clicks leave Pub/Sub once a night as one JSON file; a subscription or Dataflow can deliver them all day." />
+
+    **Follow-ups the interviewer may ask.**
+    - The message schema changes. What happens to the subscription?
+    - How do you keep a copy of the raw events for replay?
+
+    **Watch out for.** Streaming into many small files in Cloud Storage instead. A file a minute is 1,440 files a day; native tables, or a nightly compaction job, avoid that.
   </InterviewQuestion>
 </InterviewQuestions>

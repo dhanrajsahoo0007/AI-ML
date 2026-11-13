@@ -1,20 +1,49 @@
 ---
 title: "Messaging & Streaming on Azure"
 description: "Service Bus, Event Hubs, Event Grid and Queue Storage, with the AWS and Google Cloud equivalents."
+updated: 2026-11-14
 ---
 
-Azure splits messaging by job. **Service Bus** is the enterprise broker for queues and topics, with sessions, transactions and duplicate detection. **Event Hubs** is the partitioned event stream, with a Kafka-compatible endpoint. **Event Grid** routes discrete events. **Queue Storage** is a cheap, simple queue inside a storage account.
+Every Brightpost order has to start three jobs: send the confirmation email, update the stock count and feed analytics. None of them should slow down checkout, so the shop hands each order to a messaging service and moves on. On Azure one fact shapes that design: business messages and event streams live in different services. **Service Bus** carries messages that must each be handled, such as orders. **Event Hubs** carries high-volume streams that many readers replay.
+
+## The idea
+
+A queue hands each message to one worker; a topic copies it to every subscriber; a stream keeps it, in order, for readers that replay. All three deliver at least once, so every consumer must cope with seeing a message twice.
+
+<Callout tone="blue" title="Learn the idea">
+  New to queues and streams? [Queues vs Streams](/cloud/start-here/queues-vs-streams) builds all three with Brightpost's order emails, and [Queues, Topics, Streams, Event Buses and Workflows](/cloud/data/streaming-and-messaging-services) covers partitions, lag, event buses and workflows. This page names the Azure pieces.
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/queue-topic-stream" stepper cloud="azure" minWidth={620} caption="Brightpost's order events on Azure in six steps: a Service Bus queue, a duplicate email, the fix, the dead-letter subqueue, a topic and an event hub." />
+
+<CloudMapping diagram="cloud/queue-topic-stream" lead="azure" />
 
 ## TL;DR
 
-- **Service Bus queues** for work; **Service Bus topics** for fan-out with per-subscription filters.
-- **Sessions** give ordered, one-at-a-time processing per key.
-- **Event Hubs** for telemetry and clickstreams, readable with Kafka clients; **Capture** writes to storage.
-- **Event Grid** for reacting to resource events and routing domain events.
+- **Service Bus queues** for work, **Service Bus topics** for fan-out with a filter on each subscription.
+- **Sessions** give ordered, one-at-a-time processing per key, such as per order.
+- **Event Hubs** for telemetry and clickstreams, with partitions, consumer groups and a Kafka endpoint.
+- **Event Grid** pushes events, such as "a file was added", to handlers. **Queue Storage** is a cheap, plain queue.
 
 ## At a glance
 
 <CloudGroupTable group="messaging" lead="azure" />
+
+## How it fits together on Azure
+
+In step 1 the shop sends one message per order to a Service Bus queue, and two email workers receive from it. In the default **peek-lock** mode a received message is locked, not removed. The worker **completes** it when the email is sent, and only then is it deleted.
+
+Step 2 is the failure. Worker A crashes before completing order 1042, the lock runs out, and Service Bus hands 1042 to worker B. Step 3 adds the sent-email table in Azure Database for PostgreSQL, so the second email is skipped. In step 4, after the **maximum delivery count**, Service Bus moves the message to the queue's built-in **dead-letter subqueue**.
+
+Step 5 turns the queue into a **topic**. The shop sends "order placed" once, and each **subscription** gets its own copy, filter and dead-letter subqueue. Step 6 is the stream: Event Hubs keeps every order event in **partitions** for a retention period. Each **consumer group** reads at its own place and saves **checkpoints** in Blob Storage. A new report starts from the beginning.
+
+| The idea | On Azure | What to know |
+|---|---|---|
+| Queue lock | Peek-lock, with a lock duration | A long job renews its lock; the client library can do it |
+| Topic | Service Bus topic and subscriptions | Each subscription is a queue with its own filter; not on the Basic tier |
+| Order per key | Sessions, by session id | One receiver holds a session at a time |
+| Dead-letter queue | Built-in dead-letter subqueue | Nothing empties it; you must read it |
+| Stream | Event Hubs partitions and consumer groups | Partition count is hard to change later on some tiers |
 
 ## Services
 
@@ -22,26 +51,70 @@ Azure splits messaging by job. **Service Bus** is the enterprise broker for queu
 
 <CloudServiceProfile id="azure-service-bus" />
 
+**Pick it when** each message is business work, such as an order or a payment, that must be handled once, in order per key, with dead-lettering. **Duplicate detection** drops a repeated send with the same message id inside a time window you set.
+
 ### Azure Event Hubs
 
 <CloudServiceProfile id="azure-event-hubs" />
 
-## Coming from AWS
+**Pick it when** many readers need the same high-volume stream, or your code already uses Kafka clients.
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| SQS FIFO | Service Bus sessions | Plus transactions and scheduled messages |
-| SNS → SQS | Service Bus topic with subscriptions | Each subscription is its own durable queue with SQL-like filters |
-| Kinesis / MSK | Event Hubs | Partitions and consumer groups; Kafka endpoint instead of real brokers |
-| Firehose | Event Hubs Capture | Writes Avro or Parquet to Blob or Data Lake Storage |
-| Amazon MQ | Service Bus Premium | AMQP 1.0 and JMS 2.0 |
+**Event Grid**, which pushes resource and app events to handlers, is on [Serverless & Orchestration](/cloud/azure/serverless#azure-event-grid). **Azure Queue Storage** is a simple queue inside a storage account, with no sessions, topics or built-in dead-lettering.
+
+## Common mistakes
+
+- **Using Event Hubs as a work queue.** There is no per-message lock or dead-letter; a reader saves one checkpoint per partition. One bad event stalls its partition until the code skips it.
+- **Never reading the dead-letter subqueue.** Messages stay there with nobody told. Alarm on the dead-lettered message count and decide who replays or drops them.
+- **A lock shorter than the work.** If sending a batch takes longer than the lock duration, the lock runs out and the messages go to another worker. Renew the lock, or take smaller batches.
+
+## Where this shows up in system design
+
+- **[Uber Eats](/system-design/case-studies/uber-eats):** the order event bus becomes a Service Bus topic. Dispatch and notifications each get a subscription, and the order id as session id keeps each order's steps in order.
+- **[Metrics and logging](/system-design/case-studies/metrics-and-logging):** agents send to Event Hubs, and **Capture** writes the stream to Blob or Data Lake Storage. See [Analytics on Azure](/cloud/azure/analytics).
+- **[Distributed message queue](/system-design/case-studies/distributed-message-queue):** the topics, partitions and consumer groups that case study designs are what Service Bus and Event Hubs run for you.
 
 ## Related
 
-[Messaging & Streaming on AWS](/cloud/aws/messaging) · [Messaging & Streaming on Google Cloud](/cloud/gcp/messaging) · [Queues vs Streams](/cloud/start-here/queues-vs-streams) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues)
+[Queues vs Streams](/cloud/start-here/queues-vs-streams) · [Queues, Topics, Streams, Event Buses and Workflows](/cloud/data/streaming-and-messaging-services) · [Messaging & Streaming on AWS](/cloud/aws/messaging) · [Messaging & Streaming on Google Cloud](/cloud/gcp/messaging) · [Serverless & Orchestration on Azure](/cloud/azure/serverless) · [System Design](/system-design)
 
 <InterviewQuestions>
+  <InterviewQuestion question="What does peek-lock mean on Service Bus, and how can it send the same email twice?" category="Cloud" level="Junior">
+    **Short answer.** In peek-lock mode a worker receives a message and locks it, and the message is deleted only when the worker completes it. If the worker crashes first, the lock runs out and another worker receives the same message.
+
+    **Why.** Service Bus cannot tell "crashed after sending" from "crashed before sending", so it hands the message out again. That is at-least-once delivery. The other mode, receive-and-delete, removes the message at once, so a crash loses it instead.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={2} cloud="azure" highlight={["queue", "workerA", "workerB", "dup"]} caption="Worker A crashes before it completes order 1042, so Service Bus hands it to worker B, which sends the email again." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens after a message has been delivered the maximum number of times?
+    - How does the worker make the second delivery harmless?
+
+    **Watch out for.** Switching to receive-and-delete to stop duplicates. You trade a second email for a lost one.
+  </InterviewQuestion>
+
   <InterviewQuestion question="Service Bus or Event Hubs for order events?" category="Cloud" level="Mid">
-    Service Bus when each event is work to be done once, possibly in order per order id (sessions), with dead-lettering and transactions. Event Hubs when many consumers need the same high-volume stream and may replay it. Many designs use Event Hubs as the event log and Service Bus for individual jobs.
+    **Short answer.** Service Bus when each event is work to be done once, perhaps in order per order id with sessions. Event Hubs when many readers need the same high-volume stream and may replay it. Many designs use both: Event Hubs as the record of events, Service Bus for each job.
+
+    **Why.** Service Bus locks, completes and dead-letters each message, so one failure affects one order. Event Hubs keeps events for a retention period, and each consumer group reads at its own checkpoint. That makes replay easy but per-message retries hard.
+
+    <AnimatedDiagram spec="animated/cloud/queue-topic-stream" step={6} cloud="azure" highlight={["stream", "analytics", "report"]} caption="An event hub keeps every order event; analytics and a new report each read at their own place." />
+
+    **Follow-ups the interviewer may ask.**
+    - How many partitions would you give Brightpost's event hub, and what limits that choice?
+    - Where does each consumer group keep its checkpoints?
+
+    **Watch out for.** Using Event Hubs because it is "faster". At about 4,000 orders on a sale day, throughput is not the deciding factor; what happens to a failed message is.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Each order's messages must run in order, but thousands of orders must run in parallel. How do you do that on Service Bus?" category="Cloud" level="Mid">
+    **Short answer.** Turn on sessions for the queue and set the session id to the order id. One receiver holds a session at a time and gets its messages in order. Other receivers work on other orders at the same time.
+
+    **Why.** Order matters within an order, not across orders. A session lock is held per session id, so parallelism grows with the number of active orders. A session-enabled queue only accepts messages that carry a session id.
+
+    **Follow-ups the interviewer may ask.**
+    - A receiver crashes while holding a session. What happens to that order's messages?
+    - One order gets a burst of 500 updates. What does that do to the others?
+
+    **Watch out for.** Using a single session id for everything. Only one receiver can then work at a time, and the whole queue becomes one slow line.
   </InterviewQuestion>
 </InterviewQuestions>

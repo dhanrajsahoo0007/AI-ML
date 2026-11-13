@@ -1,11 +1,353 @@
 ---
 title: "Cost Models and Purchasing Options"
-description: "What a cloud bills you for and the few levers that change it: rightsizing, commitments, spot capacity, storage tiers and data transfer."
-status: outline
+description: "On demand, commitments, spot, automatic discounts, licences, storage tiers and the data transfer map, and how to size a commitment from real usage."
+updated: 2026-11-14
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** what you are billed for (time, requests, bytes stored and bytes moved) and the handful of levers that change the number: rightsizing, commitments, spot capacity, storage tiers and the data-transfer paths that quietly dominate a bill. Numbers appear as ratios, never as prices.
+<KeyIdea>
+  The same server can be bought in several ways, and each lower price asks for something back: a promise to use it, or the right to take it away.
+</KeyIdea>
 
-**Related reading on this site:** [What the Cloud Is](/cloud/fundamentals/what-is-cloud) · [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning) · [Compute on AWS](/cloud/aws/compute)
+## The story
+
+In the week of its biggest sale, Brightpost ran 3 app servers on average. The image-resize worker ran day and night on a fourth machine to clear a pile of new product photos. The finance lead asked whether the cloud had a lower rate for steady use. It does: a commitment. Asha bought one for 4 machines, sized on that week, for 3 years, because the longer term gives the lower rate. Two weeks later the team moved the resize worker to a serverless function, which bills per request, and the commitment did not cover it. After the sale, the shop went back to 2 app servers on most days. For the next 12 months, the fleet used 2.4 of the 4 committed machines in an average hour. About 40% of the commitment, some 14,000 machine-hours, was paid for and never used, with two more years still to come.
+
+The rate was lower. The bill was not. Each step below adds one way to buy, and shows which part of Brightpost it fits.
+
+## How it works
+
+Three words first. **On demand** is the default way to buy: the full rate, no promise, start and stop at will. A **commitment** is a promise to use or spend a set amount for 1 or 3 years, for a lower rate. The glossary calls it <Term id="reserved-capacity">reserved capacity</Term>. The **baseline**, or floor, is the level of use you stay at or above in almost every hour.
+
+### Step 1: On demand, the price of not promising
+
+<AnimatedDiagram spec="animated/cloud/cost-levers" step={1} minWidth={620} caption="Brightpost's starting point: the app servers and the database bill at the full on-demand rate for every hour they run." />
+
+In the picture, every box bills at the on-demand rate, often by the second. Nothing is promised, so nothing is wasted when use falls: stop a server and its meter stops.
+
+The bill is built from a few meters: time, gigabytes kept, requests and data moved. [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics) explains them. This page is about how you buy each meter. Every cheaper way trades the lower rate for a promise or a risk. On demand is right for anything new, spiky or short-lived, and for anything you have not measured yet.
+
+<PremiumBreak />
+
+### Step 2: Measure the floor before you buy
+
+<AnimatedDiagram spec="animated/cloud/cost-levers" step={2} minWidth={620} caption="A usage history counts the servers running each hour: never fewer than 2, and 10 for a few hours a year." />
+
+A commitment pays only for the hours you use it, so measure first. Brightpost counts its app servers in each of the 8,760 hours of a year. In 8,040 hours there are 2. On the 30 busiest days there are 3. On the sale day there are up to 10, for a few hours.
+
+The floor is 2 and the peak is 10. An average hides both, so look at the hourly count, over several weeks and a full season.
+
+Shrink before you measure. <Term id="rightsizing">Rightsizing</Term> means moving each server to the size its real use needs. Commit to a server that idles at 15% processor, and you pay for that spare room for years.
+
+### Step 3: A commitment sized on the peak
+
+<AnimatedDiagram spec="animated/cloud/cost-levers" step={3} minWidth={620} caption="The failure: the commitment covers 4 machines, the fleet uses 2.4, and the resize function is outside it." />
+
+Brightpost made two choices at once. It sized the commitment on the sale week instead of the floor. It also bought a kind tied to one machine type in one region. A serverless function is not a machine, so that kind can never cover it.
+
+<Callout tone="red" title="What breaks">
+  The commitment covers 4 machines every hour for 3 years. In an average hour Brightpost runs 2.4: the 2 app servers, a third on the 30 busiest days, and test machines in working hours. The resize worker now bills per request, outside the promise. So 1.6 machines' worth, 40% of the commitment, is paid every hour and does nothing. That is about 14,000 machine-hours a year, and the commitment cannot be cancelled.
+</Callout>
+
+The size came from a peak. The shape came from the old design, two weeks before the design changed.
+
+### Step 4: Two kinds of commitment
+
+Commitments come in two shapes, under different names on each cloud.
+
+<Compare
+  columns={["", "Resource-based", "Spend-based"]}
+  rows={[
+    ["You promise", "A set amount of one machine type, or of processors and memory, in one region", "A set spend per hour on compute"],
+    ["It covers", "That type or family, in that region", "Many machine types and regions; on some clouds, containers and functions too"],
+    ["Rate", "Usually the lower of the two", "Lower than on demand"],
+    ["If the design changes", "The promise may stop matching what runs", "The promise follows the spend"],
+    ["Brightpost would use it for", "The database: same engine, same size for years", "The app servers, which may move to containers"],
+  ]}
+  caption="The two shapes of a commitment. Each cloud's names and rules are in the tabs below."
+/>
+
+Both come in 1-year and 3-year terms; the longer term gives the lower rate and the larger risk.
+
+### Step 5: Commit to the floor, on demand above it
+
+<AnimatedDiagram spec="animated/cloud/cost-levers" step={4} minWidth={620} caption="The rule Brightpost now follows: commit to the 2 servers that never switch off, and buy the busy-day servers on demand." />
+
+How to choose a commitment level from a usage baseline:
+
+1. **Remove waste and rightsize first.** A lower rate on an idle server is still waste.
+2. **Find the floor** in at least several weeks of hourly usage. For Brightpost it is 2 servers.
+3. **Subtract planned changes.** Anything moving to serverless, to containers or to another region in the term comes off.
+4. **Commit to what is left.** Start with a 1-year term if you are unsure.
+5. **Add in slices.** Buy more later, on different dates, so the slices do not all end together.
+
+A quick test for one machine: divide the committed rate by the on-demand rate. If the machine runs a bigger share of hours than that, the commitment wins. Brightpost's 2 servers run every hour, 17,520 hours a year. The third runs 720 hours, so it stays on demand, added by <Term id="autoscaling">autoscaling</Term>.
+
+Watch two numbers each month: **utilisation**, the share of the commitment you used, and **coverage**, the share of steady usage it covers.
+
+### Step 6: Spot capacity for work that can stop
+
+<AnimatedDiagram spec="animated/cloud/cost-levers" step={5} minWidth={620} caption="The nightly export runs on spare capacity. If the machine is taken back, the job runs again and writes its one file." />
+
+<Term id="spot-capacity">Spot capacity</Term> is the provider's spare machines at a much lower rate. The provider can take one back at short notice, from about 30 seconds to two minutes depending on the cloud.
+
+Brightpost's nightly export reads the day's orders and writes one file, about 20 minutes of work, on spot. The file is written only when complete, so a reclaim leaves no half-file, and the job runs again on the next machine.
+
+Four habits handle a reclaim:
+
+- **Listen for the notice** and stop cleanly.
+- **Make the work restartable**, and a retry safe to run twice.
+- **Spread out** over several machine types and zones.
+- **Keep a fallback** to on demand when a deadline is close.
+
+Never put the only database or the checkout on spot. [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus) covers queues and checkpoints.
+
+### Step 7: Discounts you do not sign for
+
+Some discounts arrive without any promise.
+
+- **Sustained use discounts.** One of the three clouds lowers a VM's rate by itself when it runs for most of the month, on some machine types.
+- **Volume tiers.** Storage and data transfer rates often fall as the monthly volume grows.
+- **Free tiers.** Small always-free amounts, trials and credits. They suit learning, never a running shop.
+
+A server that already gets an automatic discount gains less from a commitment, so check what you get before you sign.
+
+### Step 8: Licences: included or your own
+
+Some software, such as Windows Server or SQL Server, needs a paid licence. A cloud sells it two ways.
+
+<Compare
+  columns={["", "Licence included", "Bring your own licence"]}
+  rows={[
+    ["How you pay", "Inside the hourly rate", "Licences you already own, plus a lower hourly rate"],
+    ["Paperwork", "None", "You prove you own enough licences"],
+    ["Hardware", "Shared machines", "Some licence terms need a dedicated host, a whole machine billed to you"],
+    ["Fits", "Short projects, small fleets", "A company moving many licensed servers from its own data centre"],
+  ]}
+  caption="Two ways to pay for licensed software on a cloud."
+/>
+
+Brightpost runs Linux and PostgreSQL, which carry no licence fee, so this lever does nothing for it.
+
+### Step 9: Storage classes and lifecycle
+
+<AnimatedDiagram spec="animated/cloud/cost-levers" step={6} minWidth={620} caption="A lifecycle rule moves each export file to the cold class 90 days after it is written." />
+
+The <Term id="storage-class">storage class</Term> sets the rate for gigabytes kept. Colder classes cost less to keep and more to read back.
+
+The finance lead reads export files in the first weeks, for refunds and month-end checks; after 90 days almost nobody does. So a <Term id="lifecycle-rule">lifecycle rule</Term> moves each file to the cold class at 90 days.
+
+Two traps: colder classes charge for each gigabyte read back, and bill a minimum stay even for a file deleted early. The same lever works for logs, snapshots and backups: keep less, keep it colder, delete on a schedule. [Object Storage](/cloud/data/object-storage) has the full ladder.
+
+### Step 10: The data transfer map
+
+<AnimatedDiagram spec="animated/cloud/data-transfer-paths" stepper minWidth={620} caption="Five paths a byte can take, each marked free or billed. Real rates differ by cloud and change over time." />
+
+Moving data has its own meters, and the boundary it crosses sets the rate.
+
+1. **Inside one zone:** free on private addresses.
+2. **Across <Term id="availability-zone">zones</Term>:** billed on some clouds, on one of them in each direction.
+3. **The internet:** data in is free. Data out, called <Term id="egress">egress</Term>, is billed per gigabyte, usually at the highest rate on the map.
+4. **The cloud's own services:** through a <Term id="nat-gateway">NAT gateway</Term>, the NAT bills every gigabyte. A <Term id="private-endpoint">private endpoint</Term> skips that meter, though some endpoints bill their own.
+5. **Across regions:** billed per gigabyte.
+
+Draw your data paths and mark every boundary they cross. [NAT & Leaving the Network](/cloud/networking/nat-and-egress) shows the NAT fix in full.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: on demand by default, two shapes of commitment, spare capacity, and licences you can bring.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Commitments:** Savings Plans, a spend per hour for 1 or 3 years; Compute Savings Plans also cover Fargate and Lambda. Reserved Instances tie the rate to an instance family in a region, or to a database such as RDS.
+    - **Spare capacity:** Spot Instances, with a two-minute interruption notice.
+    - **Automatic discounts:** none for running all month. Some storage and data transfer rates fall as monthly volume grows.
+    - **Licences:** licence included, or bring your own onto Dedicated Hosts where the terms require it.
+    - **Free tier:** credits for new accounts and an always-free amount on some services. The terms changed in 2025.
+
+    **The difference that changes a design.** A Savings Plan lowers the rate but holds no machines for you. To be sure of capacity in one zone on a sale day, AWS sells capacity reservations, billed whether used or not. Brightpost would buy a discount for its floor, and a reservation only for a day it cannot risk.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Commitments:** committed use discounts for 1 or 3 years. Resource-based ones buy vCPUs, memory, GPUs or local SSD in one region. Spend-based ones buy a spend per hour on Compute Engine or on services such as Cloud SQL.
+    - **Spare capacity:** Spot VMs, stopped or deleted with about 30 seconds' notice.
+    - **Automatic discounts:** sustained use discounts on some machine series, for VMs that run a large part of the month, with no promise.
+    - **Licences:** premium images such as Windows Server add a licence charge, or bring your own onto sole-tenant nodes.
+    - **Free tier:** a trial credit for new customers, and an always-free amount on some products.
+
+    **The difference that changes a design.** A resource-based commitment buys vCPUs and memory of one machine series in a region, not whole VMs. Brightpost could change server shapes inside that series and stay covered. Usage that a commitment covers does not also get a sustained use discount, so compare against the automatic rate, not the full one.
+  </Tab>
+  <Tab label="Azure">
+    - **Commitments:** Azure Reservations for a VM size family in a region, or for a database, for 1 or 3 years. The Azure savings plan for compute is a spend per hour across VM sizes and regions.
+    - **Spare capacity:** Azure Spot Virtual Machines, with about 30 seconds' notice. You choose whether an evicted VM is stopped or deleted.
+    - **Automatic discounts:** none for running all month. Dev/Test pricing lowers rates on some services for non-production subscriptions.
+    - **Licences:** Azure Hybrid Benefit for Windows Server and SQL Server licences you already own.
+    - **Free tier:** a credit for the first 30 days, some services free for 12 months, and an always-free amount on others.
+
+    **The difference that changes a design.** Azure Hybrid Benefit takes the licence part out of a Windows or SQL Server rate, and it combines with reservations. A company moving licensed servers from its own data centre should count its licences before it sizes a commitment. Brightpost runs Linux, so it gains nothing here.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/cost-levers" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/cost-levers" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="How should I buy this compute?"
+  tree={{
+    q: "Have you measured this workload's hourly use for several weeks?",
+    no: "On demand. Measure first, and rightsize what you find.",
+    yes: {
+      q: "Is this the part that runs every hour, the floor?",
+      yes: {
+        q: "Might it change machine type, move to containers or go serverless in the term?",
+        yes: "A spend-based commitment for the floor, 1 year first. It follows the spend when the design changes.",
+        no: "A resource-based commitment for the floor. It usually gives the lower rate. Brightpost's database fits here.",
+      },
+      no: {
+        q: "Can the work stop at any moment and run again safely?",
+        yes: {
+          answer: "Spot capacity, with retries and a fallback to on demand. Brightpost's nightly export fits here.",
+          href: "/cloud/compute/batch-hpc-gpus",
+        },
+        no: {
+          answer: "On demand with autoscaling, so you pay only for the busy hours. Brightpost's extra servers fit here.",
+          href: "/cloud/compute/autoscaling",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Brightpost committed to 4 machines and used 2.4 in an average hour. What share of the commitment was wasted, and how many machine-hours is that in a year?" hint="A year has 8,760 hours.">
+    1.6 of 4 machines, so 40%. 1.6 × 8,760 is about 14,000 machine-hours a year, paid for and never used.
+  </QuizItem>
+  <QuizItem question="The third app server runs 720 hours a year. Should Brightpost add it to the commitment?" hint="What share of the year does it run?">
+    No. 720 of 8,760 hours is about a twelfth of the year. A commitment for it would be paid every hour and used for one hour in twelve. It stays on demand.
+  </QuizItem>
+  <QuizItem question="The spot machine running the nightly export is taken back after 15 minutes. What does Brightpost lose?">
+    About 15 minutes of machine time. The file is written only when the job completes, so nothing half-written is left. The job runs again on the next machine.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "On demand", "Resource-based commitment", "Spend-based commitment", "Spot"]}
+  rows={[
+    ["You promise", "Nothing", "A machine type or amount, 1 or 3 years", "A spend per hour, 1 or 3 years", "Nothing"],
+    ["Rate", "Full", "Lower", "Lower", "Lowest"],
+    ["Can be taken back", false, false, false, true],
+    ["If use shrinks", "You pay less at once", "You still pay the promise", "You still pay the promise", "You pay less at once"],
+    ["If the design changes", "No effect", "May stop matching", "Follows the spend", "No effect"],
+    ["Brightpost uses it for", "Extra servers on busy days, test machines", "The database", "The 2 always-on app servers", "The nightly export"],
+  ]}
+  caption="Four ways to buy the same compute. Real rates differ by cloud and change over time."
+/>
+
+Most real bills use all four at once: each part of the system gets the cheapest way to buy that it can live with.
+
+## Common pitfalls
+
+- **Committing to the peak.** A sale week is not a normal week. Commit to the hourly floor, and let autoscaling buy the rest on demand.
+- **Committing right before a redesign.** A machine-tied commitment cannot follow a move to containers or functions. Subtract planned changes, or choose a spend-based commitment.
+- **Spot without a retry.** Work kept on the machine's own disk is lost on a reclaim. Save progress outside the machine and make each run safe to repeat.
+- **Ignoring data paths.** Cross-zone, cross-region and NAT traffic hide inside other lines. Draw each path and mark the boundaries it crosses.
+
+## How to say it in an interview
+
+"I buy compute in layers. I rightsize first, then measure hourly usage for several weeks and find the floor. I commit to that floor, minus anything I plan to move in the term, using a spend-based commitment if the design may change. Above the floor I use on demand with autoscaling, and work that can stop and restart goes on spot with retries and a fallback. I track utilisation and coverage each month. Lifecycle rules move old data to colder classes. And I draw every data path, because cross-zone, cross-region and NAT traffic all bill."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between a commitment discount and spot pricing?" level="Junior" category="Cloud">
+    **Short answer.** A commitment gives a lower rate because you promise to use or spend a set amount for 1 or 3 years. Spot gives an even lower rate because the provider can take the machine back at short notice. One asks you for a promise; the other takes away your guarantee.
+
+    **Why.** Brightpost's 2 app servers run every hour of the year, so a commitment for them is used in full. The nightly export takes about 20 minutes and can run again if interrupted, so it runs on spot. Swapped, both fail: a checkout on spot loses orders, and a commitment for the export sits idle most hours.
+
+    <AnimatedDiagram spec="animated/cloud/cost-levers" step={5} highlight={["commit", "servers", "export"]} caption="The commitment covers the always-on servers; the export runs on spare capacity." />
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to a spot job when the machine is taken back?
+    - Can a commitment and spot capacity cover the same machine?
+
+    **Watch out for.** Calling spot "a cheaper commitment". Spot holds no promise either way, and the provider decides when it ends.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you decide how much compute to commit to?" level="Mid" category="Cloud">
+    **Short answer.** Rightsize first, then measure hourly usage for several weeks and find the floor: the level you stay above in almost every hour. Subtract anything you plan to move during the term, and commit to what is left. Leave everything above the floor on demand or spot.
+
+    **Why.** A commitment is paid every hour, used or not, so only always-on usage repays it. Brightpost sized its commitment on the sale week, 4 machines, and used 2.4 in an average hour: 40% wasted. Its floor was 2 app servers. Its resize worker had moved to a function, which a machine-tied commitment cannot cover. Buying in slices on different dates lets the level follow growth.
+
+    <AnimatedDiagram spec="animated/cloud/cost-levers" step={4} highlight={["usage", "commit", "servers"]} caption="The usage history sets the floor, and the commitment covers only that." />
+
+    **Follow-ups the interviewer may ask.**
+    - How long a usage history is enough?
+    - When would you choose a 3-year term over a 1-year one?
+
+    **Watch out for.** Using the monthly average. An average of 2.4 hides a floor of 2, and committing to 2.4 wastes money in most hours.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why can a worker fleet reading from object storage cost more in networking than in compute?" level="Mid" category="Cloud">
+    **Short answer.** Because the reads may cross metered boundaries. Through a NAT gateway, every gigabyte is billed by the NAT. From another zone or region, the crossing is billed too. Workers that run for minutes can move terabytes, so the transfer lines outgrow the machine hours.
+
+    **Why.** Compute bills for time, and spot workers are cheap per hour. Networking bills per gigabyte, whatever the machine costs. Workers in private subnets often reach storage through the NAT by default. A private endpoint takes that traffic off the NAT meter, one region removes the cross-region line, and caching cuts the gigabytes themselves.
+
+    <AnimatedDiagram spec="animated/cloud/data-transfer-paths" step={4} caption="The same storage read through a NAT is billed per gigabyte; through a private endpoint it skips that meter." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you find which path costs the most?
+    - When does a private endpoint have its own charge?
+
+    **Watch out for.** Assuming traffic inside one cloud is free. Inside one zone it often is; across a NAT, a zone or a region it often is not.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you run work on spot capacity without losing it?" level="Mid" category="Cloud">
+    **Short answer.** Make every job restartable and expect interruptions. Listen for the notice, save progress outside the machine, and make retries safe to run twice. Spread across machine types and zones, and fall back to on demand near a deadline.
+
+    **Why.** The notice lasts about 30 seconds to two minutes, depending on the cloud, and anything kept only on the machine is lost. Brightpost's nightly export writes its file only when complete, so a rerun costs minutes and leaves no half-file. A job queue holds unfinished work for the next machine.
+
+    **Follow-ups the interviewer may ask.**
+    - What work should never run on spot?
+    - How do you stop a retried job from writing the same file twice?
+
+    **Watch out for.** Relying on the notice to finish the work. The notice is for stopping cleanly, not for finishing a 20-minute job.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design a purchasing plan for a service with a flat base load and a 10x nightly batch." level="Senior" category="Cloud">
+    **Short answer.** Commit to the flat base after rightsizing it. Run the nightly batch on spot capacity across several machine types, with checkpoints and an on-demand fallback for the deadline. Keep any busy-day growth of the base on demand with autoscaling. Then check the data paths and storage classes, which a compute plan does not touch.
+
+    **Why.** The base runs every hour, so a commitment is used in full; make it spend-based if the service may change shape. The batch is ten times larger but runs a few hours a night, so a commitment for it would sit idle most of the day. Spot fits work that can stop. The batch also moves a lot of data: keep it in its storage's region, use a private endpoint, and move old outputs to colder classes.
+
+    <AnimatedDiagram spec="animated/cloud/cost-levers" step={6} highlight={["commit", "servers", "export", "bucket", "cold"]} caption="Commitment for the base, spot for the batch, and a lifecycle rule for what the batch writes." />
+
+    **Follow-ups the interviewer may ask.**
+    - The batch must finish by 6 a.m. How do you guarantee it without paying on-demand rates every night?
+    - How would you show finance the plan is working each month?
+
+    **Watch out for.** Committing to the batch peak "because it runs every night". Running every night is not running every hour.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics)
+- [FinOps and the Cost Tools](/cloud/operations/finops-and-cost-tools)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [Batch, HPC and GPUs](/cloud/compute/batch-hpc-gpus)
+- [Serverless Functions](/cloud/compute/serverless-functions)
+- [Object Storage: Tiers, Lifecycle, Versioning and Redundancy](/cloud/data/object-storage)
+- [NAT & Leaving the Network](/cloud/networking/nat-and-egress)
+- [Private Endpoints](/cloud/networking/private-endpoints)
+- [Capacity planning and bottlenecks](/system-design/fundamentals/capacity-planning)
+
+## Further reading
+
+- [AWS Savings Plans User Guide](https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html): spend-based commitments and how they apply.
+- [Amazon EC2 Spot Instances](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-spot-instances.html): spare capacity and interruption notices.
+- [Google Cloud committed use discounts](https://cloud.google.com/docs/cuds): resource-based and spend-based commitments.
+- [Azure Reservations](https://learn.microsoft.com/azure/cost-management-billing/reservations/save-compute-costs-reservations): reserved capacity and how it applies.

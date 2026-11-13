@@ -6,20 +6,21 @@ import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 // (no NAT meter) or through a NAT (billed per GB). Step 5: across regions, billed per GB.
 //
 // Geometry. Left: Region A (x 10-540) holds Zone A (x 22-270) and Zone B (x 282-528). Boxes are 160 wide: zone A's
-// at x 66, zone B's at x 326. Rows: boxes at y 98-146 and y 238-286. Right column (x 560-780), one group per row:
-// Internet (customers, y 98), Provider services (storage, y 238), Region B (replica, y 380). The internet arrows are
+// at x 66, zone B's at x 326. Rows: boxes at y 98-146 and y 262-310. Right column (x 560-780), one group per row:
+// Internet (customers, y 98), Provider services (storage, y 262), Region B (replica, y 428). The services and Region B
+// groups start low enough that the NAT pill and the cross-region pill clear their title tabs. The internet arrows are
 // free arrows at y 110 and y 136, so the two pills sit one above the other between the app server and customers.
 // The cross-zone arrow runs diagonally from the zone B server to the zone A database; its pill sits in the gutter
 // between the zones (x 276), clear of every box. The NAT path is a dashed diagonal from the zone B server to the
-// storage box; its pill sits on the gap between Region A and the right column.
+// storage box; it bends at (745, 196), right of the Provider services tab, and enters the storage box from above.
 // Box labels fit 160 - 8 = 152 px at 6.2 px per character ("Private endpoint" is 16 characters, 99 px).
 // The canvas is 790 wide so labels stay readable in the 660 px article column.
 
 const shapes: LayoutShape[] = [
   // Step 1: one zone.
   { id: "srvA", type: "box", x: 66, y: 98, w: 160, h: 48, label: "App server", sub: "zone A", tone: "teal" },
-  { id: "dbA", type: "box", x: 66, y: 238, w: 160, h: 48, label: "Database", sub: "zone A", tone: "violet" },
-  { id: "same", type: "arrow", x: 0, y: 0, from: "srvA", to: "dbA", label: "same zone: free", tone: "green" },
+  { id: "dbA", type: "box", x: 66, y: 262, w: 160, h: 48, label: "Database", sub: "zone A", tone: "violet" },
+  { id: "same", type: "arrow", x: 0, y: 0, from: "srvA", to: "dbA", label: "free", tone: "green" },
 
   // Step 2: a second zone.
   { id: "srvB", type: "box", x: 326, y: 98, w: 160, h: 48, label: "App server", sub: "zone B", tone: "teal", step: 2 },
@@ -56,7 +57,7 @@ const shapes: LayoutShape[] = [
     id: "pe",
     type: "box",
     x: 326,
-    y: 238,
+    y: 262,
     w: 160,
     h: 48,
     label: "Private endpoint",
@@ -68,7 +69,7 @@ const shapes: LayoutShape[] = [
     id: "storage",
     type: "box",
     x: 600,
-    y: 238,
+    y: 262,
     w: 160,
     h: 48,
     label: "Storage service",
@@ -88,6 +89,7 @@ const shapes: LayoutShape[] = [
     label: "via NAT: per GB",
     tone: "orange",
     dashed: true,
+    via: [[745, 196]],
     step: 4,
   },
 
@@ -96,7 +98,7 @@ const shapes: LayoutShape[] = [
     id: "replica",
     type: "box",
     x: 600,
-    y: 380,
+    y: 428,
     w: 160,
     h: 48,
     label: "Bucket replica",
@@ -122,7 +124,7 @@ const shapes: LayoutShape[] = [
     id: "note1",
     type: "text",
     x: 22,
-    y: 352,
+    y: 376,
     w: 506,
     h: 22,
     label: "Green: free. Orange: billed on some paths or clouds. Red: billed per GB.",
@@ -132,7 +134,7 @@ const shapes: LayoutShape[] = [
     id: "note2",
     type: "text",
     x: 22,
-    y: 380,
+    y: 404,
     w: 506,
     h: 22,
     label: "Real rates differ by cloud and change over time.",
@@ -144,14 +146,14 @@ const spec: LayoutSpec = {
   kind: "layout",
   title: "The data transfer map: which paths are free and which are billed",
   width: 790,
-  height: 450,
+  height: 500,
   groups: [
-    { id: "region-a", title: "Region A", tone: "blue", x: 10, y: 34, w: 530, h: 290 },
-    { id: "zone-a", title: "Zone A", tone: "neutral", x: 22, y: 64, w: 248, h: 248 },
-    { id: "zone-b", title: "Zone B", tone: "neutral", x: 282, y: 64, w: 246, h: 248 },
+    { id: "region-a", title: "Region A", tone: "blue", x: 10, y: 34, w: 530, h: 314 },
+    { id: "zone-a", title: "Zone A", tone: "neutral", x: 22, y: 64, w: 248, h: 272 },
+    { id: "zone-b", title: "Zone B", tone: "neutral", x: 282, y: 64, w: 246, h: 272 },
     { id: "internet", title: "Internet", tone: "neutral", x: 560, y: 64, w: 220, h: 104 },
-    { id: "services", title: "Provider services", tone: "violet", x: 560, y: 204, w: 220, h: 104 },
-    { id: "region-b", title: "Region B", tone: "blue", x: 560, y: 346, w: 220, h: 98 },
+    { id: "services", title: "Provider services", tone: "violet", x: 560, y: 228, w: 220, h: 104 },
+    { id: "region-b", title: "Region B", tone: "blue", x: 560, y: 396, w: 220, h: 96 },
   ],
   shapes,
   steps: [
