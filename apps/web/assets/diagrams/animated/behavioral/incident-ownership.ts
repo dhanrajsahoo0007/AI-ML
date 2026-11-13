@@ -21,9 +21,21 @@ const spec: SequenceSpec = {
     { from: "lead", to: "prod", label: "Quantifies blast radius: 18% of EU writes failing", kind: "call", step: 1 },
     { from: "lead", to: "prod", label: "Flips feature flag & rolls back release v42.8", kind: "call", step: 2 },
     { from: "prod", to: "lead", label: "5xx drops to 0.01% within 90 seconds", kind: "return", step: 2 },
-    { from: "lead", to: "prod", label: "Traces lock contention to unindexed foreign-key cascade", kind: "call", step: 3 },
+    {
+      from: "lead",
+      to: "prod",
+      label: "Traces lock contention to unindexed foreign-key cascade",
+      kind: "call",
+      step: 3,
+    },
     { from: "lead", to: "guard", label: "Writes blameless COE: why staging missed table lock", kind: "call", step: 3 },
-    { from: "lead", to: "guard", label: "Adds migration lock-timeout linter & shadow traffic gate", kind: "call", step: 4 },
+    {
+      from: "lead",
+      to: "guard",
+      label: "Adds migration lock-timeout linter & shadow traffic gate",
+      kind: "call",
+      step: 4,
+    },
   ],
 };
 

@@ -45,7 +45,7 @@ export default function DsaHubPage() {
             </Link>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{t.fm.description}</p>
             <p className="mt-3 text-xs text-muted-foreground">
-              {problemsForTopic(items, t.slug).length + outlinesForTopic(items, t.slug).length} problems
+              {problemCount(problemsForTopic(items, t.slug).length + outlinesForTopic(items, t.slug).length)}
             </p>
           </li>
         ))}
@@ -53,3 +53,5 @@ export default function DsaHubPage() {
     </div>
   );
 }
+
+const problemCount = (n: number) => `${n} ${n === 1 ? "problem" : "problems"}`;
