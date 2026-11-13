@@ -24,15 +24,16 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // The task sits below and between them, so the full load and the change stream form a V under the two databases.
 // Validation reads the target diagonally and gets the source side from the task. The cutover edge leaves the app,
 // runs down to x 400 at y 320 and enters the target from the top, right of its zone tab, so it crosses no tab.
-// Zone tabs: the bottom zone starts at x 10, so its tab sits left of both V edges. The two database zones have short
+// Zone tabs: the app and source zones use the subnet kind (inline label), because the left column's vertical edges
+// enter them at x 130, where a tab would sit. The bottom zone starts at x 10, so its tab sits left of both V edges. The two database zones have short
 // titles so their tabs end before x 400.
 // Text room: a label takes about 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. Nodes are
 // sized for the longest name the Services toggle shows: "MySQL on a VM" (w 164), "RDS for PostgreSQL" (w 192), "DMS
-// Schema Conversion" and "Open-source converter" (w 210), "DMS replication task" (w 204), "Data Validation Tool"
+// Schema Conversion" and "Open-source converter" (w 226), "DMS replication task" (w 204), "Data Validation Tool"
 // (w 204). The gap between source and target (212 to 304) fits a 12-character pill.
 const spec: DiagramSpec = {
   title: "Moving a live database: convert, copy, stream, check, cut over",
-  width: 795,
+  width: 800,
   height: 650,
   steps: [
     { title: "MySQL on a VM serves the wholesale app" },
@@ -46,11 +47,11 @@ const spec: DiagramSpec = {
   zones: [
     { id: "people", title: "Gift shops", tone: "neutral", x: 10, y: 20, w: 240, h: 140 },
     { id: "first-try", title: "First try", tone: "neutral", x: 290, y: 20, w: 220, h: 140 },
-    { id: "app-zone", title: "Wholesale", tone: "teal", x: 10, y: 190, w: 240, h: 110 },
-    { id: "old", title: "Source", tone: "violet", x: 10, y: 345, w: 240, h: 110 },
+    { id: "app-zone", title: "Wholesale", tone: "teal", kind: "subnet", x: 10, y: 190, w: 240, h: 110 },
+    { id: "old", title: "Source", tone: "violet", kind: "subnet", x: 10, y: 345, w: 240, h: 110 },
     { id: "new", title: "Target", tone: "violet", x: 290, y: 345, w: 220, h: 110 },
-    { id: "convert-zone", title: "Conversion", tone: "orange", x: 560, y: 345, w: 230, h: 110 },
-    { id: "migration", title: "Migration service", tone: "orange", x: 10, y: 515, w: 780, h: 115 },
+    { id: "convert-zone", title: "Conversion", tone: "orange", x: 548, y: 345, w: 247, h: 110 },
+    { id: "migration", title: "Migration service", tone: "orange", x: 10, y: 515, w: 785, h: 115 },
   ],
   nodes: [
     // Step 1
@@ -128,9 +129,9 @@ const spec: DiagramSpec = {
       icon: "pipeline",
       tone: "orange",
       step: 3,
-      x: 680,
+      x: 672,
       y: 400,
-      w: 210,
+      w: 226,
       cloud: {
         aws: { id: "aws-sct", label: "DMS Schema Conversion" },
         gcp: { label: "Open-source converter" },
@@ -176,7 +177,7 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: one MySQL database on one VM takes every read and write.
-    { from: "shops", to: "app", label: "orders", packet: true },
+    { from: "shops", to: "app", label: "orders", packet: true, labelAt: 0.3 },
     { from: "app", to: "source", label: "reads, writes", packet: true, delay: 0.8, until: 6 },
 
     // Step 2: the whole copy happens while writes are stopped; it overruns and is rolled back.
