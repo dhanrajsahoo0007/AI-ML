@@ -48,9 +48,9 @@ const spec: SequenceSpec = {
   ],
   notes: [
     { lane: "shop", text: "Pay waits 3 s at most", step: 1, at: 0.5 },
-    { lane: "print", text: "Server A is at 100%", step: 2, at: 6.5 },
+    { lane: "print", text: "Server A is at 100%", step: 2, at: 7.5 },
     { lane: "order", text: "Retries are under 10% of calls", step: 3, at: 8.5 },
-    { lane: "order", text: "Budget spent: no retry", step: 4, at: 12.5 },
+    { lane: "order", text: "Retries already over 10%", step: 4, at: 10.5 },
   ],
 };
 

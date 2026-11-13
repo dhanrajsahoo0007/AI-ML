@@ -13,13 +13,13 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Nodes never move. Edges that a later step replaces are twins with `until`: the order-to-balancer and
 // balancer-to-print edges exist once per step from 1 to 4; only the step 4 set stays in the full view.
 //
-// Layout: three columns (left x 125, middle x 400, right x 667) and three rows.
-//   Row 1 (y 115), Order service zone: order server A 125 | order server B 400.
-//   Row 2 (y 280): private DNS 125 | internal balancer 400 | service identity 667 (step 5).
-//   Row 3 (y 445), Print service zone: print server A 125 | print server B 400.
+// Layout: three columns (left x 125, middle x 380, right x 667) and three rows.
+//   Row 1 (y 115), Order service zone: order server A 125 | order server B 380.
+//   Row 2 (y 280): private DNS 125 | internal balancer 380 | service identity 667 (step 5).
+//   Row 3 (y 445), Print service zone: print server A 125 | print server B 380.
 // Edge routes: order A drops straight down x 125 to the DNS (the name sits on that vertical edge) and reaches the
-// balancer on a diagonal that enters its top; order B drops straight down x 400. The balancer reaches print B
-// straight down x 400 and print A on a diagonal whose pill sits between the DNS box and the print zone's tab. The
+// balancer on a diagonal that enters its top; order B drops straight down x 380. The balancer reaches print B
+// straight down x 380 and print A on a diagonal whose pill sits between the DNS box and the print zone's tab. The
 // identity node reaches order B and print B on diagonals that pass right of the balancer.
 //
 // Why this order: on a phone the figure opens on the left ~460 units, so steps 1 to 4, the free preview and the
@@ -42,8 +42,8 @@ const spec: DiagramSpec = {
   ],
   zones: [
     { id: "region", title: "London region", tone: "neutral", kind: "region", x: 10, y: 20, w: 775, h: 505 },
-    { id: "orders", title: "Order service", tone: "teal", x: 25, y: 55, w: 525, h: 115 },
-    { id: "printing", title: "Print service", tone: "teal", x: 25, y: 385, w: 525, h: 120 },
+    { id: "orders", title: "Order service", tone: "teal", x: 25, y: 55, w: 505, h: 115 },
+    { id: "printing", title: "Print service", tone: "teal", x: 25, y: 385, w: 505, h: 120 },
   ],
   nodes: [
     // Step 1
@@ -64,7 +64,7 @@ const spec: DiagramSpec = {
       sub: "calls BookPrint",
       icon: "server",
       tone: "teal",
-      x: 400,
+      x: 380,
       y: 115,
       w: 176,
       cloud: server,
@@ -90,7 +90,7 @@ const spec: DiagramSpec = {
       sub: "private address",
       icon: "load-balancer",
       tone: "blue",
-      x: 400,
+      x: 380,
       y: 280,
       w: 212,
       h: 54,
@@ -117,7 +117,7 @@ const spec: DiagramSpec = {
       sub: "prepares print files",
       icon: "server",
       tone: "teal",
-      x: 400,
+      x: 380,
       y: 445,
       w: 176,
       cloud: server,
@@ -189,7 +189,7 @@ const spec: DiagramSpec = {
     { from: "ilb", to: "print-b", label: "each call", packet: true, delay: 1.6, step: 4 },
 
     // Step 5: the caller shows a short-lived credential; the print service checks it.
-    { from: "identity", to: "order-b", label: "short-lived credential", dashed: true, step: 5 },
+    { from: "identity", to: "order-b", label: "short-lived credential", labelAt: 0.35, dashed: true, step: 5 },
     { from: "identity", to: "print-b", label: "keys to verify", dashed: true, step: 5 },
   ],
 };
