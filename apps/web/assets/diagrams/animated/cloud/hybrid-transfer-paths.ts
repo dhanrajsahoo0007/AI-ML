@@ -11,19 +11,21 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // writes into the bucket.
 //
 // Nodes never move and never disappear. The copy script is not a node, because the transfer agent replaces it: it
-// lives in the labels of two edges that end at step 2 (`until: 2`). The help desk edge is a twin: plain in step 1, red
-// in step 2, plain again from step 3.
+// lives in the labels of edges that end at step 2 (`until`). Two edges are twins: line-to-help-desk is plain in step 1,
+// red in step 2 and plain again from step 3; line-to-bucket is a copy in step 1, a red "4,000 skipped" in step 2 and a
+// checked copy from step 3.
 //
 // Layout: three rows of places, top to bottom: the office, the internet and courier band, the cloud.
 //   Columns (centres): left x 130 | middle x 390 | right x 672.
 //   Office (y 40-300): gateway 130,100 | NAS 390,100 / staff 130,235 | agent 390,235.
 //   Courier (y 190-310): appliance 672,250, beside the office.
-//   Internet band (y 330-440): help desk 130,385 | office line 390,385. Partner band: photographer 672,385.
-//   Cloud (y 475-655): share copy 130,560 | photo bucket 390,555 | SFTP endpoint 672,580.
+//   Internet band (y 335-445): help desk 130,390 | office line 390,390. Partner band: photographer 672,390.
+//   Cloud (y 495-680): share copy 130,580 | photo bucket 390,575 | SFTP endpoint 672,600.
+// The gaps between the bands (y 300-335 and 445-495) hold the pills of the vertical edges, off every zone border.
 // Every byte the office sends goes through the office line node, so the reader sees one pipe shared by the staff, the
-// copy, the agent and the gateway. The script's data path runs straight down the middle column (NAS, line, bucket);
-// the agent sits on that path from step 3. The skipped files (step 2) go down the gutter at x 505; the courier route
-// (step 4) goes down the gutter at x 525, between the internet band and the partner band.
+// copy, the agent and the gateway. The data path runs straight down the middle column (NAS, line, bucket); the agent
+// sits on that path from step 3. The courier route (step 4) goes down the gutter at x 525, between the internet band
+// and the partner band, and enters the bucket from the upper right.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 (the free
 // preview and the failure) use only the left and middle columns. The canvas stays under 800 wide so labels are
@@ -38,7 +40,7 @@ const bucket = { aws: "aws-s3", gcp: "gcp-cloud-storage", azure: "azure-blob" } 
 const spec: DiagramSpec = {
   title: "Moving a photo archive into the cloud: online, by courier and through a gateway",
   width: 795,
-  height: 670,
+  height: 695,
   steps: [
     { title: "A copy script over the office line" },
     { title: "The line fills and files go missing" },
@@ -50,16 +52,16 @@ const spec: DiagramSpec = {
   zones: [
     { id: "office", title: "Brightpost office", tone: "neutral", x: 10, y: 40, w: 480, h: 260 },
     { id: "courier", title: "Courier", tone: "neutral", x: 560, y: 190, w: 225, h: 120 },
-    { id: "internet", title: "Internet", tone: "neutral", kind: "subnet", x: 10, y: 330, w: 480, h: 110 },
-    { id: "partner", title: "Partner", tone: "neutral", kind: "subnet", x: 560, y: 330, w: 225, h: 110 },
-    { id: "cloud", title: "Cloud", tone: "blue", kind: "vpc", x: 10, y: 475, w: 775, h: 180 },
+    { id: "internet", title: "Internet", tone: "neutral", kind: "subnet", x: 10, y: 335, w: 480, h: 110 },
+    { id: "partner", title: "Partner", tone: "neutral", kind: "subnet", x: 560, y: 335, w: 225, h: 110 },
+    { id: "cloud", title: "Cloud", tone: "blue", kind: "vpc", x: 10, y: 495, w: 775, h: 185 },
   ],
   nodes: [
     // Step 1: the office, its one line, and the bucket the photos must reach.
     {
       id: "nas",
       label: "Office NAS",
-      sub: "12 TB photos, 100 TB raw",
+      sub: "12 TB + 100 TB raw",
       icon: "disk",
       tone: "violet",
       x: 390,
@@ -83,7 +85,7 @@ const spec: DiagramSpec = {
       icon: "router",
       tone: "blue",
       x: 390,
-      y: 385,
+      y: 390,
       w: 170,
     },
     {
@@ -93,7 +95,7 @@ const spec: DiagramSpec = {
       icon: "browser",
       tone: "neutral",
       x: 130,
-      y: 385,
+      y: 390,
       w: 170,
     },
     {
@@ -104,7 +106,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       variant: "glyph",
       x: 390,
-      y: 555,
+      y: 575,
       cloud: bucket,
     },
 
@@ -169,7 +171,7 @@ const spec: DiagramSpec = {
       tone: "violet",
       step: 5,
       x: 130,
-      y: 560,
+      y: 580,
       w: 190,
       cloud: {
         aws: { id: "aws-s3", label: "S3 bucket" },
@@ -182,12 +184,12 @@ const spec: DiagramSpec = {
     {
       id: "photographer",
       label: "Photographer",
-      sub: "200 new photos a month",
+      sub: "200 photos a month",
       icon: "users",
       tone: "neutral",
       step: 6,
       x: 672,
-      y: 385,
+      y: 390,
       w: 190,
     },
     {
@@ -198,7 +200,7 @@ const spec: DiagramSpec = {
       tone: "blue",
       step: 6,
       x: 672,
-      y: 580,
+      y: 600,
       w: 180,
       cloud: {
         aws: "aws-transfer-family",
@@ -212,23 +214,11 @@ const spec: DiagramSpec = {
     { from: "staff", to: "line", label: "web, mail" },
     { from: "line", to: "helpdesk", label: "help desk", until: 1 },
     { from: "nas", to: "line", label: "copy script", packet: true, until: 2 },
-    { from: "line", to: "bucket", label: "one stream, no cap", packet: true, delay: 1, until: 2 },
+    { from: "line", to: "bucket", label: "one stream, no cap", packet: true, delay: 1, until: 1 },
 
     // Step 2: the line is full all day, and the script skips files it cannot name.
     { from: "line", to: "helpdesk", label: "time-outs", tone: "red", step: 2, until: 2 },
-    {
-      from: "nas",
-      to: "bucket",
-      label: "4,000 skipped",
-      tone: "red",
-      dashed: true,
-      via: [
-        [505, 100],
-        [505, 515],
-      ],
-      step: 2,
-      until: 2,
-    },
+    { from: "line", to: "bucket", label: "4,000 skipped", tone: "red", dashed: true, step: 2, until: 2 },
 
     // Step 3: the agent reads the NAS, keeps to a cap by day and checks every file.
     { from: "line", to: "helpdesk", label: "help desk", step: 3 },
@@ -246,7 +236,7 @@ const spec: DiagramSpec = {
       flow: true,
       via: [
         [525, 250],
-        [525, 515],
+        [525, 535],
       ],
       step: 4,
     },
@@ -257,7 +247,7 @@ const spec: DiagramSpec = {
     { from: "line", to: "cloudshare", label: "kept in step", flow: true, labelAt: 0.62, step: 5 },
 
     // Step 6: the photographer uploads by SFTP; each file lands as an object.
-    { from: "photographer", to: "sftp", label: "SFTP upload", packet: true, step: 6 },
+    { from: "photographer", to: "sftp", label: "SFTP upload", packet: true, labelAt: 0.3, step: 6 },
     { from: "sftp", to: "bucket", label: "one object per file", packet: true, delay: 1.2, step: 6 },
   ],
 };
