@@ -1,19 +1,46 @@
 ---
 title: "Caching on Google Cloud"
-description: "Memorystore for Valkey, Redis Cluster and Memcached, with the AWS and Azure equivalents."
+description: "Memorystore for Valkey, Redis Cluster, Redis and Memcached, with the AWS and Azure equivalents."
+updated: 2026-11-14
 ---
 
-**Memorystore** is Google Cloud's managed cache, with Valkey, Redis (single node and Cluster) and Memcached engines. **Memorystore for Valkey**, generally available since April 2025, is the default for new caches and supports cross-Region replication.
+Brightpost's product pages and baskets must load in well under a millisecond on sale day, without every view becoming a query on the orders database. On Google Cloud that job belongs to one product, **Memorystore**, which runs Valkey, Redis or Memcached for you. Two facts shape the design. A Memorystore cache has no public address, so it is reached only from inside your VPC network. And durability is a setting on the same cache, not a separate product.
+
+## The idea
+
+A managed cache keeps answers you will need again in fast memory, and the cloud runs the servers, the copies and the failover. You still decide what goes in, under which key, for how long, and what happens on a miss.
+
+<Callout tone="blue" title="Learn the idea">
+  The cloud-neutral version, with Brightpost's 9:00 sale-day stampede, is in [Managed Caches](/cloud/data/managed-caches). The theory of cache strategies and invalidation is in [Caching](/system-design/patterns/caching).
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/cache-patterns" stepper cloud="gcp" minWidth={620} caption="Brightpost's cache on Google Cloud: Memorystore in front of Cloud SQL, guarded against stampedes, with a replica, shards and Cloud Monitoring alarms." />
+
+<CloudMapping diagram="cloud/cache-patterns" lead="gcp" />
 
 ## TL;DR
 
-- **Memorystore for Valkey** for caches, sessions, counters, leaderboards and presence.
-- Pick shard and replica counts; scaling is online.
-- No DAX-style integrated cache for Firestore or Bigtable: put Memorystore in front yourself.
+- **Memorystore for Valkey** is the default for new caches: sessions, page caches, counters, leaderboards and presence.
+- **Memorystore for Redis Cluster** for existing Redis code that needs shards; a single **Memorystore for Redis** instance grows only in size.
+- There is no serverless tier: you choose node type, shard count and replicas, and change them online.
+- No cache is built into Firestore or Bigtable. Put Memorystore in front of them in your own code.
 
 ## At a glance
 
 <CloudGroupTable group="caching" lead="gcp" />
+
+## How it fits together on Google Cloud
+
+Step 1: the app servers on Compute Engine read baskets from Memorystore and every product page from Cloud SQL. Step 2: product pages move to cache-aside on one Memorystore key with a 5-minute TTL. Steps 3 and 4 are the stampede and its fix. The rebuild lock is code in the app, a key set only if it does not exist, on the same cache.
+
+Step 5: each shard gets a **replica** in another zone of the region, and Memorystore promotes it if the primary fails. Step 6: Valkey and Redis Cluster spread the 16,384 slots over shards and add shards while serving. Step 7: Memorystore sends hit rate, evictions, memory and processor metrics to **Cloud Monitoring**, where Brightpost's alarms live.
+
+| The concept says | On Google Cloud | What to know |
+|---|---|---|
+| The cache's address | A private endpoint inside your VPC network | No public address; Valkey and Redis Cluster connect through Private Service Connect |
+| Replica in zone B | Replica count per shard (Valkey, Redis Cluster); Standard tier (single Redis instance) | The Basic tier of a single instance has no replica |
+| Shards | Shard count on Valkey or Redis Cluster | A single Redis instance cannot shard |
+| Persistence | Off, snapshots, or an append-only log | Speeds a restart; does not make the cache a database |
 
 ## Services
 
@@ -21,14 +48,62 @@ description: "Memorystore for Valkey, Redis Cluster and Memcached, with the AWS 
 
 <CloudServiceProfile id="gcp-memorystore" />
 
-## Coming from AWS
+Pick **Memorystore for Valkey** for anything new. Pick **Redis Cluster** when existing code or tooling expects Redis by name. Pick a **single Redis instance** for a small cache that will not outgrow one node. Pick **Memcached** for a pure string cache where a lost node costs only misses.
 
-| On AWS | On Google Cloud | What actually changes |
-|---|---|---|
-| ElastiCache for Valkey | Memorystore for Valkey | Very similar; no per-request serverless option |
-| MemoryDB | Memorystore with persistence | Snapshots and AOF, not a synchronous multi-zone log |
-| DAX | No equivalent | Cache in the application in front of Firestore or Bigtable |
+Brightpost's 260 MB of product pages and baskets fits one small Valkey shard with one replica in a second zone.
+
+## Common mistakes
+
+- **Creating the cache before the network.** Memorystore lives behind a private connection in one VPC network and region. Plan the network, and where the app servers run, first.
+- **Choosing the Basic tier of a single Redis instance for sessions.** It has no replica, so a node failure logs every shopper out.
+- **Treating persistence as durability.** Snapshots and the append-only log help a restart; a failover can still lose the last writes. Orders stay in Cloud SQL.
+
+## Where this shows up in system design
+
+- **Read-heavy pages:** cache-aside in front of Cloud SQL or Spanner, with jittered TTLs and a rebuild lock for hot keys.
+- **Sessions and rate limits:** small keys with TTLs, read on every request, kept in Valkey with a replica.
+- **NoSQL read paths:** a hot Firestore document or Bigtable row cached in Memorystore, because neither database has a cache built in.
 
 ## Related
 
-[Caching on AWS](/cloud/aws/caching) · [Caching on Azure](/cloud/azure/caching) · [Caching](/system-design/patterns/caching) · [Databases on Google Cloud](/cloud/gcp/databases)
+[Managed Caches](/cloud/data/managed-caches) · [Caching on AWS](/cloud/aws/caching) · [Caching on Azure](/cloud/azure/caching) · [Databases on Google Cloud](/cloud/gcp/databases) · [Networking on Google Cloud](/cloud/gcp/networking) · [System design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Which Memorystore engine would you pick for Brightpost's baskets and product pages?" category="Cloud" level="Junior">
+    **Short answer.** Memorystore for Valkey, with one replica in a second zone. It stores hashes and counters, takes over from a replica if a node fails, and can add shards later.
+
+    **Why.** Baskets are small, read on every page, and annoying to lose, so they need a copy that survives one node. Memcached keeps no copies. A single Redis instance can have a replica but cannot shard, so growth means a bigger node. Valkey speaks the same commands as Redis, so existing client code works.
+
+    **Follow-ups the interviewer may ask.**
+    - When would Memcached be the better pick?
+    - What would make you choose Redis Cluster over Valkey?
+
+    **Watch out for.** Picking the cheapest option without a replica. Losing the node logs out every shopper with a basket.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The app servers cannot connect to a new Memorystore for Valkey cache. What do you check?" category="Cloud" level="Mid">
+    **Short answer.** That the app runs in the same VPC network the cache was attached to, and that the private connection for that network and region exists. Memorystore has no public address to fall back on.
+
+    **Why.** Valkey and Redis Cluster are reached through Private Service Connect endpoints created in your network for that region. An app server in another network, or a laptop on the internet, has no route. Then check the client: authentication, encryption in transit if it is on, and a cluster-aware client when there is more than one shard.
+
+    **Follow-ups the interviewer may ask.**
+    - How would a second project's app reach the same cache?
+    - Why might connecting work but most commands fail?
+
+    **Watch out for.** Opening firewall rules to the internet. The cache cannot be reached that way; the fix is in the network design.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Someone proposes keeping orders in Memorystore with the append-only log turned on. Is that safe?" category="Cloud" level="Mid">
+    **Short answer.** No. Persistence helps a restarted node reload its data; it does not stop a failover from losing the last writes. Orders stay in Cloud SQL, and Memorystore keeps baskets and page copies.
+
+    **Why.** The primary answers a write, then copies it to its replica a moment later. If the primary's zone fails in between, the promoted replica never saw that write, whatever the log on the old primary says. For a basket that is an annoyance; for a paid order it is lost money. Google Cloud has no separate durable in-memory database, so the durable copy belongs in a database.
+
+    <AnimatedDiagram spec="animated/cloud/cache-patterns" step={5} cloud="gcp" highlight={["cache", "replica"]} minWidth={620} caption="The replica in zone B trails the primary, so the newest writes can be lost in a failover." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does a cold restart cost without persistence?
+    - Where would you put a write that must be fast and must not be lost?
+
+    **Watch out for.** Saying "snapshots make it durable". A snapshot is minutes old by design.
+  </InterviewQuestion>
+</InterviewQuestions>

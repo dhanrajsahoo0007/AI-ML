@@ -54,6 +54,8 @@ including teenagers, who know the idea from a concept page and now want the real
 - Brightpost (canon in `apps/web/content/cloud/PAGE-TEMPLATES.md` §2) is the running example; reuse canon facts; no new
   incident needed. Our own words only: no vendor or course text, no prices or discount percentages, no limits that
   change. When unsure of a fact, leave it out and list it in your report.
+- Never put `<Term>` inside an `<InterviewQuestion>` answer (it breaks the question library with a 500); use plain words there.
+- `<CloudMapping>` reads only architecture specs (no `layout`/`sequence`); if a spec has no steps, cite it with `highlight`, not `step`.
 - Sentences ≤ 30 words, terms defined on first use, no "simply / just / obviously".
 
 ## Verify (fix until clean, judging only your own files)

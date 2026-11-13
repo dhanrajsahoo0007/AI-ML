@@ -1,20 +1,50 @@
 ---
 title: "Caching on Azure"
-description: "Azure Managed Redis and the Cosmos DB integrated cache, with the AWS and Google Cloud equivalents."
+description: "Azure Managed Redis, the retiring Azure Cache for Redis, and the Cosmos DB integrated cache, with the AWS and Google Cloud equivalents."
+updated: 2026-11-14
 ---
 
-**Azure Managed Redis** is the cache for new Azure designs. It is built on Redis Enterprise, clustered by default, and supports active geo-replication. The older **Azure Cache for Redis** is closed to new customers and retiring (Enterprise tiers on March 31, 2027; Basic, Standard and Premium on September 30, 2028).
+Brightpost's product pages and baskets must load in well under a millisecond on sale day, without every view becoming a query on the orders database. On Azure that job belongs to **Azure Managed Redis**. Two facts shape the design. You size a whole cache by tier and memory, not by nodes and shards. And a **clustering policy** decides how clients see the shards, so it must be chosen before the client code is written.
+
+## The idea
+
+A managed cache keeps answers you will need again in fast memory, and the cloud runs the servers, the copies and the failover. You still decide what goes in, under which key, for how long, and what happens on a miss.
+
+<Callout tone="blue" title="Learn the idea">
+  The cloud-neutral version, with Brightpost's 9:00 sale-day stampede, is in [Managed Caches](/cloud/data/managed-caches). The theory of cache strategies and invalidation is in [Caching](/system-design/patterns/caching).
+</Callout>
+
+<AnimatedDiagram spec="animated/cloud/cache-patterns" stepper cloud="azure" minWidth={620} caption="Brightpost's cache on Azure: Azure Managed Redis in front of a PostgreSQL flexible server, guarded against stampedes, with replicas, shards and Azure Monitor alarms." />
+
+<CloudMapping diagram="cloud/cache-patterns" lead="azure" />
 
 ## TL;DR
 
-- **Azure Managed Redis** for caches, sessions, counters and real-time state.
-- Clients must support **Redis Cluster** because instances are clustered by default.
-- **Cosmos DB integrated cache** caches point reads in front of Cosmos DB, like DAX for DynamoDB.
-- Plan migrations off Azure Cache for Redis before its retirement dates.
+- **Azure Managed Redis** for caches, sessions, counters, leaderboards and real-time state in new designs.
+- Pick the **clustering policy** first: it decides whether the client must understand Redis Cluster.
+- **Azure Cache for Redis** is closed to new customers and retiring; plan the move before its dates.
+- The **Cosmos DB integrated cache** serves repeated reads in front of Cosmos DB with no cache code.
 
 ## At a glance
 
 <CloudGroupTable group="caching" lead="azure" />
+
+## How it fits together on Azure
+
+Step 1: the app servers on Azure Virtual Machines read baskets from Azure Managed Redis and every product page from the PostgreSQL flexible server. Step 2: product pages move to cache-aside on one key with a 5-minute TTL. Steps 3 and 4 are the stampede and its fix. The rebuild lock is code in the app, a key set only if it does not exist, on the same cache.
+
+Step 5: Azure Managed Redis keeps a replica of each shard and fails over by itself, spread across availability zones where the region has them. Step 6: the cache is clustered from the start. A bigger memory size brings more shards, and you never set the shard count. Step 7: hit rate, evictions, memory and processor load go to **Azure Monitor**, where Brightpost's alarms live.
+
+| The concept says | On Azure | What to know |
+|---|---|---|
+| Node size | Tier and memory size | Memory Optimized, Balanced and Compute Optimized trade memory against processing power |
+| Shards | Set by the service from the size | The clustering policy decides what the client sees |
+| The cache's address | One endpoint, usually behind a private endpoint | Sign-in with Microsoft Entra ID instead of access keys |
+| Copies in another region | Active geo-replication | Several regions accept writes; conflicts are resolved by the service |
+
+<Callout tone="orange" title="Azure Cache for Redis is retiring">
+  The older service is closed to new customers. Its Enterprise tiers retire on March 31, 2027, and its Basic, Standard and Premium tiers on September 30, 2028. New caches start on Azure Managed Redis.
+</Callout>
 
 ## Services
 
@@ -22,15 +52,64 @@ description: "Azure Managed Redis and the Cosmos DB integrated cache, with the A
 
 <CloudServiceProfile id="azure-managed-redis" />
 
-## Coming from AWS
+Pick it for any new cache on Azure, and as the target when moving off Azure Cache for Redis.
 
-| On AWS | On Azure | What actually changes |
-|---|---|---|
-| ElastiCache for Valkey | Azure Managed Redis | Redis Enterprise based, with modules such as search and JSON |
-| ElastiCache Global Datastore | Active geo-replication | Multi-Region writes with conflict resolution |
-| DAX | Cosmos DB integrated cache | Through the dedicated gateway |
-| ElastiCache for Memcached | No equivalent | Use Azure Managed Redis |
+Brightpost's 260 MB of product pages and baskets fits the smallest sizes; it picks a tier with high availability so a replica covers a lost node.
+
+The **Cosmos DB integrated cache** is not a separate service. It is a cache inside a Cosmos DB dedicated gateway, and its profile is on [Databases on Azure](/cloud/azure/databases). Pick it when the data already lives in Cosmos DB and you want repeated reads served without cache code. There is no managed Memcached on Azure.
+
+## Common mistakes
+
+- **Writing the client before choosing the clustering policy.** A client that does not understand Redis Cluster fails on a cache that shows every shard.
+- **Starting a new design on Azure Cache for Redis.** It is closed to new customers and has retirement dates.
+- **Putting access keys in app settings.** Use Microsoft Entra ID with a managed identity, then turn the keys off, as Brightpost did after its key leak.
+
+## Where this shows up in system design
+
+- **Read-heavy pages:** cache-aside in front of Azure SQL or PostgreSQL, with jittered TTLs and a rebuild lock for hot keys.
+- **Sessions and rate limits:** small keys with TTLs, read on every request, in a highly available cache.
+- **Global reads:** active geo-replication keeps a copy of session or profile data near users in more than one region.
 
 ## Related
 
-[Caching on AWS](/cloud/aws/caching) · [Caching on Google Cloud](/cloud/gcp/caching) · [Caching](/system-design/patterns/caching) · [Databases on Azure](/cloud/azure/databases)
+[Managed Caches](/cloud/data/managed-caches) · [Caching on AWS](/cloud/aws/caching) · [Caching on Google Cloud](/cloud/gcp/caching) · [Databases on Azure](/cloud/azure/databases) · [Identity & Security on Azure](/cloud/azure/security) · [System design](/system-design)
+
+<InterviewQuestions>
+  <InterviewQuestion question="Brightpost needs a new cache on Azure today. Azure Cache for Redis or Azure Managed Redis?" category="Cloud" level="Junior">
+    **Short answer.** Azure Managed Redis. Azure Cache for Redis is closed to new customers and has announced retirement dates, so a new design on it would need a second migration.
+
+    **Why.** Both speak the Redis commands, so the app code is nearly the same. Azure Managed Redis is clustered, keeps a replica of each shard, and adds active geo-replication and modules such as search and JSON. Brightpost's 260 MB fits a small size with high availability on.
+
+    **Follow-ups the interviewer may ask.**
+    - What would you check before moving an existing cache across?
+    - Does the move change the client library?
+
+    **Watch out for.** Assuming "same commands" means "same client settings". The clustering policy can change what the client must support.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What does the clustering policy on Azure Managed Redis change for the app?" category="Cloud" level="Mid">
+    **Short answer.** Whether the client sees every shard or one endpoint. With the OSS policy the client must understand Redis Cluster and talks to each shard directly. With the Enterprise policy a proxy hides the shards behind one endpoint, so any Redis client works.
+
+    **Why.** The OSS policy skips a hop and scales further, but needs a cluster-aware client. The Enterprise policy accepts any client, and the proxy routes each command. Either way, a command on several keys needs the keys in one slot, so Brightpost names basket keys with a hash tag such as `{basket:42}`.
+
+    <AnimatedDiagram spec="animated/cloud/cache-patterns" step={6} cloud="azure" highlight={["cache", "shards"]} minWidth={620} caption="The cache is spread over shards; the clustering policy decides whether the app servers see them." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which policy would you pick for an old library that only knows single-node Redis?
+    - Does the policy change what happens to a hot key?
+
+    **Watch out for.** Testing on one small cache and assuming production behaves the same. Check the policy on every environment.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do Brightpost's app servers reach Azure Managed Redis with no password in their config?" category="Cloud" level="Mid">
+    **Short answer.** Give the app servers a managed identity, grant it access on the cache, and sign in with Microsoft Entra ID. Reach the cache through a private endpoint, then turn off access keys.
+
+    **Why.** After the key leak, Brightpost keeps no long-lived keys anywhere. The client asks Entra ID for a token as the server's identity and uses it to sign in. Tokens expire, so the client library must refresh them and re-authenticate open connections. The private endpoint gives the cache an address inside the network, so it needs no public access.
+
+    **Follow-ups the interviewer may ask.**
+    - What happens to open connections when a token expires?
+    - How would a developer connect from a laptop for debugging?
+
+    **Watch out for.** Moving the key into an environment variable and calling it fixed. It is still a long-lived key that can leak.
+  </InterviewQuestion>
+</InterviewQuestions>
