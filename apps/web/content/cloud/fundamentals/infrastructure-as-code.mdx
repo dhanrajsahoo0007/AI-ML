@@ -1,11 +1,327 @@
 ---
 title: "Infrastructure as Code"
-description: "Why clicking in a console does not scale, and how describing infrastructure in files keeps every environment the same."
-status: outline
+description: "Why console clicks drift, and how a reviewed template, a plan and a pipeline with no stored keys keep every cloud environment the same."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the ways to talk to a cloud (console, command line and SDKs), why clicking in a console does not scale, what declarative means, how a tool keeps state and computes a plan, how modules make environments identical, and how to choose between a multi-cloud tool and a provider's own engine.
+<KeyIdea>
+  Write down what your cloud setup should look like in a file, and let a tool make the cloud match that file, the same way every time.
+</KeyIdea>
 
-**Related reading on this site:** [DevOps & IaC on AWS](/cloud/aws/devops) · [DevOps & IaC on Google Cloud](/cloud/gcp/devops) · [DevOps & IaC on Azure](/cloud/azure/devops)
+## The story
+
+Brightpost's shop runs on a scaling group: a set of identical servers that grows and shrinks with traffic. Its rule says at least 1 server, at most 10, and one more whenever the processors pass about 60%. Asha built it by clicking through the provider's website, and she built a test copy the same way. In a quiet week, five weeks before the spring sale, she lowered the shop's maximum from 10 to 3 to keep the bill down. She meant to put it back. Nothing recorded why, and the test copy still said 10. On sale day at 10:05 the rule asked for 9 servers and got 3. Three servers hold about 600 shoppers at once, and about 1,800 were trying. Pages timed out until 11:50, when an engineer found the number. About 650 orders were lost.
+
+Every step below closes one of the gaps that let a two-minute change cost a morning of sales.
+
+## How it works
+
+Three words first. A **resource** is one thing you rent, such as a server, a network or a database. An **environment** is a full copy of a system kept for one purpose, such as testing or serving customers. <Term id="infrastructure-as-code">Infrastructure as code</Term> (IaC) means describing your resources in text files that a tool reads and applies.
+
+### Step 1: Five ways to talk to a cloud
+
+<AnimatedDiagram spec="animated/cloud/iac-pipeline" step={1} minWidth={620} caption="Brightpost's first setup: every click in the console becomes a call to the cloud's API, which builds the test copy and the shop's servers." />
+
+There are five common ways to ask a cloud for something.
+
+- **Web console.** A website with forms and buttons. Good for looking around and learning.
+- **Command line.** A program you type commands into, such as `cloud servers list` (a made-up example). You can save commands in a script.
+- **Cloud shell.** A command line inside the browser, already signed in, with the tools installed.
+- **SDKs.** Libraries that let your own program call the cloud, such as an app that makes a storage folder for each new customer.
+- **Infrastructure as code.** Files that describe the result you want. A tool compares them with the cloud and makes the changes.
+
+All five go through the same door: the cloud's API, the set of requests it accepts. Each request is checked by the identity service. [API design basics](/system-design/fundamentals/api-design) explains what an API is. The difference is what stays behind. A click leaves no file that a teammate can read, review or run again. Only the last way does.
+
+<PremiumBreak />
+
+### Step 2: Drift: the change nobody wrote down
+
+<AnimatedDiagram spec="animated/cloud/iac-pipeline" step={2} minWidth={620} caption="The failure: a maximum lowered by hand makes the two copies differ, and 1,800 sale-day shoppers meet 3 servers." />
+
+<Term id="drift">Drift</Term> is the gap between what you believe your cloud looks like and what it really looks like. A hand change opens it. Each one feels small: a number lowered, a firewall rule added, a setting tried "for now".
+
+Brightpost believed both copies said 10. The test copy did. The shop said 3. Nothing showed the difference, because the only record of the setup was the live cloud itself.
+
+<Callout tone="red" title="What breaks">
+  At 10:05 the scaling rule asks for 9 servers. The cloud stops at 3, because that is the maximum it was given. About 1,200 shoppers wait on pages that time out. The audit trail later shows the change, five weeks old, but nobody thought to look until 11:50. About 650 of the day's orders are gone.
+</Callout>
+
+Two things failed. The setup existed only as clicks, so nobody could compare it with anything. And a change to production needed no second pair of eyes. The next steps fix both.
+
+### Step 3: Declarative: describe the result, not the steps
+
+<AnimatedDiagram spec="animated/cloud/iac-pipeline" step={3} minWidth={620} caption="The setup is written as a template in a repository. People still use the console, but only to look." />
+
+There are two ways to write a setup down. An **imperative** script lists actions: create a group, set the maximum to 10, add a rule. A **declarative** file describes the end result: a group with a maximum of 10. A tool works out the actions.
+
+Brightpost picks declarative. Its file is called a **template**. It lives in a **repository**, a store for files that keeps every past version and who changed it. Here is the core of it, in a made-up syntax close to the common tools:
+
+```text
+# Illustrative only, not a real tool's syntax.
+scaling_group "shop" {
+  image        = "shop-app-v42"
+  min_servers  = 1
+  max_servers  = var.max_servers   # 10 for the shop, 4 for test
+  target_cpu   = 60
+  zones        = var.zones
+}
+```
+
+The file states the **desired state**: what should exist. A script must know where it starts from. A template does not. The tool reads what exists, compares, and does only what is missing.
+
+### Step 4: A plan before any change
+
+<AnimatedDiagram spec="animated/cloud/iac-pipeline" step={4} minWidth={620} caption="The engine compares the template with the live servers and shows one change, maximum 3 to 10, before it applies anything." />
+
+The tool works in two moves. **Plan** reads the template and the live cloud, then lists the difference. **Apply** makes that difference real. Asha's first plan against the shop showed one line: change the maximum from 3 to 10. That one line was the sale-day failure, found before the next sale.
+
+A plan marks each resource as added, changed, deleted or **replaced**. Replaced means deleted and then built again, because some settings cannot change in place. A rename can mean a new, empty database. So the plan is the part a reviewer must read.
+
+Apply is <Term id="idempotent">idempotent</Term>: running it again with no new change does nothing. The tool sees that the cloud already matches and stops.
+
+### Step 5: One template, many environments
+
+The test copy and the shop come from the same template. Only the **inputs** differ: values passed in for each environment.
+
+<Compare
+  columns={["Input", "Test environment", "Shop environment"]}
+  rows={[
+    ["Account", "Test account", "Shop account"],
+    ["Most servers", "4, the account's quota", "10"],
+    ["Zones", "1", "3"],
+    ["Tag env", "test", "prod"],
+  ]}
+  caption="One template, two sets of inputs. Everything not listed is the same in both."
+/>
+
+A **module** is a reusable piece of template, like a function in code. Brightpost's "web servers" module holds the scaling group, its health checks and its alerts. Both environments call it. A fix to the module reaches both, and the test copy gets it first. The same idea scales to a company's whole estate; see [Landing Zones](/cloud/fundamentals/landing-zones).
+
+### Step 6: Applied from a pipeline, with no stored key
+
+<AnimatedDiagram spec="animated/cloud/iac-pipeline" step={5} minWidth={620} caption="Each merge starts the pipeline. It swaps its own token for a 1-hour credential, then runs the plan and the apply." />
+
+People stop applying from laptops. A **CI pipeline**, a service that runs set jobs whenever code changes, does it for them:
+
+1. Asha proposes a change to the template.
+2. The pipeline runs a plan and posts it next to the change.
+3. A second engineer reads the plan and approves.
+4. On merge, the pipeline applies that same change.
+
+The pipeline needs cloud permissions, but it holds no key. Through <Term id="federation">federation</Term>, it shows the identity service a signed token that says which repository and branch it runs for. It gets back a credential that lasts 1 hour, for one deploy role. [Identity and Access](/cloud/fundamentals/identity-and-access) explains why a stored key is the risk to avoid.
+
+### Step 7: State: the tool's memory, kept in one place
+
+<AnimatedDiagram spec="animated/cloud/iac-pipeline" step={6} minWidth={620} caption="The engine reads its state from one remote store and holds a lock for the whole run." />
+
+To change or delete what it built, the tool must remember what it built. That memory is the **state**: a record that links each block of the template to a real resource and its last known settings. Without it, renaming a block would leave the old server running, unowned.
+
+Three rules for state:
+
+- **One remote copy.** Kept in a shared store, not on a laptop. Two copies disagree, and the tool trusts whichever one it reads.
+- **A lock.** A run takes a lock before it starts. A second run waits or stops, so two applies never change the same servers at once.
+- **Guarded like a secret.** State can hold passwords and other <Term id="secret">secrets</Term> in plain text. Encrypt it, keep old versions, and let only the pipeline write it.
+
+Some engines keep state for you; others leave it to you. The tabs below show which.
+
+### Step 8: Catching drift every night
+
+Hand changes still happen, in an outage or by mistake. So Brightpost runs a plan every night against each environment, without applying it. An empty plan means no drift. Any line in it means someone changed the cloud outside the template.
+
+When the nightly plan finds drift:
+
+1. Find who and why in the audit trail.
+2. If the change was right, write it into the template and review it.
+3. If it was wrong, apply the template to undo it.
+
+Emergencies get a written exception, called **break-glass** access. A named person may change production by hand during an outage. The change goes into the template within one working day. People's everyday roles in production are read-only.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a declarative file, a plan, an apply and a record of what was built. What differs is who runs the engine and who keeps the state.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Native engine:** AWS CloudFormation. It builds a stack: a named group of resources it creates, changes and deletes together.
+    - **Language:** templates in JSON or YAML. The AWS Cloud Development Kit (CDK) lets you write them in languages such as TypeScript or Python, and turns that into a template.
+    - **Plan step:** a change set lists what an update will add, change or replace.
+    - **Who keeps the state:** CloudFormation, inside the stack. There is no state file for you to store or lock.
+    - **Multi-cloud tool:** Terraform or OpenTofu. You store the state yourself, for example in an S3 bucket, with a lock.
+
+    **The difference that changes a design.** CloudFormation runs inside AWS, so no laptop or runner holds the engine's memory. If an update fails partway, it rolls the stack back to its last working state by default. Drift detection compares a stack with the live resources. With a multi-cloud tool, state storage, locking and access to it become your design.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Native engine:** Infrastructure Manager. It runs Terraform configurations for you inside Google Cloud.
+    - **Language:** Terraform's own language. Config Connector is a second route: resources written as Kubernetes objects.
+    - **Plan step:** a preview shows what a deployment would change.
+    - **Who keeps the state:** Infrastructure Manager, for each deployment it runs.
+    - **Multi-cloud tool:** Terraform or OpenTofu run yourself, with state in a Cloud Storage bucket, which supports locking.
+
+    **The difference that changes a design.** The native engine and the multi-cloud tool share one language. Moving between them is mostly about who runs the tool and keeps the state, not a rewrite. Config Connector works differently. A controller in a cluster keeps checking each resource and undoes hand changes on its own, so drift is fixed, not only reported.
+  </Tab>
+  <Tab label="Azure">
+    - **Native engine:** Azure Resource Manager (ARM), the layer every Azure request passes through. It runs deployments.
+    - **Language:** ARM templates in JSON, or Bicep, a shorter language that compiles to ARM JSON.
+    - **Plan step:** what-if shows what a deployment would create, change or delete.
+    - **Who keeps the state:** nobody. ARM has no state file; it compares the template with the live resources on each run.
+    - **Multi-cloud tool:** Terraform or OpenTofu, with state in Azure Blob Storage, locked during a run.
+
+    **The difference that changes a design.** With no state file, nothing can go stale or get lost. But ARM sees only what the template names. By default a deployment leaves alone any resource the template does not mention. Deleting a block from the template does not delete the resource, unless you choose a mode that removes what is missing.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/iac-pipeline" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/iac-pipeline" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which kind of IaC tool fits?"
+  tree={{
+    q: "Does the setup span more than one cloud, or outside services such as DNS or monitoring?",
+    yes: "A multi-cloud tool. Plan for remote state with a lock, and give only the pipeline write access to it.",
+    no: {
+      q: "Would the team rather write in a general programming language than in a template format?",
+      yes: "A code-first kit that produces the provider's templates, where one exists. Keep the logic small: the plan, not the code, is what gets reviewed.",
+      no: {
+        answer: "The provider's own engine. It keeps the state for you, and its plan step works the same in every account.",
+        href: "/cloud/operations/ci-cd-and-deployment-strategies",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The nightly plan for the shop says 'change most servers 10 → 6'. Nobody has edited the template. What happened, and what do you do?" hint="Where else can a change come from?">
+    Someone changed the shop by hand: that is drift. Find who and why in the audit trail. If 6 is right, change the template through review. If not, apply the template to put 10 back.
+  </QuizItem>
+  <QuizItem question="The pipeline applies the template, then runs again a minute later with no new change. What does the second run do?" hint="Think about desired state.">
+    Nothing. The plan is empty because the cloud already matches the template. Apply is idempotent.
+  </QuizItem>
+  <QuizItem question="Two pipeline runs for the shop start 20 seconds apart. What stops both from changing the servers at once?">
+    The lock on the state. The first run holds it, and the second waits or stops until the lock is free.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Console clicks", "Script of commands", "Declarative template"]}
+  rows={[
+    ["First working setup", "About 30 minutes", "About 2 hours", "About a day, the first time"],
+    ["Record of what should exist", false, "Only if kept up to date", "The template, reviewed"],
+    ["Shows a change before it happens", false, false, true],
+    ["Run it twice", "Everything clicked again", "Often a second copy, or an error", "The second run changes nothing"],
+    ["Finds a hand change", false, false, "The nightly plan"],
+    ["Rebuild the shop from nothing", "Most of a day, from memory", "Hours, fixing what fails", "One apply, about 20 minutes"],
+  ]}
+  caption="Brightpost's numbers for its shop servers. Times are what a small team should expect."
+/>
+
+Clicks win on the first afternoon. Every later change, review and rebuild costs less with the template.
+
+## Common pitfalls
+
+- **Fixing production in the console and moving on.** The next apply undoes the fix, or the fix becomes drift nobody knows about. Write every hand change back into the template within a day.
+- **Applying without reading the plan.** A "replace" line on a database means delete, then create an empty one. Make the plan part of every review, and block a replace on data stores unless someone confirms it.
+- **State on a laptop or in the repository.** Two copies disagree, and secrets in state end up in version history. Keep one remote copy, encrypted and locked, that only the pipeline writes.
+- **A copy of the template per environment.** The copies drift apart the same way clicks do. Use one module with inputs, and let test receive every change first.
+- **A long-lived cloud key in the pipeline.** It can change everything the template can, for as long as it exists. Use federation and a 1-hour credential for one deploy role.
+
+## How to say it in an interview
+
+"I keep infrastructure in declarative templates in a repository, so the file is the record of what should exist. Every change goes through review, and the review shows the tool's plan: what will be added, changed, replaced or deleted. A pipeline applies the change after approval, using federation and a short-lived credential instead of a stored key. The tool's state lives in one remote store, encrypted and locked during each run, or the provider's engine keeps it for me. Every environment comes from the same modules with different inputs. A nightly plan catches drift, and hand changes in an emergency are written back into the template."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What does declarative mean for infrastructure?" level="Junior" category="Cloud">
+    **Short answer.** You describe the end result you want, such as "a scaling group with at most 10 servers", and the tool works out the steps. An imperative script lists the steps yourself, in order.
+
+    **Why.** A declarative tool reads what exists, compares it with the file, and changes only the difference. So the same file works on an empty account and on a running one, and a second run does nothing. When Brightpost's maximum had been lowered to 3 by hand, the first plan showed one change, 3 back to 10.
+
+    <AnimatedDiagram spec="animated/cloud/iac-pipeline" step={4} highlight={["repo", "engine", "plan", "api"]} caption="The engine compares the template with what is live, and the plan lists only the difference." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does "idempotent" mean, and why does it matter here?
+    - When is an imperative script still the right tool?
+
+    **Watch out for.** Saying "declarative means it is written in YAML". The format does not matter. What matters is that the file states the result and the tool computes the change.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why does the state file matter, and where should it live?" level="Mid" category="Cloud">
+    **Short answer.** State is the tool's memory: which real resource each block of the template created, and its last known settings. It should live in one remote store, encrypted, with versions kept, locked during every run, and written only by the pipeline.
+
+    **Why.** Without state, the tool cannot tell its own servers from anyone else's. A renamed block would create a new resource and leave the old one running. Two copies of state, say on two laptops, give two different plans. Without a lock, two runs can change the same servers at once. Some provider engines keep state for you, which removes this whole design.
+
+    <AnimatedDiagram spec="animated/cloud/iac-pipeline" step={6} path="ci>engine>state" caption="The pipeline runs the engine, and the engine reads and locks one remote copy of state." />
+
+    **Follow-ups the interviewer may ask.**
+    - A run crashed and left the lock held. What do you do?
+    - How do you split state so a mistake in one part cannot touch the database?
+
+    **Watch out for.** Committing state to the repository "so everyone has it". It leaks secrets into history and still has no lock.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost's production and test setups drifted apart. How do you find drift and stop it coming back?" level="Mid" category="Cloud">
+    **Short answer.** Find it with a plan run against each environment on a schedule, every night, without applying. Stop it by making the template the only normal way to change production: people get read-only roles there, and changes go through review and the pipeline.
+
+    **Why.** Brightpost's maximum was lowered from 10 to 3 by hand five weeks before the sale, and nothing compared the shop with anything. A nightly plan would have shown that line the next morning, not after 650 lost orders. Each finding is either written into the template through review or undone by an apply.
+
+    <AnimatedDiagram spec="animated/cloud/iac-pipeline" step={2} caption="Built by clicks, the two copies differ and nothing shows it until sale day." />
+
+    **Follow-ups the interviewer may ask.**
+    - Should the nightly job fix drift by itself, or only report it?
+    - How do you handle a setting that the cloud changes on its own, such as the current server count?
+
+    **Watch out for.** Banning the console and calling it solved. Outages will still need hand changes, so plan for them with break-glass access and a write-back rule.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A team runs on one cloud only. CloudFormation, Bicep or Infrastructure Manager, or Terraform: how do you decide?" level="Mid" category="Cloud">
+    **Short answer.** Start from three questions: who keeps the state, what else the template must reach, and what the team already knows. A native engine keeps or avoids state for you and needs nothing outside the cloud to run. A multi-cloud tool also reaches outside services, such as DNS or monitoring, and one language serves several clouds.
+
+    **Why.** For Brightpost, on one cloud with 3 engineers, the native engine removes a whole design task: no state store, no lock, no access to guard. If the shop also manages its DNS, help desk alerts or a second cloud, a multi-cloud tool covers them in one plan. Google Cloud's native engine runs Terraform itself, which narrows the gap there. Either way, the habits matter more than the tool: plan in review, apply from a pipeline, no stored keys.
+
+    **Follow-ups the interviewer may ask.**
+    - What does moving from one tool to the other cost later?
+    - How does a code-first kit such as the CDK change the review?
+
+    **Watch out for.** Choosing a multi-cloud tool "in case we move clouds". The resources in the templates are still specific to one provider, so a move is a rewrite of most blocks anyway.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you make a change to a shared module safe for every environment that uses it?" level="Senior" category="Cloud">
+    **Short answer.** Version the module, and roll each version through the environments in order: test first, then production. Each environment gets its own plan in review, and production moves only after test has run the new version without trouble.
+
+    **Why.** At Brightpost one "web servers" module serves both environments. If both use the latest copy, one merge changes production at the same moment as test. With versions, test moves to the new one, its plan is reviewed and applied, and the team watches it for a day. Production's plan is then a separate change, read line by line for replaces. The pipeline applies with a 1-hour credential for that environment's deploy role only, so a test run cannot touch the shop.
+
+    <AnimatedDiagram spec="animated/cloud/iac-pipeline" step={5} path="repo>ci>engine>api" caption="Each environment's change takes the same road: merge, pipeline, plan, apply." />
+
+    **Follow-ups the interviewer may ask.**
+    - The module must rename a resource. How do you avoid a delete and re-create?
+    - How do you test a module before any environment uses it?
+
+    **Watch out for.** Testing the module change only in test and applying "the same thing" to production. Production's live state differs, so its plan can differ. Read that plan too.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Identity and Access](/cloud/fundamentals/identity-and-access)
+- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
+- [Landing Zones: Setting Up an Estate](/cloud/fundamentals/landing-zones)
+- [CI/CD and Deployment Strategies](/cloud/operations/ci-cd-and-deployment-strategies)
+- [Configuration, Patching and Fleet Management](/cloud/operations/config-patching-and-fleet-management)
+- [Autoscaling: The Control Loop](/cloud/compute/autoscaling)
+- [DevOps & IaC on AWS](/cloud/aws/devops)
+- [DevOps & IaC on Google Cloud](/cloud/gcp/devops)
+- [DevOps & IaC on Azure](/cloud/azure/devops)
+- [API design basics](/system-design/fundamentals/api-design)
+
+## Further reading
+
+- [AWS CloudFormation User Guide](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/Welcome.html): stacks, change sets and drift detection.
+- [Google Cloud Infrastructure Manager overview](https://cloud.google.com/infrastructure-manager/docs/overview): deployments and previews.
+- [Bicep overview](https://learn.microsoft.com/azure/azure-resource-manager/bicep/overview): Azure's template language and what-if.
+- [Terraform documentation](https://developer.hashicorp.com/terraform/docs): plans, state and backends.

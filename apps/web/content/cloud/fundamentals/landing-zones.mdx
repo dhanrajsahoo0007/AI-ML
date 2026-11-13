@@ -1,11 +1,316 @@
 ---
 title: "Landing Zones: Setting Up an Estate"
-description: "The standard shape of a multi-account estate: prod and non-prod kept apart, shared identity and logging, and guardrails on top."
-status: outline
+description: "The standard shape of a cloud estate, set up before teams arrive: environments apart, one sign-in, shared logs and network, guardrails and account vending."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the standard shape of a multi-account estate: production and non-production kept apart, shared containers for identity, logging, security and networking, and guardrails set at the top of the tree. It explains why every provider now offers a blueprint for it.
+<KeyIdea>
+  A landing zone is the layout of accounts, rules and shared services a company sets up once, so every new team starts inside it instead of building its own.
+</KeyIdea>
 
-**Related reading on this site:** [Identity & Security on AWS](/cloud/aws/security) · [DevOps & IaC on AWS](/cloud/aws/devops)
+## The story
+
+Brightpost, the small shop that sells posters and greeting cards, grew in 2026. A second team of two engineers began a wholesale shop, where about 300 gift shops order cards in bulk. One Friday in March, they opened a new account through the provider's sign-up page, with the company card and one shared owner password. To let shops download price lists, they made the account's bucket public. Each night, an export of trade orders landed in the same bucket, with every shop's contact name, phone number and address. Brightpost's guardrail against public buckets sat on its organisation's root, and this account was not in the organisation. On day 41 a security researcher emailed to say the file was readable by anyone. Nobody could say who else had downloaded it, so Brightpost wrote to all 300 shops.
+
+Every step below makes sure the next account starts inside the rules, not outside them.
+
+## How it works
+
+Three words first. An **estate** is all of a company's cloud accounts, with the rules and shared services around them. A <Term id="landing-zone">landing zone</Term> is the standard shape of that estate, set up before teams arrive: where accounts go, what they share and which rules they start with. A **baseline** is the list of settings every new account gets on its first day. Accounts, the organisation tree and guardrails are explained on [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance); this page builds on them.
+
+### Step 1: An estate built by hand, for one team
+
+<AnimatedDiagram spec="animated/cloud/landing-zone" step={1} minWidth={620} caption="Brightpost's tree before the second team: a root with a guardrail, three folders, one account in each, and the shop's logs going to the archive." />
+
+Brightpost already has an <Term id="organization">organisation</Term>, a tree that holds all its accounts. A guardrail on the root allows 2 regions and no public buckets. Three folders hang below it: non-production, production and security. Each holds one account: test, shop and audit. Staff sign in once, with a password and a second proof. The shop account sends its audit trail, the record of every call, to the log archive in the audit account.
+
+It works because one team built it and the same team uses it. But the shape lives in people's heads: "new accounts go under a folder", "switch on logging". Nothing written down says how an account joins the estate. Keeping each mistake inside one wall is an old security idea; the [Security overview](/system-design/fundamentals/security) covers it.
+
+<PremiumBreak />
+
+### Step 2: A second team, a hand-made account
+
+<AnimatedDiagram spec="animated/cloud/landing-zone" step={2} minWidth={620} caption="The failure: the wholesale account sits outside the tree, its bucket is public, and no logs reach the archive." />
+
+Brightpost had no way to request an account, so the wholesale team made one the way any new customer does. An account made through the public sign-up page belongs to no organisation. Rules hung on Brightpost's root never reach it, and nobody had set up logging, sign-in or alerts inside it.
+
+<Callout tone="red" title="What breaks">
+  For 41 days the wholesale bucket hands its files to anyone who asks. The guardrail that forbids public buckets exists, but it hangs on a tree this account is not part of. The account sends no audit trail to the archive and never recorded reads of its files. So when the researcher writes, Brightpost cannot tell whether one stranger or a thousand downloaded the orders.
+</Callout>
+
+Nothing here was a clever attack. Someone with a good reason made a bucket public, in an account no rule could see. Missing: a place in the tree, logs sent to the archive, and a way to make accounts that always does both.
+
+### Step 3: Every account inside the tree
+
+<AnimatedDiagram spec="animated/cloud/landing-zone" step={3} minWidth={620} caption="The wholesale account joins the production folder. The root guardrail now reaches it, and the public download is refused." />
+
+First, Brightpost brings the wholesale account into the organisation, under the production folder. From that minute the root guardrail applies. The bucket's public setting is switched off, and the next anonymous download fails. Price lists move to a page that shop owners reach after they sign in.
+
+The tree follows two rules, in this order:
+
+1. **Separate by environment first.** Production and non-production sit in different folders. A test mistake must never reach live data, so this wall matters most.
+2. **Then separate by team.** Each team gets an account in each environment: shop live, shop test, wholesale live, wholesale test. A team's mistake and its bill stay in its own account.
+
+A third team adds two accounts to existing folders. The shape does not change.
+
+### Step 4: One door for people
+
+Staff already sign in through single sign-on with MFA, as [Identity and Access](/cloud/fundamentals/identity-and-access) describes. The landing zone decides what each sign-in reaches. People get a role in an account through a group, and the groups follow the tree.
+
+<Compare
+  columns={["Group", "Test accounts", "Live accounts", "Audit account"]}
+  rows={[
+    ["Shop developers", "Change, shop test only", "Read only, shop live", "No access"],
+    ["Wholesale developers", "Change, wholesale test only", "Read only, wholesale live", "No access"],
+    ["Platform admins (2 people)", "Admin", "Admin", "Read only"],
+    ["Security reviewer", "Read only", "Read only", "Read only"],
+  ]}
+  caption="Brightpost's groups and what they reach. Nobody can change the audit account through a group."
+/>
+
+The wholesale account's shared owner password is gone; its owner login gets MFA and is kept for emergencies. Removing a leaver from the company directory closes every account at once.
+
+### Step 5: A log archive nobody can edit, and one security view
+
+<AnimatedDiagram spec="animated/cloud/landing-zone" step={4} minWidth={620} caption="The wholesale account's audit trail flows to the archive, and a security tooling account collects findings from every account." />
+
+Every account in the tree now sends its audit trail to the log archive. The archive is **append only**: records can be added, but not changed or removed until a retention period ends. Brightpost keeps them for 1 year. Application teams have no role in the audit account. Someone who breaks into the wholesale account cannot erase the evidence, because their rights stop at that account's wall. Buckets with customer data now also record every read.
+
+The second shared account holds **security tooling**: services that scan every account for risky settings. Each problem becomes a **finding**, a short report such as "this bucket is readable by anyone". The tooling reads every account and changes none. Brightpost's scan runs every hour, so a public bucket becomes a finding the same day, not an email on day 41. More on [Threat Detection, Audit Logs and Security Posture](/cloud/resilience/threat-detection).
+
+### Step 6: A shared network hub
+
+<AnimatedDiagram spec="animated/cloud/landing-zone" step={5} minWidth={620} caption="The wholesale account's network attaches to one hub, and the hub holds the single private link to the printing partner." />
+
+Each account has its own private network. Without a plan, every account that needs the printing partner builds its own link. Every pair of accounts that must talk needs its own connection too: 6 pairs for 4 accounts, 45 pairs for 10.
+
+A <Term id="transit-hub">transit hub</Term> fixes this. Each network attaches once to the hub, and the hub holds the one link to the partner. Brightpost keeps the hub in its own network account, run by the platform admins. Every account also gets an address range from one plan, because two networks with the same addresses can never be joined. The details are on [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks).
+
+### Step 7: Guardrails and a baseline from day one
+
+A guardrail on the root reaches every account below it, including accounts made next year. So a landing zone sets its guardrails before the first team arrives. They come in two kinds:
+
+- **Preventive** guardrails refuse a request. No public buckets, 2 regions only, and nobody may switch off the audit trail.
+- **Detective** guardrails let a request through and raise a finding. A server without an `owner` tag, or a database with no backup plan.
+
+The guardrails are one part of the baseline. This is the whole list every new Brightpost account gets:
+
+<Compare
+  columns={["Every new account gets", "Brightpost's choice", "Stops or tells?"]}
+  rows={[
+    ["A place in the tree", "The production or non-production folder", "Stops: folder rules apply at once"],
+    ["Guardrails", "Inherited from the root and the folder", "Stops"],
+    ["Audit trail", "Every call sent to the log archive", "Tells"],
+    ["Security tooling", "Enrolled, findings go to the security account", "Tells"],
+    ["Sign-in", "Team groups get their roles; owner login locked away", "Stops"],
+    ["Network", "A range from the plan, attached to the hub", "Neither: it connects"],
+    ["Cost", "Tags env, team, owner; budget alerts at 50%, 80%, 100%", "Tells"],
+  ]}
+  caption="Brightpost's baseline. A new account is not ready until every row is in place."
+/>
+
+### Step 8: Account vending
+
+<AnimatedDiagram spec="animated/cloud/landing-zone" step={6} minWidth={620} caption="Account vending creates the wholesale test account in the non-production folder, with the whole baseline on its first day." />
+
+**Account vending** is a process that creates accounts the same way every time. Like a vending machine, a request goes in and an account with the whole baseline comes out. The request names a team, an environment and an owner. A pipeline creates the account in the right folder, then applies every row of the baseline.
+
+In May the wholesale team asked for a test account. Vending made it in about 20 minutes, and nobody had to remember a step. The pipeline is written as <Term id="infrastructure-as-code">infrastructure as code</Term>, so a baseline change is reviewed like any code change. Brightpost's rule is now short: an account that did not come from vending is brought in or closed.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: folders by environment, shared accounts, guardrails from the top, and one way to make accounts. Each provider publishes a blueprint for it.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Blueprint:** AWS Control Tower, which sets up a landing zone on top of AWS Organizations and keeps checking it.
+    - **Tree and shared accounts:** organizational units (OUs) per environment. A Security OU holds two shared accounts: Log Archive for logs, and Audit for security tooling. Brightpost's audit account is the one AWS calls Log Archive. A network account usually runs AWS Transit Gateway as the hub.
+    - **Sign-in:** IAM Identity Center gives each group a permission set in the accounts it needs.
+    - **Guardrails:** Control Tower calls them controls. Preventive ones are built on service control policies (SCPs), detective ones on AWS Config rules.
+    - **Vending:** Account Factory creates accounts from a template. Account Factory for Terraform runs it from a pipeline.
+
+    **The difference that changes a design.** Control Tower manages the shared accounts, controls and logging it sets up. A change made outside it is reported as drift and must be repaired. So treat its pieces as fixed, and add your own guardrails beside them, in code. SCPs do not apply to the management account, so run no workloads there.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Blueprint:** Google Cloud Setup, a guided console flow that builds a foundation and can export it as Terraform. Google also publishes a foundation blueprint in Terraform.
+    - **Tree and shared projects:** the organization, folders per environment, then projects. Shared projects hold the logs, the security view and the network.
+    - **Sign-in:** groups in Cloud Identity or Google Workspace, granted roles on folders and projects.
+    - **Guardrails:** organization policies on the organization or a folder, inherited below. An organization-level log sink gathers every project's audit logs. Security Command Center reports findings for the whole organization.
+    - **Vending:** a project factory, usually a Terraform module run from a pipeline. No single managed service does it.
+
+    **The difference that changes a design.** A network can be shared, not only connected. With Shared VPC, one host project owns the network, and application projects place their servers inside it. The network team controls routes and firewall rules in one place, while each team owns its project. So the hub is often one host project per environment.
+  </Tab>
+  <Tab label="Azure">
+    - **Blueprint:** Azure landing zones, a reference design with accelerators that deploy it from the portal, Bicep or Terraform.
+    - **Tree and shared subscriptions:** management groups under the tenant root group. A platform group holds subscriptions for identity, management (the logs) and connectivity (the hub). A landing zones group holds the application subscriptions.
+    - **Sign-in:** Microsoft Entra ID, one tenant for the whole estate, with roles assigned to groups.
+    - **Guardrails:** Azure Policy at management groups. Besides deny and audit, some policies deploy a missing setting, such as sending logs to the central workspace. Microsoft Defender for Cloud reports findings.
+    - **Vending:** subscription vending, a Bicep or Terraform module run from a pipeline that places each subscription in its group.
+
+    **The difference that changes a design.** The management group a subscription sits in decides its baseline. Because some policies deploy missing settings, moving a subscription into a group also switches on its logging. So the groups follow kinds of workload, such as internet-facing or internal, not the org chart.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/landing-zone" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/landing-zone" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="How much landing zone do you need?"
+  tree={{
+    q: "Will this cloud hold real customer data or take payments?",
+    no: "One account is enough for learning or a short experiment. Set a budget alert, and delete it when you finish.",
+    yes: {
+      q: "Does more than one team build here, or will one join within a year?",
+      no: {
+        answer: "A small tree: production and non-production accounts, an audit account for logs, guardrails at the root. Write it as code so a second team fits in later.",
+        href: "/cloud/fundamentals/accounts-and-governance",
+      },
+      yes: {
+        q: "Do auditors, regulators or a payment provider ask for evidence?",
+        yes: "A full landing zone from a provider blueprint, with retention rules that match what auditors ask for. Plan folders, address ranges and log retention before the first team arrives.",
+        no: "A landing zone from a provider blueprint: folders by environment, an account per team per environment, shared log, security and network accounts, guardrails at the root, and vending.",
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="In March the wholesale account is outside Brightpost's organisation. Its admin makes a bucket public. The root guardrail forbids public buckets. What happens?" hint="Which accounts does a guardrail reach?">
+    The bucket becomes public. A guardrail reaches only the accounts below it in the tree, and this account is not in the tree. Joining the production folder in step 3 is what brings it under the rule.
+  </QuizItem>
+  <QuizItem question="An engineer with admin rights in the wholesale live account tries to delete last month's records from the log archive. What stops them?" hint="Where does the archive live?">
+    The account wall. The archive lives in the audit account, and the engineer's rights end at the wholesale account. The archive is also append only, so records stay until the 1-year retention period ends.
+  </QuizItem>
+  <QuizItem question="Brightpost grows to 10 accounts that all need to talk to each other. How many connections does it need without a hub, and how many with one?">
+    Without a hub, one per pair: 10 × 9 ÷ 2 = 45. With a hub, one per account: 10. Each new account then adds one connection instead of ten.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Accounts made by hand", "A tree built by hand", "Landing zone with vending"]}
+  rows={[
+    ["First setup", "Minutes", "About a day", "About a week for Brightpost"],
+    ["Each new account", "Minutes, with no rules", "Half a day, from memory", "About 20 minutes, whole baseline"],
+    ["Guardrails reach new accounts", false, "If someone remembers", true],
+    ["Logs in the archive from day one", false, "If someone remembers", true],
+    ["Network ranges never overlap", false, "If someone keeps a list", true],
+    ["Fits", "One person's experiment", "One team, a few accounts", "Two or more teams, or customer data"],
+  ]}
+  caption="Brightpost's numbers. Setup times are what a small team should expect the first time."
+/>
+
+A landing zone costs the most on its first day and the least on every day after. A hand-made account is cheapest only until something goes wrong inside it.
+
+## Common pitfalls
+
+- **Building the landing zone after the second team arrives.** Accounts made in the meantime start without rules, and someone must later find everything they did. Set up the shape while there is one team.
+- **Editing the blueprint's own pieces by hand.** Blueprints manage the guardrails and shared accounts they create, so a manual change shows up as drift or is undone. Add your own rules beside theirs, in code.
+- **Overlapping address ranges.** Two networks with the same addresses cannot join one hub. Hand out ranges from one plan, at vending time.
+- **Logs kept in the account they describe.** Whoever controls that account can erase the evidence. Send audit trails to a separate account that application teams cannot change.
+- **A side door for "urgent" accounts.** One hand-made account undoes the rest. Make vending fast enough that nobody needs a side door.
+
+## How to say it in an interview
+
+"A landing zone is the shape of a cloud estate, set up once before teams arrive. I separate by environment first, then by team: production and non-production folders, and an account per team per environment. Shared accounts hold the log archive, security tooling and the network hub, and application teams cannot change them. Guardrails sit on the root and the folders, so every account, including next year's, starts under them. People sign in once and get roles through groups. New accounts come only from a vending pipeline that applies the same baseline every time. I start from the provider's blueprint and keep my own additions in code."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a landing zone, in plain words?" level="Junior" category="Cloud">
+    **Short answer.** It is the standard layout of a company's cloud accounts, set up before teams start building. It says where accounts go, what they share, such as logs, security tools and the network, and which rules every account starts with.
+
+    **Why.** Without one, each team sets up its own account its own way. Brightpost's wholesale team made an account through the public sign-up page. It sat outside the organisation, so the guardrail against public buckets never reached it, and a bucket of trade orders stayed public for 41 days. With a landing zone, every account is made in the tree, with logging and guardrails from its first minute.
+
+    <AnimatedDiagram spec="animated/cloud/landing-zone" step={6} highlight={["org", "nonprod", "prod", "security", "archive", "tooling", "hub", "vending"]} caption="The shape: folders by environment, shared accounts for logs, security and the network, and vending for new accounts." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does every new account get on its first day?
+    - Does a two-person startup need one?
+
+    **Watch out for.** Describing a landing zone as one product you buy. Each provider offers a blueprint, but the landing zone is the layout and its rules, whatever builds it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why keep audit logs in a separate account that application teams cannot change?" level="Mid" category="Cloud">
+    **Short answer.** So the evidence survives the incident it records. A person or attacker with full control of an application account cannot reach across the account wall to delete or edit the logs.
+
+    **Why.** Logs kept inside the account they describe share its blast radius. A thief with the wholesale account's admin rights could switch off logging and delete what was written. In Brightpost's landing zone, every account sends its audit trail to the audit account. Application teams hold no role there, and the archive is append only for 1 year.
+
+    <AnimatedDiagram spec="animated/cloud/landing-zone" step={4} path="wholesale>archive" caption="The wholesale account writes its audit trail into an account its own admins cannot change." />
+
+    **Follow-ups the interviewer may ask.**
+    - Who may read the archive, and how is that access itself logged?
+    - Which logs are off by default and must be switched on?
+
+    **Watch out for.** Saying "we encrypt the logs" as the answer. Encryption hides the content; it does not stop an admin of the same account from deleting it.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Brightpost now has three teams building one product. Sketch the account layout." level="Mid" category="Cloud">
+    **Short answer.** Folders by environment under one root, then one account per team in each environment. Next to them, shared accounts for the log archive, security tooling and the network hub, and guardrails on the root and on each folder.
+
+    **Why.** Environment first, because the most damaging mistakes cross from test into live. Team second, so one team's mistake and its bill stay in its own account. Three teams means six workload accounts, three live and three test, plus the three shared ones. Vending creates each of them with logging, roles, a network range and a budget.
+
+    <AnimatedDiagram spec="animated/cloud/landing-zone" step={6} highlight={["org", "nonprod", "prod", "test", "shop", "wholesale", "wtest"]} caption="Two teams so far: each has a live account under production and a test account under non-production." />
+
+    **Follow-ups the interviewer may ask.**
+    - Where do shared services, such as a build pipeline, live?
+    - Would you add a sandbox folder, and with which guardrails?
+
+    **Watch out for.** One account per team holding both test and live. That puts the most important wall in the wrong place.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What goes wrong if guardrails are set inside each account instead of on the tree?" level="Mid" category="Cloud">
+    **Short answer.** Every new account starts without them, and any admin of an account can remove them. A rule on the tree reaches every account below it, including future ones, and no account admin can switch it off.
+
+    **Why.** A rule inside an account depends on that account's admins, and on whoever creates the next account remembering it. Brightpost's wholesale account was the extreme case: it was not in the tree at all, and its bucket stayed public for 41 days. Once the account joined the production folder, the same request was refused without anyone touching the account.
+
+    <AnimatedDiagram spec="animated/cloud/landing-zone" step={2} highlight={["guardrail", "org", "wholesale", "bucket"]} caption="The guardrail hangs on the root, and the hand-made account is not under it." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you test a new guardrail without breaking production?
+    - Which rules should be detective rather than preventive?
+
+    **Watch out for.** Assuming that an account is under the guardrails because it belongs to the same company. Only its place in the tree decides that.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design an account vending process: what happens between 'we need an account' and the first deploy?" level="Senior" category="Cloud">
+    **Short answer.** A short request goes into a pipeline that applies the whole baseline in code. It creates the account, places it in the right folder, connects logging, security tooling, sign-in, network and budget, and hands the team a ready account.
+
+    **Why.** The request names the team, the environment and an owner. The pipeline creates the account under the matching folder, so guardrails apply from the first minute. It sends the audit trail to the archive, enrols the account in security tooling and gives the team's groups their roles. It assigns a non-overlapping address range, attaches it to the hub, and sets tags and budget alerts. Brightpost's wholesale test account took about 20 minutes. Make vending faster than any side door, or people will use the side door.
+
+    <AnimatedDiagram spec="animated/cloud/landing-zone" step={6} path="vending>wtest>nonprod>org" caption="Vending creates the account directly under its folder, so the root's rules apply from the first minute." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do existing accounts get a baseline change made after they were vended?
+    - Who approves a request for a production account?
+
+    **Watch out for.** A vending process that only creates the account and leaves the rest to a checklist. The checklist is the step people skip under pressure.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance)
+- [Identity and Access](/cloud/fundamentals/identity-and-access)
+- [Infrastructure as Code](/cloud/fundamentals/infrastructure-as-code)
+- [Peering, Hub-and-Spoke & Transit](/cloud/networking/connecting-networks)
+- [Threat Detection, Audit Logs and Security Posture](/cloud/resilience/threat-detection)
+- [Observability on the Cloud](/cloud/operations/observability-on-the-cloud)
+- [Compliance, Data Residency and Sovereignty](/cloud/resilience/compliance-and-residency)
+- [Identity & Security on AWS](/cloud/aws/security)
+- [Identity & Security on Google Cloud](/cloud/gcp/security)
+- [Identity & Security on Azure](/cloud/azure/security)
+- [Security overview](/system-design/fundamentals/security)
+
+## Further reading
+
+- [AWS Control Tower User Guide](https://docs.aws.amazon.com/controltower/latest/userguide/what-is-control-tower.html): landing zone, controls and Account Factory.
+- [Organizing your AWS environment using multiple accounts](https://docs.aws.amazon.com/whitepapers/latest/organizing-your-aws-environment/organizing-your-aws-environment.html): OU and account patterns.
+- [Google Cloud landing zone design](https://cloud.google.com/architecture/landing-zones): hierarchy, identity, network and security decisions.
+- [Azure landing zones](https://learn.microsoft.com/azure/cloud-adoption-framework/ready/landing-zone/): management groups, platform and application landing zones.

@@ -1,11 +1,271 @@
 ---
 title: "Cloud in 10 Minutes"
-description: "Follow one small online shop from a single rented server to two regions, and meet the ten cloud words every other page uses."
-status: outline
+description: "Follow one small shop from a single rented server to a design ready for a second region, and meet each big cloud idea once, with a link to its page."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the whole Cloud section in one story. Brightpost, a small online shop, starts on one rented machine and grows step by step until it serves two continents. Each step names one idea and the hub that teaches it.
+<KeyIdea>
+  A cloud rents you computers and ready-made services by the minute, so a system can start as one machine and add each piece when it needs it.
+</KeyIdea>
 
-**Related reading on this site:** [Cloud Basics](/cloud/start-here/cloud-basics) · [Service Equivalents](/cloud/start-here/service-equivalents) · [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+## The story
+
+Brightpost is a small online shop that sells posters and greeting cards, about 400 orders a day. Asha, its first developer, starts it on one rented server, a computer in another company's building that runs the shop and its database. It can serve 200 shoppers at once, and an ordinary day peaks at about 40. Then comes the first big sale. At 9 a.m., 2,000 shoppers arrive at once. Pages stop loading, and the shop stays broken until noon. Shoppers wanted to place about 4,000 orders that day. About 1,200 of them never happened.
+
+This page follows Brightpost for two years. Each step adds one piece, names one cloud idea and links to the page that teaches it.
+
+## How it works
+
+Three words first. A **provider** is a company that rents out computers from its own buildings, called **data centres**. A **virtual machine (VM)** is a slice of one big computer that behaves like a whole computer. On this page a **server** means one VM.
+
+### Step 1: One rented server
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" step={1} minWidth={620} caption="Brightpost's first setup: every shopper reaches one rented server that runs the shop and its database." />
+
+Brightpost owns no hardware. It rents one VM and reaches it over the internet. The provider buys the machines, powers them and replaces broken parts. Brightpost pays for the minutes its VM runs.
+
+Requests go to the provider's **API**, a door that programs use to ask for things such as "start a server". One more server arrives in minutes, not weeks. [What the Cloud Is](/cloud/fundamentals/what-is-cloud) explains why that matters.
+
+<PremiumBreak />
+
+### Step 2: Sale day: ten times the shoppers
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" step={2} minWidth={620} caption="The failure: 2,000 shoppers arrive at once at a server built for 200, and about 1,200 orders are lost." />
+
+**Capacity** is how much work a system can do at once. Brightpost sized its server for an ordinary day.
+
+<Callout tone="red" title="What breaks">
+  At 9 a.m. 2,000 shoppers ask one server for pages. It works on about 200 at a time, so the rest wait. After 30 seconds their browsers give up. Asha hears about it at 9:40, from angry emails. By noon about 1,200 of the day's 4,000 orders are lost.
+</Callout>
+
+The server was a **single point of failure**: one part whose trouble stops everything. Each later step removes one. [Availability, SLAs and What Fails Together](/cloud/resilience/availability-math) shows how to count them.
+
+### Step 3: Copies in three zones behind a load balancer
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" step={3} minWidth={620} caption="A load balancer shares shoppers between copies of the server in three zones. A scaling rule runs between 1 and 10 copies." />
+
+A <Term id="region">region</Term> is a group of a provider's data centres in one area; Brightpost uses one near London. Inside it are <Term id="availability-zone">zones</Term>: separate buildings with their own power, kilometres apart. The servers sit in a private network only Brightpost can reach, a <Term id="vpc">VPC</Term>.
+
+A <Term id="load-balancer">load balancer</Term> is the one address shoppers use. It shares them between server copies in three zones and drops a dead copy in about 30 seconds. An <Term id="autoscaling">autoscaling</Term> rule keeps processor use near 60%: 2 servers on most days, up to 10 on a sale day. For now every copy still uses the database on the first server. See [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge) and [Autoscaling](/cloud/compute/autoscaling).
+
+### Step 4: A managed database with a standby
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" step={4} minWidth={620} caption="The orders database leaves the server. The provider runs it, with a standby copy in zone B." />
+
+The database was the next single point of failure. Now it is **managed**: the provider installs, patches and backs it up. Brightpost keeps the data, the settings and the choice of who may connect.
+
+A **standby** is a copy in another zone that receives every write. If the main copy fails, the standby takes over in about 2 minutes, a switch called <Term id="failover">failover</Term>. [Service Models](/cloud/fundamentals/service-models) shows how much work you can hand over. [Shared Responsibility](/cloud/fundamentals/shared-responsibility) shows what always stays yours.
+
+### Step 5: Photos: a bucket, a function and an edge cache
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" step={5} minWidth={620} caption="Photos live in a bucket, a function makes thumbnails of each new one, and an edge cache keeps copies near far-away shoppers." />
+
+About 300 new product photos a week go to <Term id="object-storage">object storage</Term>. A **bucket** holds files of any size and gives each one an address.
+
+Each new photo starts a **function**, a small piece of code the provider runs only when something happens. It makes thumbnails in about 2 seconds, and Brightpost pays for those seconds alone. Code that runs with no server for you to look after is <Term id="serverless">serverless</Term>.
+
+A product page takes about 3 seconds in Sydney. A <Term id="cdn">CDN</Term> keeps photo copies in buildings near far-away shoppers, so only the first view crosses the world. See [Object Storage](/cloud/data/object-storage) and [CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf).
+
+### Step 6: Accounts under one organisation
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" step={6} minWidth={620} caption="One organisation holds the shop, test and audit accounts. Staff sign in once, and every call is copied to the audit account." />
+
+An **account** is a walled container for cloud resources; some clouds say project or subscription. Brightpost has three: shop, test and audit. A test script cannot reach the live database. The <Term id="organization">organisation</Term> is the tree above every account, and a rule set at its top binds them all.
+
+Every call is checked: who is calling, and may they do this? That check is <Term id="iam">IAM</Term>, identity and access management. Staff sign in once, with a password and a second proof (<Term id="mfa">MFA</Term>). Every call is copied to the audit account, out of reach of the shop's admins. Read [Identity and Access](/cloud/fundamentals/identity-and-access) and [Accounts, Projects and Governance](/cloud/fundamentals/accounts-and-governance).
+
+### Step 7: A budget that watches the bill
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" step={7} minWidth={620} caption="The organisation's spend, split by tag, feeds budget alerts at 50%, 80% and 100%." />
+
+Paying for use has a catch: a server nobody switches off keeps costing. A forgotten 4-server test copy once ran for 30 days and doubled Brightpost's bill.
+
+Now every resource carries <Term id="tag">tags</Term> such as `env`, `team` and `owner`, so the bill splits by them. A budget alerts at 50%, 80% and 100% of the month's plan. The whole setup lives in template files that a tool applies, called <Term id="infrastructure-as-code">infrastructure as code</Term>, so no resource is born untagged. See [How Cloud Pricing Works](/cloud/fundamentals/pricing-basics).
+
+### Step 8: A second region, previewed
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" step={8} minWidth={620} caption="Preview only: a second region could take traffic later. Brightpost has not built it." />
+
+Three zones survive one building going dark, but not the loss of a whole region. A second region would hold another copy of the shop and its data. It costs a second set of most pieces and raises hard questions. Which region takes the writes? How many recent orders may a switch lose? At 400 orders a day Brightpost waits. [Multi-Region, Global Routing and Data Replication](/cloud/resilience/multi-region) shows how to decide.
+
+## On AWS, Google Cloud and Azure
+
+The journey is the same on all three clouds. The names change, and so does the shape of the private network.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Servers:** EC2 instances in an Auto Scaling group across Availability Zones.
+    - **Front door:** an Application Load Balancer.
+    - **Database:** Amazon RDS for PostgreSQL with a Multi-AZ standby.
+    - **Photos:** Amazon S3, AWS Lambda and Amazon CloudFront.
+    - **Accounts:** AWS Organizations, IAM Identity Center, a CloudTrail organization trail, AWS Budgets.
+
+    **The difference that changes a design.** A VPC belongs to one region, and each subnet sits in one zone. Three zones mean three subnets, all listed in the Auto Scaling group.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Servers:** Compute Engine VMs in a regional managed instance group with an autoscaler.
+    - **Front door:** Cloud Load Balancing; the external Application Load Balancer can be global.
+    - **Database:** Cloud SQL for PostgreSQL with high availability.
+    - **Photos:** Cloud Storage, Cloud Run functions and Cloud CDN.
+    - **Accounts:** an organization with folders and projects, Cloud Identity, an aggregated log sink, Cloud Billing budgets.
+
+    **The difference that changes a design.** A VPC network is global, and each subnet spans every zone of its region. One subnet covers Brightpost's three zones. A second region is one more subnet in the same network.
+  </Tab>
+  <Tab label="Azure">
+    - **Servers:** Azure virtual machines in a Virtual Machine Scale Set across availability zones.
+    - **Front door:** Application Gateway in the region, or Azure Front Door at the edge.
+    - **Database:** Azure Database for PostgreSQL flexible server with zone-redundant high availability.
+    - **Photos:** Blob Storage, Azure Functions and Azure Front Door.
+    - **Accounts:** management groups over subscriptions, Microsoft Entra ID, the activity log exported to the audit subscription, Cost Management budgets.
+
+    **The difference that changes a design.** A virtual network belongs to one region, and its subnets span every zone in it. You pick the zone on each resource, not on the subnet.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/brightpost-grows" stepper minWidth={620} caption="The whole journey in eight steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/brightpost-grows" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Where should I read next?"
+  tree={{
+    q: "Is this your first time with the cloud?",
+    yes: {
+      answer: "Read the Fundamentals hub in order, starting with What the Cloud Is.",
+      href: "/cloud/fundamentals/what-is-cloud",
+    },
+    no: {
+      q: "Are you preparing for a design interview?",
+      yes: {
+        answer: "Take the interview path: decision guides first, then failures and trade-offs.",
+        href: "/cloud/start-here/learning-paths",
+      },
+      no: {
+        q: "Do you know the design and need one provider's names for it?",
+        yes: { answer: "Keep Service Equivalents open as a lookup table.", href: "/cloud/start-here/service-equivalents" },
+        no: { answer: "Pick a reading order on Learning Paths.", href: "/cloud/start-here/learning-paths" },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="Each Brightpost server serves about 200 shoppers at once. How many servers does the 9 a.m. rush of 2,000 need, and what stops a bug from starting 50?" hint="Divide, then look at the scaling rule.">
+    10 servers. The rule's maximum is 10, so a bug or a flood of fake traffic cannot rent more.
+  </QuizItem>
+  <QuizItem question="One photo is viewed 5,000 times in a day, all in Sydney. About how many of those views reach the bucket in London?" hint="What does the edge cache keep?">
+    About one. The first view fetches the photo from London. The edge keeps a copy near Sydney for later views, until that copy expires.
+  </QuizItem>
+  <QuizItem question="A test script deletes every database it can find. Since step 6, why can it not delete the live orders database?">
+    It runs in the test account, and the live database is in the shop account. Nothing crosses the wall between accounts unless the shop account allows it.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "One server (step 1)", "Three zones (steps 3 to 7)", "Two regions (step 8)"]}
+  rows={[
+    ["Survives a sale day of 2,000 shoppers", false, true, true],
+    ["Survives one zone losing power", false, true, true],
+    ["Survives a whole region failing", false, false, true],
+    ["Copies of the orders database", "1, on the app server", "2: main and standby", "3, one far away"],
+    ["Who patches the database", "Asha", "The provider", "The provider"],
+  ]}
+  caption="Brightpost's three shapes. Each column costs more to run than the one before."
+/>
+
+Move right only when the failure it survives costs more than the extra pieces. For Brightpost today, that is the middle column.
+
+## Common pitfalls
+
+- **Building step 8 on day one.** Two regions double most of the bill and the work. Start with zones.
+- **One account for everything.** A test script then reaches the live database. Split accounts early.
+- **Copies that keep state.** Baskets held in one server's memory vanish when the rule removes it. Keep them in the database.
+- **No budget alert.** A forgotten copy runs all month. Tag everything and set alerts on day one.
+
+## How to say it in an interview
+
+"I start with the smallest design that works, then add one piece per failure I can name. Server copies run across zones behind a load balancer, with an autoscaling rule that has a maximum. The database is managed, with a standby in another zone. Static files go to object storage behind a CDN. Separate accounts, single sign-on and an audit trail come early. A second region waits for a stated recovery target."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Why did Brightpost move its database off the app server, and why to a managed service?" level="Junior" category="Cloud">
+    **Short answer.** On one server, the database is a single point of failure, and copies in other zones still depend on it. A managed database with a standby in a second zone removes that, and the provider takes over patching, backups and failover.
+
+    **Why.** In step 3, all three app servers used the database on the first server. If zone A lost power, every copy stopped taking orders. Managed, a standby in zone B takes over in about 2 minutes, and Asha stops spending hours on patches and disks.
+
+    <AnimatedDiagram spec="animated/cloud/brightpost-grows" step={4} highlight={["app", "db", "standby"]} caption="The database leaves the app server and gains a standby in another zone." />
+
+    **Follow-ups the interviewer may ask.**
+    - What stays Brightpost's job with a managed database?
+    - Why not run a copy of the database on each app server?
+
+    **Watch out for.** Saying a managed database needs no care. Access, settings and the data are still yours.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Zone A loses power at lunchtime. Which parts of Brightpost's design keep selling, and what do shoppers notice?" level="Mid" category="Cloud">
+    **Short answer.** The load balancer stops sending shoppers to zone A, and the servers in zones B and C carry on. The standby in zone B becomes the main database. Shoppers see about 2 minutes of failed checkouts.
+
+    **Why.** Health checks drop the dead server in about 30 seconds, and the scaling rule starts replacements in the zones that still work. Database failover takes about 2 minutes; a write caught in the middle fails and must be retried. Photos keep loading, because the bucket and the edge cache are not tied to one zone.
+
+    <AnimatedDiagram spec="animated/cloud/brightpost-grows" step={5} highlight={["lb", "app-b", "app-c", "standby"]} caption="What keeps selling when zone A goes dark: the front door, two zones of servers and the standby." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do the app servers find the new main database?
+    - Two zones must now carry the load of three. What must be true of the scaling rule?
+
+    **Watch out for.** Forgetting capacity. If the rule is already at its maximum, the surviving zones cannot grow.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="A product page takes 3 seconds to load in Sydney. What does an edge cache fix, and what does it not?" level="Mid" category="Cloud">
+    **Short answer.** It fixes the photos: after the first view, they come from a building near Sydney. It does not fix prices, stock or checkout, which still travel to London on every request.
+
+    **Why.** Photos are most of a page's bytes and rarely change, so an edge copy can stay for days. Baskets and prices change all the time, so they stay in the database. Australia brings about 30 orders a day, too few to justify a second region.
+
+    <AnimatedDiagram spec="animated/cloud/brightpost-grows" step={5} path="shoppers>cdn>photos" caption="Photos reach far shoppers from the edge; only the first view goes back to the bucket." />
+
+    **Follow-ups the interviewer may ask.**
+    - How long should the edge keep a photo, and what happens when one is replaced?
+    - What else on the page could the edge cache?
+
+    **Watch out for.** Saying a CDN makes the whole site fast. Anything personal or changing still goes back to the region.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="What would Brightpost need before adding a second region, and what would it cost?" level="Senior" category="Cloud">
+    **Short answer.** First a target: how long the shop may be down, and how many orders it may lose, when a region fails. Then a copy of the data far away, a way to send shoppers there and a practised switch. It costs a second set of most pieces, data copied between regions and harder operations.
+
+    **Why.** Three zones already survive a building failing, so the target decides the design. Copying data far away usually lags by seconds, so a switch can lose the last few orders. Taking writes in both regions brings conflicts. At 400 orders a day, backups in the second region and a rebuild of a few hours may be enough.
+
+    <AnimatedDiagram spec="animated/cloud/brightpost-grows" step={8} highlight={["lb", "db", "region2"]} caption="The second region needs a copy of the data and a route for shoppers before it helps." />
+
+    **Follow-ups the interviewer may ask.**
+    - Would the second region sit idle or serve shoppers, and why?
+    - How do you test the switch without losing orders?
+
+    **Watch out for.** Adding a region "for availability" with no target. Then nobody can say if the cost is worth it.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [What the Cloud Is](/cloud/fundamentals/what-is-cloud)
+- [Regions, Zones and the Edge](/cloud/fundamentals/regions-zones-edge)
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [High Availability Inside One Region](/cloud/resilience/ha-patterns)
+- [Learning Paths](/cloud/start-here/learning-paths)
+- [Service Equivalents](/cloud/start-here/service-equivalents)
+- [Scaling from one server to millions of users](/system-design/fundamentals/scaling-journey)
+- [Load balancing pattern](/system-design/patterns/load-balancing)
+
+## Further reading
+
+- [NIST SP 800-145](https://csrc.nist.gov/pubs/sp/800/145/final): the short standard definition of cloud computing.
+- [AWS Regions and Availability Zones](https://aws.amazon.com/about-aws/global-infrastructure/regions_az/): how AWS lays out its regions.
+- [Google Cloud geography and regions](https://cloud.google.com/docs/geography-and-regions): regions, zones and resource scope.
+- [What are Azure availability zones?](https://learn.microsoft.com/azure/reliability/availability-zones-overview): zones and zone-redundant services.
