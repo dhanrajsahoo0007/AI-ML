@@ -53,7 +53,7 @@ which spawns a Web Worker per run and compares results with `runner/compare.ts`.
   `apps/web/src/app/dsa/problems/[slug]/judge/route.ts` (data from `judge.ts`: arguments and expected values, no names)
   and runs them in the browser, in the same worker as "Run tests"; only each case's outcome is shown. They never
   appear in a page, its RSC payload, the problem index or a client bundle. `readHiddenTestsForJudge()` has one caller
-  (`judge.ts`), `judge.ts` has one importer (the route), and `readHiddenTestsForValidation()` stays for content-check
+  (`judge.ts`), `judge.ts` is re-exported by the feature index and called only by the route, and `readHiddenTestsForValidation()` stays for content-check
   and the tests. `leak.test.ts` and `judge.test.ts` enforce all of this; the E2E "hidden tests are never served" test
   covers the pages. A server-side judge (Stage C) is still possible later and would use the same files.
 - **Premium editorials are never compiled for public pages**: `mdx.tsx` splits at `<PremiumBreak/>` and the page

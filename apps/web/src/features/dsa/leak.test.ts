@@ -195,9 +195,18 @@ describe("the judge route is the only way hidden cases are served", () => {
   const sources = walk(srcDir, (f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f));
   const text = (f: string) => fs.readFileSync(f, "utf8");
 
-  it("only the judge route imports the judge module", () => {
+  it("only the feature index imports the judge module, and only the judge route calls it", () => {
     const importers = sources.filter((f) => /from "(@\/features\/dsa|\.)\/judge"/.test(text(f))).map(rel);
-    expect(importers).toEqual(["src/app/dsa/problems/[slug]/judge/route.ts"]);
+    expect(importers).toEqual(["src/features/dsa/index.ts"]);
+    const callers = sources
+      .filter((f) => /\bjudge(Cases|Params)\b/.test(text(f)))
+      .map(rel)
+      .sort();
+    expect(callers).toEqual([
+      "src/app/dsa/problems/[slug]/judge/route.ts",
+      "src/features/dsa/index.ts",
+      "src/features/dsa/judge.ts",
+    ]);
   });
 
   it("only the judge module uses the judge's reader", () => {

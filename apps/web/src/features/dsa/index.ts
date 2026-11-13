@@ -33,3 +33,5 @@ export {
   topicSeo,
 } from "./seo";
 export { TOPICS_DIR } from "./source";
+// Only the judge route may call these (leak.test.ts): they read hidden test cases.
+export { judgeCases, judgeParams } from "./judge";

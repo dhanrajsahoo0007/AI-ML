@@ -1,4 +1,4 @@
-import { judgeCases, judgeParams } from "@/features/dsa/judge";
+import { judgeCases, judgeParams } from "@/features/dsa";
 
 // The hidden cases "Submit" runs in the browser (features/dsa/judge.ts). Prerendered: one static JSON file per
 // problem, nothing computed per request and no database. Not a page, so it is kept out of search indexes.

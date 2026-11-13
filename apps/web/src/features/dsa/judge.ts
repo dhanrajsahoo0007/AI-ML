@@ -9,7 +9,7 @@ import { loadDsaItems, readHiddenTestsForJudge, validProblems, withoutDrafts } f
 // else. They never appear in a page, its RSC payload or a client bundle (leak.test.ts), and their names stay
 // behind: the route sends arguments and expected values only.
 //
-// The route's only caller is the route handler; nothing else may import this module (leak.test.ts checks).
+// Re-exported by the feature index for the judge route, which is its only caller (leak.test.ts checks).
 
 const built = () => sectionOfKind("problems").state !== "off";
 
