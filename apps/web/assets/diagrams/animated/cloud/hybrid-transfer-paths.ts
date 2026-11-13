@@ -211,7 +211,7 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: everything the office sends shares one line.
-    { from: "staff", to: "line", label: "web, mail" },
+    { from: "staff", to: "line", label: "web, mail", labelAt: 0.55 },
     { from: "line", to: "helpdesk", label: "help desk", until: 1 },
     { from: "nas", to: "line", label: "copy script", packet: true, until: 2 },
     { from: "line", to: "bucket", label: "one stream, no cap", packet: true, delay: 1, until: 1 },
@@ -244,7 +244,7 @@ const spec: DiagramSpec = {
     // Step 5: staff open files on the gateway; it syncs changes over the same line.
     { from: "staff", to: "gateway", label: "opens files", step: 5 },
     { from: "gateway", to: "line", label: "syncs changes", flow: true, labelAt: 0.3, step: 5 },
-    { from: "line", to: "cloudshare", label: "kept in step", flow: true, labelAt: 0.62, step: 5 },
+    { from: "line", to: "cloudshare", label: "kept in step", flow: true, labelAt: 0.8, step: 5 },
 
     // Step 6: the photographer uploads by SFTP; each file lands as an object.
     { from: "photographer", to: "sftp", label: "SFTP upload", packet: true, labelAt: 0.3, step: 6 },
