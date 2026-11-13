@@ -17,24 +17,30 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // with `until`, because from step 3 every shopper goes through the load balancer.
 //
 // Layout: a left column for the outside world, the home region to its right, the organisation along the bottom.
-//   Left, "Internet" (x 8-180): lost orders 92,95 | shoppers 80,205 | edge cache 92,565.
+//   Left, "Internet" (x 8-180): shoppers 62,260 (far left, so the step 1 and 2 edges have room for a label) |
+//   edge cache 92,565.
+//   Lost orders 370,85 sit above the region, outside every zone, so the failure edge from the first server rises
+//   right of the zone A label and right of the region tab (title kept short, "London region", so the tab ends at
+//   x 325).
 //   Home region (x 188-782, y 150-650): load balancer 480,205 above three zone bands drawn side by side (subnet
-//   kind, inline label, no tab): zone A x 196 (app 285,315 | db 280,430), zone B x 390 (app-b 483,315 |
+//   kind, inline label, no tab): zone A x 196 (app 285,315 | db 282,430), zone B x 390 (app-b 483,315 |
 //   standby 492,430), zone C x 584 (app-c 677,315; a shorter band, so the scaling rule 677,440 sits below it, in
 //   the region but in no zone). Photos bucket 330,565 and resize function 677,565 sit below the bands, regional.
 //   Second region (preview), top right: region2 671,80.
 //   Organisation (y 690-905): identity 105,755 | org 400,755 | audit 676,755 | budget 400,860.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left ~480 units. Steps 1 and 2 (the free
-// preview and the failure) use only the shoppers, the lost orders and the first server, all left of x 375.
+// preview and the failure) use only the shoppers, the first server and the lost orders, all left of x 480.
 // The canvas stays under 800 wide so labels are readable in the 660 px article column; it grows taller instead.
 //
-// Edge routes: shoppers and the load balancer share a row (y 205), so their edge is straight and crosses the region
-// outline below its tab. The edge to zone C runs along y 205 and turns down at x 677, so it enters zone C right of
-// the band's inline label. Long labels sit on vertical edges (photos, adds or removes, spend by tag).
-// Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Nodes are sized for
-// the longest name the Services toggle shows: "Cloud Load Balancing" (lb, w 196), "Cloud Run functions" (resize,
-// w 190), "Management groups" (org, w 180), "Virtual Machines" (app servers, w 170), "Azure Postgres" (w 156).
+// Edge routes: the shoppers sit a little below the load balancer's row, so the edge to the first server enters its
+// left side under the "ZONE A" label, and the edge to the load balancer crosses the region outline below its tab.
+// The edge to zone C runs along y 205 and turns down at x 677, so it enters zone C right of the band's label.
+// Long labels sit on vertical edges (photos, adds or removes, spend by tag).
+// Text room: about 7.6 px per bold label character and 5.5 px per sub character after 52 px for the icon. Nodes
+// are sized for the longest name the Services toggle shows: "Cloud Load Balancing" (lb, w 206), "Cloud Run
+// functions" (resize, w 196), "Management groups" (org, w 196), "Virtual Machines" (app servers, w 174),
+// "Azure Postgres" (database and standby, w 162).
 const server = { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" } as const;
 const database = {
   aws: "aws-rds",
@@ -57,9 +63,9 @@ const spec: DiagramSpec = {
     { title: "A second region, previewed" },
   ],
   zones: [
-    { id: "internet", title: "Internet", tone: "neutral", x: 8, y: 40, w: 172, h: 600 },
+    { id: "internet", title: "Internet", tone: "neutral", x: 8, y: 150, w: 172, h: 490 },
     { id: "second", title: "Second region", tone: "neutral", kind: "region", x: 560, y: 25, w: 222, h: 105 },
-    { id: "region", title: "Region near London", tone: "neutral", kind: "region", x: 188, y: 150, w: 594, h: 500 },
+    { id: "region", title: "London region", tone: "neutral", kind: "region", x: 188, y: 150, w: 594, h: 500 },
     { id: "zone-a", title: "Zone A", tone: "blue", kind: "subnet", x: 196, y: 255, w: 186, h: 235 },
     { id: "zone-b", title: "Zone B", tone: "blue", kind: "subnet", x: 390, y: 255, w: 186, h: 235 },
     { id: "zone-c", title: "Zone C", tone: "blue", kind: "subnet", x: 584, y: 255, w: 186, h: 115 },
@@ -74,8 +80,8 @@ const spec: DiagramSpec = {
       icon: "users",
       tone: "neutral",
       variant: "glyph",
-      x: 80,
-      y: 205,
+      x: 62,
+      y: 260,
     },
     {
       id: "app",
@@ -85,7 +91,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 285,
       y: 315,
-      w: 170,
+      w: 174,
       cloud: server,
     },
 
@@ -97,9 +103,9 @@ const spec: DiagramSpec = {
       icon: "bag",
       tone: "red",
       step: 2,
-      x: 92,
-      y: 95,
-      w: 150,
+      x: 370,
+      y: 85,
+      w: 140,
     },
 
     // Step 3
@@ -112,7 +118,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 480,
       y: 205,
-      w: 196,
+      w: 206,
       cloud: {
         aws: "aws-elb",
         gcp: "gcp-cloud-load-balancing",
@@ -128,7 +134,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 483,
       y: 315,
-      w: 170,
+      w: 174,
       cloud: server,
     },
     {
@@ -140,7 +146,7 @@ const spec: DiagramSpec = {
       step: 3,
       x: 677,
       y: 315,
-      w: 170,
+      w: 174,
       cloud: server,
     },
     {
@@ -163,14 +169,14 @@ const spec: DiagramSpec = {
     // Step 4
     {
       id: "db",
-      label: "Orders database",
-      sub: "managed",
+      label: "Database",
+      sub: "orders, managed",
       icon: "database",
       tone: "violet",
       step: 4,
-      x: 280,
+      x: 282,
       y: 430,
-      w: 156,
+      w: 162,
       cloud: database,
     },
     {
@@ -182,7 +188,7 @@ const spec: DiagramSpec = {
       step: 4,
       x: 492,
       y: 430,
-      w: 156,
+      w: 162,
       cloud: database,
     },
 
@@ -208,7 +214,7 @@ const spec: DiagramSpec = {
       step: 5,
       x: 677,
       y: 565,
-      w: 190,
+      w: 196,
       cloud: { aws: "aws-lambda", gcp: "gcp-cloud-run-functions", azure: "azure-functions" },
     },
     {
@@ -250,7 +256,7 @@ const spec: DiagramSpec = {
       step: 6,
       x: 400,
       y: 755,
-      w: 180,
+      w: 196,
       cloud: {
         aws: "aws-organizations",
         gcp: { id: "gcp-resource-manager", label: "Organization" },
