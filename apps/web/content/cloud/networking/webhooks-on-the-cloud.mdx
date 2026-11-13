@@ -1,11 +1,321 @@
 ---
 title: "Receiving and Sending Webhooks on the Cloud"
-description: "Build a webhook receiver that never loses an event: gateway, queue and worker, with signed requests, retries and a dead-letter queue."
-status: outline
+description: "Receive webhooks with an endpoint, a queue and an event-id check; send them with an outbox, retries, backoff and signing. How each cloud builds both."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the receiver built as a gateway, then a queue, then a worker; signature secrets kept in a secret store; retries and dead-letter queues; and managed event destinations for sending webhooks.
+<KeyIdea>
+  When another system calls you to say "this happened", answer at once, do the work later, and make sure that doing it twice changes nothing.
+</KeyIdea>
 
-**Related reading on this site:** [Webhooks and callbacks](/system-design/fundamentals/webhooks) · [Idempotency](/system-design/patterns/idempotency) · [Message Queues and Pub/Sub](/system-design/patterns/message-queues)
+## The story
+
+Brightpost's customers pay through a payment provider. When a payment succeeds, the provider sends a request to Brightpost's shop: "order 58213 is paid". The shop's code then marks the order paid and sends a print job to the printing partner, all before it replies. That takes about 2 seconds. The provider waits 10 seconds for a reply. With no reply by then, it counts the delivery as failed and sends the same event again a minute later. On a sale morning the database was busy and the code took about 14 seconds. Between 9:05 and 9:40, 40 payment events got no reply in time. Each first copy had finished anyway, and each resent copy ran again. So 40 orders were marked paid twice. Staff at the printing partner spotted 38 repeated jobs, but 2 slipped through, and two customers got two parcels.
+
+Every step below repairs one part of that morning, then turns the idea round for the webhooks Brightpost sends.
+
+## How it works
+
+Three words first. A **webhook** is a request that one system sends to a web address of another when something happens. The sender is the **provider**; the system that owns the address is the **receiver**. The thing that happened is an **event**: a small record with its own id, such as `evt_7731`, a type, such as "payment succeeded", and the data.
+
+### Step 1: Two directions, one rule
+
+<AnimatedDiagram spec="animated/cloud/webhook-receiver" step={1} minWidth={620} caption="Brightpost's first setup: the provider posts the event and waits while the handler marks the order paid and sends the print job." />
+
+Brightpost uses webhooks both ways. It **receives** them from the payment provider. Its wholesale shop **sends** them: when a bulk order ships, the gift shop that ordered it gets a "shipped" request. There are about 300 gift shops.
+
+The theory is on [Webhooks and callbacks](/system-design/fundamentals/webhooks): a signed request, retries with longer and longer waits, and duplicates. This page builds both sides on a cloud. One rule runs through it. The receiver checks the request, stores the event and replies within a second. A worker does the slow part later, safely even when an event comes twice. In the picture the handler breaks that rule: the provider waits while it does all the work.
+
+<PremiumBreak />
+
+### Step 2: The slow reply that pays twice
+
+<AnimatedDiagram spec="animated/cloud/webhook-receiver" step={2} minWidth={620} caption="The failure: no reply within 10 seconds, so the provider sends the event again, and the handler runs the whole job a second time." />
+
+A provider cannot see inside your code. It sees one thing: did a success reply arrive in time? If not, it tries again, because losing a payment is worse than sending it twice. Providers deliver **at least once**: every event arrives, and some arrive twice.
+
+<Callout tone="red" title="What breaks">
+  At 9:12 the handler starts on order 58213 and takes 14 seconds. At 10 seconds the provider gives up waiting, while the handler is still working. The handler finishes at 14 seconds and marks the order paid. At 9:13 the same event arrives again, and nothing tells the handler it has seen it. It records a second payment and sends a second print job. This happened 40 times before 9:40.
+</Callout>
+
+The morning had two causes. The reply waited for slow work, and the work had no memory of the events it had done. Steps 4 and 5 remove one each. Fixing only the first is not enough.
+
+### Step 3: A public door that checks the signature
+
+<AnimatedDiagram spec="animated/cloud/webhook-receiver" step={3} minWidth={620} caption="A public webhook endpoint checks each request's signature with the secret it reads from the secret store." />
+
+The provider sits outside Brightpost's network, so the receiver needs a public address. Anyone can send a fake "order paid" there. The defence is a **signature**. Both sides share a <Term id="secret">secret</Term>, a random string nobody else knows. The provider mixes it with the request's exact bytes and a timestamp, and sends the result in a header. The endpoint does the same sum and compares. A stranger cannot produce a match, and an old timestamp means a replayed copy.
+
+On a cloud, the endpoint is a small piece of code behind a public URL: a route on an <Term id="api-gateway">API gateway</Term>, or a function with its own address. [Hosting REST and GraphQL APIs](/cloud/networking/hosting-apis) compares those doors. The secret lives in the cloud's **secret store**, which hands secrets only to identities allowed to read them. The endpoint reads it with its service identity and caches it for a few minutes. [Secrets management](/cloud/resilience/secrets-management) covers rotation: for a day, accept the old and the new secret.
+
+### Step 4: Reply in milliseconds, work from a queue
+
+<AnimatedDiagram spec="animated/cloud/webhook-receiver" step={4} minWidth={620} caption="The endpoint adds the event to a queue and replies at once. The handler takes events from the queue at its own pace." />
+
+The endpoint now does three things, in order: check the signature, add the event to a **queue**, reply with success. That takes about 50 milliseconds. A queue is a managed list of messages that workers take one at a time; [Queues vs Streams](/cloud/start-here/queues-vs-streams) explains them. The payment handler becomes the worker. On a sale morning it may take 14 seconds per event and fall 10 minutes behind. The provider never notices, because it already has its reply.
+
+The order matters. Reply before the event is in the queue, and a crash loses it for good. Reply after, and a crash between the two means the provider sends it again. A duplicate is safe once Step 5 is in place; a lost event is not. So when the queue refuses an event, the endpoint replies with an error, and the provider tries later.
+
+### Step 5: The queue alone still lets a double through
+
+<AnimatedDiagram spec="animated/cloud/webhook-receiver" step={5} minWidth={620} caption="Event evt_7731 arrives twice. The handler finds its id in the processed-events table and skips the second copy." />
+
+With the queue in place, Brightpost expected the doubles to stop. In the first month the provider still sent 9 events twice. Twice, a release restarted the endpoint after it had queued an event but before its reply went out. Seven times, the reply was lost on the network. Each time the provider did the right thing and sent the event again.
+
+The queue cannot help here. Each copy is a separate request, so it becomes a separate queue message with its own message id. To the queue they are two jobs. Only the event id inside, `evt_7731` both times, says they are the same.
+
+So the handler checks it. The handler is made <Term id="idempotent">idempotent</Term>: running it twice on one event has the same effect as running it once. It works in one database transaction, a group of changes that are saved together or not at all:
+
+1. Add the event id to a **processed-events** table, where each id may appear once.
+2. If that id is already there, stop and treat the message as done.
+3. Otherwise mark the order paid and create the print job.
+4. Save all of it in one commit.
+
+If the handler crashes before the commit, nothing was saved, and the queue hands the event out again. If it crashes after, the id is there and the retry stops at step 2. The 9 doubles become 9 skipped messages. [Idempotency](/system-design/patterns/idempotency) covers the pattern in depth.
+
+### Step 6: Park failures, replay after the fix
+
+<AnimatedDiagram spec="animated/cloud/webhook-receiver" step={6} minWidth={620} caption="An event that fails 5 times moves to the dead-letter queue. After the fix it is sent back to the main queue." />
+
+Some events fail every time. In June a payment for an order paid partly by gift voucher crashed the handler. The queue handed the event out again, and it crashed again. A **dead-letter queue** stops that loop. After 5 failed tries, the queue moves the event aside, and the other events carry on.
+
+An alarm fires when the dead-letter queue holds one event. Asha fixed the voucher bug that afternoon and **replayed** 3 parked events: she moved them back to the main queue. They went through once each, because of Step 5.
+
+One more safety net costs little. Payment providers let you list recent events. Once an hour a small job asks for the last hour's payments and compares them with the orders table. An event the provider gave up on, perhaps during a 3-hour outage, still gets processed.
+
+### Step 7: Sending: an outbox and a delivery worker
+
+<AnimatedDiagram spec="animated/cloud/webhook-receiver" step={7} minWidth={620} caption="The other direction: the shipped change and an outbox row are saved together, and a delivery worker sends each row to the gift shop's URL." />
+
+Now Brightpost is the provider. When the warehouse marks a bulk order shipped, the gift shop must hear about it. The easy way is to send the request from the same code, right after saving. But a crash between "saved" and "sent" loses the notice, and nobody knows.
+
+An **outbox** fixes that. It is a table in the same database. The "shipped" change and a new outbox row, "tell shop 112 that order W-2207 shipped", are saved in one transaction. Both exist, or neither does. A **delivery worker** reads unsent rows and sends each one. It signs the body with that shop's own secret, so one shop cannot fake events for another. It also puts a fresh event id in every notice, so the shops can drop doubles the way Brightpost does.
+
+### Step 8: Retries, backoff and jitter for 300 endpoints
+
+<AnimatedDiagram spec="animated/cloud/webhook-retry" stepper caption="One success, one retry that works, one shop that stays down, and the row parked after 24 hours." />
+
+Gift shops run their own servers, and on any day a few of them are down. The worker treats a success reply as done. An error, or no reply within 5 seconds, means "try again later".
+
+- **Backoff.** The first retry waits about 1 minute. Each wait doubles, up to 2 hours, so a shop that is down for a day gets about 20 tries, not thousands.
+- **Jitter.** Each wait gets a random part. Many gift shops use the same shop software host. When it fails at 16:00 and comes back at 16:20, the retries arrive spread over minutes, not in one burst.
+- **Isolation.** At most 2 requests to one shop are open at once. A shop that hangs for 5 seconds on every request uses 2 workers, not all of them.
+- **Give up, visibly.** After 24 hours the row is parked as failed. The shop gets an email and can press "resend" on its account page.
+
+The same rules for any cloud call are on [Quotas, Throttling, Retries and Backoff](/cloud/resilience/quotas-and-retries).
+
+### Step 9: Build the sender, or rent one
+
+Each cloud has a managed service that sends events to web addresses for you, with retries, backoff and a place for failed deliveries. The tabs below name them.
+
+<Compare
+  columns={["", "Your own delivery worker", "Managed event delivery"]}
+  rows={[
+    ["Retries, backoff, jitter", "You write and test them", "Built in, set by a policy"],
+    ["Failed deliveries", "Your parked rows and alarm", "A dead-letter target you choose"],
+    ["Per-shop secret and signature", "Yes, your code", "Often an auth header or token instead; check the service"],
+    ["Per-shop rate limits", "Yes, your code", "Some services, per destination"],
+    ["What you still own", "Everything", "The outbox, the shop list, telling shops about failures"],
+    ["Brightpost's choice", "Yes, at about 300 shops", "Worth it at thousands of endpoints"],
+  ]}
+  caption="Brightpost sends about 120 shipped notices a day. Either way, the outbox stays."
+/>
+
+Brightpost keeps its own worker. Its gift shops expect one signature format and one retry schedule, and 120 notices a day is little code to run.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: a public endpoint that checks the signature, a queue, an idempotent worker, a dead-letter queue, and an outbox for sending.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Public endpoint:** a route on Amazon API Gateway, or a Lambda function URL for a single function.
+    - **Signing secret:** AWS Secrets Manager, read by the function's IAM role and cached in memory.
+    - **Queue and worker:** an Amazon SQS queue. Lambda polls it and calls the worker function with batches of messages.
+    - **Failed events:** a second SQS queue set as the dead-letter queue, with a maximum receive count. SQS can move parked messages back to the source queue.
+    - **Sending webhooks:** Amazon EventBridge API destinations send events to an outside URL, with a stored connection for the auth header, a rate limit per destination, retries and a dead-letter queue.
+
+    **The difference that changes a design.** API Gateway can write a request straight into SQS, with no function in front. That is the fastest acknowledgement there is. But nothing then checks the signature before the queue. The worker must do it, so the raw body and the signature header must travel into the message unchanged.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Public endpoint:** a Cloud Run service or a Cloud Run function with a public HTTPS URL that allows unauthenticated calls. The signature is its only gate.
+    - **Signing secret:** Secret Manager, read by the service's service account, or mounted into the container.
+    - **Queue and worker:** a Pub/Sub topic. A push subscription sends each message to a Cloud Run worker, and a success reply counts as the acknowledgement.
+    - **Failed events:** a dead-letter topic on the subscription, after a maximum number of delivery attempts. Replay by publishing the parked messages to the main topic again.
+    - **Sending webhooks:** Cloud Tasks with HTTP targets. Each queue has its own rate limit and retry settings. There is no service made for sending to many outside customers.
+
+    **The difference that changes a design.** The worker is itself reached over HTTPS, because Pub/Sub pushes to it. So there are two doors with two different gates. The public endpoint accepts anyone with a valid signature. The worker's URL accepts only Pub/Sub, which attaches a token for a service account you choose. Never make the worker's URL public too.
+  </Tab>
+  <Tab label="Azure">
+    - **Public endpoint:** an Azure Functions HTTP trigger. Azure API Management can stand in front when many webhooks share one door.
+    - **Signing secret:** Azure Key Vault, read by the function's managed identity.
+    - **Queue and worker:** an Azure Service Bus queue, read by a function with a Service Bus trigger.
+    - **Failed events:** every Service Bus queue has a built-in dead-letter subqueue, used after a maximum delivery count. Replay by sending the messages to the main queue again.
+    - **Sending webhooks:** Azure Event Grid delivers events from a custom topic to webhook subscribers, with retries and dead-lettering to a storage container.
+
+    **The difference that changes a design.** Service Bus can drop a second message with the same message id within a time window you set. Set the message id to the provider's event id, and many doubles never reach the worker. Keep the processed-events check anyway: the window ends, and a worker can still crash after its commit. On the sending side, Event Grid asks each new subscriber URL to prove it wants the events. Every gift shop's software would have to answer that check.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/webhook-receiver" stepper minWidth={620} caption="The whole story in seven steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/webhook-receiver" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="A webhook request has arrived"
+  tree={{
+    q: "Does the signature match, with a timestamp from the last few minutes?",
+    no: "Refuse it with an error and add nothing to the queue. A real provider's retry will fail the same way, and the alarm on refused requests tells you if your secret is wrong.",
+    yes: {
+      q: "Did the queue accept the event?",
+      no: "Reply with an error. The provider will send the event again later, which is safe.",
+      yes: {
+        q: "Later, in the worker: is the event id already in processed events?",
+        yes: "Skip it and acknowledge the message. The work was done the first time.",
+        no: {
+          answer: "Do the work and add the event id in the same commit. If the work fails 5 times, the event goes to the dead-letter queue.",
+          href: "/system-design/patterns/idempotency",
+        },
+      },
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="The provider waits 10 seconds. Brightpost's endpoint now replies in about 50 milliseconds, but on a sale morning the worker takes 14 seconds per event. Does the provider resend?" hint="What is the provider waiting for?">
+    No. The provider waits only for the reply, and the endpoint sends it after the event is in the queue. The 14 seconds happen later, out of the provider's sight.
+  </QuizItem>
+  <QuizItem question="A release restarts the endpoint after it queued evt_7731 but before it replied. What happens next, and what stops a double payment?" hint="Two queue messages, one event id.">
+    The provider sends evt_7731 again, so the queue holds two messages. The worker runs the first and adds evt_7731 to processed events. On the second it finds the id and skips it.
+  </QuizItem>
+  <QuizItem question="A gift shop's server is down from 16:00 to 17:30. Brightpost's first retry waits 1 minute, and each wait doubles. Does the 'shipped' notice arrive?">
+    Yes. Tries go out at about 16:01, 16:03, 16:07, 16:15, 16:31 and 17:03, all failing, and the next at about 18:07 succeeds. It arrives about 37 minutes after the shop is back, well inside the 24 hours.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Handle inline", "Endpoint, then queue and worker", "Gateway writes straight to the queue"]}
+  rows={[
+    ["Reply time", "2 s normally, 14 s on a sale morning", "About 50 ms", "Under 50 ms"],
+    ["Provider resends caused by slow work", "40 in one morning", "0", "0"],
+    ["Events lost if the worker is down", "Provider retries, then gives up", "0: they wait in the queue", "0: they wait in the queue"],
+    ["Signature checked", "In the handler", "At the endpoint, before the queue", "In the worker, so forged events sit in the queue"],
+    ["Code you run", "One handler", "Endpoint and worker", "Worker only"],
+    ["Use it for", "A prototype with a few events a day", "Most receivers, including Brightpost's", "Very high volume where every millisecond counts"],
+  ]}
+  caption="Brightpost's numbers. Each design still needs the event-id check, because providers deliver at least once."
+/>
+
+The queue costs one extra service and about a day of work. It turns a slow morning into a backlog instead of 40 double payments.
+
+## Common pitfalls
+
+- **Doing the work before replying.** The provider's time limit becomes your code's time limit, and a slow day turns into resends. Check, queue, reply, and do the work in a worker.
+- **Trusting the queue to remove doubles.** A resent event is a new message to the queue. Store the event id in the same commit as the work, with a unique rule on it.
+- **Checking the signature on a changed body.** Some gateways and frameworks parse the body and rebuild it, with different spaces or key order, before your code sees it. The sums then never match. Check the raw bytes as they arrived.
+- **No alarm on the dead-letter queue.** Parked events are silent. A payment that sits there for a week is an order that never ships. Alarm on one message.
+- **One slow customer blocks every delivery.** Without a per-endpoint limit, a gift shop that hangs for 5 seconds on each request ties up every worker. Cap the open requests per shop and use short time limits.
+
+## How to say it in an interview
+
+"On the receiving side I treat a webhook as a message to store, not a job to run. A public endpoint checks the signature against a secret from the secret store, puts the event on a queue and replies within milliseconds. A worker processes it idempotently: it records the event id in the same transaction as the change and skips ids it has seen, because providers deliver at least once. After a few failures the event goes to a dead-letter queue with an alarm, and I replay it after the fix. On the sending side I write an outbox row in the same transaction as the business change. A delivery worker signs each request and retries with exponential backoff and jitter, with a per-customer limit. A managed event-delivery service can replace that worker, but not the outbox."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Should a shop learn about payments through webhooks or by asking the provider?" level="Junior" category="Cloud">
+    **Short answer.** Webhooks first, so the shop hears about a payment within a second. Add a small job that asks the provider for recent events once an hour. It catches anything the webhooks missed.
+
+    **Why.** Asking every few seconds for every waiting order costs thousands of requests a day that mostly get "not yet". A webhook is one request per event. But webhooks can fail for hours: Brightpost's endpoint can be down, or the provider can give up after its retries. The hourly comparison of the provider's list with the orders table makes the webhook fast and the job complete.
+
+    <AnimatedDiagram spec="animated/cloud/webhook-receiver" step={4} path="provider>endpoint>queue>handler" caption="The webhook path: the provider posts, the endpoint queues and replies, the worker processes." />
+
+    **Follow-ups the interviewer may ask.**
+    - What does the hourly job do when it finds a payment with no matching event?
+    - When would polling alone be the better choice?
+
+    **Watch out for.** Saying webhooks are reliable enough on their own. The provider stops retrying at some point, and those events are gone unless you ask.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Your webhook receiver already puts every event on a queue. Why must the worker still be idempotent?" level="Mid" category="Cloud">
+    **Short answer.** Because the provider can send the same event twice, and each copy becomes a separate queue message. Only the event id inside shows they are one event, so the worker must check it.
+
+    **Why.** A provider resends whenever it does not see your success reply: the reply was lost on the network, or a release restarted the endpoint after queueing but before replying. Brightpost saw 9 such doubles in one month after adding its queue. The worker adds the event id to a processed-events table, with a unique rule, in the same commit as marking the order paid. A second copy finds the id and stops.
+
+    <AnimatedDiagram spec="animated/cloud/webhook-receiver" step={5} highlight={["queue", "handler", "seen", "db"]} caption="Two queue messages, one event id: the processed-events table stops the second." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why must the id and the order change be in one commit?
+    - The queue has its own duplicate check. Why is that not enough?
+
+    **Watch out for.** Using the queue's message id as the key. Two copies of one event get different message ids.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="The provider waits 10 seconds for a reply, and your handler takes 14 seconds on busy days. What do you change?" level="Mid" category="Cloud">
+    **Short answer.** Split replying from working. The endpoint checks the signature, adds the event to a queue and replies in milliseconds. A worker reads the queue and takes as long as it needs.
+
+    **Why.** The provider cannot see whether slow work finished. After 10 seconds it assumes failure and resends, which cost Brightpost 40 double payments in one morning. With a queue, the reply takes about 50 milliseconds whatever the database is doing. A busy morning becomes a backlog that the worker clears. Reply only after the queue has accepted the event, so a crash cannot lose it. Keep the event-id check too, for the resends that still happen.
+
+    <AnimatedDiagram spec="animated/cloud/webhook-receiver" step={2} caption="Before the change: the provider gives up at 10 seconds, resends, and the work runs twice." />
+
+    **Follow-ups the interviewer may ask.**
+    - What should the endpoint reply if the queue is unavailable?
+    - How do you know the worker is falling behind?
+
+    **Watch out for.** Making the handler faster and stopping there. The next slow day brings the resends back.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How does your endpoint know a webhook really came from the payment provider?" level="Mid" category="Cloud">
+    **Short answer.** It checks a signature. The provider computes it from a shared secret, the raw body and a timestamp. The endpoint repeats the sum with the same secret and refuses any request that does not match or is too old.
+
+    **Why.** The URL must be public, so anyone can post to it. Only someone with the secret can make a matching signature, and the timestamp stops an attacker from replaying a captured request later. On a cloud, the secret sits in the secret store. The endpoint reads it with its own identity and keeps it in memory, so there is no copy in code. During a rotation the endpoint accepts both the old and the new secret for a day.
+
+    <AnimatedDiagram spec="animated/cloud/webhook-receiver" step={3} highlight={["provider", "endpoint", "secret"]} caption="The endpoint reads the signing secret from the secret store and checks every request before anything else." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why must the check use the raw bytes and not the parsed body?
+    - Does an IP allow-list replace the signature?
+
+    **Watch out for.** Relying on a hard-to-guess URL. A URL leaks through logs and screenshots, and it cannot be rotated without telling the provider.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design webhook delivery for a platform that notifies 10,000 customers, with dead-letter handling." level="Senior" category="Cloud">
+    **Short answer.** Write an outbox row in the same transaction as each business change. Delivery workers read the outbox, sign each request with the customer's own secret, and retry with exponential backoff and jitter, with a limit per customer. After about a day, a delivery is parked as failed, the customer is told, and they can replay it.
+
+    **Why.** The outbox means no event is lost between "saved" and "sent". At 10,000 endpoints, some are always down. Backoff keeps a dead endpoint to a few tries an hour, and jitter spreads retries when a host that many customers share comes back. A per-customer limit stops one slow endpoint from holding every worker. Parked deliveries go to a dead-letter store with a replay button. Each event carries a stable id, so customers can drop doubles. A managed event-delivery service can take over the retries and the dead-letter part.
+
+    <AnimatedDiagram spec="animated/cloud/webhook-retry" step={3} caption="A customer that stays down: each try stops at 5 seconds, and the waits between tries double." />
+
+    **Follow-ups the interviewer may ask.**
+    - A customer is down for a week. When do you stop, and what do you keep?
+    - How do customers rotate their secret without missing events?
+    - Do you promise the order of events, and if not, what do customers do?
+
+    **Watch out for.** Sending from the same code that saves the change, with no outbox. A crash between the two loses the event, and nobody knows it is missing.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Hosting REST and GraphQL APIs](/cloud/networking/hosting-apis)
+- [API Gateways & API Management](/cloud/networking/api-gateways)
+- [Queues vs Streams](/cloud/start-here/queues-vs-streams)
+- [Secrets, Identity-Based Access and Rotation](/cloud/resilience/secrets-management)
+- [Quotas, Throttling, Retries and Backoff on the Cloud](/cloud/resilience/quotas-and-retries)
+- [Serverless Functions](/cloud/compute/serverless-functions)
+- [Webhooks and callbacks](/system-design/fundamentals/webhooks)
+- [Idempotency](/system-design/patterns/idempotency)
+- [Message Queues and Pub/Sub](/system-design/patterns/message-queues)
+
+## Further reading
+
+- [Amazon SQS dead-letter queues](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html): redrive policy and moving messages back.
+- [Amazon EventBridge API destinations](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-api-destinations.html): sending events to outside URLs.
+- [Pub/Sub push subscriptions](https://cloud.google.com/pubsub/docs/push): pushing messages to a worker URL.
+- [Azure Service Bus duplicate detection](https://learn.microsoft.com/azure/service-bus-messaging/duplicate-detection): message ids and the time window.
