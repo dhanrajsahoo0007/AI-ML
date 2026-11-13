@@ -8,4 +8,5 @@ import dynamic from "next/dynamic";
 export const TabsIsland = dynamic(() => import("./tabs.client").then((m) => m.Tabs));
 export const Tab = dynamic(() => import("./tabs.client").then((m) => m.Tab));
 export const DecisionTreeClient = dynamic(() => import("./decision-tree.client").then((m) => m.DecisionTreeClient));
+export const SpotTheFlagClient = dynamic(() => import("./spot-the-flag.client").then((m) => m.SpotTheFlagClient));
 export const TermRoot = dynamic(() => import("./term.client").then((m) => m.TermRoot));

@@ -149,7 +149,7 @@ export function PracticeController() {
               <span className="font-semibold text-ink">Practice mode.</span> Open a question, answer it out loud against
               the timer, then show the answer and rate yourself.{" "}
               <span className="whitespace-nowrap text-muted-foreground">
-                {practised} of {items.length} practised
+                {practised} of {items.length} main questions practised
               </span>
             </p>
             <div role="group" aria-label="Question order" className="flex flex-wrap gap-1.5">
@@ -253,7 +253,7 @@ function PracticePanel({
           const length = p.share * ANSWER_SECONDS;
           const filled = Math.min(1, Math.max(0, (elapsed - start) / length));
           return (
-            <div key={p.key} className="relative bg-paper-2" style={{ flexGrow: p.share, flexBasis: 0 }}>
+            <div key={p.key} className="relative bg-hairline" style={{ flexGrow: p.share, flexBasis: 0 }}>
               <div
                 className="absolute inset-y-0 left-0"
                 style={{ width: `${filled * 100}%`, backgroundColor: PART_TONE[p.key] }}
@@ -269,7 +269,7 @@ function PracticePanel({
             className={cn("min-w-0 truncate", part?.key === p.key && !revealed && "font-semibold text-ink")}
             style={{ flexGrow: p.share, flexBasis: 0 }}
           >
-            {p.label}
+            {p.short}
           </li>
         ))}
       </ol>

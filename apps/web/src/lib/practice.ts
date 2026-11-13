@@ -108,6 +108,8 @@ export const ANSWER_SECONDS = 120;
 export interface AnswerPart {
   key: "situation" | "action" | "result" | "learning";
   label: string;
+  /** One word for the timer bar, where the first part is too narrow for its full label. */
+  short: string;
   /** Share of the answer, 0 to 1. The shares add up to 1. */
   share: number;
   /** What to say in this part. */
@@ -116,10 +118,22 @@ export interface AnswerPart {
 
 /** The STAR+L time budget: most of the answer is what you did. */
 export const ANSWER_PARTS: readonly AnswerPart[] = [
-  { key: "situation", label: "Situation and task", share: 0.15, cue: "The system, what was at risk, your constraint." },
-  { key: "action", label: "Action", share: 0.6, cue: "Three things you did, and why you chose them." },
-  { key: "result", label: "Result", share: 0.15, cue: "The number that moved, and what stayed safe." },
-  { key: "learning", label: "Learning", share: 0.1, cue: "What you changed so it does not happen again." },
+  {
+    key: "situation",
+    label: "Situation and task",
+    short: "Setup",
+    share: 0.15,
+    cue: "The system, what was at risk, your constraint.",
+  },
+  { key: "action", label: "Action", short: "Action", share: 0.6, cue: "Three things you did, and why you chose them." },
+  { key: "result", label: "Result", short: "Result", share: 0.15, cue: "The number that moved, and what stayed safe." },
+  {
+    key: "learning",
+    label: "Learning",
+    short: "Learning",
+    share: 0.1,
+    cue: "What you changed so it does not happen again.",
+  },
 ];
 
 /** The part of the answer a speaker should be in after `seconds`, or null once the time is up. */

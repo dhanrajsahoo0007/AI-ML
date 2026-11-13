@@ -1,5 +1,5 @@
 // The shared teaching components. Everything an MDX author can use from this folder is exported here
-// and registered in src/lib/mdx-doc.tsx. Interactive parts (Tabs, DecisionTree) are islands loaded lazily.
+// and registered in src/lib/mdx-doc.tsx. Interactive parts (Tabs, DecisionTree, SpotTheFlag) are islands loaded lazily.
 
 export { KeyIdea } from "./key-idea";
 export { Term, Glossary } from "./term";
@@ -9,6 +9,7 @@ export { Tabs } from "./tabs";
 export { Tab } from "./lazy.client";
 export { Quiz, QuizItem } from "./quiz";
 export { DecisionTree } from "./decision-tree";
+export { SpotTheFlag } from "./spot-the-flag";
 export { RequirementsTable } from "./requirements-table";
 export { EstimateTable } from "./estimate-table";
 export { Numbers } from "./numbers";
