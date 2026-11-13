@@ -13,21 +13,21 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 //
 // Layout: two zones on top that the team builds (Shoppers, Shop) in the left column, a "cloud's job" zone across the
 // middle and right columns, and a "team's job" zone across the bottom.
-//   Left (x 130): shoppers 100 | app servers 260 | ticket queue 650 | incident review 760.
-//   Middle (x 375): metrics 260 | machine alarms 395 | on-call engineer 650 | runbook 760.
-//   Right (x 640): checkout SLI 260 | burn-rate alert 395 | alert routing 500 | paging tool 650.
-// The middle column ends at x 470, so a phone that opens on the left 480 units shows every node of steps 1-2.
+//   Left (x 130): shoppers 88 | app servers 260 | ticket queue 650 | incident review 760.
+//   Middle (x 365): metrics 260 | machine alarms 395 | on-call engineer 650 | runbook 760.
+//   Right (x 630): checkout SLI 260 | burn-rate alert 395 | alert routing 500 | paging tool 650.
+// The middle column ends at x 455, so a phone that opens on the left 480 units shows every node of steps 1-2.
 // Labels that sit near a zone border or tab use labelAt to move off it.
 // Steps 1 and 2 use only the left and middle columns, so a phone shows them without scrolling sideways. The canvas
 // stays under 800 wide so labels are readable in the 660 px article column.
 //
-// Zone tabs sit on each zone's top-left corner. Vertical edges run at x 130, 375 and 640, right of every tab, and
+// Zone tabs sit on each zone's top-left corner. Vertical edges run at x 130, 365 and 630, right of every tab, and
 // every node's top is at least 26 units below its zone's top. Text room: a label takes up to 7.2 px per character
 // and a sub line about 5.5 px, after 52 px for the icon. Nodes are sized for the longest name the Services toggle
 // puts in them ("Amazon CloudWatch", "Application Signals", "Notification channel", "SLO burn-rate alarm").
 const spec: DiagramSpec = {
   title: "From machine alarms to SLO alerts that page a person",
-  width: 780,
+  width: 770,
   height: 830,
   steps: [
     { title: "An alarm on every machine metric" },
@@ -39,10 +39,10 @@ const spec: DiagramSpec = {
     { title: "A blameless review closes the loop" },
   ],
   zones: [
-    { id: "shoppers-z", title: "Shoppers", tone: "neutral", x: 20, y: 40, w: 230, h: 120 },
+    { id: "shoppers-z", title: "Shoppers", tone: "neutral", x: 20, y: 30, w: 230, h: 110 },
     { id: "shop-z", title: "Shop", tone: "teal", x: 20, y: 190, w: 230, h: 140 },
-    { id: "cloud-z", title: "The cloud's job", tone: "orange", x: 270, y: 190, w: 490, h: 350 },
-    { id: "team-z", title: "The team's job", tone: "neutral", x: 20, y: 590, w: 740, h: 220 },
+    { id: "cloud-z", title: "The cloud's job", tone: "orange", x: 260, y: 190, w: 490, h: 350 },
+    { id: "team-z", title: "The team's job", tone: "neutral", x: 20, y: 590, w: 730, h: 220 },
   ],
   nodes: [
     // Step 1
@@ -53,8 +53,8 @@ const spec: DiagramSpec = {
       icon: "users",
       tone: "neutral",
       x: 130,
-      y: 100,
-      w: 170,
+      y: 88,
+      w: 180,
     },
     {
       id: "app",
@@ -64,7 +64,7 @@ const spec: DiagramSpec = {
       tone: "teal",
       x: 130,
       y: 260,
-      w: 170,
+      w: 180,
       cloud: { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" },
     },
     {
@@ -73,9 +73,9 @@ const spec: DiagramSpec = {
       sub: "every server sends",
       icon: "signal",
       tone: "orange",
-      x: 375,
+      x: 365,
       y: 260,
-      w: 190,
+      w: 180,
       cloud: { aws: "aws-cloudwatch", gcp: "gcp-cloud-monitoring", azure: "azure-monitor" },
     },
     {
@@ -84,13 +84,13 @@ const spec: DiagramSpec = {
       sub: "CPU, disk, every 5xx",
       icon: "bell",
       tone: "orange",
-      x: 375,
+      x: 365,
       y: 395,
-      w: 190,
+      w: 180,
       cloud: {
         aws: { label: "CloudWatch alarms" },
         gcp: { label: "Alerting policies" },
-        azure: { label: "Metric alert rules" },
+        azure: { label: "Metric alerts" },
       },
     },
     {
@@ -99,9 +99,9 @@ const spec: DiagramSpec = {
       sub: "Asha this week",
       icon: "user-check",
       tone: "neutral",
-      x: 375,
+      x: 365,
       y: 650,
-      w: 190,
+      w: 180,
     },
 
     // Step 3
@@ -112,7 +112,7 @@ const spec: DiagramSpec = {
       icon: "meter",
       tone: "orange",
       step: 3,
-      x: 640,
+      x: 630,
       y: 260,
       w: 190,
       cloud: {
@@ -131,7 +131,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       accent: true,
       step: 4,
-      x: 640,
+      x: 630,
       y: 395,
       w: 190,
       cloud: {
@@ -149,7 +149,7 @@ const spec: DiagramSpec = {
       icon: "topic",
       tone: "orange",
       step: 5,
-      x: 640,
+      x: 630,
       y: 500,
       w: 200,
       cloud: {
@@ -165,7 +165,7 @@ const spec: DiagramSpec = {
       icon: "phone",
       tone: "neutral",
       step: 5,
-      x: 640,
+      x: 630,
       y: 650,
       w: 190,
     },
@@ -178,7 +178,7 @@ const spec: DiagramSpec = {
       step: 5,
       x: 130,
       y: 650,
-      w: 170,
+      w: 180,
     },
 
     // Step 6
@@ -189,9 +189,9 @@ const spec: DiagramSpec = {
       icon: "file",
       tone: "blue",
       step: 6,
-      x: 375,
+      x: 365,
       y: 760,
-      w: 190,
+      w: 180,
     },
 
     // Step 7
@@ -204,13 +204,13 @@ const spec: DiagramSpec = {
       step: 7,
       x: 130,
       y: 760,
-      w: 170,
+      w: 180,
     },
   ],
   edges: [
     // Step 1: every metric has an alarm, and every alarm goes to one chat channel.
-    { from: "shoppers", to: "app", label: "checkouts", packet: true, labelAt: 0.28, until: 1 },
-    { from: "app", to: "metrics", label: "metrics", flow: true },
+    { from: "shoppers", to: "app", label: "checkouts", packet: true, labelAt: 0.33, until: 1 },
+    { from: "app", to: "metrics", flow: true },
     { from: "metrics", to: "alarms", label: "140 rules" },
     { from: "alarms", to: "oncall", label: "140 alerts a week", packet: true, until: 1 },
 
@@ -222,7 +222,7 @@ const spec: DiagramSpec = {
       tone: "red",
       dashed: true,
       packet: true,
-      labelAt: 0.28,
+      labelAt: 0.33,
       step: 2,
       until: 2,
     },
@@ -237,7 +237,7 @@ const spec: DiagramSpec = {
     },
 
     // Step 3: count what shoppers feel.
-    { from: "shoppers", to: "app", label: "checkouts", packet: true, labelAt: 0.28, step: 3 },
+    { from: "shoppers", to: "app", label: "checkouts", packet: true, labelAt: 0.33, step: 3 },
     { from: "metrics", to: "sli", label: "counts", flow: true },
 
     // Step 4: the target and the alert on how fast it is being used up.
@@ -247,7 +247,18 @@ const spec: DiagramSpec = {
     { from: "burn", to: "route", packet: true },
     { from: "route", to: "pager", label: "fast burn: page", packet: true, delay: 0.6, labelAt: 0.35 },
     { from: "route", to: "ticket", label: "slow burn: ticket", dashed: true, labelAt: 0.3 },
-    { from: "alarms", to: "ticket", label: "6 kept: ticket", dashed: true, labelAt: 0.65 },
+    // Routed down x 236, right of the team zone's tab, so the line never crosses it.
+    {
+      from: "alarms",
+      to: "ticket",
+      label: "6 kept: ticket",
+      dashed: true,
+      via: [
+        [236, 520],
+        [236, 650],
+      ],
+      labelAt: 0.3,
+    },
 
     // Step 6: a person, and the page of steps for this alert.
     { from: "pager", to: "oncall", label: "calls", packet: true, delay: 1.2, step: 6 },
