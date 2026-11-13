@@ -11,20 +11,20 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Nodes never move and never disappear. The app-to-database edge changes its label as jobs leave the database, so
 // each version ends with `until`; the last one ("orders only") stays in the full view.
 //
-// Layout: three columns (x 115 | 400 | 672) and four rows (y 90 | 260 | 430 | 600).
-//   Left, the shop side: shoppers 115,90 | app 115,260 | basket cache 115,430.
-//   Middle, the source of truth: photos bucket 400,90 | orders database 400,260 | orders lost 400,430.
+// Layout: three columns (x 112 | 392 | 672) and four rows (y 75 | 260 | 430-445 | 590).
+//   Left, the shop side: shoppers 112,75 | app 112,260 | basket cache 112,430.
+//   Middle, the source of truth: photos bucket 392,75 | orders database 392,260 | orders lost 392,430.
 //   Right, the derived stores: search engine 672,260 | reporting copy 672,430 | finance lead 672,600.
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 and 2 (the free
 // preview and the failure) use only the shoppers, the app, the photos bucket, the database and the lost orders, all
-// left of x 485. The canvas stays under 800 wide so labels are readable in the 660 px article column.
+// left of x 478. The canvas stays under 800 wide so labels are readable in the 660 px article column.
 //
-// Edge routes: the app reaches the search engine over the top of the database (y 178, between the photo row and the
-// database row), so it never crosses the database box. The copy to the reporting store runs diagonally from the
-// database's lower right to the copy's upper left, clear of the search engine and the lost orders.
-// Zone tabs: the left zones have short titles ("Shoppers", "App", "Memory") so the vertical edges at x 115 enter
-// them right of their tabs. The reporting zone uses the subnet kind (inline label, no tab) because the copy edge
-// enters it through the top.
+// Edge routes: the app reaches the search engine over the top of the database (y 200, between the photo row and the
+// database row, above the App zone), so it never crosses the database box. The copy to the reporting store runs
+// down to the right of the lost orders, then enters the copy from its left side, below the zone's inline label.
+// Zone tabs: the left zones have short titles ("Shoppers", "App", "Memory") so the vertical edges at x 112 enter
+// them right of their tabs; the shoppers sit high (y 75) so the "search, buy" pill clears the App tab. The
+// reporting zone uses the subnet kind (inline label, no tab), so the finance lead's edge needs no tab to avoid.
 // Text room: about 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Nodes are sized
 // for the longest name the Services toggle shows: "Virtual Machines" (app, w 172), "Azure Postgres" (database,
 // w 170), "Vertex AI Search" (search, w 178), "Managed Redis" (cache, w 176), "Cloud SQL replica" (copy, w 182).
@@ -46,10 +46,10 @@ const spec: DiagramSpec = {
     { title: "Reports read a copy" },
   ],
   zones: [
-    { id: "people", title: "Shoppers", tone: "neutral", x: 10, y: 35, w: 210, h: 135 },
+    { id: "people", title: "Shoppers", tone: "neutral", x: 10, y: 22, w: 210, h: 130 },
     { id: "app-zone", title: "App", tone: "teal", x: 10, y: 205, w: 210, h: 110 },
     { id: "memory", title: "Memory", tone: "orange", x: 10, y: 375, w: 210, h: 110 },
-    { id: "data", title: "Data stores", tone: "violet", x: 290, y: 35, w: 495, h: 280 },
+    { id: "data", title: "Data stores", tone: "violet", x: 290, y: 22, w: 495, h: 293 },
     { id: "reporting", title: "Reporting", tone: "neutral", kind: "subnet", x: 572, y: 375, w: 213, h: 305 },
   ],
   nodes: [
@@ -61,8 +61,8 @@ const spec: DiagramSpec = {
       icon: "users",
       tone: "neutral",
       variant: "glyph",
-      x: 115,
-      y: 88,
+      x: 112,
+      y: 75,
     },
     {
       id: "app",
@@ -70,7 +70,7 @@ const spec: DiagramSpec = {
       sub: "2 to 10 servers",
       icon: "server",
       tone: "teal",
-      x: 115,
+      x: 112,
       y: 260,
       w: 172,
       cloud: { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" },
@@ -82,8 +82,8 @@ const spec: DiagramSpec = {
       icon: "blob",
       tone: "violet",
       variant: "glyph",
-      x: 400,
-      y: 88,
+      x: 392,
+      y: 75,
       cloud: { aws: "aws-s3", gcp: "gcp-cloud-storage", azure: "azure-blob" },
     },
     {
@@ -92,7 +92,7 @@ const spec: DiagramSpec = {
       sub: "PostgreSQL",
       icon: "database",
       tone: "violet",
-      x: 400,
+      x: 392,
       y: 260,
       w: 170,
       cloud: database,
@@ -106,7 +106,7 @@ const spec: DiagramSpec = {
       icon: "bag",
       tone: "red",
       step: 2,
-      x: 400,
+      x: 392,
       y: 430,
       w: 164,
     },
@@ -137,7 +137,7 @@ const spec: DiagramSpec = {
       icon: "cache",
       tone: "orange",
       step: 4,
-      x: 115,
+      x: 112,
       y: 430,
       w: 176,
       cloud: {
@@ -178,7 +178,7 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: shoppers use the app; their browsers fetch photos straight from the bucket. One database, three jobs.
-    { from: "shoppers", to: "app", label: "browse, search, buy", packet: true },
+    { from: "shoppers", to: "app", label: "search, buy", packet: true },
     { from: "shoppers", to: "photos", label: "photos by URL", packet: true, delay: 0.6 },
     { from: "app", to: "db", label: "every query", packet: true, delay: 1.2, until: 1 },
 
@@ -187,15 +187,15 @@ const spec: DiagramSpec = {
     { from: "db", to: "lost", label: "checkout 9 s", tone: "red", dashed: true, step: 2, until: 2 },
 
     // Step 3: search goes to a search engine; the database sends it every product change.
-    { from: "app", to: "db", label: "orders, baskets", packet: true, step: 3, until: 3 },
+    { from: "app", to: "db", label: "no search", packet: true, step: 3, until: 3 },
     {
       from: "app",
       to: "search",
       label: "search words",
       packet: true,
       via: [
-        [200, 178],
-        [672, 178],
+        [190, 200],
+        [672, 200],
       ],
       labelAt: 0.55,
       step: 3,
@@ -207,7 +207,7 @@ const spec: DiagramSpec = {
     { from: "app", to: "cache", label: "basket by id", packet: true, delay: 0.8, step: 4 },
 
     // Step 5: an asynchronous copy takes the long report queries.
-    { from: "db", to: "replica", label: "copied", dashed: true, flow: true, step: 5 },
+    { from: "db", to: "replica", label: "copied", dashed: true, flow: true, via: [[530, 445]], labelAt: 0.35, step: 5 },
     { from: "finance", to: "replica", label: "report", packet: true, step: 5 },
   ],
 };
