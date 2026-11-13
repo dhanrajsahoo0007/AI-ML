@@ -21,8 +21,9 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // columns, so the free preview and the failure are visible without scrolling.
 //
 // The key service is a glyph node (76 wide), which leaves a 134-unit gap for the labels on the app-to-key edges.
-// The script sits in a subnet zone (inline label, no tab) because its edge leaves through the top. The audit edge
-// runs below the key-service zone (y 188) and drops into the monitoring zone at x 672, right of that zone's tab.
+// The script sits in a subnet zone titled "Admin" (the contractor ran it with admin rights): inline label, no tab,
+// because its edge leaves through the top. The audit edge leaves the key glyph to the right (x 520, clear of its
+// label), runs below the key-service zone (y 188) and drops into the monitoring zone at x 672, right of its tab.
 // Nodes are sized for the longest name the Services toggle puts in them ("Virtual Machines", "Cloud Audit Logs").
 const spec: DiagramSpec = {
   title: "Envelope encryption: a data key wrapped by a key that never leaves",
@@ -40,7 +41,7 @@ const spec: DiagramSpec = {
     { id: "app", title: "Application", tone: "teal", x: 10, y: 40, w: 240, h: 120 },
     { id: "keys", title: "Key service", tone: "red", x: 295, y: 40, w: 490, h: 130 },
     { id: "storage", title: "Storage", tone: "violet", x: 10, y: 215, w: 240, h: 145 },
-    { id: "contractor", title: "Contractor", tone: "neutral", kind: "subnet", x: 295, y: 225, w: 190, h: 135 },
+    { id: "contractor", title: "Admin", tone: "neutral", kind: "subnet", x: 295, y: 225, w: 190, h: 135 },
     { id: "monitor", title: "Monitoring", tone: "orange", x: 560, y: 215, w: 225, h: 270 },
   ],
   nodes: [
@@ -88,7 +89,7 @@ const spec: DiagramSpec = {
     {
       id: "script",
       label: "Clean-up script",
-      sub: "deletes untagged keys",
+      sub: "no tag, so delete",
       icon: "robot",
       tone: "red",
       step: 4,
@@ -109,7 +110,7 @@ const spec: DiagramSpec = {
       y: 100,
       w: 176,
       cloud: {
-        aws: { label: "Key policy" },
+        aws: { label: "KMS key policy" },
         gcp: { label: "IAM on the key" },
         azure: { label: "Key Vault RBAC" },
       },
@@ -154,7 +155,7 @@ const spec: DiagramSpec = {
     { from: "app", to: "kms", label: "new data key", packet: true, bidirectional: true, until: 2 },
 
     // Step 2: the file is encrypted locally; only the wrapped copy of the key is stored, beside the file.
-    { from: "app", to: "bucket", label: "encrypted file + wrapped key", packet: true, step: 2 },
+    { from: "app", to: "bucket", label: "encrypted file + wrapped key", packet: true, labelAt: 0.35, step: 2 },
 
     // Step 3: reading sends the small wrapped key to the key service, never the file.
     { from: "app", to: "kms", label: "unwrap the key", packet: true, bidirectional: true, step: 3, until: 3 },
@@ -185,10 +186,11 @@ const spec: DiagramSpec = {
       dashed: true,
       flow: true,
       via: [
-        [470, 188],
+        [520, 130],
+        [520, 188],
         [672, 188],
       ],
-      labelAt: 0.4,
+      labelAt: 0.55,
       step: 6,
     },
     { from: "trail", to: "alarm", label: "delete scheduled", packet: true, step: 6 },

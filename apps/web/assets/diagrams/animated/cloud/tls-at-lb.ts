@@ -19,7 +19,7 @@ const spec: SequenceSpec = {
     { title: "Renewal without a restart" },
   ],
   lanes: [
-    { id: "phone", label: "Shopper's phone", icon: "phone", tone: "neutral" },
+    { id: "phone", label: "Shopper", icon: "phone", tone: "neutral" },
     { id: "lb", label: "Load balancer", icon: "load-balancer", tone: "blue" },
     { id: "certs", label: "Cert service", icon: "certificate", tone: "red" },
     { id: "app", label: "App server", icon: "server", tone: "teal" },
