@@ -44,12 +44,12 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // stays under 800 wide so labels are readable in the 660 px article column.
 // Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Sized for the longest
 // name the Services toggle shows: "Cloud Load Balancing" (lb, w 200), "Virtual Machines" (servers, w 168),
-// "Internet gateway" (igw, w 176), "Azure PostgreSQL" (database glyphs).
+// "Internet gateway" (igw, w 176), "Azure Postgres" (database glyphs, shortened so it stays inside zone A).
 const server = { aws: "aws-ec2", gcp: "gcp-compute-engine", azure: "azure-vm" } as const;
 const database = {
   aws: "aws-rds",
   gcp: "gcp-cloud-sql",
-  azure: { id: "azure-postgresql", label: "Azure PostgreSQL" },
+  azure: { id: "azure-postgresql", label: "Azure Postgres" },
 };
 const routes = {
   aws: { id: "aws-vpc", label: "Route table" },
@@ -283,11 +283,12 @@ const spec: DiagramSpec = {
       tone: "red",
       dashed: true,
       via: toServerA,
+      labelAt: 0.56,
       step: 5,
       until: 5,
     },
     { from: "lb", to: "app-b", label: "half", packet: true, via: [[472, 300]], labelAt: 0.85, step: 5, until: 5 },
-    { from: "lb", to: "app-c", label: "half", packet: true, via: [[672, 245]], labelAt: 0.85, step: 5, until: 5 },
+    { from: "lb", to: "app-c", label: "half", packet: true, via: [[672, 245]], labelAt: 0.92, step: 5, until: 5 },
     { from: "app-b", to: "db-standby", label: "new primary", packet: true, delay: 1, step: 5, until: 5 },
   ],
 };
