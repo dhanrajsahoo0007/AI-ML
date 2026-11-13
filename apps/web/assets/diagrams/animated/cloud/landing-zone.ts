@@ -68,7 +68,7 @@ const spec: DiagramSpec = {
       tone: "orange",
       x: 130,
       y: 90,
-      w: 200,
+      w: 192,
       cloud: {
         aws: { id: "aws-organizations", label: "Organizations SCP" },
         gcp: { id: "gcp-resource-manager", label: "Org Policy" },
