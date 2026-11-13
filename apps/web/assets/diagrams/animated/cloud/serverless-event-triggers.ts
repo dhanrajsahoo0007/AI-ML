@@ -20,7 +20,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Why this order: on a phone the figure opens on the left 480 units. Steps 1 to 4 happen in the left and middle
 // columns, so the free preview and the failure show without scrolling; only the dead-letter queue and steps 5 and 6
 // need the right column. Diagonal edges run through the gaps between zones (rows 140-190 and 300-345); the HTTP
-// edge leaves the endpoint upwards, right of the Front door tab, and runs left along row 322.
+// edge leaves the endpoint upwards, right of the Front door tab, and runs left along row 318.
 // The middle zones start at x 262 so their tabs end before x 390, where the vertical edges run.
 // Text room: a label takes up to 7.2 px per character and a sub line about 5.5 px, after 52 px for the icon. Nodes
 // are sized for the longest name the Services toggle puts in them ("Azure Virtual Machines", "EventBridge
@@ -182,7 +182,7 @@ const spec: DiagramSpec = {
       step: 5,
       x: 672,
       y: 245,
-      w: 206,
+      w: 212,
       cloud: {
         aws: { id: "aws-eventbridge", label: "EventBridge Scheduler" },
         gcp: { label: "Cloud Scheduler" },
@@ -254,8 +254,8 @@ const spec: DiagramSpec = {
       delay: 1.2,
       bidirectional: true,
       via: [
-        [720, 322],
-        [500, 322],
+        [720, 318],
+        [500, 318],
       ],
       labelAt: 0.4,
       step: 6,
