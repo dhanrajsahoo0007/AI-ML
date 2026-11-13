@@ -19,8 +19,8 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // The bucket zone starts at y 40, so the diagonal edges from the app server and the script enter it through its
 // left side (near y 190 and y 308), well below the zone tab. The signed URL and the old "photo" edge share the
 // x 130 line but never show in the same view; their labels sit near the app end, clear of the Staff tab. The copy to
-// the second region leaves the bucket downwards, runs right along y 330 under the worker and drops into the region
-// zone at x 720, right of its short tab.
+// the second region leaves the bucket downwards, runs right along y 316 under the worker and drops straight into
+// the region zone at x 672, right of its short tab.
 //
 // Why this order: on a phone the figure scrolls sideways and opens on the left 480 units. Steps 1 to 3 (the free
 // preview, the failure and the fix) use only the left and middle columns. The canvas stays under 800 wide.
@@ -208,10 +208,9 @@ const spec: DiagramSpec = {
       dashed: true,
       flow: true,
       via: [
-        [520, 330],
-        [720, 330],
+        [520, 316],
+        [672, 316],
       ],
-      labelAt: 0.6,
       step: 6,
     },
   ],
