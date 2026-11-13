@@ -23,6 +23,7 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // columns, so the free preview and the failure show without scrolling; only steps 6 and 7 need the right column.
 // A "Server group" or "Control loop" tab would reach x 150 and sit on the vertical edges at x 140, so the left-hand
 // zones use the subnet kind (inline label, no tab). Only "Receipts" keeps a tab: its edges enter from the side.
+// Subnet zones start 38 units above their first node, so the NEW ring clears the inline label.
 // Text room: 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Nodes are sized for
 // the longest name the Services toggle shows ("Cloud Load Balancing", "Predictive autoscaling", "Recurrence profile").
 const spec: DiagramSpec = {
@@ -39,9 +40,9 @@ const spec: DiagramSpec = {
     { title: "Queue workers scale on backlog" },
   ],
   zones: [
-    { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 10, y: 25, w: 520, h: 112 },
-    { id: "group", title: "Server group", tone: "teal", kind: "subnet", x: 10, y: 272, w: 775, h: 112 },
-    { id: "loop", title: "Control loop", tone: "orange", kind: "subnet", x: 10, y: 443, w: 530, h: 262 },
+    { id: "outside", title: "Outside", tone: "neutral", kind: "subnet", x: 10, y: 13, w: 520, h: 124 },
+    { id: "group", title: "Server group", tone: "teal", kind: "subnet", x: 10, y: 260, w: 775, h: 124 },
+    { id: "loop", title: "Control loop", tone: "orange", kind: "subnet", x: 10, y: 431, w: 530, h: 274 },
     { id: "print", title: "Receipts", tone: "orange", x: 580, y: 443, w: 205, h: 262 },
   ],
   nodes: [
@@ -234,7 +235,7 @@ const spec: DiagramSpec = {
   edges: [
     // Step 1: measure and compare.
     { from: "shoppers", to: "lb", label: "browse, buy", packet: true },
-    { from: "lb", to: "servers12", label: "requests", packet: true, delay: 0.6, labelAt: 0.35 },
+    { from: "lb", to: "servers12", label: "requests", packet: true, delay: 0.6, labelAt: 0.25 },
     { from: "servers12", to: "metrics", label: "CPU each minute", dashed: true, flow: true },
     { from: "metrics", to: "autoscaler", label: "average", packet: true, delay: 1.2 },
 
