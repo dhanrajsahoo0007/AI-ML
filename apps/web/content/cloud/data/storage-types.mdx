@@ -1,11 +1,292 @@
 ---
 title: "Object, Block and File: Which One for Which Job"
-description: "The three storage shapes on every cloud, why each exists, and four questions that pick the right one for a job."
-status: outline
+description: "The three storage shapes as cloud services: how programs reach each one, its cost and speed, how it is backed up, and how to pick."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the three storage shapes explained from the API up (a key that returns bytes, a disk, a mounted folder), why each exists, and the four questions that pick one. The theory is recapped in one paragraph and linked.
+<KeyIdea>
+  A cloud keeps your files in three shapes: a disk for one machine, a folder many machines share, and a bucket of whole files fetched by name. Pick the shape by how your program reaches the data.
+</KeyIdea>
 
-**Related reading on this site:** [Files, blocks and objects](/system-design/fundamentals/storage-types) · [Storage on AWS](/cloud/aws/storage)
+## The story
+
+Brightpost's print service runs on 2 small servers. For each order it renders a print file of about 40 MB and sends it to the printing partner: about 400 files a day. Each server saved the files it made on its own disk, and this worked for months. On a Thursday in November the partner's system was down from 10:00 to 10:20. Sixty-four sends failed, and each one was retried 5 minutes later through the internal balancer. The balancer picks either server, so 33 retries landed on the server that had not made the file. That server looked on its own disk, found nothing and marked the job "file missing". Nobody noticed until Saturday, when 33 customers asked where their posters were.
+
+Every step below follows one print file, from a private disk to the storage shape that fits it.
+
+## How it works
+
+Three words first. To **attach** a disk is to connect it to one machine, which then uses it as its own drive. To **mount** a folder is to make a folder held elsewhere appear at a path on the machine, such as `/print`. A **key** is the full name of one stored file, such as `print/58213.pdf`.
+
+### Step 1: Three shapes, three ways in
+
+<AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={1} minWidth={620} caption="Brightpost's first setup: each print server saves the file it renders on its own disk, then sends it to the partner." />
+
+Storage on a cloud comes in three shapes. What separates them is the way a program reaches the data.
+
+<Compare
+  columns={["Shape", "How a program reaches it", "Who can use it at once"]}
+  rows={[
+    ["Block storage", "A disk attached to the machine; the operating system reads and writes blocks", "One machine, in one zone"],
+    ["File storage", "A folder mounted over the network; programs open files by path", "Many machines"],
+    ["Object storage", "Web requests: put a whole file under a key, get it back by key", "Any number of programs, wherever access allows"],
+  ]}
+  caption="The three shapes, sorted by the way in."
+/>
+
+In the picture, each print file lives on a disk, the one shape that only one machine can see. [Files, blocks and objects](/system-design/fundamentals/storage-types) explains how each shape works inside, from 4 KB blocks to web requests. This page is about the services a cloud runs for each shape, what they cost, how they fail and how to choose.
+
+<PremiumBreak />
+
+### Step 2: A disk belongs to one machine
+
+<AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={2} minWidth={620} caption="The failure: the retry reaches server B, and B's own disk has no copy of the file that server A made." />
+
+<Term id="block-storage">Block storage</Term> is a cloud disk, usually called a volume. It sits in the provider's storage system, not inside the server, and reaches the server over the network. The server's operating system puts a file system on it and keeps recent changes in memory. A second machine writing to the same volume would not see those changes, and the two would wreck each other's files. So a volume attaches to one machine at a time, normally in the same <Term id="availability-zone">zone</Term>.
+
+<Callout tone="red" title="What breaks">
+  Server A renders the file for order 58213 and saves it on disk A. Its send fails at 10:04, while the partner is down. At 10:09 the balancer gives the retry to server B. Server B looks in its own folder, finds nothing and gives up. The file existed the whole time, on a disk only server A could see. That happened to 33 of the 64 retries.
+</Callout>
+
+Each cloud has a shared mode for some disk types, where a few machines attach one volume. Only software built for it, such as a cluster file system, can use it safely. The print service needs something plainer: one folder that both servers see.
+
+### Step 3: A folder many machines mount
+
+<AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={3} minWidth={620} caption="Both print servers mount one file share, so the retry on server B opens the file that server A saved." />
+
+<Term id="file-storage">File storage</Term> is a file server the cloud runs for you, called a file share. Machines mount it with a standard network protocol: NFS on Linux, SMB on Windows. Programs then open, write, rename and lock files by path, as they would on a local disk.
+
+The render tool did not change. That afternoon Brightpost pointed its output folder at the share, mounted at `/print` on both servers, and any server could finish any job.
+
+On most products a share spans several zones of a region. Each file operation crosses the network, so a few milliseconds per operation is normal, and a gigabyte costs more than in object storage. A share fits software that expects a shared folder.
+
+### Step 4: Whole files by key
+
+<AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={4} minWidth={620} caption="Each server writes the print file to a bucket by key. The partner downloads it with a signed link." />
+
+Print files have a short, plain life. Each is written once, read whole once or twice, and is useless after 30 days. That is the job <Term id="object-storage">object storage</Term> is built for. A program sends a whole file in one web request, a PUT, under a key. Another program fetches it with a GET. A **bucket** is the container that holds these files, called objects, and it grows without anyone sizing it.
+
+A month after the incident, the print files moved to a bucket. The partner now downloads each one with a **signed link**: a web address with a signature and an expiry time, good for one object. The servers send nothing. A <Term id="lifecycle-rule">lifecycle rule</Term> deletes print files after 30 days, so no clean-up script is needed.
+
+Object storage cannot change part of a file. To edit an object, you write a whole new one in its place. The share stays, holding the 2 GB of templates and fonts that the render tool opens by path. [Object Storage: Tiers, Lifecycle, Versioning and Redundancy](/cloud/data/object-storage) covers buckets in depth.
+
+### Step 5: Speed and cost: the shape of each bill
+
+<Compare
+  columns={["", "Block storage", "File storage", "Object storage"]}
+  rows={[
+    ["One small read takes, roughly", "About 1 ms", "1 to a few ms", "Tens of ms to the first byte"],
+    ["Speed grows with", "The disk type and size you pick", "The size stored, or the speed you buy", "The number of readers at once"],
+    ["You pay for", "The size you provision, full or empty", "The size stored, or provisioned", "The size stored, each request and data sent out"],
+    ["Price per gigabyte", "More than object storage", "More than object storage", "The lowest; colder classes cost less"],
+    ["Change part of a file in place", true, true, false],
+  ]}
+  caption="Rough shapes for planning, not quotes. Real values depend on the product, the type you pick and the cloud."
+/>
+
+A disk bills for the size you ask for. Each print server has a 100 GB disk with about 20 GB in use, and Brightpost pays for all 100. Its speed comes from its type. You buy IOPS, the small reads and writes it can do per second, and <Term id="throughput" />, the megabytes it moves per second. [Block Storage: Volume Types, IOPS and Snapshots](/cloud/data/block-storage) explains the types.
+
+A bucket bills for what it holds, plus a small fee per request and a fee for data that leaves the cloud, called <Term id="egress" />. One read is slow next to a disk, but thousands of readers at once are fine. Colder <Term id="storage-class">storage classes</Term> cost less to keep and more to read back.
+
+### Step 6: How each shape is backed up
+
+<AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={5} minWidth={620} caption="Each shape keeps copies its own way: disk snapshots, a share backup and old object versions, all held in a backup vault." />
+
+Each shape has its own kind of copy.
+
+- **Disks: snapshots.** A <Term id="snapshot" /> saves the disk's blocks at one moment, and later snapshots save only the blocks that changed. A snapshot can become a new disk in another zone. For a database, use the database's own backup, or pause writes before the snapshot.
+- **Shares: share backups.** The service copies the whole share on a schedule. Some products also keep read-only snapshots inside the share, so a user can open yesterday's version of a file.
+- **Objects: versions and copies.** With versioning on, an overwrite or a delete keeps the old version. Replication copies new objects to a second bucket, in another region or account.
+
+The provider's own copies protect against broken hardware, not against your own delete. Keep one copy where the same mistake cannot reach it: another account, another region, or a vault that refuses deletes. Brightpost snapshots the print disks weekly, backs up the share nightly and keeps old object versions for 7 days. [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults) goes further.
+
+### Step 7: Four questions that pick a shape
+
+Ask them in this order. The first yes decides.
+
+1. **Does one machine need a disk of its own?** An operating system, a database you run yourself, a tool that needs steady low latency. Choose block storage.
+2. **Must several machines open the same files by path?** Software you cannot change, shared home folders, the templates of a content tool. Choose file storage.
+3. **Are files written once and read whole, perhaps by people outside?** Uploads, photos, exports, logs, backups. Choose object storage.
+4. **Must it grow with no known limit and stay cheap?** Choose object storage, with a colder class for old data.
+
+For a new system that stores files, start with object storage. A managed database, such as Brightpost's orders database, sits on block storage that the provider runs for you.
+
+## On AWS, Google Cloud and Azure
+
+The three shapes and their rules are the same on all three clouds. Only the names and a few mechanisms differ.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Object:** Amazon S3. Each bucket lives in one region. Storage classes and lifecycle rules move old objects to cheaper classes.
+    - **Block:** Amazon EBS volumes, attached to EC2 instances in the same Availability Zone. Some instance types also have instance store disks, whose data is lost when the instance stops.
+    - **File:** Amazon EFS, an NFS share for Linux that grows and shrinks with the files in it. Most file systems span the zones of the region.
+    - **Specialised file:** Amazon FSx: Windows File Server for SMB, Lustre for compute clusters, NetApp ONTAP and OpenZFS.
+    - **Backup:** EBS snapshots; AWS Backup plans that cover EBS, EFS, FSx and S3; S3 versioning and replication.
+
+    **The difference that changes a design.** An EBS volume lives in one zone. To use its data in another zone, you snapshot it and create a new volume from the snapshot there. So a server that must survive a zone failure keeps nothing on its volume that it cannot rebuild. Shared data goes to EFS or S3, and EFS bills for what is stored, so there is no share size to plan.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Object:** Cloud Storage. Each bucket has a location: one region, a dual-region or a multi-region. Storage classes and lifecycle rules work as on the other clouds.
+    - **Block:** Persistent Disk and Hyperdisk, attached to Compute Engine VMs. A disk is zonal, or regional: written to two zones of the region at once. Local SSD sits in the host machine; use it only for data you can lose.
+    - **File:** Filestore, a managed NFS share.
+    - **Specialised file:** NetApp Volumes for NetApp features and SMB; Managed Lustre for compute clusters.
+    - **Backup:** disk snapshots on a schedule; Backup and DR Service; Filestore backups; object versioning and soft delete in Cloud Storage.
+
+    **The difference that changes a design.** A regional disk keeps a second copy in another zone, written at the same moment as the first. If one zone fails, you attach the disk to a VM in the other zone, with no snapshot to restore. That makes one VM with a regional disk a simple way for a self-run database to survive the loss of a zone.
+  </Tab>
+  <Tab label="Azure">
+    - **Object:** Blob Storage. Blobs sit in containers inside a storage account. Access tiers and lifecycle rules move old blobs to cheaper tiers.
+    - **Block:** Managed Disks, attached to Azure Virtual Machines. A locally redundant disk lives in one zone; zone-redundant disks, offered for some disk types, write to several zones.
+    - **File:** Azure Files, managed SMB and NFS shares inside a storage account.
+    - **Specialised file:** Azure NetApp Files for demanding workloads; Azure Managed Lustre for compute clusters.
+    - **Backup:** disk snapshots; Azure Backup for VMs, disks, file shares and blobs; blob versioning and soft delete.
+
+    **The difference that changes a design.** Blob Storage and Azure Files both live inside a storage account, and the account sets the redundancy and network rules for everything in it. So you group data by how it must be copied and who may reach it, one account per group. Azure Files speaks SMB natively, so it is the usual home for Windows apps that need a shared drive.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/storage-three-shapes" stepper minWidth={620} caption="The whole story in five steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/storage-three-shapes" lead="aws" />
+
+## Try it
+
+Say how a program reaches the data, and see the service each cloud offers.
+
+<CloudDecisionTree topic="storage" />
+
+<Quiz>
+  <QuizItem question="With print files on each server's own disk, the balancer gave each of the 64 retries to either server. About how many should fail, and why not all of them?" hint="Where does a retry find its file?">
+    About half, and 33 did. A retry that returned to the server that made the file found it on that server's disk. A retry sent to the other server found nothing.
+  </QuizItem>
+  <QuizItem question="Brightpost makes about 400 print files a day at about 40 MB each, and a lifecycle rule deletes them after 30 days. How much does the bucket hold once it settles?" hint="Files per day, times size, times days kept.">
+    About 480 GB: 400 × 40 MB is 16 GB a day, times 30 days. It stays there because each day's new files replace the day that expires. Nobody sizes anything.
+  </QuizItem>
+  <QuizItem question="Someone suggests keeping the orders database's data files in a bucket, because buckets cost less per gigabyte. What goes wrong?">
+    A database changes small pieces of its files many times a second. An object can only be replaced whole, and each request takes tens of milliseconds. Every small change would rewrite a whole file, slowly. The database belongs on a disk.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Disk on each server", "One file share", "Object storage"]}
+  rows={[
+    ["A retry on the other server finds the file", false, true, true],
+    ["Change to the render tool", "None", "One folder path", "Write and read by key"],
+    ["Size to plan", "Each disk: 100 GB", "Depends on the product", "None"],
+    ["Who can read a file", "Only the server that made it", "Both servers", "Both servers, and the partner by signed link"],
+    ["Old files removed by", "A clean-up script on each server", "A clean-up script", "A lifecycle rule"],
+    ["Brightpost uses it now for", "Operating system and render tool", "2 GB of templates and fonts", "Print files"],
+  ]}
+  caption="Brightpost's three options for print files."
+/>
+
+The share fixed the incident in an afternoon. The bucket was a month's work, and it removed the clean-up scripts, the sends and the size planning.
+
+## Common pitfalls
+
+- **A database on object storage.** A database rewrites small pieces of its files all the time, and an object can only be replaced whole. Run the database on a disk, or use a managed database, and send its backups to a bucket.
+- **Photos on a server's disk.** They fill a disk you sized by hand, and the next server cannot see them. Put them in a bucket behind an edge cache.
+- **A shared folder faked with a sync script.** Copying files between servers every 5 minutes leaves each file missing for up to 5 minutes, edits clash and deleted files come back. Use a real share.
+- **A folder used as a queue.** One server drops files and another polls the folder. Two readers can take the same file, and a crash loses track of it. Use a [queue](/cloud/data/streaming-and-messaging-services).
+- **Snapshots as the only backup.** A snapshot in the same account as the disk can be deleted by the same mistake or the same intruder. Copy backups to another account or region, and lock the copies.
+
+## How to say it in an interview
+
+"I pick a storage shape by how the program reaches the data. A block volume is a disk for one machine in one zone, with low latency and in-place writes. It holds operating systems and databases, and bills for the size I provision. A file share is a folder many machines mount over NFS or SMB; I use it when existing software needs a shared path. Everything written once and read whole, such as uploads, exports and backups, goes to object storage. It has no size to plan, serves any number of readers and is the cheapest per gigabyte. Each shape is backed up its own way, snapshots, share backups or object versions, with a copy kept in another account."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is the difference between object, block and file storage on a cloud?" level="Junior" category="Cloud">
+    **Short answer.** Block storage is a disk attached to one machine. File storage is a folder that many machines mount and use by path. Object storage holds whole files under keys, written and read with web requests.
+
+    **Why.** The difference is the way in, and it decides who can share the data. A disk belongs to one machine, so it suits an operating system or a database. A share gives several servers the same files, as Brightpost's print servers needed after a retry could not find its file. A bucket suits files written once and read whole, such as 400 print files a day, and it never needs sizing.
+
+    <AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={5} highlight={["da", "share", "bucket"]} caption="One disk, one share and one bucket, each doing the job its shape fits." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which of the three can you edit part of a file in?
+    - Which shape does a managed database use underneath?
+
+    **Watch out for.** Saying object storage is "a file system in the cloud". It has no folders to mount and no in-place edits; a key only looks like a path.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Many containers must serve product photos. Would you use a block volume, a file share or object storage?" level="Mid" category="Cloud">
+    **Short answer.** Object storage. Photos are written once and read whole, by any number of readers. A bucket serves them without a size to plan, and an edge cache in front takes most of the reads.
+
+    **Why.** A block volume attaches to one machine, so the other containers cannot see it. A file share would work, but costs more per gigabyte and adds a network round trip to every file opened. With a bucket, clients can upload and download directly with signed links, so photo bytes skip the containers.
+
+    <AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={4} path="pb>bucket>partner" caption="Servers write by key; anyone with a signed link reads the object directly." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you stop strangers from listing every photo?
+    - What happens to the bill if every photo is read from the bucket instead of the cache?
+
+    **Watch out for.** Choosing the file share "because the code already writes to a folder". That fixes today's code and leaves you paying the highest price per gigabyte for files that never change.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why can't one block volume be attached to two servers in two zones?" level="Mid" category="Cloud">
+    **Short answer.** A volume lives in one zone, and its file system is managed by one operating system. A second writer would not see the first one's changes in memory, and the two would corrupt the disk.
+
+    **Why.** The volume reaches the server over the provider's network inside one zone. The server's operating system caches parts of the file system, and another machine cannot know about that cache. Brightpost's print servers hit the plain version of this: server B could not see disk A at all, so 33 retries failed. Shared-disk modes exist for some disk types, for cluster-aware software only, and within limits each cloud sets.
+
+    <AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={2} highlight={["pb", "db", "da"]} caption="Server B can read only its own disk; disk A belongs to server A." />
+
+    **Follow-ups the interviewer may ask.**
+    - How do you move a volume's data to another zone?
+    - Which cloud offers a disk that keeps a copy in a second zone?
+
+    **Watch out for.** Saying "turn on multi-attach and mount it on both". With an ordinary file system on top, that corrupts the data.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="When is a file share the right answer for a new system?" level="Mid" category="Cloud">
+    **Short answer.** When software that you cannot change needs a normal folder shared by several machines. Examples are a tool that reads templates by path, shared home folders and Windows apps that use a network drive.
+
+    **Why.** A share gives ordinary file operations, open, rename and lock, to many machines at once, so existing code works unchanged. Brightpost's render tool reads 2 GB of templates and fonts by path, and the share serves them to both servers. New code that writes whole files should use a bucket instead. A share costs more per gigabyte, and each file operation crosses the network.
+
+    <AnimatedDiagram spec="animated/cloud/storage-three-shapes" step={3} highlight={["pa", "pb", "share"]} caption="Two servers mount one folder and see the same files." />
+
+    **Follow-ups the interviewer may ask.**
+    - Why is a share a poor place for a database's files?
+    - How would you back up the share?
+
+    **Watch out for.** Using a share to pass work between servers by dropping files in a folder. That is a queue built badly; use a real queue.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How would you back up a system that uses all three storage shapes?" level="Senior" category="Cloud">
+    **Short answer.** Each shape gets its own copy: scheduled snapshots for disks, the service's backups for shares, and versioning plus replication for buckets. At least one copy goes to another account or region, locked against deletes. Then restores are tested on a schedule.
+
+    **Why.** The provider's own copies protect against broken hardware, not against a bad script or an intruder. Start from what each store holds. Brightpost's print disks hold only software an image can rebuild, so a weekly snapshot is enough; the share is backed up nightly. A database gets its own backups, not a raw disk snapshot. Decide how much data each store may lose, then set the schedule.
+
+    **Follow-ups the interviewer may ask.**
+    - How do you stop an intruder with admin rights from deleting the backups too?
+    - How often would you test a restore, and what would you measure?
+
+    **Watch out for.** Saying "object storage is durable, so the bucket needs no backup". Durability covers lost hardware; a delete is copied to every replica as faithfully as a write.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Where Data Lives on the Cloud](/cloud/data/data-on-the-cloud)
+- [Object Storage: Tiers, Lifecycle, Versioning and Redundancy](/cloud/data/object-storage)
+- [Block Storage: Volume Types, IOPS and Snapshots](/cloud/data/block-storage)
+- [File Shares, Hybrid Storage and Moving Bulk Data](/cloud/data/file-hybrid-and-transfer)
+- [Virtual Machines, Instance Families and Images](/cloud/compute/virtual-machines)
+- [Backups, Snapshots, Vaults and Immutability](/cloud/resilience/backups-and-vaults)
+- [Storage on AWS](/cloud/aws/storage)
+- [Storage on Google Cloud](/cloud/gcp/storage)
+- [Storage on Azure](/cloud/azure/storage)
+- [Files, blocks and objects](/system-design/fundamentals/storage-types)
+- [Object / Blob Storage](/system-design/databases/object-storage)
+
+## Further reading
+
+- [Amazon S3 User Guide](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html): buckets, keys and storage classes.
+- [Amazon EFS User Guide](https://docs.aws.amazon.com/efs/latest/ug/whatisefs.html): managed NFS shares on AWS.
+- [Compute Engine storage options](https://cloud.google.com/compute/docs/disks): Persistent Disk, Hyperdisk and Local SSD.
+- [Introduction to Azure Storage](https://learn.microsoft.com/azure/storage/common/storage-introduction): blobs, files and disks.

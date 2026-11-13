@@ -10,7 +10,8 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // fonts that the render tool opens by path. Step 5: each shape gets its own backup: disk snapshots, a share
 // backup and object versions, all copied to a backup vault.
 //
-// Nodes never move and never disappear. Edges a later step replaces are twins: server B's edge to disk B is a save
+// Nodes never move and never disappear. Edges a later step replaces are twins: the balancer-to-B edge is plain in
+// step 1, an orange retry in step 2 and plain again from step 3; server B's edge to disk B is a save
 // in step 1 and a red "not found" in step 2; the send to the partner is plain in step 1, red in step 2 and a green
 // retry from B in step 3, before the partner reads the bucket in step 4.
 //
@@ -141,7 +142,7 @@ const spec: DiagramSpec = {
     {
       id: "share",
       label: "File share",
-      sub: "one folder, two servers",
+      sub: "mounted by both",
       icon: "folder-share",
       tone: "violet",
       step: 3,
@@ -182,13 +183,13 @@ const spec: DiagramSpec = {
   edges: [
     // Step 1: a job reaches one print server, which saves the file on its own disk and sends it on.
     { from: "order", to: "lb", label: "print job", packet: true },
-    { from: "lb", to: "pa", label: "job", packet: true, delay: 1.2, labelAt: 0.55 },
-    { from: "lb", to: "pb", label: "job", packet: true, delay: 1.2 },
-    { from: "pa", to: "da", label: "save file", packet: true, delay: 2.4, until: 2 },
+    { from: "lb", to: "pa", packet: true, delay: 1.2 },
+    { from: "lb", to: "pb", packet: true, delay: 1.2, until: 1 },
+    { from: "pa", to: "da", label: "save file", packet: true, delay: 2.4, labelAt: 0.3, until: 2 },
     { from: "pb", to: "db", label: "save file", packet: true, delay: 2.4, until: 1 },
     { from: "pa", to: "partner", label: "send file", packet: true, delay: 3.6, labelAt: 0.75, until: 1 },
 
-    // Step 2: the partner is down; the retry lands on server B, which looks on its own disk and finds nothing.
+    // Step 2: the partner is down; the balancer gives the retry to server B, which looks on its own disk and finds nothing.
     {
       from: "pa",
       to: "partner",
@@ -199,9 +200,11 @@ const spec: DiagramSpec = {
       step: 2,
       until: 2,
     },
+    { from: "lb", to: "pb", label: "retry", tone: "orange", packet: true, labelAt: 0.8, step: 2, until: 2 },
     { from: "pb", to: "db", label: "file not found", tone: "red", dashed: true, step: 2, until: 2 },
 
     // Step 3: both servers mount one share, so the retry on B finds A's file. The mounts run down the gutter.
+    { from: "lb", to: "pb", packet: true, delay: 1.2, step: 3 },
     {
       from: "pa",
       to: "share",
@@ -221,7 +224,7 @@ const spec: DiagramSpec = {
         [285, 300],
         [285, 520],
       ],
-      labelAt: 0.8,
+      labelAt: 0.88,
       step: 3,
     },
     { from: "pb", to: "partner", label: "retry: found", tone: "green", packet: true, labelAt: 0.7, step: 3, until: 3 },
@@ -241,7 +244,7 @@ const spec: DiagramSpec = {
       step: 4,
     },
     { from: "pb", to: "bucket", label: "PUT", packet: true, delay: 1.2, labelAt: 0.35, step: 4 },
-    { from: "bucket", to: "partner", label: "signed link", packet: true, delay: 2.4, step: 4 },
+    { from: "bucket", to: "partner", label: "signed link", packet: true, delay: 2.4, labelAt: 0.82, step: 4 },
 
     // Step 5: each shape has its own way to keep a copy, and the copies live in a vault.
     {
@@ -268,7 +271,7 @@ const spec: DiagramSpec = {
       labelAt: 0.4,
       step: 5,
     },
-    { from: "bucket", to: "vault", label: "versions", dashed: true, flow: true, step: 5 },
+    { from: "bucket", to: "vault", label: "versions", dashed: true, flow: true, labelAt: 0.25, step: 5 },
   ],
 };
 
