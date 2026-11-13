@@ -12,7 +12,7 @@ import type { LayoutShape, LayoutSpec } from "@/components/diagrams/types";
 //
 // Geometry: groups at x 10 and 405, each 375 wide, y 34 to 314. Copy columns are 108 wide with a gap of 10, starting
 // at x 26 (VMs) and 421 (containers), so the third ends at 370 or 765. Rows: app 60, libraries 106, guest OS or
-// runtime 152 (44 tall), hypervisor or host OS 206, server 256. Step-2 rows at y 334 and 388, outside the groups.
+// runtime 152 (44 tall), hypervisor or host OS 206, server 256. Step-2 rows at y 334 and 392 (a 14-unit gap keeps the NEW badges clear), outside the groups.
 // Box labels fit width - 8 at 6.2 px per character: "Wall: its own kernel per VM" (27) needs 175 of 336.
 
 const COPY_X = [0, 118, 236];
@@ -112,7 +112,7 @@ const shapes: LayoutShape[] = [
     id: "vm-wall",
     type: "box",
     x: 26,
-    y: 388,
+    y: 392,
     w: 344,
     h: 44,
     label: "Wall: its own kernel per VM",
@@ -124,7 +124,7 @@ const shapes: LayoutShape[] = [
     id: "ctr-wall",
     type: "box",
     x: 421,
-    y: 388,
+    y: 392,
     w: 344,
     h: 44,
     label: "Wall: one shared kernel",
@@ -138,7 +138,7 @@ const spec: LayoutSpec = {
   kind: "layout",
   title: "Virtual machines and containers on one server",
   width: 790,
-  height: 446,
+  height: 452,
   groups: [
     { id: "vms", title: "Three virtual machines", tone: "orange", x: 10, y: 34, w: 375, h: 280 },
     { id: "ctrs", title: "Three containers", tone: "teal", x: 405, y: 34, w: 375, h: 280 },
