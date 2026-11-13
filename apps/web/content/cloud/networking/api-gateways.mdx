@@ -1,11 +1,322 @@
 ---
 title: "API Gateways & API Management"
-description: "What a managed API gateway does on every request, how it differs from a load balancer or a mesh, and when the extra hop is worth it."
-status: outline
+description: "One gateway in front of many services: tokens checked once, versions and end dates, partner portals, plans and quotas, and logs per API and per caller."
+updated: 2026-11-13
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
+## In one sentence
 
-**What it will cover:** the one door in front of all your APIs: routing, authentication, keys and quotas, throttling, versioning, transformation and developer portals; gateway versus load balancer versus service mesh; and when the extra hop is worth it.
+<KeyIdea>
+  When many services share one front door, the door can do the jobs they all need, such as checking who is calling, so each job is done once and done the same way.
+</KeyIdea>
 
-**Related reading on this site:** [API gateways and backends for frontends](/system-design/fundamentals/api-gateway) · [Rate Limiting](/system-design/patterns/rate-limiting) · [Serverless & Orchestration on AWS](/cloud/aws/serverless)
+## The story
+
+Brightpost's wholesale API now has three services: orders, stock and invoices. About 300 gift shops' tills call them through one gateway, which checks each shop's key and limits its rate. Each morning a till signs in and gets a token that lasts 1 hour. The gateway passes the token on, and each service checks it in its own code. That makes three copies, written by three people over three months. The invoices copy checks the token's signature but never its expiry time. On a Friday night, a till is stolen in a break-in at shop 64. On Saturday morning Brightpost blocks that till's sign-in, so it can get no new token. Orders and stock refuse its last token once its hour is up. The invoices service keeps accepting it. For 8 days, someone downloads 41 of shop 64's invoices, with its prices, orders and address. Nobody notices, because each service logs in its own format and none counts calls per till. Asha finds the gap on day 9, while copying the token check into a fourth service.
+
+No single line of code was hard. The check lived in three places, so it could be wrong in one. Every step below moves one shared job into the gateway.
+
+## How it works
+
+Three words first. A **token** is a short-lived, signed note that says who the caller is and when the note stops working. An <Term id="api-gateway">API gateway</Term> is a door that reads every call before passing it to a service. **API management** is the gateway plus the work around it: a catalogue of APIs, a portal for outside developers, plans, versions and reports.
+
+### Step 1: One door in front of several services
+
+<AnimatedDiagram spec="animated/cloud/api-gateway-request" step={1} minWidth={620} caption="Every till call passes one gateway, but each service checks the sign-in token in its own code." />
+
+Brightpost's gateway already knows which shop sends each call, because every shop has its own key. It also caps each shop's rate, as [Hosting REST and GraphQL APIs](/cloud/networking/hosting-apis) showed. But a key only names the shop. It is a fixed string, saved in every till's settings, and it never expires.
+
+The proof that this caller is a signed-in till, right now, is the token. Here, three services each check it alone, with checks A, B and C. A gateway shared by many services, and why that helps, is taught in [API gateways and backends for frontends](/system-design/fundamentals/api-gateway). This page covers what managed gateways add on the cloud.
+
+<PremiumBreak />
+
+### Step 2: Three copies of one check
+
+<AnimatedDiagram spec="animated/cloud/api-gateway-request" step={2} minWidth={620} caption="The failure: the stolen till's key still works, and the invoices service's check never reads the expiry time." />
+
+The gateway sees a valid key for shop 64, because the shop's other 2 tills use the same key. So it passes the stolen till's calls on.
+
+<Callout tone="red" title="What breaks">
+  Checks A and B read the token's expiry time and refuse it after its hour. Check C reads the shop number and the signature, and stops there. From Saturday to day 9, the stolen till downloads 41 invoices, about 5 a day. Each service writes its own logs, in its own format, with no column for the till. So no one view shows one till that only calls invoices.
+</Callout>
+
+The fix is not a fourth, better copy. It is one check, in one place, that every call must pass.
+
+### Step 3: Check the token once, at the door
+
+<AnimatedDiagram spec="animated/cloud/api-gateway-request" step={3} minWidth={620} caption="A sign-in service issues the tokens. The gateway checks each one with the service's keys and refuses the stolen till." />
+
+Brightpost's tokens use a common format, the **JWT** (JSON Web Token): a few named fields plus a signature. A sign-in service issues them, using **OAuth 2.0**, the standard way a program asks for a token. The gateway fetches the sign-in service's public keys, keeps a copy, and checks four things on every call:
+
+1. **Signature:** the sign-in service made this token, and nobody changed it.
+2. **Expiry:** the token's hour is not over.
+3. **Issuer:** it came from Brightpost's sign-in service, not another one.
+4. **Audience:** it was made for this API, not for a different app.
+
+A failed check stops the call at the door. A good call goes on with the checked shop number attached. The services stop checking tokens, and they accept calls only from the gateway. [Authentication for APIs](/system-design/fundamentals/api-auth) explains tokens in depth.
+
+### Step 4: Two versions side by side
+
+<AnimatedDiagram spec="animated/cloud/api-gateway-request" step={4} minWidth={620} caption="Orders v2 runs next to v1. The gateway sends /v1 and /v2 to the right service and tells /v1 callers the end date." />
+
+The order API needs a breaking change. Version 2 sends prices in pence as whole numbers, so 4.50 becomes 450. A till that reads v2 as if it were v1 would show prices 100 times too high. So the two versions run side by side, and the version is part of the address: `/v1/orders` and `/v2/orders`.
+
+The gateway routes each path to its service. On every `/v1` answer, it adds two response headers: one says the version is deprecated, which means it will be retired, and one gives the end date. Brightpost gives shops 6 months. A gateway can also send a share of calls, such as 10 in 100, to a new build first. That is a <Term id="canary">canary</Term>. [API design](/system-design/fundamentals/api-design) covers versioning styles.
+
+### Step 5: Small changes on the way through
+
+A gateway can change a request before it reaches the service, and the answer before it reaches the caller. That is **transformation**. Brightpost uses four small kinds:
+
+1. **Add a header:** the checked shop number, so services never read the token.
+2. **Strip a header:** internal headers that name servers or versions are removed from answers.
+3. **One error shape:** every refusal comes back in the same format, whichever service sent it.
+4. **Rename a field:** for 3 old till models, the gateway renames one field so they keep working.
+
+Keep these small. A rule such as "shops in Wales get free delivery" belongs in a service, where it is tested and reviewed like code.
+
+### Step 6: Partners: a portal, keys and plans
+
+<AnimatedDiagram spec="animated/cloud/api-gateway-request" step={5} minWidth={620} caption="Partner apps sign up on the developer portal, get a key, and call the gateway on a plan of their own." />
+
+Two marketplace apps want to show Brightpost's cards and stock. Brightpost does not want to email keys by hand. A **developer portal** is a website for outside developers. It shows the API documentation, built from the API's description file, and lets them try calls and sign up for a key.
+
+Each key is tied to a **plan**: which APIs it may call, how fast, and how many calls a day. Some clouds call a bundle of APIs with its plan a "product".
+
+<Compare
+  columns={["", "Gift shops plan", "Partner plan"]}
+  rows={[
+    ["Who", "About 300 shops' tills", "2 marketplace apps"],
+    ["APIs", "Orders, stock, invoices", "Stock and catalogue, read only"],
+    ["Rate", "5 calls a second", "2 calls a second"],
+    ["Daily quota", "20,000 calls", "5,000 calls"],
+  ]}
+  caption="Brightpost's two plans. A partner can never reach the order or invoice APIs, whatever it sends."
+/>
+
+A <Term id="quota">quota</Term> caps the total, and the rate caps the speed; [Rate limiting](/system-design/patterns/rate-limiting) explains how they are counted.
+
+### Step 7: Seeing each API and each caller
+
+<AnimatedDiagram spec="animated/cloud/api-gateway-request" step={6} minWidth={620} caption="The gateway writes one log line per call, so every API and every key can be counted the same way." />
+
+Every call now passes one place, so one place can record it. The gateway writes one line per call: time, key, till, path, version, result and time taken. From those lines come two views:
+
+- **Per API:** calls, errors and the slowest 1 in 100 calls (<Term id="p99">p99</Term>) for orders, stock and invoices.
+- **Per caller:** calls, errors and versions for each shop, till and partner.
+
+Three weeks before the `/v1` end date, one query shows 23 shops still on `/v1`, so the team emails those 23. A till that calls only invoices, at night, now stands out in the per-caller view. [Observability on the cloud](/cloud/operations/observability-on-the-cloud) covers alarms and dashboards.
+
+### Step 8: Where the gateway sits
+
+<AnimatedDiagram spec="animated/cloud/gateway-vs-lb" minWidth={620} caption="Five layers, five questions. Only the gateway knows which shop is calling, and only the service knows what the call means." />
+
+A call from a till can pass up to five layers, and each one owns one question. The edge cache owns copies of public answers. The <Term id="waf">WAF</Term> (web application firewall) owns traffic that looks like an attack. The <Term id="load-balancer">load balancer</Term> owns healthy servers. The gateway owns who is calling and what they may call. The service owns the business rule: may shop 64 open invoice 9031?
+
+Do not move a question to the wrong layer. A gateway that checks the token cannot know which invoices belong to which shop. [CDN, edge and WAF](/cloud/networking/cdn-edge-and-waf) and [Load balancing](/cloud/networking/load-balancing) cover those layers. Calls between Brightpost's own services skip the public gateway; [Service-to-service calls](/cloud/networking/service-to-service) covers that path.
+
+## On AWS, Google Cloud and Azure
+
+The idea is the same on all three clouds: one gateway checks tokens, routes versions, applies plans and logs every call.
+
+<Tabs title="On each cloud">
+  <Tab label="AWS">
+    - **Gateway:** Amazon API Gateway, in two main kinds. REST APIs carry the most features. HTTP APIs are lighter and built for passing calls through.
+    - **Token check:** HTTP APIs have a built-in JWT authorizer that checks the issuer, audience and expiry. REST APIs use a Cognito user pool authorizer, or a Lambda authorizer that runs your own check.
+    - **Versions:** stages, such as `v1` and `v2`, mapped to paths on a custom domain. REST API stages can send a share of calls to a canary deployment.
+    - **Keys and plans:** API keys and usage plans, with a rate and a quota per key, on REST APIs only.
+    - **Portal and reports:** metrics and access logs go to CloudWatch. For a partner portal, check API Gateway's current portal options or host your own.
+
+    **The difference that changes a design.** The kind decides the features. Usage plans, request mapping templates and canary stages belong to REST APIs. HTTP APIs have the simplest built-in JWT check. Brightpost needs plans for partners, so it would pick REST APIs and check tokens with a Cognito authorizer.
+  </Tab>
+  <Tab label="Google Cloud">
+    - **Gateway:** Apigee is the full API management platform. API Gateway is a lighter gateway, set up from an OpenAPI file, for Cloud Run, functions and App Engine.
+    - **Token check:** API Gateway checks JWTs against an issuer and its public keys, named in the OpenAPI file. Apigee uses policies such as VerifyJWT and OAuthV2.
+    - **Versions:** Apigee API proxies have revisions, deployed to environments, with base paths such as `/v1` and `/v2`. API Gateway uses a new API config for each change.
+    - **Keys and plans:** Apigee bundles proxies into API products with quotas, and each developer app gets a key. API Gateway checks API keys and quotas per calling project.
+    - **Portal and reports:** Apigee has developer portal options and analytics by proxy, product and app. API Gateway reports to Cloud Logging and Cloud Monitoring.
+
+    **The difference that changes a design.** With Apigee, a load balancer usually sits in front of the gateway. An external Application Load Balancer takes the calls, with Cloud Armor as the WAF, and passes them to Apigee. So Step 8's order changes, but what each layer owns does not.
+  </Tab>
+  <Tab label="Azure">
+    - **Gateway:** Azure API Management (APIM). One service holds the gateway, the developer portal and the rules. On some tiers, a self-hosted gateway runs in your own containers.
+    - **Token check:** the validate-jwt policy checks the signature, issuer, audience and expiry. A separate policy checks tokens from Microsoft Entra ID.
+    - **Versions:** versions for breaking changes, by path, header or query string, grouped in a version set. Revisions for safe changes inside one version.
+    - **Keys and plans:** products group APIs, and subscriptions give each caller a key. The rate-limit-by-key and quota-by-key policies set plans.
+    - **Portal and reports:** a built-in developer portal where callers read docs, try calls and get keys. Analytics in APIM, plus Azure Monitor and Application Insights.
+
+    **The difference that changes a design.** APIM separates versions from revisions. A revision lets Brightpost test a change on a separate address, then make it current, and callers change nothing. A version is a new address, such as `/v2`, for a change that breaks callers. So small fixes never need a new version.
+  </Tab>
+</Tabs>
+
+<AnimatedDiagram spec="animated/cloud/api-gateway-request" stepper minWidth={620} caption="The whole story in six steps. The Services toggle shows each provider's name for every box." />
+
+<CloudMapping diagram="cloud/api-gateway-request" lead="aws" />
+
+## Try it
+
+<DecisionTree
+  title="Which door does this API need?"
+  tree={{
+    q: "Do people outside your company build on it?",
+    yes: {
+      q: "Do they need to sign up, read docs and pick plans without your help?",
+      yes: "Full API management: a developer portal, plans or products, and reports per caller.",
+      no: "A lighter managed gateway: token checks, a key and a plan per caller, and routes per version.",
+    },
+    no: {
+      q: "Is it calls between your own services inside your network?",
+      yes: {
+        answer: "No public gateway in the path. Use private service calls with workload identity, or a service mesh.",
+        href: "/cloud/networking/service-to-service",
+      },
+      no: "If several services share one sign-in, a gateway still checks it once. For one service and your own app, a layer 7 load balancer is enough.",
+    },
+  }}
+/>
+
+<Quiz>
+  <QuizItem question="A till gets a token at 23:10 and is stolen at 23:30. Brightpost blocks its sign-in at once. With the gateway checking every token, until when can the till still call?" hint="Blocking sign-in stops new tokens. What about the one it has?">
+    Until 00:10, when its current token expires. Blocking sign-in stops new tokens only. To close that hour, use shorter tokens or a list of refused token ids at the gateway.
+  </QuizItem>
+  <QuizItem question="Three weeks before the /v1 end date, 23 shops still call /v1. What do you do, and what do you not do?">
+    Email those 23 shops, using the per-caller view, and keep /v1 running until the date. Do not switch /v1 off early, or 23 tills stop taking orders.
+  </QuizItem>
+  <QuizItem question="A partner app on the partner plan has made 5,000 calls by 17:00. What happens to its next call, and to the other partner?" hint="Whose quota is it?">
+    The gateway refuses it with "too many requests" until the daily quota resets. The other partner has its own key and its own count, so it carries on.
+  </QuizItem>
+</Quiz>
+
+## Trade-offs
+
+<Compare
+  columns={["", "Checks in every service", "A light managed gateway", "Full API management"]}
+  rows={[
+    ["Copies of the token check", "One per service: 3 at Brightpost", "One", "One"],
+    ["Versions and end dates", "Each team on its own", "Routes per version", "Versions, revisions and notices in one place"],
+    ["Partner sign-up", "Keys emailed by hand", "Keys made by an engineer", "Self-service portal"],
+    ["Reports per caller", "Only if every service logs the same way", "Logs and metrics per key", "Built-in analytics per API, plan and app"],
+    ["Extra wait per call", "None", "About 15 ms, Brightpost's measure", "About the same, plus time for each rule"],
+    ["Cost shape", "Engineer time, repeated per service", "Per call on most plans", "Often a fixed fee per hour or unit, sometimes plus calls"],
+  ]}
+  caption="Brightpost moved from the first column to the second, and uses the third for its partners."
+/>
+
+A gateway adds a few milliseconds and a bill. It removes copies of the same rule, and copies are where rules go wrong.
+
+## Common pitfalls
+
+- **Using API keys as proof of identity.** A key sits in every till's settings and never expires, so whoever copies it becomes the shop. Use keys to pick a plan; use short-lived tokens to prove who is calling.
+- **Trusting a shop-number header from anywhere.** If a service accepts that header from any caller, anyone can claim to be shop 64. Accept calls only from the gateway, on a private network.
+- **Changing v1 in place.** A breaking change to a live version stops every till that reads the old shape. Add `/v2`, send an end date on `/v1`, and retire it only when the logs show no callers.
+- **Business rules in the gateway.** Transformations are hard to test and review. Keep them to headers, error shapes and renames; put rules in services.
+- **The gateway checks the token, so the service checks nothing.** The gateway knows who calls, not which invoices are theirs. Each service still checks that the shop owns the order or invoice it asks for.
+
+## How to say it in an interview
+
+"When several services share one front door, I put an API gateway there and give it the jobs every service needs. It checks each token once: signature, expiry, issuer and audience. Then it passes the checked caller to services that accept calls only from it. Each service still checks that the caller owns the data. I version in the path, run v1 and v2 side by side, and send an end date on v1. For partners I add a portal, keys and plans with a rate and a daily quota. The gateway logs every call per API and per caller, so I can see who still uses an old version."
+
+## Interview questions
+
+<InterviewQuestions>
+  <InterviewQuestion question="Gateway or load balancer: what does each one own?" level="Junior" category="Cloud">
+    **Short answer.** A load balancer owns healthy servers and an even spread of calls. A gateway owns who is calling and what they may call: tokens, keys, plans, versions and logs per caller. Many designs use both.
+
+    **Why.** Brightpost's balancer cannot tell shop 64 from shop 65. Its gateway can, because it reads each call's token and key. The service then answers the last question: may shop 64 open invoice 9031?
+
+    <AnimatedDiagram spec="animated/cloud/gateway-vs-lb" caption="Each layer answers one question; only the gateway knows the caller." />
+
+    **Follow-ups the interviewer may ask.**
+    - Which goes first, the balancer or the gateway?
+    - When is a balancer alone enough?
+
+    **Watch out for.** Saying the gateway replaces the balancer. Many designs keep a balancer in front of the gateway, behind it, or both.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Why check tokens at the gateway instead of in each service?" level="Mid" category="Cloud">
+    **Short answer.** One check in one place cannot drift. Copies in every service are written and updated by different people, and one of them will be wrong.
+
+    **Why.** Brightpost had three copies. The invoices copy never read the expiry time, so a stolen till's expired token worked for 8 days and fetched 41 invoices. With one check at the gateway, the same token is refused at the door. The services accept calls only from the gateway, and still check who owns the data.
+
+    <AnimatedDiagram spec="animated/cloud/api-gateway-request" step={2} caption="Three copies of one check; the third skips the expiry time." />
+
+    **Follow-ups the interviewer may ask.**
+    - What stops a caller from going around the gateway?
+    - Should services check the token again, as defence in depth?
+
+    **Watch out for.** Removing every check from services. The gateway proves who calls; only the service knows which data is theirs.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you enforce per-customer quotas without touching service code?" level="Mid" category="Cloud">
+    **Short answer.** Give each customer its own key, tie the key to a plan with a rate and a daily quota, and let the gateway count and refuse. The services never see the extra calls.
+
+    **Why.** Brightpost's partner plan allows 2 calls a second and 5,000 a day, on stock and catalogue only. The gateway counts per key, so one partner's busy afternoon never uses up another's quota. A partner that calls the order API is refused, whatever it sends.
+
+    <AnimatedDiagram spec="animated/cloud/api-gateway-request" step={5} highlight={["partner", "portal", "gw"]} caption="Partners get a key from the portal; the gateway applies the partner plan to every call." />
+
+    **Follow-ups the interviewer may ask.**
+    - What should the client do when it is refused?
+    - How do you count quotas when the gateway runs in two regions?
+
+    **Watch out for.** Counting by caller address. Many callers can share one address, and one caller can use many.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="How do you ship a breaking change to an API that outside tills depend on?" level="Mid" category="Cloud">
+    **Short answer.** Never change the live version in place. Run the new version beside the old one on its own path, send an end date on every old-version answer, and retire it only when the logs show nobody still calls it.
+
+    **Why.** Brightpost's v2 sends prices in pence, so a till reading it as v1 would show prices 100 times too high. The gateway routes `/v1` and `/v2` to different services and adds the end date, 6 months out. Three weeks before it, the per-caller view shows 23 shops still on v1, and the team emails them.
+
+    <AnimatedDiagram spec="animated/cloud/api-gateway-request" step={4} path="gw>orders2" caption="The new version runs beside the old one; the gateway routes each path." />
+
+    **Follow-ups the interviewer may ask.**
+    - Version in the path, a header or the query string?
+    - Which changes are safe without a new version?
+
+    **Watch out for.** Announcing an end date with no way to see who still uses the old version.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="Design a public API for 500 partners with versioning, keys, plans and a developer portal, and pick a service on each cloud." level="Senior" category="Cloud">
+    **Short answer.** Put a full API management service in front: a portal for sign-up and docs, a key per partner app, plans with rates and quotas, versions in the path, and analytics per partner. On AWS, API Gateway REST APIs with usage plans, plus a portal. On Google Cloud, Apigee. On Azure, API Management.
+
+    **Why.** With 500 partners, sign-up and keys must be self-service, or an engineer spends days on emails. Plans let you offer a free tier and paid tiers, and the analytics feed billing. Tokens from a sign-in service prove who calls; the gateway checks them once. Behind it, services accept calls only from the gateway.
+
+    <AnimatedDiagram spec="animated/cloud/api-gateway-request" step={6} caption="One door that checks, routes, applies plans and logs every call." />
+
+    **Follow-ups the interviewer may ask.**
+    - How would you bill partners from the gateway's counts?
+    - How do you keep two regions' quota counts in step?
+
+    **Watch out for.** Picking the lighter gateway for a partner programme. Its keys and quotas work, but without a portal and analytics the team does that work by hand.
+  </InterviewQuestion>
+
+  <InterviewQuestion question="If every call goes through the gateway, is it a single point of failure?" level="Senior" category="Cloud">
+    **Short answer.** It is a single door, so design it like one. Managed gateways run across several zones in a region. If you need to survive a whole region failing, run a gateway in a second region and switch with DNS.
+
+    **Why.** A gateway in one region fails with that region, and every API behind it goes with it. A second region doubles the bill and needs the same keys, plans and certificates in both. Brightpost has no second region yet, so it accepts that risk and keeps its gateway setup as code to rebuild fast.
+
+    **Follow-ups the interviewer may ask.**
+    - Where do quota counts live if two regions serve the same partner?
+    - What should a gateway do when the sign-in service is down?
+
+    **Watch out for.** Forgetting the gateway's own limits. Account-wide caps apply above your plans, so check them before a sale day.
+  </InterviewQuestion>
+</InterviewQuestions>
+
+## Related
+
+- [Hosting REST and GraphQL APIs](/cloud/networking/hosting-apis)
+- [Load Balancing: L4 vs L7, Regional vs Global](/cloud/networking/load-balancing)
+- [CDN, Edge, DDoS & WAF](/cloud/networking/cdn-edge-and-waf)
+- [Service-to-Service Calls on the Cloud](/cloud/networking/service-to-service)
+- [Receiving and Sending Webhooks on the Cloud](/cloud/networking/webhooks-on-the-cloud)
+- [Identity and access](/cloud/fundamentals/identity-and-access)
+- [Serverless Functions: Triggers, Cold Starts and Concurrency](/cloud/compute/serverless-functions)
+- [API gateways and backends for frontends](/system-design/fundamentals/api-gateway)
+- [Authentication for APIs](/system-design/fundamentals/api-auth)
+- [Rate Limiting](/system-design/patterns/rate-limiting)
+
+## Further reading
+
+- [Amazon API Gateway Developer Guide](https://docs.aws.amazon.com/apigateway/latest/developerguide/welcome.html): REST and HTTP APIs, authorizers, usage plans.
+- [Apigee documentation](https://cloud.google.com/apigee/docs): API proxies, products and the developer portal.
+- [Google Cloud API Gateway documentation](https://cloud.google.com/api-gateway/docs): a lighter gateway set up from OpenAPI.
+- [Azure API Management documentation](https://learn.microsoft.com/azure/api-management/): policies, products, versions and the developer portal.
