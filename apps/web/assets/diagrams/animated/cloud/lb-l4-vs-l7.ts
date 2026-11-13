@@ -210,7 +210,7 @@ const spec: DiagramSpec = {
   ],
   edges: [
     // Step 1: one public address; the balancer shares shoppers between the servers.
-    { from: "shoppers", to: "lb", label: "HTTPS", packet: true, via: [[380, 100]], labelAt: 0.3, until: 5 },
+    { from: "shoppers", to: "lb", label: "HTTPS", packet: true, via: [[380, 100]], labelAt: 0.38, until: 5 },
     { from: "lb", to: "app-a", packet: true, delay: 1, until: 1 },
     { from: "lb", to: "app-b", packet: true, delay: 1.3 },
 
