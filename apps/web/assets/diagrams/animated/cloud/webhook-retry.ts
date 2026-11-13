@@ -19,7 +19,7 @@ const spec: SequenceSpec = {
   ],
   lanes: [
     { id: "outbox", label: "Outbox", icon: "log", tone: "violet" },
-    { id: "worker", label: "Delivery worker", icon: "workers", tone: "teal" },
+    { id: "worker", label: "Worker", icon: "workers", tone: "teal" },
     { id: "shop", label: "Gift shop API", icon: "bag", tone: "neutral" },
   ],
   messages: [

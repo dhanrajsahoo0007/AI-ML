@@ -14,17 +14,18 @@ import type { DiagramSpec } from "@/components/diagrams/types";
 // Nodes never move. The handler is the same node in every step: the same code, first called inline, later fed by
 // the queue. Edges that a later step replaces end with `until`.
 //
-// Layout: three columns (x 120 | 400 | 680) and four rows (y 95 | 255 | 415 | 575).
+// Layout: three columns (x 112 | 380 | 680) and four rows (y 95 | 255 | 415 | 575).
 //   Left, "outside and secrets": provider, secret store, printing partner, gift shops.
 //   Middle, "Brightpost's path": webhook endpoint, payment handler, orders database, delivery worker.
 //   Right, "added later": queue, dead-letter queue, processed events, outbox.
-// provider 120,95 | endpoint 400,95 | queue 680,95 | secret 120,255 | handler 400,255 | dlq 680,255 |
-// partner 120,415 | db 400,415 | seen 680,415 | shops 120,575 | delivery 400,575 | outbox 680,575.
+// provider 112,95 | endpoint 380,95 | queue 680,95 | secret 112,255 | handler 380,255 | dlq 680,255 |
+// partner 112,415 | db 380,415 | seen 680,415 | shops 112,575 | delivery 380,575 | outbox 680,575.
 //
 // Why this order: on a phone the figure opens on the left 480 units. Steps 1 and 2 use only provider, handler,
-// database and printing partner, all in the left and middle columns.
-// Columns are 104 units apart between boxes, so a pill of up to about 14 characters fits on a horizontal edge.
-// Zone tabs are short ("Edge", "Workers", "Data") so the vertical edges at x 400 enter right of them.
+// database and printing partner, all in the left and middle columns; the middle boxes end at x 472.
+// Gaps between boxes are 92 (left-middle) and 124 (middle-right) units, room for a pill of about 11 and 15
+// characters. Zone tabs are short ("Edge", "Workers", "Data") and the middle zones start at x 270, so the vertical
+// edges at x 380 enter right of the tabs.
 // Text room: up to 7.2 px per label character and 5.5 px per sub character after 52 px for the icon. Nodes are
 // sized for the longest name the Services toggle shows ("Cloud Run worker", "Function (queue)", "Dead-letter topic").
 const spec: DiagramSpec = {
@@ -41,14 +42,14 @@ const spec: DiagramSpec = {
     { title: "Sending: an outbox and a delivery worker" },
   ],
   zones: [
-    { id: "outside", title: "Provider", tone: "neutral", x: 20, y: 40, w: 200, h: 100 },
-    { id: "security", title: "Security", tone: "red", x: 20, y: 200, w: 200, h: 100 },
-    { id: "partners", title: "Partners", tone: "neutral", x: 20, y: 360, w: 200, h: 260 },
-    { id: "edge", title: "Edge", tone: "blue", x: 300, y: 40, w: 200, h: 100 },
-    { id: "workers", title: "Workers", tone: "teal", x: 300, y: 200, w: 200, h: 100 },
+    { id: "outside", title: "Provider", tone: "neutral", x: 12, y: 40, w: 200, h: 100 },
+    { id: "security", title: "Security", tone: "red", x: 12, y: 200, w: 200, h: 100 },
+    { id: "partners", title: "Partners", tone: "neutral", x: 12, y: 360, w: 200, h: 260 },
+    { id: "edge", title: "Edge", tone: "blue", x: 270, y: 40, w: 210, h: 100 },
+    { id: "workers", title: "Workers", tone: "teal", x: 270, y: 200, w: 210, h: 100 },
     { id: "messaging", title: "Messaging", tone: "orange", x: 580, y: 40, w: 200, h: 260 },
-    { id: "data", title: "Data", tone: "violet", x: 300, y: 360, w: 480, h: 100 },
-    { id: "sending", title: "Sending", tone: "orange", x: 300, y: 520, w: 480, h: 100 },
+    { id: "data", title: "Data", tone: "violet", x: 270, y: 360, w: 510, h: 100 },
+    { id: "sending", title: "Sending", tone: "orange", x: 270, y: 520, w: 510, h: 100 },
   ],
   nodes: [
     // Step 1
@@ -58,7 +59,7 @@ const spec: DiagramSpec = {
       sub: "waits 10 s for a reply",
       icon: "card",
       tone: "neutral",
-      x: 120,
+      x: 112,
       y: 95,
       w: 176,
     },
@@ -68,7 +69,7 @@ const spec: DiagramSpec = {
       sub: "marks orders paid",
       icon: "workers",
       tone: "teal",
-      x: 400,
+      x: 380,
       y: 255,
       w: 176,
       cloud: {
@@ -83,7 +84,7 @@ const spec: DiagramSpec = {
       sub: "PostgreSQL",
       icon: "database",
       tone: "violet",
-      x: 400,
+      x: 380,
       y: 415,
       w: 176,
       cloud: {
@@ -98,7 +99,7 @@ const spec: DiagramSpec = {
       sub: "prints and posts",
       icon: "building",
       tone: "neutral",
-      x: 120,
+      x: 112,
       y: 415,
       w: 176,
     },
@@ -111,9 +112,9 @@ const spec: DiagramSpec = {
       icon: "webhook",
       tone: "blue",
       step: 3,
-      x: 400,
+      x: 380,
       y: 95,
-      w: 176,
+      w: 184,
       cloud: {
         aws: { id: "aws-api-gateway", label: "API Gateway" },
         gcp: { id: "gcp-cloud-run", label: "Cloud Run (HTTP)" },
@@ -127,7 +128,7 @@ const spec: DiagramSpec = {
       icon: "vault",
       tone: "red",
       step: 3,
-      x: 120,
+      x: 112,
       y: 255,
       w: 176,
       cloud: {
@@ -205,7 +206,7 @@ const spec: DiagramSpec = {
       icon: "workers",
       tone: "teal",
       step: 7,
-      x: 400,
+      x: 380,
       y: 575,
       w: 176,
       cloud: {
@@ -221,7 +222,7 @@ const spec: DiagramSpec = {
       icon: "bag",
       tone: "neutral",
       step: 7,
-      x: 120,
+      x: 112,
       y: 575,
       w: 176,
     },
