@@ -8,111 +8,201 @@ order: 7
 ## In one sentence
 
 <KeyIdea>
-**Invent and Simplify** is the ability to delete moving parts by reframing the problem rather than adding infrastructure, while **Think Big** connects a bold, 10x multi-year architecture vision to a pragmatic week-two first milestone.
+  **Invent and Simplify** means you look for a new way to do the job that leaves **fewer parts** than before. **Think
+  Big** means you propose a direction larger than the request, and tie it to a first step small enough to ship.
 </KeyIdea>
 
 ## The story
 
-When an engineering team is asked to support a new product requirement, their default instinct is almost always **additive**: add another microservice, add another Kafka topic, add another caching tier.
+When a team gets a new requirement, the usual move is to add something: another service, another queue, another cache. Two years on, one click passes through 19 services, nobody can run the system on a laptop, and half of on-call time goes on mismatched data formats between them.
 
-Two years later, a single user click traverses 19 microservices, nobody can run the stack on a laptop, and on-call engineers spend half their week debugging distributed serialization mismatches.
-Then a Senior Engineer steps back and asks: *"Why do we have three separate stateful services passing JSON over HTTP when all three read the same 40 MB configuration dataset that changes once an hour?"* They replace three microservices and a Redis cluster with an immutable SQLite snapshot pushed to S3 and memory-mapped locally inside the gateway, deleting 14,000 lines of code, cutting <Term id="p99" /> latency from 45 ms to 0.2 ms, and saving \$8,000/month.
+A senior engineer on the gateway team raises one thing in a design review. Three of those services pass JSON to each other, and all three read the same 40 MB configuration dataset, which changes once an hour. She asks why that needs three services.
 
-That is **Invent and Simplify**: true invention is measured not by how many boxes you draw on the whiteboard, but by **how many boxes you safely erase**.
+She replaces the three services and their cache cluster with one snapshot file. A job writes it to object storage each hour, and the gateway loads it into memory. 14,000 lines of code are deleted. <Term id="p99" /> for that path falls from 45 ms to 3 ms, and pages for it go from six a month to none.
 
-## What interviewers are really testing
+Then she looks sideways. Four other teams hold hourly reference data in the same heavy way. She writes up the snapshot as a shared pattern and helps one of those teams adopt it first.
 
-<AnimatedDiagram spec="animated/behavioral/amazon-lp-tensions" highlight={["dive", "think-big", "res-3"]} caption="Invent & Simplify and Think Big require spanning altitudes: seeing the 10x multi-year horizon while cutting unnecessary complexity today." />
+## What the interviewer scores
 
-| Principle | What strong L5/L6 signal looks like | What fails the Bar Raiser probe |
-| --- | --- | --- |
-| **Invent and Simplify** | Questioning problem assumptions to collapse 3 moving parts into 1; willing to be "misunderstood for long periods" while proving a contrarian simplification | Over-engineering a resume-driven architecture (adding Kubernetes + service mesh for a 20 RPS internal tool) |
-| **Think Big** | Spotting that 4 teams are solving the same point problem and proposing a unified platform with a concrete Phase-1 wedge | Pitching "sci-fi vaporware" with no path to incremental delivery or unit-economic grounding |
+<AnimatedDiagram
+  spec="animated/behavioral/simplify-and-think-big"
+  stepper
+  minWidth={700}
+  caption="One example of each principle. They pull against each other, because a bigger idea usually means more to build."
+/>
+
+1. **Invent and Simplify.** The invention is measured by what is gone afterwards: three services became one file.
+2. **Think Big.** One deletion tool for eight teams, where the request was a workflow for one.
+3. **Where they pull apart.** A big idea adds parts that someone must run. A simple design removes them.
+4. **A strong answer holds both.** A large direction, and a first step that is small, simple and useful alone.
+
+### Invent and Simplify
+
+In our words: expect new ideas from yourself and your team, take good ideas from anywhere, keep looking for the simpler way, and accept that a new idea may be misunderstood for a while.
+
+| A strong story shows                                                     | What weakens it                                         |
+| ------------------------------------------------------------------------ | ------------------------------------------------------- |
+| The system ended with fewer parts, or callers got a simpler interface    | A new framework, queue or cluster for a small problem   |
+| You questioned a requirement and showed with data that it was not needed | Every requirement treated as fixed                      |
+| You used an existing tool where one fitted, and said why where none did  | Your own database or message broker, built for interest |
+| People doubted it, and you answered with a small proof on real data      | Nobody disagreed, so nothing was at stake               |
+
+### Think Big
+
+In our words: thinking small limits what you can achieve. Set a bold direction that gets people moving, and look for ways to serve customers that nobody has asked for yet.
+
+| A strong story shows                                              | What weakens it                         |
+| ----------------------------------------------------------------- | --------------------------------------- |
+| You saw the same problem in several teams and proposed one answer | You built your team's copy and moved on |
+| A first milestone that shipped in weeks and was useful alone      | A vision document with no first step    |
+| A number for the size of the gain: weeks saved, teams served      | "It would be transformative"            |
+| You say who did not adopt it, and why                             | Every team adopted it                   |
 
 <PremiumBreak />
 
-## How the bar changes by level
+## A weak answer, then the fix
 
-<Compare
-  columns={["Dimension", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
-  rows={[
-    ["Invent & Simplify", "Automates a repetitive manual team workflow or simplifies a tangled module", "Replaces a brittle multi-component pipeline with a cleaner, lower-toil architecture", "Deletes entire classes of cross-team infrastructure or unifies fragmented data planes"],
-    ["Think Big Horizon", "Designs a component so it doesn't need a rewrite next quarter", "Designs a service architecture that scales 10x over 12–18 months", "Authors a 1–3 year PR/FAQ or technical vision that reshapes the org's product or platform"],
-  ]}
-  caption="At Amazon, 'Think Big' is often evaluated through the Working Backwards PR/FAQ lens: what is the customer headline 2 years from now?"
-/>
+### Invent and Simplify
 
-## Interactive diagnostic: test your story
+**Question:** _"Tell me about a time you found a simple solution to a complex problem."_
 
-<DecisionTree
-  title="Audit your Invent & Simplify or Think Big story"
-  tree={{
-    q: "In your Invent & Simplify story, did the system end up with FEWER moving parts, lower operational toil, or a simpler developer interface than the alternative?",
-    yes: {
-      q: "In your Think Big story, did you pair the 10x vision with a concrete, low-risk Phase 1 that delivered value in weeks rather than years?",
-      yes: {
-        answer: "Strong L6 calibration on both principles! Next: Frugality & Learn and Be Curious.",
-        href: "/behavioral/amazon-leadership-principles/frugality-and-curiosity",
-      },
-      no: "Anchor your Think Big vision in a 'strangler wedge': show how Milestone 1 proved the value in 4 weeks on one real customer workflow.",
-    },
-    no: "If you built something complex, explain the even-more-complex status quo it replaced, or how it hid complexity behind a dead-simple 3-line API for callers.",
-  }}
-/>
+<Tabs title="Invent and Simplify">
+  <Tab label="Weak answer">
+    *"Our fraud counters ran on a big streaming cluster that kept breaking. I redesigned it with a more modern architecture, using a new stream processor and a service mesh, and it was a lot cleaner. The team was impressed with the design."*
 
-## Worked engineering example (STAR+L)
-
-<Tabs title="Simplification vs. 10x Platform Vision">
-  <Tab label="Invent & Simplify (Deleting Moving Parts)">
-    **Prompt:** *"Tell me about a time you invented a simple solution to a complex technical problem."*
-
-    - **Situation & Task:** *"Our analytics ingestion pipeline used a 12-node Spark Streaming cluster + Redis dedup store to compute real-time 15-minute merchant fraud counters at 3,000 events/sec. It cost \$11k/month and paged on-call twice a week whenever Spark checkpoint state corrupted."*
-    - **Action:** *"During a post-mortem, I questioned why we needed exact event-ID deduplication and heavy JVM streaming for a sliding 15-minute fraud heuristic. I proved on 30 days of historical fraud labels that a probabilistic HyperLogLog + 1-minute tumbling window in plain Go workers had 99.8% recall parity with exact state. I built a 400-line stateless Go consumer backed by Postgres unlogged tables in 5 days."*
-    - **Result:** *"We decommissioned the entire Spark Streaming cluster, cut monthly infra spend from \$11k to \$650/month (94% reduction), reduced end-to-end lag from 18 seconds to 400 ms, and had zero on-call pages over the next 9 months."*
-    - **Learning:** *"Always audit whether a business problem actually requires exact distributed state before reaching for a stateful streaming engine."*
   </Tab>
-  <Tab label="Think Big (Turning Point Fixes into a Platform)">
-    **Prompt:** *"Tell me about a time you proposed a bold vision that looked beyond the immediate request."*
+  <Tab label="Fixed">
+    - **Situation and task.** *"Our pipeline computed 15-minute fraud counters per merchant at 3,000 events a second. It ran on a 12-node streaming cluster with a separate store for removing duplicates. It cost \$11,000 a month and paged us twice a week when its saved state was corrupted."*
+    - **Action.** *"In an incident review I asked why a 15-minute fraud signal needed exact duplicate removal. Nobody knew. It had been copied from the billing pipeline. I replayed 30 days of labelled fraud and showed that approximate counts in one-minute windows flagged 99.8 percent of the same merchants. In five days I wrote a 400-line consumer with no saved state, on tables we already ran. Two teammates were worried about losing exactness, so I ran both pipelines side by side for two weeks and posted the differences every day."*
+    - **Result.** *"We turned the cluster off. Cost went from \$11,000 to \$650 a month, lag from 18 seconds to under 1 second, and we had no pages from it in nine months. About 11 merchants a month are flagged a few minutes later than before, which the fraud team accepted."*
+    - **Learning.** *"Before I add a system that keeps state, I ask which requirement forces it, and I test that requirement on real data."*
 
-    - **Situation & Task:** *"Product asked my team to build a custom GDPR data-deletion workflow for our Orders service in 6 weeks. While scoping it, I noticed 7 other domain teams had the exact same compliance mandate on their Q3 roadmaps, each planning to build bespoke S3/Postgres scrubbers."*
-    - **Action:** *"I wrote a 4-page PR/FAQ proposing a unified, declarative **Privacy Deletion Orchestrator** where any service simply registered an idempotency webhook and a retention schema in YAML, while our central engine handled audit logs, retries, cryptographic erasure proofs, and SLA tracking. To avoid delaying our Q2 Orders deadline, I built the orchestrator with Orders as Tenant #0 in 5 weeks."*
-    - **Result:** *"Orders passed compliance on time, and all 7 sibling teams onboarded in under 3 days each instead of spending 6 weeks apiece, saving ~40 engineering-weeks across the org."*
-    - **Learning:** *"The best way to sell a Think Big platform vision is to fund Milestone 1 out of a concrete single-team deliverable."*
   </Tab>
 </Tabs>
 
-## Introspect your own work
+What changed:
 
-<Quiz title="Spot hidden simplification & vision opportunities">
-  <QuizItem
-    question="1. If you were forced to delete 30% of the services, queues, or tables in your current architecture tomorrow, which ones would you merge or remove?"
-    hint="Where is your team paying a distributed-systems tax for data that fits in memory?"
-  >
-    That thought experiment is the fastest way to uncover your next *Invent and Simplify* story.
+- The weak answer adds parts and calls it cleaner. The fixed one removes a cluster.
+- A requirement was questioned and tested on 30 days of data.
+- The doubters got a side-by-side run, and the answer states what got slightly worse.
+
+### Think Big
+
+**Question:** _"Tell me about a time you proposed something larger than what you were asked for."_
+
+<Tabs title="Think Big">
+  <Tab label="Weak answer">
+    *"We were asked to build a data deletion workflow for the orders service. I told my manager we should really build a company-wide privacy platform that would handle every regulation for every team. I wrote a long vision document. It was not funded. I still think it was the right idea."*
+
+  </Tab>
+  <Tab label="Fixed">
+    - **Situation and task.** *"My team was asked to build a customer data deletion workflow for the orders service in six weeks, to meet a privacy regulation. While scoping it I found seven other teams with the same task on their plans, each about to build its own."*
+    - **Action.** *"I wrote a four-page proposal for one deletion service. A team registers a webhook and a short file that says what to delete and when, and the service handles retries, the audit log and deadlines. To protect our own date, I built it with orders as the first user and nothing in it that orders did not need. In week five I showed it working to the seven team leads."*
+    - **Result.** *"Orders met its date. Five of the seven teams joined, at about three days each in place of six weeks. Two teams with unusual storage built their own, so the saving was about 28 engineer-weeks against the 40 I had forecast."*
+    - **Learning.** *"I fund the first step of a large idea from a deliverable my team already owes."*
+
+  </Tab>
+</Tabs>
+
+What changed:
+
+- The weak answer has a vision and no first step. The fixed one ships the first step inside an existing deadline.
+- The size of the gain is a number, and it is lower than the forecast.
+- Two teams said no, and the answer says so.
+
+## Try it: the same question at three levels
+
+Amazon's pages give no behavioral bar by level, so the scale here is our own. What grows from one answer to the next is how many teams work differently afterwards.
+
+<GuessTheLevel
+  title="Guess the level"
+  prompt="Tell me about a time you simplified something, or proposed a bigger idea than you were asked for."
+  levels={["Junior or mid", "Senior", "Staff"]}
+  answers={[
+    {
+      text: "Our release needed 14 manual steps from a wiki page. I wrote a script for 11 of them, and a release went from 50 minutes to 12.",
+      level: "Junior or mid",
+      why: "One person simplified their own team's routine. A good first Invent and Simplify story.",
+    },
+    {
+      text: "I replaced a three-service pipeline that my team ran with one job and one table. On-call pages for it went from six a month to none.",
+      level: "Senior",
+      why: "A whole piece of the team's architecture was removed, and the team's on-call load changed.",
+    },
+    {
+      text: "As an intern I noticed that two teams kept separate copies of the same country code table. I proposed one shared file and moved my own team onto it. The other team has not moved yet.",
+      level: "Junior or mid",
+      why: "The idea looks past the task, but the change so far is inside one team. The honest ending helps.",
+    },
+    {
+      text: "Four teams were each building rate limiting. I wrote the proposal for one shared library, shipped it in a month with my own team as the first user, and three of the four adopted it within two quarters.",
+      level: "Staff",
+      why: "Several teams changed how they build, and the first step was small enough to ship in a month.",
+    },
+  ]}
+/>
+
+## Check your story
+
+<DecisionTree
+  title="Audit your Invent and Simplify or Think Big story"
+  tree={{
+    q: "In your Invent and Simplify story, did the system end up with fewer parts, less on-call work or a simpler interface?",
+    yes: {
+      q: "In your Think Big story, did a first step ship in weeks and prove useful by itself?",
+      yes: {
+        answer: "Both stories are sound. Next, read Frugality and Learn and Be Curious.",
+        href: "/behavioral/amazon-leadership-principles/frugality-and-curiosity",
+      },
+      no: "Add the first step: the one team or one workflow where the idea proved itself within a few weeks.",
+    },
+    no: "If what you built was complex, describe the more complex thing it replaced, or the three-line interface it gave its callers.",
+  }}
+/>
+
+## Build your own
+
+1. Suppose you had to remove 30 percent of the services, queues or tables in your system tomorrow. Write which ones you would merge, and what stops you today.
+2. Look at the last feature you built. Write down which other teams are solving nearly the same problem.
+3. Find a requirement you once questioned. Write how you tested whether it was needed.
+4. Find an idea of yours that people doubted. Write what their worry was and what you showed them.
+
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=strategy)
+
+## Red flags
+
+- **Design for the CV.** A container platform and a service mesh for an internal tool with 20 requests a second. Recover by starting from the problem's size and choosing the smallest thing that fits.
+- **Not invented here.** Your own message broker where a managed one fitted. Recover by naming the specific limit that ruled out the standard option.
+- **A vision with no first step.** Recover by adding the milestone that shipped, or by choosing another story.
+- **Complexity moved to the callers.** Your service got simpler and every caller got harder. Recover by describing the change from the caller's side.
+
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="People doubted my idea at first. Is that a bad sign for the story?">
+    No. Amazon's text for Invent and Simplify says a new idea may be misunderstood for a long time. Say why the doubt
+    was reasonable, what small proof you built on real data, and who changed their mind.
   </QuizItem>
-  <QuizItem
-    question="2. Look at the last feature you built. Are 2 or 3 other teams in your company solving a 80%-similar problem in parallel?"
-    hint="L6+ engineers look horizontally across sibling teams' roadmaps."
-  >
-    Extracting a shared primitive from parallel team pain is how Senior/Staff engineers practice *Think Big*.
+  <QuizItem question="I am junior. What does Think Big look like for me?">
+    It looks like seeing one step past your task. You noticed that a second team had the same problem, or you built your
+    part so that it would not need a rewrite next quarter. Say what you proposed and what happened to it, even if the
+    answer is "not yet".
+  </QuizItem>
+  <QuizItem question="My big proposal was not funded. Can I still use it?">
+    Only if something shipped. A first step that worked for one team is a result. A document that nobody acted on is a
+    story about persuasion that failed, and it needs a clear lesson to be worth telling.
   </QuizItem>
 </Quiz>
-
-## Common red flags & how to recover
-
-- **Confusing "Invent" with "Not-Invented-Here Syndrome":** Building your own custom database or message broker when a standard managed service fits the bill is a red flag. Explain why off-the-shelf options didn't fit your specific constraint.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="Amazon's 'Invent and Simplify' says leaders accept being misunderstood for long periods. Tell me about a time your idea was initially met with skepticism."
-    level="Senior"
-    companies={["Amazon"]}
-  >
-    Show why the skepticism was rational at first (e.g., teammates worried that replacing a microservice with an embedded library would couple deployments), how you built a low-risk proof-of-concept using real production traces to address their concern empirically, and how you turned the skeptics into advocates.
-  </InterviewQuestion>
-</InterviewQuestions>
 
 ## Related
 
 - [Frugality & Learn and Be Curious](/behavioral/amazon-leadership-principles/frugality-and-curiosity)
-- [Staff & Principal Behavioral Playbook](/behavioral/leveling-and-tracks/staff-and-principal-behavioral)
+- [Staff & Principal Engineer Behavioral Loops](/behavioral/leveling-and-tracks/staff-and-principal-behavioral)
+- [Influencing Without Authority Across Teams](/behavioral/competencies/influence-without-authority)
+- [All 16 Leadership Principles: Question Index](/behavioral/amazon-leadership-principles/leadership-principles-question-index)
+
+## Sources
+
+- [Amazon: Leadership Principles](https://www.amazon.jobs/content/en/our-workplace/leadership-principles). Invent and Simplify and Think Big in Amazon's own words.
+
+The descriptions of the two principles, the tables, the level scale and the example answers are our own.

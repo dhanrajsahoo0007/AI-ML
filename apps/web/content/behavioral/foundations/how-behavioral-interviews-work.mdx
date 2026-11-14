@@ -9,230 +9,243 @@ access: free
 ## In one sentence
 
 <KeyIdea>
-A behavioral interview is not a personality test or a vibe check; it is a structured forensic audit where interviewers capture verbatim evidence of the hardest problems you have owned, how you behaved under friction, and what career level your scope supports.
+  A behavioral interview **collects written evidence**. Your interviewer writes down what you say you did, and other
+  people, some of whom never meet you, use those notes to decide **whether to hire you and at what level**.
 </KeyIdea>
 
 ## The story
 
-Imagine two candidates (Maya and Devon) who both pass the coding and system design rounds for a Senior Software Engineer (L5) role with identical technical scores. In the 45-minute behavioral round, the interviewer asks both of them: *"Tell me about a time a launch you owned went sideways."*
+Two candidates for the same senior role have similar coding and design results. Each is asked: "Tell me about a launch you owned that went wrong."
 
-Devon gives a polished, upbeat three-minute summary: *"We had a caching bug during our checkout migration, so our team stayed late, rolled it back, fixed the race condition, and launched two days later with zero issues."* When pressed on what **he** specifically changed, Devon speaks in generalities (*"we added more tests and reviewed the code carefully"*).
+The first gives a smooth three minutes. "We had a caching bug during the checkout migration. The team stayed late, rolled it back, fixed a race condition and launched two days later." Asked what he changed himself, he says "we added more tests".
 
-Maya takes 20 seconds to frame the stakes: a multi-region payment webhook cutover at 12,000 requests per second where duplicate retries threatened double-charging merchants. She then spends 75 seconds walking through **her** three specific engineering moves: how she noticed <Term id="p99" /> lock contention in the canary shard, why she pulled the kill switch over her product manager's objection, how she traced the bug to a non-<Term id="idempotent" /> retry key, and the linter + shadow-replay gate she built afterward so no engineer on the team could ship an unkeyed mutation again.
+The second takes 20 seconds to set the scene: a payment webhook cutover at 12,000 requests a second, where repeated retries could charge a merchant twice. She then gives three things she did. She saw lock contention on the first shard to take traffic. She stopped the rollout, against her product manager's wishes. She traced the cause to a retry key that was not unique, and afterwards added a build check so that nobody could ship a write without one.
 
-Twenty-four hours later, inside the debrief room, the difference is stark. The interviewer cannot defend Devon against the Bar Raiser's simplest question: *"Was Devon the driver or a passenger on that team?"* Devon is down-leveled to L4. Maya's verbatim notes prove she operates with L5 autonomy, technical backbone, and systemic ownership. She gets the L5 offer at the top of the band.
+The next day both interviewers write their feedback. The second has quotes, a decision and a number. The first has one line: "Could not establish what the candidate did." Nothing he wrote is negative, but he has nothing that argues for a senior offer.
 
-## What interviewers are really testing
+## What happens to your answer
 
-<AnimatedDiagram spec="animated/behavioral/debrief-loop" stepper caption="From your spoken story to the final offer: how verbatim notes and rubric scores travel through the debrief loop." />
-
-Most engineers prepare for behavioral rounds as if the interviewer is the sole audience. In reality, your interviewer is a **court reporter** gathering evidence to defend you in front of a skeptical room, a Bar Raiser (Amazon, Uber, Stripe), a Hiring Committee that never met you (Google), or a calibration review (Meta, Apple, Anthropic), who will read a written packet cold.
-
-<Numbers
-  items={[
-    { value: "24h", label: "Deadline to submit written feedback", hint: "Submitted independently before seeing other interviewers' scores" },
-    { value: "50%+", label: "Down-levels caused by behavioral scope", hint: "Candidates pass coding/design at L5+ but show L4 behavioral scope" },
-    { value: "3 levels", label: "Typical follow-up probe depth", hint: "Why Option A? What did YOU write? What breaks at 10x?" },
-    { value: "6–8", label: "Core stories needed for a full loop", hint: "Mapped across conflict, ownership, ambiguity, failure & leadership" },
-  ]}
+<AnimatedDiagram
+  spec="animated/behavioral/debrief-loop"
+  stepper
+  minWidth={820}
+  caption="A general picture of the path from your spoken answer to a decision. The names, the timing and the people involved differ by company."
 />
 
-When an interviewer types into their rubric form while you speak, they are looking for five concrete signals that survive scrutiny in that debrief packet:
+1. **The interview.** You tell a story and the interviewer asks follow-up questions. Most of what gets written down comes from the follow-ups.
+2. **Written feedback.** After the interview, each interviewer writes up what they heard against a set of criteria. Google says every candidate for a role is scored against the same rubrics and that interviewers must give structured feedback.
+3. **A review by more than one person.** The feedback is read together. At Amazon, a Bar Raiser from another team leads the debrief and keeps it on the evidence. Google says the decision draws on "a number of perspectives".
+4. **Hire and level.** Two questions are answered: should we hire, and at what level. Former interviewers describe these as separate decisions that need different evidence.
 
-1. **Driver vs. Passenger ("I" vs. "We"):** Did you diagnose the bottleneck, author the RFC, and make the hard trade-off, or were you executing tickets someone else scoped?
-2. **Radius of Ambiguity:** Were you handed a clean Jira ticket (L3), a feature spec (L4), a messy team problem (L5), or an unowned multi-team organizational bottleneck (L6+)?
-3. **Principled Friction:** How do you behave when constraints collide, when a deadline clashes with <Term id="availability" />, or when a senior engineer disagrees with your architecture?
-4. **Epistemic Honesty & Self-Awareness:** Can you state clearly where your hypothesis was wrong, what you underestimated, and what someone else got right?
-5. **Systemic Mechanisms over Good Intentions:** After a bug or conflict, did you just promise to "be more careful," or did you change a system (CI gate, <Term id="slo" /> alert, RFC template, runbook)?
+The diagram is a composite. It uses Amazon's "Bar Raiser" for the outside reviewer and shows a day between interview and write-up. No company we checked publishes a deadline for feedback, and the level names in it (L4, L5, L6) are the ones candidates use, not ones the companies publish.
+
+What three companies say in public:
+
+| Company    | Where behavioral questions are asked                                                         | Who decides, as published                                                              |
+| ---------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **Amazon** | In every interview. Each interviewer covers different Leadership Principles.                 | The hiring manager together with the Bar Raiser, after a debrief the Bar Raiser leads. |
+| **Google** | In structured interviews. Its prep page names ambiguity, working with people and leadership. | Not named. The careers page speaks of several perspectives and internal reviews.       |
+| **Meta**   | In a behavioral interview of 45 minutes, according to its 2022 engineering prep post.        | Not published.                                                                         |
+
+Candidates commonly report a hiring committee at Google and at Meta. Neither company's current careers pages confirm how those work, so treat detailed accounts as unconfirmed.
 
 <PremiumBreak />
 
-## How the bar changes by level
+## What the interviewer writes down
 
-The exact same question (*"Tell me about a time you resolved a technical disagreement"*, *"Tell me about a production incident"*) is asked from Junior (L3) to Principal (L7). Your answer determines your level.
+Whatever the company, the notes come back to five things.
+
+1. **What you did yourself.** Did you find the cause, write the proposal and make the trade, or carry out tasks that someone else had defined? "I" for your actions, "we" for shared results.
+2. **How open the problem was.** A ticket, a feature spec, a team problem with no clear cause, or a problem between teams that nobody owned.
+3. **How you act under pressure from two sides.** A deadline against reliability, or a senior engineer who disagrees with your design.
+4. **Honesty about yourself.** Where your first idea was wrong, what you underestimated and what someone else got right.
+5. **What you changed afterwards.** A promise to be more careful, or a build check, an alert, a template, a runbook.
+
+## A weak answer, then the fix
+
+**Question:** _"Tell me about a time you took ownership of a reliability problem."_
+
+<Tabs title="The same project, told twice">
+  <Tab label="Weak answer">
+    *"Last year our notification service had reliability problems at peak and was dropping push notifications. Our team decided to move from direct HTTP calls to a queue. We worked with the mobile team on the payload, wrote the consumers and rolled it out over a month. After that things were much more stable and we were paged less."*
+
+    **What the interviewer can write:** almost nothing. Every decision is "we". There is no starting number and no result. No option was weighed.
+
+  </Tab>
+  <Tab label="Fixed">
+    - **Situation and task.** *"Our checkout notifications service handles 8,000 events a second at peak. When the push provider slowed down, our worker threads ran out, and order confirmation p99 rose to 4.2 seconds. Nobody owned the boundary between checkout and notifications, and the holiday peak was three weeks away."*
+    - **Action.** *"I offered to lead the fix. First, I went through two days of thread dumps and showed that retries inside the checkout worker were holding database connections open. Second, I rejected a two-month rewrite because it would miss the holiday freeze. I put a circuit breaker in front of the push client within two days, then moved sending behind an outbox table with a key that stops double sends. Third, the mobile lead was worried about late receipts, so I measured it: 99.4 percent of notifications still arrived within 350 ms."*
+    - **Result.** *"We shipped five days before the peak. At 3.2 times normal traffic, with two provider slowdowns, checkout p99 stayed at 140 ms. Pages went from 11 a week to none over the next quarter."*
+    - **Learning.** *"I added a build rule that fails any network call to a third party inside a database transaction. It now runs on all 14 payment services."*
+
+  </Tab>
+</Tabs>
+
+What changed:
+
+- Every action has "I" and a reason.
+- There is a rejected option, so the interviewer can see a judgment.
+- The result has a before and an after, and the learning is a rule that exists.
+
+## The same answer at three levels
+
+The same question is asked from junior to principal. The scope of your answer is what places it. One published rubric, written by former Meta engineers, puts it this way: a junior story affects your own work, a senior story affects your whole team, and a staff story affects two or more teams.
 
 <Compare
-  columns={["Signal dimension", "L3 / L4 (Junior – Mid SWE)", "L5 (Senior SWE)", "L6+ (Staff / Principal / EM)"]}
+  columns={["", "Junior or mid", "Senior", "Staff and above"]}
   rows={[
-    ["Problem origin", "Assigned by manager or tech lead", "Spotted a team-level gap or ambiguous requirement", "Identified a multi-team or 12-month horizon bottleneck unprompted"],
-    ["Decision trade-offs", "Picked between 2 library or implementation options", "Balanced latency, cost, reliability, and delivery schedule with data", "Aligned competing org incentives; killed sunk-cost work when needed"],
-    ["Conflict handling", "Escalated cleanly or aligned with a peer on a PR", "Built a benchmark or trade-off matrix to align peers and PM", "Resolved cross-org turf wars; turned skeptics into co-authors"],
-    ["Post-incident learning", "Fixed the bug and added a unit/integration test", "Eliminated a class of bugs across the service with automated guardrails", "Changed org-wide architecture, paved-road tooling, or SLO governance"],
+    [
+      "Where the problem came from",
+      "Given by a manager or tech lead",
+      "You noticed a gap in your team or an unclear requirement",
+      "You found a problem across teams, or a year ahead, before anyone asked",
+    ],
+    [
+      "The trade-off",
+      "A choice between two libraries or two ways to build it",
+      "Latency, cost, reliability and the date weighed with data",
+      "Goals of different teams reconciled, or work stopped that was no longer worth finishing",
+    ],
+    [
+      "Disagreement",
+      "Settled with a peer in review, or raised cleanly",
+      "A test or a written comparison that brought peers and product together",
+      "A dispute between groups resolved so that the doubters helped write the result",
+    ],
+    [
+      "After a failure",
+      "Fixed the bug and added a test",
+      "Removed that kind of bug from the service with an automatic check",
+      "Changed shared tooling or standards for many teams",
+    ],
   ]}
-  caption="How Hiring Committees and Bar Raisers map your story's scope to an engineering level."
+  caption="If every story you tell has the scope of the level below the one you applied for, the notes will support the lower level."
 />
 
-## Interactive diagnostic: test your story
+## Try it: what can the interviewer write down?
 
-Before you bring a story into an interview loop, run it through this debrief-readiness tree to see whether it will hold up as an L5+ anchor story or trigger a down-level probe:
+<WhichPrinciple
+  title="What does this sentence give the interviewer?"
+  instruction="Each line is one sentence from a candidate's answer. Pick what an interviewer could write down from it."
+  principles={["Your own action", "Scope", "Judgment", "Nothing to write"]}
+  prompts={[
+    {
+      text: "We decided to move to a queue and rolled it out over a month.",
+      principle: "Nothing to write",
+      why: "'We' made the decision, no reason is given and there is no number. The interviewer cannot credit you with any of it.",
+    },
+    {
+      text: "I went through two days of thread dumps and found retries holding database connections open.",
+      principle: "Your own action",
+      why: "First person, specific, and it produced a finding.",
+    },
+    {
+      text: "Nobody owned the boundary between checkout and notifications, so I took it and agreed a plan with both team leads.",
+      principle: "Scope",
+      why: "The problem sat between two teams and had no owner. That is what tells the interviewer how far your work reached.",
+    },
+    {
+      text: "I rejected the full rewrite because it would have missed the holiday freeze, and put a circuit breaker in first.",
+      principle: "Judgment",
+      why: "An option turned down, with the reason. Judgment only shows when the listener can see the path you did not take.",
+    },
+    {
+      text: "I always put communication first and I care a lot about quality.",
+      principle: "Nothing to write",
+      why: "A belief about yourself. Behavioral questions ask for one event that happened.",
+    },
+    {
+      text: "I stopped the rollout against the product manager's wishes, because one payment in 200 was being charged twice.",
+      principle: "Judgment",
+      why: "A decision under pressure from two sides, with the number that justified it.",
+    },
+    {
+      text: "The build rule I wrote now runs on four other teams' services.",
+      principle: "Scope",
+      why: "The effect of the work went beyond the candidate's own team.",
+    },
+  ]}
+/>
+
+## Check your story
 
 <DecisionTree
-  title="Will your story survive the Hiring Committee packet?"
+  title="Will your story hold up in written feedback?"
   tree={{
-    q: "Could the project have succeeded in roughly the same way if you had been on vacation for those two weeks?",
-    yes: "Passenger signal: Pick a different episode where your personal diagnosis, design choice, or pushback changed the technical trajectory.",
+    q: "Would the project have gone much the same way if you had been on holiday for those two weeks?",
+    yes: "Choose a different story: one where your finding, your design choice or your objection changed what happened.",
     no: {
-      q: "Did the story involve real tension: a rejected alternative, a stakeholder pushback, a broken assumption, or a hard constraint?",
+      q: "Did the story have real tension: a rejected option, pushback from someone, a wrong assumption or a hard limit?",
       yes: {
-        q: "Can you state the before-and-after outcome in concrete numbers (latency, error rate, engineering hours, or revenue) AND name one systemic mechanism you changed afterward?",
+        q: "Can you give the result as a before and an after, and name one thing you changed afterwards?",
         yes: {
-          answer: "Strong L5+ anchor story! Now stress-test it against 3-level follow-up probes.",
+          answer: "This story is ready to tell. Next, prepare for the follow-up questions.",
           href: "/behavioral/foundations/handling-follow-up-probes",
         },
         no: {
-          answer: "Good core action, but weak landing. Quantify the proxy metrics and define the guardrail you built.",
+          answer:
+            "The middle is good and the ending is weak. Find a number, and name the check or rule you left behind.",
           href: "/behavioral/foundations/quantifying-engineering-impact",
         },
       },
-      no: "Low-signal execution story: Smooth projects where everything went according to plan do not prove senior judgment. Highlight the hardest trade-off or failure mode you navigated.",
+      no: "A project where everything went to plan shows little judgment. Find the hardest choice or the thing that nearly went wrong, and build the story around it.",
     },
   }}
 />
 
-## Worked engineering example (STAR+L)
+## Build your own
 
-Notice how the same underlying event (migrating a high-throughput notification pipeline) sounds completely different when told as a generic status update versus an evidence-packed debrief story.
+Go through your last 18 to 24 months of work with these three questions before you write any story.
 
-<Tabs title="Debrief packet comparison">
-  <Tab label="Weak (Passenger / Status Update)">
-    **Prompt:** *"Tell me about a time you took ownership of a reliability problem."*
+1. **What would not have happened without you?** Look at your last three projects. Find the design decision or the debugging result that was yours. Old pull requests and design comments help.
+2. **What did the other side get right?** Think of a technical argument you won. In hindsight, which part of the other person's worry was valid?
+3. **What rule do you follow because breaking it once hurt?** Never an unthrottled backfill, always a rollback plan. The incident behind that rule is your failure story.
 
-    > "Last year our notification service was having reliability issues during peak traffic and dropping push notifications. Our team decided to migrate from synchronous HTTP calls to an async Kafka queue. We worked with the mobile team to update the payload format, wrote consumers, and rolled it out over a month. After the migration, things were much more stable and we didn't get paged as much."
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=growth).
 
-    **Why this fails in debrief:**
-    - Uses *"we"* for every decision; the interviewer cannot write down a single action the candidate personally took.
-    - No baseline metric, no target <Term id="slo" />, and no quantified result (*"much more stable"* is unscorable).
-    - Zero trade-offs discussed: why Kafka over SQS? How was duplicate delivery handled?
-  </Tab>
-  <Tab label="Strong (L5 Senior Driver Signal)">
-    **Prompt:** *"Tell me about a time you took ownership of a reliability problem."*
+## Red flags
 
-    > **Situation & Task:** "On our checkout notifications service handling 8,000 events/sec at peak, third-party push gateway brownouts were causing thread-pool exhaustion that spilled over and degraded core order-confirmation APIs to 4.2s <Term id="p99" />. Nobody owned the boundary between checkout and notifications, and a holiday traffic spike was three weeks away."
-    >
-    > **Action:** "I volunteered to lead the isolation fix. First, I traced 48 hours of thread dumps to prove that synchronous retry loops inside the checkout worker were holding database connections open. Second, rather than proposing a 2-month rewrite that would miss the holiday freeze, I designed a two-step strangler: I put a bounded local circuit breaker in front of the push client in 48 hours, and then moved dispatch behind a transactional outbox with an <Term id="idempotent" /> dedup key (`order_id + event_type`) so retries could never double-notify users. Third, when the mobile lead worried about delayed receipts, I ran a shadow benchmark showing 99.4% of async events delivered in under 350 ms."
-    >
-    > **Result:** "We shipped 5 days before Black Friday. During a 3.2x traffic peak, checkout <Term id="p99" /> stayed flat at 140 ms despite two upstream push-provider brownouts, and on-call pages dropped from 11 per week to zero over the next quarter."
-    >
-    > **Learning:** "I added a lint rule and architectural review check banning outbound third-party network calls inside database transaction scopes across all 14 payment services."
-  </Tab>
-</Tabs>
+- **"We" for three minutes.** The interviewer cannot tell what you built. **Recover:** say "my part was" and name it.
+- **A philosophy in place of an event.** "I always prioritise communication." **Recover:** "Here is one time I did that", then tell it.
+- **Criticising former colleagues.** **Recover:** describe what happened and what you did, without a verdict on the person.
+- **Two minutes of background.** **Recover:** pause and say, "Let me go straight to the three things I did and the result, and you can ask about any part."
+- **An invented story.** Follow-up questions go to details that only someone who was there would know. **Recover:** see the first common question below.
 
-## Introspect your own work
+## Common questions
 
-The goal of behavioral preparation is not to invent theatrical stories; it is to audit your real engineering history with the same rigor you bring to a production post-mortem. When you introspect honestly, you stop worrying about "tricking" the interviewer and start understanding your own engineering patterns.
-
-<AnimatedDiagram spec="animated/behavioral/self-introspection-loop" stepper caption="The 4-stage Career Introspection Loop: turning raw work history into genuine self-knowledge." />
-
-Use these four self-reflection prompts to audit your last 18–24 months of work before writing a single story card:
-
-<Quiz title="Career introspection audit">
-  <QuizItem
-    question="1. The Fingerprint Test: Look at your last 3 major projects. Which specific design decision or debugging breakthrough would NOT have happened if you hadn't been in the room?"
-    hint="Check your old PRs, RFC comments, and post-mortem docs."
-  >
-    Write down the exact PR, benchmark, or design paragraph you authored. If you realized you mostly executed designs scoped by a Staff engineer or PM, don't hide from that: identify the largest sub-problem where you *did* make the call, AND use that insight to seek higher-ambiguity scope in your current job.
+<Quiz title="Common questions">
+  <QuizItem question="What if I have never faced the exact situation in the question?">
+    Do not invent one. Say so, and offer the nearest real thing: "I have not rolled back a schema change across regions.
+    The closest was a key rotation that broke 8 percent of mobile clients." Tell that story, then spend the last 20
+    seconds on what you would check differently in the case they asked about.
   </QuizItem>
-  <QuizItem
-    question="2. The Counterfactual Audit: Think of a technical argument you 'won' in the past two years. In hindsight, what part of the other person's concern turned out to be valid?"
-    hint="Interviewers love candidates who can steelman the person they disagreed with."
-  >
-    Every engineering trade-off has a cost. Maybe your microservice split improved deployment independence but added 15 ms of tail latency and schema coordination toil. Naming what the other engineer got right proves mature, low-ego judgment.
+  <QuizItem question="How much technical detail belongs in a behavioral answer?">
+    Enough to make the limit and the trade-off clear in about 20 seconds: "write locks on the orders table at 4,000
+    transactions a second". Then stay on your decisions and the people involved. Keep the deeper detail ready for the
+    follow-ups.
   </QuizItem>
-  <QuizItem
-    question="3. The Scar-Tissue Check: What is one engineering rule you follow religiously today because breaking it burned you in production once?"
-    hint="Examples: never running an unbatched backfill, always adding jitter to retries, never shipping an LLM prompt change without an offline golden eval."
-  >
-    That scar is your highest-signal **Failure / Mistake** story. The pain is real, the root cause is vivid in your memory, and the guardrail you built afterward is authentic.
+  <QuizItem question="Can the behavioral round change the level of my offer?">
+    Candidates at several companies report offers one level below the one they interviewed for, after feedback that
+    their stories had the smaller scope. No company we checked publishes how often this happens, and we found no
+    reliable figure. What you control is the scope of the stories you choose.
   </QuizItem>
 </Quiz>
 
-## Common red flags & how to recover
-
-<ProsCons
-  pros={[
-    "Using 'I' for your specific actions while crediting teammates by role for theirs",
-    "Naming the rejected options and the exact constraint that decided the trade-off",
-    "Owning mistakes plainly in the first 30 seconds without blaming QA, PMs, or legacy code",
-    "Quantifying both the primary win metric and the guardrail metric (what you refused to break)",
-  ]}
-  cons={[
-    "Hiding behind 'we' for 3 minutes so the interviewer cannot tell what you personally built",
-    "Speaking in abstract philosophy ('I always prioritize communication') instead of a single past episode",
-    "Bashing former managers, PMs, or teammates as incompetent",
-    "Spending 2 minutes on system backstory and rushing the actual actions in 15 seconds",
-  ]}
-/>
-
-**How to recover mid-interview if you catch yourself rambling:** Pause, smile, and say: *"Let me zoom straight to the three actions I took and the outcome, and then we can dive into whichever layer is most useful."* Interviewers immediately respect candidates who self-regulate their altitude.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="What is the difference between how Amazon, Google, and Meta evaluate behavioral interviews?"
-    level="Senior"
-    companies={["Amazon", "Google", "Meta"]}
-  >
-    **Short answer.** All three test ownership, conflict resolution, and scope, but they route the evidence differently:
-
-    | Company | Where behavioral happens | Who decides | Key trap to avoid |
-    | --- | --- | --- | --- |
-    | **Amazon** | 15–20 min of Leadership Principles in **every** round | Bar Raiser + Hiring Manager in live debrief | Repeating the same story more than twice across 5 interviewers |
-    | **Google** | Dedicated 45-min **Googleyness & Leadership (G&L)** round | Independent **Hiring Committee** reading written notes cold | Giving vague answers without concrete metrics that survive written summarization |
-    | **Meta** | Dedicated 45-min **Jedi** round | Post-loop calibration committee | Describing L4 feature execution when interviewing for E5/E6 |
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="Why do strong technical candidates get down-leveled after the behavioral round?"
-    level="Senior"
-    companies={["Meta", "Google", "Stripe", "Uber"]}
-  >
-    Down-leveling almost never happens because a candidate was impolite; it happens because every story they told had the **scope and autonomy of the level below**.
-
-    <KeyIdea>
-    If you interview for Senior (L5) or Staff (L6) but all of your stories describe taking a clearly scoped requirement from a PM/TL and implementing it cleanly without navigating ambiguity, cross-team alignment, or systemic trade-offs, the committee must calibrate you at L4.
-    </KeyIdea>
-
-    To avoid an accidental down-level, choose stories where **you** defined the problem boundary, weighed competing system constraints, and left behind a team- or org-wide mechanism.
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="How should I answer a behavioral question if I haven't faced that exact scenario in production?"
-    level="Mid"
-    companies={["Google", "Amazon", "Microsoft"]}
-  >
-    Never fabricate a story: 3-level Bar Raiser follow-ups expose invented details within 90 seconds. Instead, use a **transparent bridge**:
-
-    1. **Acknowledge the closest real episode:** *"I haven't had to roll back a multi-region database schema cutover specifically, but the closest high-stakes rollback I led was an auth token signing key rotation that broke 8% of mobile clients."*
-    2. **Deliver that real story using STAR+L.**
-    3. **Bridge to their domain:** Spend the final 20 seconds explaining what additional invariant you would check in their specific scenario.
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="How much technical detail belongs inside a behavioral answer?"
-    level="Mid"
-    companies={["Amazon", "Apple", "Netflix"]}
-  >
-    Include enough technical specificity to make the **constraint and trade-off** unmistakable in 20 seconds (e.g., *"Postgres write lock contention at 4,000 TPS"* or *"context-window truncation in our RAG pipeline"*), then focus on your decisions, trade-offs, and human alignment. Keep the deep implementation details ready in your back pocket for the interviewer's follow-up probes.
-  </InterviewQuestion>
-</InterviewQuestions>
-
 ## Related
 
-<LearningPath
-  title="Master the Behavioral Foundations in 90 minutes"
-  steps={[
-    { title: "The STAR+L Framework (and When to Break It)", href: "/behavioral/foundations/star-plus-l-framework", minutes: 15 },
-    { title: "Handling Follow-Up Probes & Bar Raiser Drill-Downs", href: "/behavioral/foundations/handling-follow-up-probes", minutes: 20 },
-    { title: "Building Your 8-Story Matrix", href: "/behavioral/foundations/building-your-story-matrix", minutes: 20 },
-    { title: "Quantifying Engineering & ML Impact", href: "/behavioral/foundations/quantifying-engineering-impact", minutes: 20 },
-    { title: "High-Signal Questions to Ask Interviewers", href: "/behavioral/foundations/questions-to-ask-interviewers", minutes: 15 },
-  ]}
-/>
+- [The STAR+L Framework (and When to Break It)](/behavioral/foundations/star-plus-l-framework): how to spend the two minutes of an answer.
+- [Handling Follow-Up Probes & Bar Raiser Drill-Downs](/behavioral/foundations/handling-follow-up-probes): where most of the evidence is collected.
+- [Building Your 8-Story Matrix](/behavioral/foundations/building-your-story-matrix): choosing the stories to prepare.
+- [How Amazon & the Bar Raiser Evaluate the 16 LPs](/behavioral/amazon-leadership-principles/how-amazon-evaluates-lps): one company's process in detail.
 
-- [Amazon's 16 Leadership Principles](/behavioral/amazon-leadership-principles): how Bar Raisers test LP tensions.
-- [FAANG & AI Lab Company Playbooks](/behavioral/company-playbooks): loop-specific rubrics for Meta, Google, Apple, Netflix, Stripe, and Frontier AI labs.
-- [Behavioral & Leadership Question Bank](/interviews#leadership): practice real prompts and follow-ups by company.
+## Sources
 
-## Further reading
+- [About Amazon: the Bar Raiser programme](https://www.aboutamazon.com/news/workplace/amazon-bar-raiser). The Bar Raiser leads the debrief, and the hiring manager and Bar Raiser make the decision together.
+- [Amazon Jobs: Interview loop](https://amazon.jobs/content/en/how-we-hire/interview-loop). Each interviewer is assigned competencies based on the Leadership Principles.
+- [Google Careers: How we hire](https://www.google.com/about/careers/applications/how-we-hire/). Structured interviews, the same rubrics for every candidate, structured feedback and review from several perspectives.
+- [Google Careers: Interview tips](https://www.google.com/about/careers/applications/interview-tips/). The three areas Google's behavioral questions cover.
+- [Meta Careers: Preparing for your software engineering interview at Meta](https://www.metacareers.com/blog/preparing-for-your-software-engineering-interview-at-meta/). The 45-minute behavioral interview. The post was last updated in 2022.
+- [Hello Interview: How behavioral interviews really work](https://www.hellointerview.com/blog/how-behavioral-interviews-really-work). A former interviewer's account: hire and level are separate decisions.
+- [Tech Interview Handbook: Behavioral interview rubrics](https://www.techinterviewhandbook.org/behavioral-interview-rubrics/). Scope by level: your own work, your team, two or more teams.
 
-- [Amazon Interview Prep: Leadership Principles](https://www.amazon.jobs/content/en/our-workplace/leadership-principles): official definitions of the 16 Leadership Principles.
-- [Google re:Work, Structured Interviewing Guide](https://rework.withgoogle.com/): the research behind rubric-based behavioral grading.
+The five things an interviewer writes down, the example answers and the exercise are our own.

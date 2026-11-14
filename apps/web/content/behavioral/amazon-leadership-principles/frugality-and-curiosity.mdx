@@ -8,109 +8,215 @@ order: 8
 ## In one sentence
 
 <KeyIdea>
-**Frugality** treats hard resource constraints (compute budget, headcount, GPU quota, time) as a catalyst for cleaner architecture rather than a reason to cut corners, while **Learn and Be Curious** proves you proactively master unfamiliar technical domains before a crisis forces you to.
+  **Frugality** means you get more done with less, and you treat a limit on money, people or time as a reason to design
+  better. **Learn and Be Curious** means you keep learning things outside your area, and you **use** what you learn on a
+  real problem.
 </KeyIdea>
 
 ## The story
 
-Give an engineering team an unlimited cloud budget and eight engineers to solve a problem, and they will almost certainly build an eight-microservice system that costs \$40,000 a month.
-Give the same problem to two engineers with a \$1,500/month budget cap, and the design changes: they can't afford the operational overhead of eight services, so they study the workload distribution, compress the hot dataset into a 2 GB memory-mapped bloom filter + SQLite index, and serve 15,000 QPS from two spot instances.
+Give a team eight engineers and no budget limit, and a lookup service tends to become eight small services that cost \$40,000 a month to run.
 
-Amazon's **Frugality** principle states: *"Accomplish more with less. Constraints breed resourcefulness, self-sufficiency, and invention. There are no extra points for growing headcount, budget size, or fixed expense."*
+Give the same problem to two engineers with a cap of \$1,500 a month. They cannot afford to run eight services, so they study the workload first. They find that 2 GB of data answers 97 percent of requests. Neither of them has worked with memory-mapped files, so one spends three days reading how they behave under load and testing them on a copy of production traffic. They keep the hot data in memory on two small instances and serve 15,000 requests a second. The rare request for cold data takes 200 ms where it used to take 20.
 
-## What interviewers are really testing
+The limit did two things. It forced a simpler design, and it forced someone to learn something. That is why these two principles sit well together in one story.
 
-<AnimatedDiagram spec="animated/behavioral/self-introspection-loop" stepper caption="Learn and Be Curious + Frugality: questioning how systems work under the hood unlocks 10x efficiency wins." />
+## What the interviewer scores
 
-| Principle | What Bar Raisers look for | Red flag to avoid |
-| --- | --- | --- |
-| **Frugality** | Solving a scale or product challenge with existing hardware/headcount through algorithmic, caching, batching, or architectural cleverness | Being "cheap" in a way that hurts customers or burns out on-call engineers (e.g., turning off staging environments or observability) |
-| **Learn and Be Curious** | Self-directed deep dives into a new domain (e.g., eBPF, CUDA kernels, LLM quantization, Rust, or financial accounting rules) and applying it to ship a real win | Listing courses or papers you read passively without ever applying the knowledge to a real system |
+<AnimatedDiagram
+  spec="animated/behavioral/frugality-and-curiosity"
+  stepper
+  minWidth={700}
+  caption="One example of each principle. They pull against each other because learning costs time, and a strong story measures what the time paid back."
+/>
+
+1. **Frugality.** A log cluster kept everything on fast disks. Keeping only 12 hours there took the cost from \$38,000 to \$14,000 a month.
+2. **Learn and Be Curious.** A backend engineer learned phone audio code in two days and used it to fix a battery problem.
+3. **Where they pull apart.** Learning costs time and sometimes money, with no promise of a return. Frugality asks what you got for it.
+4. **A strong answer holds both.** Give the learning a limit, such as two days, and measure what it paid back.
+
+### Frugality
+
+In our words: achieve more with less. A constraint makes people resourceful and inventive, and there is no credit for a bigger team, a bigger budget or a bigger fixed cost.
+
+| A strong story shows                                                       | What weakens it                                      |
+| -------------------------------------------------------------------------- | ---------------------------------------------------- |
+| The saving came from a better design: tiers, batching, a cheaper algorithm | The saving came from switching off staging or alerts |
+| A cost per unit, before and after: per request, per tenant, per GB         | "We saved a lot"                                     |
+| Reliability and speed held, or you say exactly what got worse              | Cheaper and slower, and nobody measured it           |
+| You were told no to more budget and found another way                      | Asking for more people was the first move            |
+
+### Learn and Be Curious
+
+In our words: you are never finished learning. Keep improving yourself, be curious about what else is possible, and go and find out.
+
+| A strong story shows                                                  | What weakens it                    |
+| --------------------------------------------------------------------- | ---------------------------------- |
+| You learned something outside your area and used it on a real problem | A list of courses, books and blogs |
+| How you learned: what you read, the experiment you ran, who you asked | "I picked it up quickly"           |
+| What changed in production because of it                              | Nothing shipped                    |
+| You passed it on: a guide, a talk or a pairing session                | The knowledge stayed with you      |
 
 <PremiumBreak />
 
-## How the bar changes by level
+## A weak answer, then the fix
 
-<Compare
-  columns={["Dimension", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
-  rows={[
-    ["Frugality", "Optimizes a slow query or right-sizes over-provisioned containers", "Designs a new feature to run within existing cluster headroom; cuts cloud/LLM unit cost by 40–70%", "Re-architects org-wide unit economics (cost per request / cost per tenant) so margin scales with growth"],
-    ["Learn & Be Curious", "Ramps up on a new language, framework, or codebase in days to unblock a sprint", "Masters an adjacent domain (security, ML eval, database internals) to solve a cross-boundary bottleneck", "Spots an emerging industry shift early, runs an empirical spike, and teaches the rest of the org"],
-  ]}
-  caption="Always tie Learn and Be Curious to an applied outcome: what did you learn, how fast did you learn it, and what changed in production?"
-/>
+### Frugality
 
-## Interactive diagnostic: test your story
+Here is a first-try answer. Pick the sentences that would cost the candidate points.
 
-<DecisionTree
-  title="Test your Frugality or Curiosity story"
-  tree={{
-    q: "For Frugality: Did your constraint-driven solution maintain or IMPROVE reliability and latency while saving money/headcount?",
-    yes: {
-      q: "For Learn & Be Curious: Did you apply the new skill to solve a real engineering problem (and share it with your team) rather than just reading a tutorial?",
-      yes: {
-        answer: "Strong Frugality & Curiosity signal! Next: Hire and Develop the Best.",
-        href: "/behavioral/amazon-leadership-principles/hire-develop-and-best-employer",
-      },
-      no: "Connect your learning to a shipped artifact: a benchmark, a production fix, or a brown-bag workshop that upleveled your team.",
+<SpotTheFlag
+  title="Spot the red flags in a Frugality answer"
+  prompt="Tell me about a time you delivered a result with a very limited budget."
+  sentences={[
+    {
+      text: "Our log search cluster cost 38,000 dollars a month, and finance had frozen any expansion while log volume grew 20 percent a quarter.",
+      note: "A setup with the limit and the numbers. Keep it.",
     },
-    no: "Never tell a Frugality story where cutting cost degraded availability or developer productivity: show how constraints forced a smarter design.",
-  }}
+    {
+      text: "I asked for more budget twice, and when that failed I was pretty frustrated with finance.",
+      flag: "Resentment about the limit. In this principle the limit is the starting point of the design.",
+    },
+    {
+      text: "To save money we turned off the staging cluster and shortened log retention without telling the audit team.",
+      flag: "A saving made by removing something other people rely on. That is being cheap, and it moves the cost to someone else.",
+    },
+    {
+      text: "I profiled 30 days of queries and found that 91 percent of searches only touched the last 6 hours of logs.",
+      note: "The waste was found with data, in the first person.",
+    },
+    {
+      text: "So we made some changes to storage and it got cheaper.",
+      flag: "'We', no design and no number. Say what you changed and what it cost before and after.",
+    },
+    {
+      text: "Searches on older logs now take about 40 seconds, which the audit team agreed to beforehand.",
+      note: "It says what got worse and who accepted it. This makes the saving believable.",
+    },
+  ]}
 />
 
-## Worked engineering example (STAR+L)
+The same story with the design in it:
 
-<Tabs title="Frugality vs. Learn and Be Curious">
-  <Tab label="Frugality (Doing More With Zero Extra Budget)">
-    **Prompt:** *"Tell me about a time you delivered a major result with very limited budget, time, or headcount."*
+- **Situation and task.** _"Our log search cluster cost \$38,000 a month. Finance had frozen any expansion, and log volume was growing 20 percent a quarter."_
+- **Action.** _"I profiled 30 days of queries. 91 percent of searches touched only the last 6 hours of logs. The other 13 days sat on fast disks for audits that happen a few times a month. I proposed two tiers: 12 hours on the fast disks, and everything older compressed in object storage behind a slower query path. Before building it, I showed the audit team what a 40-second search would look like, and they agreed. I moved one log source first and compared results for a week."_
+- **Result.** _"Over the next year volume grew 2.4 times and the monthly cost fell from \$38,000 to \$14,000. Recent searches got about 30 percent faster because the indexes were smaller. Searches on old logs went from 3 seconds to about 40."_
+- **Learning.** _"Storage proposals on our team now state a cost per GB queried."_
 
-    - **Situation & Task:** *"Our log-search cluster was costing \$38k/month on Elasticsearch, and CFO budget caps froze any cluster expansion even though enterprise log volume was growing 20% quarter-over-quarter."*
-    - **Action:** *"I profiled query logs over 30 days and discovered 91% of interactive searches only touched the last 6 hours of logs, while the remaining 13.5 days of retention sat on expensive NVMe SSDs for rare compliance audits. Instead of asking for more budget, I architected a two-tier storage split: kept only 12 hours in hot NVMe indices and streamed compressed Parquet blocks to S3 with an Athena/Trino on-demand query federated wrapper for historical searches older than 12h."*
-    - **Result:** *"We absorbed 2.4x log volume growth over the next year while cutting monthly cluster spend from \$38k to \$14k/month (\$288k/yr saved), and hot-window query <Term id="p99" /> actually improved by 30% due to smaller index shards."*
-    - **Learning:** *"We added cost-per-GB-queried telemetry to every storage RFC."*
+### Learn and Be Curious
+
+**Question:** _"Tell me about a time you had to learn something unfamiliar quickly to solve a problem."_
+
+<Tabs title="Learn and Be Curious">
+  <Tab label="Weak answer">
+    *"I love learning. I read engineering blogs every morning, and I did two online courses on machine learning last year. When our audio feature had a battery problem, I picked up the mobile side quickly and fixed it."*
+
   </Tab>
-  <Tab label="Learn and Be Curious (Mastering an Unfamiliar Stack)">
-    **Prompt:** *"Tell me about a time you had to learn a completely unfamiliar technology or domain quickly to solve a problem."*
+  <Tab label="Fixed">
+    - **Situation and task.** *"I am a backend engineer. Our on-device wake word feature was draining Android batteries by 4.8 percent an hour. The launch limit was 1 percent, and the one audio specialist on the team was on leave."*
+    - **Action.** *"I had never worked on audio or on phone power use. I gave myself two days to learn before I touched the code. I read the source of the voice detection library we used, set up a power profiler on a test phone, and asked two firmware engineers how a phone decides to wake its fast processor cores. The profiler showed our bridge code copying an audio buffer every 10 ms, and each copy woke a fast core. I changed it to share one buffer and to hand over 80 ms of audio per wake-up. One of the firmware engineers reviewed it."*
+    - **Result.** *"Drain fell to 0.6 percent an hour with no loss in detection, and we shipped on the date. My first attempt had been a lower sample rate. It cut detection accuracy by 6 points, and I reverted it."*
+    - **Learning.** *"I wrote a three-page guide to power profiling for backend engineers. Two teammates have used it since."*
 
-    - **Situation & Task:** *"As a backend Go engineer, I was asked to rescue an on-device audio wake-word pipeline where battery drain on Android devices was blocking launch, and our sole C++/DSP specialist was on parental leave."*
-    - **Action:** *"I had zero prior DSP experience. I spent 48 hours reading the WebRTC VAD source code, set up an Android power-profiler harness on my desk, and interviewed two firmware engineers to build a mental model of CPU wake locks. Profiling showed the C++ JNI bridge was copying 16 kHz PCM buffers every 10 ms and waking the big ARM core. I learned ring-buffer SIMD intrinsics, batched inference to 80 ms windows on the efficiency core, and validated accuracy against our 10,000-clip audio test set."*
-    - **Result:** *"Battery drain dropped from 4.8%/hour to 0.6%/hour (below the 1.0% launch gate) with zero wake-word recall loss, shipping the release on schedule."*
-    - **Learning:** *"I wrote a 3-page 'Backend Engineer's Guide to JNI & Mobile Power Profiling' so any backend engineer on the team could debug mobile native traces."*
   </Tab>
 </Tabs>
 
-## Introspect your own work
+What changed:
 
-<Quiz title="Audit your unit-economics & learning habits">
-  <QuizItem
-    question="1. Do you know how much your team's primary service costs per month in cloud/LLM spend, and what the #1 cost driver is?"
-    hint="Most engineers have never opened their team's AWS Cost Explorer or token-usage breakdown."
-  >
-    Spend 15 minutes this week checking your service's unit cost (\$/1,000 requests or \$/active tenant). Almost every service has one 80/20 inefficiency (uncompressed cross-AZ traffic, over-provisioned NAT gateways, unbatched embeddings) waiting to become a great *Frugality* story.
+- The weak answer lists what the candidate reads. The fixed one names a problem, a two-day limit and three sources.
+- The learning was used: a profiler finding, a code change and a number.
+- It includes a first attempt that failed, and it ends with the knowledge passed on.
+
+## The same answer at three levels
+
+Amazon's pages give no behavioral bar for each level, so this scale is our own.
+
+<Compare
+  columns={["", "Junior or mid", "Senior", "Staff"]}
+  rows={[
+    [
+      "Frugality",
+      "You tuned a slow query, or right-sized containers that had far more memory than they used",
+      "You designed a feature to fit inside capacity the team already had",
+      "You changed the cost per request or per tenant for a whole product line",
+    ],
+    [
+      "Learn and Be Curious",
+      "You learned a new language or codebase in days to finish a task",
+      "You learned a neighbouring field, such as security or database internals, to fix a problem between teams",
+      "You saw a shift coming, tested it on real work and taught it to the org",
+    ],
+    [
+      "A result that fits",
+      "A report that ran for 9 minutes now runs in 40 seconds",
+      "A cluster's cost fell from 38,000 to 14,000 dollars a month while volume grew",
+      "Cost per tenant fell by a third across four services",
+    ],
+  ]}
+  caption="Our own scale for sizing a story. Amazon does not publish one."
+/>
+
+## Check your story
+
+<DecisionTree
+  title="Test your Frugality or Learn and Be Curious story"
+  tree={{
+    q: "In your Frugality story, did reliability and speed hold, or can you say exactly what got worse and who agreed to it?",
+    yes: {
+      q: "In your Learn and Be Curious story, did you use the new skill on a real problem and pass it on to someone?",
+      yes: {
+        answer: "Both stories are sound. Next, read Hire and Develop the Best.",
+        href: "/behavioral/amazon-leadership-principles/hire-develop-and-best-employer",
+      },
+      no: "Tie the learning to something that exists: a benchmark, a production fix, a written guide or a session you ran for the team.",
+    },
+    no: "A saving that made the service less reliable is a cost moved to customers or to on-call. Choose a story where the limit led to a better design.",
+  }}
+/>
+
+## Build your own
+
+1. Find out what your team's main service costs each month, and what the largest single cost is. Write one change that would cut it.
+2. Think of a time you were told no to more people or budget. Write what you did next.
+3. Name one layer below your daily work that you treat as a black box: the database's storage engine, the garbage collector, the network stack. Write a problem that knowing it would have solved faster.
+4. Find the last thing you learned that changed something in production. Write how long the learning took and what it paid back.
+
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=growth)
+
+## Red flags
+
+- **Cheap, and someone else pays.** Staging switched off, alerts removed, on-call stretched. Recover by choosing a saving that came from design, and say what stayed the same.
+- **"I read a lot."** Reading is not a result. Recover by naming one problem where something you learned changed what you built.
+- **Resentment about a no.** Recover by telling what the limit made you look at, and what you found.
+- **A saving with no number.** Recover with the cost before and after, per month or per unit.
+
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="I have never owned a budget. How do I show Frugality?">
+    Time and people are budgets too. A story where you delivered with two engineers in place of five, or reused an
+    existing component in place of building one, fits. It also helps to learn what your service costs to run. Many
+    engineers have never looked, and a first look often turns up a story.
   </QuizItem>
-  <QuizItem
-    question="2. What is one layer 'one level below' your daily abstraction (e.g., Postgres heap pages, Linux epoll, V8 garbage collection, or KV-cache paging) that you have treated as a black box?"
-    hint="Curiosity one layer below your daily job is what separates senior debuggers from average ones."
-  >
-    Pick one black box, read its core implementation or paper this weekend, and run a small benchmark to see it in action.
+  <QuizItem question="Is asking for more resources a red flag?">
+    No. Sometimes more capacity is the right answer. What is listened for is the order: you measured where the cost went
+    and tried the cheaper options first, and your request came with that evidence.
+  </QuizItem>
+  <QuizItem question="Does a course or certificate count for Learn and Be Curious?">
+    Only as the start of a story. Say what you did with it afterwards: the problem you applied it to and what changed.
+    If nothing changed yet, pick a different example.
   </QuizItem>
 </Quiz>
-
-## Common red flags & how to recover
-
-- **Claiming "I read Hacker News and blogs" as your Learn and Be Curious answer:** Passive reading is low signal. Always anchor on a **concrete problem** where curiosity led you to test, measure, and ship something better.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="Tell me about a time you requested more resources (headcount or budget) and were told no. What did you do?"
-    level="Senior"
-    companies={["Amazon"]}
-  >
-    Show zero resentment over the "no." Walk through how the constraint forced you to audit the workflow, eliminate low-ROI scope, automate manual steps, or partner with another team to reuse an existing component.
-  </InterviewQuestion>
-</InterviewQuestions>
 
 ## Related
 
 - [Invent and Simplify & Think Big](/behavioral/amazon-leadership-principles/invent-simplify-and-think-big)
 - [Hire and Develop the Best & Earth's Best Employer](/behavioral/amazon-leadership-principles/hire-develop-and-best-employer)
+- [Quantifying Engineering & ML Impact](/behavioral/foundations/quantifying-engineering-impact)
+- [All 16 Leadership Principles: Question Index](/behavioral/amazon-leadership-principles/leadership-principles-question-index)
+
+## Sources
+
+- [Amazon: Leadership Principles](https://www.amazon.jobs/content/en/our-workplace/leadership-principles). Frugality and Learn and Be Curious in Amazon's own words.
+
+The descriptions of the two principles, the tables, the level scale and the example answers are our own.

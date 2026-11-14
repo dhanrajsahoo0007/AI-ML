@@ -8,161 +8,204 @@ order: 3
 ## In one sentence
 
 <KeyIdea>
-Your initial two-minute STAR+L story only sets the board; the hiring decision is made during the three to five follow-up probes that test whether you were the true technical driver, why you rejected alternatives, and how you think about counterfactuals.
+  Your two-minute story opens the conversation. Most of what the interviewer writes down comes from the **follow-up
+  questions**: why you did not take the other option, which part was yours, and what you would change now. Answer each
+  one in **30 to 45 seconds, conclusion first**.
 </KeyIdea>
 
 ## The story
 
-A candidate finishes a crisp two-minute story about migrating an authentication service to short-lived JWTs. They smile, expecting the interviewer to move to the next question on the sheet.
+A candidate finishes a clear two-minute story about moving a login service to short-lived tokens. He expects the next question on the list.
 
-Instead, the Amazon Bar Raiser leans forward and asks four rapid-fire questions over the next six minutes:
-1. *"You mentioned you chose a 15-minute token TTL instead of token revocation lists. Who wrote the trade-off doc, and what exact numbers convinced security?"*
-2. *"When the mobile team pushed back on refresh token rotation, what was their strongest technical argument?"*
-3. *"What broke during the 5% canary rollout that you didn't anticipate in the design review?"*
-4. *"If traffic grew 10x tomorrow and a compromised signing key had to be revoked in under 5 seconds, what part of your design fails first?"*
+The interviewer stays on the story and asks four more questions over the next six minutes:
 
-Candidates who memorized a polished script freeze or get defensive here: they interpret rapid probing as hostility. Experienced candidates recognize what is actually happening: **probing is a compliment**. An interviewer only drills down when your story has potential to clear the Senior or Staff bar and they need concrete evidence for their written packet.
+1. "You chose a 15-minute token lifetime over a revocation list. Who wrote that comparison, and which numbers persuaded the security team?"
+2. "The mobile team objected to rotating refresh tokens. What was their strongest argument?"
+3. "What broke in the 5 percent rollout that the design review had not predicted?"
+4. "If a signing key leaked tomorrow and had to be revoked within five seconds, which part of your design fails first?"
 
-## What interviewers are really testing
+A candidate who memorised a script hears an attack and gets shorter and more defensive with each answer. A prepared candidate hears something else. An interviewer asks follow-ups because they need detail for their written feedback, and they tend to ask more when a story is worth the time. He answers each in under a minute. On the fourth, he says plainly which part fails.
 
-<AnimatedDiagram spec="animated/behavioral/probe-tree" stepper caption="The 3-level Bar Raiser probe sequence: testing judgment, personal fingerprints, and counterfactual seniority." />
+## What each follow-up is checking
 
-Every follow-up probe falls into one of **four diagnostic categories**:
+<AnimatedDiagram
+  spec="animated/behavioral/probe-tree"
+  stepper
+  minWidth={820}
+  caption="One opening story and three kinds of follow-up: the option you rejected, the part that was yours, and what breaks at ten times the load."
+/>
 
-| Probe Archetype | Typical Phrasing | What the Bar Raiser is testing | How to answer in 30–45 seconds |
-| --- | --- | --- | --- |
-| **1. The Alternative Probe** | *"Why didn't you just use X?"* / *"What else did you consider?"* | Engineering judgment vs. cargo-culting | Name the constraint (latency, operational toil, consistency, schedule) that disqualified Option X |
-| **2. The Fingerprint Probe** | *"What part of that did YOU personally write or decide?"* | Separating the driver from passengers hiding behind "we" | Name the specific module, RFC section, benchmark, or bug fix you authored |
-| **3. The Friction / Empathy Probe** | *"Why did the PM/peer disagree with you? Were they wrong?"* | Low-ego collaboration & steelmanning | State the valid constraint the other person was protecting (e.g., Q4 launch date or client UX) |
-| **4. The Counterfactual / Scale Probe** | *"What would you do differently today?"* / *"What breaks at 10x?"* | Senior+ architectural foresight & intellectual honesty | Point to the first bottleneck that saturates next and the design change you would make |
+1. **The opening.** Two minutes: the situation, three things you did, the result.
+2. **The rejected option.** "Why not the simpler way?" The candidate points to a design note and the limit that ruled the other option out.
+3. **Your own part.** "Which part did you write?" The candidate names one change and one bug they fixed, and says what teammates did.
+4. **Hindsight and scale.** "What breaks at ten times the volume?" The candidate names the first limit the system would hit and what they would do about it.
+
+The diagram shows three follow-ups and labels the interviewer a Bar Raiser, which is Amazon's name for an interviewer from outside the hiring team. There is no fixed number at any company. Some interviewers ask one follow-up and move on. Others spend ten minutes on one story.
+
+Almost every follow-up is one of four kinds:
+
+| Kind                 | It sounds like                                         | What it checks                                    | A good answer in 30 to 45 seconds                                    |
+| -------------------- | ------------------------------------------------------ | ------------------------------------------------- | -------------------------------------------------------------------- |
+| **The other option** | "Why not X?" "What else did you consider?"             | Whether you chose, or followed a habit            | The limit that ruled X out: latency, effort to run, the date         |
+| **Your part**        | "What did you write or decide yourself?"               | Whether "we" was hiding a small role              | The module, the document section, the test or the fix that was yours |
+| **The other side**   | "Why did they disagree? Were they wrong?"              | Whether you understood the person you argued with | The fair concern they were protecting                                |
+| **Hindsight**        | "What would you do differently?" "What breaks at 10x?" | Honesty, and how far ahead you think              | The first part that would fail, and the change you would make        |
 
 <PremiumBreak />
 
-## How the bar changes by level
+## Try it: an answer to a second follow-up
 
-Watch how the depth of your response to a follow-up probe (*"Why did you pick a transactional outbox over direct dual-writes?"*) calibrates your level:
+A candidate has told a story about cutting the cost of an AI assistant by 55 percent with a cache that matches questions by meaning. The first follow-up was "why not an exact-match cache?" This is the second. Select the sentences in the answer that cost points.
 
-<Compare
-  columns={["Probe Dimension", "L3 / L4 Response", "L5 (Senior) Response", "L6+ (Staff / Principal) Response"]}
-  rows={[
-    ["Why reject Option B?", "'Our tech lead said dual-writes can lose data'", "'A crash between DB commit and Kafka publish leaves state inconsistent; outbox gives atomic local commit'", "'Quantified our 0.2% pod eviction rate during deploys, which meant ~180 orphaned ledger rows/day under dual-write'"],
-    ["What did you miss?", "'Nothing major, the launch went smoothly'", "'I underestimated outbox table bloat; had to add partitioned vacuuming after week 1'", "'I optimized for single-region throughput but coupled the schema to Postgres, which made our multi-region active-active move harder 9 months later'"],
-    ["Stakeholder pushback", "'The PM wanted it faster so we worked overtime'", "'Negotiated with PM to ship core outbox for payments first and defer analytics events by 1 sprint'", "'Aligned 3 service owners on a shared outbox library so nobody had to maintain custom relay daemons'"],
+<SpotTheFlag
+  title="Spot the red flags"
+  prompt="What was the rate of wrong cache hits, and how did you stop one customer's cached answer reaching another customer?"
+  sentences={[
+    {
+      text: "Our platform team handled the vector database settings, so I am not completely sure about the exact threshold.",
+      flag: "The opening story claimed the cache design. This sentence hands it to another team. If part of it was not yours, say where your part began, then answer for your part.",
+    },
+    {
+      text: "But we tested it thoroughly and it looked good.",
+      flag: "'We', no number, and 'looked good'. A follow-up asks for the detail behind a claim, and this has none.",
+    },
+    {
+      text: "For keeping customers apart, I put the customer id and the permission group into the cache key, so a lookup can only match entries from the same customer.",
+      note: "A direct answer to the second half of the question, in the first person, with how it works.",
+    },
+    {
+      text: "I measured wrong hits on 1,500 labelled pairs of questions before launch.",
+      note: "How the number was produced. This is what the interviewer is looking for.",
+    },
+    {
+      text: "I think the rate was probably around one percent, maybe less, something like that.",
+      flag: "A guess. The next follow-up will be about this number. Give a figure you can defend, or say you do not remember it exactly and give the range.",
+    },
+    {
+      text: "Anyway, the main point is that we cut cost by 55 percent, which was the goal.",
+      flag: "A retreat to the headline. The interviewer asked to go deeper, and this goes back to the opening.",
+    },
   ]}
-  caption="Follow-up probes expose the true ceiling of a candidate's technical and organizational depth."
 />
 
-## Interactive diagnostic: test your story
+The same answer, at the depth that was asked for:
 
-Pick your primary project story and run it through this Bar Raiser stress test:
+_"Keeping customers apart was the part I would not trade. I put the customer id and the permission group into the cache key, so the similarity search only ever runs inside one customer's own entries. For wrong hits, I labelled 1,500 pairs of questions and tested thresholds. At 0.94, about 3 percent of hits had the wrong meaning, mostly negations: 'is X allowed' against 'is X not allowed'. I raised the threshold to 0.965 and added a small check on negation and numbers, which brought wrong hits under 0.3 percent. The platform team ran the database itself. The key design and the threshold work were mine."_
+
+What changed:
+
+- It answers both halves of the question, the more serious one first.
+- The number comes with how it was measured.
+- The boundary with the platform team is stated once, at the end, as a fact.
+
+The other two follow-ups in the same chain:
+
+- **"Why not an exact-match cache?"** _"We shipped that first. It took four hours and caught 14 percent of traffic, mostly retries. But 40 percent of our cost was business users asking the same compliance questions in different words, and exact match missed those."_
+- **"What aged badly?"** _"Keeping the cache fresh. I started with a 24-hour expiry, so an edited policy document gave stale answers for up to a day. Two sprints later I added an index from each source document to its cache entries, so an edit clears them within five seconds."_
+
+## The same follow-up at three levels
+
+One follow-up, _"Why an outbox table and not two direct writes?"_, and two that often come after it.
+
+<Compare
+  columns={["", "Junior or mid", "Senior", "Staff"]}
+  rows={[
+    [
+      "Why not the other option?",
+      "Our tech lead said direct writes can lose data.",
+      "A crash between the database commit and the publish leaves the two out of step. The outbox makes it one local commit.",
+      "About 0.2 percent of our pods are stopped mid-request during deploys. With direct writes that was roughly 180 lost ledger events a day.",
+    ],
+    [
+      "What did you miss?",
+      "Nothing major. The launch went well.",
+      "I underestimated how fast the outbox table grows. I had to add partitioned cleanup after the first week.",
+      "I tied the design to one database in one region. Nine months later that made our move to two active regions harder.",
+    ],
+    [
+      "How did you handle pushback?",
+      "The product manager wanted it sooner, so we worked late.",
+      "I agreed with product to ship payments first and move analytics events back one sprint.",
+      "I got three service owners onto one shared outbox library, so nobody maintains their own relay.",
+    ],
+  ]}
+  caption="The follow-up is the same. The level shows in how exact the reason is and how far the consequences reach."
+/>
+
+## Check your story
 
 <DecisionTree
-  title="Can your story survive 3 levels of Bar Raiser probing?"
+  title="Is your story ready for follow-ups?"
   tree={{
-    q: "If the interviewer asks 'Why didn't you do the simpler/obvious alternative?', can you name a quantified constraint (latency, cost, error rate, deadline) that ruled it out?",
+    q: "If asked 'why not the simpler option?', can you name a limit with a number that ruled it out?",
     yes: {
-      q: "If they ask 'What was the hardest bug or surprise during rollout?', do you have a specific technical detail ready?",
+      q: "If asked 'what was the hardest surprise during rollout?', do you have a specific technical detail ready?",
       yes: {
-        q: "If they ask 'What would you redesign if you started over today?', can you name a real architectural limitation without undermining your whole story?",
+        q: "If asked 'what would you redesign today?', can you name a real limit of your design without undoing the whole story?",
         yes: {
-          answer: "Bulletproof! Your story has all 3 probe layers ready.",
+          answer: "This story is ready for follow-ups. Next, check that your set of stories covers every topic.",
           href: "/behavioral/foundations/building-your-story-matrix",
         },
-        no: "Prepare 1 genuine hindsight trade-off (e.g., 'Our polling interval worked at 1k TPS, but at 20k TPS I would switch to CDC via WAL streaming').",
+        no: "Prepare one honest piece of hindsight. For example: 'Polling worked at 1,000 writes a second. At 20,000 I would read changes from the database log.'",
       },
-      no: "Review your PR history or post-mortem notes to recall 1 real rollout edge case (e.g., connection pool spike, serialization mismatch, or cold-cache stampede).",
+      no: "Go back to your pull requests or the incident notes and find one real surprise: a connection pool that filled, a format mismatch, a cache that was empty at the wrong moment.",
     },
-    no: "Never claim your design had no alternatives. Reconstruct the 2 options you weighed and why Option A won on your specific workload.",
+    no: "Never say there was no other option. Write down the two you weighed and why one won for your workload.",
   }}
 />
 
-## Worked engineering example (STAR+L)
+## Build your own
 
-Here is how a live 4-minute probe chain plays out when an interviewer drills into a candidate's story about cutting LLM inference cost:
+Take your main project story and write a two-sentence answer to each of these.
 
-<Tabs title="Live probe transcript:Defensive vs. Calibrated">
-  <Tab label="Defensive / Scripted (Fails Probe 2)">
-    - **Interviewer:** *"You said you reduced RAG pipeline cost by 55% using semantic caching. Why didn't a simple exact-match hash cache work?"*
-    - **Candidate:** *"Exact match doesn't work well for natural language because users phrase things differently."*
-    - **Interviewer (Probe 2):** *"Sure, but embedding every query and searching a vector index adds latency and false-positive cache hits. What was your false-positive rate, and how did you stop a cached answer for Tenant A from leaking to Tenant B?"*
-    - **Candidate:** *"Um, our platform team handled the vector database configuration, so I'm not 100% sure on the exact threshold, but we tested it and it looked good."*
-    - **Debrief Verdict:** Candidate claimed ownership of the caching architecture in the opener, but collapsed under a basic multi-tenancy and threshold probe. Likely passenger.
-  </Tab>
-  <Tab label="Calibrated Senior+ (Clears Probes 1–3)">
-    - **Interviewer:** *"You said you reduced RAG pipeline cost by 55% using semantic caching. Why didn't a simple exact-match hash cache work?"*
-    - **Candidate (Probe 1, Alternatives):** *"We actually shipped exact-match normalization first! It took 4 hours to build and caught 14% of traffic, mostly automated retries and UI suggestion chips. But 40% of our cost came from enterprise users asking variations of the same compliance questions, which exact match missed."*
-    - **Interviewer (Probe 2, Fingerprints & Safety):** *"What was your false-positive rate on semantic hits, and how did you prevent cross-tenant leakage?"*
-    - **Candidate:** *"Cross-tenant leakage was a hard non-negotiable. I partitioned the cache key prefix by `tenant_id + role_acl_hash` before vector similarity ever ran, so a query could only search embeddings within the caller's exact permission boundary. For false positives, I benchmarked cosine thresholds on 1,500 labeled query pairs: at 0.94 we saw 3.1% wrong-intent hits on negated questions ('is X allowed' vs 'is X not allowed'), so I raised the threshold to 0.965 and added a lightweight cross-encoder verification check on numeric/negation tokens, bringing false hits below 0.3%."*
-    - **Interviewer (Probe 3, Hindsight):** *"What broke or aged poorly in that design?"*
-    - **Candidate:** *"Cache invalidation when source documents updated! Initially we used a 24-hour TTL, which meant a policy doc edit stayed stale for a day. Two sprints later I had to add an inverted index mapping `source_doc_id -> cache_entry_ids` so document webhook updates evicted affected cache keys within 5 seconds."*
-  </Tab>
-</Tabs>
+1. What is the simple approach an interviewer will suggest: a scheduled job, one database table, no cache? At what number did it stop working?
+2. Where did a teammate do the heavy work? Write the boundary: "I designed the state machine and wrote the coordinator. A teammate owned the infrastructure code and the dashboards."
+3. What surprised you in the rollout?
+4. If you rebuilt it in half the time, which third of the design would you leave out?
 
-## Introspect your own work
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=judgment), then ask a friend to read the story and ask "why?" four times. The [Mock Loop](/behavioral/practice-lab/mock-loop) does the same with a timer.
 
-<Quiz title="Stress-test your memory before the interviewer does">
-  <QuizItem
-    question="1. For your top project story, what is the 'Simpler Baseline' question an interviewer will ask ('Why didn't you just use a cron job / Postgres / a monolith')?"
-    hint="Every complex architecture must justify why a boring solution failed."
-  >
-    Write down the exact metric where the boring solution broke (e.g., *"A single Postgres table worked up to 2,500 writes/sec, but at 8,000 writes/sec autovacuum lag caused 1.8s p99 spikes"*).
+## Red flags
+
+- **Guessing.** A made-up number or a detail from a layer you did not touch. **Recover:** "I did not write that layer. My part started at the request handler. From our load tests, here is how that boundary behaved."
+- **Hearing "why?" as "you are wrong".** Interviewers sometimes challenge a correct decision to see whether you fold or explain. **Recover:** restate the limit and the number calmly. If they raise something you had not considered, say so.
+- **Returning to the script.** Repeating part of the opening when asked to go deeper. **Recover:** answer only the question asked, then stop.
+- **Answers that grow.** Each follow-up answer longer than the last. **Recover:** conclusion first, one reason, one number, stop. Then ask, "Shall I go further into that?"
+- **Claiming the idea.** Saying a direction was yours when a lead proposed it. **Recover:** see the second common question below.
+
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="The interviewer interrupted my story after 45 seconds. What does that mean?">
+    One of two things. Your setup was running long and they want the actions. Or you just said the thing they need, and
+    they want more of it now. Stop, answer what they asked in 30 to 45 seconds, then offer: "Shall I go further into
+    that, or tell you how the rollout ended?"
   </QuizItem>
-  <QuizItem
-    question="2. Where in your story did someone else on your team do the heavy lifting?"
-    hint="Knowing the exact boundary of your work makes you sound 10x more credible."
-  >
-    Map the boundary explicitly: *"I designed the state machine and wrote the coordinator service; my teammate Rahul owned the Terraform module and Grafana dashboards."* When an interviewer probes Terraform, you can state that boundary cleanly instead of bluffing.
+  <QuizItem question="What if they ask whose idea it was, and it was my tech lead's?">
+    Say so, then go straight to the hard part that was yours. "Our staff engineer proposed moving to an event log. My
+    part was the snapshot design and fixing the out-of-order replay bug that was blocking the cutover." If you claim the
+    idea, the next follow-up will be about a decision you did not make.
   </QuizItem>
-  <QuizItem
-    question="3. If you had to re-implement your project today with half the time, what 30% of the design would you delete?"
-    hint="This is the exact answer to 'What would you do differently?'"
-  >
-    Identifying over-engineered parts of your own past work (like a custom plugin system that only ever had one plugin) is one of the strongest Staff+ signals you can give.
+  <QuizItem question="How do I answer 'what would you do differently?' when the project went well?">
+    Choose one of three. Order: "I ran real traffic through it in week four. I would do that in week one, because real
+    payloads showed two bugs our tests missed." Size: "I built a general rule engine for five teams when two needed it."
+    Growth: "It worked at 10 shards. At 60 the slowest requests got slower, and I would plan for that from the start."
+  </QuizItem>
+  <QuizItem question="How many follow-ups should I expect on one story?">
+    It depends on the interviewer, the company and how much time is left. Preparing answers to the four kinds above
+    covers most of what you will be asked.
   </QuizItem>
 </Quiz>
 
-## Common red flags & how to recover
-
-- **Bluffing when you don't know a number or detail:** If an interviewer probes a layer you didn't touch, never guess. Say: *"I didn't write the TLS termination layer (my ownership started at the gRPC ingress worker) but based on our load tests, here is how that boundary behaved."*
-- **Treating "Why?" as "You're wrong":** Sometimes Bar Raisers challenge a *correct* decision just to see if you fold under authority or defend your reasoning calmly with data. Hold your ground politely if the numbers back you up.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="What should I do if an interviewer interrupts my STAR story after 45 seconds?"
-    level="Mid"
-    companies={["Amazon", "Meta", "Uber"]}
-  >
-    Treat an interruption as a **routing signal, not a failure**. It usually means either:
-    1. Your Situation/Task wind-up was too long and they want you in the Action block, or
-    2. You just mentioned the exact signal their rubric requires and they want to zoom in immediately.
-
-    Stop immediately, answer their specific question in 30–45 seconds, and then ask: *"Would you like me to dive deeper into that trade-off, or share how the rollout finished?"*
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="How do I answer 'What would you do differently if you did this project again?' when the project succeeded?"
-    level="Senior"
-    companies={["Google", "Amazon", "Stripe"]}
-  >
-    Never say *"Nothing, it worked great."* Every real system has a seam that aged poorly as traffic, team size, or requirements evolved. Pick one of three high-signal reflections:
-
-    1. **Sequencing reflection:** *"I waited until week 4 to run shadow production traffic; next time I would replay production logs in week 1 because real payloads exposed two encoding bugs our unit tests missed."*
-    2. **Complexity reflection:** *"I built a generic rule engine for 5 teams when only 2 needed it; a simpler config-driven schema would have shipped two weeks faster."*
-    3. **Scale-horizon reflection:** *"Our synchronous fan-out worked cleanly at 10 shards, but at 60 shards tail latency crept up; I would design hedged requests in from day one."*
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="What if the Bar Raiser asks 'Who came up with that idea?' and the honest answer is my tech lead?"
-    level="Mid"
-    companies={["Amazon", "Google"]}
-  >
-    Be 100% honest and pivot immediately to the **hard problem you solved inside that direction**:
-    *"Our Staff Engineer proposed the high-level move to an event-sourced ledger. My ownership was designing the snapshot compaction algorithm and solving the out-of-order replay bug that was blocking production cutover."* Honesty builds instant trust; claiming someone else's architecture and failing the next probe destroys the round.
-  </InterviewQuestion>
-</InterviewQuestions>
-
 ## Related
 
-- [The STAR+L Framework](/behavioral/foundations/star-plus-l-framework): structuring the 2-minute opening arc.
-- [Building Your 8-Story Matrix](/behavioral/foundations/building-your-story-matrix): preparing 8 deep stories instead of 50 shallow ones.
-- [How Amazon Evaluates Leadership Principles](/behavioral/amazon-leadership-principles/how-amazon-evaluates-lps): inside the Bar Raiser mechanism.
+- [The STAR+L Framework (and When to Break It)](/behavioral/foundations/star-plus-l-framework): the two-minute opening that the follow-ups start from.
+- [Presenting Your Past Project Deep-Dive](/behavioral/competencies/project-deep-dive-walkthrough): a whole round made of follow-ups.
+- [Building Your 8-Story Matrix](/behavioral/foundations/building-your-story-matrix): eight stories you know in depth.
+- [How Amazon & the Bar Raiser Evaluate the 16 LPs](/behavioral/amazon-leadership-principles/how-amazon-evaluates-lps): who the Bar Raiser is.
+
+## Sources
+
+- [About Amazon: the Bar Raiser programme](https://www.aboutamazon.com/news/workplace/amazon-bar-raiser). The Bar Raiser is an interviewer from outside the hiring team.
+
+The four kinds of follow-up, the example answers and the exercise are our own. No company we researched publishes how many follow-up questions its interviewers ask.

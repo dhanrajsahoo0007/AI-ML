@@ -8,129 +8,211 @@ order: 8
 ## In one sentence
 
 <KeyIdea>
-In the "Past Project Deep-Dive" round (Stripe Manager Chat, Uber Bar Raiser, Apple/Google/Amazon HM rounds), spending 12 minutes reciting a tour of your company's boxes and arrows is fatal; win by spending **2 minutes on business/scale context**, **3 minutes on the architecture boundary**, and **70% of your time on the 2–3 hardest trade-offs, bottlenecks, and failure modes YOU personally owned**.
+  A project deep dive is scored on **your decisions**, so give a **two-minute overview**, show the design in four boxes,
+  and spend most of the time on the two or three hardest choices you made: what you rejected, what broke and what you
+  would change.
 </KeyIdea>
 
 ## The story
 
-Almost every Senior (L5), Staff (L6+), and AI/ML engineering loop includes a 20-to-45 minute **Past Project Deep-Dive** ("Walk me through the most complex system you have designed or built").
+Two engineers get the same 30-minute round: "Walk me through a system you built."
 
-Here is how most strong engineers accidentally bomb this round:
-1. They pick a massive system built by 40 people over 3 years, draw 15 microservices on the whiteboard, and talk for 15 minutes without pausing, leaving the interviewer wondering: *"What did THIS candidate actually design vs. inherit?"*
-2. They only present the final happy-path architecture, omitting the dead ends, the rejected alternatives, the migration hazards, and the production bug that paged them at 3 AM.
+The first chooses a platform that 40 people built over three years. He draws 15 services and explains each one. At minute 14 the interviewer interrupts for the first time: "Which of these did you design?" He points at two boxes. There are now 16 minutes left to talk about them, and half of that goes on questions he could have answered at the start.
 
-Interviewers use the Project Deep-Dive as a **live X-ray of your true seniority and ownership depth**.
+The second chooses a smaller system that four people built. She spends two minutes on the problem, the scale and her part. She draws four boxes. Then she says: "There were three hard problems here. Which would you like to start with?" The interviewer picks one. For the next 20 minutes they talk about a decision she made, the option she rejected, the bug that followed and what she would do now.
 
-## What interviewers are really testing
+Both systems worked. The second interviewer's notes are full of the candidate's own decisions. The first interviewer's notes are mostly a list of services.
 
-<AnimatedDiagram spec="animated/behavioral/probe-tree" stepper caption="How interviewers drill 3 layers deep into your project's constraints, rejected options, and failure recovery." />
+## The layers an interviewer drills into
 
-Use the **25-Minute Project Deep-Dive Blueprint** to structure your walkthrough:
+<AnimatedDiagram
+  spec="animated/behavioral/deep-dive-layers"
+  stepper
+  minWidth={700}
+  caption="A deep dive starts wide and narrows. Each layer down covers less of the system and more of your own choices."
+/>
 
-| Minute Mark | Section | What to Cover & Draw |
-| --- | --- | --- |
-| **Min 0–2** | **1. Business Context & Hard Constraints** | The user problem, traffic/data scale (RPS, TB, p99 SLA, team size), and **your exact role** (e.g., *"I was the Lead/DRI for the ingestion and consistency engine across a 5-person pod"*) |
-| **Min 2–5** | **2. High-Level Architecture (3–5 Boxes Max)** | Draw the clean boundary: ingress, core state/compute, storage, and external dependencies. Stop and ask: *"Would you like me to dive into the storage sharding trade-off, the zero-downtime migration, or the tail-latency control loop?"* |
-| **Min 5–15** | **3. The 2 Hardest Trade-Offs (Options A vs. B vs. C)** | Walk through the rejected alternatives, the benchmark/math that decided the winner, and the sharp edges you accepted |
-| **Min 15–20** | **4. Rollout Safety, Failure Modes & Metrics** | Shadow verification, idempotency, how the system degrades when a dependency dies, and the quantified business/latency result |
-| **Min 20–25** | **5. What You Would Change Today (Retrospective)** | What broke 6 months later as scale 10x'd, and what you would redesign with hindsight |
+1. **The two-minute overview.** The problem, the scale in numbers and exactly what you did. Nothing else.
+2. **The design in four boxes.** Group everything you did not own into one box called "upstream" or "other services". Then offer three topics.
+3. **A decision you made.** The options you had, the numbers that decided it and what you gave up. Most of the round belongs here.
+4. **What broke.** Something did. Say how you found out, what it affected and what you did. For example: "During the migration, 0.2 percent of customers were counted twice for six hours. Our nightly comparison caught it and we issued credits the next day."
+5. **What you would change.** With what you know today. "Nothing" ends the conversation at the point where a senior candidate has the most to say.
+
+A plan for a 25-minute round:
+
+| Minutes  | Layer                 | What to cover                                                              |
+| -------- | --------------------- | -------------------------------------------------------------------------- |
+| 0 to 2   | Overview              | The user problem, the scale, the team size and your part                   |
+| 2 to 5   | Design                | Four boxes, then: "Which of these three problems shall I go into?"         |
+| 5 to 15  | Two decisions         | For each: the options, the measurement or sum that chose one, the downside |
+| 15 to 20 | What broke            | The rollout, a failure, how the system behaves when a dependency is down   |
+| 20 to 25 | What you would change | What stopped fitting as usage grew, and the design you would choose now    |
+
+The interviewer will interrupt and change the order. The plan is there so that you know which layer you are in and can return to it.
 
 <PremiumBreak />
 
-## How the bar changes by level
+## Try it: a weak overview, then the fix
 
-<Compare
-  columns={["Dimension", "L4 (Mid-Level SWE)", "L5 (Senior SWE)", "L6+ (Staff / Principal SWE)"]}
-  rows={[
-    ["System Scope", "Owns a well-defined service component, pipeline stage, or major feature end-to-end", "Owns an end-to-end service or multi-component subsystem; drives RFC, rollout, and SLOs", "Owns multi-service / cross-org architecture, platform abstractions, or company-critical migrations"],
-    ["Trade-Off Fluency", "Explains why the team chose library/pattern X over Y with clear pros/cons", "Defends quantitative trade-offs (CAP, latency, FinOps cost, operability) across 3+ competing designs", "Explains how organizational topology (Conway's Law), multi-year product strategy, and hardware economics shaped the design"],
-    ["Self-Critique", "Identifies code/test improvements they would make next time", "Points out architectural seams that hit scaling limits at 5x load and how they evolved them", "Critiques the 18-month lifecycle of the architecture candidly, including organizational adoption friction"],
-  ]}
-  caption="When an interviewer asks 'What would you do differently if you rebuilt this today?', saying 'Nothing, it worked great' is a major missed signal."
-/>
+Here is the first minute of a deep dive. Select the sentences that cost points.
 
-## Interactive diagnostic: test your deep-dive project
-
-<DecisionTree
-  title="Is your flagship project ready for a 30-minute Deep-Dive round?"
-  tree={{
-    q: "Can you draw the high-level architecture in under 3 minutes using 4–6 clean boxes, and state in one sentence which exact box(es) YOU personally designed vs. inherited?",
-    yes: {
-      q: "For your 2 biggest design decisions, can you present at least two rejected alternatives (Option A vs. Option B) with the exact numbers/constraints that made you reject them?",
-      yes: {
-        q: "Have you prepared a candid answer for 'What broke in production?' AND 'What would you redesign today at 10x scale?'",
-        yes: {
-          answer: "Deep-Dive ready! Next: move to Hub 5 (Leveling & Role-Specific Tracks).",
-          href: "/behavioral/leveling-and-tracks/junior-to-senior-leveling",
-        },
-        no: "Every deep-dive ends with 'What would you change today?' Prepare 1 scaling bottleneck and 1 operational simplification you discovered post-launch.",
-      },
-      no: "An architecture presentation without rejected alternatives sounds like you just followed orders. Write down a 3-column comparison table for your top 2 decisions.",
+<SpotTheFlag
+  title="Spot the red flags"
+  prompt="Walk me through the most technically difficult project you have worked on."
+  sentences={[
+    {
+      text: "Sure. So the company was founded in 2016, and originally everything was one large application.",
+      flag: "History. The first minute is gone and the interviewer still does not know what the project is.",
     },
-    no: "Simplify your diagram! Group peripheral services into a single 'Upstream/Downstream' box so 80% of the visual focus stays on the subsystem you owned.",
-  }}
+    {
+      text: "I will talk about usage metering for our API: it counts 120,000 events a second for 40,000 customers and must answer 'is this customer over their limit' in under 15 ms.",
+      note: "The project, the scale and the hard constraint in one sentence. This is how the overview should start.",
+    },
+    {
+      text: "The platform has about fifteen services, and I will go through each of them so you have the full picture.",
+      flag: "A tour. Nobody can hold fifteen boxes in their head, and most of them are not yours. Show four.",
+    },
+    {
+      text: "It uses Kafka, ClickHouse, Redis, a gateway plugin and a custom Go service with its own log.",
+      flag: "A list of tools is not a design. Say what each part is for, and which part was hard.",
+    },
+    {
+      text: "We were four engineers. I wrote the design document, built the limit-checking protocol myself and led the migration from the old system.",
+      note: "Your part, stated exactly, with the team size. The interviewer now knows what to ask you about.",
+    },
+    {
+      text: "It all went smoothly and it has run without problems since.",
+      flag: "If nothing went wrong there is nothing to go deeper on, and few interviewers will believe it. Offer the hard problems.",
+    },
+  ]}
 />
 
-## Worked engineering example (STAR+L)
+The same opening in about two minutes:
 
-<Tabs title="Project Deep-Dive Scripts: The Opening Pitch & The Trade-Off Matrix">
-  <Tab label="The 2-Minute Opening Pitch + Interactive Menu">
-    **Prompt:** *"Walk me through the most technically challenging project you have worked on recently."*
+- **The project and its scale (30 seconds).** "I will walk you through the usage metering system for our API platform. It counts 120,000 events a second for 40,000 business customers. It has to answer 'is this customer over their limit' in under 15 ms, and the monthly bill has to match usage to within 0.005 percent."
+- **My part (20 seconds).** "We were four engineers. I wrote the design document, built the limit-checking protocol myself and led the move from the old system."
+- **The design (40 seconds).** "There are three parts. Each gateway keeps a small local allowance per customer. A regional coordinator hands those allowances out. A ledger records every event and is compared with the bill each night."
+- **Three topics (30 seconds).** "There were three hard problems. One: a few very large customers overloading a single partition. Two: counting each event exactly once when a region fails over. Three: moving 40,000 live customers with no lost events. Which would you like to start with?"
 
-    - **1. The Hook & Scale (45 sec):** *"I'll walk you through the **Real-Time Usage Metering & Quota Engine** I architected and led for our API platform, which processes **120,000 events/sec** across 40,000 B2B customers with a hard **sub-15ms p99 enforcement budget** on the API gateway hot path and **99.995% billing accuracy**."*
-    - **2. My Exact Role vs. Team (20 sec):** *"We were a 4-engineer squad. I authored the system RFC, personally built the distributed token-bucket lease protocol and Kafka-to-ClickHouse reconciliation pipeline, and led the zero-downtime migration from our legacy Redis cluster."*
-    - **3. The 3-Box Architecture + Interviewer Menu (45 sec):** *"At a high level, the system has three planes: (1) Edge Gateway Local Lease Caches, (2) a Regional Quota Coordinator service, and (3) an Async Durable Ledger & Reconciler. **There were three really hard engineering problems here: first, preventing 'hot-tenant' Redis partition bottlenecks without allowing 10x quota overruns; second, guaranteeing exactly-once billing aggregation during regional failovers; and third, migrating 40,000 live customers with zero dropped webhooks. Which of those three would you like to dive into first?**"*
+What changed:
+
+- No history. The first sentence is the project.
+- Four boxes at most, and the candidate's own part is named.
+- The ending hands the choice to the interviewer, who can go straight to what they need to score.
+
+## "What would you change today?"
+
+Almost every deep dive ends here.
+
+<Tabs title="One question, two answers">
+  <Tab label="Weak answer">
+    *"Honestly, it worked well and met all its targets, so I would not change much."*
+
+    **What the interviewer writes:** no reflection. Either the candidate has not looked at the system since launch, or will not admit a flaw.
+
   </Tab>
-  <Tab label="Handling 'What Would You Redesign Today?' (Hindsight Signal)">
-    **Prompt:** *"Looking back at that system 12 months later, what was its biggest flaw and how would you redesign it today?"*
+  <Tab label="Fixed">
+    *"It met the 15 ms target. Six months later we hit something I had not planned for. Sales began selling to groups of companies, where 50 workspaces share one limit. I had keyed everything by a single customer id, so a shared limit meant coordinating across partitions, and limit checks for those customers took twice as long."*
 
-    - **Weak Answer:** *"Honestly it worked really well and met all our SLOs, so I wouldn't change much."* (Zero architectural growth signal.)
-    - **Strong Senior/Staff Answer:** *"While the adaptive lease protocol hit our 15 ms p99 latency and 99.995% billing accuracy targets, six months after launch we hit an operational pain point I hadn't anticipated: **Enterprise Multi-Workspace Hierarchies**. When Sales introduced parent-child organization pools where 50 sub-workspaces shared a single pooled rate limit, our flat `tenant_id` shard key required cross-partition lease coordination that doubled tail latency for hierarchical tenants. If I were designing the data model today, I would key the lease state machine by `billing_root_id` from Day 1 with hierarchical local sub-quotas, and I would replace our custom Go WAL-compaction worker with native ClickHouse `ReplacingMergeTree` materialized views, which wasn't mature in our cluster when we started, and would have saved us ~1,800 lines of custom state-recovery code."*
+    *"If I designed it today, I would key the allowance by the billing owner from the first day, with smaller allowances under it. I would also drop about 1,800 lines of recovery code I wrote. The database has a built-in feature for it now, which was not ready when we started."*
+
+    **What the interviewer writes:** knows how the system aged, names their own design choice as the cause, has a specific alternative.
+
   </Tab>
 </Tabs>
 
-## Introspect your own work
+## The same answer at three levels
 
-<Quiz title="Stress-test your Project Deep-Dive readiness">
-  <QuizItem
-    question="1. Why should you offer the interviewer a '3-Door Menu' of deep-dive topics at Minute 3 instead of talking for 15 minutes straight?"
-    hint="Different interviewers have different rubrics: an SRE cares about failover, a Staff SWE cares about sharding, and an EM cares about cross-team migration."
-  >
-    Offering a 3-topic menu at Minute 3 turns a one-way monologue into a collaborative peer conversation and lets the interviewer steer straight to the competency they are assigned to grade.
+<Compare
+  columns={["", "Mid level", "Senior", "Staff"]}
+  rows={[
+    [
+      "Size of the system",
+      "One component, pipeline stage or large feature, owned end to end",
+      "A whole service or a group of components, including its design document, rollout and targets",
+      "A design that crosses services and teams, or a migration the company depends on",
+    ],
+    [
+      "How decisions are explained",
+      "Why the team chose one library or pattern over another, with pros and cons",
+      "Three or more designs compared with numbers: latency, cost, how hard it is to run",
+      "How team structure, product plans over several years and cost shaped the design",
+    ],
+    [
+      "Hindsight",
+      "Code and tests they would improve",
+      "Where the design reached its limit at five times the load, and how they changed it",
+      "An honest account of the design over 18 months, including how hard it was for other teams to adopt",
+    ],
+  ]}
+  caption="Choose a project whose size matches the level you are interviewing for, and where the decisions were yours."
+/>
+
+## Check your project
+
+<DecisionTree
+  title="Is your project ready for a deep dive?"
+  tree={{
+    q: "Can you draw the design in under three minutes with four to six boxes, and say in one sentence which boxes you designed?",
+    yes: {
+      q: "For your two biggest decisions, can you name an option you rejected and the number or limit that ruled it out?",
+      yes: {
+        q: "Do you have an honest answer ready for 'what broke?' and 'what would you change today?'",
+        yes: {
+          answer: "Your project is ready. Next, see how the same story is scored at different levels.",
+          href: "/behavioral/leveling-and-tracks/junior-to-senior-leveling",
+        },
+        no: "Prepare one thing that failed after launch and one thing you would make simpler. Every deep dive reaches these two questions.",
+      },
+      no: "A design with no rejected options sounds like you were told what to build. Write a three-column comparison for your top two decisions.",
+    },
+    no: "Simplify the drawing. Put everything you did not own into one box, so most of the picture is the part you built.",
+  }}
+/>
+
+## Build your own
+
+1. Which project of the last three or four years had the hardest decisions that were yours to make? It does not have to be the largest or the newest.
+2. Say the overview aloud with a timer: the problem, the scale, your part, three topics. Stop at two minutes.
+3. For each of the three topics, write the option you rejected and why.
+4. Write two sentences each for "what broke" and "what I would change".
+
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=strategy). Then practise the drawing on a blank page until four boxes take you under three minutes while you talk.
+
+## Red flags
+
+- **Credit for what you inherited.** **Recover:** say it first. "The database was chosen before I joined. My part was the partition design and fixing the compaction failures." Interviewers respect this and ask about your part.
+- **The 15-box tour.** **Recover:** stop, say "let me simplify", and redraw with four boxes.
+- **No rejected options.** **Recover:** for the decision you are on, name one alternative and the reason it lost.
+- **"Nothing went wrong."** **Recover:** offer the smallest real failure you have. A six-hour double count is enough.
+- **Confidential detail.** Customer names, internal code or unreleased products. **Recover:** describe the system with general terms and rounded numbers. No interviewer needs the real names.
+
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="My recent work was simple. Can I present a project from three years ago?">
+    Yes. A project from the last few years where the hard decisions were yours is a better choice than a recent one with
+    little to discuss. Refresh the numbers, the data model and the failures before the interview, because you will be
+    asked about them.
   </QuizItem>
-  <QuizItem
-    question="2. Can you draw your flagship project from memory on a blank Excalidraw or whiteboard in 180 seconds?"
-    hint="Fumbling with drawing tools eats valuable deep-dive time."
-  >
-    Practice drawing your **4-Box Context Diagram** and your **3-Column Trade-Off Table** until you can sketch both in under 3 minutes while narrating.
+  <QuizItem question="The interviewer interrupts me every minute. Is it going badly?">
+    Usually it is going well. Interruptions mean the interviewer is looking for the edge of what you know. Answer in 30
+    to 45 seconds with the conclusion first, ask "shall I go further on that?", then return to the layer you were in.
+  </QuizItem>
+  <QuizItem question="I am a new graduate. What project do I use?">
+    An internship project, a final-year project or a serious personal one. The layers are the same at a smaller size:
+    what it did, your part of it, one choice you made, one thing that went wrong. See the page on new grad and intern
+    interviews for more.
   </QuizItem>
 </Quiz>
 
-## Common red flags & how to recover
-
-- **Claiming credit for inherited infrastructure:** If you joined after the storage engine was already chosen, say so upfront (*"When I joined, the team had already selected Cassandra; my scope was solving the tombstones compaction outage and designing the v2 partition key"*). Interviewers respect honesty and will probe the part you *did* own.
-- **Violating NDA with proprietary secrets:** Never paste internal code, customer names, or secret unreleased product names. Describe systems using clean architectural primitives, public scale orders of magnitude, and standard industry patterns.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="What if my most recent project was mostly glue code or product CRUD: can I present an older project from 2–3 years ago?"
-    level="Senior"
-    companies={["Google", "Meta", "Stripe", "Uber"]}
-  >
-    Yes! Choosing a slightly older project (within the last 2–4 years) where you had **deep architectural ownership, tough trade-offs, and measurable production scale** is much better than presenting a recent project that was technically shallow. Just make sure you refresh your memory on the exact numbers, schemas, and failure modes before the loop.
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="How do I handle it when the interviewer interrupts my walkthrough every 60 seconds with skeptical questions?"
-    level="Senior"
-    companies={["Amazon", "Uber", "Apple", "Netflix"]}
-  >
-    Frequent interruptions in a Project Deep-Dive are a **good sign**, not a bad sign! It means the interviewer is engaged and testing your depth boundary. Answer their question concisely in 30–45 seconds (conclusion first), ask *"Does that answer your question on the consistency model, or should we go deeper there?"*, and then smoothly resume your arc.
-  </InterviewQuestion>
-</InterviewQuestions>
-
 ## Related
 
-- [Handling Follow-Up Probes & "Why Did You Do That?"](/behavioral/foundations/handling-follow-up-probes)
-- [Quantifying Engineering Impact When You Don't Have Revenue Metrics](/behavioral/foundations/quantifying-engineering-impact)
-- [Junior-to-Senior (L3–L5) Leveling Rubric](/behavioral/leveling-and-tracks/junior-to-senior-leveling)
+- [Handling Follow-Up Probes & Bar Raiser Drill-Downs](/behavioral/foundations/handling-follow-up-probes): the questions inside each layer.
+- [Quantifying Engineering & ML Impact](/behavioral/foundations/quantifying-engineering-impact): the numbers for your overview.
+- [How the Same Question Is Graded at Junior, Mid & Senior](/behavioral/leveling-and-tracks/junior-to-senior-leveling): matching the project to the level.
+- [New Grad & Intern Behavioral Interviews](/behavioral/leveling-and-tracks/new-grad-and-intern-interviews): deep dives on course and internship projects.
+
+## Sources
+
+The plan, the examples and the exercise on this page are our own. Deep-dive rounds differ in length and format from company to company, so ask your recruiter how long the round is and whether you may draw.

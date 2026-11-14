@@ -8,130 +8,173 @@ order: 4
 ## In one sentence
 
 <KeyIdea>
-**Insist on the Highest Standards** is not perfectionism or nitpicking variable names in PRs; it is refusing to ship silent defects downstream and replacing fragile manual vigilance with automated quality gates that actually speed up delivery.
+  **Insist on the Highest Standards** means you do not pass a defect down the line, and you fix a problem so that it
+  stays fixed. In an interview it is tested against a deadline: a strong story **holds the standard and still ships**.
 </KeyIdea>
 
 ## The story
 
-Every team has met two kinds of engineers who claim to have "high standards."
+Most teams have met two engineers who both say they have high standards.
 
-The first is the **Gatekeeper**: they leave 42 nitpick comments on every pull request, demand a two-week rewrite three days before launch, and block releases without offering code or alternatives. Teammates start routing PRs around them.
-The second is the **Bar-Raiser Engineer**: when they spot that a new payment-retry worker lacks idempotency keys and could double-charge users during a network partition, they don't just block the PR: they pair with the author for two hours to add an idempotency token column, write the fault-injection test, and then add a CI static-analysis check so no future worker can merge without an idempotency policy.
+The first leaves 42 comments on a pull request, most of them about names and spacing. Three days before a launch he asks for a two-week rewrite. He offers no code and no smaller option. After a few months, teammates send their reviews to someone else.
 
-Amazon's *Insist on the Highest Standards* states: *"Leaders continually raise the bar and drive their teams to deliver high-quality products, services, and processes. Leaders ensure that defects do not get sent down the line and that problems are fixed so they stay fixed."*
+The second reads a new payment retry worker and sees that it has no <Term id="idempotent">idempotency</Term> key. If the network drops between the charge and the reply, a customer is charged twice. She does not stop at a blocking comment. She pairs with the author for two hours to add the key and a test that cuts the connection mid-request. The worker ships the same week. Then she adds a build check, so that no new worker can merge without declaring how it handles a retry.
 
-## What interviewers are really testing
+Both engineers slowed one change down. Only the second one named a harm to a customer, helped to remove it, and left the team faster afterwards. That is the version of this principle an interviewer wants to hear.
 
-<AnimatedDiagram spec="animated/behavioral/one-way-vs-two-way-door" stepper caption="High standards protect irreversible invariants (data integrity, security, SLAs) while letting reversible surface area ship fast." />
+## What the interviewer scores
 
-Bar Raisers test whether you know the difference between **non-negotiable invariants** and **negotiable scope**:
+<AnimatedDiagram
+  spec="animated/behavioral/standards-vs-speed"
+  stepper
+  minWidth={700}
+  caption="One defect, found three days before launch. Speed decides how much ships, and the standard decides what must be true of it."
+/>
 
-| Non-Negotiable Invariants (Hold the Line) | Negotiable Surface Area (Ship & Iterate) |
-| --- | --- |
-| Data correctness, financial ledger accuracy, <Term id="idempotent" /> writes | Secondary dashboard filters, admin UI polish, batch export formats |
-| Tenant isolation, auth checks, PII redaction | Supporting 100% of rare edge-case file formats on day one |
-| Rollback safety, <Term id="slo" /> burn-rate alerts, bounded blast radius | Fully automated self-service onboarding (can be white-glove for first 5 tenants) |
+In our words, the principle asks you to keep raising the quality bar, to stop defects before they reach the next person, and to fix causes so they do not return. The diagram follows one decision.
+
+1. **The finding.** Three days before launch, a failover test shows stock oversold in 0.4 percent of reservations.
+2. **Favour speed.** Ship on Monday and accept the defect. The date holds and the customer pays for it.
+3. **Favour the standard.** Delay two weeks for a full rework. The defect is gone and so is the date.
+4. **Split the decision.** Let speed decide the scope, and let the standard decide the things that must hold.
+5. **Hold both.** Ship on Monday with a smaller scope and the defect closed.
+
+The split in step 4 is the skill. Some things can be cut and some cannot:
+
+| Hold the line                                                           | Open to cuts                                                          |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Correct data: money, stock, anything a customer would dispute           | Secondary filters, admin screens, export formats                      |
+| Who can see whose data: access checks, tenant separation, personal data | Rare file formats on day one                                          |
+| A tested rollback, and alerts on your <Term id="slo" />                 | Self-service setup, if the first five customers can be set up by hand |
+
+A strong story names one item from the left column that was at risk, and one from the right that you gave up to protect it.
+
+Keep the left column short. If everything is a standard, nothing can ship and the team stops listening. Three or four things that must be true of every release are enough, and each should be something a customer or an on-call engineer would notice.
 
 <PremiumBreak />
 
-## How the bar changes by level
+## A weak answer, then the fix
 
-<Compare
-  columns={["Dimension", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
-  rows={[
-    ["Code & Design Quality", "Writes thorough unit/integration tests and catches edge cases in own code", "Spots systemic reliability/API flaws in design reviews and helps teammates fix them", "Establishes org-wide architectural standards, COE (Correction of Error) rigor, and canary gates"],
-    ["Fixing Defects for Good", "Fixes the bug and adds a regression test", "Eliminates an entire class of bugs across the service with a linter, schema constraint, or test harness", "Turns recurring operational pain across multiple teams into a shared paved-road platform"],
-  ]}
-  caption="At L5 and L6, 'high standards' is measured by how much easier you made it for the whole team to do the right thing by default."
-/>
+**Question:** _"Tell me about a time you would not compromise on quality under pressure to ship."_
 
-## Interactive diagnostic: test your story
+<Tabs title="One answer, twice">
+  <Tab label="Weak answer">
+    *"Three days before launch I noticed a small inventory drift in a failover test. The team wanted to ship, but I have very high standards, so I blocked the launch until it was fixed properly. It took two more weeks. Quality matters more than dates."*
 
-<DecisionTree
-  title="Does your story show High Standards or Perfectionist Gatekeeping?"
-  tree={{
-    q: "When you raised the quality concern in your story, could the defect have caused real customer harm, data corruption, security exposure, or on-call outages?",
-    yes: {
-      q: "Did you help build the solution or propose a scoped path that still protected the delivery timeline?",
-      yes: {
-        q: "Did you leave behind an automated mechanism (CI check, contract test, template) so the team didn't rely on manual memory?",
-        yes: {
-          answer: "Calibrated L6 High Standards story! Next: Dive Deep & Are Right, A Lot.",
-          href: "/behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot",
-        },
-        no: "Add the mechanism you built afterward so the defect stayed fixed permanently.",
-      },
-      no: "Never end a story with 'I blocked the launch.' Show how you paired, cut non-essential scope, or built the safety shim so the launch succeeded safely.",
-    },
-    no: "Avoid stories about stylistic code formatting or minor refactors; anchor on a defect with measurable user or operational blast radius.",
-  }}
-/>
-
-## Worked engineering example (STAR+L)
-
-<Tabs title="Holding the quality bar under deadline pressure">
-  <Tab label="Refusing to Ship a Silent Defect">
-    **Prompt:** *"Tell me about a time you refused to compromise on quality despite pressure to ship."*
-
-    - **Situation & Task:** *"Three days before launching our multi-region inventory reservation API, load testing passed at 5,000 RPS, and Product wanted to flip 100% traffic on Monday. While reviewing the failover test logs, I noticed a 0.4% negative-inventory drift during simulated Redis leader failovers."*
-    - **Action:** *"The team was exhausted and argued 0.4% only happened during rare failovers. I calculated that at peak flash-sale volume, a single failover would oversell ~600 units of out-of-stock items, triggering manual customer cancellations. I proposed a 48-hour trade-off: instead of delaying launch by two weeks, we launched on Monday with a Lua fencing-token check on Redis writes and routed failover traffic to synchronous Postgres serializable checks for the 15-minute failover window."*
-    - **Result:** *"I implemented the Lua check and chaos test over 36 hours. We launched on Monday on time; when an actual ElastiCache node replacement happened three weeks later, oversell count was zero."*
-    - **Learning:** *"I added Jepsen-style Redis failover injection to our pre-release CI pipeline so state drift fails the build automatically."*
   </Tab>
-  <Tab label="Raising a Team's Operational Bar">
-    **Prompt:** *"Tell me about a time you weren't satisfied with the status quo on your team and raised the bar."*
+  <Tab label="Fixed">
+    - **Situation and task.** *"Three days before we launched a stock reservation API, load tests had passed at 5,000 requests a second. Reading the failover test logs, I saw stock go negative in 0.4 percent of reservations when the cache leader changed."*
+    - **Action.** *"The team was tired and said failovers are rare. I worked out the cost: at sale volume, one failover would oversell about 600 units, and each one is an order we cancel by hand. A full rework needed two weeks. I proposed a smaller change that fit before Monday. Every stock write carries a version, so a write from an old leader is rejected, and during a failover reservations use the database path, which is slower and correct. To make room, we moved bulk reservation out of the launch. I wrote the check and a failover test in 36 hours, and a teammate reviewed both."*
+    - **Result.** *"We launched on Monday. Three weeks later a cache node was replaced in business hours and the oversell count was zero. Bulk reservation shipped five weeks later than first planned."*
+    - **Learning.** *"The failover test now runs in the build before every release."*
 
-    - **Situation & Task:** *"When I joined our billing-webhooks team, on-call engineers were getting paged 15+ times a week, and post-mortems ended with 'engineer will be more careful during deploys.'"*
-    - **Action:** *"I audited 3 months of incidents and found 70% were caused by backward-incompatible protobuf changes or missing database index locks. I introduced Amazon's 5-Whys COE template and built two automated gates: `buf breaking` in CI to block wire-incompatible schema edits, and a Postgres `lock_timeout = 2s` wrapper on all migrations."*
-    - **Result:** *"Within 6 weeks, deploy-induced SEV-2s dropped from 4/month to zero over the next two quarters, and weekly on-call pages fell from 15 to under 2."*
-    - **Learning:** *"Two sibling payments teams adopted our COE template and CI migration wrapper."*
   </Tab>
 </Tabs>
 
-## Introspect your own work
+What changed:
 
-<Quiz title="Audit your quality standards">
-  <QuizItem
-    question="1. What is one recurring annoyance in your current team's codebase or deployment pipeline that everyone has normalized as 'just how things are'?"
-    hint="Normalized pain (flaky tests, manual deploy steps, noisy alerts) is where High Standards stories are born."
-  >
-    Pick the single highest-toil normalized flaw and ask: what 1-day automated check would make that class of failure impossible?
+- The defect has a cost to customers: 600 oversold units per failover. In the weak answer it is "a small drift".
+- The candidate built the fix and found a path that kept the date.
+- Something was given up, and the answer says what: bulk reservation, five weeks late.
+- The standard no longer depends on someone remembering it.
+
+## Try it: the same question at three levels
+
+Amazon's pages give no behavioral bar by level, so the scale here is our own. The principle is the same in each answer. What grows is how many people now do the right thing by default.
+
+<GuessTheLevel
+  title="Guess the level"
+  prompt="Tell me about a time you raised the quality bar."
+  levels={["Junior or mid", "Senior", "Staff"]}
+  answers={[
+    {
+      text: "A bug in our date parser came back twice after I fixed it. I added a regression test with the 14 date formats our users send and wired it into the build.",
+      level: "Junior or mid",
+      why: "One person, their own code, and a test that stays. The right size for a first quality story.",
+    },
+    {
+      text: "Our incident reviews kept ending with 'be more careful'. I read three months of incidents, found that 70 percent came from two kinds of unsafe change, and added two build checks that block them. Pages fell from 15 a week to 2.",
+      level: "Senior",
+      why: "A whole class of defect was removed for the service, and the team's on-call load changed.",
+    },
+    {
+      text: "Our team reran one flaky test by habit. I found a race in its setup and fixed it. The suite went from failing one run in six to none in a month.",
+      level: "Junior or mid",
+      why: "A real improvement inside the team's own code, found and fixed alone.",
+    },
+    {
+      text: "Four payment teams each had their own rules for schema changes. I wrote one standard with their leads, built the shared check and got it adopted in all four over a quarter. One team kept an exception for an old service.",
+      level: "Staff",
+      why: "Several teams changed how they work, and the answer is honest about the exception.",
+    },
+  ]}
+/>
+
+## Check your story
+
+<DecisionTree
+  title="High standards, or gatekeeping?"
+  tree={{
+    q: "Could the defect in your story have harmed a customer, corrupted data, exposed data or paged someone?",
+    yes: {
+      q: "Did you help build the fix, or propose a smaller scope that kept the date?",
+      yes: {
+        q: "Did you leave something automatic behind, such as a build check, a contract test or a template?",
+        yes: {
+          answer: "The story holds the standard and ships. Next, read Dive Deep and Are Right, A Lot.",
+          href: "/behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot",
+        },
+        no: "Add what you built afterwards so the defect stayed fixed. If you built nothing, say what you would add now.",
+      },
+      no: "A story cannot end with 'I blocked the launch'. Show how you paired on the fix, cut scope or built the guard so the launch went ahead safely.",
+    },
+    no: "Choose another story. Formatting, naming and small refactors are taste. Start from a defect with a cost you can measure.",
+  }}
+/>
+
+## Build your own
+
+1. Name one annoyance your team treats as normal: a flaky test, a manual deploy step, a noisy alert. Write what a one-day check would do about it.
+2. Think of the last time you pushed back in a review. Write the production scenario you were worried about, in one sentence, with a number.
+3. Find a time you shipped with a known gap. Write what you held, what you cut, and whether you would make the same split again.
+4. Find a defect that reached production on your watch. Write why the tests missed it and what catches it now.
+
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=prioritisation)
+
+## Red flags
+
+- **Gold-plating.** Three weeks on a framework for a problem that happens once a year. Recover by tying the standard to a harm: who was hurt, how often and what it cost.
+- **"I blocked the launch" as the ending.** Recover by saying what you built or cut so that the launch could go ahead.
+- **Standards as taste.** Names, formatting, a preferred pattern. Recover by picking a defect that a customer or an on-call engineer would have felt.
+- **A standard kept by memory.** "We agreed to be more careful." Recover by naming the check that now runs without you.
+
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="How do I hold a standard when the deadline is tomorrow?">
+    Split the decision the way the diagram does. Apply speed to the scope: drop a feature, launch in one region, cap the
+    traffic. Apply the standard to what must hold: correct data, access checks, alerts and a rollback you have tested.
+    You ship less, and what you ship is sound.
   </QuizItem>
-  <QuizItem
-    question="2. Think of the last time you pushed back in a code or design review. Did the author leave the review feeling supported and sharper, or frustrated?"
-    hint="High standards + Earn Trust means critiquing the failure mode with data and offering concrete code."
-  >
-    Frame every review pushback around the **production scenario** (*"Under a retry storm, line 84 will open 1,000 connections: here's a 5-line bounded pool snippet"*), never around personal taste.
+  <QuizItem question="A defect reached production on my watch. Does that rule the story out?">
+    No. The principle is about defects that stay fixed. Tell it plainly: what broke, why your tests missed it, and what
+    you added so that kind of defect is caught next time.
+  </QuizItem>
+  <QuizItem question="Is a refactoring story a good fit?">
+    Only if you can name what the old code was costing: incidents, hours per release, bugs per month. A refactor told as
+    "the code was ugly" sounds like taste.
   </QuizItem>
 </Quiz>
-
-## Common red flags & how to recover
-
-- **Gold-plating disguised as High Standards:** Spending 3 weeks building a custom framework for a problem that only happens once a year violates *Bias for Action* and *Frugality*. Always tie your standard to customer harm or operational toil.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="How do you balance Insist on the Highest Standards with Bias for Action when a deadline is tomorrow?"
-    level="Senior"
-    companies={["Amazon"]}
-  >
-    Use the **Scope vs. Invariant split**:
-    - Apply *Bias for Action* to **feature surface area** (cut the batch-upload UI, limit the beta to 1 region, or cap QPS).
-    - Apply *Insist on the Highest Standards* to **core invariants** (data integrity, security, observability, and 60-second rollback).
-    You ship a smaller feature on time, but the slice you ship is rock-solid.
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="Tell me about a time a defect slipped into production on your watch. How does that fit 'Highest Standards'?"
-    level="Mid"
-    companies={["Amazon"]}
-  >
-    Having high standards doesn't mean you never write a bug; it means **you never allow the same class of bug to happen twice**. Walk through the defect candidly, show why existing test layers missed it, and highlight the structural guardrail you built afterward.
-  </InterviewQuestion>
-</InterviewQuestions>
 
 ## Related
 
 - [Bias for Action & Deliver Results](/behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results)
 - [Dive Deep & Are Right, A Lot](/behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot)
-- [Production Incidents & Mistakes](/behavioral/competencies/production-incidents-and-mistakes)
+- [Owning Production Outages, Bugs & Mistakes](/behavioral/competencies/production-incidents-and-mistakes)
+- [All 16 Leadership Principles: Question Index](/behavioral/amazon-leadership-principles/leadership-principles-question-index)
+
+## Sources
+
+- [Amazon: Leadership Principles](https://www.amazon.jobs/content/en/our-workplace/leadership-principles). Insist on the Highest Standards in Amazon's own words.
+
+The description of the principle, the hold-or-cut table, the level scale and the example answers are our own.

@@ -8,135 +8,176 @@ order: 5
 ## In one sentence
 
 <KeyIdea>
-Ambiguity is the primary leveling separator between Mid-Level (L4) and Senior/Staff (L5/L6+) engineers: L4 engineers wait for ambiguity to be removed before coding, whereas L5/L6+ engineers **manufacture clarity** by writing explicit **Goals / Non-Goals**, running a **48-hour de-risking spike** on the biggest unknown, and designing **reversible two-way-door milestones**.
+  An ambiguity story is about **what you wrote down and tested in the first week**. The interviewer wants to hear how a
+  one-line goal became a goal with a number, a list of what you would not do, one tested unknown and a first small
+  release.
 </KeyIdea>
 
 ## The story
 
-In Google's *Googleyness & Leadership* round, Meta's *Jedi* round, and Amazon's *Bias for Action / Dealing with Ambiguity* probes, you will be asked: *"Tell me about a time you had to start a project with vague or constantly changing requirements."*
+A backend engineer is told by her director: "Enterprise customers are leaving because the dashboard is slow. Fix it this quarter." There is no spec and no target. Six teams own parts of the dashboard.
 
-Junior candidates answer by describing how chaotic the project was and how they worked nights and weekends rewriting code every time requirements changed. To a hiring committee, heroically rewriting code three times is not a positive signal: it shows you built rigid one-way doors before validating the problem.
+She does not start by tuning queries. She spends two days on one page.
 
-Senior and Staff engineers treat ambiguity as an information-theory problem: **How do I buy the maximum amount of architectural certainty for the minimum amount of engineering time in Week 1?**
+First she joins load-time data to the list of accounts that left. Median load time has no link to leaving. What the lost accounts share is Monday mornings: admins with more than 10,000 seats waiting over eight seconds for the first load of the week.
 
-## What interviewers are really testing
+Her page says three things. **Goal:** Monday first-load p99 for large accounts from 8.4 seconds to under 1.5. **Not doing:** no rewrite of the six teams' services this quarter. **Biggest unknown:** whether account totals can be built ahead of time without touching those services.
 
-<AnimatedDiagram spec="animated/behavioral/one-way-vs-two-way-door" stepper caption="How Senior+ engineers separate irreversible One-Way Doors from reversible Two-Way Doors to move fast under ambiguity." />
+A two-day test says yes. In week two, one customer gets pre-built totals. By week five, the p99 is 920 ms. Of five accounts that had threatened to leave, three stay and two still go.
 
-Interviewers evaluate your **Ambiguity Playbook** across four steps:
+## From one line to a plan
 
-| Step | What Senior / Staff Engineers Do | What Causes Rework & Burnout |
-| --- | --- | --- |
-| **1. Bounding the Problem (Goals & Non-Goals)** | Writing a 1-page brief within 48 hours that explicitly lists **3 Goals, 3 Non-Goals, and 3 Open Questions** to force stakeholder alignment | Starting a 6-week implementation based on a vague Slack message |
-| **2. De-Risking the Hardest Unknown First** | Identifying the #1 technical or user assumption that could kill the project and testing it with a 2-day spike or shadow replay | Building the easy CRUD scaffolding and UI polish for 4 weeks before testing the core bottleneck |
-| **3. Designing for Shifting Requirements** | Isolating volatile business rules behind a strategy interface, config table, or feature flag while keeping the core data model clean | Hardcoding volatile product assumptions deep inside database schemas |
-| **4. Milestone Checkpoints** | Shipping a thin end-to-end vertical slice in Week 2 so real usage shapes Week 3–6 | Waiting until Week 8 for the "big reveal" only to learn customer needs shifted |
+<AnimatedDiagram
+  spec="animated/behavioral/ambiguity-to-plan"
+  stepper
+  minWidth={700}
+  caption="The story above as a path: the one-line goal, one page of assumptions, a two-day test, a first milestone and a check-in."
+/>
+
+1. **The one-line goal.** Say it as you received it. The interviewer needs to hear how little you were given.
+2. **What you assumed, on one page.** A goal with a number, what you will not do, and the questions still open. The "not doing" list is often the most useful part, because people who disagree with it tell you so in week one.
+3. **The biggest unknown, tested first.** Pick the assumption that would end the project if it were false, and spend a day or two on it before building the easy parts.
+4. **A first milestone.** Something real, for one customer or one team, within two weeks. What they do with it shapes the rest.
+5. **A check-in.** A set moment where the people who gave you the goal can say keep going, change direction or stop.
+
+| What is scored                 | Strong signal                                                           | Weak signal                                                |
+| ------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------- |
+| **Setting the limits**         | A one-page plan within two days, with things you will not do            | Six weeks of building from a chat message                  |
+| **Order of work**              | The riskiest unknown is tested in week one                              | Four weeks on screens and scaffolding before the hard part |
+| **Room for change**            | The parts likely to change sit behind a setting, a flag or an interface | Business rules written deep into the database schema       |
+| **Early contact with reality** | A thin working version in week two                                      | A reveal in week eight                                     |
 
 <PremiumBreak />
 
-## How the bar changes by level
+## A weak answer, then the fix
 
-<Compare
-  columns={["Dimension", "L4 (Mid-Level SWE)", "L5 (Senior SWE)", "L6+ (Staff / Principal SWE)"]}
-  rows={[
-    ["Starting Point", "Given a scoped problem with some edge cases undefined; resolves edge cases with PM/TL", "Given a vague business symptom ('onboarding drop-off is too high'); diagnoses root cause and defines the technical roadmap", "Identifies unowned, existential org-level problems or multi-quarter technology shifts before leadership asks"],
-    ["Handling Pivots", "Adapts cleanly when sprint priorities shift; keeps PRs modular", "Designs extensible seams around volatile requirements so mid-project pivots require config/plugin changes, not rewrites", "Sequences multi-team bets so early milestones deliver standalone value even if company strategy pivots mid-year"],
-    ["Risk Management", "Flags blockers early in standup", "Kills bad technical directions in Week 1 via prototypes and shadow benchmarks", "Protects 20+ engineers from thrash by absorbing executive ambiguity and translating it into stable interfaces"],
-  ]}
-  caption="When asked about ambiguity, show the exact artifacts (Goals/Non-Goals doc, spike results, modular boundary) you created to bring order to chaos."
-/>
+**Question:** _"Tell me about a time the requirements changed while you were building."_
 
-## Interactive diagnostic: test your story
+<Tabs title="One story, told twice">
+  <Tab label="Weak answer">
+    *"I was building a weekly active users report for the leadership team. The requirements kept changing. First they wanted logins, then they wanted any action, then finance wanted paying users only. I rewrote the pipeline three times and worked two weekends to get it done. It was chaotic, but I delivered it in the end."*
 
-<DecisionTree
-  title="Audit your Ambiguity & Shifting Priorities story"
-  tree={{
-    q: "At the start of your story, was the problem genuinely underspecified (e.g., no clear spec, conflicting stakeholder definitions, or unproven technical feasibility)?",
-    yes: {
-      q: "Can you point to the exact mechanism you used in Week 1 to create clarity (e.g., a 1-page Goals/Non-Goals doc, data exploration, or a 48-hour de-risking prototype)?",
-      yes: {
-        q: "When requirements shifted mid-flight, did your modular architecture or iterative rollout allow you to pivot with minimal wasted work?",
-        yes: {
-          answer: "High-signal ambiguity story! Next: master Owning Production Outages, Bugs & Mistakes.",
-          href: "/behavioral/competencies/production-incidents-and-mistakes",
-        },
-        no: "Explain how you separated the stable core (storage/events) from the volatile policy layer so the mid-stream change took days instead of weeks.",
-      },
-      no: "Don't jump straight from 'it was vague' to 'we shipped it'. Walk the interviewer through how you narrowed 5 murky possibilities down to 1 concrete plan.",
-    },
-    no: "Choose a story where nobody handed you a spec, ideally where people initially disagreed on what the problem even was.",
-  }}
-/>
+    **What the interviewer writes:** worked hard, complained about change, rebuilt the same thing three times. Nothing shows the candidate did anything to make the next change cheaper.
 
-## Worked engineering example (STAR+L)
-
-<Tabs title="Navigating Ambiguity: Vague Goal vs. Mid-Flight Pivot">
-  <Tab label="Turning a Vague One-Line Goal into a Shipped System">
-    **Prompt:** *"Tell me about a time you were given a very ambiguous problem with no clear direction and had to figure out what to build."*
-
-    - **Situation & Task:** *"Our VP of Product asked our squad to 'reduce enterprise customer churn caused by slow dashboard loads' in Q3. There was no spec, no target latency SLA, and six different teams owned widgets on the dashboard."*
-    - **Action:** *"Instead of randomly optimizing backend queries, I spent 48 hours manufacturing clarity:
-      1. **Quantifying the Real Bottleneck:** I joined client RUM (Real User Monitoring) traces against enterprise churn cohorts and discovered that p50 load time didn't correlate with churn at all: what drove churn was **cold-cache Monday morning timeouts (>8 seconds)** for enterprise admins with 50,000+ seats.
-      2. **Explicit Goals & Non-Goals Doc:** I wrote a 1-page proposal aligning PM and Engineering on a single crisp goal (*Cut Monday morning cold-load p99 for >10k-seat tenants from 8.4s to under 1.5s*) and an explicit non-goal (*Do not rewrite the 6 widget microservices in Q3*).
-      3. **De-Risking Spike & Two-Way Door:** I ran a 2-day spike proving that pre-warming materialized tenant rollups via an async change-data-capture (CDC) stream solved 90% of the bottleneck without touching the 6 widget teams' schemas."*
-    - **Result:** *"Shipped the CDC rollup layer in 3 weeks; enterprise admin p99 load times dropped from 8.4s to 920 ms, and Q3/Q4 churn in the >10k-seat cohort fell by 24%."*
-    - **Learning:** *"Ambiguity disappears when you intersect user behavior telemetry with explicit Non-Goals before writing production code."*
   </Tab>
-  <Tab label="Surviving a Major Mid-Project Requirement Pivot">
-    **Prompt:** *"Tell me about a time requirements changed drastically halfway through a project."*
+  <Tab label="Fixed">
+    - **Situation and task.** *"I am a data engineer. Leadership asked for a weekly active users report in four weeks. Nobody had defined 'active'."*
+    - **Action.** *"My first version counted logins, and a week later product wanted any action counted. I had built the definition into the pipeline, so that change cost me three days. I did two things so the next change would not. I moved the definition into one SQL view, separate from the pipeline. And I wrote a half-page with three candidate definitions and the number each one produced, and asked product and finance to choose in one meeting. They could not fully agree, so the report shows two numbers with labels."*
+    - **Result.** *"When finance later asked for paying users only, the change took one afternoon. The report shipped a week after the first date. Four teams use it now."*
+    - **Learning.** *"If nobody can define a term in the first meeting, I treat it as something that will change, and I keep it out of the pipeline."*
 
-    - **Situation & Task:** *"Four weeks into building our new merchant subscription billing engine for US Stripe/ACH rails, leadership signed a flagship European enterprise deal that required SEPA Direct Debit and multi-currency VAT invoicing within the same launch window."*
-    - **Action:** *"Because we knew international expansion was a future possibility during Week 1, I had separated our **core double-entry ledger and subscription state machine** (a one-way door) from **payment-rail adapters and tax-calculation plugins** (two-way doors). When the European pivot hit in Week 4, instead of panicking or rewriting our database schema, I led a 1-hour re-scoping triage with Product:
-      1. We kept 100% of the core ledger and state machine intact.
-      2. We paused two low-urgency US self-serve coupon features (moving them to fast-follow).
-      3. We implemented the SEPA asynchronous webhook settlement states behind our existing `PaymentRailAdapter` interface in 8 days."*
-    - **Result:** *"We hit the European enterprise launch deadline on the original date, onboarding a \$3.2M ARR anchor customer with zero schema rework."*
-    - **Learning:** *"When building in a fast-moving business, ask in Week 1: 'Which part of this system is a universal domain invariant, and which part is a policy that Sales or Product will change next month?' Isolate the policy behind an interface."*
   </Tab>
 </Tabs>
 
-## Introspect your own work
+What changed:
 
-<Quiz title="Audit your ambiguity habits">
-  <QuizItem
-    question="1. When you are assigned a murky initiative, what is the first document you write?"
-    hint="Writing a 1-page 'Goals, Non-Goals & Open Assumptions' memo in the first 48 hours saves weeks of rework."
-  >
-    Notice how **Non-Goals** are often more valuable than Goals: getting stakeholders to agree on what you are *not* building in v1 cuts scope creep in half.
+- The first rewrite is still in the story, as the reason for the change of approach.
+- The candidate made the open question visible, with numbers, and got a decision.
+- The result is honest: one week late, and two numbers where one was wanted.
+
+## Decisions that are hard to undo
+
+Under ambiguity, speed comes from knowing which decisions can be changed later.
+
+- **Hard to undo:** a public API, the key a database is partitioned by, a data model other teams build on, deleting data. Slow down for these. Get a second opinion before you commit.
+- **Easy to undo:** a batch size, a screen behind a flag, a ranking rule held in a setting. Decide these quickly and move on.
+
+In a story, one sentence is enough: "The ledger format was hard to change later, so I spent two days on it. The payment provider was behind an interface, so I picked one and moved on." It tells the interviewer that you spent your care where it mattered.
+
+## Try it: the same question at four levels
+
+At a higher level, the starting point is vaguer and more people are waiting on your answer.
+
+<GuessTheLevel
+  title="Guess the level"
+  prompt="Tell me about a time you worked on something that was not clearly defined."
+  levels={["Intern or new grad", "Mid", "Senior", "Staff"]}
+  answers={[
+    {
+      text: "The ticket said 'support export to CSV' and nothing else. I wrote down five questions about size limits and formats and got answers from the product manager in a day. She was unsure about the row limit, so I made it a setting.",
+      level: "Mid",
+      why: "A scoped task with missing detail. The candidate filled the gaps and kept the uncertain part easy to change.",
+    },
+    {
+      text: "Nobody owned the question of whether our three teams should keep three job schedulers. I interviewed the leads, wrote down what we did not know, and ran a four-week trial moving one team's jobs. I brought leadership a recommendation with its cost. Two teams moved. We kept the third as it was, on purpose.",
+      level: "Staff",
+      why: "The candidate found the problem, it crossed several teams, and the outcome was a decision for the organisation, including a decision not to act.",
+    },
+    {
+      text: "My internship task was 'improve the onboarding emails'. I asked my mentor what improved meant and we agreed on open rate. I listed three ideas and tried the subject line first because it was quickest to test. Open rate went from 21 to 26 percent.",
+      level: "Intern or new grad",
+      why: "The candidate asked for a definition and chose a sensible first step, with a mentor's help. That is the right size for a first role.",
+    },
+    {
+      text: "I was told 'checkout conversion is down, look into it'. I split the funnel by device and found the drop was only on Android after a keyboard change. I wrote a one-page plan with one goal and two things we would not touch, tested the fix on 10 percent of users in week one, and shipped in week three.",
+      level: "Senior",
+      why: "The starting point was a symptom. The candidate found the cause, set the scope and ran the work without being handed a plan.",
+    },
+  ]}
+/>
+
+## Check your story
+
+<DecisionTree
+  title="Audit your ambiguity story"
+  tree={{
+    q: "At the start, was the problem truly open: no spec, people disagreeing about the goal, or nobody sure it could be built?",
+    yes: {
+      q: "Can you name what you produced in the first week to make it clear: a one-page plan, a data analysis or a short test?",
+      yes: {
+        q: "When something changed midway, did your design or your rollout let you adjust without starting again?",
+        yes: {
+          answer: "This story is ready. Next, prepare a story about a mistake in production.",
+          href: "/behavioral/competencies/production-incidents-and-mistakes",
+        },
+        no: "Say which part you kept stable and which part you kept easy to change, and how long the change took. If it did cost a rewrite, say what you do differently now.",
+      },
+      no: "Do not jump from 'it was vague' to 'we shipped'. Describe how you got from several possible problems to one plan.",
+    },
+    no: "Choose a story where nobody gave you a spec. The best ones start with people disagreeing about what the problem is.",
+  }}
+/>
+
+## Build your own
+
+1. What is the vaguest instruction you have been given at work or on a course project? Write it in the words that were used.
+2. What did you write down, measure or test in the first few days?
+3. What did you decide not to do, and who agreed to that?
+4. What changed halfway, and how many days did the change cost you?
+
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=ambiguity).
+
+## Red flags
+
+- **Complaining about change.** "The requirements kept moving." **Recover:** say what the team was learning that caused the change, then what you did to make the next one cheap.
+- **Rewrites as proof of effort.** Three rebuilds and two weekends show stamina. They also show the design could not take a change. **Recover:** say what you changed after the first rewrite.
+- **Waiting for clarity.** "I was blocked until product finished the spec." **Recover:** name the questions you wrote down and who you took them to.
+- **Planning without testing.** Four weeks on a 30-page design with no prototype and no data. **Recover:** name the one unknown you would now test in the first two days.
+
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="How do I answer 'how do you know when you have enough information to start'?">
+    Give a rule and an example. One workable rule: start when you know most of what you need and you have put a limit on
+    the worst outcome, with a flag, a small rollout or a format you can migrate. Past that point you learn faster from a
+    small release than from more discussion.
   </QuizItem>
-  <QuizItem
-    question="2. Look at your current project. What is the single riskiest unproven assumption, and when is it scheduled to be tested?"
-    hint="At Google X ('The Monkey and the Pedestal'), you always tackle the hardest bottleneck first."
-  >
-    In interviews, explicitly state how you front-loaded the highest-risk technical unknown into Week 1 rather than leaving integration testing for the final sprint.
+  <QuizItem question="Is 'my manager did not give me enough detail' an ambiguity story?">
+    Only if the story is about what you did next. Missing detail in a ticket is a small version of ambiguity, and it
+    suits a junior or mid-level answer. For a senior answer, start from a symptom or a goal, with no solution given.
+  </QuizItem>
+  <QuizItem question="What if the project was cancelled at the check-in?">
+    That can be a strong story. Say what the first milestone showed, who decided to stop and what was saved by stopping
+    in week three and not in week ten.
   </QuizItem>
 </Quiz>
 
-## Common red flags & how to recover
-
-- **Complaining about changing requirements:** In high-growth tech and AI labs, shifting requirements are a sign that the team is learning from customers and model breakthroughs. Frame pivots as normal inputs to your engineering process.
-- **Analysis paralysis:** Spending 4 weeks writing a 30-page architecture spec for an ambiguous problem without running a single prototype or looking at production data.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="What is the difference between a 'One-Way Door' and a 'Two-Way Door' when navigating ambiguity?"
-    level="Senior"
-    companies={["Amazon", "Google", "Meta", "Stripe"]}
-  >
-    A **One-Way Door (Type 1 decision)** is nearly irreversible or very expensive to undo, such as a public API contract, a foundational encryption/sharding key, or deleting customer data. Slow down and validate these thoroughly. A **Two-Way Door (Type 2 decision)** is easily reversible, such as an internal worker's batch size, a feature-flagged UI flow, or a pluggable ranking heuristic. Under ambiguity, convert as many decisions as possible into Two-Way Doors (via feature flags, versioned headers, and interfaces) so you can ship and learn fast.
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="What if the interviewer asks: 'How do you decide when you have enough information to stop researching and start building?'"
-    level="Senior"
-    companies={["Google", "Anthropic", "OpenAI"]}
-  >
-    Use the **70% + Blast-Radius Rule**: once you have ~70% of the information needed AND you have bounded the worst-case failure blast radius (via a canary flag, shadow mode, or schema compatibility), waiting for the remaining 30% online in production is faster and more accurate than debating it offline in a conference room.
-  </InterviewQuestion>
-</InterviewQuestions>
-
 ## Related
 
-- [Bias for Action & Deliver Results](/behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results)
-- [Tight Deadlines, Scope Cuts & Paying Down Tech Debt](/behavioral/competencies/tight-deadlines-and-tech-debt)
-- [Google: Googleyness & Leadership (G&L)](/behavioral/company-playbooks/google-googleyness-and-leadership)
+- [Bias for Action & Deliver Results](/behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results): Amazon's wording for deciding without full information.
+- [Tight Deadlines, Scope Cuts & Paying Down Tech Debt](/behavioral/competencies/tight-deadlines-and-tech-debt): when the date is fixed and the scope has to move.
+- [Hypothetical Questions: What Would You Do If...](/behavioral/foundations/hypothetical-and-situational-questions): the same steps, asked about a case you have not lived.
+
+## Sources
+
+The stories, the rubric and the exercise on this page are our own. They describe no specific company's process.

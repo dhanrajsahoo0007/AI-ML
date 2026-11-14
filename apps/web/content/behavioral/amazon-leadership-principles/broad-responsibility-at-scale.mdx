@@ -8,116 +8,190 @@ order: 10
 ## In one sentence
 
 <KeyIdea>
-**Success and Scale Bring Broad Responsibility** tests whether you proactively engineer for second-order societal, privacy, security, accessibility, environmental, and AI-safety impacts before a 1-in-10,000 edge case harms thousands of real people at scale.
+  **Success and Scale Bring Broad Responsibility** means that at scale a rare case happens every hour, and your system
+  touches people who never chose to use it. You look for those **secondary effects** before they hurt someone, and you
+  build the guard into the system.
 </KeyIdea>
 
 ## The story
 
-At a 50-user startup, a 0.01% edge case happens once a year. At Amazon, Google, or OpenAI scale (serving 100 million requests an hour) a 0.01% edge case happens **10,000 times every single hour**.
+At a startup with 50 users, a case that happens in 0.01 percent of requests turns up about once a year. At a service that handles 100 million requests an hour, the same case happens 10,000 times an hour.
 
-Suppose an engineer builds an LLM customer-support summarizer that logs raw prompt context to an internal analytics table so data scientists can debug bad summaries. At small scale, it looks like harmless debugging telemetry. At scale, those raw prompts contain unredacted credit-card numbers, medical disclosures, and auth tokens accessible to 400 internal analysts.
-An engineer who embodies **Success and Scale Bring Broad Responsibility** doesn't wait for a compliance audit or a data breach to care: during the initial RFC, they build a deterministic PII/secret scrubbing pipeline with differential access controls and a 7-day auto-TTL, leaving the system better, safer, and more trustworthy than they found it.
+An ML engineer builds a tool that summarises customer support chats. To debug bad summaries, the design writes each raw prompt to an analytics table. At small scale this is ordinary debugging. At full scale the prompts will include card numbers, medical details and login tokens, in a table that 400 people can read. No customer agreed to that, and no customer would ever see it happen.
 
-## What interviewers are really testing
+Launch is four days away, and nobody has asked for a change. She raises it in the design review anyway and builds the guard herself in two days. A scrubber replaces card numbers, tokens and health terms before anything is written. Read access drops from 400 people to the 12 who debug summaries. Rows are deleted after seven days.
 
-<AnimatedDiagram spec="animated/behavioral/incident-ownership" stepper caption="Broad responsibility at scale means catching second-order privacy, security, fairness, and carbon/cost blast radius in CI before it reaches production." />
+The debugging still works. The team ships on the date.
 
-| Dimension of Responsibility | Concrete Engineering Signal |
-| --- | --- |
-| **Security & Privacy by Design** | Catching PII leakage, overly permissive IAM roles, cross-tenant data bleed, or unencrypted tokens during design review |
-| **AI Safety, Fairness & Bias** | Auditing model performance across demographic/language cohorts; adding guardrails against prompt injection or hallucinated medical/financial advice |
-| **Accessibility & Inclusion** | Ensuring critical user flows work with screen readers, high contrast, low-bandwidth mobile networks, and screen-reader keyboard traps (WCAG 2.2 AA) |
-| **Resource & Carbon Footprint** | Eliminating wasteful zombie compute jobs, runaway retry storms that DDoS partner systems, or unnecessary multi-TB data duplication |
+## What the interviewer scores
+
+<AnimatedDiagram
+  spec="animated/behavioral/broad-responsibility"
+  stepper
+  minWidth={700}
+  caption="The debug log from the story at two scales. The pull is to ship it as it is, and a strong answer keeps the feature and adds the guard."
+/>
+
+In our words, the principle says that a large company's actions reach far beyond its customers, so its people should be humble and careful about secondary effects and leave things better than they found them.
+
+1. **A useful feature.** The log has a good reason to exist.
+2. **Scale changes the odds.** Multiply the rare case by your real traffic.
+3. **Who else is affected.** Look past the user in front of you: other customers, partners, colleagues, the public.
+4. **The pull to ship as it is.** The date is close, and the risk has not hurt anyone yet.
+5. **Hold both.** Keep the feature and build the guard in, so it does not depend on anyone remembering.
+
+You do not need a charity or climate story. For engineers the principle shows in ordinary production work:
+
+| Area                            | A strong story shows                                                          | What weakens it                         |
+| ------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------- |
+| **Privacy and security**        | You caught personal data in a log, or one customer's data reaching another    | "Security reviews that sort of thing"   |
+| **Fairness of a model**         | You measured quality per language, region or device and fixed the worst group | Only the average was measured           |
+| **Accessibility**               | A key flow now works with a screen reader, a keyboard and a slow connection   | "Most users are fine"                   |
+| **Partners and shared systems** | You limited what your traffic does to a smaller system when it is failing     | "Their server should have coped"        |
+| **Waste**                       | You removed jobs, copies or retries that cost money and energy for nothing    | Nobody knew what the idle jobs were for |
 
 <PremiumBreak />
 
-## How the bar changes by level
+## A weak answer, then the fix
 
-<Compare
-  columns={["Signal", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
-  rows={[
-    ["Risk Detection", "Spots an unredacted PII log or missing auth check in a PR and fixes it", "Runs a threat model / privacy / fairness audit on a new service and builds automated guardrails", "Designs org-wide governance, multi-tenant isolation architectures, or AI evaluation gates"],
-    ["Second-Order Thinking", "Considers how a change affects immediate callers", "Bounds retry storms, downstream blast radius, and worst-case abuse vectors", "Balances capability velocity against systemic societal, regulatory, and platform trust risks"],
+Here is a first-try answer. Pick the sentences that would cost the candidate points.
+
+<SpotTheFlag
+  title="Spot the red flags in a Broad Responsibility answer"
+  prompt="Tell me about a time your work affected people outside your team in a way you had not planned."
+  sentences={[
+    {
+      text: "Our webhook service retried a failed delivery up to 20 times, 5 seconds apart.",
+      note: "A setup that names the mechanism. Keep it.",
+    },
+    {
+      text: "When a small merchant's server had a brief problem, our retries arrived as a wave of 50,000 requests and kept it down for hours.",
+      note: "The secondary effect, with a number and a person who was hurt.",
+    },
+    {
+      text: "Strictly speaking that was their problem, because our retry policy was in the documentation.",
+      flag: "The harm is pushed onto the people it happened to. This principle is about effects you cause for others.",
+    },
+    {
+      text: "I went through 90 days of delivery logs and found our retries were involved in 40 percent of the outages small merchants reported.",
+      note: "A first-person investigation that sizes the harm.",
+    },
+    {
+      text: "Nobody from compliance had asked for a change, so it was not a priority.",
+      flag: "Waiting to be made to act. A strong story moves before an audit or an incident forces it.",
+    },
+    {
+      text: "In the end we slowed the retries down a bit and the complaints stopped.",
+      flag: "'We', no design, no number, and nothing that stops the next service from doing the same.",
+    },
   ]}
-  caption="You do not need a 'charity' story to answer this LP: security, privacy, multi-tenant safety, accessibility, and AI fairness are prime engineering stories."
 />
 
-## Interactive diagnostic: test your story
+The same story, told well:
+
+- **Situation and task.** _"Our webhook service retried a failed delivery up to 20 times, 5 seconds apart. When a small merchant's server had a brief problem, our retries arrived as a wave of up to 50,000 requests and kept it down for hours. Nothing on our own dashboards was red."_
+- **Action.** _"I went through 90 days of delivery logs and merchant support tickets. Our retries were involved in 40 percent of the outages that small merchants reported. I changed the policy to exponential backoff with random jitter and capped concurrent deliveries per destination. I added a <Term id="circuit-breaker" /> that pauses delivery to an endpoint after 60 seconds of errors and replays the events when it recovers. Our largest merchants wanted fast retries, so I made the cap a setting they can raise. I tested the change by replaying a real outage against a copy of a merchant's endpoint."_
+- **Result.** _"Deliveries that succeed in the end rose from 74 to 98.6 percent. Our retry traffic fell by 62 percent, and tickets about webhook floods went from about 30 a month to 2. A late event can now arrive up to 15 minutes after it happened, and three merchants complained about that."_
+- **Learning.** _"Our design review template now asks what our traffic does to the receiver when the receiver is failing."_
+
+What changed:
+
+- The merchant's outage is treated as something the candidate's system did.
+- The harm is sized before the fix: 40 percent of reported outages.
+- The fix is a design with a setting for those who need the old behavior, and the answer admits who was unhappy.
+- The lesson went into a review template, so it reaches the next service.
+
+## The same answer at three levels
+
+Amazon's pages give no behavioral bar for each level, so this scale is our own. What grows is how far from your own code you looked, and how many people the guard now protects.
+
+<Compare
+  columns={["", "Junior or mid", "Senior", "Staff"]}
+  rows={[
+    [
+      "What you caught",
+      "A personal data field in a log, or a missing access check, in a review",
+      "A privacy, abuse or fairness risk in a new service, found before launch by your own review",
+      "A risk across many services: how customers are kept apart, how models are evaluated",
+    ],
+    [
+      "How far you looked",
+      "The callers of your own change",
+      "Retries, misuse and the worst case for systems downstream",
+      "The trade between shipping speed and trust in the platform",
+    ],
+    [
+      "What lasted",
+      "The fix and a test for it",
+      "An automatic check in the build or a limit in the service",
+      "A rule or review step that several teams follow",
+    ],
+  ]}
+  caption="Our own scale for sizing a story. Amazon does not publish one."
+/>
+
+## Check your story
 
 <DecisionTree
   title="Test your Broad Responsibility story"
   tree={{
-    q: "In your story, did you spot and mitigate a risk that affected users, privacy, security, accessibility, fairness, or downstream ecosystems BEFORE an external regulator or outage forced your hand?",
+    q: "Did you find and reduce the risk before an audit, a regulator or an incident forced you to?",
     yes: {
-      q: "Did you embed the fix into an automated gate (CI check, IAM policy, eval suite, rate limiter) so future engineers couldn't accidentally bypass it?",
+      q: "Is the guard automatic, such as a build check, an access policy, an evaluation set or a rate limit?",
       yes: {
-        answer: "Complete! You have now covered all 16 Amazon Leadership Principles.",
-        href: "/behavioral/company-playbooks/meta-jedi-interview",
+        answer:
+          "The story is complete, and this is the last of the 16 principles. Check your coverage in the question index.",
+        href: "/behavioral/amazon-leadership-principles/leadership-principles-question-index",
       },
-      no: "Show how you turned your manual audit into an automated invariant check.",
+      no: "Say how your one-off review became a check that runs without you. If it did not, say what you would add now.",
     },
-    no: "Frame the story around the moment you asked: 'If this system scales 100x or is abused by a bad actor, who gets hurt and how do we bound it now?'",
+    no: "Start the story at the moment you asked who gets hurt if this runs at 100 times the traffic, or if someone misuses it.",
   }}
 />
 
-## Worked engineering example (STAR+L)
+## Build your own
 
-<Tabs title="Privacy/Security vs. AI Fairness & Scale">
-  <Tab label="Catching Cross-Tenant PII Leakage">
-    **Prompt:** *"Tell me about a time you identified a secondary impact or ethical/security risk of your team's work and took action."*
+1. Suppose someone sent 10,000 crafted requests to your service tonight. Write the worst thing that could happen to another customer's data or availability.
+2. Check whether your product works as well on a slow phone connection, with a screen reader, or in a second language. Write down the group with the worst numbers.
+3. Find something your system does to another team or a partner when that team is having a bad day. Write what limits it.
+4. Find a risk you raised before anyone asked. Write what it cost to fix then, and what it would have cost later.
 
-    - **Situation & Task:** *"We were launching an AI auto-complete feature for enterprise support agents. To speed up response time, the initial design cached prompt-completion pairs in a shared Redis cluster keyed by the first 64 characters of the prompt."*
-    - **Action:** *"During a pre-launch code review, I realized that two agents at different companies typing a standard greeting ('Hi, I am following up on your account number...') could collide on the 64-character prefix and receive cached completions containing another tenant's customer name or invoice details. Even though launch was 4 days away, I flagged the cross-tenant PII risk, wrote a reproduction test proving the collision, and re-keyed the cache with an HMAC of `tenant_id + user_role + full_prompt_hash` plus an automated regex PII scrubber before any entry was written to Redis."*
-    - **Result:** *"We shipped on the original launch day with zero cross-tenant exposure, and passed our SOC2 Type II audit the following month."*
-    - **Learning:** *"I added a mandatory multi-tenant cache-key linter rule across our monorepo requiring `tenant_id` in every cache namespace."*
-  </Tab>
-  <Tab label="Preventing Downstream Ecosystem Harm">
-    **Prompt:** *"Tell me about a time you realized a technical design would negatively impact an external partner or community at scale."*
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=judgment)
 
-    - **Situation & Task:** *"Our webhook delivery service retried failed merchant endpoints up to 20 times with fixed 5-second intervals. When small indie merchants experienced a brief database hiccup, our 50,000-webhook retry wave acted like a DDoS attack that kept their servers down for hours."*
-    - **Action:** *"I analyzed webhook failure logs and saw our aggressive retries were causing 40% of small-merchant outages. I redesigned our retry policy to use exponential backoff with full jitter, added per-destination concurrency caps and circuit breakers that paused delivery when a merchant's endpoint returned 503 for 60 seconds, and exposed a self-serve 'replay when ready' button in the merchant dashboard."*
-    - **Result:** *"Webhook recovery success rate rose from 74% to 98.6%, outbound retry bandwidth dropped by 62%, and small-merchant support tickets about webhook floods fell to zero."*
-    - **Learning:** *"At scale, an unthrottled client retry loop is indistinguishable from an attack; every outbound caller must respect the receiver's capacity."*
-  </Tab>
-</Tabs>
+## Red flags
 
-## Introspect your own work
+- **"That is legal's job."** Recover by telling what you found yourself, in a design or code review, and what you built.
+- **A volunteering story.** A charity day says nothing about your engineering judgment. Recover with a production story about privacy, access, fairness or a partner.
+- **Acting only when forced.** The fix came after the audit or the incident. Recover by choosing a story where you moved first, or say plainly what you missed and what you check now.
+- **A guard that relies on memory.** "We agreed to be careful with that table." Recover by naming the check that enforces it.
 
-<Quiz title="Second-order responsibility audit">
-  <QuizItem
-    question="1. If a malicious user or compromised API key sent 10,000 crafted requests to your service tonight, what is the worst thing that could happen to other users' data or availability?"
-    hint="Think about tenant isolation, PII in logs, and noisy-neighbor starvation."
-  >
-    Auditing your service's blast radius under abuse is one of the highest-leverage exercises a Senior+ engineer can run.
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="Will an engineer be asked about this principle?">
+    Some prep guides say engineers are rarely asked about it by name. That is not confirmed, and Amazon says its
+    principles apply to every role. One story is enough, and it will also serve for questions about ownership and
+    standards.
   </QuizItem>
-  <QuizItem
-    question="2. Does your product or model work equally well for users on a 3G mobile connection, using a screen reader, or speaking with a non-US accent/locale?"
-    hint="Slicing error rates by locale, device tier, or accessibility mode often uncovers massive blind spots."
-  >
-    Check your metrics across the bottom 5% device/network/locale cohorts, not just the median.
+  <QuizItem question="The harm I prevented never happened. How do I show a result?">
+    Size what was exposed: how many records, customers or requests the risk covered. Then say what the guard has caught
+    since. "The scrubber has redacted 40,000 card numbers in six months" is a result.
+  </QuizItem>
+  <QuizItem question="What if raising the risk delayed the launch?">
+    Say so, with the number of days and who agreed to it. Then say what you did to keep the delay short, such as
+    shipping to a small group first. A delay you chose and explained is easier to defend than a risk you kept quiet.
   </QuizItem>
 </Quiz>
 
-## Common red flags & how to recover
-
-- **Saying "I'm just an IC engineer, compliance/ethics is Legal's job":** Amazon added this 16th Leadership Principle specifically to ensure engineers take direct technical ownership of scale externalities.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="What kinds of stories fit 'Success and Scale Bring Broad Responsibility' if I don't work on climate or charity projects?"
-    level="Mid"
-    companies={["Amazon"]}
-  >
-    95% of strong engineering answers to this LP come from **production software engineering**:
-    1. **Privacy & Data Protection:** Redacting PII from logs/training data, GDPR/CCPA deletion rigor, tenant isolation.
-    2. **AI Safety & Fairness:** Eliminating demographic bias in ML models, preventing prompt injection or toxic outputs.
-    3. **Accessibility (a11y):** Making interfaces usable for blind or motor-impaired users.
-    4. **Cloud Efficiency & Ecosystem Citizenship:** Cutting wasteful compute/energy usage or preventing retry storms against smaller partners.
-  </InterviewQuestion>
-</InterviewQuestions>
-
 ## Related
 
-- [Frontier AI Labs Values (Anthropic, OpenAI, DeepMind)](/behavioral/company-playbooks/frontier-ai-labs-values)
-- [How Amazon Evaluates the 16 LPs](/behavioral/amazon-leadership-principles/how-amazon-evaluates-lps)
-- [Amazon Leadership Principles Question Bank](/interviews/amazon-leadership-principles)
+- [Anthropic, OpenAI & DeepMind: Safety, Agency & Epistemic Honesty](/behavioral/company-playbooks/frontier-ai-labs-values)
+- [How Amazon & the Bar Raiser Evaluate the 16 LPs](/behavioral/amazon-leadership-principles/how-amazon-evaluates-lps)
+- [Owning Production Outages, Bugs & Mistakes](/behavioral/competencies/production-incidents-and-mistakes)
+- [All 16 Leadership Principles: Question Index](/behavioral/amazon-leadership-principles/leadership-principles-question-index)
+
+## Sources
+
+- [Amazon: Leadership Principles](https://www.amazon.jobs/content/en/our-workplace/leadership-principles). Success and Scale Bring Broad Responsibility in Amazon's own words.
+
+The description of the principle, the table of areas, the level scale and the example answers are our own.

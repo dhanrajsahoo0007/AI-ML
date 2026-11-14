@@ -8,127 +8,224 @@ order: 5
 ## In one sentence
 
 <KeyIdea>
-**Dive Deep** means refusing to trust high-level averages when anecdotes or tail metrics disagree (peeling the onion down to raw logs, query plans, and flamegraphs) while **Are Right, A Lot** means actively hunting for disconfirming data to break your own initial hypothesis.
+  **Dive Deep** means that when a summary number and a customer's report disagree, you go down to the records until you
+  can explain both. **Are Right, A Lot** means your judgment is good because you look for other views and try to prove
+  your own belief wrong before you act on it.
 </KeyIdea>
 
 ## The story
 
-A checkout service's top-line Grafana dashboard is glowing bright green: **99.94% HTTP 200 OK**, average latency **48 ms**. Yet Customer Support reports three tweets from users in Brazil saying they can't complete purchases.
+A checkout team's dashboard is green: 99.94 percent of requests succeed, and the average response takes 48 ms. Support forwards three messages from customers in Brazil who cannot complete a purchase.
 
-An engineer who doesn't *Dive Deep* glances at the green dashboard, replies *"Metrics look fine on our end, probably a client network issue,"* and closes the ticket.
-An engineer who practices **Dive Deep + Are Right, A Lot** remembers Amazon's famous rule: **when the metrics and the anecdotes disagree, the anecdotes are usually right**. They slice the 200 OK metric by region and payment method, discovering that our API returns `HTTP 200 OK` with `{ "error": "PIX_TIMEOUT" }` inside the JSON body, so the top-line 5xx alert was completely blind! Within 30 minutes, they trace the timeout to an expired mTLS intermediate certificate on one regional proxy, fix the cert rotation, and replace the HTTP-status alert with a business-level checkout completion <Term id="sli" />.
+One engineer looks at the dashboard, replies that the service is healthy and that it is probably the customers' network, and closes the ticket.
 
-## What interviewers are really testing
+A second engineer has the same first belief. She writes down what would be true if it were right: failures would be spread across every payment method. Then she checks. She splits the success number by region and payment method, and one slice stands out. Instant bank payments in Brazil fail 31 percent of the time. She reads a handful of raw responses. The API returns "200 OK" with an error code inside the body, so the error alert never saw them.
 
-<AnimatedDiagram spec="animated/behavioral/probe-tree" stepper caption="In a Dive Deep interview, the Bar Raiser drills down 3 levels into your diagnostic chain to verify you actually touched the logs, traces, and metrics." />
+Thirty minutes later she has the cause: an expired certificate on one regional proxy. She renews it, then adds an alert that reads the error code in the body.
 
-| Principle | What the Bar Raiser probes | Classic failure mode |
-| --- | --- | --- |
-| **Dive Deep** | Your exact forensic sequence: which metric you sliced, what false hypothesis you ruled out first, and the exact line of code/state where the bug lived | Delegating the investigation (*"I asked my junior engineer to look into the logs"*) or stopping at a superficial workaround (restarting pods) |
-| **Are Right, A Lot** | How you seek **disconfirming evidence** (*"work to disconfirm their beliefs"*) and synthesize conflicting data from diverse sources | Claiming *"I just had a gut feeling"* or refusing to pivot when a benchmark disproves your pet architecture |
+She went down two layers, and she dropped her own first explanation on the way.
+
+## What the interviewer scores
+
+<AnimatedDiagram
+  spec="animated/behavioral/dive-deep-layers"
+  stepper
+  minWidth={700}
+  caption="The investigation from the story. The left side goes down through the data, and the right side tests the first belief."
+/>
+
+1. **The summary and the report disagree.** A green dashboard and three customers who cannot pay. Both are facts, and a good explanation covers both.
+2. **Dive Deep.** Split the number, then read the records behind the slice that looks wrong.
+3. **Are Right, A Lot.** Say what your first belief predicts, and check whether that is what you see.
+4. **Where they pull apart.** Each layer costs time, and a decision is waiting. Depth with no stopping point is its own failure.
+5. **A strong answer holds both.** Go deep enough to explain both facts, then act.
+
+### Dive Deep
+
+In our words: stay close to the details at every level of seniority, check often, and be suspicious when the numbers and the stories from customers do not match.
+
+| A strong story shows                                               | What weakens it                              |
+| ------------------------------------------------------------------ | -------------------------------------------- |
+| The exact steps: what you split, what you read, what you ruled out | "I looked into the logs"                     |
+| You did the digging yourself                                       | "I asked someone on the team to investigate" |
+| A cause you can name as a mechanism                                | "Some kind of memory issue"                  |
+| A fix for the cause, and a way to see it next time                 | "We restarted it and it went away"           |
+
+### Are Right, A Lot
+
+In our words: have strong judgment, seek out people who see it differently, and work to disprove what you believe.
+
+| A strong story shows                                                     | What weakens it                                    |
+| ------------------------------------------------------------------------ | -------------------------------------------------- |
+| A test that could have shown you were wrong, chosen before you committed | "I had a gut feeling"                              |
+| You went to the person who disagreed most                                | You asked only the people who agreed               |
+| You changed your mind when the evidence did, and said so                 | You were right in every story you tell             |
+| You stopped digging when one more layer could not change the decision    | Three weeks of analysis on a choice you could undo |
 
 <PremiumBreak />
 
-## How the bar changes by level
+## A weak answer, then the fix
 
-<Compare
-  columns={["Dimension", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
-  rows={[
-    ["Depth of Diagnosis", "Debugs a single-service stack trace or SQL `EXPLAIN ANALYZE` plan", "Traces distributed tail-latency or data corruption across queues, caches, and OS/network boundaries", "Audits org-wide metrics, spots flawed proxy KPIs (Goodhart's Law), and redesigns observability"],
-    ["Judgment & Disconfirmation", "Validates code assumptions with unit and staging tests", "Runs shadow benchmarks to test competing hypotheses before committing the team", "Synthesizes product, unit-economic, and technical signals to make high-leverage architectural bets"],
-  ]}
-  caption="Even Engineering Managers (SDMs) and Principal Engineers (L7) at Amazon are expected to Dive Deep into raw metrics and COE root causes."
-/>
+### Dive Deep
 
-## Interactive diagnostic: test your story
+Here is a first-try answer. Read it as the interviewer would and pick the sentences that cost points.
 
-<DecisionTree
-  title="Will your Dive Deep story survive Bar Raiser forensics?"
-  tree={{
-    q: "In your story, was the root cause obvious from the first error log, or did you have to peel back at least 2–3 layers (including a false lead)?",
-    yes: {
-      q: "Can you name the exact diagnostic tool or query you used (e.g., `EXPLAIN (ANALYZE, BUFFERS)`, eBPF/flamegraph, histogram slicing by tenant, tcpdump, or token-level attention trace)?",
-      yes: {
-        q: "For 'Are Right, A Lot', can you show how you tested a hypothesis that could have proven you WRONG?",
-        yes: {
-          answer: "Rock-solid Dive Deep & Judgment story! Next: Have Backbone; Disagree and Commit.",
-          href: "/behavioral/amazon-leadership-principles/have-backbone-and-earn-trust",
-        },
-        no: "Add the moment where you tested two competing hypotheses (or changed your mind when disconfirming data arrived).",
-      },
-      no: "Refresh the specific technical details: Bar Raisers will ask 'How did you prove it was lock contention and not CPU saturation?'",
+<SpotTheFlag
+  title="Spot the red flags in a Dive Deep answer"
+  prompt="Tell me about a time your metrics looked fine but something was wrong."
+  sentences={[
+    {
+      text: "After we moved our recommendation service to a new connection pool, p99 latency improved from 95 ms to 62 ms.",
+      note: "A setup with numbers. Keep it.",
     },
-    no: "A 1-layer bug ('the config URL had a typo') is too shallow for L5+. Choose an investigation where top-level metrics hid a deeper systemic interaction.",
-  }}
+    {
+      text: "The ads team said their fill rate had dipped 1.8 percent that week, but our dashboard was green, so I told them it was probably on their side.",
+      flag: "The summary is trusted over the report, and the problem is pushed away without a check.",
+    },
+    {
+      text: "Later I asked a junior engineer to look through the logs.",
+      flag: "The digging is handed to someone else, so the interviewer cannot score your depth.",
+    },
+    {
+      text: "I joined our request logs to the auction ids and split latency by the size of each user's history.",
+      note: "A specific first-person step. This is the sentence that gets written down.",
+    },
+    {
+      text: "It turned out to be some kind of memory issue for big users.",
+      flag: "The cause is vague. Name the mechanism and how you confirmed it.",
+    },
+    {
+      text: "We restarted the service and the numbers recovered.",
+      flag: "A restart removes the evidence and leaves the cause in place.",
+    },
+  ]}
 />
 
-## Worked engineering example (STAR+L)
+The same story with the depth in it:
 
-<Tabs title="Dive Deep vs. Are Right, A Lot">
-  <Tab label="Dive Deep (When Metrics & Anecdotes Disagree)">
-    **Prompt:** *"Tell me about a time when your high-level metrics looked fine, but you dug deeper and found a critical problem."*
+- **Situation and task.** _"We moved our recommendation service to a new connection pool. <Term id="p99" /> improved from 95 ms to 62 ms and errors stayed at 0.01 percent. The same week, the ads team saw their fill rate drop by 1.8 percent."_
+- **Action.** _"My dashboard gave me no reason to look, and their report did. I joined our request logs to their auction ids and split latency by the size of each user's history. 99 percent of users have under 50 items. The top 0.5 percent have over 2,000, and they bring in 19 percent of ad revenue. For them, decoding the history caused garbage collection pauses that pushed the slowest requests past the 80 ms auction deadline, so they were served an empty fallback. I confirmed it by replaying 500 of those requests in staging with pause logging switched on."_
+- **Result.** _"I capped the history at the 150 most recent events and reused the buffers. The slowest 0.1 percent of requests went from 140 ms to 38 ms, and the fill rate came back within two days."_
+- **Learning.** _"We now track latency for our heaviest users as its own target, so a regression for them pages us."_
 
-    - **Situation & Task:** *"After migrating our recommendation service to a new gRPC connection pool, overall <Term id="p99" /> latency improved from 95 ms to 62 ms and error rates sat at 0.01%. However, the Ads team mentioned a 1.8% dip in auction fill rate that started the same week."*
-    - **Action:** *"Our dashboard looked healthy, so it was tempting to blame Ads changes. Instead, I joined our request logs with downstream auction IDs and sliced latency by payload size. I found that while 99% of users had under 50 history items, our top 0.5% power users (who generated 19% of ad revenue!) had 2,000+ items. For that 0.5% cohort, protobuf deserialization was triggering Go GC pauses that pushed p99.9 past the 80 ms auction deadline: silently dropping them to empty fallback ads without logging a 5xx error."*
-    - **Result:** *"I capped history payloads to the 150 most recent high-signal events and pooled byte buffers, cutting p99.9 from 140 ms to 38 ms and recovering the full 1.8% auction fill rate (~\$1.4M/yr annualized)."*
-    - **Learning:** *"I replaced our flat request-count SLO with a **revenue-weighted and cohort-sliced SLO** so whale-cohort regressions page on-call immediately."*
+### Are Right, A Lot
+
+**Question:** _"Tell me about a time you changed your mind about a technical direction."_
+
+<Tabs title="Are Right, A Lot">
+  <Tab label="Weak answer">
+    *"Our events table reached 4 TB and writes got slow. I knew from experience that we needed a different datastore, so I wrote the proposal and pushed it through. Some people doubted it, but I was confident, and I am usually right about these things."*
+
   </Tab>
-  <Tab label="Are Right, A Lot (Disconfirming Your Own Belief)">
-    **Prompt:** *"Tell me about a time you strongly believed in a technical direction, sought out disconfirming evidence, and changed your mind."*
+  <Tab label="Fixed">
+    - **Situation and task.** *"Our Postgres events table reached 4 TB and write latency rose. I believed we had to move to a different datastore, and I had drafted a six-week migration proposal."*
+    - **Action.** *"Before I presented it, I went to the database engineer who doubted the plan most and asked her to help me design a test that could prove me wrong. We measured where the write load came from. 82 percent of it was not new events. It was upkeep on four indexes that no query used, plus a disk flush on every low-value telemetry row."*
+    - **Result.** *"I withdrew my own proposal. We dropped the four indexes, partitioned the table by week and relaxed the flush for telemetry. p99 write latency went from 45 ms to 4 ms in three days, and we did not spend the six weeks. I had also expected our slow monthly report to speed up. It did not, and that is still open."*
+    - **Learning.** *"We run an index usage report before anyone proposes a new datastore."*
 
-    - **Situation & Task:** *"When our Postgres events table hit 4 TB and write latency spiked, I was convinced we needed to migrate to Apache Cassandra, and I drafted an RFC for a 6-week migration."*
-    - **Action:** *"Before presenting the RFC for approval, I asked our sharpest DBA (who was skeptical of introducing Cassandra operational toil) to help me design a benchmark that could **disprove** my migration plan. Profiling `pg_stat_io` together, we discovered 82% of our write IOPS wasn't new event inserts at all: it was B-tree index page splits on four unused secondary indexes plus synchronous `fsync` on non-critical telemetry rows."*
-    - **Result:** *"I killed my own Cassandra RFC. Dropping the 4 unused indexes, partitioning by week, and setting `synchronous_commit = off` for telemetry transactions cut write IOPS by 76% and p99 write latency from 45 ms to 4 ms in 3 days, saving 6 weeks of migration work and \$90k/yr in new cluster costs."*
-    - **Learning:** *"I added an index-usage audit query to our monthly operational review before any team is allowed to propose a new datastore."*
   </Tab>
 </Tabs>
 
-## Introspect your own work
+What changed:
 
-<Quiz title="Sharpen your diagnostic & epistemic habits">
-  <QuizItem
-    question="1. Think of the last bug where your FIRST hypothesis turned out to be wrong. How long did it take you to let go of that first hypothesis?"
-    hint="Confirmation bias is the #1 enemy of fast debugging."
-  >
-    Write down the rule: *"Before spending 2 days building a fix for Hypothesis A, what is the 15-minute query or log check that could prove Hypothesis A false?"*
+- The weak answer treats confidence as evidence. The fixed one names a test that could have gone against the candidate.
+- The candidate went to the person who disagreed.
+- It admits one prediction that was wrong.
+
+## The same answer at three levels
+
+Amazon's pages give no behavioral bar for each level, so this scale is our own. The habits are the same at every level, and the system you apply them to gets larger.
+
+<Compare
+  columns={["", "Junior or mid", "Senior", "Staff"]}
+  rows={[
+    [
+      "How deep you went",
+      "One service: a stack trace or a query plan",
+      "Across services: queues, caches and the network between them",
+      "Across the org: a metric everyone trusted that measured the wrong thing",
+    ],
+    [
+      "How you tested your belief",
+      "A unit test or a staging run before you merged",
+      "A side-by-side benchmark of two options before the team committed",
+      "Product, cost and technical evidence weighed for a decision several teams depend on",
+    ],
+    [
+      "A result that fits",
+      "A query went from 2 seconds to 40 ms",
+      "Fill rate for the heaviest users came back, and a new target watches it",
+      "Four teams replaced a request-count target with one split by customer size",
+    ],
+  ]}
+  caption="Our own scale for sizing a story. Amazon does not publish one."
+/>
+
+## Check your story
+
+<DecisionTree
+  title="Is your Dive Deep story deep enough?"
+  tree={{
+    q: "Did the cause take at least two steps to find, including one lead that turned out to be false?",
+    yes: {
+      q: "Can you name the tool or query you used at each step, and what it showed?",
+      yes: {
+        q: "Did you test an explanation in a way that could have proved you wrong?",
+        yes: {
+          answer: "The story shows both principles. Next, read Have Backbone and Earn Trust.",
+          href: "/behavioral/amazon-leadership-principles/have-backbone-and-earn-trust",
+        },
+        no: "Add the moment you compared two explanations, or the moment you changed your mind when the data came in.",
+      },
+      no: "Go back to your notes and recover the detail. Expect to be asked how you knew it was one cause and not another.",
+    },
+    no: "A one-step bug, such as a typo in a config file, is too thin. Pick an investigation where the summary numbers hid the problem.",
+  }}
+/>
+
+## Build your own
+
+1. Think of the last bug where your first explanation was wrong. Write how long you held on to it, and what finally changed your mind.
+2. Name one number your team reports every week that could stay green while users have a bad time. Write how you would check it.
+3. Find a decision where you asked someone who disagreed with you. Write what they told you and what you did with it.
+4. Find an investigation you stopped. Write why one more day of digging would not have changed what you did.
+
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=judgment)
+
+## Red flags
+
+- **"We restarted it and it went away."** Recover by saying what you captured before the restart, or what you added so the next occurrence leaves evidence.
+- **Someone else did the digging.** Recover by choosing a story where you ran the queries. If you led the investigation, say which step you did yourself.
+- **Always right.** A set of stories with no error in them reads as stubborn. Recover with one story where you changed your mind and say what changed it.
+- **Digging without end.** Three weeks of analysis on a decision you could reverse in a day. Recover by saying where you stopped and why that was enough.
+
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="How technical should the detail be?">
+    Name the tool and the finding in one sentence each: "I split latency by payload size and the top 0.5 percent of
+    users were ten times slower." The interviewer may not know your stack, so say what each step told you. Keep the
+    deeper detail ready for follow-up questions.
   </QuizItem>
-  <QuizItem
-    question="2. What is one dashboard metric your team reports every week that could look 100% green while users are actually having a terrible experience?"
-    hint="Think about averages, HTTP 200s with soft errors, or client-side crashes that never reach the server."
-  >
-    Fixing a blind dashboard metric is a textbook L5/L6 *Dive Deep* story waiting to happen.
+  <QuizItem question="Can I use a story where I was wrong?">
+    Yes. Are Right, A Lot is about judgment over many decisions, and that includes noticing early when one is wrong. A
+    story where you tested your own plan and dropped it is one of the clearest ways to show it.
+  </QuizItem>
+  <QuizItem question="I am a manager. Do I still need a Dive Deep story?">
+    Yes. Amazon's text for this principle says leaders work at every level of detail and that no task is beneath them.
+    Use a story where you read the data yourself: an incident timeline, a cost report or a hiring funnel.
   </QuizItem>
 </Quiz>
-
-## Common red flags & how to recover
-
-- **Stopping at "We restarted the server and it went away":** Restarting pods without capturing a heap dump, thread dump, or core trace destroys the evidence and guarantees the outage will return at a worse time.
-- **Confusing *Are Right, A Lot* with stubbornness:** Claiming you are always right in every argument makes you look low-trust (*Earn Trust* failure). Showing how you actively try to falsify your own ideas proves true scientific rigor.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="Walk me through the hardest bug you ever diagnosed in production. How did you isolate the root cause?"
-    level="Senior"
-    companies={["Amazon", "Google", "Datadog"]}
-  >
-    Structure a debugging story like a **binary search over the system state**:
-    1. **The symptom & blast radius:** Why it was non-obvious (e.g., intermittent 0.3% corrupted payloads only on Tuesday mornings).
-    2. **Eliminating half the search space:** How you proved whether the corruption happened at the client, load balancer, app worker, or storage engine.
-    3. **The smoking gun:** The exact packet capture, memory profile, or race-condition trace that reproduced the bug deterministically.
-    4. **The systemic prevention:** The test or invariant check that prevents the entire bug class.
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="Tell me about a time you had to make a judgment call when two metrics pointed in opposite directions."
-    level="Senior"
-    companies={["Amazon", "Meta", "Netflix"]}
-  >
-    Classic example: an ML ranking or UX change increases short-term click-through rate (+3%) while slightly increasing latency (+60 ms) or session abandonment. Show how you dug into long-term cohort retention or downstream conversion to establish a **hierarchy of metrics** rather than picking whichever metric made your launch look good.
-  </InterviewQuestion>
-</InterviewQuestions>
 
 ## Related
 
 - [Have Backbone (Disagree and Commit) & Earn Trust](/behavioral/amazon-leadership-principles/have-backbone-and-earn-trust)
 - [Quantifying Engineering & ML Impact](/behavioral/foundations/quantifying-engineering-impact)
-- [Production Incidents & Mistakes](/behavioral/competencies/production-incidents-and-mistakes)
+- [Handling Follow-Up Probes & Bar Raiser Drill-Downs](/behavioral/foundations/handling-follow-up-probes)
+- [All 16 Leadership Principles: Question Index](/behavioral/amazon-leadership-principles/leadership-principles-question-index)
+
+## Sources
+
+- [Amazon: Leadership Principles](https://www.amazon.jobs/content/en/our-workplace/leadership-principles). Dive Deep and Are Right, A Lot in Amazon's own words.
+
+The descriptions of the two principles, the tables, the level scale and the example answers are our own.
