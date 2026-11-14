@@ -25,6 +25,14 @@ const WARN_UNMAPPED = new Set(args.has("--warn-cloud-questions") ? ["cloud"] : [
 const STRICT = args.has("--strict");
 /** Sections whose pages must not use em dashes (house style: commas, colons or full stops instead). */
 const NO_EM_DASH = new Set(["behavioral"]);
+/**
+ * Sections where a page may hold at most two interactive exercises (content/AGENTS.md), and the tags that count.
+ * Tabs, Compare, Quiz and diagrams do not count.
+ */
+const WIDGET_LIMIT = new Set(["behavioral"]);
+const WIDGET_TAGS =
+  /<(DecisionTree|SpotTheFlag|GuessTheLevel|WhichPrinciple|PrepChecklist|StoryBuilder|StoryMatrix|MockLoop)[\s/>]/g;
+const MAX_WIDGETS = 2;
 /** A line of tool output that has been pasted into the end of pages before; it renders as text. */
 const STRAY_TOOL_LINE = /^`,Path:\s*$/;
 
@@ -232,6 +240,15 @@ async function main() {
           report(item.file, "em dash; use a comma, a colon or a full stop", "error", i + 1);
         }
       });
+      if (WIDGET_LIMIT.has(section.key)) {
+        const widgets = [...text.matchAll(WIDGET_TAGS)].map((m) => m[1]);
+        if (widgets.length > MAX_WIDGETS) {
+          report(
+            item.file,
+            `${widgets.length} exercises (${widgets.join(", ")}); a page may hold at most ${MAX_WIDGETS}`
+          );
+        }
+      }
       const guarded = [...text.matchAll(GUARD_RE)].map((m) => [m.index!, m.index! + m[0].length]);
       for (const m of text.matchAll(LINK_RE)) {
         const raw = m[1] ?? m[2] ?? m[3];

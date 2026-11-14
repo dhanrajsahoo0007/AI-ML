@@ -75,7 +75,8 @@ Rules the code enforces:
   `apps/web/src/components/teach/`) validate props with strict zod schemas: an unknown or misspelled prop is a red
   note in dev and fails the production build.
 - **Widgets** (eleven lazy islands in `apps/web/src/components/teach/widgets/`): at most two per page, `DecisionTree`,
-  `SpotTheFlag`, `GuessTheLevel` and `WhichPrinciple` included. Not yet enforced by content-check, so reviewers check it.
+  `SpotTheFlag`, `GuessTheLevel` and `WhichPrinciple` included. content-check enforces it for the exercises on
+  behavioral pages (an error above two); in the other sections reviewers check it.
 - **Glossary**: owned by the section with `glossary: true` in `sections.yaml`. `<Term id>` ids must exist in
   `system-design/glossary.yaml` (zod-validated by `apps/web/src/lib/glossary.ts`: kebab-case unique ids, `short` at
   most 160 characters, `related` ids must exist).
