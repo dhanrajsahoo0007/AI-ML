@@ -8,130 +8,177 @@ order: 2
 ## In one sentence
 
 <KeyIdea>
-You cannot influence a sibling or platform team by telling them why **your** OKRs need their help; you influence without authority by **aligning your proposal with their pain points**, **lowering their adoption cost to near zero** (codemods, PRs, shadow harnesses), and building a **coalition of early adopters**.
+  Another team changes how it works when the change **solves a problem they already have** and **costs them almost
+  nothing to adopt**. An influence story shows how you found their problem, did most of the work yourself and let the
+  first team's result persuade the rest.
 </KeyIdea>
 
 ## The story
 
-The transition from Mid-Level (L4) to Senior (L5) and Staff (L6) engineering is defined by a simple mathematical fact: the biggest bottlenecks in any company sit **between** teams, where nobody has direct reporting authority over everyone else.
+A security engineer needs a payments team to move 14 endpoints from an old auth token to a new one. The payments team does not report to her. She sends a design document and a request. The reply comes the same day: the quarter is fully planned, try again in three months.
 
-When a Senior/Staff candidate complains in an interview, *"The platform team refused to prioritize our API changes for two quarters, so we were blocked,"* the hiring committee hears: *"This candidate only knows how to operate inside their manager's ticket queue."* Conversely, candidates who show how they turned an unaligned external team into an enthusiastic partner (by reducing the partner team's toil and doing the heavy lifting) score at the top of the rubric.
+She does not go to her director. She reads the payments team's on-call log for the last quarter and counts: 30 percent of their pages came from the old token expiring at the wrong moment. She brings that number to their tech lead, as his problem, with her migration as the fix.
 
-## What interviewers are really testing
+He is interested but still has no time. So she pays the cost herself. She builds a small proxy that accepts both tokens, writes a script that rewrites the call sites, and opens a draft pull request in their repository. Their effort drops from about two weeks of work to a 30-minute review.
 
-<AnimatedDiagram spec="animated/behavioral/influence-coalition" stepper caption="The 4-stage coalition and friction-reduction playbook for influencing across organizational boundaries without authority." />
+The payments team merges it. Their token pages go to zero. She writes up the result with their engineers named first, and four more teams ask for the same pull request.
 
-Interviewers evaluate four mechanisms of **Influence Without Authority**:
+## What the interviewer scores
 
-| Mechanism | High-Leverage Senior / Staff Action | Low-Leverage Action (Stalls Out) |
-| --- | --- | --- |
-| **1. Incentive Mapping** | Discovering what metrics, pages, or tech debt the partner team is *already* stressed about and framing your RFC as relief for them | Sending a demand list of features you need them to build for your deadline |
-| **2. Lowering Activation Energy** | Shipping an automated codemod, self-serve migration CLI, or upstream PR + test suite so adoption takes them 30 minutes instead of 3 sprints | Publishing a 20-page mandate doc and expecting 12 teams to rewrite their services manually |
-| **3. Lighthouse / Wedge Adopter** | Partnering deeply with 1 friendly team first to prove a 40% latency/cost win, then using their success story to create pull from skeptics | Calling a 30-person all-hands meeting on Day 1 where every skeptic piles on |
-| **4. Shared Credit** | Highlighting the partner team's engineers in launch demos and leadership updates | Taking solo credit for a cross-team migration |
+<AnimatedDiagram
+  spec="animated/behavioral/influence-coalition"
+  stepper
+  minWidth={700}
+  caption="The story above in four steps: a refused request, their problem found, the cost paid for them, and a shared result that brings in other teams."
+/>
+
+1. **The request meets a wall.** A fair refusal, for a fair reason. A story where the other team agreed at once has nothing to score.
+2. **Their problem first.** She found a number in their own on-call log. The proposal became relief for them.
+3. **You pay the cost.** A proxy, a rewrite script and a ready pull request. The other team reviews work; it does not do it.
+4. **A shared result.** The first team's numbers and names are in the write-up. Other teams now ask, and nobody has to be pushed.
+
+| What is scored            | Strong signal                                                      | Weak signal                                           |
+| ------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------- |
+| **Finding their problem** | You learned what the other team was already worried about          | A list of what your team needs by your date           |
+| **Lowering their cost**   | A script, a pull request or a tool that turns weeks into a review  | A 20-page document that tells 12 teams to do the work |
+| **One team first**        | One willing team, a measured result, then the others               | A meeting with every team on day one                  |
+| **Credit**                | Their engineers are named in the demo and the update to leadership | "I led a migration across five teams"                 |
+
+The order matters. Many candidates start their story at step three, with the tool they built. Without the refusal and the reason behind it, the tool sounds like ordinary project work, and the interviewer cannot tell that anyone needed persuading.
 
 <PremiumBreak />
 
-## How the bar changes by level
+## When the answer is still no
 
-<Compare
-  columns={["Dimension", "L4 (Mid-Level SWE)", "L5 (Senior SWE)", "L6+ (Staff / Principal SWE)"]}
-  rows={[
-    ["Influence Radius", "Influences code health and design choices within immediate squad (5–8 engineers)", "Influences 2–4 sibling or partner teams to adopt an API contract, migration, or reliability fix", "Influences org-wide or company-wide engineering standards across 10+ teams and multiple Directors"],
-    ["How Adoption Happens", "Writes clear PRs, docs, and helper libraries for teammates", "Co-develops in partner repos; builds migration automation and aligns with partner TLs/PMs", "Uses Lighthouse teams, golden-path paved roads, and executive-aligned telemetry scorecards"],
-    ["Handling Pushback", "Escalates cross-team roadmap blocks to EM/TL early", "Diagnoses partner bandwidth constraints and negotiates phased or co-developed solutions directly", "Restructures architectural boundaries and incentives so teams naturally do the right thing by default"],
-  ]}
-  caption="At Staff+ (L6+), 'Influence Without Authority' is your primary job description: you have L6 scope but zero direct reports."
-/>
+Some teams will not move. A story that admits this is more believable than one where everyone agreed. Three things are worth saying when it happened to you.
 
-## Interactive diagnostic: test your story
+- **What you did on your own side.** A shim, an adapter or a default that kept your project safe without them. In the story above, the proxy that accepted both tokens meant no team had to move on a fixed date.
+- **What you learned about timing.** Teams say yes more easily at the start of a planning cycle, after an incident of their own, or when one of their deadlines depends on the change. If you asked in the third week of a full quarter, say so.
+- **What you chose not to do.** Perhaps you could have forced it through a director, and you decided the working relationship was worth more than six weeks. That is a judgment an interviewer can score. Say what the delay cost, so the trade is clear.
 
-<DecisionTree
-  title="Will your 'Influence Without Authority' story pass a Senior/Staff bar?"
-  tree={{
-    q: "Did the people you influenced sit OUTSIDE your direct reporting chain (e.g., a sibling squad, platform org, security team, or senior leadership)?",
-    yes: {
-      q: "Did you overcome initial resistance or roadmap friction by understanding THEIR incentives AND reducing their engineering effort (e.g., via automation, codemods, or upstream PRs)?",
-      yes: {
-        q: "Did the adoption stick durably (measured by % of services migrated, incident reduction, or velocity gain) without requiring your manager to force compliance?",
-        yes: {
-          answer: "Staff-caliber influence story! Next: master Giving & Receiving Critical Feedback.",
-          href: "/behavioral/competencies/feedback-and-difficult-conversations",
-        },
-        no: "Quantify the adoption funnel (e.g., '14 of 14 tier-1 services migrated within 6 weeks') and the durable guardrail that kept it green.",
-      },
-      no: "If they agreed immediately with zero friction, the story lacks signal. Highlight why they pushed back initially and how you lowered their adoption cost.",
-    },
-    no: "Pick a story where you could not rely on your team's internal sprint planning: cross-team or org-wide alignment carries 3x more weight.",
-  }}
-/>
+Then end the story with the count as it really was: nine of eleven, three of four. Say which team has not moved and why.
 
-## Worked engineering example (STAR+L)
+## A weak answer, then the fix
 
-<Tabs title="Influence Without Authority: Platform Migration vs. Roadmap Alignment">
-  <Tab label="Driving a 14-Team Zero-Downtime Migration (Staff Bar)">
-    **Prompt:** *"Tell me about a time you convinced multiple teams to adopt a standard or migration that wasn't on their roadmap."*
+**Question:** _"Tell me about a time you needed another team to do something that was not on their plan."_
 
-    - **Situation & Task:** *"After two cascading retry-storm outages, I saw that 14 downstream microservices were calling our core inventory tier with uncalibrated retries and no circuit breakers. None of those 14 teams had 'client resilience refactoring' on their Q3 roadmap."*
-    - **Action:** *"When I first sent an RFC asking teams to adopt a new resilience SDK, only 1 team replied: everyone else cited sprint capacity. I pivoted my strategy across three steps:
-      1. **Incentive Discovery:** I interviewed 4 lead engineers on the noisy teams and learned they hated getting paged at 2 AM for downstream timeouts just as much as we did, but dreaded spending a week rewriting HTTP clients and tests.
-      2. **Zero-Toil Paved Road:** I built an AST codemod (`jscodeshift` / OpenRewrite) that automatically wrapped their existing client calls with hedged timeouts, adaptive concurrency limits, and pre-configured Prometheus dashboards, turning a 5-day manual refactor into a 15-minute reviewable PR.
-      3. **Lighthouse Wedge + Scorecard:** I paired with the Checkout team (our most vocal skeptic) first, merged their auto-generated PR, and showed in the weekly eng sync that their tail 5xx errors dropped by 81% during a downstream blip. Then I published a friendly weekly 'Resilience Readiness' leaderboard and opened pre-tested PRs directly against the remaining 13 repos."*
-    - **Result:** *"All 14 tier-1 services merged the migration within 5 weeks with zero manager escalation; retry-amplified Sev-1 outages dropped from 3 per quarter to zero over the next year."*
-    - **Learning:** *"When teams resist a best practice, they rarely disagree with the goal: they are protecting their sprint bandwidth. Make the right path the easiest path through automation."*
+<Tabs title="One story, told twice">
+  <Tab label="Weak answer">
+    *"I work on our design system. Four product teams were still using their own date pickers and modals, which was hurting accessibility. I wrote a detailed migration guide and sent it to all four teams. Nobody did anything for a month, which was frustrating because the guide was very clear. I raised it with my director, who told the teams to prioritise it. Most of them moved over eventually and accessibility got better."*
+
+    **What the interviewer writes:** sent a document, waited, escalated. No sign of what the other teams needed. No numbers.
+
   </Tab>
-  <Tab label="Unblocking a Partner Team Dependency (Senior Bar)">
-    **Prompt:** *"Tell me about a time you needed work from another team whose priorities didn't align with yours."*
+  <Tab label="Fixed">
+    - **Situation and task.** *"I work on our design system. Four product teams used their own date pickers and modals, and together they had 22 open accessibility bugs a quarter. None of them had the migration planned."*
+    - **Action.** *"My first try was a migration guide sent to all four teams. Nothing happened for a month. So I asked each tech lead what the guide would cost them. The answer was about a sprint each, which they did not have. I did three things. I wrote a script that swaps the imports and props in about 80 percent of cases. I picked the checkout team first, because they had the most bugs, and opened the pull request myself. Then I showed their bug count in the frontend guild meeting, with their engineer presenting."*
+    - **Result.** *"Three of the four teams merged within six weeks, and accessibility bugs fell from 22 a quarter to 7. The fourth team was in the middle of a redesign and moved three months later. I did not get them sooner."*
+    - **Learning.** *"I no longer send a guide on its own. Any change I ask another team to make now arrives as a pull request they can review."*
 
-    - **Situation & Task:** *"To launch our real-time notification preferences center, we needed the Identity team to expose a batch token-introspection endpoint. Their PM told us their backlog was full for the next two months due to a compliance audit."*
-    - **Action:** *"Instead of escalating to our directors, I sat down with the Identity Tech Lead to understand their compliance audit workload. I noticed that 30% of their database CPU saturation (one of their audit risk items) was actually caused by internal services (including ours!) making N+1 single-token introspection calls. I built a quick query log breakdown proving that a batch endpoint with a 30-second Redis cache would cut their primary DB load by 28%, directly solving their #1 compliance scaling risk. I then offered to write the implementation and load tests inside their repo following their PR checklist if their TL could commit to two 30-minute code reviews."*
-    - **Result:** *"The Identity team enthusiastically approved the co-development plan; we shipped the endpoint in 9 days, unblocked our launch 6 weeks early, and reduced Identity DB CPU utilization by 31%."*
-    - **Learning:** *"Reframing your feature request as a solution to the partner team's #1 operational headache turns a 'No' into a fast-track partnership."*
   </Tab>
 </Tabs>
 
-## Introspect your own work
+What changed:
 
-<Quiz title="Audit your cross-team influence habits">
-  <QuizItem
-    question="1. Think of an RFC or architectural proposal you wrote that got slow or lukewarm adoption. How much engineering work did adopting it require from the other teams?"
-    hint="High activation energy kills 90% of good architectural ideas."
-  >
-    In your next cross-team initiative (and in your interview stories), pair every RFC with a **migration script, template PR, or self-serve CLI** that cuts adoption effort by 80%+.
+- The failed first attempt is still there, and now it is the reason for the change of approach.
+- The other teams have a reason for saying no, and the candidate removed it.
+- The result has a number and an honest gap: one team took three months longer.
+
+## Try it: the same question at three levels
+
+All four answers are to the same question. The level shows in who had to change and how the change spread.
+
+<GuessTheLevel
+  title="Guess the level"
+  prompt="Tell me about a time you got people who do not report to you to change how they work."
+  levels={["Mid", "Senior", "Staff"]}
+  answers={[
+    {
+      text: "Our team's test run took 25 minutes because everyone ran the full suite. I wrote a script that runs only the tests for changed files, showed it at stand-up and paired with two teammates to set it up. Five of our six engineers use it now.",
+      level: "Mid",
+      why: "The people who changed are teammates, and the change is to the team's own tools. A good story at the right size for mid level.",
+    },
+    {
+      text: "Three teams wrote to our events table with different field names. Two of their leads told me they lost a day a month to broken dashboards. I wrote a schema check and opened the pull requests in their repositories myself. All three merged within a month.",
+      level: "Senior",
+      why: "Other teams changed, and the candidate found their problem and did the work in their code without a manager.",
+    },
+    {
+      text: "The platform team would not schedule our API change, so I asked my manager to raise it with theirs. It was planned for the following quarter and we shipped then.",
+      level: "Mid",
+      why: "The work crossed teams, but the manager did the persuading. The candidate's own influence stopped at their team's edge.",
+    },
+    {
+      text: "Eleven teams each kept their own deploy scripts. I ran a pilot with one team and their rollback time fell from 40 minutes to 6. With that result I got the engineering directors to make the shared pipeline the default for new services. Nine teams moved in two quarters. Two have not.",
+      level: "Staff",
+      why: "Many teams, a pilot used as proof, and a change to the default so that adoption continues without the candidate.",
+    },
+  ]}
+/>
+
+## Check your story
+
+<DecisionTree
+  title="Audit your influence story"
+  tree={{
+    q: "Were the people you influenced outside your own team's planning: another team, a platform group, security, or leadership?",
+    yes: {
+      q: "Did they say no or stall at first, and did you get past it by learning their problem and cutting their effort?",
+      yes: {
+        q: "Can you say how many adopted it and what stayed in place afterwards, without a manager forcing it?",
+        yes: {
+          answer: "This story is ready. Next, prepare a story about feedback that was hard to give.",
+          href: "/behavioral/competencies/feedback-and-difficult-conversations",
+        },
+        no: "Add the count, such as 9 of 11 teams in two quarters, and the thing that keeps it in place: a default, a build check or a template.",
+      },
+      no: "If they agreed straight away, the story shows little. Say why they first refused and what you did to lower the cost for them.",
+    },
+    no: "Choose a story where your own team's sprint planning could not solve it. At a small company this can be a founder, sales or a customer.",
+  }}
+/>
+
+## Build your own
+
+1. Think of a proposal of yours that other teams were slow to adopt. How many days of work did it ask of each team?
+2. What was that team already worried about: pages, a deadline, an audit, a slow build? Where would you have found the number?
+3. What could you have built so that their part was a review?
+4. Who on the other team did the most to make it work, and did their manager hear about it from you?
+
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=influence).
+
+## Red flags
+
+- **Escalation first.** Going to a director to force a peer team to comply. **Recover:** say what you tried directly, and if you did escalate, say that the other lead knew and came with you.
+- **"I wrote a document and asked them to follow it."** A document with no tooling is a request for free work. **Recover:** name what you built to cut their effort, even if it was only a template pull request.
+- **"They blocked us for two quarters."** The story ends with you waiting. **Recover:** say what you did while blocked: a workaround on your side, or the work done in their repository.
+- **All the credit.** "I migrated five teams." **Recover:** name what the other teams' engineers did, and say what you did to make that visible.
+
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="How do I show this if my company has only one engineering team?">
+    The people outside your authority are founders, product, sales, support, a customer or a vendor. It also counts when
+    you get your own peers to take up a testing or monitoring practice that nobody ordered. Show how you proved it on a
+    small case and how many people chose to use it.
   </QuizItem>
-  <QuizItem
-    question="2. When you persuade another team to help you, how do you make sure their manager and leadership know about their contribution?"
-    hint="Publicly amplifying partner engineers builds 'social capital' so they say yes twice as fast next time."
-  >
-    Always mention in your **Result** how you sent a praise note to their EM/Director or invited their engineer to co-present the win.
+  <QuizItem question="Is it ever right to escalate?">
+    Yes, when a decision cannot wait and the two teams' goals truly conflict. That is what shared managers are for. Say
+    what you tried first, and say that you escalated in the open: both leads, one summary, both options.
+  </QuizItem>
+  <QuizItem question="What does starting with one team mean in practice?">
+    Pick one team that is willing and visible. Work closely with them until the rough parts of your change are fixed and
+    you have one result to show. Other teams are then persuaded by a peer's numbers, which works better than your
+    argument.
   </QuizItem>
 </Quiz>
 
-## Common red flags & how to recover
-
-- **Weaponizing executive escalation first:** Going straight to a VP or Director to force a peer team to comply destroys long-term trust and signals you cannot build technical consensus.
-- **"I wrote a doc and told them to follow it":** Documentation without a paved road (tooling, codemods, CI checks) is wishful thinking at scale.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="How do I show 'Influence Without Authority' if I work at a small startup with only one engineering team?"
-    level="Mid"
-    companies={["Meta", "Google", "Stripe"]}
-  >
-    At a smaller company, your influence without authority happens across **founders, product, sales/customer-success, external customers/vendors, or peer engineers** when introducing a new testing, observability, or architecture standard that nobody mandated. Show how you proved ROI with a prototype and got the whole team to adopt it voluntarily.
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="What is the 'Lighthouse Team' pattern that Staff Engineers use to drive org-wide change?"
-    level="Staff"
-    companies={["Google", "Netflix", "Uber"]}
-  >
-    Instead of trying to boil the ocean by migrating 20 teams at once, you pick **one high-visibility, cooperative team ("the Lighthouse")**, embed closely with them to iron out every sharp edge of your new platform/standard, and deliver an undeniable metric win (e.g., 50% faster builds or 70% fewer pages). Once other teams see the Lighthouse team shipping faster with less pain, adoption flips from **push** to **pull**.
-  </InterviewQuestion>
-</InterviewQuestions>
-
 ## Related
 
-- [Resolving Technical Disagreements & Design Deadlocks](/behavioral/competencies/technical-conflict-and-alignment)
-- [Staff, Principal & Distinguished Engineer Behavioral Rubric](/behavioral/leveling-and-tracks/staff-and-principal-behavioral)
-- [Working with PMs, Designers, Legal, Security & Customers](/behavioral/competencies/cross-functional-collaboration)
+- [Resolving Technical Disagreements & Design Deadlocks](/behavioral/competencies/technical-conflict-and-alignment): when the block is one person's design view.
+- [Working with PMs, Designers, Legal, Security & Customers](/behavioral/competencies/cross-functional-collaboration): influence across functions.
+- [Staff & Principal Engineer Behavioral Loops](/behavioral/leveling-and-tracks/staff-and-principal-behavioral): where this competency carries the most weight.
+
+## Sources
+
+The stories, the rubric and the exercise on this page are our own. They describe no specific company's process.

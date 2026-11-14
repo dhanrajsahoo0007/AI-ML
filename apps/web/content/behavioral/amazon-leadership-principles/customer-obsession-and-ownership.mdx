@@ -9,126 +9,256 @@ access: free
 ## In one sentence
 
 <KeyIdea>
-**Customer Obsession** means starting from quantified user or developer pain (even when an internal shortcut is easier), while **Ownership** means treating your team's API boundary as an interface contract, never an excuse to ignore an end-to-end failure.
+  **Customer Obsession** means you start from what the customer is living with and work backwards to the fix.
+  **Ownership** means you act for the whole company and the long term, so a problem that sits between two teams is still
+  yours to move.
 </KeyIdea>
 
 ## The story
 
-An API platform team ships a v2 pagination change that cuts their own database CPU by 25%. Technically, the team hit its quarterly OKR.
+An API platform team ships a new pagination format. It cuts their database CPU by 25 percent, and the team meets its quarterly goal.
 
-Two days later, an engineer named Priya notices in the API gateway access logs that 3% of enterprise SDK clients are retrying the same page token in an infinite loop because v2 changed how empty cursors serialize, burning through the customers' rate limits and silently dropping their nightly data syncs. Strictly speaking, the SDK belongs to a different team in another time zone, and the release notes did mention the cursor change in a footnote.
+Two days later, a backend engineer on the team reads the gateway logs and sees something odd. About 3 percent of enterprise clients are requesting the same page again and again. The new format writes an empty cursor differently, and an older SDK reads it as "more pages to come". Those clients use up their rate limits, and their nightly data syncs fail without an error.
 
-A low-ownership engineer says: *"Not our bug: the SDK team owns client parsing, and we documented it."*
-Priya exhibits **Customer Obsession + Ownership**: she adds a 12-line server-side compatibility normalization that detects legacy SDK user-agents and returns the v1 cursor shape, stops the customer bleeding in 40 minutes, and then submits a PR with contract tests to the SDK repository so both teams can deprecate the shim cleanly in 60 days.
+The SDK belongs to another team in another time zone. The release notes mentioned the cursor change in a footnote. An easy reply is available: the SDK team owns parsing, and the change was documented.
 
-## What interviewers are really testing
+She does two things. Within 40 minutes she ships a 12-line server change that returns the old cursor shape to old SDK versions, and the failed syncs stop. Then she opens a pull request on the SDK repository with a fix and a contract test, and agrees a date 60 days out to remove the server patch.
 
-<AnimatedDiagram spec="animated/behavioral/amazon-lp-tensions" highlight={["customer", "frugality", "res-2"]} caption="Customer Obsession and Ownership are tested under friction: when helping the customer costs your team time or crosses an org boundary." />
+The first move is Customer Obsession. The second is Ownership.
 
-Bar Raisers probe two distinct failure modes on these principles:
+## What the interviewer scores
 
-| Principle | What strong signal looks like | What fails the Bar Raiser probe |
-| --- | --- | --- |
-| **Customer Obsession** | Starting with user telemetry/latency/trust; rejecting internal shortcuts that shift toil onto customers; inventing unasked-for safeguards | Equating "customer" with "whatever my PM wrote in Jira" without understanding the user impact |
-| **Ownership** | Debugging across upstream/downstream repos; taking accountability for legacy tech debt; thinking 12–24 months ahead | Stopping at "their service returned 500"; shipping a hack that hits this quarter's goal but breaks next quarter's scale |
+<AnimatedDiagram
+  spec="animated/behavioral/customer-obsession-ownership"
+  stepper
+  minWidth={700}
+  caption="The incident from the story. Each principle asks for something different, and a strong answer gives both."
+/>
+
+Amazon publishes 16 Leadership Principles and says each interviewer is assigned competencies based on them (see Sources). These two often appear in one story, and they can pull against each other.
+
+1. **Customer Obsession** asks what the customer is living with today. In the story, 3 percent of clients were losing a nightly sync.
+2. **Ownership** asks who will fix the cause and what the system looks like in a year. The cause sat in another team's SDK.
+3. **Where they pull apart.** The fastest relief for the customer is a patch on your side. A patch with no end date becomes permanent, and that is a long-term cost you chose for the company.
+4. **A strong answer holds both.** Relief today, the real fix in the right place, and a date to remove the patch.
+
+### Customer Obsession
+
+In our words: start with the customer and work backwards, and earn their trust by acting on what they experience, including problems they have not reported. The customer can be an end user, a merchant, or another engineering team that calls your API.
+
+| A strong story shows                                                                   | What weakens it                                   |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| You found the pain yourself: in logs, in support tickets or by watching someone work   | The customer is "whatever was in the ticket"      |
+| A number for the customer's cost: failed syncs, seconds of waiting, support contacts   | Only your own metric: CPU, build time, tickets    |
+| You gave something up for the customer: time, scope or an internal shortcut            | The right thing for the customer was also easiest |
+| You said no to one loud request to protect many users, and offered something in return | Saying yes to every request                       |
+
+### Ownership
+
+In our words: think like an owner of the whole company. Look further ahead than this quarter, act outside your own team when the problem is there, and never answer with "that is not my job".
+
+| A strong story shows                                                                   | What weakens it                                         |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| You followed the problem past your team's boundary and brought the owners a tested fix | You stopped at "their service returned an error"        |
+| You chose the option that would still work in a year, and you can say what it cost     | A quick fix that met this quarter's goal and broke next |
+| You stayed until the result held: a check, an alert, a removal date                    | You shipped and moved on                                |
+| The owning team reviewed and agreed to your change                                     | You changed another team's service without them         |
 
 <PremiumBreak />
 
-## How the bar changes by level
+## A weak answer, then the fix
 
-Who counts as your "customer" (external end-user, merchant, or internal developer consuming your platform API) is fine at any level: what changes is the **cost and boundary** you navigated:
+### Customer Obsession
+
+**Question:** _"Tell me about a time you went further than expected for a customer."_
+
+<Tabs title="Customer Obsession">
+  <Tab label="Weak answer">
+    *"Product engineers were unhappy with the feature flag SDK that my team owns. We got a ticket asking for faster tests, so we put it on the plan for the next quarter. We built a local mode and people liked it. Our customers are really important to us."*
+
+  </Tab>
+  <Tab label="Fixed">
+    - **Situation and task.** *"I own the feature flag SDK that 40 product services use. Engineers told us their local integration tests took 45 seconds to start, because the SDK fetched flag rules over the network. A fix was not on our plan for the quarter."*
+    - **Action.** *"I sat with three product engineers while they ran their tests. All three had replaced our SDK with hand-written fakes, and two production incidents that year came from fakes that had gone out of date. Over two days I built a local mode that reads flag rules from a file in the repository and checks their types, with no network call. I wrote a script that removed the fakes, and I ran it for the first five teams myself."*
+    - **Result.** *"34 of the 40 services moved within three weeks. Test start time fell from 45 seconds to under 1 second. Six services stayed on the old path because they test against live flags, and I left them there."*
+    - **Learning.** *"Our SDK design template now has a section on how the SDK behaves in a local test."*
+
+  </Tab>
+</Tabs>
+
+What changed:
+
+- The pain came from watching customers work. The weak answer waits for a ticket.
+- The customer's cost has numbers: 45 seconds and two incidents.
+- The result says who was not helped: six services.
+
+### Ownership
+
+**Question:** _"Tell me about a time you solved a problem that was outside your area."_
+
+<Tabs title="Ownership">
+  <Tab label="Weak answer">
+    *"Our search service was missing its latency target every morning. I looked at our logs and the delay was in a call to the identity team's service. I filed a ticket with them and marked it urgent. They were busy with an audit, so it took six weeks. It was frustrating, but it was their service."*
+
+  </Tab>
+  <Tab label="Fixed">
+    - **Situation and task.** *"Our search service missed its 120 ms <Term id="p99" /> target every day at 9 am. Our logs showed the time went on a call to the entitlements service, owned by the identity team. Their plan was frozen for a compliance audit."*
+    - **Action.** *"I asked their on-call engineer if I could profile the call in their staging environment. A batch job at 9 am was using up the connection pool that live requests share. I wrote a 60-line change that gives batch reads their own pool, added a load test that showed p99 under 12 ms during a batch run, and walked their on-call engineer through it. They reviewed and merged it that afternoon."*
+    - **Result.** *"Our 9 am p99 fell from 380 ms to 78 ms. The audit was not delayed."*
+    - **Learning.** *"I also added a 40 ms timeout with a cached fallback on our side, so a slow dependency now degrades search and does not stop it."*
+
+  </Tab>
+</Tabs>
+
+What changed:
+
+- The weak answer ends at the team boundary. The fixed one crosses it, with the owning team's consent.
+- The fix went where the cause was, and the owners reviewed it.
+- The learning protects the candidate's own service the next time a dependency slows down.
+
+## The same answer at three levels
+
+Amazon's pages do not give a behavioral bar for each level. The scale below is this site's own. The principle stays the same at every level, and the boundary you crossed gets wider.
 
 <Compare
-  columns={["Dimension", "L4 (SDE I)", "L5 (SDE II)", "L6 (Senior SDE / SDM)"]}
+  columns={["", "Junior or mid", "Senior", "Staff"]}
   rows={[
-    ["Customer Obsession", "Fixes a confusing error message or edge-case bug reported by users", "Proactively instruments user-journey pain and pushes back on a breaking change with data", "Works backwards from customer workflows to redesign a multi-service architecture"],
-    ["Boundary of Ownership", "Takes ownership of unowned bugs or flaky tests inside the team's repo", "Debugs into an upstream/downstream team's service, authors the fix PR, and adds cross-service SLAs", "Steps into an organizational vacuum across 3+ teams to rescue a failing company initiative"],
-    ["Time Horizon", "Current sprint + clean production rollout", "6–12 months of operational maintainability and on-call health", "1–3 year architectural durability and migration path"],
+    [
+      "Who the customer is",
+      "One user or one team with a reported problem",
+      "A group of users whose problem you found before they reported it",
+      "A whole customer workflow that crosses several services",
+    ],
+    [
+      "The boundary you crossed",
+      "An unowned bug or a flaky test in your team's code",
+      "Another team's service, with a fix they reviewed",
+      "A gap between three or more teams that nobody owned",
+    ],
+    [
+      "How far ahead you looked",
+      "This release and a clean rollout",
+      "The next 6 to 12 months of on-call load",
+      "The next 1 to 3 years of the architecture",
+    ],
+    [
+      "A result that fits",
+      "Support contacts about one screen fell from 30 a week to 4",
+      "Failed syncs for 3 percent of clients went to zero",
+      "Three teams adopted one shared contract test suite",
+    ],
   ]}
-  caption="Internal platform engineers can use internal developer teams as their 'customer', just quantify developer friction and toil saved."
+  caption="Our own scale for sizing a story. Amazon does not publish one."
 />
 
-## Interactive diagnostic: test your story
+## Try it
+
+<WhichPrinciple
+  title="Which principle does the line show?"
+  instruction="Each line is from a candidate's answer. Pick the principle it shows most clearly, or Neither."
+  principles={["Customer Obsession", "Ownership", "Neither"]}
+  prompts={[
+    {
+      text: "I read 200 support tickets from the last month and found that 61 of them were about the same export screen.",
+      principle: "Customer Obsession",
+      why: "The candidate went looking for what customers experience, before anyone asked.",
+    },
+    {
+      text: "The bug was in the billing team's library, so I wrote a failing test, opened a pull request on their repository and stayed on the review until it merged.",
+      principle: "Ownership",
+      why: "The work was outside the candidate's team, and they stayed until it was done.",
+    },
+    {
+      text: "I worked all weekend alone to finish the migration because nobody else cared.",
+      principle: "Neither",
+      why: "Effort is not a principle. There is no customer, no lasting result, and it speaks badly of the team.",
+    },
+    {
+      text: "I turned down the faster migration because it would have left us two schemas to keep in step for a year.",
+      principle: "Ownership",
+      why: "A short-term gain was given up for long-term cost. That is the long-term half of Ownership.",
+    },
+    {
+      text: "The customer asked for a bulk delete button. I asked what they were clearing out, and a retention setting did the job.",
+      principle: "Customer Obsession",
+      why: "The candidate worked backwards from the need, and did not stop at the request.",
+    },
+    {
+      text: "We hit our quarterly goal of cutting database CPU by 25 percent.",
+      principle: "Neither",
+      why: "An internal metric said as 'we'. It says nothing about a customer or about the long term.",
+    },
+  ]}
+/>
+
+## Check your story
 
 <DecisionTree
   title="Test your Customer Obsession or Ownership story"
   tree={{
-    q: "In your story, was doing the right thing for the customer/system ALSO the easiest thing for your team's schedule?",
-    yes: "Weak tension: Pick a moment where advocating for the user or long-term system health required extra work, a scope trade-off, or crossing a team boundary.",
+    q: "In your story, was the right thing for the customer also the easiest thing for your team?",
+    yes: "The story has no cost in it. Pick a time when helping the customer took extra work, a cut in scope or a step into another team's area.",
     no: {
-      q: "If this is an Ownership story across teams, did you respect the other team's code-review and operational boundaries while doing the legwork?",
+      q: "Did your fix reach the cause as well as the symptom on your side?",
       yes: {
-        answer: "Strong calibrated Ownership signal! Next: Bias for Action & Deliver Results.",
-        href: "/behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results",
+        q: "If you worked in another team's code or service, did they review and agree to the change?",
+        yes: {
+          answer: "The story shows both principles. Next, read Bias for Action and Deliver Results.",
+          href: "/behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results",
+        },
+        no: "Say how you worked with the owning team: a draft pull request, a call with their on-call engineer, their review. Changing another team's service without them reads as a risk.",
       },
-      no: "Clarify how you partnered with the owning team (opening a tested draft PR and pairing with their on-call) rather than cowboy-deploying into their service.",
+      no: "Add what you did about the cause. If the cause is still open, say so plainly and say who owns it now.",
     },
   }}
 />
 
-## Worked engineering example (STAR+L)
+## Build your own
 
-<Tabs title="Customer Obsession for Backend / Platform Engineers">
-  <Tab label="Internal Platform Customer Story">
-    **Prompt:** *"Tell me about a time you went above and beyond for a customer (internal or external)."*
+Use these prompts to find a story in your own work.
 
-    - **Situation & Task:** *"I owned our internal feature-flag evaluation SDK used by 40 product services. Product engineers complained that local integration tests took 45 seconds to boot because our SDK fetched flag rules from staging over the network, but replacing it wasn't on our Q2 roadmap."*
-    - **Action:** *"I shadowed three product engineers during their test runs and saw they were mocking our SDK with brittle regexes that caused two production incidents when flag types changed. Over two days between sprint tasks, I built a deterministic in-memory `LocalFlagProvider` mode that validated flag schemas against a committed JSON snapshot in 8 ms with zero network calls, and auto-generated the migration codemod."*
-    - **Result:** *"34 of 40 services adopted it within three weeks. Local test boot time dropped from 45s to under 100 ms, and flag-type mismatch incidents dropped to zero."*
-    - **Learning:** *"We added 'local test ergonomics' as a mandatory section in every platform SDK RFC template."*
-  </Tab>
-  <Tab label="Cross-Boundary Ownership Story">
-    **Prompt:** *"Tell me about a time you took on something significant outside your area of responsibility."*
+1. Think of the last time you thought "that is another team's bug". Write what you did next, and what one step further would have looked like.
+2. Name the person at the end of your system's request path. Write one way your system fails them without raising an alert: a retry, an abandoned upload, a support ticket.
+3. Find one decision where you chose the slower option for the sake of next year. Write what it cost this quarter.
+4. Find one request you turned down to protect other users. Write what you offered in its place.
 
-    - **Situation & Task:** *"Our search ranking service was missing its 120 ms <Term id="p99" /> <Term id="slo" /> every day at 9 AM UTC. Our service logs showed the delay came from the upstream user-entitlements gRPC call, owned by the Identity team whose roadmap was locked for a compliance audit."*
-    - **Action:** *"Instead of escalating a ticket war, I pulled the Identity repo, spun up a flamegraph against their staging environment, and found that a batch cron job at 9 AM was evicting their Redis connection pool. I wrote a 60-line PR isolating batch reads onto a separate connection pool with a <Term id="rate-limit" />, wrote the load test proving p99 stayed under 12 ms during batch runs, and walked their on-call engineer through the diff."*
-    - **Result:** *"They reviewed and merged it the same afternoon. Our 9 AM search p99 dropped from 380 ms to 78 ms without delaying their compliance audit."*
-    - **Learning:** *"We added per-caller connection-pool isolation and client-side hedged requests at 40 ms so an upstream hiccup can never cascade into search."*
-  </Tab>
-</Tabs>
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=customer-focus)
 
-## Introspect your own work
+## Red flags
 
-<Quiz title="Self-audit on Ownership & Customer Obsession">
-  <QuizItem
-    question="1. Think of the last time you said (or thought) 'That's not our team's bug.' What happened next?"
-    hint="Did you stop at the boundary, or did you trace one hop deeper?"
-  >
-    In your current work, the easiest way to build L6 *Ownership* stories is to trace one hop past your service boundary whenever an integration breaks, handing the partner team a reproducible test case instead of a vague complaint.
+- **The lone hero.** "Nobody else cared, so I worked 80 hours alone." It reads as poor teamwork and a single point of failure. Recover by saying what you left behind for the team: a runbook, a tool or a test.
+- **Yes to everything.** Treating every request as Customer Obsession. Recover with a story where you said no to one loud request and offered something that met the real need.
+- **Stopping at the boundary.** "Their service returned an error" as the end of the story. Recover by adding what you brought the owning team: a reproduction, a failing test or a draft fix.
+
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="I work on an internal platform. Who is my customer?">
+    The engineers who call your API or use your tool. Measure their cost the way you would for a paying user: minutes of
+    waiting, failed builds, hours of manual work. Say who the customer is in your first sentence so the interviewer does
+    not have to guess.
   </QuizItem>
-  <QuizItem
-    question="2. Who is the real human at the end of your system's request path, and how do you know when your system frustrates them?"
-    hint="If you only know when PagerDuty fires on 5xx, you are missing silent customer pain."
-  >
-    Identify one "silent failure" metric in your system (e.g., rage-clicks, client retries, abandoned uploads, or support tickets) and check it this week.
+  <QuizItem question="Can one story show both principles?">
+    Yes, and the story on this page does. Amazon's interview pages give no rule about using a story twice. Prepare more
+    than one all the same, so you can pick the story that fits the question you are asked.
+  </QuizItem>
+  <QuizItem question="What if the other team rejected my fix?">
+    It is still a usable story. Say what you did next: for example, you kept a guard on your own side, agreed an owner
+    and a date for their fix, and checked on that date. A partial result told honestly is stronger than a story that
+    stops at the ticket.
   </QuizItem>
 </Quiz>
 
-## Common red flags & how to recover
-
-- **The Martyr / Hero Complex:** Saying *"Nobody else on my team cared, so I worked 80 hours alone over the weekend."* Bar Raisers flag this as poor teamwork and single-point-of-failure behavior. Show how you fixed the problem **and** brought the team along via runbooks and shared tooling.
-- **Confusing Customer Obsession with saying Yes to every feature request:** Sometimes the most customer-obsessed act is saying **no** to a noisy feature request that would degrade reliability or latency for 99% of users.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="Tell me about a time you had to say no to a customer or stakeholder request in order to protect a larger customer group."
-    level="Senior"
-    companies={["Amazon", "Stripe"]}
-  >
-    Frame the tension between **one vocal customer's request** (e.g., an enterprise tenant asking for synchronous 30-second custom webhook scripts in the shared checkout path) and **platform-wide customer reliability** (protecting p99 latency and multi-tenant isolation for all other tenants). Show how you said no to the dangerous implementation while inventing a safe alternative (e.g., an async event stream with signed webhooks) that solved their underlying business need.
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="Describe a time you inherited a messy legacy system or technical debt that you didn't create, and how you left it better."
-    level="Mid"
-    companies={["Amazon", "Google", "Microsoft"]}
-  >
-    Avoid trash-talking the previous authors (*"the code was garbage"*); acknowledge the constraints they operated under when the company was smaller (*Earn Trust*). Then walk through your **Pareto triage**: how you measured where 80% of the on-call pain or deployment failures came from, added characterization tests before refactoring, and incrementally strangled the brittle modules while delivering scheduled product features.
-  </InterviewQuestion>
-</InterviewQuestions>
-
 ## Related
 
-- [How Amazon Evaluates the 16 LPs](/behavioral/amazon-leadership-principles/how-amazon-evaluates-lps)
+- [How Amazon & the Bar Raiser Evaluate the 16 LPs](/behavioral/amazon-leadership-principles/how-amazon-evaluates-lps)
 - [Bias for Action & Deliver Results](/behavioral/amazon-leadership-principles/bias-for-action-and-deliver-results)
-- [Influence Without Authority](/behavioral/competencies/influence-without-authority)
+- [Influencing Without Authority Across Teams](/behavioral/competencies/influence-without-authority)
+- [All 16 Leadership Principles: Question Index](/behavioral/amazon-leadership-principles/leadership-principles-question-index)
+
+## Sources
+
+- [Amazon: Leadership Principles](https://www.amazon.jobs/content/en/our-workplace/leadership-principles). The 16 principles in Amazon's own words, including Customer Obsession and Ownership.
+- [Amazon: Interview loop](https://amazon.jobs/content/en/how-we-hire/interview-loop). How the interviews use the principles: each interviewer is assigned competencies based on them.
+
+The descriptions of the two principles, the tables, the level scale and the example answers are our own.
