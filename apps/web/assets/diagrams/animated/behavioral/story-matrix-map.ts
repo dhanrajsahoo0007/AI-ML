@@ -8,7 +8,7 @@ const spec: DiagramSpec = {
     { title: "1. Anchor real projects", covers: "4-8 career episodes" },
     { title: "2. Extract core tensions", covers: "Technical & human friction" },
     { title: "3. Pivot the camera angle", covers: "Primary vs secondary lens" },
-    { title: "4. Answer 50+ prompts", covers: "Any company rubric" },
+    { title: "4. Answer many prompts", covers: "At any company" },
   ],
   zones: [
     { id: "anchors", title: "Real Career Episodes", tone: "blue", x: 16, y: 24, w: 240, h: 332 },
@@ -92,7 +92,7 @@ const spec: DiagramSpec = {
     {
       id: "q-disagree",
       label: "Disagree & Commit",
-      sub: "Amazon LP / Meta Jedi",
+      sub: "Conflict questions",
       icon: "check-circle",
       tone: "green",
       x: 784,
@@ -116,7 +116,7 @@ const spec: DiagramSpec = {
     {
       id: "q-staff",
       label: "Ambiguity & Direction",
-      sub: "Google G&L / Leveling",
+      sub: "Ambiguity questions",
       icon: "award",
       tone: "green",
       x: 784,

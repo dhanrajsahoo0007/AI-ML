@@ -2,7 +2,7 @@ import type { SequenceSpec } from "@/components/diagrams/types";
 
 const spec: SequenceSpec = {
   kind: "sequence",
-  title: "How a Bar Raiser peels the onion across 3 follow-up probes",
+  title: "A story, then three follow-up questions",
   width: 860,
   steps: [
     { title: "1. Opening 2-min STAR+L story", covers: "Headline & scope" },
@@ -11,7 +11,7 @@ const spec: SequenceSpec = {
     { title: "4. Probe 3: Counterfactual & scale", covers: "Tests seniority" },
   ],
   lanes: [
-    { id: "interviewer", label: "Bar Raiser", icon: "user-check", tone: "orange" },
+    { id: "interviewer", label: "Interviewer", icon: "user-check", tone: "orange" },
     { id: "candidate", label: "Candidate", icon: "user", tone: "blue" },
     { id: "design", label: "RFC / Code", icon: "code", tone: "teal" },
     { id: "metrics", label: "Telemetry", icon: "gauge", tone: "green" },

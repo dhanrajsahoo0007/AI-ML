@@ -7,13 +7,13 @@ const spec: DiagramSpec = {
   steps: [
     { title: "1. Live story & follow-up probes", covers: "Candidate delivery" },
     { title: "2. Independent rubric & verbatim notes", covers: "Written evidence" },
-    { title: "3. Bar Raiser & packet audit", covers: "Cross-round synthesis" },
+    { title: "3. Independent review", covers: "Cross-round synthesis" },
     { title: "4. Leveling & hiring decision", covers: "Offer calibration" },
   ],
   zones: [
     { id: "interview", title: "1. Live Interview (45 min)", tone: "blue", x: 16, y: 24, w: 210, h: 312 },
-    { id: "evidence", title: "2. Written Packet (24h)", tone: "teal", x: 246, y: 24, w: 220, h: 312 },
-    { id: "calibration", title: "3. Debrief / Committee", tone: "orange", x: 486, y: 24, w: 210, h: 312 },
+    { id: "evidence", title: "2. Written feedback", tone: "teal", x: 246, y: 24, w: 220, h: 312 },
+    { id: "calibration", title: "3. Debrief", tone: "orange", x: 486, y: 24, w: 210, h: 312 },
     { id: "outcome", title: "4. Final Calibration", tone: "green", x: 716, y: 24, w: 188, h: 312 },
   ],
   nodes: [
@@ -67,8 +67,8 @@ const spec: DiagramSpec = {
     },
     {
       id: "bar-raiser",
-      label: "Bar Raiser Audit",
-      sub: "Tests red flags",
+      label: "Independent reviewer",
+      sub: "Checks the evidence",
       icon: "scale",
       tone: "orange",
       accent: true,
@@ -93,7 +93,7 @@ const spec: DiagramSpec = {
     {
       id: "leveling",
       label: "Level Calibration",
-      sub: "L4 vs L5 vs L6 bar",
+      sub: "Which level fits",
       icon: "trending-up",
       tone: "green",
       x: 810,
@@ -104,8 +104,8 @@ const spec: DiagramSpec = {
     },
     {
       id: "decision",
-      label: "Hire / Down-level",
-      sub: "Evidence-backed call",
+      label: "The decision",
+      sub: "Hire or not, and level",
       icon: "award",
       tone: "green",
       accent: true,

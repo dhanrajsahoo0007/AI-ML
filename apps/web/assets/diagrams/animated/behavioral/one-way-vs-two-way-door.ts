@@ -31,7 +31,7 @@ const spec: LayoutSpec = {
       w: 180,
       h: 110,
       label: "Technical Decision",
-      sub: "70% data available; clock is ticking",
+      sub: "Some data missing; clock is ticking",
       tone: "blue",
       step: 1,
     },
