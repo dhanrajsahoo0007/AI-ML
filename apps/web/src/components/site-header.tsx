@@ -34,8 +34,10 @@ const isUnder = (pathname: string, href: string) => pathname === href || pathnam
 
 // The desktop bar is sized by how many sections it shows, because every step below is a fixed width. Up to seven
 // sections (`regular`): the phone menu below 1100px, small labels up to 1280px, icons from 1440px, Subscribe from
-// 1800px, the arrows from 1900px. With eight or more (`crowded`) each step comes later, so the links never run under
-// the logo or the buttons: 1280px, 1600px, 1760px, 2040px and 2200px, measured with nine sections.
+// 1800px, the arrows from 1900px. With eight or more (`crowded`, eleven today, with the `shortLabel`s of sections.yaml)
+// each step comes later, so the links never run under the logo or the buttons: the bar from 1440px, larger text and
+// buttons from 1920px, icons from 2040px, Subscribe from 2200px, arrows from 2400px (measured with eleven sections;
+// below 1440px the phone menu is used).
 // The class names are written out in full so Tailwind can see them.
 const BAR_SIZES = {
   regular: {
@@ -52,17 +54,17 @@ const BAR_SIZES = {
     arrow: "min-[1900px]:block",
   },
   crowded: {
-    show: "min-[1280px]:flex",
-    phone: "min-[1280px]:hidden",
-    item: "min-[1600px]:text-sm",
-    barGap: "min-[1600px]:gap-6",
-    linkGap: "min-[1600px]:gap-4",
-    toolGap: "min-[1600px]:gap-3",
-    pricing: "min-[1600px]:px-4 min-[1600px]:py-2 min-[1600px]:text-sm",
-    gem: "min-[1600px]:block",
-    icon: "min-[1760px]:block",
-    subscribe: "min-[2040px]:inline-flex",
-    arrow: "min-[2200px]:block",
+    show: "min-[1440px]:flex",
+    phone: "min-[1440px]:hidden",
+    item: "min-[1920px]:text-sm",
+    barGap: "min-[1920px]:gap-6",
+    linkGap: "min-[1920px]:gap-4",
+    toolGap: "min-[1920px]:gap-3",
+    pricing: "min-[1920px]:px-4 min-[1920px]:py-2 min-[1920px]:text-sm",
+    gem: "min-[1920px]:block",
+    icon: "min-[2040px]:block",
+    subscribe: "min-[2200px]:inline-flex",
+    arrow: "min-[2400px]:block",
   },
 } as const;
 const REGULAR_BAR_MAX = 7;
