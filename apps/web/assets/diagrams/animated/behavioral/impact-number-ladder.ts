@@ -7,7 +7,7 @@ const spec: LayoutSpec = {
   height: 352,
   steps: [
     { title: "An adjective", covers: "Nothing the interviewer can write down" },
-    { title: "A number", covers: "Better, but 80 percent of what?" },
+    { title: "A number", covers: "Better, but the starting point is missing" },
     { title: "A baseline and a unit", covers: "From this to that, in milliseconds" },
     { title: "The scale", covers: "How much traffic or data it applied to" },
     { title: "A period and a guardrail", covers: "How long it held, and what did not get worse" },

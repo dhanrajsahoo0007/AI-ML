@@ -1,7 +1,7 @@
 import type { DiagramSpec } from "@/components/diagrams/types";
 
 const spec: DiagramSpec = {
-  title: "How Amazon Bar Raisers test the tension between competing Leadership Principles",
+  title: "Four pairs of Leadership Principles that pull against each other",
   width: 920,
   height: 410,
   steps: [
@@ -11,9 +11,9 @@ const spec: DiagramSpec = {
     { title: "4. Candor vs Alignment", covers: "Have Backbone ↔ Earn Trust & Commit" },
   ],
   zones: [
-    { id: "pole-a", title: "Principle Pole A", tone: "blue", x: 16, y: 20, w: 250, h: 370 },
-    { id: "pole-b", title: "Competing Pole B", tone: "orange", x: 335, y: 20, w: 250, h: 370 },
-    { id: "synthesis", title: "Bar Raiser Resolution", tone: "green", x: 654, y: 20, w: 250, h: 370 },
+    { id: "pole-a", title: "One principle", tone: "blue", x: 16, y: 20, w: 250, h: 370 },
+    { id: "pole-b", title: "The one pulling against it", tone: "orange", x: 335, y: 20, w: 250, h: 370 },
+    { id: "synthesis", title: "An answer that holds both", tone: "green", x: 654, y: 20, w: 250, h: 370 },
   ],
   nodes: [
     {
