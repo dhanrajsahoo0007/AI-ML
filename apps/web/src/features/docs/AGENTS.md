@@ -1,6 +1,6 @@
 # features/docs: the `docs` section kind
 
-MDX hubs and articles for GenAI & LLM Systems (GenAI and ML System Design hubs), Classic System Design and Cloud. One shared route
+MDX hubs and articles for GenAI & LLM Systems, ML System Design, Classic System Design, Behavioral and Cloud. One shared route
 pair serves every docs section: `apps/web/src/app/(content)/[section]/page.tsx` and
 `apps/web/src/app/(content)/[section]/[...slug]/page.tsx`.
 

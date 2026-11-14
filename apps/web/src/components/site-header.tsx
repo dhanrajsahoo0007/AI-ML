@@ -32,6 +32,43 @@ const CompanyMenuItems = dynamic(() => import("@/components/company-menu-items")
 
 const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
+// The desktop bar is sized by how many sections it shows, because every step below is a fixed width. Up to seven
+// sections (`regular`): the phone menu below 1100px, small labels up to 1280px, icons from 1440px, the tagline and
+// Subscribe from 1800px, the arrows from 1900px. With eight or more (`crowded`) each step comes later, so the links
+// never run under the logo or the buttons: 1280px, 1600px, 1760px, 2040px and 2200px, measured with nine sections.
+// The class names are written out in full so Tailwind can see them.
+const BAR_SIZES = {
+  regular: {
+    show: "min-[1100px]:flex",
+    phone: "min-[1100px]:hidden",
+    item: "xl:text-sm",
+    barGap: "xl:gap-6",
+    linkGap: "xl:gap-4",
+    toolGap: "xl:gap-3",
+    pricing: "xl:px-4 xl:py-2 xl:text-sm",
+    gem: "xl:block",
+    icon: "min-[1440px]:block",
+    tagline: "min-[1800px]:inline",
+    subscribe: "min-[1800px]:inline-flex",
+    arrow: "min-[1900px]:block",
+  },
+  crowded: {
+    show: "min-[1280px]:flex",
+    phone: "min-[1280px]:hidden",
+    item: "min-[1600px]:text-sm",
+    barGap: "min-[1600px]:gap-6",
+    linkGap: "min-[1600px]:gap-4",
+    toolGap: "min-[1600px]:gap-3",
+    pricing: "min-[1600px]:px-4 min-[1600px]:py-2 min-[1600px]:text-sm",
+    gem: "min-[1600px]:block",
+    icon: "min-[1760px]:block",
+    tagline: "min-[2040px]:inline",
+    subscribe: "min-[2040px]:inline-flex",
+    arrow: "min-[2200px]:block",
+  },
+} as const;
+const REGULAR_BAR_MAX = 7;
+
 export function SiteHeader({
   navTree,
   profileMenu,
@@ -47,6 +84,7 @@ export function SiteHeader({
   const headerRef = useRef<HTMLElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const extras = siteConfig.extraNav;
+  const bar = navTree.length > REGULAR_BAR_MAX ? BAR_SIZES.crowded : BAR_SIZES.regular;
   const openSection = navTree.find((s) => s.key === openKey);
   const subscribe = navTree.find((s) => s.kind === SUBSCRIBE_KIND && !s.comingSoon);
 
@@ -80,7 +118,8 @@ export function SiteHeader({
 
   const itemClass = (active: boolean) =>
     cn(
-      "relative inline-flex items-center gap-1.5 whitespace-nowrap py-1 text-[12.5px] transition-colors xl:text-sm",
+      "relative inline-flex items-center gap-1.5 whitespace-nowrap py-1 text-[12.5px] transition-colors",
+      bar.item,
       active
         ? "text-ink after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-ink"
         : "text-muted-foreground hover:text-ink"
@@ -93,32 +132,42 @@ export function SiteHeader({
       onMouseEnter={() => clearTimeout(closeTimer.current)}
       className="sticky top-0 z-40 w-full border-b border-hairline/80 bg-paper"
     >
-      <nav aria-label="Main" className="flex h-16 w-full items-center gap-3 px-4 sm:px-6 xl:gap-6">
+      <nav aria-label="Main" className={cn("flex h-16 w-full items-center gap-3 px-4 sm:px-6", bar.barGap)}>
         <Link href="/" className="flex shrink-0 items-center gap-3">
           <span className="flex items-center gap-2">
             <BrandMark className="size-7 sm:size-8" />
             <span className="font-display text-xl whitespace-nowrap sm:text-2xl">{siteConfig.name}</span>
           </span>
-          <span className="hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground min-[1800px]:inline">
+          <span
+            className={cn(
+              "hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground",
+              bar.tagline
+            )}
+          >
             {siteConfig.tagline}
           </span>
         </Link>
 
-        <div className="relative hidden min-w-0 flex-1 items-center justify-center gap-2 self-stretch min-[1100px]:flex xl:gap-4">
+        <div
+          className={cn(
+            "relative hidden min-w-0 flex-1 items-center justify-center gap-2 self-stretch",
+            bar.show,
+            bar.linkGap
+          )}
+        >
           {navTree.map((section) => {
             const label = section.shortLabel ?? section.label;
             const active = isUnder(pathname, section.href) || openKey === section.key;
             // The underline of the current section takes that section's tint (data-tone on the link).
             const className = cn(itemClass(active), "after:bg-tint", section.comingSoon && "text-muted-foreground/70");
-            // The section's icon, in its tint when the section is current or its menu is open. The bar is sized for
-            // seven sections next to the logo mark and wordmark: the phone menu below 1100px, labels only up to
-            // 1440px, icons from 1440px, the tagline and Subscribe from 1800px, the arrows from 1900px.
+            // The section's icon, in its tint when the section is current or its menu is open (widths: BAR_SIZES).
             const SectionIcon = getIconComponent(section.icon);
             const icon = SectionIcon && (
               <SectionIcon
                 aria-hidden
                 className={cn(
-                  "hidden size-3.5 shrink-0 transition-colors min-[1440px]:block",
+                  "hidden size-3.5 shrink-0 transition-colors",
+                  bar.icon,
                   active ? "text-tint" : "text-muted-foreground/80"
                 )}
               />
@@ -130,7 +179,8 @@ export function SiteHeader({
                 <ChevronDown
                   aria-hidden
                   className={cn(
-                    "hidden size-3 transition-transform duration-200 min-[1900px]:block",
+                    "hidden size-3 transition-transform duration-200",
+                    bar.arrow,
                     openKey === section.key && "rotate-180"
                   )}
                 />
@@ -200,7 +250,7 @@ export function SiteHeader({
         </div>
 
         <div
-          className="ml-auto hidden shrink-0 items-center gap-2 min-[1100px]:flex xl:gap-3"
+          className={cn("ml-auto hidden shrink-0 items-center gap-2", bar.show, bar.toolGap)}
           onMouseEnter={() => setOpenKey(null)}
         >
           <SearchButton />
@@ -211,16 +261,22 @@ export function SiteHeader({
               key={e.href}
               href={e.href}
               aria-current={isUnder(pathname, e.href) ? "page" : undefined}
-              className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-[13px] font-medium whitespace-nowrap text-paper transition-colors hover:bg-primary xl:px-4 xl:py-2 xl:text-sm"
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-[13px] font-medium whitespace-nowrap text-paper transition-colors hover:bg-primary",
+                bar.pricing
+              )}
             >
-              <Gem aria-hidden className="hidden size-3.5 xl:block" />
+              <Gem aria-hidden className={cn("hidden size-3.5", bar.gem)} />
               {e.label}
             </Link>
           ))}
           {subscribe && (
             <Link
               href={subscribe.href}
-              className="hidden rounded-full border border-hairline px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-ink min-[1800px]:inline-flex"
+              className={cn(
+                "hidden rounded-full border border-hairline px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-ink",
+                bar.subscribe
+              )}
             >
               Subscribe
             </Link>
@@ -228,7 +284,7 @@ export function SiteHeader({
           {profileMenu}
         </div>
 
-        <div className="ml-auto flex items-center gap-1 min-[1100px]:hidden">
+        <div className={cn("ml-auto flex items-center gap-1", bar.phone)}>
           <SearchButton compact />
           <ThemeToggle />
           {profileMenuMobile}

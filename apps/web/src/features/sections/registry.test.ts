@@ -28,6 +28,24 @@ function withEnv<T>(env: AppEnv, fn: () => T): T {
   }
 }
 
+/**
+ * Runs `fn` in `env` against a registry given as YAML text instead of content/sections.yaml. The registry is
+ * cached per environment, so it is read once under another environment on the way in and on the way out.
+ */
+function withRegistry<T>(text: string, env: AppEnv, fn: () => T): T {
+  const before = process.env.SECTIONS_YAML;
+  const other = APP_ENVS.find((e) => e !== env)!;
+  process.env.SECTIONS_YAML = text;
+  try {
+    withEnv(other, () => allSections());
+    return withEnv(env, fn);
+  } finally {
+    if (before === undefined) delete process.env.SECTIONS_YAML;
+    else process.env.SECTIONS_YAML = before;
+    withEnv(other, () => allSections());
+  }
+}
+
 describe("resolveAppEnv", () => {
   it("uses APP_ENV when set", () => {
     for (const env of APP_ENVS) assert.equal(resolveAppEnv(env, "production"), env);
@@ -54,13 +72,14 @@ describe("content/sections.yaml", () => {
     assert.deepEqual(states.behavioral, { local: "on", preview: "on", staging: "on", production: "off" });
     assert.deepEqual(states.dsa, { local: "on", preview: "on", staging: "off", production: "off" });
     assert.deepEqual(states.newsletter, { local: "on", preview: "on", staging: "on", production: "off" });
-    assert.equal(states["ml-system-design"], undefined, "ML System Design is a hub of ai-system-design now");
+    assert.deepEqual(states["ml-system-design"], { local: "on", preview: "on", staging: "on", production: "off" });
   });
-  it("parks the ML System Design hub of AI & ML System Design outside local", () => {
-    const ai = entries.find((s) => s.key === "ai-system-design");
-    assert.deepEqual(ai?.hubRelease, {
-      "ml-system-design": { local: "on", preview: "off", staging: "off", production: "off" },
-    });
+  it("gives ML System Design its own section and parks no hub", () => {
+    assert.equal(entries.find((s) => s.key === "ml-system-design")?.kind, "docs");
+    assert.deepEqual(
+      entries.filter((s) => s.hubRelease).map((s) => s.key),
+      []
+    );
   });
   it("gives each section one label", () => {
     assert.equal(entries.find((s) => s.key === "cloud")?.label, "Cloud");
@@ -130,7 +149,7 @@ describe("release states per environment", () => {
   it("shows everything in local", () => {
     withEnv("local", () => assert.equal(visibleSections().length, allSections().length));
   });
-  it("hides Cloud and drops DSA, Newsletter and ML System Design in production", () => {
+  it("hides Cloud and drops ML System Design, Behavioral, DSA and Newsletter in production", () => {
     withEnv("production", () => {
       assert.equal(sectionState("cloud"), "hidden");
       assert.deepEqual(
@@ -140,26 +159,33 @@ describe("release states per environment", () => {
       assert.deepEqual(hiddenRoutes(), {
         env: "production",
         hidden: ["/cloud"],
-        off: ["/behavioral", "/dsa", "/newsletter", "/ai-system-design/ml-system-design"],
+        off: ["/ml-system-design", "/behavioral", "/dsa", "/newsletter"],
       });
       assert.equal(isPathVisible("/cloud/aws/compute"), false);
       assert.equal(isPathVisible("/cloudy"), true);
       assert.equal(isPathVisible("/system-design/databases"), true);
     });
   });
-  it("keeps the ML System Design hub off outside local, and the rest of the section on", () => {
+  it("keeps a parked hub (hubRelease) off outside local, and the rest of its section on", () => {
+    // No section parks a hub today, so this runs against a registry that does.
+    const parked =
+      "- { key: docs-a, kind: docs, label: A, href: /docs-a, icon: x, navGroup: learn, order: 1, " +
+      "hub: { title: A, subtitle: B }, release: { local: on, preview: on, staging: on, production: on }, " +
+      "hubRelease: { parked: { local: on, preview: off, staging: off, production: off } } }\n";
     for (const env of ["preview", "staging", "production"] as const) {
-      withEnv(env, () => {
-        assert.equal(isInOffHub("/ai-system-design/ml-system-design/drift-detection"), true);
-        assert.equal(isPathVisible("/ai-system-design/ml-system-design"), false);
-        assert.equal(isPathVisible("/ai-system-design/ml-system-designer"), true);
-        assert.equal(isPathVisible("/ai-system-design/genai-system-design/rag-fundamentals"), true);
+      withRegistry(parked, env, () => {
+        assert.equal(isInOffHub("/docs-a/parked/some-page"), true);
+        assert.equal(isPathVisible("/docs-a/parked"), false);
+        assert.equal(isPathVisible("/docs-a/parkedish"), true);
+        assert.equal(isPathVisible("/docs-a/open/some-page"), true);
+        assert.deepEqual(hiddenRoutes().off, ["/docs-a/parked"]);
       });
     }
-    withEnv("local", () => {
-      assert.equal(isPathVisible("/ai-system-design/ml-system-design/drift-detection"), true);
+    withRegistry(parked, "local", () => {
+      assert.equal(isPathVisible("/docs-a/parked/some-page"), true);
       assert.deepEqual(hiddenRoutes().off, []);
     });
+    withEnv("local", () => assert.deepEqual(hiddenRoutes().off, []));
   });
   it("throws for an unknown section key", () => {
     assert.throws(() => sectionState("nope"), /Unknown section/);

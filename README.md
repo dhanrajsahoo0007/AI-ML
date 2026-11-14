@@ -43,7 +43,8 @@ All content lives in `apps/web/content` as MDX and YAML:
 
 | Folder              | Site section                                                                                                                                                                        |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ai-system-design/` | GenAI & LLM Systems (`/ai-system-design`): GenAI deep-dives, plus the ML System Design hub (parked: local only, `hubRelease` in `sections.yaml`)                                    |
+| `ai-system-design/` | GenAI & LLM Systems (`/ai-system-design`): one GenAI hub read in twelve groups (`groups` in `sections.yaml`)                                                                        |
+| `ml-system-design/` | ML System Design (`/ml-system-design`): classic ML systems, off in production until released                                                                                        |
 | `system-design/`    | System Design fundamentals and case studies (`/system-design`)                                                                                                                      |
 | `cloud/`            | Cloud Architecture: AWS, Google Cloud and Azure guides (`/cloud`), dev only for now (see feature flags)                                                                             |
 | `question-bank/`    | Interview question library: `taxonomy.yaml` (categories and subsections), one YAML file per category, `articles.yaml` (files practice questions inside articles under a subsection) |
