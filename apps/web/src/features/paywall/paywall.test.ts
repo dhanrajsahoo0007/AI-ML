@@ -79,7 +79,7 @@ describe("premium-routes manifest", () => {
     expect(m.routes).toContain("/system-design/databases/b-trees");
     expect(m.routes).not.toContain("/system-design/databases");
     // An outline article stays free (alwaysFree: outlines).
-    expect(m.routes).not.toContain("/system-design/case-studies/dropbox");
+    expect(m.routes).not.toContain("/system-design-case-studies/case-studies/dropbox");
     expect(m.routes.every((r) => !r.endsWith(`/${PREVIEW_SEGMENT}`))).toBe(true);
   });
 
