@@ -85,7 +85,7 @@ describe("the question library (real content)", () => {
 // Topics and follow-ups, on entries shaped like a library YAML file.
 describe("parseYamlQuestions", () => {
   const CACHING = "/system-design/patterns/caching";
-  const MESSENGER = "/system-design/case-studies/facebook-messenger";
+  const MESSENGER = "/system-design-case-studies/case-studies/facebook-messenger";
   const categories = new Map([
     ["sd", { track: "design" as const, subsections: [{ slug: "chat", title: "Chat", description: "x" }] }],
     ["ai", { track: "ai" as const, subsections: [{ slug: "rag", title: "RAG", description: "x" }] }],

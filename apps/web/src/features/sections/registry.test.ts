@@ -65,7 +65,9 @@ describe("content/sections.yaml", () => {
     const states = Object.fromEntries(entries.map((s) => [s.key, s.release]));
     const everywhere = { local: "on", preview: "on", staging: "on", production: "on" };
     assert.deepEqual(states["ai-system-design"], everywhere);
+    assert.deepEqual(states["genai-system-design"], everywhere);
     assert.deepEqual(states["system-design"], everywhere);
+    assert.deepEqual(states["system-design-case-studies"], everywhere);
     assert.deepEqual(states.interviews, everywhere);
     assert.deepEqual(states.companies, everywhere);
     assert.deepEqual(states.cloud, { local: "on", preview: "on", staging: "on", production: "hidden" });
@@ -154,7 +156,14 @@ describe("release states per environment", () => {
       assert.equal(sectionState("cloud"), "hidden");
       assert.deepEqual(
         visibleSections().map((s) => s.key),
-        ["ai-system-design", "system-design", "interviews", "companies"]
+        [
+          "ai-system-design",
+          "genai-system-design",
+          "system-design",
+          "system-design-case-studies",
+          "interviews",
+          "companies",
+        ]
       );
       assert.deepEqual(hiddenRoutes(), {
         env: "production",

@@ -17,7 +17,7 @@ interface PageCase {
 
 const PAGES: Record<string, PageCase> = {
   "free article (outline)": {
-    path: "/system-design/case-studies/dropbox",
+    path: "/system-design-case-studies/case-studies/dropbox",
     types: ["Article", "BreadcrumbList"],
     ogType: "article",
   },
@@ -189,7 +189,7 @@ test.describe("security headers @core", () => {
   // must not trip the (report-only) policy, so it can be enforced later without breaking pages.
   for (const path of [
     "/",
-    "/system-design/case-studies/dropbox",
+    "/system-design-case-studies/case-studies/dropbox",
     "/interviews/safety-security/hallucination",
     "/companies",
   ]) {

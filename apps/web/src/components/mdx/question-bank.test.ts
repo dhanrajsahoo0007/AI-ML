@@ -45,7 +45,7 @@ const parent: LibraryQuestion = {
   id: "design-chat",
   q: "Design a chat app",
   topics: [
-    { href: "/system-design/case-studies/facebook-messenger", title: "Design Facebook Messenger" },
+    { href: "/system-design-case-studies/case-studies/facebook-messenger", title: "Design Facebook Messenger" },
     { href: "/system-design/patterns/caching", title: "Caching" },
   ],
   followUps: [followUp],

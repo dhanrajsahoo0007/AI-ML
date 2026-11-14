@@ -33,9 +33,9 @@ const CompanyMenuItems = dynamic(() => import("@/components/company-menu-items")
 const isUnder = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
 // The desktop bar is sized by how many sections it shows, because every step below is a fixed width. Up to seven
-// sections (`regular`): the phone menu below 1100px, small labels up to 1280px, icons from 1440px, the tagline and
-// Subscribe from 1800px, the arrows from 1900px. With eight or more (`crowded`) each step comes later, so the links
-// never run under the logo or the buttons: 1280px, 1600px, 1760px, 2040px and 2200px, measured with nine sections.
+// sections (`regular`): the phone menu below 1100px, small labels up to 1280px, icons from 1440px, Subscribe from
+// 1800px, the arrows from 1900px. With eight or more (`crowded`) each step comes later, so the links never run under
+// the logo or the buttons: 1280px, 1600px, 1760px, 2040px and 2200px, measured with nine sections.
 // The class names are written out in full so Tailwind can see them.
 const BAR_SIZES = {
   regular: {
@@ -48,7 +48,6 @@ const BAR_SIZES = {
     pricing: "xl:px-4 xl:py-2 xl:text-sm",
     gem: "xl:block",
     icon: "min-[1440px]:block",
-    tagline: "min-[1800px]:inline",
     subscribe: "min-[1800px]:inline-flex",
     arrow: "min-[1900px]:block",
   },
@@ -62,7 +61,6 @@ const BAR_SIZES = {
     pricing: "min-[1600px]:px-4 min-[1600px]:py-2 min-[1600px]:text-sm",
     gem: "min-[1600px]:block",
     icon: "min-[1760px]:block",
-    tagline: "min-[2040px]:inline",
     subscribe: "min-[2040px]:inline-flex",
     arrow: "min-[2200px]:block",
   },
@@ -73,14 +71,18 @@ export function SiteHeader({
   navTree,
   profileMenu,
   profileMenuMobile,
+  defaultOpenKey,
+  initialNavItems,
 }: {
   navTree: HeaderNavSection[];
   profileMenu: ReactNode;
   profileMenuMobile: ReactNode;
+  defaultOpenKey?: string;
+  initialNavItems?: HeaderNavItems;
 }) {
   const pathname = useCanonicalPathname();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [openKey, setOpenKey] = useState<string | null>(defaultOpenKey ?? null);
   const headerRef = useRef<HTMLElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const extras = siteConfig.extraNav;
@@ -133,19 +135,9 @@ export function SiteHeader({
       className="sticky top-0 z-40 w-full border-b border-hairline/80 bg-paper"
     >
       <nav aria-label="Main" className={cn("flex h-16 w-full items-center gap-3 px-4 sm:px-6", bar.barGap)}>
-        <Link href="/" className="flex shrink-0 items-center gap-3">
-          <span className="flex items-center gap-2">
-            <BrandMark className="size-7 sm:size-8" />
-            <span className="font-display text-xl whitespace-nowrap sm:text-2xl">{siteConfig.name}</span>
-          </span>
-          <span
-            className={cn(
-              "hidden text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground",
-              bar.tagline
-            )}
-          >
-            {siteConfig.tagline}
-          </span>
+        <Link href="/" className="flex shrink-0 items-center gap-2">
+          <BrandMark className="size-7 sm:size-8" />
+          <span className="font-display text-xl whitespace-nowrap sm:text-2xl">{siteConfig.name}</span>
         </Link>
 
         <div
@@ -243,6 +235,7 @@ export function SiteHeader({
                 key={openSection.key}
                 section={openSection}
                 pathname={pathname}
+                initialItems={initialNavItems}
                 onNavigate={() => setOpenKey(null)}
               />
             </div>
@@ -410,15 +403,16 @@ function loadNavItems() {
   return itemsPromise;
 }
 
-function useNavItems() {
-  const [items, setItems] = useState<HeaderNavItems | null | undefined>(loadedItems);
+function useNavItems(initial?: HeaderNavItems) {
+  const [items, setItems] = useState<HeaderNavItems | null | undefined>(initial ?? loadedItems);
   useEffect(() => {
+    if (initial) return;
     let live = true;
     loadNavItems().then((v) => live && setItems(v));
     return () => {
       live = false;
     };
-  }, []);
+  }, [initial]);
   return items;
 }
 
@@ -437,14 +431,16 @@ function runsByHeading<G extends { heading?: string }>(groups: G[]) {
 function SectionPanel({
   section,
   pathname,
+  initialItems,
   onNavigate,
 }: {
   section: HeaderNavSection;
   pathname: string;
+  initialItems?: HeaderNavItems;
   /** Closes the menu: a company link only changes the query string, which the header does not see as navigation. */
   onNavigate: () => void;
 }) {
-  const items = useNavItems();
+  const items = useNavItems(initialItems);
   // Opens on the group that holds the current page (known once the article lists have loaded), else the first one.
   // A group's own href can be a hub page shared with other groups, so the article lists decide.
   const [picked, setPicked] = useState<string | undefined>(undefined);
@@ -594,7 +590,7 @@ function SectionPanel({
                   </Link>
                 </div>
                 {items === undefined && active.count > 0 ? (
-                  <ul aria-hidden className="columns-2 gap-8">
+                  <ul aria-hidden className={cn(active.count > 8 && "columns-2 gap-8")}>
                     {Array.from({ length: Math.min(active.count, 10) }, (_, i) => (
                       <li key={i} className="mb-2.5 h-4 w-4/5 animate-pulse rounded bg-paper-2" />
                     ))}
@@ -602,7 +598,7 @@ function SectionPanel({
                 ) : blocks.length > 0 && section.kind === "directory" ? (
                   <CompanyMenuItems items={blocks.flatMap((b) => b.items)} onNavigate={onNavigate} />
                 ) : blocks.length > 0 ? (
-                  <div className="columns-2 gap-8">
+                  <div className={blocks.length > 1 ? "columns-2 gap-8" : "space-y-4"}>
                     {blocks.map((block, i) => {
                       const BlockIcon = block.icon ? getIconComponent(block.icon) : undefined;
                       return (
