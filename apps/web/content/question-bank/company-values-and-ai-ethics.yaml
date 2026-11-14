@@ -10,8 +10,31 @@
     - /behavioral/company-playbooks/stripe-airbnb-and-fintech
     - /behavioral/company-playbooks/uber-doordash-and-palantir
   a: |-
-    **What interviewers are testing.** High-bar product and infrastructure companies (Stripe *Users First* & *Exothermic*, Airbnb *Host* & *Champion the Mission*, Uber/DoorDash Bar Raiser, Palantir Decomposition) test **micro-pessimism paired with macro-optimism**: assuming every network call, webhook, and data feed will fail or duplicate in production, and designing idempotent, auditable systems that protect the user's money and trust.
+    **What it tests.** Whether you know which parts of a system must be exactly right and which parts can ship rough. The interviewer listens for how you planned for failure: retries, duplicates, late data and partial writes. At senior level the hard part is defending the speed you gave up, or the risk you accepted, with numbers.
 
+    **How to shape the answer.**
+
+    - **Situation and task.** Name the system, what a wrong result would cost a user, and the deadline pressure.
+    - **Action.** Say which paths you treated as must-be-correct and how you protected them: idempotent writes, an audit record, a reconciliation job. Say what you cut or delayed to pay for that.
+    - **Result.** Give the delivery date against the plan and an error number from production.
+    - **Learning.** Say how you now split work into correct-first and fast-first.
+
+    **A strong answer sounds like this.** "I led the backend for a refunds feature with a launch date eight weeks out. A double refund would cost us money, and a missed refund would cost a customer's trust. Every write that moved money got an idempotency key, an audit row and a nightly reconciliation job. The admin screens shipped plain, with no bulk actions. We launched one week late, which I agreed with the product lead in week three. In the first quarter we processed about 40,000 refunds, and reconciliation caught 11 duplicates before any money moved twice."
+
+    **Watch out for.** Saying everything had to be perfect, and giving no number for the delay or the error rate.
+  followUps:
+    - q: What did you choose not to build, and how did you explain that to the people who wanted it?
+      level: Senior
+      a: |-
+        Name the feature, who asked for it and the risk you weighed it against. Say what you offered in its place and when the feature shipped later. The interviewer checks that you made the trade openly and did not hide it in the schedule.
+    - q: How did you know the system was correct once it was live?
+      level: Senior
+      a: |-
+        Describe the check that would have caught a wrong result: a reconciliation job, a daily count against a second source, or an alert on mismatches. Say how often it fired and what you did the first time. "Nobody complained" is a weak answer.
+    - q: Tell me about a failure the design did not expect.
+      level: Senior
+      a: |-
+        Give one real case, how it was found and how many users it touched. Then say what you changed in the design and in your review checklist. Admitting a gap and showing the repair builds more trust than a clean record.
 - id: company-ai-ml-offline-online-gap-story
   q: Tell me about a time an ML model or LLM pipeline you built looked great on offline benchmarks but underperformed or failed in production. How did you diagnose and fix it?
   level: Senior
@@ -21,17 +44,33 @@
     - judgment
   topics:
     - /behavioral/leveling-and-tracks/ai-and-ml-engineer-behavioral
-    - /behavioral/company-playbooks/frontier-ai-labs-values
+    - /behavioral/competencies/production-incidents-and-mistakes
   a: |-
-    **What interviewers are testing.** Real-world AI/ML maturity. Anyone can recite textbook definitions of data leakage or distribution shift; interviewers probe for the **exact forensic workflow** you used when offline metrics (AUC, NDCG, or LLM-as-judge win rate) diverged from online business metrics or human user satisfaction.
+    **What it tests.** Real experience of running models in production. The interviewer wants the steps you took, in order, when an offline metric and a live result disagreed. At senior level you must also show what you changed in the team's evaluation.
 
-    **Four failure modes to anchor your story:**
+    **How to shape the answer.**
 
-    1. **Train-serve or prompt-context skew:** Feature pipelines or RAG chunking behaving differently in real-time serving vs. batch evaluation.
-    2. **Proxy metric Goodharting:** Optimizing click-through rate or judge verbosity at the expense of downstream task completion.
-    3. **Latency eating quality:** A 3x larger model improving offline accuracy by 2% while adding 900 ms of p95 latency that caused user abandonment.
-    4. **Unrepresentative eval golden sets:** Eval sets missing adversarial, multi-turn, or long-tail production queries.
+    - **Situation and task.** Give the model, the offline number, the live number and what the gap cost.
+    - **Action.** Walk through your checks in order. Common causes are features computed differently in training and serving, a proxy metric that does not match the user's goal, added latency, and a test set that misses real queries. Say what you ruled out and how.
+    - **Result.** Give the fix and the live metric after it.
+    - **Learning.** Name the check you added before the next launch.
 
+    **A strong answer sounds like this.** "I built a retrieval pipeline for a support assistant. On our test set of 400 questions it answered 88 percent correctly. In the first live week, users marked only 61 percent of answers as helpful. I sampled 200 live questions and found that 45 percent were follow-up turns, and our test set had none. Retrieval used only the last message, so it lost the topic. I rewrote the query from the last three turns and added 150 multi-turn cases to the test set. Helpful ratings rose to 74 percent, still below the offline number."
+
+    **Watch out for.** Blaming the data team, naming a cause you never confirmed, and stopping at the fix without changing how you evaluate.
+  followUps:
+    - q: How did you rule out the other possible causes?
+      level: Senior
+      a: |-
+        List two or three causes you considered and the test for each, for example comparing logged serving features with training features for the same requests. Say how long each check took. The interviewer wants an ordered search, cheapest check first, with evidence at each step.
+    - q: Why did your offline evaluation miss it?
+      level: Senior
+      a: |-
+        Give the plain reason: how the test set was built and what it left out. Take your share of the miss. Then say what now keeps the test set close to live traffic, and who owns that job.
+    - q: How did you explain the gap to people who had already seen the offline number?
+      level: Senior
+      a: |-
+        Say who you told, how soon, and the words you used. Give the corrected expectation as a range and the date of the next reading. Senior candidates report the bad number themselves before anyone asks.
 - id: company-frontier-ai-safety-vs-capability-tension
   q: Tell me about a time you discovered a safety, reliability, privacy, or alignment risk right before a high-visibility launch. How did you handle the tension between shipping speed and safety?
   level: Senior
@@ -44,83 +83,142 @@
     - /behavioral/company-playbooks/frontier-ai-labs-values
     - /behavioral/leveling-and-tracks/ai-and-ml-engineer-behavioral
   a: |-
-    **What interviewers are testing.** Frontier AI labs (Anthropic, OpenAI, DeepMind) explicitly evaluate **epistemic honesty** and **calibrated safety judgment**. They reject two extremes: reckless shipping ("we'll fix jailbreaks or PII leaks if users complain") and unquantified alarmism ("we must halt the launch indefinitely without measuring the failure rate").
+    **What it tests.** Calibrated judgment about risk, and honesty about what you do not know. The interviewer rejects two extremes: shipping and hoping nobody notices, and demanding a halt without measuring anything. At senior level the hard part is making a specific recommendation under launch pressure.
 
-    **How to demonstrate frontier-lab judgment:**
+    **How to shape the answer.**
 
-    - **Quantify the failure rate and severity:** Run a red-team or automated evaluation harness to measure exact prevalence and worst-case harm.
-    - **Engineer layered mitigations:** Combine input/output classifiers, constitutional/system-prompt constraints, tool-permission sandboxing, or staged rollout gates so capability and safety advance together.
-    - **State uncertainties plainly:** Distinguish between risks your mitigation provably bounds and residual risks that require active production telemetry and kill switches.
+    - **Situation and task.** Name the risk, how you found it and how close the launch was.
+    - **Action.** Show that you measured how often it happens and how bad the worst case is. Describe the layers of mitigation you proposed: a filter, a narrower permission, a staged rollout, an off switch. Say who decided.
+    - **Result.** Say what shipped and when, and give the measured rate after mitigation.
+    - **Learning.** State what stayed uncertain and how you monitored it.
 
+    **A strong answer sounds like this.** "Four days before our assistant's public launch, I found it could repeat email addresses from retrieved documents. I ran 2,000 test prompts overnight, and it leaked personal data in 1.4 percent of them. I took that number to the launch lead with three options. We agreed to add an output filter, remove one document source, and launch to 5 percent of users first. The rate fell to 0.05 percent in testing. I said the filter could miss new formats, so we logged every match and kept an off switch. The full launch slipped by six days."
+
+    **Watch out for.** A story with no measurement, presenting yourself as the only person who cared about safety, and claiming the mitigation removed the risk completely.
+  followUps:
+    - q: What would you have done if leadership had decided to launch without the mitigation?
+      level: Senior
+      a: |-
+        Say you would state the risk and your recommendation in writing, ask who accepts the risk, and then follow the decision unless it crossed a legal or ethical line. Name where that line is for you. The interviewer wants firmness without drama.
+    - q: How did you decide the remaining risk was acceptable?
+      level: Senior
+      a: |-
+        Give the numbers: the rate, the worst-case harm to a user, and how fast you could detect and stop it. Say who agreed the threshold. Admit what the tests could not cover. Acceptable must mean a stated level that someone accountable approved.
+    - q: How did the people who owned the launch date react, and how did you keep working with them?
+      level: Senior
+      a: |-
+        Describe their concern fairly, for example a public date that was already announced. Show that you brought options and a cost for each, and more than a problem. Say how the relationship stood a month later.
 - id: company-apple-quality-bar-across-boundaries
   q: Tell me about a time you held a high quality bar on work that crossed team, platform or hardware and software boundaries.
   level: Senior
   category: company-values-and-ai-ethics
   subcategory: meta-google-apple-netflix
-  signals:
-    - judgment
   companies:
     - Apple
+  signals:
+    - judgment
   topics:
     - /behavioral/company-playbooks/apple-craft-and-collaboration
   a: |-
-    **What interviewers are testing.** Apple organises engineers by function, so most features need several specialist teams. The interviewer wants to see that you cared about the finished experience, including the parts outside your own code, and that you kept the bar without damaging the working relationship.
+    **What it tests.** Whether you care about the finished experience, including the parts outside your own code. The interviewer wants to see that you measured a quality gap, raised it as a shared problem and kept the working relationship. At senior level the hard part is holding the bar with no authority over the other team.
 
-    **How to structure your answer (STAR+L):**
+    **How to shape the answer.**
 
-    - **Situation & Task:** Name the feature, the teams involved and the quality gap you noticed. Give a number: a memory budget, a frame time, a battery cost or an error rate.
-    - **Action:** Show how you measured the gap, how you raised it with the other team as a shared problem, and what you built or changed yourself to close it. Name one option you rejected and why.
-    - **Result:** State the before and after numbers and what the user would have noticed.
-    - **Learning:** Say what check or budget you added so the gap is caught earlier next time.
+    - **Situation and task.** Name the feature, the teams involved and the gap you noticed. Give a number, such as a frame time or an error rate.
+    - **Action.** Show how you measured the gap, how you raised it, and what you changed yourself.
+    - **Result.** State the before and after numbers and what a user would notice.
+    - **Learning.** Say what check or budget you added so the gap is caught earlier.
 
-    **Red flags to avoid.** Blaming the other team, describing polish with no measurement, or sharing details your current employer would treat as confidential. Respecting confidentiality is itself a good signal here.
+    **A strong answer sounds like this.** "I owned the camera screen in our mobile app, and a firmware team owned the capture pipeline. On older phones the preview dropped to 22 frames a second. I recorded traces on three devices and showed that 60 percent of the frame time was a colour conversion on their side. I took the traces to their lead and offered to write the test harness. They moved the conversion to the graphics chip, and I cut our overlay drawing in half. The preview reached 30 frames a second. We added a frame-time budget to both teams' release checks."
 
+    **Watch out for.** Blaming the other team, describing polish with no measurement, and sharing details your current employer would treat as confidential.
+  followUps:
+    - q: What did you do when the other team said the fix was not a priority for them?
+      level: Senior
+      a: |-
+        Say how you showed the cost to users with data, what part of the work you offered to take on, and when you would have gone to a manager. The interviewer checks persistence and respect together. Going over someone's head first is a poor answer.
+    - q: How did you decide the result was good enough to ship?
+      level: Senior
+      a: |-
+        Give the target you set before the work started and why you chose that number: what a user can notice. Say what you left unfixed and how you recorded it. A bar with no number sounds like taste alone.
+    - q: Which option did you reject, and why?
+      level: Senior
+      a: |-
+        Name a real alternative, for example hiding the feature on older devices, and the reason it lost: user impact, cost or risk. This shows you compared options and did not just follow the first idea.
 - id: company-netflix-decision-after-seeking-dissent
   q: Tell me about a decision you owned where you asked for opposing views before you made the call.
   level: Senior
   category: company-values-and-ai-ethics
   subcategory: meta-google-apple-netflix
-  signals:
-    - judgment
   companies:
     - Netflix
+  signals:
+    - judgment
   topics:
     - /behavioral/company-playbooks/netflix-culture-and-judgment
   a: |-
-    **What interviewers are testing.** Netflix's culture memo describes one person owning a decision after gathering disagreement from others. The interviewer checks three things: that you sought out people likely to disagree, that their input changed something, and that you then decided without waiting for a vote.
+    **What it tests.** Netflix lists judgment, candor and courage among its published values. The interviewer checks three things: that you looked for people likely to disagree, that their input changed something, and that you then decided without waiting for a vote. At senior level you must also own what went badly.
 
-    **How to structure your answer (STAR+L):**
+    **How to shape the answer.**
 
-    - **Situation & Task:** Describe the decision, why it was yours to make and what was at stake.
-    - **Action:** Say who you asked and why you chose them. Give the strongest objection you heard in their words. Explain what you changed because of it and what you kept. Then state the decision and how you told the people who disagreed.
-    - **Result:** Give the outcome with a number, and say whether the objection turned out to be right in part.
-    - **Learning:** Say how you now collect disagreement on decisions of this size.
+    - **Situation and task.** Describe the decision, why it was yours to make and what was at stake.
+    - **Action.** Say who you asked and why. Give the strongest objection in their words, what you changed because of it and what you kept. Then state the decision and how you told them.
+    - **Result.** Give the outcome with a number, and say where the objection proved right.
+    - **Learning.** Say how you now collect disagreement before a decision.
 
-    **Red flags to avoid.** Asking only people who agree with you, describing a group vote as your decision, or telling a story where nobody's feedback changed anything.
+    **A strong answer sounds like this.** "I owned the decision to move 14 services from weekly release trains to a deploy for every change. Before deciding, I sent a two-page proposal to the three people most likely to object. The on-call lead wrote that frequent deploys would hide which change caused an incident. That was fair, so I added automatic rollback and a deploy marker on every dashboard. I announced the decision with each objection and my answer. Lead time fell from five days to one. Incidents rose from four to six in the first month, as she had warned."
 
+    **Watch out for.** Asking only people who agree with you, describing a group vote as your decision, and a story where nobody's feedback changed anything.
+  followUps:
+    - q: How confident were you when you made the call, and what would have changed your mind?
+      level: Senior
+      a: |-
+        Give a rough confidence, for example 70 percent, and the evidence behind it. Name the one result that would have made you reverse, and whether you set a date to check. A decision with a stated exit is stronger than a claim of certainty.
+    - q: How did the people who disagreed respond after you decided?
+      level: Senior
+      a: |-
+        Say what you told them, including the parts of their view you did not accept and why. Describe what they did next. If someone stayed unhappy, say so and say how you kept working together.
+    - q: What did you do when part of the decision turned out badly?
+      level: Senior
+      a: |-
+        Name the part that went wrong, who noticed and how fast you said so in public. Then give the correction. The interviewer wants you to own the result without rewriting what you believed at the time.
 - id: company-microsoft-changed-approach-after-learning
   q: Tell me about a time you were wrong about a technical approach and changed course after learning from someone else.
   level: Senior
   category: company-values-and-ai-ethics
   subcategory: meta-google-apple-netflix
-  signals:
-    - growth
   companies:
     - Microsoft
+  signals:
+    - growth
   topics:
     - /behavioral/company-playbooks/microsoft-growth-mindset
   a: |-
-    **What interviewers are testing.** Microsoft describes its culture as a growth mindset: learning matters more than already knowing. Interviewers also look for work that builds on other teams and helps them in return. They want a real case where you held a view, met evidence against it and changed.
+    **What it tests.** Growth mindset, which Microsoft names as part of its culture. The interviewer wants a real case where you held a technical view, met evidence against it and changed. At senior level, also show credit given to the person who was right and a habit that changed.
 
-    **How to structure your answer (STAR+L):**
+    **How to shape the answer.**
 
-    - **Situation & Task:** State the approach you first believed in and why it seemed right.
-    - **Action:** Describe the evidence or the person that showed you were wrong. Explain how you tested it, what you changed, and how you gave credit. If you reused another team's platform instead of building your own, say so.
-    - **Result:** Give the outcome with a number, and name what the other team gained as well.
-    - **Learning:** Say which habit changed, for example testing your own assumption first or asking the owning team earlier.
+    - **Situation and task.** State the approach you first believed in and why it seemed right.
+    - **Action.** Describe the evidence or the person that showed you were wrong. Explain how you tested it, what you changed, and how you gave credit.
+    - **Result.** Give the outcome with a number, and say what the other team gained.
+    - **Learning.** Say which habit changed, for example asking the owning team before you design.
 
-    **Red flags to avoid.** A story where you were right all along, a vague "I learned to listen", or taking credit for work that another team did.
+    **A strong answer sounds like this.** "I designed a custom scheduler for our nightly data jobs, because I believed the shared platform could not handle our 300 dependent tasks. An engineer on the platform team read my design and said their newest release supported dependency groups. I doubted it, so we tested together for two days with our real job graph. It ran all 300 tasks, 12 minutes faster than my prototype. I dropped my design, moved us to their platform in three weeks and named her in the write-up. Her team got two bug reports and a new test case from our workload."
 
+    **Watch out for.** A story where you were right all along, a vague "I learned to listen", and taking credit for work that another team did.
+  followUps:
+    - q: What made you resist at first?
+      level: Senior
+      a: |-
+        Be honest about the cause: pride in your design, time already spent, or an old experience with the other team's tool. Then say what broke the resistance. Naming the bias plainly is the signal. A candidate who felt no resistance at all sounds rehearsed.
+    - q: What would you have done if the test had been unclear and the other person still preferred their approach?
+      level: Senior
+      a: |-
+        Say how you would settle it: agree the measure in advance, run a longer test, or ask a third engineer to review. If it stays even, pick the option that is cheaper to reverse and back it fully.
+    - q: What have you learned recently and applied since then?
+      level: Senior
+      a: |-
+        Give one specific thing from the last few months, how you learned it and where you used it, with a result. Keep it small and true. The interviewer checks that learning is a habit and not a single story.
 - id: company-meta-most-proud-of-building
   q: What are you most proud of building, and what was your part in it?
   level: Mid
@@ -321,49 +419,184 @@
         Give the limit you had in mind: a date, a cost, or a number of failed attempts, and what the other plan was. This shows that persistence was a choice and not a habit.
 - id: tell-me-about-a-time-your-offline-results-didn-t-match-onlin
   q: Tell me about a time your offline results didn't match online results.
-  a: |
-    Describe the gap, how you investigated it, for example metric misalignment, exposure bias, feature skew or novelty effects, what you changed in evaluation or the model, and how it improved later decisions. This shows mature understanding of experimentation.
   level: Senior
   category: company-values-and-ai-ethics
   subcategory: ai-ml-project-stories
   signals:
     - judgment
+  topics:
+    - /behavioral/leveling-and-tracks/ai-and-ml-engineer-behavioral
+    - /behavioral/foundations/quantifying-engineering-impact
+  a: |-
+    **What it tests.** Whether you understand experiments well enough to explain a gap between an offline score and a live test. The interviewer listens for an ordered investigation and honesty about the result. At senior level you should also change how the team evaluates the next model.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Give the model, the offline gain, the online result and the test length.
+    - **Action.** Say which causes you checked: a metric that does not match the business goal, bias in logs from the old model, feature differences between training and serving, or a novelty effect. Give the evidence for the one you found.
+    - **Result.** Say what you changed and give the next online reading.
+    - **Learning.** Say how later launch decisions changed.
+
+    **A strong answer sounds like this.** "I trained a new ranking model for our product feed. Offline, ranking quality rose 6 percent on logged clicks. In a two-week A/B test, orders were flat and click rate fell 1 percent. Our logs held only items the old model had shown, so the offline test rewarded copying it. I ran 2 percent of traffic with randomised positions for one week and rebuilt the test set from it. On that set the new model was only 0.8 percent better, so we did not launch. The next model, built against the new test set, lifted orders 1.2 percent online."
+
+    **Watch out for.** Calling the online test wrong because you liked the offline number, listing causes without proving one, and leaving the evaluation unchanged.
+  followUps:
+    - q: How did you convince the team to spend live traffic on randomised data?
+      level: Senior
+      a: |-
+        Give the cost in plain terms, for example 2 percent of traffic for one week and the orders at risk, against the cost of building models that do not help. Say who approved it. Asking with a number is the skill being tested.
+    - q: Could the online test itself have been wrong?
+      level: Senior
+      a: |-
+        Say what you checked: the split between groups, the sample size, the length of the test and whether other launches overlapped. Give the result of each check. Only after that do you treat the online number as the truth.
+    - q: What did you tell stakeholders who expected a launch?
+      level: Senior
+      a: |-
+        Say you reported the flat result first, then the cause, then the new date. Avoid defending the model. People trust the next offline number more when you were direct about this one.
 - id: describe-a-time-you-had-to-work-with-messy-or-incomplete-dat
   q: Describe a time you had to work with messy or incomplete data.
-  a: |
-    Explain how you assessed the data quality, what you fixed, what assumptions you documented, how you validated that conclusions were robust, and how you improved the data source for the future. Interviewers look for rigor and pragmatism.
   level: Junior
   category: company-values-and-ai-ethics
   subcategory: ai-ml-project-stories
   signals:
     - judgment
+  topics:
+    - /behavioral/leveling-and-tracks/ai-and-ml-engineer-behavioral
+    - /behavioral/leveling-and-tracks/new-grad-and-intern-interviews
+  a: |-
+    **What it tests.** Care and common sense with real data. The interviewer wants to see that you looked at the data before you trusted it, wrote down your assumptions and checked that your conclusion still held. For a junior candidate one dataset is enough. The hard part is being exact about what you found.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Say what the data was for, its size and what was wrong: missing values, duplicates or mixed units.
+    - **Action.** Say how you measured the problem, what you fixed, what you dropped and which assumptions you wrote down.
+    - **Result.** Give the outcome and one check that it did not depend on your cleaning choices.
+    - **Learning.** Say what you asked the data owner to fix, or what you check first now.
+
+    **A strong answer sounds like this.** "During my internship I had to predict late deliveries from 80,000 order records. I profiled the table first. 14 percent of rows had no delivery time, and one warehouse logged weights in pounds while the rest used kilograms. I converted the weights. I dropped the rows with no delivery time, since that was the value to predict, and noted it in the notebook. Then I checked whether the dropped rows looked like the rest. They did not: one region was twice as common. I told my mentor, and we reported that region separately."
+
+    **Watch out for.** Saying you cleaned the data with no detail, filling in missing values without saying how, and not reporting what you removed.
+  followUps:
+    - q: How did you know your cleaning did not change the answer?
+      level: Junior
+      a: |-
+        Describe one comparison: results with and without the dropped rows, or with two ways of filling gaps. Give both numbers. If you did not check at the time, say so and say what you would run now.
+    - q: What did you do about the source of the bad data?
+      level: Junior
+      a: |-
+        Say who owned the data and what you told them, for example a short note with row counts and examples. If nothing was fixed, say you added a validation step on your side. Even a junior candidate can report a problem upstream.
+    - q: Which assumption were you least sure about?
+      level: Junior
+      a: |-
+        Name one and explain why, then say how you flagged it to the person using your results. The interviewer is checking honesty. An analysis with stated doubts is more useful than one that hides them.
 - id: tell-me-about-a-time-you-chose-a-simpler-model-over-a-more-c
   q: Tell me about a time you chose a simpler model over a more complex one.
-  a: |
-    Describe the requirements, such as latency, interpretability or data size, how you compared options, why the simpler model won on overall value, and the outcome. This shows judgment over novelty.
   level: Mid
   category: company-values-and-ai-ethics
   subcategory: ai-ml-project-stories
   signals:
     - judgment
+  topics:
+    - /behavioral/leveling-and-tracks/ai-and-ml-engineer-behavioral
+    - /behavioral/competencies/project-deep-dive-walkthrough
+  a: |-
+    **What it tests.** Judgment over novelty. The interviewer wants the requirements first, then a fair comparison, then why the simpler model was the better choice overall. At mid level you should have measured both options yourself and be able to say what the simple model gave up.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Give the problem and the constraints that mattered: latency, explainability, data size, serving cost or the team's ability to maintain the model.
+    - **Action.** Say how you compared the options on the same data. Give both sets of numbers.
+    - **Result.** Say what shipped, its effect, and what the simple model does worse.
+    - **Learning.** Say when you would choose the complex one.
+
+    **A strong answer sounds like this.** "I built a fraud score for card payments with a 50 millisecond budget. I compared gradient-boosted trees with a sequence network over each customer's history. The network scored 0.93 AUC and the trees 0.91. But the network took 120 milliseconds per request and needed a feature store we did not have. Risk analysts also had to explain each blocked payment, and the trees gave clear reasons. I shipped the trees in four weeks. Fraud losses fell 9 percent in the first quarter. We did miss some slow account-takeover patterns, so I logged those cases to justify the network later."
+
+    **Watch out for.** A complex model you never tested, a comparison on accuracy alone, and a claim that the simple model lost nothing.
+  followUps:
+    - q: What would make you switch to the complex model?
+      level: Mid
+      a: |-
+        Give a concrete trigger: a measured gain above a threshold, a lower serving cost, or a new requirement the simple model cannot meet. Say how you would test it. This shows the choice was a decision for now, with a way back.
+    - q: How did you make the comparison fair?
+      level: Mid
+      a: |-
+        Say both models used the same split, the same features where possible and a similar tuning effort. Admit any gap, for example less tuning time for the network. The interviewer is checking that the result was not decided before the test.
+    - q: Did anyone push for the more complex option?
+      level: Mid
+      a: |-
+        Describe their reason fairly, often accuracy or interest in the method. Say what evidence you shared and how the decision was made. If they were partly right, say so and say what you did about it.
 - id: describe-a-time-you-raised-an-ethical-or-fairness-concern-ab
   q: Describe a time you raised an ethical or fairness concern about a model.
-  a: |
-    Explain the concern, how you measured it, for example performance gaps across groups, how you raised it constructively, the changes made, and the result. Show that you balance responsibility with business goals and bring evidence.
   level: Senior
   category: company-values-and-ai-ethics
   subcategory: ai-ml-project-stories
   signals:
     - judgment
+  topics:
+    - /behavioral/leveling-and-tracks/ai-and-ml-engineer-behavioral
+    - /behavioral/company-playbooks/frontier-ai-labs-values
+  a: |-
+    **What it tests.** Whether you raise a hard concern with evidence and still help the business reach its goal. The interviewer listens for how you measured the problem, who you told and what changed. At senior level the hard part is getting a decision from the people who own the launch, without blocking and without preaching.
+
+    **How to shape the answer.**
+
+    - **Situation and task.** Name the model, who it affects and what you noticed.
+    - **Action.** Say how you measured the concern, for example error rates by group. Say how you raised it, the options you gave and the cost of each.
+    - **Result.** Say what changed and give the numbers after.
+    - **Learning.** Name the check that is now part of your process.
+
+    **A strong answer sounds like this.** "I led modelling for a loan pre-screening model. In review I split results by age and found that applicants over 60 were wrongly rejected 11 percent of the time, against 5 percent for others. The cause was a feature built from app usage. I showed the product owner the two numbers and three options with costs. We removed the feature and reweighted the training data. Overall accuracy fell by 0.6 points, and the gap closed to 6 against 5 percent. Launch moved by two weeks. We now report error rates by group in every model review."
+
+    **Watch out for.** A concern with no measurement, a story where you are the lone hero against a careless company, and a fix with no mention of what it cost.
+  followUps:
+    - q: What did the fix cost, and who accepted that cost?
+      level: Senior
+      a: |-
+        Give the number: accuracy lost, delay or revenue. Name the role that approved it and how you presented the trade. The interviewer wants to see that you treated the business goal as real and still held your position.
+    - q: What would you have done if the decision had been to ship as it was?
+      level: Senior
+      a: |-
+        Say you would put the risk and your recommendation in writing, ask for a named owner of the risk, and propose monitoring. State the point where you would escalate further, such as a legal breach. Stay calm and specific.
+    - q: How did you choose which groups and which measure to check?
+      level: Senior
+      a: |-
+        Explain the choice: who the model could harm, what data you had, and why you used that error measure. Admit groups you could not measure. Fairness measures can conflict with each other, so say why yours fitted the use.
 - id: how-do-you-decide-when-a-model-is-good-enough-to-ship
   q: How do you decide when a model is good enough to ship?
-  a: |
-    Tie it to agreed success criteria: improvement over baseline on the right metrics and segments, acceptable latency and cost, safety and fairness checks, monitoring and rollback readiness, and a plan for online validation. Give an example of making this call.
   level: Mid
   category: company-values-and-ai-ethics
   subcategory: ai-ml-project-stories
   signals:
     - judgment
+  topics:
+    - /behavioral/leveling-and-tracks/ai-and-ml-engineer-behavioral
+    - /behavioral/foundations/quantifying-engineering-impact
+  a: |-
+    **What it tests.** Whether you have a clear rule for a launch decision, or ship when the model feels ready. The interviewer wants criteria agreed before training, and one real example. At mid level the hard part is naming what you would accept as imperfect and how you would catch a problem after launch.
+
+    **How to shape the answer.**
+
+    - **Your rule first.** Say the model ships when it meets criteria agreed in advance with the product owner.
+    - **The criteria.** A gain over the baseline on the right metric and on key segments, latency and cost inside budget, and safety or fairness checks passed.
+    - **The safety net.** Monitoring, a rollback plan and a staged online test.
+    - **One example.** Give a real decision with numbers.
+
+    **A strong answer sounds like this.** "I agree the bar before I train. For a search ranking model, the product owner and I wrote three conditions: at least 2 percent better than the live model offline, no segment more than 1 percent worse, and 95th percentile latency under 80 milliseconds. My model was 3.1 percent better, but new users were 1.5 percent worse, so I did not ship. I spent one more week on features for new users and got that segment level. Then I ran it on 10 percent of traffic with an alert on click rate, and it shipped with a 1.4 percent lift in clicks."
+
+    **Watch out for.** "When the accuracy is high enough" with no baseline, criteria invented after you saw the results, and no monitoring or rollback plan.
+  followUps:
+    - q: What if the model beats the baseline overall but is worse for one segment?
+      level: Mid
+      a: |-
+        Say it depends on who the segment is and how much worse. Give your rule, for example a limit agreed in advance, and the options: fix it, send that segment to the old model, or accept it with sign-off. Then give a case.
+    - q: Who makes the final call?
+      level: Mid
+      a: |-
+        Say that you bring the evidence and a recommendation, and the product or business owner accepts the risk. Explain how you handle disagreement. Avoid both extremes: deciding alone, or handing over numbers with no recommendation.
+    - q: How do you know after launch that it is still good enough?
+      level: Mid
+      a: |-
+        Name what you monitor: input drift, the live metric and a guardrail such as complaint rate. Give thresholds and who gets alerted. Mention a date for a planned review. Good enough is a state you keep checking.
 - id: company-meta-why-meta
   q: Why Meta?
   level: Mid
