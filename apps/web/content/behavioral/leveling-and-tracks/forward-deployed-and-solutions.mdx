@@ -8,134 +8,207 @@ order: 5
 ## In one sentence
 
 <KeyIdea>
-Forward-Deployed Software Engineers (FDSEs), Applied AI Engineers, and Solutions Architects at **Palantir, OpenAI, Anthropic, Stripe, Scale AI, Ramp, and Databricks** are evaluated on a unique dual bar: can you **parachute into a chaotic enterprise customer environment and ship working production software in days**, while **abstracting field patterns back into the core product** so you don't build N bespoke consulting forks?
+  A story from a customer-facing engineering role is scored twice: on **what the customer got and how fast**, and on
+  **what your own product kept afterwards**. The strongest stories show you watching the real work, shipping something
+  small on real data, and coming back with something reusable or a clear "no".
 </KeyIdea>
 
 ## The story
 
-The **Forward-Deployed Engineer (FDE / FDSE)** role (pioneered by Palantir and now one of the fastest-growing tracks at OpenAI, Anthropic, Scale AI, Stripe, and defense/fintech unicorns) sits at the high-pressure intersection of systems engineering and live customer missions.
+A solutions engineer is two weeks from a contract decision at an insurer. The pilot sorts incoming claim documents. The customer's vice president of claims has the dashboard open: 62 percent of claims are routed correctly. She says she will cancel on Friday.
 
-Candidates coming from pure internal backend roles often fail FDE behavioral loops in one of two ways:
-1. **They act like rigid internal platform engineers:** *"I told the customer their data schema didn't match our v2 API spec, so they needed to clean their ERP tables first."* (In the field, the customer's messy data *is* the reality you must solve.)
-2. **They act like pure agency consultants:** Saying yes to every custom customer whim and building 10 unmaintainable one-off forks that collapse six months later.
+On a video call, his team argues about the number. He does something else. He travels to the claims office and sits behind three adjusters for two hours.
 
-Winning FDE candidates show how they **sit beside the end operator to discover the real workflow bottleneck**, **ship a high-trust vertical wedge in 72 hours**, and **harvest reusable primitives back into the core platform**.
+He sees two things nobody on his side knew. About 40 percent of scans are faxes that bundle several patients into one file, so the system reads five claims as one. And the adjusters paste results into an old terminal that cuts text at 80 characters.
 
-## What interviewers are really testing
+That night he writes a splitter that cuts a bundle wherever the patient number changes. On Thursday he processes 150 live claims next to the adjusters, with the vice president watching. Routing is correct on 88 percent.
 
-<AnimatedDiagram spec="animated/behavioral/influence-coalition" stepper caption="How Forward-Deployed & Applied Engineers align external customer executives, field operators, and internal core product teams." />
+She signs for one region, not the three that were planned. He takes the splitter back to his product team, and it ships to every customer the next quarter.
 
-FDE and Applied Engineering behavioral loops test **four specialized pillars**:
+## What the interviewer scores
 
-| FDE Pillar | Strong Hire Signal | No-Hire Red Flag |
-| --- | --- | --- |
-| **1. Ground-Truth Discovery ("Decomp")** | Ignoring the customer executive's 50-page RFP wish list long enough to shadow the actual frontline operator/developer and find the 20% bottleneck causing 80% of the pain | Blindly building whatever feature list the customer's procurement slide deck asked for |
-| **2. Live Executive & Crisis Poise** | Staying calm when a live demo or enterprise integration breaks in front of a C-suite buyer; communicating blast radius transparently and recovering in hours | Blaming the customer's IT team or panicking/bluffing when an edge case hits live |
-| **3. The "80% Platform / 20% Last-Mile" Balance** | Solving the customer's urgent deadline today with a clean adapter, then upstreaming the generalized capability into Core Product in Sprint +1 | Forking the core codebase per customer ("consulting ware") with no path back to main |
-| **4. Commercial & Mission Outcome Focus** | Measuring success by customer activation, contract expansion, or mission latency, not by lines of code written | Building technically flashy demos that never survive Day-2 production operations |
+<AnimatedDiagram
+  spec="animated/behavioral/customer-pilot-arc"
+  stepper
+  minWidth={700}
+  caption="The arc of a customer story. The top row happens at the customer. The bottom row is what happened next, for them and for your product."
+/>
+
+Walk through the steps:
+
+1. **The ask.** What the customer said they wanted, in their words.
+2. **Watch the work.** What you saw when you sat with the people doing the job. This is usually where the story turns.
+3. **A small first version.** Something working in days, on their real data, with its limits stated.
+4. **Something breaks.** A demo fails or a number is bad. Say what you told the customer and how soon.
+5. **Result and product.** The customer's number, and what your own product kept: a feature, an adapter, or a request you declined.
+
+This is our own rubric for forward-deployed, solutions and applied engineering roles. It does not describe one company's process.
+
+| Signal                                     | A strong story shows                                                        | What weakens it                                          |
+| ------------------------------------------ | --------------------------------------------------------------------------- | -------------------------------------------------------- |
+| **You find the real problem**              | A gap between the request and what the users needed, found by watching them | Building the requirements document as written            |
+| **You stay calm when it breaks**           | What you said to the customer in the first hour, and the fix                | Blaming their IT team, their data or your own colleagues |
+| **You protect the product**                | A customer need met without a private copy of the code                      | One custom version per customer                          |
+| **You measure what the customer measures** | Their number: claims routed, hours saved, a contract signed or lost         | Lines of code, or a demo that never went live            |
 
 <PremiumBreak />
 
-## How the bar changes by level
+## A weak answer, then the fix
 
-<Compare
-  columns={["Dimension", "L4 (Forward-Deployed SWE)", "L5 (Senior FDSE / Deployment Lead)", "L6+ (Staff FDSE / Field Chief Architect)"]}
-  rows={[
-    ["Customer Scope", "Owns end-to-end technical integration and workflow delivery for 1–2 customer workstreams", "Acts as Technical Lead for flagship multi-million-dollar enterprise deployments; manages C-suite/VP technical stakeholders", "Shapes technical strategy across an entire industry vertical (Defense, Healthcare, Global Finance); closes 8-figure strategic partnerships"],
-    ["Product Feedback Loop", "Files crisp bug reports and contributes reusable connectors/scripts back to the shared library", "Co-designs quarterly roadmaps with Core Product PMs/TLs; turns 3 customer implementations into 1 general product feature", "Identifies the next multi-hundred-million-dollar product line from field signal and incubates the v0 platform in the field"],
-    ["Crisis Management", "Debugs dirty customer data feeds, auth/VPC peering issues, and latency spikes rapidly", "De-escalates threatened contract churns; leads joint customer-internal war rooms to resolution", "Establishes company-wide deployment playbooks, security enclave architectures, and FDE onboarding bar"],
-  ]}
-  caption="At Palantir, OpenAI, and Anthropic, many core product lines started as patterns built by Forward-Deployed Engineers inside 2–3 lighthouse customers."
-/>
+<Tabs title="A customer demands a custom feature">
+  <Tab label="Weak answer">
+    **Question:** *"Tell me about a time an important customer demanded something that would have created a lot of technical debt."*
 
-## Interactive diagnostic: test your FDE / Applied story
+    *"A big banking customer needed their own 14-step approval process built into our deployment pipeline before their go-live. It was a large deal, so we made it happen. I worked very hard for three weeks and we delivered on time. The customer was happy. Later two other banks wanted their own versions and it got a bit messy, but that is the nature of enterprise software."*
 
-<DecisionTree
-  title="Will your stories clear a Forward-Deployed / Applied Engineering loop?"
-  tree={{
-    q: "In your customer/stakeholder story, did you uncover a gap between what the stakeholder INITIALLY asked for and what their workflow ACTUALLY needed?",
-    yes: {
-      q: "Did you validate the solution with a rapid, high-signal prototype or live pilot against real (messy) data within days rather than months?",
-      yes: {
-        q: "Did you abstract what you built for that specific customer/team into a reusable primitive, SDK, or product feature that accelerated future deployments?",
-        yes: {
-          answer: "Gold-standard FDE story! Next: master Behavioral Red Flags & How to Recover Mid-Interview.",
-          href: "/behavioral/leveling-and-tracks/red-flags-and-recovery",
-        },
-        no: "Always close an FDE story with the 'Field-to-Product Flywheel': how your solution reduced onboarding time for the next 10 customers.",
-      },
-      no: "FDE loops prize speed-to-value. Highlight how you shipped a working vertical slice in Week 1 to build customer trust.",
-    },
-    no: "Show diagnostic backbone: explain how you listened to the customer's symptom, inspected their real data/workflow, and guided them to a better technical solution.",
-  }}
-/>
+    **How it is heard:** the candidate said yes without asking why. There is no sign they understood the need. The cost is waved away, and there are now three versions of the product.
 
-## Worked engineering example (STAR+L)
-
-<Tabs title="FDE Signature Stories: Saving an At-Risk Pilot & Field-to-Product Generalization">
-  <Tab label="Turning Around a Failing Enterprise Pilot Under Executive Pressure">
-    **Prompt:** *"Tell me about a time a customer integration or high-visibility pilot was failing, and you had to step in to save the outcome."*
-
-    - **Situation & Task:** *"Two weeks before a \$2.5M annual contract decision with a Fortune 100 insurer, their VP of Claims threatened to cancel our AI document-triage pilot because end-to-end claim processing accuracy in their UAT environment was stuck at 62% (vs. our 90% SLA target) and latency was timing out over their on-prem VPN."*
-    - **Action:** *"I flew onsite for 72 hours to run a **ground-truth decomposition**:
-      1. **Shadowing the Adjusters:** Instead of arguing over the 62% aggregate metric on a Zoom call, I sat behind three claims adjusters for two hours. I discovered two things nobody in engineering knew: first, 40% of their scanned PDFs were multi-claim fax bundles where pages from 3 different patients were concatenated without separators; second, their VPN proxy was stripping HTTP chunked-transfer headers, causing silent 30-second client retries.
-      2. **48-Hour Wedge Fix:** That night, I built a lightweight page-boundary classifier using header patient-ID transitions to split fax bundles before ingestion, and switched our client transport to standard buffered JSON payloads with idempotent job polling to bypass the VPN proxy bug.
-      3. **Live Side-by-Side Verification:** On Thursday morning, I sat with the adjusters and the VP to process 150 live claims side-by-side."*
-    - **Result:** *"End-to-end claim accuracy jumped from 62% to **94.2%**, p95 processing time fell from 34s to **3.8s**, the VP signed the \$2.5M production contract the following week, and I upstreamed the multi-document bundle splitter into our core ingestion SDK, where it became a default toggle used by 18 other healthcare customers."*
-    - **Learning:** *"Enterprise pilots rarely fail in the core model: they fail in the unglamorous last mile of document topology, network proxies, and operator ergonomics that you can only see by sitting next to the user."*
   </Tab>
-  <Tab label="Saying 'No' to a Custom Fork & Generalizing the Platform">
-    **Prompt:** *"Tell me about a time an important customer or stakeholder demanded a custom feature that would have created massive technical debt."*
+  <Tab label="Fixed">
+    **Question:** *"Tell me about a time an important customer demanded something that would have created a lot of technical debt."*
 
-    - **Situation & Task:** *"A strategic banking customer demanded that we hardcode their bespoke 14-step compliance approval state machine directly into our core deployment pipeline before their Q3 go-live. Two other banks were asking for slightly different 8-step and 11-step approval flows. Building three custom forks would have fractured our release train."*
-    - **Action:** *"Instead of saying a flat 'no' (which would stall a \$1.2M deal) or hardcoding their 14 steps into core, I met with the bank's Chief Information Security Officer (CISO) to understand the underlying invariant. They didn't actually care whether our UI rendered 14 screens: they needed **cryptographically signed webhook attestations** from their internal ServiceNow and Veracode gates before a production release token could be minted. In 6 days, I designed a generic **External Attestation Gate Webhook Contract** in our core platform: any enterprise customer could register N required signing keys and webhook policies, and our pipeline simply verified the Ed25519 signatures before promotion. I wrote a 200-line serverless bridge connecting their ServiceNow instance to our new webhook contract."*
-    - **Result:** *"The bank passed their CISO audit on schedule with zero custom forks in our core codebase, and the other two banks onboarded onto the exact same Attestation Webhook primitive in under 3 days each."*
-    - **Learning:** *"When three enterprise customers ask for three incompatible custom workflows, extract the policy execution into an external webhook contract and keep the core state machine pure."*
+    - **Situation and task.** *"A bank asked us to build their 14-step compliance approval into our core deployment pipeline before their go-live in the third quarter. Two other banks were asking for different flows of their own."*
+    - **Action.** *"I did not say yes or no on the call. I asked to meet their head of security to understand what the 14 steps protected. Her real requirement was narrower: every deployment needed a signed record that her own system had approved it. So I proposed one hook in our pipeline that calls the customer's approval service and waits for a signed answer. Their 14 steps stayed in their system. I wrote a one-page design, got our product lead to agree it was general, and built it with one engineer from the core team."*
+    - **Result.** *"The bank passed its audit with no private version of our code. Their go-live slipped two weeks because their approval service was not ready, and their project manager was not pleased with me. One of the other two banks adopted the same hook in three days. The third still wants its flow built in, and we have said no."*
+    - **Learning.** *"A customer's request is a solution they have already designed. I now ask what it protects before I discuss how to build it."*
+
+    **What changed:** a question before an answer, the real need found, a general design, and an honest account of who was unhappy.
+
   </Tab>
 </Tabs>
 
-## Introspect your own work
+## The same answer at three levels
 
-<Quiz title="Audit your readiness for Forward-Deployed & Applied roles">
-  <QuizItem
-    question="1. If you have only worked on internal engineering teams (no external customers), how can you answer FDE customer questions?"
-    hint="Internal platform, infrastructure, and data teams have 'customers' too!"
-  >
-    Treat **internal product squads, data scientists, ops analysts, or partner orgs** as your customers: show how you embedded in their workflow, diagnosed their real pain point beyond their initial feature ticket, shipped a fast wedge, and generalized the platform.
+One question, "Tell me about a pilot or integration that was failing", at three levels.
+
+<Compare
+  columns={["", "Mid level", "Senior", "Staff"]}
+  rows={[
+    [
+      "What you owned",
+      "One integration for one customer team",
+      "The whole pilot, including the customer's sponsor",
+      "A set of customers with the same problem, and the product gap behind it",
+    ],
+    [
+      "What you did",
+      "Found the bad data feed, fixed the mapping, and told your lead the same day",
+      "Sat with the users, reset the success measure with the sponsor, and shipped a narrower first version",
+      "Showed product leaders that four pilots failed the same way, and got the fix onto the roadmap",
+    ],
+    [
+      "What the product kept",
+      "A bug report with a reproduction",
+      "An adapter that the next two customers reused",
+      "A feature that cut setup time for every new customer",
+    ],
+  ]}
+  caption="Our own examples of how scope grows in customer-facing engineering roles."
+/>
+
+## Try it: sort the customer request
+
+<WhichPrinciple
+  title="What do you do with this request?"
+  instruction="Read each customer request. Which response fits best?"
+  principles={["Build it for this customer now", "Solve the need a different way", "Take it to the product team"]}
+  prompts={[
+    {
+      text: "Their dates arrive as day/month/year and your importer expects month/day. Go-live is on Friday.",
+      principle: "Build it for this customer now",
+      why: "A small, contained adapter with a deadline. It needs no product decision.",
+    },
+    {
+      text: "They ask you to hardcode their 14-step approval flow into your core pipeline.",
+      principle: "Solve the need a different way",
+      why: "The request is a solution. Find what it protects, such as an audit record, and meet that need without a private version.",
+    },
+    {
+      text: "Sign-in fails because your connector does not read group membership from their identity provider. Three other prospects use the same provider.",
+      principle: "Take it to the product team",
+      why: "A general gap that several customers will hit. It belongs in the product, with your evidence.",
+    },
+    {
+      text: "The sponsor wants a dashboard with 40 metrics. The operators you watched look at two numbers all day.",
+      principle: "Solve the need a different way",
+      why: "What was asked for and what is used differ. Show the two numbers first and ask what decision the rest would support.",
+    },
+    {
+      text: "They need three years of history loaded once before launch, from a format nobody else uses.",
+      principle: "Build it for this customer now",
+      why: "A one-off script. It will never be reused, and that is fine if you say so.",
+    },
+    {
+      text: "For the fifth time this year, a customer needs their data stored in their own region.",
+      principle: "Take it to the product team",
+      why: "Five requests is a pattern. Bring the list of customers and the deals affected.",
+    },
+  ]}
+/>
+
+## Check your stories
+
+<DecisionTree
+  title="Is your customer story complete?"
+  tree={{
+    q: "Does your story include a gap between what the customer first asked for and what their work needed?",
+    yes: {
+      q: "Did you get something working on their real data within days or a couple of weeks?",
+      yes: {
+        q: "Does the story end with what your own product kept: something reusable, or a request you declined?",
+        yes: {
+          answer: "The story is complete. Next, practise recovering when an answer goes wrong.",
+          href: "/behavioral/leveling-and-tracks/red-flags-and-recovery",
+        },
+        no: "Add it. Say what the next customer got for free because of this one, or what you refused to build and why.",
+      },
+      no: "Say what slowed it down. If the first version took months, explain the constraint, such as security review or data access.",
+    },
+    no: "Go back to how you learned what they needed. If you never watched the users work, say what you relied on, and what you would do now.",
+  }}
+/>
+
+## Build your own
+
+1. **What did the customer ask for, and what did they need?** Write both, in one sentence each.
+2. **Who did you watch or talk to below the sponsor?** Name the role and what you saw.
+3. **What broke in front of them?** Write the first thing you said.
+4. **What did your product keep?** A feature, an adapter, a document, or a "no".
+
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=customer-focus)
+
+## Red flags
+
+- **"Their data was a mess."** Messy data is the job. Recover by saying what the mess was and how you handled it.
+- **Yes to everything.** A story where every request was built suggests a product with a version per customer. Say what you declined or redirected.
+- **No to everything.** "It did not match our API, so they had to fix their side" shows no effort to meet them. Say what you adapted.
+- **The sponsor only.** If the only customer in your story is an executive, add the person who used the thing every day.
+
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="I have only worked on internal systems. What can I use?">
+    Internal users are customers for this purpose. Use a time another team asked for one thing and needed another, or
+    when you sat with support or operations staff to see how your tool was used. Say plainly that the customer was
+    internal.
   </QuizItem>
-  <QuizItem
-    question="2. In a live FDE role-play or case interview, the interviewer says: 'I'm the VP of Operations at an airline; our baggage recovery costs \$50M/yr. Build us an AI dashboard.' What is your very first move?"
-    hint="Jumping straight to drawing an LLM/React architecture is the #1 trap."
-  >
-    Spend the first 3 minutes **decomposing the physical and operational reality**: ask who the human operator is at the airport carousel, what data feeds exist today and how lagged/dirty they are, what decision the operator can actually take in 5 minutes when a bag misses a connection, and what single metric defines a successful 2-week pilot in one terminal.
+  <QuizItem question="Can I name the customer?">
+    Not unless the work is public. Describe them by industry and size: "a regional insurer with about 2,000 staff".
+    Leave out contract values if they are confidential, and use proportions.
+  </QuizItem>
+  <QuizItem question="What if the pilot failed and the customer left?">
+    It can still be a strong story. Say what you would do differently in the first two weeks, and what your product team
+    learned. A lost deal with a clear lesson is better than a vague win.
   </QuizItem>
 </Quiz>
 
-## Common red flags & how to recover
-
-- **Arrogance toward non-technical operators or legacy enterprise IT:** FDEs succeed through humility and empathy for the customer's constraints. Never mock a customer's legacy stack in an interview.
-- **"Hero syndrome" that leaves the customer helpless:** Building a fragile script that only you know how to run at 2 AM violates operational handoff standards.
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="How does an OpenAI or Anthropic 'Applied AI / Forward-Deployed Engineer' loop differ from a standard SWE loop?"
-    level="Senior"
-    companies={["OpenAI", "Anthropic", "Palantir", "Scale AI", "Stripe"]}
-  >
-    In addition to coding and system design, Applied/FDE loops test **live problem decomposition with an ambiguous enterprise partner**, **eval-driven iteration** (turning a vague customer prompt workflow into a deterministic 95%+ reliability system with latency/cost bounds), and **executive communication under pressure**.
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="How do I balance fast field delivery against clean code in an FDE behavioral answer?"
-    level="Senior"
-    companies={["Palantir", "Stripe", "Databricks"]}
-  >
-    Use the **"Isolate the Adapter, Protect the Core"** rule: explain how you kept 100% strict invariants on security, data integrity, and core platform APIs, while writing fast, disposable last-mile ingestion adapters during the 2-week pilot, followed by a scheduled refactor pass once the workflow proved business value.
-  </InterviewQuestion>
-</InterviewQuestions>
-
 ## Related
 
-- [Uber, DoorDash & Palantir: Ownership, Grit & Decomposition](/behavioral/company-playbooks/uber-doordash-and-palantir)
 - [Working with PMs, Designers, Legal, Security & Customers](/behavioral/competencies/cross-functional-collaboration)
+- [Navigating Ambiguity & Shifting Requirements](/behavioral/competencies/ambiguity-and-shifting-priorities)
+- [Customer Obsession & Ownership](/behavioral/amazon-leadership-principles/customer-obsession-and-ownership)
 - [Behavioral Red Flags & How to Recover Mid-Interview](/behavioral/leveling-and-tracks/red-flags-and-recovery)
+
+## Sources
+
+The rubric, the examples and the exercises on this page are our own. They do not describe any one company's interview process, and we make no claim here about how a particular company runs interviews for these roles.

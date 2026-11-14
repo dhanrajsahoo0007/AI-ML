@@ -8,136 +8,207 @@ order: 4
 ## In one sentence
 
 <KeyIdea>
-AI, ML, and Data Engineer behavioral interviews test whether you treat machine learning as an **empirical engineering discipline** rather than a Kaggle leaderboard game: interviewers probe how you debugged **offline-to-online metric divergence**, caught **silent data leakage or distribution shift**, chose a **simple baseline over a flashy neural architecture**, and built **trustworthy LLM/agent evaluation loops**.
+  A strong machine learning story has four parts: **the offline result, the online result, the gap between them, and
+  what you changed**. Interviewers for ML, AI and data roles listen for how you handled the gap, because a model that
+  only ever worked in a notebook tells them little.
 </KeyIdea>
 
 ## The story
 
-In behavioral and past-project rounds for Applied AI Engineers, ML Systems Engineers, and Research Engineers at Meta, Google, OpenAI, Anthropic, Stripe, and DoorDash, generic software stories aren't enough. The interviewer will ask:
-- *"Tell me about a time your offline model metrics improved significantly, but the online A/B test was flat or negative."*
-- *"Tell me about a time you discovered data leakage, label noise, or train-serve skew."*
-- *"Tell me about a time you advocated for a simpler heuristic, linear baseline, or prompt pipeline over a complex model."*
+An ML engineer on a search team trains a new ranking model. Offline, the ranking score rises 4.8 percent, the team's biggest gain that year. She presents it on a Friday and everyone is pleased.
 
-Candidates who only talk about model architecture tweaks (swapping LoRA ranks or attention heads) fail this round. The strongest AI/ML candidates talk about **looking directly at raw failure examples**, **data pipelines**, **latency/FinOps envelopes**, and **aligning offline proxy metrics with real user utility**.
+The A/B test runs for two weeks on 5 percent of traffic. Purchases per search do not move. On mobile they fall slightly.
 
-## What interviewers are really testing
+There are two ways to tell this in an interview. In the first, she says the test was noisy, the team retrained with more data, and a later version did well. In the second, she says what she checked and in what order. The live features matched the training features, so that was not it. The model added 185 ms at p95, and on phones, slower results meant more abandoned searches. The offline labels came from clicks on the old top results, so they favoured the old model's taste.
 
-<AnimatedDiagram spec="animated/behavioral/faang-loop-comparison" stepper caption="How ML & GenAI loops evaluate empirical rigor, data hygiene, offline-online parity, and safety/cost trade-offs." />
+The second telling is the same project. It is the one that shows how she works when the number she wanted turns out to be wrong.
 
-AI/ML behavioral scorecards focus on **four signature competencies**:
+## What the interviewer scores
 
-| AI/ML Competency | Strong Hire Signal (Senior / Staff MLE & AI Eng) | Weak / Reject Signal |
-| --- | --- | --- |
-| **1. Offline ↔ Online Divergence Forensics** | Systematically checking train-serve feature skew, latency-induced abandonment, selection bias, and Goodharted proxy metrics when A/B tests fail | Blaming "noisy traffic" or blindly training a larger model when an online A/B test loses |
-| **2. Data-Centric Hygiene & Leakage Detection** | Inspecting 100 raw samples by hand; catching temporal data leakage, duplicate contamination, or broken tokenizer/chunking boundaries | Treating the training dataset or RAG corpus as a black box someone else cleaned |
-| **3. Simplicity & FinOps Pragmatism** | Shipping a logistic regression, GBDT, BM25 lexical filter, or cached small model when it hits 97% of the quality at 1/10th the GPU cost and latency | Insisting on a 70B LLM or heavy deep-learning ensemble on a 50 ms hot path with no baseline comparison |
-| **4. LLM Evals & Guardrail Engineering** | Building stratified golden eval sets, pairwise human/judge calibration, and deterministic PII/hallucination circuit breakers | "Vibe-checking" 5 prompts in a notebook and deploying straight to production |
+<AnimatedDiagram
+  spec="animated/behavioral/ml-story-arc"
+  stepper
+  minWidth={700}
+  caption="The four parts of a machine learning story, using the search ranking example. The gap is where most of the scoring happens."
+/>
+
+Walk through the steps:
+
+1. **Offline result.** One number, the metric and the baseline it beat.
+2. **Online result.** What happened with real users, including when it was nothing.
+3. **The gap.** The causes you checked, in order, and which one the evidence pointed to.
+4. **What you changed.** A fix that follows from the cause, not a second guess.
+5. **What stayed.** The second result, stated honestly, and the rule or check you added.
+
+Four things are listened for across ML, AI and data roles. This is our own rubric, not a company's.
+
+| Signal                            | A strong story shows                                                    | What weakens it                                           |
+| --------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------- |
+| **You investigate the gap**       | A list of causes checked, with what ruled each one in or out            | "The test was noisy" or "we retrained"                    |
+| **You look at the data**          | You read 50 or 100 raw examples yourself and found something            | The dataset treated as a box you never opened             |
+| **You try the simple thing**      | The baseline you measured first, and the cost of the complex option     | A large model chosen because it was interesting           |
+| **You can defend the evaluation** | How the test set was built, what it cannot tell you, and who checked it | Five examples in a notebook, or a score nobody questioned |
 
 <PremiumBreak />
 
-## How the bar changes by level
+## A weak answer, then the fix
 
-<Compare
-  columns={["Dimension", "L4 (Mid-Level MLE / AI Eng)", "L5 (Senior MLE / Applied AI Eng)", "L6+ (Staff MLE / Principal AI Architect)"]}
-  rows={[
-    ["Problem Formulation", "Translates a defined ML task into clean features, training loops, and offline evals", "Translates an ambiguous product goal into the right ML objective function, online guardrail metrics, and latency budget", "Reframes multi-team business problems across the model/system boundary (e.g., unifying ranking stages, post-training recipes, and inference economics)"],
-    ["Failure Recovery", "Debugs model convergence, NaN losses, and pipeline failures", "Diagnoses subtle train-serve skew, temporal leakage, reward hacking, and offline-online metric inversions", "Designs org-wide feature-store parity invariants, automated shadow-eval gates, and continuous drift recovery systems"],
-    ["Cost & Latency", "Optimizes batch sizes, quantization, and prompt token counts", "Balances accuracy vs. p99 latency and GPU $/1M requests via distillation, cascades, and caching", "Sets company-wide GPU FinOps strategy, model routing architectures, and build-vs-fine-tune-vs-API standards"],
-  ]}
-  caption="In modern AI loops, saying 'I reduced GPU inference cost by 65% while holding eval win-rate neutral' is just as impressive as an accuracy lift."
-/>
+<Tabs title="The same project, told twice">
+  <Tab label="Weak answer">
+    **Question:** *"Tell me about a time a model looked good offline and did not deliver online."*
 
-## Interactive diagnostic: test your AI/ML stories
+    *"I trained a transformer reranker for our search team that improved our offline ranking metric by nearly 5 percent. When we tested it online the results were flat, which was disappointing, but A/B tests can be noisy. We iterated on the architecture, tried a few different configurations and distilled it, and the next version performed really well. It taught me that offline metrics are not everything."*
 
-<DecisionTree
-  title="Are your project stories ready for an AI / ML behavioral loop?"
-  tree={{
-    q: "Do you have a story where an offline metric (AUC, NDCG, perplexity, or LLM-judge score) improved, but the online production metric regressed or stayed flat, and you diagnosed the exact root cause?",
-    yes: {
-      q: "Do you have a story where you personally inspected raw data/traces and caught a subtle data leakage, label corruption, or train-serve skew bug?",
-      yes: {
-        q: "Can you share a time you pushed back against unnecessary model complexity in favor of a simpler, cheaper, or lower-latency baseline/cascade?",
-        yes: {
-          answer: "Complete AI/ML behavioral portfolio! Next: explore Forward-Deployed & Applied Engineering loops.",
-          href: "/behavioral/leveling-and-tracks/forward-deployed-and-solutions",
-        },
-        no: "Prepare a 'Simplicity First' story: show where a heuristic, lexical BM25 stage, or distilled 8B model beat a heavy architecture on latency/ROI.",
-      },
-      no: "Every ML interviewer asks about dirty data or leakage. Recall a time you looked at 50–100 raw rows/traces yourself and found a pipeline bug.",
-    },
-    no: "Offline-vs-online divergence is the #1 ML behavioral question. Prepare a story covering latency drag, train-serve skew, or proxy-metric misalignment.",
-  }}
-/>
+    **How it is heard:** no cause was found. "We iterated" hides what was done and by whom. The second result has no number. The learning is a slogan.
 
-## Worked engineering example (STAR+L)
-
-<Tabs title="AI/ML Signature Stories: Offline-Online Gap vs. LLM Eval Rigor">
-  <Tab label="Debugging an Offline-vs-Online A/B Test Inversion">
-    **Prompt:** *"Tell me about a time a model or ranking improvement looked great offline, but failed in an online A/B test."*
-
-    - **Situation & Task:** *"On our e-commerce search ranking squad, I trained a cross-encoder transformer reranker that improved offline NDCG@10 by **+4.8%**: our largest offline gain all year. However, when we ran a 5% online A/B test, gross merchandise value (GMV) per session dropped by **-1.9%**."*
-    - **Action:** *"Instead of discarding the model or blaming test noise, I ran a **3-hypothesis forensic decomposition**:
-      1. **Train-Serve Skew Check:** I logged live feature tensors on 10,000 shadow queries and compared them against our offline replay join. Parity was 99.9%.
-      2. **Latency Elasticity Slicing:** I bucketed the A/B test results by device network speed and p95 latency. I found our cross-encoder added **185 ms at p95**; on mobile cellular connections, every 100 ms of search latency increased query abandonment by 1.4%, completely wiping out our relevance gain!
-      3. **Exposure Bias in Offline Labels:** Furthermore, our offline golden set was sampled from historical clicks on top-3 results, penalizing novel long-tail items.
-      To fix both bottlenecks, I distilled the cross-encoder into a 2-layer INT8 quantized dual-encoder with dynamic token pruning for queries over 6 words, and gated reranking to the top 25 candidates instead of top 100."*
-    - **Result:** *"Reranker p95 latency dropped from 210 ms to **18 ms**, and our follow-up A/B test delivered a statistically significant **+2.3% GMV lift (+$14M annualized)** while preserving +4.1% NDCG@10."*
-    - **Learning:** *"Offline ranking metrics assume zero latency cost. In production, latency IS a quality feature: always evaluate offline accuracy gains inside a hard latency-elasticity budget."*
   </Tab>
-  <Tab label="Catching Silent Data Leakage & Building an LLM Cascade">
-    **Prompt:** *"Tell me about a time you discovered a major flaw in an evaluation benchmark or training pipeline."*
+  <Tab label="Fixed">
+    **Question:** *"Tell me about a time a model looked good offline and did not deliver online."*
 
-    - **Situation & Task:** *"Our applied AI team was fine-tuning an open-weights 13B LLM for automated clinical insurance prior-authorization extraction. A teammate reported 96% F1 on our held-out validation split, but early hospital pilot users complained the model hallucinated policy codes on new patient forms."*
-    - **Action:** *"I pulled 100 validation examples and their nearest neighbors in the training split using MinHash LSH and discovered **patient-level temporal leakage**: the dataset had been split randomly by document ID rather than by `(patient_id, clinic_template_id)`. Because patients submitted 4–5 follow-up forms using the exact same clinic header template, the model was memorizing clinic boilerplate shortcuts rather than reading the clinical notes!
-      1. **Rebuilt the Eval Harness:** I re-partitioned the benchmark strictly by **out-of-distribution clinic + temporal cutoff**, which revealed our true generalization F1 was only **71%**.
-      2. **Simpler Hybrid Architecture:** Rather than scaling up to a 70B fine-tune, I designed a deterministic 2-stage pipeline: an OCR layout-aware regex/rules extractor for structured ICD-10 header tables, paired with a schema-constrained LLM call strictly for unstructured physician narrative sections, backed by a citation-span verifier that highlighted the exact source sentence for every extracted field."*
-    - **Result:** *"True out-of-clinic generalization F1 jumped from 71% to **93.8%**, human nurse review time dropped by **64%**, and our citation-span verifier eliminated ungrounded policy code hallucinations."*
-    - **Learning:** *"Random row splits are the #1 source of illusory ML progress. Always split evaluation data along the exact generalization boundary your production system will face on Day 1."*
+    - **Offline.** *"I trained a reranker for product search. Our offline ranking score rose 4.8 percent against the production model."*
+    - **Online.** *"A two-week A/B test on 5 percent of traffic showed no change in purchases per search, and a small drop on mobile."*
+    - **The gap.** *"I checked three causes. First, feature mismatch: I logged live features for 10,000 queries and compared them with training. They matched. Second, latency: my model added 185 ms at p95, and when I split the test by connection speed, the loss was all on slow connections. Third, labels: our test set was built from clicks on the old top three results, so it rewarded agreeing with the old model."*
+    - **What I changed.** *"I distilled the model into a smaller one and reranked 25 candidates in place of 100. That brought the added latency to 18 ms. I also asked our analyst to build a second test set from randomised results."*
+    - **Result.** *"The second A/B test showed purchases per search up 1.1 percent. That is real, and it is much less than the 4.8 percent I had presented."*
+    - **Learning.** *"Every offline evaluation on our team now reports latency next to quality, and fails if p95 goes over budget."*
+
+    **What changed:** three named causes with evidence, a fix tied to the cause, a modest honest number, and a check that stays.
+
   </Tab>
 </Tabs>
 
-## Introspect your own work
+## The same answer at three levels
 
-<Quiz title="Audit your AI/ML stories for senior engineering depth">
-  <QuizItem
-    question="1. In your ML/LLM project stories, can you state the exact baseline you compared against before introducing a complex model?"
-    hint="Interviewers immediately ask: 'What did a simple heuristic, regex, BM25, or zero-shot prompt score on that same eval set?'"
-  >
-    Always open your **Action** section with the **Baseline Ladder**: *"First, I stood up a deterministic BM25 / logistic regression baseline in 1 day, which achieved X%. That gave us the exact error budget to justify Y."*
+One question, "Tell me about a result you were excited about that did not hold up", at three levels.
+
+<Compare
+  columns={["", "Mid level", "Senior", "Staff"]}
+  rows={[
+    [
+      "The result",
+      "My classifier scored 96 percent on the validation set and 71 percent on new clinics",
+      "My team's churn model passed review and then missed its first live month by a wide margin",
+      "Three teams reported gains on a shared benchmark that did not show up in the product",
+    ],
+    [
+      "What you found",
+      "The split was random by document, so the same patients were in training and validation",
+      "The training data ended before a pricing change, and nobody owned checking for that",
+      "The benchmark had been tuned against for a year and no longer matched real usage",
+    ],
+    [
+      "What you changed",
+      "Re-split by clinic and date, reported the lower number, and retrained",
+      "Added a data freshness check to the team's launch review, and withdrew the forecast",
+      "Replaced the benchmark with a quarterly refreshed sample, and got the three teams to report on it",
+    ],
+  ]}
+  caption="Our own examples. At each level the candidate reports the lower number. What grows is who else had to change."
+/>
+
+## Try it: find the cause of the gap
+
+<WhichPrinciple
+  title="Find the cause of the gap"
+  instruction="Each case is a model that did better offline than online. Which cause does the evidence point to?"
+  principles={[
+    "Training and serving data differ",
+    "Added latency",
+    "Leakage into the test set",
+    "The metric measures the wrong thing",
+  ]}
+  prompts={[
+    {
+      text: "A fraud model scores well offline. Live, it misses new fraud. The 'account age' feature is computed nightly in training but is up to three days stale when served.",
+      principle: "Training and serving data differ",
+      why: "The same feature has different values in training and in production.",
+    },
+    {
+      text: "A recommendation model wins offline. Online, engagement drops only for users on slow networks, and page load is 200 ms longer.",
+      principle: "Added latency",
+      why: "The loss follows connection speed, and the model made the page slower.",
+    },
+    {
+      text: "A document classifier scores 96 percent on validation and 71 percent at a new customer. Validation was a random sample of all documents, and customers send many near-identical forms.",
+      principle: "Leakage into the test set",
+      why: "Near-copies of the training documents were in the validation set, so the score measured memory.",
+    },
+    {
+      text: "A support assistant's answers score higher with an automated grader. Customers reopen more tickets. The grader rewards longer answers.",
+      principle: "The metric measures the wrong thing",
+      why: "The score rose because answers got longer, and length is not what customers needed.",
+    },
+    {
+      text: "A demand forecast beats the old one on last year's data. In the first live month it is far off. A price change happened after the training data ended.",
+      principle: "Training and serving data differ",
+      why: "The live data comes from a world the training data never saw.",
+    },
+  ]}
+/>
+
+## Check your stories
+
+<DecisionTree
+  title="Are your ML stories ready?"
+  tree={{
+    q: "Do you have a story where an offline number improved and the live result did not, and you found the cause?",
+    yes: {
+      q: "Do you have a story where you read raw examples yourself and found a data problem?",
+      yes: {
+        q: "Can you name the simple baseline you measured before building something complex?",
+        yes: {
+          answer: "Your stories cover the main themes. If you are interviewing at an AI lab, read that page next.",
+          href: "/behavioral/company-playbooks/frontier-ai-labs-values",
+        },
+        no: "Add it to each project story: what the simple version scored, and why that was or was not enough.",
+      },
+      no: "Recall one. A leak between training and test data, wrong labels, or broken text splitting all count. Say how many examples you read.",
+    },
+    no: "If you have never run an online test, use the nearest thing: a model that did well in evaluation and badly with the first real users or the first new dataset.",
+  }}
+/>
+
+## Build your own
+
+1. **Which of your results did not hold up?** Write the offline number and the real one next to each other.
+2. **What did you check, in order?** List the causes, and what ruled each one in or out.
+3. **What did the fix cost?** Time, accuracy, compute, or a launch date.
+4. **What check exists now because of it?** If none does, say what you would add.
+
+[Write it in the Story Builder](/behavioral/practice-lab/story-builder?for=failure)
+
+## Red flags
+
+- **"The test was noisy."** It may have been, but say how you know: the sample size, the interval, a rerun. Without that it sounds like an excuse.
+- **Only architecture.** A story made of layer counts and hyperparameters has no decision an interviewer can score. Add what the data looked like and what users did.
+- **A number you cannot explain.** If you quote 93 percent, expect "on what test set, built how?" Prepare that answer, or quote a number you can defend.
+- **Complexity for its own sake.** If asked why you did not use a simpler model, "we wanted to try the new one" is weak. Say what the baseline scored.
+
+## Common questions
+
+<Quiz title="Common questions">
+  <QuizItem question="I have never run an A/B test. Can I still tell this kind of story?">
+    Yes. The pattern is any result that looked good in evaluation and worse in the real world: a model that failed on a
+    new customer's data, a pipeline that passed tests and broke on production volumes, a demo that worked and a pilot
+    that did not. Keep the four parts.
   </QuizItem>
-  <QuizItem
-    question="2. When you talk about an LLM or GenAI application you built, how do you prove you didn't rely on 'LLM-as-a-Judge' blindly?"
-    hint="Frontier and applied AI interviewers know LLM judges suffer from length bias, self-preference bias, and position bias."
-  >
-    Explain how you calibrated your automated judge against a **human-labeled golden set of 200–500 stratified examples** (measuring Cohen's kappa / Spearman correlation) and swapped answer positions to eliminate position bias.
+  <QuizItem question="My LLM project has no clean metric. What do I say for the result?">
+    Say how you measured at all: the set of real questions you built, how many there were, who graded them and how often
+    two graders agreed. A small evaluation you can describe exactly is stronger than a large score you cannot.
+  </QuizItem>
+  <QuizItem question="I am a data engineer and I do not train models. Does this page apply?">
+    The same four parts fit a pipeline: the check that passed, what broke downstream, the gap, and what you changed. For
+    example, a row count that matched while a join silently dropped one region's records.
   </QuizItem>
 </Quiz>
 
-## Common red flags & how to recover
-
-- **Reciting textbook paper summaries as your own work:** If you used a standard architecture (e.g., RAG with hybrid search or LoRA fine-tuning), don't spend 10 minutes explaining how LoRA works: spend 10 minutes on **your data curation, failure taxonomy, latency optimization, and production guardrails**.
-- **Ignoring the failure mode of non-determinism:** Every AI system fails on the tail. Always explain how the UX and backend handle low-confidence predictions safely (e.g., abstention, human-in-the-loop fallback, or deterministic citations).
-
-<InterviewQuestions>
-  <InterviewQuestion
-    question="What is 'Goodhart's Law' in ML/AI systems, and how do I use it in a behavioral story?"
-    level="Senior"
-    companies={["Meta", "Google", "OpenAI", "Anthropic", "Netflix"]}
-  >
-    **Goodhart's Law** states: *"When a measure becomes a target, it ceases to be a good measure."* In ML/recsys, optimizing pure click-through rate (CTR) rewards clickbait that hurts long-term retention; in RLHF/LLMs, optimizing helpfulness ratings without a conciseness/truthfulness guardrail causes sycophancy and verbose hallucinations. Sharing a story where you caught a model gaming its proxy metric and introduced a **counter-balancing guardrail metric** is a top-tier Senior/Staff signal.
-  </InterviewQuestion>
-
-  <InterviewQuestion
-    question="How do I answer: 'Tell me about a time an ML/AI experiment failed completely'?"
-    level="Mid"
-    companies={["Google", "Meta", "Amazon", "DoorDash"]}
-  >
-    In empirical ML, 70%+ of hypotheses fail in A/B testing. Show that you **designed the experiment to fail fast and cheaply** (e.g., an offline replay or interleaved test in 3 days rather than a 6-week pipeline build), extracted a concrete **negative result insight** about user behavior or feature signal, documented it so nobody repeated the dead end, and pivoted to the winning hypothesis.
-  </InterviewQuestion>
-</InterviewQuestions>
-
 ## Related
 
-- [Anthropic, OpenAI & DeepMind: Safety, Agency & Epistemic Honesty](/behavioral/company-playbooks/frontier-ai-labs-values)
-- [Dive Deep & Are Right, A Lot](/behavioral/amazon-leadership-principles/dive-deep-and-are-right-a-lot)
+- [Anthropic, OpenAI & DeepMind](/behavioral/company-playbooks/frontier-ai-labs-values)
+- [Quantifying Engineering & ML Impact](/behavioral/foundations/quantifying-engineering-impact)
+- [Owning Production Outages, Bugs & Mistakes](/behavioral/competencies/production-incidents-and-mistakes)
 - [Presenting Your Past Project Deep-Dive](/behavioral/competencies/project-deep-dive-walkthrough)
+
+## Sources
+
+The rubric, the examples and the exercises on this page are our own. They do not describe any one company's process. For what AI labs publish and what candidates report about their interviews, see the [frontier AI labs page](/behavioral/company-playbooks/frontier-ai-labs-values) and its sources.
