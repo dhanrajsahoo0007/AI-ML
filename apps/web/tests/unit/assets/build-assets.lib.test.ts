@@ -239,7 +239,9 @@ describe("usage scan", () => {
     const refs = scanUsage(content, await contentPages(content), APP);
     const index = indexAssets(path.join(APP, "assets"), APP);
     const used = usedByOf(index.assets, refs);
-    expect(used.get("diagrams/animated/messenger/aws")).toEqual(["/system-design/case-studies/facebook-messenger"]);
+    expect(used.get("diagrams/animated/messenger/aws")).toEqual([
+      "/system-design-case-studies/case-studies/facebook-messenger",
+    ]);
     for (const a of index.assets.values()) {
       if (a.type === "animated") expect(used.get(a.id)!.length, a.id).toBeGreaterThan(0);
     }
