@@ -233,117 +233,148 @@ import s227 from "../../../assets/diagrams/animated/fundamentals/webhooks";
 import s228 from "../../../assets/diagrams/animated/fundamentals/webhooks-pipeline";
 import s229 from "../../../assets/diagrams/animated/fundamentals/websockets";
 import s230 from "../../../assets/diagrams/animated/fundamentals/websockets-scaling";
-import s231 from "../../../assets/diagrams/animated/messenger/architecture";
-import s232 from "../../../assets/diagrams/animated/messenger/aws";
-import s233 from "../../../assets/diagrams/animated/rag/acl-filtering";
-import s234 from "../../../assets/diagrams/animated/rag/advanced-pipeline";
-import s235 from "../../../assets/diagrams/animated/rag/agentic-loop";
-import s236 from "../../../assets/diagrams/animated/rag/assistant-architecture";
-import s237 from "../../../assets/diagrams/animated/rag/bi-vs-cross-encoder";
-import s238 from "../../../assets/diagrams/animated/rag/chunk-overlap";
-import s239 from "../../../assets/diagrams/animated/rag/chunk-size-tradeoff";
-import s240 from "../../../assets/diagrams/animated/rag/chunking-strategies";
-import s241 from "../../../assets/diagrams/animated/rag/closed-vs-open-book";
-import s242 from "../../../assets/diagrams/animated/rag/connectors";
-import s243 from "../../../assets/diagrams/animated/rag/connectors-incremental";
-import s244 from "../../../assets/diagrams/animated/rag/contextual-chunk";
-import s245 from "../../../assets/diagrams/animated/rag/contrastive-training";
-import s246 from "../../../assets/diagrams/animated/rag/corrective-loop";
-import s247 from "../../../assets/diagrams/animated/rag/embedding-batch-pipeline";
-import s248 from "../../../assets/diagrams/animated/rag/embedding-space";
-import s249 from "../../../assets/diagrams/animated/rag/eval-loop";
-import s250 from "../../../assets/diagrams/animated/rag/eval-triad";
-import s251 from "../../../assets/diagrams/animated/rag/exact-vs-ann";
-import s252 from "../../../assets/diagrams/animated/rag/failure-map";
-import s253 from "../../../assets/diagrams/animated/rag/filtered-search";
-import s254 from "../../../assets/diagrams/animated/rag/followup-condense";
-import s255 from "../../../assets/diagrams/animated/rag/freshness-pipeline";
-import s256 from "../../../assets/diagrams/animated/rag/graphrag-index";
-import s257 from "../../../assets/diagrams/animated/rag/graphrag-local-vs-global";
-import s258 from "../../../assets/diagrams/animated/rag/halluc-consistency-check";
-import s259 from "../../../assets/diagrams/animated/rag/halluc-grounded-flow";
-import s260 from "../../../assets/diagrams/animated/rag/hnsw-layers";
-import s261 from "../../../assets/diagrams/animated/rag/hybrid-fusion";
-import s262 from "../../../assets/diagrams/animated/rag/hyde";
-import s263 from "../../../assets/diagrams/animated/rag/incremental-reindex";
-import s264 from "../../../assets/diagrams/animated/rag/index-snapshots";
-import s265 from "../../../assets/diagrams/animated/rag/ivf-cells";
-import s266 from "../../../assets/diagrams/animated/rag/keyword-vs-vector";
-import s267 from "../../../assets/diagrams/animated/rag/kg-build-and-query";
-import s268 from "../../../assets/diagrams/animated/rag/kg-health-architecture";
-import s269 from "../../../assets/diagrams/animated/rag/kg-health-graph-slice";
-import s270 from "../../../assets/diagrams/animated/rag/kg-health-note-linking";
-import s271 from "../../../assets/diagrams/animated/rag/kg-ontology";
-import s272 from "../../../assets/diagrams/animated/rag/kg-semi-architecture";
-import s273 from "../../../assets/diagrams/animated/rag/kg-semi-ontology";
-import s274 from "../../../assets/diagrams/animated/rag/late-interaction";
-import s275 from "../../../assets/diagrams/animated/rag/lineage";
-import s276 from "../../../assets/diagrams/animated/rag/lost-in-the-middle";
-import s277 from "../../../assets/diagrams/animated/rag/memory-read-write";
-import s278 from "../../../assets/diagrams/animated/rag/memory-types";
-import s279 from "../../../assets/diagrams/animated/rag/multimodal-ingest";
-import s280 from "../../../assets/diagrams/animated/rag/parse-layout";
-import s281 from "../../../assets/diagrams/animated/rag/permission-sync";
-import s282 from "../../../assets/diagrams/animated/rag/pipeline";
-import s283 from "../../../assets/diagrams/animated/rag/pq-codes";
-import s284 from "../../../assets/diagrams/animated/rag/query-rewriting";
-import s285 from "../../../assets/diagrams/animated/rag/query-routing";
-import s286 from "../../../assets/diagrams/animated/rag/reembed-migration";
-import s287 from "../../../assets/diagrams/animated/rag/rerank-funnel";
-import s288 from "../../../assets/diagrams/animated/rag/retrieval-metrics";
-import s289 from "../../../assets/diagrams/animated/rag/rrf-fusion";
-import s290 from "../../../assets/diagrams/animated/rag/search-ranking-funnel";
-import s291 from "../../../assets/diagrams/animated/rag/search-ranking-losses";
-import s292 from "../../../assets/diagrams/animated/rag/shared-embedding-space";
-import s293 from "../../../assets/diagrams/animated/rag/similarity-measures";
-import s294 from "../../../assets/diagrams/animated/rag/similarity-topk";
-import s295 from "../../../assets/diagrams/animated/rag/single-shot-vs-agentic";
-import s296 from "../../../assets/diagrams/animated/rag/structured-vs-unstructured-router";
-import s297 from "../../../assets/diagrams/animated/rag/tenant-isolation";
-import s298 from "../../../assets/diagrams/animated/rag/text-to-sql-flow";
-import s299 from "../../../assets/diagrams/animated/rag/vector-truncation";
-import s300 from "../../../assets/diagrams/animated/rag/vector-vs-graph";
-import s301 from "../../../assets/diagrams/animated/rag/vectordb-write-read";
-import s302 from "../../../assets/diagrams/animated/transformer/add-and-norm";
-import s303 from "../../../assets/diagrams/animated/transformer/architecture";
-import s304 from "../../../assets/diagrams/animated/transformer/attention-arcs-long-range";
-import s305 from "../../../assets/diagrams/animated/transformer/attention-arcs-two-heads";
-import s306 from "../../../assets/diagrams/animated/transformer/attention-cost-grid";
-import s307 from "../../../assets/diagrams/animated/transformer/attention-worked-example";
-import s308 from "../../../assets/diagrams/animated/transformer/bert-input-embeddings";
-import s309 from "../../../assets/diagrams/animated/transformer/bert-pretrain-finetune";
-import s310 from "../../../assets/diagrams/animated/transformer/bpe-merges";
-import s311 from "../../../assets/diagrams/animated/transformer/causal-mask";
-import s312 from "../../../assets/diagrams/animated/transformer/compute-estimate";
-import s313 from "../../../assets/diagrams/animated/transformer/context-extension";
-import s314 from "../../../assets/diagrams/animated/transformer/cross-attention";
-import s315 from "../../../assets/diagrams/animated/transformer/decoder-only-block";
-import s316 from "../../../assets/diagrams/animated/transformer/feed-forward";
-import s317 from "../../../assets/diagrams/animated/transformer/flash-attention-io";
-import s318 from "../../../assets/diagrams/animated/transformer/input-embedding-sum";
-import s319 from "../../../assets/diagrams/animated/transformer/kv-cache-generation";
-import s320 from "../../../assets/diagrams/animated/transformer/kv-cache-growth";
-import s321 from "../../../assets/diagrams/animated/transformer/mha-gqa-mqa";
-import s322 from "../../../assets/diagrams/animated/transformer/moe-capacity";
-import s323 from "../../../assets/diagrams/animated/transformer/moe-routing";
-import s324 from "../../../assets/diagrams/animated/transformer/moe-total-vs-active";
-import s325 from "../../../assets/diagrams/animated/transformer/multi-head";
-import s326 from "../../../assets/diagrams/animated/transformer/output-head";
-import s327 from "../../../assets/diagrams/animated/transformer/parallelism-3d";
-import s328 from "../../../assets/diagrams/animated/transformer/path-length";
-import s329 from "../../../assets/diagrams/animated/transformer/pe-heatmap";
-import s330 from "../../../assets/diagrams/animated/transformer/pe-waves";
-import s331 from "../../../assets/diagrams/animated/transformer/position-injection";
-import s332 from "../../../assets/diagrams/animated/transformer/rope-rotation";
-import s333 from "../../../assets/diagrams/animated/transformer/scaled-dot-product";
-import s334 from "../../../assets/diagrams/animated/transformer/serving-stack";
-import s335 from "../../../assets/diagrams/animated/transformer/tensor-shapes";
-import s336 from "../../../assets/diagrams/animated/transformer/three-families";
-import s337 from "../../../assets/diagrams/animated/transformer/three-masks";
-import s338 from "../../../assets/diagrams/animated/transformer/tokenizer-pipeline";
-import s339 from "../../../assets/diagrams/animated/transformer/training-pipeline";
-import s340 from "../../../assets/diagrams/animated/transformer/training-vs-inference";
-import s341 from "../../../assets/diagrams/animated/uber-eats/architecture";
+import s231 from "../../../assets/diagrams/animated/llm/choose-cascade";
+import s232 from "../../../assets/diagrams/animated/llm/choose-gpu-memory";
+import s233 from "../../../assets/diagrams/animated/llm/choose-monthly-cost";
+import s234 from "../../../assets/diagrams/animated/llm/choose-shortlist-flow";
+import s235 from "../../../assets/diagrams/animated/llm/ctx-few-shot-anatomy";
+import s236 from "../../../assets/diagrams/animated/llm/ctx-induction-head";
+import s237 from "../../../assets/diagrams/animated/llm/ctx-lost-in-middle";
+import s238 from "../../../assets/diagrams/animated/llm/ctx-window-budget";
+import s239 from "../../../assets/diagrams/animated/llm/decode-beam-search";
+import s240 from "../../../assets/diagrams/animated/llm/decode-grammar-mask";
+import s241 from "../../../assets/diagrams/animated/llm/decode-pipeline";
+import s242 from "../../../assets/diagrams/animated/llm/decode-temperature";
+import s243 from "../../../assets/diagrams/animated/llm/decode-truncation";
+import s244 from "../../../assets/diagrams/animated/llm/diffusion-ar-vs-parallel";
+import s245 from "../../../assets/diagrams/animated/llm/diffusion-block-semi-ar";
+import s246 from "../../../assets/diagrams/animated/llm/diffusion-training-objective";
+import s247 from "../../../assets/diagrams/animated/llm/mla-absorption";
+import s248 from "../../../assets/diagrams/animated/llm/mla-cache-per-token";
+import s249 from "../../../assets/diagrams/animated/llm/mla-data-path";
+import s250 from "../../../assets/diagrams/animated/llm/mtp-architectures";
+import s251 from "../../../assets/diagrams/animated/llm/mtp-self-spec";
+import s252 from "../../../assets/diagrams/animated/llm/mtp-targets";
+import s253 from "../../../assets/diagrams/animated/llm/reason-response-anatomy";
+import s254 from "../../../assets/diagrams/animated/llm/reason-scaling-curves";
+import s255 from "../../../assets/diagrams/animated/llm/reason-three-strategies";
+import s256 from "../../../assets/diagrams/animated/llm/rlvr-grpo-step";
+import s257 from "../../../assets/diagrams/animated/llm/rlvr-r1-pipeline";
+import s258 from "../../../assets/diagrams/animated/llm/rlvr-reward-sources";
+import s259 from "../../../assets/diagrams/animated/llm/ssm-jamba-block";
+import s260 from "../../../assets/diagrams/animated/llm/ssm-kv-vs-state";
+import s261 from "../../../assets/diagrams/animated/llm/ssm-selective-scan";
+import s262 from "../../../assets/diagrams/animated/messenger/architecture";
+import s263 from "../../../assets/diagrams/animated/messenger/aws";
+import s264 from "../../../assets/diagrams/animated/rag/acl-filtering";
+import s265 from "../../../assets/diagrams/animated/rag/advanced-pipeline";
+import s266 from "../../../assets/diagrams/animated/rag/agentic-loop";
+import s267 from "../../../assets/diagrams/animated/rag/assistant-architecture";
+import s268 from "../../../assets/diagrams/animated/rag/bi-vs-cross-encoder";
+import s269 from "../../../assets/diagrams/animated/rag/chunk-overlap";
+import s270 from "../../../assets/diagrams/animated/rag/chunk-size-tradeoff";
+import s271 from "../../../assets/diagrams/animated/rag/chunking-strategies";
+import s272 from "../../../assets/diagrams/animated/rag/closed-vs-open-book";
+import s273 from "../../../assets/diagrams/animated/rag/connectors";
+import s274 from "../../../assets/diagrams/animated/rag/connectors-incremental";
+import s275 from "../../../assets/diagrams/animated/rag/contextual-chunk";
+import s276 from "../../../assets/diagrams/animated/rag/contrastive-training";
+import s277 from "../../../assets/diagrams/animated/rag/corrective-loop";
+import s278 from "../../../assets/diagrams/animated/rag/embedding-batch-pipeline";
+import s279 from "../../../assets/diagrams/animated/rag/embedding-space";
+import s280 from "../../../assets/diagrams/animated/rag/eval-loop";
+import s281 from "../../../assets/diagrams/animated/rag/eval-triad";
+import s282 from "../../../assets/diagrams/animated/rag/exact-vs-ann";
+import s283 from "../../../assets/diagrams/animated/rag/failure-map";
+import s284 from "../../../assets/diagrams/animated/rag/filtered-search";
+import s285 from "../../../assets/diagrams/animated/rag/followup-condense";
+import s286 from "../../../assets/diagrams/animated/rag/freshness-pipeline";
+import s287 from "../../../assets/diagrams/animated/rag/graphrag-index";
+import s288 from "../../../assets/diagrams/animated/rag/graphrag-local-vs-global";
+import s289 from "../../../assets/diagrams/animated/rag/halluc-consistency-check";
+import s290 from "../../../assets/diagrams/animated/rag/halluc-grounded-flow";
+import s291 from "../../../assets/diagrams/animated/rag/hnsw-layers";
+import s292 from "../../../assets/diagrams/animated/rag/hybrid-fusion";
+import s293 from "../../../assets/diagrams/animated/rag/hyde";
+import s294 from "../../../assets/diagrams/animated/rag/incremental-reindex";
+import s295 from "../../../assets/diagrams/animated/rag/index-snapshots";
+import s296 from "../../../assets/diagrams/animated/rag/ivf-cells";
+import s297 from "../../../assets/diagrams/animated/rag/keyword-vs-vector";
+import s298 from "../../../assets/diagrams/animated/rag/kg-build-and-query";
+import s299 from "../../../assets/diagrams/animated/rag/kg-health-architecture";
+import s300 from "../../../assets/diagrams/animated/rag/kg-health-graph-slice";
+import s301 from "../../../assets/diagrams/animated/rag/kg-health-note-linking";
+import s302 from "../../../assets/diagrams/animated/rag/kg-ontology";
+import s303 from "../../../assets/diagrams/animated/rag/kg-semi-architecture";
+import s304 from "../../../assets/diagrams/animated/rag/kg-semi-ontology";
+import s305 from "../../../assets/diagrams/animated/rag/late-interaction";
+import s306 from "../../../assets/diagrams/animated/rag/lineage";
+import s307 from "../../../assets/diagrams/animated/rag/lost-in-the-middle";
+import s308 from "../../../assets/diagrams/animated/rag/memory-read-write";
+import s309 from "../../../assets/diagrams/animated/rag/memory-types";
+import s310 from "../../../assets/diagrams/animated/rag/multimodal-ingest";
+import s311 from "../../../assets/diagrams/animated/rag/parse-layout";
+import s312 from "../../../assets/diagrams/animated/rag/permission-sync";
+import s313 from "../../../assets/diagrams/animated/rag/pipeline";
+import s314 from "../../../assets/diagrams/animated/rag/pq-codes";
+import s315 from "../../../assets/diagrams/animated/rag/query-rewriting";
+import s316 from "../../../assets/diagrams/animated/rag/query-routing";
+import s317 from "../../../assets/diagrams/animated/rag/reembed-migration";
+import s318 from "../../../assets/diagrams/animated/rag/rerank-funnel";
+import s319 from "../../../assets/diagrams/animated/rag/retrieval-metrics";
+import s320 from "../../../assets/diagrams/animated/rag/rrf-fusion";
+import s321 from "../../../assets/diagrams/animated/rag/search-ranking-funnel";
+import s322 from "../../../assets/diagrams/animated/rag/search-ranking-losses";
+import s323 from "../../../assets/diagrams/animated/rag/shared-embedding-space";
+import s324 from "../../../assets/diagrams/animated/rag/similarity-measures";
+import s325 from "../../../assets/diagrams/animated/rag/similarity-topk";
+import s326 from "../../../assets/diagrams/animated/rag/single-shot-vs-agentic";
+import s327 from "../../../assets/diagrams/animated/rag/structured-vs-unstructured-router";
+import s328 from "../../../assets/diagrams/animated/rag/tenant-isolation";
+import s329 from "../../../assets/diagrams/animated/rag/text-to-sql-flow";
+import s330 from "../../../assets/diagrams/animated/rag/vector-truncation";
+import s331 from "../../../assets/diagrams/animated/rag/vector-vs-graph";
+import s332 from "../../../assets/diagrams/animated/rag/vectordb-write-read";
+import s333 from "../../../assets/diagrams/animated/transformer/add-and-norm";
+import s334 from "../../../assets/diagrams/animated/transformer/architecture";
+import s335 from "../../../assets/diagrams/animated/transformer/attention-arcs-long-range";
+import s336 from "../../../assets/diagrams/animated/transformer/attention-arcs-two-heads";
+import s337 from "../../../assets/diagrams/animated/transformer/attention-cost-grid";
+import s338 from "../../../assets/diagrams/animated/transformer/attention-worked-example";
+import s339 from "../../../assets/diagrams/animated/transformer/bert-input-embeddings";
+import s340 from "../../../assets/diagrams/animated/transformer/bert-pretrain-finetune";
+import s341 from "../../../assets/diagrams/animated/transformer/bpe-merges";
+import s342 from "../../../assets/diagrams/animated/transformer/causal-mask";
+import s343 from "../../../assets/diagrams/animated/transformer/compute-estimate";
+import s344 from "../../../assets/diagrams/animated/transformer/context-extension";
+import s345 from "../../../assets/diagrams/animated/transformer/cross-attention";
+import s346 from "../../../assets/diagrams/animated/transformer/decoder-only-block";
+import s347 from "../../../assets/diagrams/animated/transformer/feed-forward";
+import s348 from "../../../assets/diagrams/animated/transformer/flash-attention-io";
+import s349 from "../../../assets/diagrams/animated/transformer/input-embedding-sum";
+import s350 from "../../../assets/diagrams/animated/transformer/kv-cache-generation";
+import s351 from "../../../assets/diagrams/animated/transformer/kv-cache-growth";
+import s352 from "../../../assets/diagrams/animated/transformer/mha-gqa-mqa";
+import s353 from "../../../assets/diagrams/animated/transformer/moe-capacity";
+import s354 from "../../../assets/diagrams/animated/transformer/moe-routing";
+import s355 from "../../../assets/diagrams/animated/transformer/moe-total-vs-active";
+import s356 from "../../../assets/diagrams/animated/transformer/multi-head";
+import s357 from "../../../assets/diagrams/animated/transformer/output-head";
+import s358 from "../../../assets/diagrams/animated/transformer/parallelism-3d";
+import s359 from "../../../assets/diagrams/animated/transformer/path-length";
+import s360 from "../../../assets/diagrams/animated/transformer/pe-heatmap";
+import s361 from "../../../assets/diagrams/animated/transformer/pe-waves";
+import s362 from "../../../assets/diagrams/animated/transformer/position-injection";
+import s363 from "../../../assets/diagrams/animated/transformer/rope-rotation";
+import s364 from "../../../assets/diagrams/animated/transformer/scaled-dot-product";
+import s365 from "../../../assets/diagrams/animated/transformer/serving-stack";
+import s366 from "../../../assets/diagrams/animated/transformer/tensor-shapes";
+import s367 from "../../../assets/diagrams/animated/transformer/three-families";
+import s368 from "../../../assets/diagrams/animated/transformer/three-masks";
+import s369 from "../../../assets/diagrams/animated/transformer/tokenizer-pipeline";
+import s370 from "../../../assets/diagrams/animated/transformer/training-pipeline";
+import s371 from "../../../assets/diagrams/animated/transformer/training-vs-inference";
+import s372 from "../../../assets/diagrams/animated/uber-eats/architecture";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/behavioral/ai-lab-values-round": s0,
@@ -577,115 +608,146 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/fundamentals/webhooks-pipeline": s228,
   "diagrams/animated/fundamentals/websockets": s229,
   "diagrams/animated/fundamentals/websockets-scaling": s230,
-  "diagrams/animated/messenger/architecture": s231,
-  "diagrams/animated/messenger/aws": s232,
-  "diagrams/animated/rag/acl-filtering": s233,
-  "diagrams/animated/rag/advanced-pipeline": s234,
-  "diagrams/animated/rag/agentic-loop": s235,
-  "diagrams/animated/rag/assistant-architecture": s236,
-  "diagrams/animated/rag/bi-vs-cross-encoder": s237,
-  "diagrams/animated/rag/chunk-overlap": s238,
-  "diagrams/animated/rag/chunk-size-tradeoff": s239,
-  "diagrams/animated/rag/chunking-strategies": s240,
-  "diagrams/animated/rag/closed-vs-open-book": s241,
-  "diagrams/animated/rag/connectors": s242,
-  "diagrams/animated/rag/connectors-incremental": s243,
-  "diagrams/animated/rag/contextual-chunk": s244,
-  "diagrams/animated/rag/contrastive-training": s245,
-  "diagrams/animated/rag/corrective-loop": s246,
-  "diagrams/animated/rag/embedding-batch-pipeline": s247,
-  "diagrams/animated/rag/embedding-space": s248,
-  "diagrams/animated/rag/eval-loop": s249,
-  "diagrams/animated/rag/eval-triad": s250,
-  "diagrams/animated/rag/exact-vs-ann": s251,
-  "diagrams/animated/rag/failure-map": s252,
-  "diagrams/animated/rag/filtered-search": s253,
-  "diagrams/animated/rag/followup-condense": s254,
-  "diagrams/animated/rag/freshness-pipeline": s255,
-  "diagrams/animated/rag/graphrag-index": s256,
-  "diagrams/animated/rag/graphrag-local-vs-global": s257,
-  "diagrams/animated/rag/halluc-consistency-check": s258,
-  "diagrams/animated/rag/halluc-grounded-flow": s259,
-  "diagrams/animated/rag/hnsw-layers": s260,
-  "diagrams/animated/rag/hybrid-fusion": s261,
-  "diagrams/animated/rag/hyde": s262,
-  "diagrams/animated/rag/incremental-reindex": s263,
-  "diagrams/animated/rag/index-snapshots": s264,
-  "diagrams/animated/rag/ivf-cells": s265,
-  "diagrams/animated/rag/keyword-vs-vector": s266,
-  "diagrams/animated/rag/kg-build-and-query": s267,
-  "diagrams/animated/rag/kg-health-architecture": s268,
-  "diagrams/animated/rag/kg-health-graph-slice": s269,
-  "diagrams/animated/rag/kg-health-note-linking": s270,
-  "diagrams/animated/rag/kg-ontology": s271,
-  "diagrams/animated/rag/kg-semi-architecture": s272,
-  "diagrams/animated/rag/kg-semi-ontology": s273,
-  "diagrams/animated/rag/late-interaction": s274,
-  "diagrams/animated/rag/lineage": s275,
-  "diagrams/animated/rag/lost-in-the-middle": s276,
-  "diagrams/animated/rag/memory-read-write": s277,
-  "diagrams/animated/rag/memory-types": s278,
-  "diagrams/animated/rag/multimodal-ingest": s279,
-  "diagrams/animated/rag/parse-layout": s280,
-  "diagrams/animated/rag/permission-sync": s281,
-  "diagrams/animated/rag/pipeline": s282,
-  "diagrams/animated/rag/pq-codes": s283,
-  "diagrams/animated/rag/query-rewriting": s284,
-  "diagrams/animated/rag/query-routing": s285,
-  "diagrams/animated/rag/reembed-migration": s286,
-  "diagrams/animated/rag/rerank-funnel": s287,
-  "diagrams/animated/rag/retrieval-metrics": s288,
-  "diagrams/animated/rag/rrf-fusion": s289,
-  "diagrams/animated/rag/search-ranking-funnel": s290,
-  "diagrams/animated/rag/search-ranking-losses": s291,
-  "diagrams/animated/rag/shared-embedding-space": s292,
-  "diagrams/animated/rag/similarity-measures": s293,
-  "diagrams/animated/rag/similarity-topk": s294,
-  "diagrams/animated/rag/single-shot-vs-agentic": s295,
-  "diagrams/animated/rag/structured-vs-unstructured-router": s296,
-  "diagrams/animated/rag/tenant-isolation": s297,
-  "diagrams/animated/rag/text-to-sql-flow": s298,
-  "diagrams/animated/rag/vector-truncation": s299,
-  "diagrams/animated/rag/vector-vs-graph": s300,
-  "diagrams/animated/rag/vectordb-write-read": s301,
-  "diagrams/animated/transformer/add-and-norm": s302,
-  "diagrams/animated/transformer/architecture": s303,
-  "diagrams/animated/transformer/attention-arcs-long-range": s304,
-  "diagrams/animated/transformer/attention-arcs-two-heads": s305,
-  "diagrams/animated/transformer/attention-cost-grid": s306,
-  "diagrams/animated/transformer/attention-worked-example": s307,
-  "diagrams/animated/transformer/bert-input-embeddings": s308,
-  "diagrams/animated/transformer/bert-pretrain-finetune": s309,
-  "diagrams/animated/transformer/bpe-merges": s310,
-  "diagrams/animated/transformer/causal-mask": s311,
-  "diagrams/animated/transformer/compute-estimate": s312,
-  "diagrams/animated/transformer/context-extension": s313,
-  "diagrams/animated/transformer/cross-attention": s314,
-  "diagrams/animated/transformer/decoder-only-block": s315,
-  "diagrams/animated/transformer/feed-forward": s316,
-  "diagrams/animated/transformer/flash-attention-io": s317,
-  "diagrams/animated/transformer/input-embedding-sum": s318,
-  "diagrams/animated/transformer/kv-cache-generation": s319,
-  "diagrams/animated/transformer/kv-cache-growth": s320,
-  "diagrams/animated/transformer/mha-gqa-mqa": s321,
-  "diagrams/animated/transformer/moe-capacity": s322,
-  "diagrams/animated/transformer/moe-routing": s323,
-  "diagrams/animated/transformer/moe-total-vs-active": s324,
-  "diagrams/animated/transformer/multi-head": s325,
-  "diagrams/animated/transformer/output-head": s326,
-  "diagrams/animated/transformer/parallelism-3d": s327,
-  "diagrams/animated/transformer/path-length": s328,
-  "diagrams/animated/transformer/pe-heatmap": s329,
-  "diagrams/animated/transformer/pe-waves": s330,
-  "diagrams/animated/transformer/position-injection": s331,
-  "diagrams/animated/transformer/rope-rotation": s332,
-  "diagrams/animated/transformer/scaled-dot-product": s333,
-  "diagrams/animated/transformer/serving-stack": s334,
-  "diagrams/animated/transformer/tensor-shapes": s335,
-  "diagrams/animated/transformer/three-families": s336,
-  "diagrams/animated/transformer/three-masks": s337,
-  "diagrams/animated/transformer/tokenizer-pipeline": s338,
-  "diagrams/animated/transformer/training-pipeline": s339,
-  "diagrams/animated/transformer/training-vs-inference": s340,
-  "diagrams/animated/uber-eats/architecture": s341,
+  "diagrams/animated/llm/choose-cascade": s231,
+  "diagrams/animated/llm/choose-gpu-memory": s232,
+  "diagrams/animated/llm/choose-monthly-cost": s233,
+  "diagrams/animated/llm/choose-shortlist-flow": s234,
+  "diagrams/animated/llm/ctx-few-shot-anatomy": s235,
+  "diagrams/animated/llm/ctx-induction-head": s236,
+  "diagrams/animated/llm/ctx-lost-in-middle": s237,
+  "diagrams/animated/llm/ctx-window-budget": s238,
+  "diagrams/animated/llm/decode-beam-search": s239,
+  "diagrams/animated/llm/decode-grammar-mask": s240,
+  "diagrams/animated/llm/decode-pipeline": s241,
+  "diagrams/animated/llm/decode-temperature": s242,
+  "diagrams/animated/llm/decode-truncation": s243,
+  "diagrams/animated/llm/diffusion-ar-vs-parallel": s244,
+  "diagrams/animated/llm/diffusion-block-semi-ar": s245,
+  "diagrams/animated/llm/diffusion-training-objective": s246,
+  "diagrams/animated/llm/mla-absorption": s247,
+  "diagrams/animated/llm/mla-cache-per-token": s248,
+  "diagrams/animated/llm/mla-data-path": s249,
+  "diagrams/animated/llm/mtp-architectures": s250,
+  "diagrams/animated/llm/mtp-self-spec": s251,
+  "diagrams/animated/llm/mtp-targets": s252,
+  "diagrams/animated/llm/reason-response-anatomy": s253,
+  "diagrams/animated/llm/reason-scaling-curves": s254,
+  "diagrams/animated/llm/reason-three-strategies": s255,
+  "diagrams/animated/llm/rlvr-grpo-step": s256,
+  "diagrams/animated/llm/rlvr-r1-pipeline": s257,
+  "diagrams/animated/llm/rlvr-reward-sources": s258,
+  "diagrams/animated/llm/ssm-jamba-block": s259,
+  "diagrams/animated/llm/ssm-kv-vs-state": s260,
+  "diagrams/animated/llm/ssm-selective-scan": s261,
+  "diagrams/animated/messenger/architecture": s262,
+  "diagrams/animated/messenger/aws": s263,
+  "diagrams/animated/rag/acl-filtering": s264,
+  "diagrams/animated/rag/advanced-pipeline": s265,
+  "diagrams/animated/rag/agentic-loop": s266,
+  "diagrams/animated/rag/assistant-architecture": s267,
+  "diagrams/animated/rag/bi-vs-cross-encoder": s268,
+  "diagrams/animated/rag/chunk-overlap": s269,
+  "diagrams/animated/rag/chunk-size-tradeoff": s270,
+  "diagrams/animated/rag/chunking-strategies": s271,
+  "diagrams/animated/rag/closed-vs-open-book": s272,
+  "diagrams/animated/rag/connectors": s273,
+  "diagrams/animated/rag/connectors-incremental": s274,
+  "diagrams/animated/rag/contextual-chunk": s275,
+  "diagrams/animated/rag/contrastive-training": s276,
+  "diagrams/animated/rag/corrective-loop": s277,
+  "diagrams/animated/rag/embedding-batch-pipeline": s278,
+  "diagrams/animated/rag/embedding-space": s279,
+  "diagrams/animated/rag/eval-loop": s280,
+  "diagrams/animated/rag/eval-triad": s281,
+  "diagrams/animated/rag/exact-vs-ann": s282,
+  "diagrams/animated/rag/failure-map": s283,
+  "diagrams/animated/rag/filtered-search": s284,
+  "diagrams/animated/rag/followup-condense": s285,
+  "diagrams/animated/rag/freshness-pipeline": s286,
+  "diagrams/animated/rag/graphrag-index": s287,
+  "diagrams/animated/rag/graphrag-local-vs-global": s288,
+  "diagrams/animated/rag/halluc-consistency-check": s289,
+  "diagrams/animated/rag/halluc-grounded-flow": s290,
+  "diagrams/animated/rag/hnsw-layers": s291,
+  "diagrams/animated/rag/hybrid-fusion": s292,
+  "diagrams/animated/rag/hyde": s293,
+  "diagrams/animated/rag/incremental-reindex": s294,
+  "diagrams/animated/rag/index-snapshots": s295,
+  "diagrams/animated/rag/ivf-cells": s296,
+  "diagrams/animated/rag/keyword-vs-vector": s297,
+  "diagrams/animated/rag/kg-build-and-query": s298,
+  "diagrams/animated/rag/kg-health-architecture": s299,
+  "diagrams/animated/rag/kg-health-graph-slice": s300,
+  "diagrams/animated/rag/kg-health-note-linking": s301,
+  "diagrams/animated/rag/kg-ontology": s302,
+  "diagrams/animated/rag/kg-semi-architecture": s303,
+  "diagrams/animated/rag/kg-semi-ontology": s304,
+  "diagrams/animated/rag/late-interaction": s305,
+  "diagrams/animated/rag/lineage": s306,
+  "diagrams/animated/rag/lost-in-the-middle": s307,
+  "diagrams/animated/rag/memory-read-write": s308,
+  "diagrams/animated/rag/memory-types": s309,
+  "diagrams/animated/rag/multimodal-ingest": s310,
+  "diagrams/animated/rag/parse-layout": s311,
+  "diagrams/animated/rag/permission-sync": s312,
+  "diagrams/animated/rag/pipeline": s313,
+  "diagrams/animated/rag/pq-codes": s314,
+  "diagrams/animated/rag/query-rewriting": s315,
+  "diagrams/animated/rag/query-routing": s316,
+  "diagrams/animated/rag/reembed-migration": s317,
+  "diagrams/animated/rag/rerank-funnel": s318,
+  "diagrams/animated/rag/retrieval-metrics": s319,
+  "diagrams/animated/rag/rrf-fusion": s320,
+  "diagrams/animated/rag/search-ranking-funnel": s321,
+  "diagrams/animated/rag/search-ranking-losses": s322,
+  "diagrams/animated/rag/shared-embedding-space": s323,
+  "diagrams/animated/rag/similarity-measures": s324,
+  "diagrams/animated/rag/similarity-topk": s325,
+  "diagrams/animated/rag/single-shot-vs-agentic": s326,
+  "diagrams/animated/rag/structured-vs-unstructured-router": s327,
+  "diagrams/animated/rag/tenant-isolation": s328,
+  "diagrams/animated/rag/text-to-sql-flow": s329,
+  "diagrams/animated/rag/vector-truncation": s330,
+  "diagrams/animated/rag/vector-vs-graph": s331,
+  "diagrams/animated/rag/vectordb-write-read": s332,
+  "diagrams/animated/transformer/add-and-norm": s333,
+  "diagrams/animated/transformer/architecture": s334,
+  "diagrams/animated/transformer/attention-arcs-long-range": s335,
+  "diagrams/animated/transformer/attention-arcs-two-heads": s336,
+  "diagrams/animated/transformer/attention-cost-grid": s337,
+  "diagrams/animated/transformer/attention-worked-example": s338,
+  "diagrams/animated/transformer/bert-input-embeddings": s339,
+  "diagrams/animated/transformer/bert-pretrain-finetune": s340,
+  "diagrams/animated/transformer/bpe-merges": s341,
+  "diagrams/animated/transformer/causal-mask": s342,
+  "diagrams/animated/transformer/compute-estimate": s343,
+  "diagrams/animated/transformer/context-extension": s344,
+  "diagrams/animated/transformer/cross-attention": s345,
+  "diagrams/animated/transformer/decoder-only-block": s346,
+  "diagrams/animated/transformer/feed-forward": s347,
+  "diagrams/animated/transformer/flash-attention-io": s348,
+  "diagrams/animated/transformer/input-embedding-sum": s349,
+  "diagrams/animated/transformer/kv-cache-generation": s350,
+  "diagrams/animated/transformer/kv-cache-growth": s351,
+  "diagrams/animated/transformer/mha-gqa-mqa": s352,
+  "diagrams/animated/transformer/moe-capacity": s353,
+  "diagrams/animated/transformer/moe-routing": s354,
+  "diagrams/animated/transformer/moe-total-vs-active": s355,
+  "diagrams/animated/transformer/multi-head": s356,
+  "diagrams/animated/transformer/output-head": s357,
+  "diagrams/animated/transformer/parallelism-3d": s358,
+  "diagrams/animated/transformer/path-length": s359,
+  "diagrams/animated/transformer/pe-heatmap": s360,
+  "diagrams/animated/transformer/pe-waves": s361,
+  "diagrams/animated/transformer/position-injection": s362,
+  "diagrams/animated/transformer/rope-rotation": s363,
+  "diagrams/animated/transformer/scaled-dot-product": s364,
+  "diagrams/animated/transformer/serving-stack": s365,
+  "diagrams/animated/transformer/tensor-shapes": s366,
+  "diagrams/animated/transformer/three-families": s367,
+  "diagrams/animated/transformer/three-masks": s368,
+  "diagrams/animated/transformer/tokenizer-pipeline": s369,
+  "diagrams/animated/transformer/training-pipeline": s370,
+  "diagrams/animated/transformer/training-vs-inference": s371,
+  "diagrams/animated/uber-eats/architecture": s372,
 };
