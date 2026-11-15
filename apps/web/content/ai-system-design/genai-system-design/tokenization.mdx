@@ -38,15 +38,10 @@ A vocabulary is a box of building blocks. Whole words as blocks would need milli
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    TXT["Raw text"] --> NORM["Normalize<br/>(Unicode, whitespace)"]
-    NORM --> PRE["Pre-tokenize<br/>(split on spaces/punctuation,<br/>or skip with SentencePiece)"]
-    PRE --> MODEL["Apply tokenizer model<br/>(BPE merges, WordPiece, Unigram)"]:::accent
-    MODEL --> IDS["Token ids"]
-    IDS --> SPECIAL["Add special tokens<br/>and chat template"]
-    SPECIAL --> EMB["Embedding lookup in the LLM"]
-```
+<AnimatedDiagram
+  spec="animated/transformer/tokenizer-pipeline"
+  caption="Follow one string down the pipeline: it is normalized, cut into word chunks, split by BPE into sub-word pieces, mapped to ids, given a <bos> token, and finally each id picks one pink row of the embedding table."
+/>
 
 The pipeline at inference:
 
@@ -60,15 +55,13 @@ The pipeline at inference:
 
 ### Training BPE, one merge at a time
 
-```mermaid
-flowchart TB
-    S["Corpus split into characters:<br/>l o w, l o w e r, n e w e s t"] --> C["Count adjacent pairs"]
-    C --> B["Most frequent pair, e.g. 'w' + 'e'"]
-    B --> MERGE["Merge it into a new token 'we'"]:::accent
-    MERGE --> CHECK{"Vocabulary at target size?"}
-    CHECK -->|"No"| C
-    CHECK -->|"Yes"| DONE["Save the ordered merge list"]
-```
+Train BPE on three words, “low”, “lower” and “newest”. Each round counts every adjacent pair, merges the most frequent one (a tie goes to the pair seen first) and adds the result to the vocabulary.
+
+<AnimatedDiagram
+  spec="animated/transformer/bpe-merges"
+  stepper
+  caption="Each merge fuses the most frequent adjacent pair into one new token, so “lo”, then “low”, then “lowe” join the vocabulary; the ordered merge list is the tokenizer."
+/>
 
 ### Why tokenization causes strange failures
 

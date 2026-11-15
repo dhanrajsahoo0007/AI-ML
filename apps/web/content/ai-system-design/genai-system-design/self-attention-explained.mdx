@@ -19,6 +19,13 @@ Think of a library search. Your **query** is the question you type. Every book h
 
 In self-attention, every word plays all three roles at once. The word "it" in "the animal didn't cross the street because it was tired" issues a query like "who am I referring to?". The key of "animal" matches that query strongly, so the output for "it" ends up containing a lot of "animal".
 
+Here is the same idea drawn as one attention head on another sentence. Each arc's thickness shows how much weight “it” puts on that word.
+
+<AnimatedDiagram
+  spec="animated/transformer/attention-arcs-long-range"
+  caption="One head lets “it” reach straight back to “server”, five words away, in a single step; the weights are illustrative and sum to 1. After Vaswani et al. (2017), Figure 3."
+/>
+
 ## Core concepts
 
 1. **Three projections.** For an input matrix $X$ with one row per token, the model computes $Q = XW_Q$, $K = XW_K$ and $V = XW_V$. The three weight matrices are learned, so the model decides what to look for and what to share.
@@ -43,19 +50,10 @@ In self-attention, every word plays all three roles at once. The word "it" in "t
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    X["Token vectors X<br/>(n x d_model)"] --> WQ["x W_Q"] --> Q["Queries Q"]
-    X --> WK["x W_K"] --> K["Keys K"]
-    X --> WV["x W_V"] --> V["Values V"]
-    Q --> S["Scores = Q K^T / sqrt(d_k)"]
-    K --> S
-    S --> M["Apply mask<br/>(causal or padding)"]
-    M --> SM["Softmax per row"]:::accent
-    SM --> O["Weights x V"]
-    V --> O
-    O --> Z["Context-aware token vectors"]
-```
+<AnimatedDiagram
+  spec="animated/transformer/scaled-dot-product"
+  caption="Queries are compared with keys, the scores are scaled, optionally masked and turned into weights, and the weights mix the values. Adapted from Vaswani et al. (2017), Figure 2."
+/>
 
 Step by step for one token:
 
@@ -79,27 +77,38 @@ Take three tokens, "the", "cat", "sat", with 2-dimensional queries and keys (so 
 
 For "sat", the query (1, 1) dotted with each key gives scores 1, 2 and 2. Divided by 1.41 they become about 0.71, 1.41 and 1.41. The softmax of those is roughly 0.20, 0.40 and 0.40. The output is 0.20 x (1, 0) + 0.40 x (0, 1) + 0.40 x (1, 1) = (0.60, 0.80). "Sat" has pulled in mostly "cat" and itself, which is the behavior you want from a verb looking for its subject.
 
+Here is the same calculation for all three tokens at once, one step at a time.
+
+<AnimatedDiagram
+  spec="animated/transformer/attention-worked-example"
+  stepper
+  caption="Follow the bottom row: “sat” scores 1, 2 and 2, the scale and softmax turn them into weights 0.20, 0.40 and 0.40, and its new vector (0.60, 0.80) is mostly “cat” and itself."
+/>
+
 ### Multi-head attention
 
-```mermaid
-flowchart TB
-    X["Token vectors"] --> H1["Head 1<br/>own W_Q, W_K, W_V"]
-    X --> H2["Head 2"]
-    X --> H3["..."]
-    X --> H8["Head h"]
-    H1 --> C["Concatenate head outputs"]
-    H2 --> C
-    H3 --> C
-    H8 --> C
-    C --> WO["Output projection W_O"]:::accent
-    WO --> Y["Multi-head attention output"]
-```
+<AnimatedDiagram
+  spec="animated/transformer/multi-head"
+  caption="Each of the 8 heads works on its own 64-wide slice, and Concat puts them back together at 512 wide. Adapted from Vaswani et al. (2017), Figure 2."
+/>
+
+Because each head has its own projections, heads can learn different jobs on the same sentence.
+
+<AnimatedDiagram
+  spec="animated/transformer/attention-arcs-two-heads"
+  caption="Two heads in the same layer read the same sentence differently: one links the pronoun to its noun, the other looks one word back. Illustrative weights; after Vaswani et al. (2017), Figures 4 and 5."
+/>
 
 Studies of trained models find heads that specialize: some track the previous token, some follow syntactic dependencies, and "induction heads" copy patterns seen earlier in the context, which is linked to in-context learning. Many heads turn out to be redundant, which is one reason grouped-query attention can share keys and values across heads with little quality loss.
 
 ### Cost
 
 For sequence length n and model size d, computing $QK^\top$ costs on the order of n squared times d operations, and the attention matrix has n squared entries per head. Doubling the context roughly quadruples attention work, while the projections and the feed-forward layers only double.
+
+<AnimatedDiagram
+  spec="animated/transformer/attention-cost-grid"
+  caption="Every token scores every token, so the score matrix has n × n entries: each doubling of n gives four times the pairs, and four times the attention work and memory per head."
+/>
 
 ## Trade-offs
 
@@ -122,7 +131,7 @@ For sequence length n and model size d, computing $QK^\top$ costs on the order o
 
 - Forgetting that a token attends to itself as well as others.
 - Applying the softmax over the wrong axis. It runs over keys, so each query's weights sum to one.
-- Thinking more heads means more compute. Total width stays the same; heads just split it.
+- Thinking more heads means more compute. Total width stays the same; the heads divide it.
 - Treating attention weights as a faithful explanation of the model's reasoning. They are a useful signal, not proof.
 
 ## How to answer in an interview

@@ -30,6 +30,13 @@ Imagine each token writes a sticky note (its key and value) the first time it is
 
    For a model with 80 layers, 64 heads of size 128 and 16-bit values, that is about 2.6 MB per token with full multi-head attention, or around 10 GB for a single 4,000-token sequence.
 
+Prefill writes the prompt's keys and values in one pass; every decode step then appends one more column to every layer's cache.
+
+<AnimatedDiagram
+  spec="animated/transformer/kv-cache-growth"
+  caption="Each new token appends one key and one value per layer and KV head, so the cache grows with every token: about 2.6 MB per token and about 10 GB for one 4,000-token sequence in this 80-layer model."
+/>
+
 3. **Multi-query attention (MQA).** All query heads share one key head and one value head. The cache shrinks by the number of heads, at some quality cost.
 
 4. **Grouped-query attention (GQA).** Query heads are split into groups that each share a key and value head. With 8 KV heads instead of 64, the example above drops from about 2.6 MB to about 0.33 MB per token, with quality close to full attention.
@@ -88,10 +95,12 @@ The arithmetic is the same; what disappears is the round trip of an n-by-n matri
 
 ### Picking MHA, GQA or MQA
 
-```mermaid
-flowchart LR
-    MHA["MHA: 64 query heads,<br/>64 KV heads"] --> GQA2["GQA: 64 query heads,<br/>8 KV heads"]:::accent --> MQA2["MQA: 64 query heads,<br/>1 KV head"]
-```
+Each query head reads keys and values from one KV head; the three designs differ only in how many query heads share each KV head.
+
+<AnimatedDiagram
+  spec="animated/transformer/mha-gqa-mqa"
+  caption="Fewer key/value heads mean a smaller cache: GQA shares one key/value head per group of query heads and cuts the cache 8× here, with quality close to MHA."
+/>
 
 Moving right shrinks the cache and speeds decoding; moving left preserves more quality. GQA is the common compromise.
 

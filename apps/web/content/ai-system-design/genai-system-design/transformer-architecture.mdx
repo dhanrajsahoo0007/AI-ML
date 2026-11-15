@@ -22,11 +22,25 @@ After a few dozen rounds, the card held by the word "bank" in "she sat by the ri
 
 Before transformers, recurrent networks passed one note down a line of people, one at a time. Information from the start of a long sentence faded by the end, and the line could not be processed in parallel. The transformer lets everyone talk to everyone at once.
 
+Count the steps a signal needs to travel from the first token to the last.
+
+<AnimatedDiagram
+  spec="animated/transformer/path-length"
+  caption="In a recurrent layer, information from the first token reaches the last after n − 1 steps; in self-attention every pair is one step apart. After Vaswani et al. (2017), Table 1 (maximum path length)."
+/>
+
 ## Core concepts
 
 1. **Tokens and embeddings.** Text is split into tokens (sub-word pieces), and each token id is looked up in an embedding table to get a vector of size $d_{model}$ (512 in the original paper, 4,096 or more in large LLMs).
 
 2. **Positional information.** Self-attention treats its input as a set, so "dog bites man" and "man bites dog" would look identical. The original paper adds fixed sinusoidal position vectors to the embeddings. Modern LLMs mostly use rotary embeddings (RoPE), which rotate queries and keys by an angle that depends on position.
+
+Here is that path for the first three tokens of the example sentence.
+
+<AnimatedDiagram
+  spec="animated/transformer/input-embedding-sum"
+  caption="Each token id picks a row of the embedding table; the row is scaled by √512 and the sinusoidal position vector is added to give the input of the first layer."
+/>
 
 3. **Self-attention.** Each token produces a query, a key and a value by multiplying its vector by three learned matrices. A token's query is compared with every key to get relevance scores, the scores go through a softmax, and the output is the weighted sum of the values:
 
@@ -36,17 +50,56 @@ Before transformers, recurrent networks passed one note down a line of people, o
 
 4. **Scaling by the square root of the key size.** Dot products grow with the vector dimension. Without the scale, large scores push the softmax into a near one-hot shape where gradients vanish, so training stalls.
 
+Every attention block in the model runs the same five steps:
+
+<AnimatedDiagram
+  spec="animated/transformer/scaled-dot-product"
+  caption="Queries are compared with keys, the scores are scaled, optionally masked and turned into weights, and the weights mix the values. Adapted from Vaswani et al. (2017), Figure 2."
+/>
+
 5. **Multi-head attention.** Instead of one attention with full-size vectors, the model runs several smaller attention "heads" in parallel (8 in the original paper), each with its own projections. Different heads learn different relationships, such as syntax, coreference or position. Their outputs are concatenated and projected back.
 
+<AnimatedDiagram
+  spec="animated/transformer/multi-head"
+  caption="Each of the 8 heads works on its own 64-wide slice, and Concat puts them back together at 512 wide. Adapted from Vaswani et al. (2017), Figure 2."
+/>
+
 6. **Feed-forward network (FFN).** A two-layer MLP applied to each token independently, usually 4x wider than the model dimension in the middle. Most of a transformer's parameters live here, and research suggests a lot of factual knowledge is stored in these weights.
+
+Below, the same network runs once for each of three tokens.
+
+<AnimatedDiagram
+  spec="animated/transformer/feed-forward"
+  caption="The feed-forward network transforms each position on its own, with the same weights at every position. After Vaswani et al. (2017), §3.3."
+/>
 
 7. **Residual connections.** Each sub-layer's output is added back to its input. This gives gradients a direct path through dozens of layers and lets each layer learn a small refinement rather than a whole new representation.
 
 8. **Layer normalization.** Normalizes each token's vector to keep activations stable. The original paper normalizes after the residual add (Post-LN). Most modern LLMs normalize before each sub-layer (Pre-LN), often with RMSNorm, because it trains more stably at depth.
 
+The two places the norm can sit:
+
+<AnimatedDiagram
+  spec="animated/transformer/add-and-norm"
+  caption="Post-LN normalises after the residual add; Pre-LN normalises only the sub-layer's input, so the skip path stays a clean identity."
+/>
+
 9. **Masking.** A **padding mask** hides padding tokens. A **causal mask** stops a token from attending to tokens after it, which is what lets a decoder be trained on next-token prediction for every position in parallel.
 
+<AnimatedDiagram
+  spec="animated/transformer/causal-mask"
+  stepper
+  caption="A mask adds −∞ to the scores a token must not use, so after the softmax those positions get exactly zero weight: the causal mask hides the future, the padding mask hides [PAD]."
+/>
+
 10. **Output head.** The final vectors are projected to vocabulary size and turned into probabilities with a softmax. Many models tie this projection to the input embedding table to save parameters.
+
+The last step turns one 512-value vector into a choice of next token.
+
+<AnimatedDiagram
+  spec="animated/transformer/output-head"
+  caption="A Linear layer scores every token in the 37,000-token vocabulary and softmax turns the scores into probabilities; the paper shares this layer's weights with the embedding tables (§3.4)."
+/>
 
 ## Architecture
 
@@ -64,8 +117,21 @@ How a translation request flows through the original encoder-decoder design, mat
 2. The encoder stack runs self-attention over the whole source sentence at once, so every source token can see every other one. Its output is one context-rich vector per source token (steps 3–5).
 3. The decoder receives the target tokens produced so far. Masked self-attention lets each of them see only earlier target tokens (steps 6–7).
 4. Cross-attention lets each target position query the encoder's output. Queries come from the decoder, keys and values from the encoder. This is how the decoder "looks at" the source sentence (step 8).
+
+<AnimatedDiagram
+  spec="animated/transformer/cross-attention"
+  caption="Queries come from the decoder and keys and values from the encoder, so “Ich” reads mostly from “I” and “liebe” mostly from “love”."
+/>
+
 5. The feed-forward network refines each position, and the final layer turns the last position's vector into a probability for every word in the vocabulary (steps 9–10).
 6. At inference, the chosen token is appended and the decoder runs again. That loop is autoregressive generation.
+
+Follow the decoder input `<s> Ich liebe` through one layer and the output head, and watch only the width of each tensor change.
+
+<AnimatedDiagram
+  spec="animated/transformer/tensor-shapes"
+  caption="Every stage keeps one row per position and changes only the width: 512, eight heads of 64, 2048 inside the feed-forward network, then 37,000 at the output."
+/>
 
 ## Deep dive
 
@@ -73,41 +139,34 @@ How a translation request flows through the original encoder-decoder design, mat
 
 Today's GPT-style LLMs drop the encoder and cross-attention entirely. Each block is just masked self-attention plus an FFN, with normalization applied first:
 
-```mermaid
-flowchart TB
-    X["Token vectors from previous block"] --> N1["RMSNorm"]
-    N1 --> ATT["Causal multi-head self-attention<br/>(RoPE applied to queries and keys)"]:::accent
-    ATT --> R1(("+"))
-    X --> R1
-    R1 --> N2["RMSNorm"]
-    N2 --> FFN["Feed-forward network<br/>(e.g. SwiGLU)"]
-    FFN --> R2(("+"))
-    R1 --> R2
-    R2 --> Y["Token vectors to next block"]
-```
+<AnimatedDiagram
+  spec="animated/transformer/decoder-only-block"
+  caption="A Pre-norm decoder block as in Llama-style LLMs: RMSNorm before each sub-layer, causal attention with RoPE, a SwiGLU feed-forward layer, and a residual add after each."
+/>
 
 ### What happens during generation
 
 During training, all positions are computed in one pass thanks to the causal mask. During inference, the model generates one token at a time, and a **KV cache** stores each layer's keys and values so earlier tokens are not recomputed.
 
-```mermaid
-sequenceDiagram
-    participant U as User prompt
-    participant M as Decoder stack
-    participant C as KV cache
-    U->>M: Prefill: process all prompt tokens in parallel
-    M->>C: Store keys and values for every layer
-    M-->>U: First output token
-    loop Decode, one token per step
-        U->>M: Feed only the newest token
-        M->>C: Read past keys and values, append new ones
-        M-->>U: Next token
-    end
-```
+<AnimatedDiagram
+  spec="animated/transformer/training-vs-inference"
+  caption="Training scores every position in one pass because the causal mask hides the future; inference has no future to hide, so it runs once per new token and feeds each output back in."
+/>
+
+<AnimatedDiagram
+  spec="animated/transformer/kv-cache-generation"
+  stepper
+  caption="Prefill processes the whole prompt once and fills the cache; every decode step feeds one token and reuses the cached keys and values."
+/>
 
 This split explains two numbers interviewers like to ask about: **time to first token** is dominated by the prefill pass, while **tokens per second** is dominated by decode steps, which are limited by memory bandwidth because each step re-reads the weights and the growing cache.
 
 ### The three families
+
+<AnimatedDiagram
+  spec="animated/transformer/three-families"
+  caption="The families differ in which blocks they keep and in who can see whom: bidirectional, both with cross-attention, or causal only."
+/>
 
 | Family | Attention pattern | Pre-training objective | Typical use | Examples |
 | --- | --- | --- | --- | --- |
@@ -124,6 +183,14 @@ This split explains two numbers interviewers like to ask about: **time to first 
 | Sinusoidal vs learned vs RoPE positions | Sinusoidal needs no parameters, RoPE handles relative positions well and extends with tricks | Learned absolute positions do not extrapolate past training length | RoPE for modern decoder LLMs |
 | More heads vs fewer | More heads capture more relation types | Each head gets a smaller dimension, more KV cache | Tune with model size; use GQA to cut cache cost |
 | Decoder-only vs encoder-decoder | One stack, simple scaling, great at open-ended generation | Less natural for strongly conditioned input-to-output tasks | Decoder-only for general LLMs |
+
+The paper's Table 1 puts numbers on the first row. Here n is the sequence length, d the representation size and k the convolution kernel width.
+
+| Layer type | Work per layer | Sequential operations | Maximum path length |
+| --- | --- | --- | --- |
+| Self-attention | O(n² · d) | O(1) | O(1) |
+| Recurrent | O(n · d²) | O(n) | O(n) |
+| Convolutional | O(k · n · d²) | O(1) | O(log_k n) |
 
 ## Real-world examples
 

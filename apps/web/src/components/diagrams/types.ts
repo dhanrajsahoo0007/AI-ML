@@ -212,6 +212,11 @@ export interface LayoutShape {
   step?: number;
   /** Pulsing ring in the shape's tone, for the element the paragraph is about. */
   highlight?: boolean;
+  /**
+   * No "NEW" ring and no stepper announcement when the shape appears: for the many cells of a matrix or vector,
+   * where one labelled shape in the same step should carry the ring instead.
+   */
+  quiet?: boolean;
   /** Arrow endpoints by shape id; the line starts and ends at the shapes' borders. */
   from?: string;
   to?: string;

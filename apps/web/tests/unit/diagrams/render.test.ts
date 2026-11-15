@@ -197,6 +197,17 @@ describe("LayoutDiagram paper-figure options", () => {
     expect(order.indexOf("arc")).toBeLessThan(order.indexOf("norm"));
   });
 
+  it("draws no NEW ring and announces nothing for quiet shapes", () => {
+    const spec = {
+      ...paperLayout,
+      shapes: paperLayout.shapes.map((s) => (s.id === "w1" || s.id === "w2" ? { ...s, step: 2, quiet: true } : s)),
+    };
+    const stepped = renderToStaticMarkup(createElement(LayoutDiagram, { spec, step: 2, stepper: true, idBase: "t" }));
+    expect(stepped.match(/data-new="true"/g)).toHaveLength(1);
+    expect(stepped).toContain('data-shape="w1" data-phase="new"');
+    expect(stepped).not.toMatch(/New:[^<]*\.7/);
+  });
+
   it("announces a multi-line label on one line in the stepper", () => {
     const stepped = renderToStaticMarkup(
       createElement(LayoutDiagram, { spec: paperLayout, step: 2, stepper: true, idBase: "t" })
