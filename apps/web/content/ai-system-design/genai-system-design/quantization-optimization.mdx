@@ -1,24 +1,203 @@
 ---
 title: Quantization & Optimization Techniques
 description: Shrinking models and accelerating inference with reduced-precision weights and complementary compression methods.
+updated: 2026-11-15
 ---
 
-Quantization maps high-precision weights and activations to lower bit widths so models fit in less VRAM and move fewer bytes per matmul. INT8 post-training quantization is widely supported and often preserves accuracy on large models when kernels are well tuned. INT4 and mixed schemes such as GPTQ or AWQ push further by exploiting per-channel scales and sometimes protecting sensitive weight outliers. FP8 on Hopper-class hardware offers a sweet spot where dynamic range is better than INT8 with competitive throughput when tensor cores expose fast FP8 paths.
+Quantisation is the cheapest way to fit a bigger model on a smaller GPU and to make each generated token cheaper. Interviewers ask about it because a good answer joins three things: the arithmetic of bytes per weight, why decode speeds up when weights shrink, and why a single outlier can wreck the rounding.
 
-GGUF and similar formats matter for CPU and consumer-GPU inference ecosystems where portability and mmap-friendly single files simplify deployment, though server-class GPU stacks more often use TensorRT engines or vendor-specific checkpoints. Quantization is not the only lever: structured pruning removes whole channels or heads with retraining or distillation to recover accuracy, and knowledge distillation trains a smaller student to mimic a teacher logits or hidden states.
+## TL;DR
 
-Quality degradation must be measured on tasks that mirror production, not only perplexity. Use held-out prompts with rubric scoring, regression suites for function calling and JSON validity, and domain-specific benchmarks for code or math. Calibration datasets for static quantization should reflect real input token distributions; mismatched calibration, for example only short prompts when production uses huge contexts, skews scales and raises error rates.
+- **Quantisation stores numbers in fewer bits.** Weight memory is **parameters × bits ÷ 8**: a 70 B model is **140 GB at 16 bits, 70 GB at 8 and 35 GB at 4**, before the KV cache.
+- **Decode is memory-bound**, so fewer bytes per weight means a shorter read per token. At an illustrative 3 TB/s, reading 140 GB takes 47 ms and reading 35 GB takes 12 ms.
+- **Weight-only schemes** (GPTQ, AWQ, INT4) save memory and decode time. **Weight-and-activation schemes** (INT8 and FP8 W8A8, SmoothQuant) also use 8-bit tensor cores, which helps compute-bound prefill.
+- **Outliers are the hard part.** A few huge values stretch the scale and crush the rest; every named method is a way to handle them.
+- **PTQ** rounds a finished model using calibration data in hours; **QAT** trains with rounding in the loop and costs a training run.
+- **Measure on your own tasks.** Perplexity alone hides broken JSON and wrong tool calls.
 
-Trade-offs include engineering time to integrate kernels, brittleness across hardware generations, and harder debugging when numerical issues surface as subtle hallucination increases rather than hard crashes. Some teams keep a full-precision shadow model for offline evaluation while serving quantized weights online.
+## The idea in plain English
+
+Think of a ruler. A ruler marked every millimetre can record a pencil's length to the millimetre. Re-mark it every centimetre and every reading becomes the nearest centimetre: the ruler is smaller to store and quicker to read, and each measurement is a little off. Now suppose one of the objects is a ladder. To fit the ladder on the ruler you stretch the whole scale, and the pencils all read "0 cm". Quantisation is the re-marked ruler. The craft is choosing the marks so the ladder does not ruin the pencils.
+
+## Core concepts
+
+### Scale, zero point and rounding
+
+A quantiser maps a 16-bit value to a small integer **code** and remembers one **scale** to map it back: value ≈ code × scale. With signed 4-bit codes from −7 to 7 there are 15 levels. The scale is usually the largest absolute value in a group divided by 7, so the largest weight lands exactly on the top level. An optional **zero point** shifts the grid for values that are not centred on zero. The error of each weight is its distance to the nearest level, at most half a step.
+
+### Weight-only against weight-and-activation
+
+**Weight-only** (W4A16, W8A16) keeps activations in 16 bits. The kernel reads packed 4-bit weights, converts them to 16 bits on the fly, and multiplies in 16 bits. Memory and bandwidth drop; arithmetic does not. **Weight-and-activation** (W8A8) rounds both inputs of the matrix multiply, so the GPU can use its 8-bit tensor cores. That helps when arithmetic is the limit (prefill, large batches). Activations are harder to round than weights because they contain outliers (see Deep dive).
+
+### INT8, FP8 and INT4
+
+- **INT8** has 256 evenly spaced levels. Widely supported and, with care, close to 16-bit quality on large models.
+- **FP8** is a floating-point byte with two layouts: **E4M3** (4 exponent bits, 3 mantissa bits, maximum about 448) and **E5M2** (5 and 2, maximum 57,344). Levels are dense near zero and sparse at the extremes, so FP8 copes with a wide range better than INT8. Hardware support begins with Hopper (H100) and Ada; Ampere (A100) has no FP8 tensor cores (NVIDIA Transformer Engine docs and vLLM's compatibility table, November 2026).
+- **INT4** has 15 or 16 levels. Used for weights only, in groups (see below), because activations at 4 bits are too coarse for most models.
+
+### Group scales and their cost
+
+One scale for a whole matrix lets one outlier set the step for millions of weights. Real 4-bit formats give each **group** of weights (commonly 128) its own scale. A 16-bit scale per group of 128 adds 16 ÷ 128 = 0.125 bit per weight; a scale plus a zero point adds 0.25. So a "4-bit" model is about 4.1 to 4.25 bits per weight.
+
+### GPTQ and AWQ: weight-only PTQ
+
+**GPTQ** (Frantar et al., 2022) quantises a layer's weights one column at a time and adjusts the not-yet-quantised weights to cancel the error, using second-order information from calibration data. The paper reports 3–4 bit weights, a 175 B model quantised in about four GPU hours, and end-to-end speed-ups of about 3.25× on A100 and 4.5× on A6000 over FP16. **AWQ** (Lin et al., 2023) observes that protecting about 1 % of the weights greatly cuts error, and finds those weights from **activation** magnitudes, not weight magnitudes. It scales those channels up before rounding (an equivalent rewrite of the layer), with no backpropagation or reconstruction, so it overfits calibration data less.
+
+### SmoothQuant and LLM.int8(): taming activation outliers
+
+**LLM.int8()** (Dettmers et al., 2022) found that from about 6.7 B parameters, a few hidden dimensions carry values of magnitude 6 or more. It rounds with a scale per row and column, and keeps those dimensions (about 0.1 %) in 16 bits, while over 99.9 % of the multiplies run in 8 bits; it halves inference memory with no measured loss up to 175 B. **SmoothQuant** (Xiao et al., 2022) instead rewrites the layer: it divides each activation channel by a factor and multiplies the matching weight row by the same factor, using s = max|X|^α ÷ max|W|^(1−α), with α = 0.5 for most models. The product is unchanged, but the activation outliers move into the weights, where 8-bit rounding handles them. The paper reports up to 1.56× speed-up and 2× less memory for W8A8.
+
+### KV-cache quantisation
+
+Weights are fixed; the **KV cache** grows with every token and every concurrent request. Storing it in FP8 or INT8 halves its bytes. It is a separate switch from weight quantisation, and it needs its own quality check. See [Long-Context Scaling and KV Quantization](/ai-system-design/genai-system-design/long-context-ring-attention-and-kv-quantization) for the cache arithmetic.
+
+## Architecture
+
+Where does the rounding happen? Either after training, or inside it.
+
+<AnimatedDiagram
+  spec="animated/serving/quant-ptq-vs-qat"
+  stepper
+  caption="Both lanes end with a model of the same kind. Post-training quantisation spends a few GPU hours and some calibration prompts; quantisation-aware training spends a training run."
+/>
+
+<StepCards>
+  <StepCard n={1} title="PTQ: a finished model plus calibration prompts go into a quantiser">
+    GPTQ, AWQ or SmoothQuant runs the prompts through the model, records activation statistics, and chooses scales and rounded weights layer by layer. Nothing is trained. Hours, not days.
+  </StepCard>
+  <StepCard n={2} title="QAT: the training loop rounds the weights it uses">
+    The forward pass uses rounded weights ("fake quantisation") while the update step changes the 16-bit copies; gradients pass through the rounding as if it were the identity. The weights settle where rounding hurts least.
+  </StepCard>
+</StepCards>
+
+**Choosing.** At 8 bits PTQ is usually enough. At 4 bits or below, or on a small model, QAT (or a short fine-tune after PTQ) recovers more quality, at the price of training infrastructure and data. QLoRA is a related case: it fine-tunes small adapters on a frozen 4-bit base (see [LoRA, QLoRA and PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft)).
+
+<Callout tone="red" title="What breaks">
+  A calibration set that does not look like production (only short prompts when real inputs are long, or one language when traffic has three) gives scales that fit the wrong activations. The model passes the offline check and misbehaves on live traffic.
+</Callout>
+
+## Deep dive
+
+### Rounding error, computed
+
+The figure rounds seven 16-bit weights to signed 4-bit codes. Step 1 uses six weights; their largest, 0.91, sets the scale: 0.91 ÷ 7 = 0.13.
+
+<AnimatedDiagram
+  spec="animated/serving/quant-number-line"
+  stepper
+  caption="Each weight lands on the nearest of 15 levels, and the gap is the error. One outlier in the same group stretches the scale and widens every gap."
+/>
+
+**How to read it.** Blue dots are the 16-bit values; the arrows drop each to the green dot on its nearest level; the table gives the code, the value it stands for, and the error. Step 2 adds an outlier of 2.80 to the group.
+
+**The numbers.** Step 1: −0.84 ÷ 0.13 = −6.46, which rounds to −6 and reads back as −0.78, an error of 0.06. The six errors are 0.06, 0.05, 0.01, 0.04, 0.01 and 0.00, a mean of 0.028. Step 2: the scale becomes 2.80 ÷ 7 = 0.40. Now −0.12 ÷ 0.40 = −0.3 and 0.09 ÷ 0.40 = 0.2 both round to code 0, so two different weights become the same value. The six original weights now average 0.075 error, 2.7 times worse, and the outlier itself is exact. Group scales confine the damage to one group; AWQ and LLM.int8() deal with the outlier directly.
+
+### Memory and the decode read
+
+<AnimatedDiagram
+  spec="animated/serving/quant-memory"
+  stepper
+  caption="Weights only, computed as parameters × bits ÷ 8 against one 80 GB GPU. The lime notes (illustrative bandwidth) show the time to read the weights once."
+/>
+
+**How to read it.** The left column is a 7 B model, the right a 70 B model; the vertical line is the GPU's 80 GB. Red is weight memory the GPU does not have. Step 3 adds the time to read all the weights once.
+
+**The numbers.** 70 × 10⁹ × 16 ÷ 8 = 140 GB (60 GB too much for one GPU), 70 GB at 8 bits, 35 GB at 4 bits. Reading 140 GB at 3,000 GB/s takes 46.7 ms; 70 GB takes 23.3 ms; 35 GB takes 11.7 ms. Decode reads every weight for each token (the argument is on the [speculative decoding](/ai-system-design/genai-system-design/speculative-decoding) and [GPU performance](/ai-system-design/genai-system-design/gpu-performance-for-llms) pages), so this read is a floor on time per token, and it halves with each halving of bits. The 4-bit file is a little larger than 35 GB: at 4.125 bits per weight, 70 × 10⁹ × 4.125 ÷ 8 = 36.1 GB.
+
+### Quality loss: shape only
+
+In general quality falls as bits fall, slowly at first and then faster. 8-bit weights are close to lossless on large models in the LLM.int8() and SmoothQuant results; 4-bit weight-only methods stay usable on large models; 3 bits and below need more care; small models lose more than large ones. We draw no curve here because the loss depends on the model, the method, the group size and the task, and a curve without cited points would invent a precision the evidence does not have. Measure on your own tasks: rubric-scored held-out prompts, regression suites for function calling and JSON validity, and domain benchmarks for code or math (see [Offline Evaluation & Benchmarks](/ai-system-design/genai-system-design/offline-evaluation-benchmarks) and [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets)). Perplexity can look fine while a rare tool call breaks.
+
+### Calibration data
+
+Static activation scales and GPTQ's error correction both depend on sample inputs. Draw them from production logs with personal data removed, stratify by length and language, and include edge cases: empty input, Unicode-heavy text, maximum-length prompts. Version the set with the checkpoint, and rerun calibration when the architecture or preprocessing changes.
+
+### Runtime and format support
+
+GGUF and similar single-file formats serve CPU and consumer-GPU runtimes, where portability and memory-mapped loading matter. Server GPU stacks more often use engine-specific checkpoints (TensorRT engines, or vLLM loading GPTQ, AWQ, FP8 and others; as of November 2026 its documentation lists AutoAWQ, GPTQModel, LLM Compressor, bitsandbytes, TorchAO and a quantised KV cache). A scheme only speeds up if the engine has a fast kernel for that format on that GPU, and newer 4-bit floating-point formats (MXFP4, NVFP4) appear in current NVIDIA and vLLM documentation for the newest hardware.
+
+### Beyond quantisation: pruning and distillation
+
+**Structured pruning** removes whole channels or attention heads, usually with retraining or distillation to recover quality. **Knowledge distillation** trains a smaller student to mimic a teacher's output probabilities or hidden states; see [Distillation and Small Models](/ai-system-design/genai-system-design/distillation-and-small-models). These stack with quantisation: a distilled, then 4-bit model is smaller twice over.
+
+### Worked example: Brightpost's 70 B support model
+
+Brightpost serves a 70 B support model. Weights alone need 140 GB at 16 bits: two 80 GB GPUs, leaving 20 GB across both for the KV cache. At 8 bits the weights are 70 GB and fit one GPU, with 10 GB free. At 4 bits they are about 36 GB, leaving over 40 GB for cache, which means many more concurrent requests.
+
+Decode gains follow. The latency target allows 4.4 ms per token (400 ms to first token and 1,500 ms for 250 tokens, as on the other serving pages). At an illustrative 3 TB/s a GPU reads 4.4 ms × 3,000 GB/s = 13.2 GB per token, so the weights must be spread over at least 140 ÷ 13.2 ≈ 11 GPUs at 16 bits, 70 ÷ 13.2 ≈ 6 at 8 bits and 35 ÷ 13.2 ≈ 3 at 4 bits (weights only, ignoring communication and KV reads). The 2,200-token prompt is prefill, which is compute-bound: weight-only 4 bits barely helps it, and 8-bit activations do.
+
+Brightpost's plan: FP8 W8A8 on Hopper GPUs for the main model; run the 200-ticket golden set and a JSON-validity suite against 16-bit and FP8, and ship if refund-approval decisions (refunds over £30) match. Try 4-bit weights only on the draft model for speculative decoding, where a wrong guess costs a check, not a wrong answer.
+
+## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| 16-bit (BF16/FP16) | Reference quality; no calibration | Largest memory and slowest decode | Quality baseline; small models |
+| FP8 W8A8 | Half the memory; 8-bit tensor cores speed prefill | Needs Hopper or Ada; per-tensor scales need care | First choice on supported GPUs |
+| INT8 (LLM.int8(), SmoothQuant) | Wide support; near-lossless on large models | Outliers need handling; mixed precision can be slow | Older GPUs; throughput serving |
+| INT4 weight-only (GPTQ, AWQ) | A quarter of the memory; fastest decode | Larger quality risk; no prefill speed-up | Fit a big model on few GPUs; latency-bound decode |
+| QAT | Best quality at low bits | A training run and data | 4 bits or below on a model you train |
+| KV-cache quantisation | More concurrent requests per GPU | Separate quality risk on long contexts | Cache, not weights, fills memory |
+
+## Real-world examples
+
+- **LLM.int8() in Hugging Face and bitsandbytes (2022).** Made 8-bit inference of 175 B-class models fit one multi-GPU server; the paper reports no loss up to 175 B.
+- **GPTQ (2022).** Quantised OPT and BLOOM-class 175 B models to 3–4 bits in about four GPU hours, and a checkpoint format that open-source engines such as vLLM load.
+- **AWQ (2023).** Activation-aware 4-bit weights; its TinyChat runtime reports over 3× over FP16 on desktop and mobile GPUs and a 70 B Llama-2 on a mobile GPU.
+- **FP8 on Hopper.** NVIDIA's Transformer Engine runs E4M3 and E5M2 tensors with per-tensor scales; vLLM's LLM Compressor path serves FP8 W8A8 on Ada and Hopper (November 2026).
+- **QLoRA (2023).** A frozen 4-bit NormalFloat base with trained adapters: a 65 B model fine-tuned on one 48 GB GPU.
+
+## Common pitfalls
+
+- Quoting memory as "4 bits = a quarter" and forgetting scales, zero points, embeddings kept in 16 bits and the KV cache.
+- Expecting INT4 weight-only to speed up prefill. It dequantises to 16 bits first, so it helps decode.
+- Calibrating on short prompts, then serving long ones.
+- Judging by perplexity alone and missing broken JSON, wrong tool names and policy drift.
+- Assuming a format is fast because it is small. Without a kernel for that GPU, it can be slower than 16-bit.
+- Mixing up PTQ and QAT: QAT needs training data and a training loop.
+
+## How to answer in an interview
+
+1. Start with the arithmetic: bytes = parameters × bits ÷ 8, and name what else fills memory (KV cache, activations).
+2. Say why it speeds up: decode is memory-bound, so fewer bytes per weight shortens the read for every token.
+3. Separate weight-only from weight-and-activation, and say which phase each helps.
+4. Name the outlier problem and one remedy: group scales, AWQ's scaling, SmoothQuant's migration, LLM.int8()'s 16-bit dimensions.
+5. Close with validation: your own eval set, a calibration set that matches traffic, and a full-precision reference.
+
+**What interviewers listen for:** the bytes arithmetic, the memory-bound argument, the outlier story, and a measured rollout.
+
+**Red flags:** "quantisation is free", quoting speed-ups without saying batch size or phase, or judging quality by perplexity only.
+
+## Further reading
+
+- [GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers (Frantar et al., 2022)](https://arxiv.org/abs/2210.17323)
+- [AWQ: Activation-aware Weight Quantization (Lin et al., 2023)](https://arxiv.org/abs/2306.00978)
+- [SmoothQuant: Accurate and Efficient Post-Training Quantization for LLMs (Xiao et al., 2022)](https://arxiv.org/abs/2211.10438)
+- [LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale (Dettmers et al., 2022)](https://arxiv.org/abs/2208.07339)
+- [FP8 Formats for Deep Learning (Micikevicius et al., 2022)](https://arxiv.org/abs/2209.05433) and [Using FP8 and FP4 with Transformer Engine (NVIDIA)](https://docs.nvidia.com/deeplearning/transformer-engine/examples/fp8_primer.html)
+- [QLoRA (Dettmers et al., 2023)](https://arxiv.org/abs/2305.14314) · [Quantization (vLLM documentation)](https://docs.vllm.ai/en/latest/features/quantization/)
+- Related pages: [GPU Performance for LLMs](/ai-system-design/genai-system-design/gpu-performance-for-llms) · [LLM Inference Engine](/ai-system-design/genai-system-design/llm-inference-engine) · [Cost & Latency Optimization](/ai-system-design/genai-system-design/cost-latency-optimization)
 
 <InterviewQuestions>
-  <InterviewQuestion question="What is the difference between PTQ and QAT for LLM deployment?" category="Optimization">
-    Post-training quantization adjusts scales and zero points after training without gradient updates, which is fast but can clip important weights if outliers are mishandled. Quantization-aware training simulates low precision during training so weights adapt, often yielding better accuracy at aggressive bit widths at the cost of longer training cycles and more complex tooling.
+  <InterviewQuestion question="What is the difference between PTQ and QAT for LLM deployment?" category="Concepts" level="Junior">
+    Post-training quantisation takes a finished model and picks scales and rounded weights using a small calibration set, with no gradient updates. It takes hours and can clip important weights if outliers are mishandled. Quantisation-aware training simulates the low precision during training, so the weights adapt to the rounding. It usually gives better accuracy at aggressive bit widths, at the cost of a training run and more complex tooling.
   </InterviewQuestion>
-  <InterviewQuestion question="When might INT4 weight-only quantization be risky for a customer support bot?" category="Trade-offs">
-    Customer bots mix long context, policy-heavy language, and tool use where small logits shifts break JSON or choose wrong tools. INT4 can increase brittle failures on rare intents. If tail quality and compliance matter, validate on stratified transcripts, keep safety classifiers calibrated, and consider INT8 or FP8 for the highest-risk tenants or reserve INT4 for draft generation with verification.
+  <InterviewQuestion question="How much GPU memory do the weights of a 70 B model need at 16, 8 and 4 bits?" category="Scaling" level="Junior">
+    Bytes are parameters times bits divided by 8. That is 140 GB at 16 bits, 70 GB at 8 bits and 35 GB at 4 bits. Real 4-bit files are a few percent larger because each group of weights stores a scale, about 36 GB with groups of 128. The KV cache, activations and the runtime need room on top, so on an 80 GB GPU only the 8-bit and 4-bit versions fit, and 8 bits leaves just 10 GB for cache.
   </InterviewQuestion>
-  <InterviewQuestion question="How would you build a calibration dataset for static INT8 activation quantization?" category="Implementation">
-    Sample realistic prompts and multimodal inputs from production logs with PII scrubbed, stratified by length, language, and feature flags. Include edge cases such as empty inputs, unicode-heavy text, and maximum-length stress tests. Run enough batches to stabilize histograms of activations, version the dataset with the model checkpoint, and re-run calibration when architecture or preprocessing changes.
+  <InterviewQuestion question="Why does quantising weights make decoding faster even though the arithmetic is the same?" category="Concepts" level="Mid">
+    Decode reads every weight from GPU memory for each token and does little arithmetic per weight, so the step is limited by memory bandwidth. Halving the bytes per weight halves the read, and so roughly the time per token, if the kernel converts weights quickly. The arithmetic units were idle anyway, so converting back to 16 bits costs little. The same trick does not help prefill much, because prefill is compute-bound; it needs 8-bit arithmetic on both operands.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why are activations harder to quantise than weights, and how do SmoothQuant and LLM.int8() deal with it?" category="Architecture" level="Senior">
+    Activations contain a few channels with values far larger than the rest; SmoothQuant reports outliers about 100 times larger than most values, and LLM.int8() finds them systematic from about 6.7 B parameters. One large value stretches the scale, so most values round to a handful of levels. LLM.int8() keeps the outlier dimensions, about 0.1 percent, in 16 bits and multiplies the rest in 8 bits. SmoothQuant divides each activation channel by a factor and multiplies the matching weight by the same factor, which leaves the output unchanged but moves the difficulty into the weights.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you build a calibration dataset for static INT8 activation quantisation?" category="Architecture" level="Mid">
+    Sample realistic prompts from production logs with personal data removed, stratified by length, language and feature flags. Include edge cases such as empty inputs, Unicode-heavy text and maximum-length prompts. Run enough batches to stabilise the activation statistics, version the set with the model checkpoint, and rerun calibration when the architecture or preprocessing changes. A set that only has short prompts gives scales that clip long-context activations.
+  </InterviewQuestion>
+  <InterviewQuestion question="When might INT4 weight-only quantisation be risky for a customer support bot?" category="Trade-offs" level="Senior">
+    Support bots mix long context, policy language and tool calls, where a small shift in logits can break JSON or pick the wrong tool. INT4 can raise failures on rare intents even when average scores hold. If tail quality and compliance matter, validate on stratified transcripts with function-calling and refund-policy regression tests, and keep INT8 or FP8 for the highest-risk traffic. INT4 suits a draft model for speculative decoding, where the large model checks every guess.
+  </InterviewQuestion>
+  <InterviewQuestion question="A quantised model passes your benchmark but customers report wrong answers. What do you check?" category="Failure modes" level="Senior">
+    First, compare calibration data with live traffic: length, language and tool-call share. A mismatch gives scales fitted to the wrong activations. Second, check the eval: perplexity or a general benchmark can hide failures in JSON validity, tool choice and policy numbers, so replay logged tickets against the 16-bit and quantised models and diff the decisions. Third, check whether the KV cache is also quantised, since long conversations stress it. Keep the full-precision model as an offline shadow to compare against.
   </InterviewQuestion>
 </InterviewQuestions>
