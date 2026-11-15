@@ -39,47 +39,62 @@ Short-term memory is the notepad on your desk during a task; when it fills up, y
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    MSG["New message / task step"] --> CTX["Context builder"]
-    STM["Short-term: recent turns,<br/>plan, tool results"] --> CTX
-    LTM[("Long-term memory store<br/>semantic + episodic")] -->|"retrieve relevant"| CTX
-    CTX --> LLM["LLM"]
-    LLM --> RESP["Response / action"]
-    LLM --> EXTRACT["Memory writer:<br/>extract facts, outcomes"]:::accent
-    EXTRACT --> DEDUP["Deduplicate, resolve conflicts,<br/>attach time and source"]
-    DEDUP --> LTM
-    STM --> SUMM["Summarize when long"] --> STM
-    USER["User controls:<br/>view, edit, delete"] --> LTM
-```
+One customer shows how the loop works. Brightpost, a fictional shop, runs a support agent: a model that can look up orders and request refunds. Last week a customer's kettle (order 4471) arrived cracked, and a support agent approved a £42 refund. Today the customer writes: "Has my kettle refund gone through? Text me from now on, not email."
 
-The memory loop:
+<AnimatedDiagram
+  spec="animated/rag/memory-read-write"
+  stepper
+  caption="Memory is two pipelines around one model call: recall before it, write after it, with a check before anything is saved."
+/>
 
-1. Build the context from recent turns plus retrieved long-term memories.
-2. The model responds or acts.
-3. A memory writer extracts facts or outcomes worth keeping.
-4. New memories are deduplicated, checked for conflicts and stored with timestamps and sources.
-5. Short-term history is summarized as it grows.
-6. Users can inspect and delete what is stored.
+**How to read it**, one card per step:
+
+<StepCards>
+  <StepCard n={1} title="The message joins the recent turns">
+    The new message is added to this session's recent turns, the short-term memory, and the context builder starts the prompt from them. When the turns grow long, the oldest are summarised to keep the prompt small. A new session has almost nothing here. On its own, the agent does not know who this customer is or what happened last week.
+  </StepCard>
+  <StepCard n={2} title="The message is embedded and recalls memories">
+    The latest message is turned into a vector by an embedding model, the same model that embedded each stored memory. The store searches only this customer's memories and returns the 3 closest: "prefers email", "4471: £42 refund approved on 12 Nov" and "kettle arrived cracked". This is retrieval, as in [RAG](/ai-system-design/genai-system-design/rag-fundamentals), over the customer's history instead of help articles.
+  </StepCard>
+  <StepCard n={3} title="The agent replies from turns and memories">
+    The prompt holds the recent turns and the 3 memories, so the agent can answer "Yes, your £42 refund was approved on 12 Nov" without asking for the order number again. The reply follows today's request and goes by text. The store still says "prefers email".
+  </StepCard>
+  <StepCard n={4} title="After the reply, a writer extracts what is worth keeping">
+    A memory writer, a second model call, reads the turn and pulls out stable facts and outcomes: "prefers text". It skips small talk and guesses. It runs after the reply, so the customer does not wait for it.
+  </StepCard>
+  <StepCard n={5} title="A new memory is checked against old ones, then saved">
+    The check searches the store for related memories and finds "prefers email", a conflict. The new memory replaces it, stamped with today's date and the chat it came from; a duplicate would be merged and a guess dropped. Without this check, the store would hold both preferences and recall either one.
+  </StepCard>
+  <StepCard n={6} title="The customer can view and delete memories">
+    The customer can see what the agent remembers, correct it and delete it. Deletion must remove the record and its vector, not hide it. Memory is personal data, so this control is not optional.
+  </StepCard>
+</StepCards>
+
+**The numbers** (illustrative): the store returns the top 3 memories for each message. At about 20 tokens each, they add 3 × 20 = 60 tokens to the prompt; replaying last week's whole chat instead would add thousands.
+
+<Callout tone="red" title="What breaks">
+  Without the conflict check, "prefers email" and "prefers text" both stay in the store, and whichever is more similar to the next message wins. The agent then emails a customer who asked for texts. Fix: check related memories at write time, replace or mark the old one as superseded, and prefer the newest memory when two disagree.
+</Callout>
 
 ## Deep dive
 
 ### Types of memory side by side
 
-```mermaid
-flowchart LR
-    subgraph SHORT["Short-term"]
-        W["Working context<br/>(this task)"]
-    end
-    subgraph LONG["Long-term"]
-        SEM["Semantic<br/>'prefers concise answers'"]
-        EPI["Episodic<br/>'last week's report used source X'"]
-        PROC["Procedural<br/>'always run tests before commit'"]
-    end
-    W -->|"write important items"| SEM
-    W -->|"log outcomes"| EPI
-    EPI -->|"distill lessons"| PROC:::accent
-```
+A common way to split memory into four kinds comes from the CoALA framework (Sumers et al., 2023). Each kind holds a different thing, so each needs its own store and its own rules.
+
+<AnimatedDiagram
+  spec="animated/rag/memory-types"
+  stepper
+  caption="Each memory type answers a different question, so each needs its own store and its own rules for writing and forgetting."
+/>
+
+**How to read it.** Step 1 is working memory: what the model can see right now, the context window for this session, holding order 4471 and the cracked kettle. Step 2 saves a stable fact as semantic memory ("prefers email"), kept as a profile record so it can be updated or deleted exactly. Step 3 logs what happened as episodic memory ("12 Nov: £42 kettle refund approved"), an event log with vectors so similar past cases can be found. Step 4 distils a lesson from many episodes into procedural memory ("damaged item: ask for a photo first"), written into the prompt or a rules file, so it changes how the agent acts in every later chat.
+
+CoALA also counts the model's weights and the agent's code as procedural memory. The figure shows only the part an agent can edit for itself.
+
+<Callout tone="red" title="What breaks">
+  Procedural memory changes every future chat, so a bad lesson spreads. A lesson distilled from three unusual refunds can become a rule that refuses ordinary ones. Fix: have a person review new procedural rules before they reach the prompt, and keep the episodes each rule came from so it can be traced and rolled back.
+</Callout>
 
 ## Trade-offs
 
@@ -120,6 +135,7 @@ flowchart LR
 - [MemGPT: Towards LLMs as Operating Systems (Packer et al., 2023)](https://arxiv.org/abs/2310.08560)
 - [Generative Agents: Interactive Simulacra of Human Behavior (Park et al., 2023)](https://arxiv.org/abs/2304.03442)
 - [Reflexion (Shinn et al., 2023)](https://arxiv.org/abs/2303.11366)
+- [Cognitive Architectures for Language Agents (CoALA; Sumers et al., 2023)](https://arxiv.org/abs/2309.02427)
 
 <InterviewQuestions>
   <InterviewQuestion question="What is the difference between short-term and long-term memory in an agent?" category="Concepts" level="Junior">
