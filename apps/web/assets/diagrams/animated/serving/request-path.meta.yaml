@@ -1,0 +1,18 @@
+title: The LLM serving path, end to end
+alt: >-
+  An architecture diagram built in seven steps. Step 1: Brightpost's customers, in orange, sending 12 requests a
+  second at peak, send a question to the gateway, which checks keys, limits and quotas. Step 2: the gateway passes
+  allowed requests to the router, which picks the model, the replica and a replica that may already hold the prompt's
+  prefix; a dashed line round the top carries other requests to Replica 2, a teal block. Step 3: this request goes to
+  the least busy replica, Replica 1, drawn as a teal zone, and waits in its queue and batcher. Step 4: the request
+  joins the running batch on the engine on the GPU, the solid teal accent. Step 5: the engine reads and writes the
+  paged KV cache, a violet block below it, which also holds a prefix cache. Step 6: tokens flow from the engine back
+  up to the gateway, and the link between customers and gateway becomes two-way, labelled SSE stream. Step 7: a dashed
+  queue-depth line runs from the queue to the autoscaler at the bottom right, which adds Replica 3, a teal block
+  added at peak.
+caption: >-
+  The request path has five hops, but only the engine on the GPU is expensive: everything else exists to keep that
+  GPU full without letting the queue grow.
+tags: [serving, inference, autoscaling, batching, genai]
+source: original
+created: 2026-11-15
