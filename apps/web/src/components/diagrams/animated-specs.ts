@@ -235,7 +235,8 @@ import s229 from "../../../assets/diagrams/animated/fundamentals/websockets";
 import s230 from "../../../assets/diagrams/animated/fundamentals/websockets-scaling";
 import s231 from "../../../assets/diagrams/animated/messenger/architecture";
 import s232 from "../../../assets/diagrams/animated/messenger/aws";
-import s233 from "../../../assets/diagrams/animated/uber-eats/architecture";
+import s233 from "../../../assets/diagrams/animated/transformer/architecture";
+import s234 from "../../../assets/diagrams/animated/uber-eats/architecture";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/behavioral/ai-lab-values-round": s0,
@@ -471,5 +472,6 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/fundamentals/websockets-scaling": s230,
   "diagrams/animated/messenger/architecture": s231,
   "diagrams/animated/messenger/aws": s232,
-  "diagrams/animated/uber-eats/architecture": s233,
+  "diagrams/animated/transformer/architecture": s233,
+  "diagrams/animated/uber-eats/architecture": s234,
 };
