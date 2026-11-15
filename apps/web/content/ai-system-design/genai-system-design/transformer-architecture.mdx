@@ -50,34 +50,21 @@ Before transformers, recurrent networks passed one note down a line of people, o
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    IN["Input tokens"] --> EMB["Token embeddings + positional information"]
-    subgraph ENC["Encoder block (repeated N times)"]
-        direction TB
-        E1["Multi-head self-attention"] --> E2["Add & Norm"]
-        E2 --> E3["Feed-forward network"] --> E4["Add & Norm"]
-    end
-    EMB --> E1
-    OUT["Target tokens so far (shifted right)"] --> DEMB["Token embeddings + positional information"]
-    subgraph DEC["Decoder block (repeated N times)"]
-        direction TB
-        D1["Masked multi-head self-attention"] --> D2["Add & Norm"]
-        D2 --> D3["Cross-attention over encoder output"] --> D4["Add & Norm"]
-        D4 --> D5["Feed-forward network"] --> D6["Add & Norm"]
-    end
-    DEMB --> D1
-    E4 -- "keys and values" --> D3
-    D6 --> LIN["Linear projection to vocabulary"] --> SM["Softmax: next-token probabilities"]:::accent
-```
+The figure below redraws the paper's architecture in colour, with the English sentence "I love tea" being translated to the German "Ich liebe Tee". Step through it from the bottom up.
 
-How a translation request flows through the original encoder-decoder design:
+<AnimatedDiagram
+  spec="animated/transformer/architecture"
+  stepper
+  caption="The encoder reads the whole English sentence at once; the decoder reads it through cross-attention while predicting one German token at a time. Adapted from Vaswani et al. (2017), Figure 1."
+/>
 
-1. The source sentence is tokenized, embedded and given positional information.
-2. The encoder stack runs self-attention over the whole source sentence at once, so every source token can see every other one. Its output is one context-rich vector per source token.
-3. The decoder receives the target tokens produced so far. Masked self-attention lets each of them see only earlier target tokens.
-4. Cross-attention lets each target position query the encoder's output. Queries come from the decoder, keys and values from the encoder. This is how the decoder "looks at" the source sentence.
-5. The feed-forward network refines each position, and the final layer turns the last position's vector into a probability for every word in the vocabulary.
+How a translation request flows through the original encoder-decoder design, matched to the figure's steps:
+
+1. The source sentence is tokenized, embedded and given positional information (steps 1–2).
+2. The encoder stack runs self-attention over the whole source sentence at once, so every source token can see every other one. Its output is one context-rich vector per source token (steps 3–5).
+3. The decoder receives the target tokens produced so far. Masked self-attention lets each of them see only earlier target tokens (steps 6–7).
+4. Cross-attention lets each target position query the encoder's output. Queries come from the decoder, keys and values from the encoder. This is how the decoder "looks at" the source sentence (step 8).
+5. The feed-forward network refines each position, and the final layer turns the last position's vector into a probability for every word in the vocabulary (steps 9–10).
 6. At inference, the chosen token is appended and the decoder runs again. That loop is autoregressive generation.
 
 ## Deep dive
