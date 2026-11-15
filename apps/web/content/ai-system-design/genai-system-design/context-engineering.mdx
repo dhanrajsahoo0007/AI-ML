@@ -34,13 +34,13 @@ A model's context window is the maximum number of tokens it can read in one call
 
 **How to read it.** Each bar is one turn, drawn to scale against a 32,000-token budget (illustrative). The first four segments (instructions, tool definitions, memory and the latest retrieved chunks) are the same size on every turn. The orange history and the teal tool results grow, and by turn 14 they make up four fifths of the bar. Step 4 shows what happens if nothing is done; step 5 shows the same turn after compaction.
 
-**The numbers.** Fixed parts: 1,200 + 1,000 + 600 + 2,000 = 4,800 tokens. Each turn adds 300 tokens of history and about 1,200 of tool results (illustrative), so turn *n* costs 4,800 + 1,500*n*. Turn 14 reaches 25,800 tokens, past the 80 % line at 25,600; turn 19 would need 33,300, more than the window. Compacting turn 14 (a 400-token summary, the last 2 turns verbatim and only the latest tool result) brings it back to 4,800 + 1,000 + 1,200 = 7,000 tokens.
+**The numbers.** Fixed parts: 1,200 + 1,000 + 600 + 2,000 = 4,800 tokens. Each turn adds 300 tokens of history and about 1,200 of tool results (illustrative), so turn _n_ costs 4,800 + 1,500*n*. Turn 14 reaches 25,800 tokens, past the 80 % line at 25,600; turn 19 would need 33,300, more than the window. Compacting turn 14 (a 400-token summary, the last 2 turns verbatim and only the latest tool result) brings it back to 4,800 + 1,000 + 1,200 = 7,000 tokens.
 
 ### Sources of context: instructions, knowledge, tools and memory
 
 Every token in the window comes from one of six sources, and they behave in three different ways:
 
-- **Fixed on every turn:** the instructions (role, policy, tone; versioned like code, see [System Prompt Design](/ai-system-design/genai-system-design/system-prompt-design)), the tool definitions (name, description and parameter schema of each tool; forty tools at 250 tokens each, illustrative, is 10,000 tokens before the customer says a word) and memory, facts kept across sessions such as "prefers email" (see [Agent Memory](/ai-system-design/genai-system-design/agent-memory)).
+- **Fixed on every turn:** the instructions (role, policy, tone; versioned like code, see [System Prompt Design](/ai-system-design/genai-system-design/system-prompt-design)), the tool definitions (name, description and parameter schema of each tool; forty tools at 250 tokens each, illustrative, is 10,000 tokens before the customer says a word; loading them on demand is covered in [Progressive Disclosure & Agent Instructions](/ai-system-design/genai-system-design/progressive-disclosure-and-agent-instructions)) and memory, facts kept across sessions such as "prefers email" (see [Agent Memory](/ai-system-design/genai-system-design/agent-memory)).
 - **Fetched per question:** retrieved chunks, the RAG part of the window.
 - **Growing every turn:** the conversation history, and tool results. An order record or a web page can be thousands of tokens, and agents call tools on most turns, so these two decide how long an agent can run.
 
@@ -60,7 +60,7 @@ The context builder makes three decisions on every turn. Here they are applied t
 
 ### Context rot and distraction
 
-More context is not free even when it fits. Liu et al. (2023) found that models used information at the start or the end of a long input better than information in the middle, even models built for long contexts.
+More context is not free even when it fits. Anthropic gives the reason in one line: a transformer relates every token to every other token, which is n² pairs for n tokens, so a longer input spreads the model's attention thinner. Two studies show what that does to answers. The first is about where the evidence sits. Liu et al. (2023) found that models used information at the start or the end of a long input better than information in the middle, even models built for long contexts.
 
 <AnimatedDiagram
   spec="animated/rag/lost-in-the-middle"
@@ -69,7 +69,35 @@ More context is not free even when it fits. Liu et al. (2023) found that models 
 
 **How to read it.** The curve is the shape of the finding, not the paper's data: accuracy is highest when the useful chunk sits at either end of the prompt, which is why step 3 above puts the evidence next to the message.
 
-Chroma's "Context Rot" report (Hong et al., 2025) tested 18 models and found that performance grew less reliable as input length grew, even on simple tasks. A single distractor (text that looks relevant but is not) lowered accuracy, and more distractors lowered it further. The five old password chunks in the kettle turn are exactly that kind of distractor. The fix is the same in both studies: send fewer, better tokens.
+The second is about how much surrounds it. Chroma's "Context Rot" report (Hong, Troynikov and Huber, July 2025) tested 18 models from four families on deliberately simple tasks, such as finding one fact in a long text, and changed only the length of the input.
+
+<AnimatedDiagram
+  spec="animated/agents/context-rot"
+  stepper
+  minWidth={620}
+  caption="Shape only, after Hong et al. (Chroma, 2025): accuracy falls as the input grows, and text that looks relevant but is not pulls it down faster."
+/>
+
+<StepCards>
+  <StepCard n={1} title="Longer input, lower accuracy">
+    The task stays the same and only the input grows. The report found that performance consistently degrades as input
+    length increases, across all its experiments. The curve is our drawing of that shape, not the report's data: each
+    model fell by a different amount.
+  </StepCard>
+  <StepCard n={2} title="Distractors pull it lower, faster">
+    A distractor is text that looks relevant but does not answer the question. Even one distractor lowered accuracy
+    against the clean baseline, and four lowered it further. The five old password chunks in the kettle turn are exactly
+    that kind of text.
+  </StepCard>
+</StepCards>
+
+One more result points the same way. On LongMemEval, a test of questions about a long chat history, every model scored clearly higher on a **focused** prompt of about 300 tokens holding only the relevant turns than on the **full** history of about 113,000 tokens. The fix is the same in both studies: send fewer, better tokens, and put the evidence where the model uses it best.
+
+<Callout tone="red" title="What breaks">
+  Filling the window because it fits. A long-context model accepts 12,420 tokens as easily as 5,140, and nothing in the
+  response says the extra 7,280 made it worse. The only way to see context rot is to measure it: run the same evaluation
+  questions with short and long contexts, with and without distractors, and compare.
+</Callout>
 
 ## Architecture
 
@@ -83,35 +111,85 @@ In a production agent one component, the context builder, assembles the model's 
 
 <StepCards>
   <StepCard n={1} title="Instructions and the message">
-    The builder joins a versioned system prompt and the customer's message and sends them to the model. With one turn and no tools, there is nothing to manage yet. The model cannot answer Brightpost-specific questions because it has no evidence.
+    The builder joins a versioned system prompt and the customer's message and sends them to the model. With one turn
+    and no tools, there is nothing to manage yet. The model cannot answer Brightpost-specific questions because it has
+    no evidence.
   </StepCard>
   <StepCard n={2} title="Add retrieved chunks">
-    The builder asks the vector index for the top 5 chunks and places them before the message. Answers now cite real articles. The model still cannot look up an order or act on one.
+    The builder asks the vector index for the top 5 chunks and places them before the message. Answers now cite real
+    articles. The model still cannot look up an order or act on one.
   </StepCard>
   <StepCard n={3} title="Add tools and their results">
-    The model can now call tools. Their results come back through the builder, not straight into the next call, so a 2,000-token order record can be trimmed to the fields that matter. This is where the window starts to grow every turn.
+    The model can now call tools. Their results come back through the builder, not straight into the next call, so a
+    2,000-token order record can be trimmed to the fields that matter. This is where the window starts to grow every
+    turn.
   </StepCard>
   <StepCard n={4} title="Add memory and history">
-    A memory store supplies facts about this customer, and a history store keeps every turn so the builder can replay the conversation. Two sources now grow without limit: history and accumulated tool results.
+    A memory store supplies facts about this customer, and a history store keeps every turn so the builder can replay
+    the conversation. Two sources now grow without limit: history and accumulated tool results.
   </StepCard>
   <StepCard n={5} title="Compact when the budget runs low">
-    When the assembled context passes 80 % of the budget, a compactor (a model call with a summarisation prompt) replaces old turns with a summary in the history store. The builder reads the summary instead of the raw turns from then on.
+    When the assembled context passes 80 % of the budget, a compactor (a model call with a summarisation prompt)
+    replaces old turns with a summary in the history store. The builder reads the summary instead of the raw turns from
+    then on.
   </StepCard>
 </StepCards>
 
 <Callout tone="red" title="What breaks">
-  Tool results appended straight into the conversation, with no builder in between, are the most common way agents run out of window. One large page or log can push out the instructions or the customer's question. Route every result through the builder and give each tool a token cap.
+  Tool results appended straight into the conversation, with no builder in between, are the most common way agents run
+  out of window. One large page or log can push out the instructions or the customer's question. Route every result
+  through the builder and give each tool a token cap.
 </Callout>
 
 ## Deep dive
 
 ### Compaction and summarization
 
-Compaction summarises a nearly full context and continues with the summary. The hard part is deciding what the summary must keep: decisions already made, open questions, promises to the customer, and identifiers such as order numbers. Anthropic describes Claude Code's compaction as keeping architectural decisions and unresolved bugs and continuing with the five most recently used files; it suggests tuning the summary prompt for recall first, then cutting what is not needed. The lightest form is **tool-result clearing**: old raw tool output is removed and the call is left in place. Anthropic reported that context editing (clearing stale tool calls and results) cut token use by 84 % in a 100-turn web-search evaluation. A third option is **note-taking**: the agent writes progress to a file or memory store outside the window and reads it back later. Resets and state hand-offs are covered in [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
+Compaction summarises a nearly full context and continues with the summary. The hard part is deciding what the summary must keep: decisions already made, open questions, promises to the customer, and identifiers such as order numbers. Anthropic describes Claude Code's compaction as keeping architectural decisions and unresolved bugs and continuing with the five most recently accessed files; it suggests tuning the summary prompt for recall first, then cutting what is not needed. The lightest form is **tool-result clearing**: old raw tool output is removed and the call is left in place. Anthropic reported that context editing (clearing stale tool calls and results) cut token use by 84 % in a 100-turn web-search evaluation. A third option is **note-taking**: the agent writes progress to a file or memory store outside the window and reads it back later. When to compact and when to reset, what a hand-off note holds, and how to keep state in files and databases outside the window are covered in depth in [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
 
 ### Just-in-time retrieval versus preloading
 
-**Preloading** retrieves before the model runs: the builder fetches the top 5 chunks for every turn, needed or not, which is how classic RAG works. **Just-in-time** retrieval gives the agent lightweight references (article titles, file paths, order ids) and a tool to open them, so it loads only what it decides it needs. For Brightpost, preloading spends 2,000 tokens on every turn, including "thanks, that's all"; just-in-time spends a few dozen tokens on references and 400 per chunk actually opened. The cost is latency and judgement: each fetch is another model turn, and the agent must know what to look for. Anthropic recommends a hybrid in many cases, with Claude Code loading its instruction files up front and finding everything else with search tools. [Agentic RAG](/ai-system-design/genai-system-design/agentic-rag) is the retrieval side of the same idea.
+**Preloading** retrieves before the model runs: the builder searches with the customer's message and adds the top 5 chunks to every turn, needed or not. This is how classic RAG works. **Just-in-time** retrieval gives the agent a search tool, or lightweight references such as file paths, stored queries and links, and lets it load only what it decides it needs. Here are two turns of the kettle conversation, run both ways.
+
+<AnimatedDiagram
+  spec="animated/agents/preload-vs-just-in-time"
+  stepper
+  minWidth={620}
+  caption="Preloading pays tokens on every turn and saves a round trip; just in time pays a round trip and loads only what the model asks for (illustrative times)."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The kettle refund turn, both ways">
+    Preload: the builder searches with the raw message and adds 5 chunks before the only model call. Just in time: the
+    first model call sees no chunks, decides it needs the refund rule and calls `search_help` with its own query,
+    "damaged item refund". The tool returns the top 3 chunks, and a second call writes the reply.
+  </StepCard>
+  <StepCard n={2} title='The "thanks" turn, and the totals'>
+    Preload searches and adds 5 chunks again, though the reply needs none of them (ringed). Just in time fetches
+    nothing. Over the two turns, preload makes fewer calls and just in time sends fewer tokens.
+  </StepCard>
+</StepCards>
+
+**The numbers.** Preload: 5 × 400 = 2,000 chunk tokens per turn, 4,000 over both turns, in 2 model calls. Just in time: 3 × 400 = 1,200 tokens over both turns, in 3 model calls. On the kettle turn, at 1.5 s per model call and 0.3 s per search (illustrative), preload takes 0.3 + 1.5 = 1.8 s and just in time 1.5 + 0.3 + 1.5 = 3.3 s.
+
+This is the call the model makes in step 1 and the result it gets back, in the Claude Messages API shape (chunk text shortened):
+
+```json
+[
+  { "type": "tool_use", "id": "toolu_02", "name": "search_help", "input": { "query": "damaged item refund" } },
+  {
+    "type": "tool_result",
+    "tool_use_id": "toolu_02",
+    "content": [
+      { "type": "text", "text": "Damaged on arrival: full refund within 30 days of delivery. …" },
+      { "type": "text", "text": "…" },
+      { "type": "text", "text": "…" }
+    ]
+  }
+]
+```
+
+The first object comes back in the model's response; the second goes in the next request. The cost of just in time is latency and judgement: each fetch is another model call, and the agent must know what to look for. Anthropic recommends a hybrid in many cases: Claude Code puts its `CLAUDE.md` instruction files into the context up front and finds everything else with `glob` and `grep`. For Brightpost, a hybrid keeps the instructions, tools and customer memory up front and leaves help-centre knowledge to `search_help`. How to keep the up-front part small (a short root file, skills that load on demand) is on [Progressive Disclosure & Agent Instructions](/ai-system-design/genai-system-design/progressive-disclosure-and-agent-instructions), and [Agentic RAG](/ai-system-design/genai-system-design/agentic-rag) is the retrieval side of the same idea.
 
 ### Isolating context with sub-agents
 
@@ -127,14 +205,35 @@ Some tasks need far more reading than one window holds. A sub-agent is a separat
 
 **The numbers.** 3 × 20,000 = 60,000 tokens read in one window, against 3 × 1,500 = 4,500 in the lead's window (illustrative; Anthropic reports sub-agent summaries of often 1,000 to 2,000 tokens). The total spent goes up, not down: Anthropic's research system used about 15 times the tokens of a chat. Sub-agents buy focus, not savings. See [Multi-Agent Systems](/ai-system-design/genai-system-design/multi-agent-systems).
 
+### Worked example: one turn, five model calls
+
+The [select, order and compress figure](#selecting-ordering-and-compressing-context) builds the kettle turn's context once. An agent calls the model several times in one turn, so the builder runs before every call. Here is the turn on the happy path from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures), with `search_help` called just in time. Each call starts from the same 3,820 tokens: the stable prefix (instructions 1,200 + four tools 1,000 + memory 600 = 2,800), the 1,000-token summary of the earlier turns and the 20-token message. Every tool call the model writes adds about 30 tokens (illustrative).
+
+| Call | New in the window since the last call                                                           | Input tokens | The model asks for                                                                                               |
+| ---- | ----------------------------------------------------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| 1    | The message                                                                                     | 3,820        | `get_order(4471)`                                                                                                |
+| 2    | That call (30) and the order record, trimmed by the builder from 2,000 tokens to 4 fields (120) | 3,970        | `search_help("damaged item refund")`                                                                             |
+| 3    | That call (30) and 3 chunks (1,200)                                                             | 5,200        | `create_refund(4471, 42.00)`: £42 is over £30, so the harness waits for the support agent, who approves at 10:20 |
+| 4    | That call (30) and "refund R-2291" (20)                                                         | 5,250        | `send_email(customer, "Your refund")`                                                                            |
+| 5    | That call (30) and "Email sent" (10)                                                            | 5,290        | Nothing: it writes the reply                                                                                     |
+
+**The numbers.** The five calls read 3,820 + 3,970 + 5,200 + 5,250 + 5,290 = **23,530** input tokens. The 2,800-token prefix is the same in every call: 5 × 2,800 = 14,000 tokens, **60 %** of the input, can come from the [prompt cache](/ai-system-design/genai-system-design/prompt-caching). Call 3's window holds the same parts as step 4 of the figure, 5,140 tokens, plus the two tool calls. Without the builder, every call would also carry the raw history (3,600 − 1,000 = 2,600 more tokens) and, from call 2, the raw order record (2,000 − 120 = 1,880 more): 2,600 + 4 × 4,480 = 20,520 extra tokens, nearly double. All counts are illustrative.
+
+Three things to take from it:
+
+- **Context is rebuilt per call, not per turn.** A rule such as "trim tool results" runs inside the loop, before each call, or the 2,000-token record rides along four times.
+- **Stable parts first pays on every call.** Put the timestamp or the chunks before the tools and the cache misses five times a turn.
+- **The approval pause is a state problem, not a context problem.** If the support agent approves an hour later, the harness reloads the run from saved state and rebuilds call 4's context; see [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state).
+
 ## Trade-offs
 
-| Decision | Option A | Option B | Choose A when |
-| --- | --- | --- | --- |
-| Getting knowledge in | Preload top-k every turn | Just-in-time via a tool | Most turns need the knowledge and latency matters |
-| Old history | Keep verbatim | Summarise | Conversations are short and exact wording matters |
-| Tool results | Keep raw | Trim or clear after use | The model must quote the raw output later |
-| Large tasks | One agent, one window | Sub-agents with summaries | The task fits in one window and steps depend on each other |
+| Decision             | Option A                                 | Option B                  | Choose A when                                                                          |
+| -------------------- | ---------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------- |
+| Getting knowledge in | Preload top-k every turn                 | Just-in-time via a tool   | Most turns need the knowledge and latency matters                                      |
+| Old history          | Keep verbatim                            | Summarise                 | Conversations are short and exact wording matters                                      |
+| Tool results         | Keep raw                                 | Trim or clear after use   | The model must quote the raw output later                                              |
+| Large tasks          | One agent, one window                    | Sub-agents with summaries | The task fits in one window and steps depend on each other                             |
+| Context layout       | Stable prefix first, volatile parts last | Newest material first     | Almost always A: it keeps the prompt cache valid and puts evidence next to the message |
 
 ## Real-world examples
 
@@ -149,6 +248,8 @@ Some tasks need far more reading than one window holds. A sub-agent is a separat
 - Loading dozens of tool definitions on every turn when the task needs three.
 - Putting volatile parts (timestamps, retrieved chunks) before stable ones, which breaks [prompt caching](/ai-system-design/genai-system-design/prompt-caching).
 - No token accounting per source, so nobody knows which part of the window grew.
+- Building the context once per turn, when an agent calls the model several times in a turn. Trimming and clearing must run before every call.
+- Letting the task drift out of view in a long run. Restate the goal and the current plan near the end of the context, where the model reads it last.
 
 ## How to answer in an interview
 
@@ -163,24 +264,73 @@ Some tasks need far more reading than one window holds. A sub-agent is a separat
 
 ## Further reading
 
-- [Effective context engineering for AI agents (Anthropic, 2025)](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
-- [Managing context on the Claude Developer Platform (Anthropic, 2025)](https://claude.com/blog/context-management)
+- [Effective context engineering for AI agents (Anthropic, 29 September 2025)](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
+- [Managing context on the Claude Developer Platform (Anthropic, 29 September 2025)](https://claude.com/blog/context-management)
 - [How we built our multi-agent research system (Anthropic, 2025)](https://www.anthropic.com/engineering/multi-agent-research-system)
-- [Context Rot: How Increasing Input Tokens Impacts LLM Performance (Hong, Troynikov and Huber, Chroma, 2025)](https://www.trychroma.com/research/context-rot)
+- [Context Rot: How Increasing Input Tokens Impacts LLM Performance (Hong, Troynikov and Huber, Chroma, July 2025)](https://www.trychroma.com/research/context-rot)
 - [Lost in the Middle: How Language Models Use Long Contexts (Liu et al., 2023)](https://arxiv.org/abs/2307.03172)
-- Related on this site: [Prompt vs RAG vs Fine-Tuning](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning), [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching)
+- Related on this site: [Context Compaction, Resets & State](/ai-system-design/genai-system-design/context-compaction-resets-and-state), [Progressive Disclosure & Agent Instructions](/ai-system-design/genai-system-design/progressive-disclosure-and-agent-instructions), [Harness Engineering](/ai-system-design/genai-system-design/harness-engineering), [Prompt vs RAG vs Fine-Tuning](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning), [Prompt Caching](/ai-system-design/genai-system-design/prompt-caching)
 
 <InterviewQuestions>
-  <InterviewQuestion question="What is context engineering, and how is it different from prompt engineering?" category="Concepts" level="Junior">
-    Prompt engineering is about how to word the instructions and examples. Context engineering is about everything the model sees on a given turn: the instructions, tool definitions, retrieved documents, memory, conversation history and tool results, and which of them to include, in what order and at what length. It matters most for agents, because their context changes and grows on every turn.
+  <InterviewQuestion
+    question="What is context engineering, and how is it different from prompt engineering?"
+    category="Concepts"
+    level="Junior"
+  >
+    Prompt engineering is about how to word the instructions and examples. Context engineering is about everything the
+    model sees on a given turn: the instructions, tool definitions, retrieved documents, memory, conversation history
+    and tool results, and which of them to include, in what order and at what length. It matters most for agents,
+    because their context changes and grows on every turn.
   </InterviewQuestion>
-  <InterviewQuestion question="Your support agent gets worse after about twenty turns. How do you diagnose and fix it?" category="Architecture" level="Mid">
-    First measure: log the token count per source on every turn. Usually history and tool results have grown until they crowd out the instructions and push the evidence into the middle of the window. Fix it in order: trim or clear tool results once used, summarise old turns past a threshold such as 80 % of the budget, keep the last few turns verbatim, and place retrieved evidence right before the latest message. Then check on long conversations in the eval set that quality holds at turn 20 and turn 50.
+  <InterviewQuestion
+    question="Your support agent gets worse after about twenty turns. How do you diagnose and fix it?"
+    category="Architecture"
+    level="Mid"
+  >
+    First measure: log the token count per source on every turn. Usually history and tool results have grown until they
+    crowd out the instructions and push the evidence into the middle of the window. Fix it in order: trim or clear tool
+    results once used, summarise old turns past a threshold such as 80 % of the budget, keep the last few turns
+    verbatim, and place retrieved evidence right before the latest message. Then check on long conversations in the eval
+    set that quality holds at turn 20 and turn 50.
   </InterviewQuestion>
-  <InterviewQuestion question="When would you retrieve just in time instead of preloading context?" category="Trade-offs" level="Mid">
-    Preload when most turns need the same kind of evidence and latency matters, as in a help-centre bot answering one question per turn. Retrieve just in time when the agent's needs vary a lot from turn to turn, when the corpus is large or changes as the agent works (a codebase), or when many turns need nothing. The price is extra model turns and a dependence on the agent knowing what to look for, so a hybrid is common: load a small, stable core up front and let the agent search for the rest.
+  <InterviewQuestion
+    question="When would you retrieve just in time instead of preloading context?"
+    category="Trade-offs"
+    level="Mid"
+  >
+    Preload when most turns need the same kind of evidence and latency matters, as in a help-centre bot answering one
+    question per turn. Retrieve just in time when the agent's needs vary a lot from turn to turn, when the corpus is
+    large or changes as the agent works (a codebase), or when many turns need nothing. The price is extra model turns
+    and a dependence on the agent knowing what to look for, so a hybrid is common: load a small, stable core up front
+    and let the agent search for the rest.
   </InterviewQuestion>
   <InterviewQuestion question="Do sub-agents save tokens? When are they worth it?" category="Trade-offs" level="Senior">
-    No, they usually spend more in total, because each sub-agent reads its own material and the lead still has to coordinate. Anthropic reported its multi-agent research system used about 15 times the tokens of a chat. What they buy is a clean lead context: each sub-agent explores in its own window and returns a summary of a thousand or two tokens, so the lead can reason over findings instead of raw pages. They pay off for broad, parallel research and hurt when steps depend tightly on each other or must share the same detailed state.
+    No, they usually spend more in total, because each sub-agent reads its own material and the lead still has to
+    coordinate. Anthropic reported its multi-agent research system used about 15 times the tokens of a chat. What they
+    buy is a clean lead context: each sub-agent explores in its own window and returns a summary of a thousand or two
+    tokens, so the lead can reason over findings instead of raw pages. They pay off for broad, parallel research and
+    hurt when steps depend tightly on each other or must share the same detailed state.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="What is context rot, and how would you test your agent for it?"
+    category="Failure modes"
+    level="Mid"
+  >
+    Context rot is the drop in answer quality as the input grows, even when everything fits in the window. Chroma's 2025
+    report found it across 18 models on simple tasks, and found that text which looks relevant but is not makes it
+    worse. To test for it, take questions from your evaluation set and run each with a short context and with long ones,
+    with and without realistic distractors such as old tool output, and with the evidence at the start, middle and end.
+    Plot accuracy against context length; the point where it falls tells you where to set the compaction threshold.
+  </InterviewQuestion>
+  <InterviewQuestion
+    question="How do you lay out the context so prompt caching keeps working across an agent's calls?"
+    category="Architecture"
+    level="Senior"
+  >
+    Put what never changes first: instructions, then tool definitions in a fixed order, then long-lived memory. Put what
+    changes on every call after it: the history summary, retrieved chunks, tool results and the new message. A cache
+    matches a prefix, so one changed token early, such as a timestamp in the system prompt or a tool list in a different
+    order, makes every token after it a miss. In a turn with five model calls the stable prefix is read five times, so
+    getting the order right can make most of the input cacheable.
   </InterviewQuestion>
 </InterviewQuestions>
