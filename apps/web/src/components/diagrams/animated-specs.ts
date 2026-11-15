@@ -235,8 +235,15 @@ import s229 from "../../../assets/diagrams/animated/fundamentals/websockets";
 import s230 from "../../../assets/diagrams/animated/fundamentals/websockets-scaling";
 import s231 from "../../../assets/diagrams/animated/messenger/architecture";
 import s232 from "../../../assets/diagrams/animated/messenger/aws";
-import s233 from "../../../assets/diagrams/animated/transformer/architecture";
-import s234 from "../../../assets/diagrams/animated/uber-eats/architecture";
+import s233 from "../../../assets/diagrams/animated/rag/chunk-overlap";
+import s234 from "../../../assets/diagrams/animated/rag/closed-vs-open-book";
+import s235 from "../../../assets/diagrams/animated/rag/failure-map";
+import s236 from "../../../assets/diagrams/animated/rag/lost-in-the-middle";
+import s237 from "../../../assets/diagrams/animated/rag/pipeline";
+import s238 from "../../../assets/diagrams/animated/rag/retrieval-metrics";
+import s239 from "../../../assets/diagrams/animated/rag/similarity-topk";
+import s240 from "../../../assets/diagrams/animated/transformer/architecture";
+import s241 from "../../../assets/diagrams/animated/uber-eats/architecture";
 
 export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/behavioral/ai-lab-values-round": s0,
@@ -472,6 +479,13 @@ export const ANIMATED_SPECS: Record<string, AnySpec> = {
   "diagrams/animated/fundamentals/websockets-scaling": s230,
   "diagrams/animated/messenger/architecture": s231,
   "diagrams/animated/messenger/aws": s232,
-  "diagrams/animated/transformer/architecture": s233,
-  "diagrams/animated/uber-eats/architecture": s234,
+  "diagrams/animated/rag/chunk-overlap": s233,
+  "diagrams/animated/rag/closed-vs-open-book": s234,
+  "diagrams/animated/rag/failure-map": s235,
+  "diagrams/animated/rag/lost-in-the-middle": s236,
+  "diagrams/animated/rag/pipeline": s237,
+  "diagrams/animated/rag/retrieval-metrics": s238,
+  "diagrams/animated/rag/similarity-topk": s239,
+  "diagrams/animated/transformer/architecture": s240,
+  "diagrams/animated/uber-eats/architecture": s241,
 };
