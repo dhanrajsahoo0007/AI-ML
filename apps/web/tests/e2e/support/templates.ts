@@ -11,8 +11,8 @@ export interface TemplatePage {
 export const TEMPLATE_PAGES: TemplatePage[] = [
   { name: "home", url: "/" },
   { name: "hub", url: "/system-design" },
-  // The heaviest diagram article (largest HTML, six diagrams).
-  { name: "article-diagrams", url: "/ai-system-design/genai-system-design/transformer-architecture", diagram: true },
+  // A Mermaid-heavy article (three build-time diagrams). The Transformer pages moved to <AnimatedDiagram> specs.
+  { name: "article-diagrams", url: "/ai-system-design/genai-system-design/prompt-engineering-types", diagram: true },
   { name: "interview-subsection", url: "/interviews/rag/rag-fundamentals" },
   { name: "pricing", url: "/pricing" },
   { name: "legal", url: "/legal/terms" },
