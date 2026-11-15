@@ -91,14 +91,14 @@ export const TOP_K = 5;
 
 /**
  * The prompt for the main question. Working: about 200 tokens of instructions + 5 chunks × 400 tokens + a 15-token
- * question = 2,215 tokens, written "about 2,200 tokens".
+ * question = 2,215 tokens, written "≈ 2,200 tokens".
  */
 export const PROMPT = {
   instructionTokens: 200,
   contextTokens: TOP_K * CORPUS.chunkTokens,
   questionTokens: 15,
   total: 200 + TOP_K * CORPUS.chunkTokens + 15,
-  rounded: "about 2,200 tokens",
+  rounded: "≈ 2,200 tokens",
 } as const;
 
 /**
@@ -243,12 +243,14 @@ export function docStrip(
   const n = Math.ceil(tokens / perCell);
   const cell = width / n;
   const tone = opts.tone ?? RAG_TONE.text;
+  // Whole-unit edges: each cell ends exactly where the next begins, so rounding never makes neighbours overlap.
+  const edge = (i: number) => Math.round(x + i * cell);
   const cells: LayoutShape[] = Array.from({ length: n }, (_, i) => ({
     id: `${id}-${i}`,
     type: "cell",
-    x: round(x + i * cell),
+    x: edge(i),
     y,
-    w: round(cell),
+    w: edge(i + 1) - edge(i),
     h,
     tone,
     step: opts.step,
@@ -362,11 +364,12 @@ export function scatter(
     });
     if (p.label) {
       const left = opts.labelLeft?.includes(p.id);
-      const lw = Math.max(40, p.label.length * 6.6);
+      const half = (p.kind === "query" ? dot + 4 : dot) / 2;
+      const lw = p.label.length * 7 + 6;
       out.push({
         id: `${id}-${p.id}-label`,
         type: "text",
-        x: round(left ? px - dot / 2 - 4 - lw : px + dot / 2 + 4),
+        x: round(left ? px - half - 2 - lw : px + half + 2),
         y: py - 9,
         w: round(lw),
         h: 18,
@@ -418,6 +421,8 @@ export function rankList(
     cutLabel?: string;
     scoreW?: number;
     digits?: number;
+    /** Tone of the score cells (default lime, ranking); neutral keeps a figure within four tones. */
+    scoreTone?: LayoutTone;
     stepOf?: (rank: number) => number | undefined;
   } = {}
 ): LayoutShape[] {
@@ -465,7 +470,7 @@ export function rankList(
         w: scoreW,
         h: rowH,
         label: item.scoreLabel ?? item.score!.toFixed(opts.digits ?? 2),
-        tone: RAG_TONE.rank,
+        tone: opts.scoreTone ?? RAG_TONE.rank,
         step,
       });
     }
