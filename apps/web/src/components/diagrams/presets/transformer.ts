@@ -83,7 +83,7 @@ export function block(
 
 /**
  * A vector drawn as `n` touching cells from (x, y), left to right (or top to bottom with `vertical`). Ids are
- * `<id>-0` … `<id>-<n-1>`. `values` (0–1) shade the cells; `labels` write in them.
+ * `<id>-0` … `<id>-<n-1>`. `values` (0–1) shade the cells; `labels` write in them. Cells are `quiet`.
  */
 export function vector(
   id: string,
@@ -106,13 +106,15 @@ export function vector(
     weight: opts.values?.[i],
     label: opts.labels?.[i],
     step: opts.step,
+    quiet: true,
     highlight: opts.highlight,
   }));
 }
 
 /**
  * A matrix of touching cells with its top-left at (x, y); `values[r][c]` (0–1) becomes each cell's weight. Ids are
- * `<id>-<r>-<c>`. Optional row labels sit to the left, column labels above, each as text shapes; `showValues` writes
+ * `<id>-<r>-<c>`. Cells and labels are `quiet` (no NEW ring each in a stepper; label the step with one other shape).
+ * Optional row labels sit to the left, column labels above, each as text shapes; `showValues` writes
  * every value in its cell with `digits` decimals.
  */
 export function matrix(
@@ -145,6 +147,7 @@ export function matrix(
         weight: Math.min(1, Math.max(0, v)),
         label: opts.showValues ? v.toFixed(opts.digits ?? 2).replace(/^0\./, ".") : undefined,
         step: opts.step,
+        quiet: true,
       })
     )
   );
@@ -160,6 +163,7 @@ export function matrix(
       label,
       tone: labelTone,
       step: opts.step,
+      quiet: true,
     })
   );
   opts.colLabels?.forEach((label, c) =>
@@ -173,6 +177,7 @@ export function matrix(
       label,
       tone: labelTone,
       step: opts.step,
+      quiet: true,
     })
   );
   return out;
@@ -189,7 +194,8 @@ export function residual(
   outX: number,
   opts: { step?: number; tone?: LayoutTone } = {}
 ): LayoutShape {
-  const midY = to.y + (to.h ?? BLOCK_H) / 2;
+  // A circle's y is already its centre; boxes are anchored at the top.
+  const midY = to.type === "circle" ? to.y : to.y + (to.h ?? BLOCK_H) / 2;
   return {
     id,
     type: "arrow",

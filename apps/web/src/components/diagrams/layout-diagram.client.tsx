@@ -54,7 +54,7 @@ export function LayoutDiagram({
   const view = layoutView(spec, current);
   const byId = new Map(view.shapes.map((v) => [v.shape.id, v.shape]));
   const added = view.shapes.flatMap((v) =>
-    v.phase === "new" && v.shape.label ? [v.shape.label.replace(/\n/g, " ")] : []
+    v.phase === "new" && v.shape.label && !v.shape.quiet ? [v.shape.label.replace(/\n/g, " ")] : []
   );
   // Arrow markers for the layout-only tones, added only when the spec uses them so other diagrams keep their defs.
   const extra = LAYOUT_ONLY_TONES.filter(
@@ -130,7 +130,7 @@ function Shape({ shape, phase }: { shape: LayoutShape; phase: Phase }) {
       data-hl={shape.highlight ? "true" : undefined}
     >
       {shape.highlight && <HighlightRing bounds={b} tone={tone} pad={shape.type === "cell" ? 4 : 6} rx={rx + 4} />}
-      {phase === "new" && <NewRing bounds={b} pad={shape.type === "cell" ? 4 : 7} />}
+      {phase === "new" && !shape.quiet && <NewRing bounds={b} pad={shape.type === "cell" ? 4 : 7} />}
       {shape.type === "circle" && (
         <circle
           cx={cx}
