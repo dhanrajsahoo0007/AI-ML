@@ -1,0 +1,23 @@
+title: An LLM serving stack
+alt: >-
+  Incoming requests on the left flow into a dotted panel titled "Scheduler: continuous batching". Inside it, a grid
+  shows three batch slots over six steps: slot 1 runs request A for three steps and then D, slot 2 runs B for all six
+  steps, slot 3 runs C for one step and then E. D and E are shaded and a note says they join the batch the moment A
+  and C finish. An arrow labelled "new prompts" goes down to a grey Prefill box ("whole prompt in parallel,
+  compute-bound") and an arrow labelled "running batch" goes down to a grey Decode box ("one token per step,
+  memory-bound"). Between them, an orange FlashAttention kernel box ("exact, tiled") sends dashed orange arrows to both.
+  Prefill writes the prompt's keys and values down into a dotted panel titled "Paged KV cache". Decode sends "append new
+  K, V" down into the cache and receives "read all K, V" back up from it, and sends tokens up to a "Streamed tokens"
+  box at the top right after each step. Inside the cache, each block holds 4 tokens as a teal row of keys over a
+  violet row of values. One shared-prefix block (a system prompt) is stored once and branches to two sequences: A
+  continues with three blocks, the last holding one token; B continues with two blocks, the last holding two. Two
+  empty grey free blocks sit to the right. A note says blocks are allocated as a sequence grows, so only its last
+  block has empty slots. Below the cache, a "GQA: fewer KV heads" box sends a dashed arrow up into it, labelled
+  "smaller K and V per token". A note says blocks are drawn with 4 tokens; vLLM's default is 16.
+caption: >-
+  Continuous batching keeps the GPU full, prefill writes each prompt's keys and values into fixed-size cache blocks
+  (shared prefixes stored once), and every decode step reads the whole cache to append one token; FlashAttention
+  serves both phases and GQA shrinks every block.
+tags: [transformer, inference, kv-cache, serving, genai]
+source: original
+created: 2026-11-15
