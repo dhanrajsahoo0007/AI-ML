@@ -8,8 +8,10 @@ Tool use turns a language model into something that can look things up and take 
 ## TL;DR
 
 - **Function calling**: the model sees tool names, descriptions and JSON schemas, and emits a structured call; your code executes it and returns the result.
-- Tool quality depends on **clear descriptions, small strict schemas, useful errors and compact outputs**.
-- **MCP** is an open protocol where **servers** expose tools, resources and prompts, and **clients** inside AI applications discover and use them.
+- The model never runs anything. It writes the call; the **app** checks it, runs it and sends the result back in the next request.
+- Tool quality depends on **clear descriptions, small strict schemas, useful errors and compact outputs**. Every definition is resent with **every request**, so each one costs input tokens.
+- Independent lookups can go out as **parallel tool calls** in one response, which saves a model call and a tool wait.
+- **MCP** is an open protocol where **servers** expose tools, resources and prompts, and **clients** inside AI applications discover and use them, one client per server.
 - Security matters: tools act with real permissions, and tool outputs can carry **prompt injection**.
 - Measure **tool selection accuracy, argument accuracy and error recovery**.
 
@@ -19,15 +21,185 @@ Imagine giving an assistant a phone with a set of apps. Each app has a label exp
 
 ## Core concepts
 
+Every figure on this page follows one task from [Agent Architectures](/ai-system-design/genai-system-design/agent-architectures). Brightpost's support agent gets this message from customer 1847: "My kettle arrived cracked. It's order 4471. Can I get my money back?" It has four tools: `get_order(order_id)`, `search_help(query)`, `create_refund(order_id, amount)` and `send_email(to, subject, body)`. The JSON on this page follows the Anthropic Messages API. Other APIs use different field names for the same parts.
+
 1. **Tool definition.** Name, description of when to use it, and a JSON schema for arguments, with types, enums and required fields.
 
-2. **Tool call.** The model emits a structured request (tool name plus arguments). Many APIs support constrained decoding so arguments always match the schema.
+Here is `get_order` taken apart, with what the four definitions cost on each request.
+
+<AnimatedDiagram
+  spec="animated/agents/tool-schema"
+  minWidth={620}
+  caption="The description does most of the work, and every definition rides along on every request, used or not."
+/>
+
+**How to read it.** Each row is one field of the definition. The model writes the `name` into its call. It reads the `description` to decide whether this tool fits the request. The Claude docs call detailed descriptions "by far the most important factor" in tool performance. The `input_schema` says which arguments to fill in, typed so the app can reject a bad call before it runs. The bar underneath is what the request carries before the customer's message even starts.
+
+**The numbers.** With tools in a request, the Claude API adds a tool-use system prompt: 286 tokens on Claude Opus 5.5. The four Brightpost definitions add an illustrative 80 + 90 + 110 + 130 = 410 tokens. That is 286 + 410 = **696 tokens per request**. The refund takes five model calls, so 5 × 696 = **3,480 input tokens** go on tools alone. Twenty tools would multiply the definition share by five.
+
+Here is the definition as the app sends it:
+
+```json
+{
+  "name": "get_order",
+  "description": "Look up one of the signed-in customer's orders by its number. Returns the item, price, delivery date and status.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "order_id": { "type": "string", "description": "The order number, such as 4471" }
+    },
+    "required": ["order_id"]
+  }
+}
+```
+
+2. **Tool call.** The model emits a structured request (tool name plus arguments). Many APIs support constrained decoding so arguments always match the schema (Claude calls it strict tool use: `"strict": true` on the definition).
 
 3. **Execution and result.** The application validates arguments, runs the tool, and returns the result to the model as a tool message.
 
+Here are concepts 2 and 3 as messages, one step per message.
+
+<AnimatedDiagram
+  spec="animated/agents/function-calling"
+  stepper
+  minWidth={620}
+  caption="The model only writes the call; the app checks it, runs it and sends the result back in the next request."
+/>
+
+**How to read it.** Solid arrows are requests; dashed arrows are replies. The model talks only to the chat service. The chat service is the only thing that talks to `get_order`. Each step below shows the exact message.
+
+**Step 1: the app sends the message and the tool definitions.** One request holds the model choice, every tool definition and the conversation so far. The other three definitions are left out here:
+
+```json
+{
+  "model": "claude-opus-5-5",
+  "max_tokens": 1024,
+  "tools": [
+    {
+      "name": "get_order",
+      "description": "Look up one of the signed-in customer's orders by its number. Returns the item, price, delivery date and status.",
+      "input_schema": { "type": "object", "properties": { "order_id": { "type": "string" } }, "required": ["order_id"] }
+    }
+  ],
+  "messages": [{ "role": "user", "content": "My kettle arrived cracked. It's order 4471. Can I get my money back?" }]
+}
+```
+
+**Step 2: the model returns a tool call.** The reply holds a `tool_use` block instead of words, and `stop_reason` says why the model stopped (fields trimmed):
+
+```json
+{
+  "role": "assistant",
+  "stop_reason": "tool_use",
+  "content": [{ "type": "tool_use", "id": "toolu_01", "name": "get_order", "input": { "order_id": "4471" } }]
+}
+```
+
+**Step 3: the app runs the tool.** The app checks that `order_id` is a string of digits, adds customer 1847 from the signed-in session, and calls its orders service. The service returns more than the model needs:
+
+```json
+{
+  "order_id": "4471",
+  "customer_id": "1847",
+  "item": "kettle",
+  "price_gbp": 42.0,
+  "delivered": "12 Nov",
+  "status": "delivered",
+  "warehouse": "LEEDS-2"
+}
+```
+
+**Step 4: the app sends the result back.** The next request resends everything so far: the customer's message, then the model's step-2 reply unchanged as an assistant message, then this new user message. Its `tool_result` names the call it answers by `tool_use_id`. The app keeps the five fields the model needs and drops the customer id and the warehouse:
+
+```json
+{
+  "role": "user",
+  "content": [
+    {
+      "type": "tool_result",
+      "tool_use_id": "toolu_01",
+      "content": "Order 4471: kettle, £42.00, delivered 12 Nov, status delivered"
+    }
+  ]
+}
+```
+
+**Step 5: the model picks the next step.** It knows the order but not the rule for damaged items, so it asks for another tool. The loop ends only when a reply has no tool call:
+
+```json
+{
+  "role": "assistant",
+  "stop_reason": "tool_use",
+  "content": [
+    { "type": "tool_use", "id": "toolu_02", "name": "search_help", "input": { "query": "damaged item refund" } }
+  ]
+}
+```
+
+<Callout tone="red" title="What breaks">
+  Trusting the model's arguments. The model fills `order_id` from text it read, and that text can be a pasted note
+  asking for a stranger's order 5122. If `get_order` took a customer id from the model too, one injected line would leak
+  another customer's order. Take identity and permissions from the session, never from the call, and validate every
+  argument against the schema before running it.
+</Callout>
+
 4. **Parallel and sequential calls.** Models can request several independent calls at once, or chain calls where one depends on another.
 
+The order lookup and the help search do not depend on each other. Here they are asked one at a time, then together.
+
+<AnimatedDiagram
+  spec="animated/agents/parallel-tool-calls"
+  stepper
+  minWidth={620}
+  caption="Independent lookups in one response cost one model call and one tool wait instead of two of each."
+/>
+
+**How to read it.** Step 1: each model call asks for one tool, so the second lookup waits for a whole extra model call. Step 2: one model response holds both calls. The app runs them at the same time, so the tool wait is the slower of the two, not the sum.
+
+**The numbers.** At an illustrative 1.5 s per model call and 0.3 s per tool call: one after the other, 1.5 + 0.3 + 1.5 + 0.3 = **3.6 s** before the next model call starts. Both at once, 1.5 + 0.3 = **1.8 s**. The whole refund drops from 5 × 1.5 + 4 × 0.3 = 8.7 s to 4 × 1.5 + 3 × 0.3 = **6.9 s**, about a fifth faster, and one model call cheaper.
+
+The response holds two `tool_use` blocks. The app sends both results back in **one** user message. The Claude docs warn that splitting them across messages teaches the model to stop calling tools in parallel.
+
+```json
+{
+  "role": "user",
+  "content": [
+    {
+      "type": "tool_result",
+      "tool_use_id": "toolu_01",
+      "content": "Order 4471: kettle, £42.00, delivered 12 Nov, status delivered"
+    },
+    { "type": "tool_result", "tool_use_id": "toolu_02", "content": "Damaged on arrival: full refund within 30 days" }
+  ]
+}
+```
+
+<Callout tone="red" title="What breaks">
+  Parallel calls with side effects or hidden order. If the model asks for `create_refund` and `send_email` in the same
+  response, running both at once can send "your refund is on its way" before the refund fails. The API does not fix an
+  order; your app chooses. Run reads in parallel, and run anything that changes state one at a time, in order, stopping
+  at the first error.
+</Callout>
+
 5. **Tool choice control.** You can force a specific tool, require some tool, or let the model decide.
+
+The Messages API calls this setting `tool_choice` and has four modes.
+
+<AnimatedDiagram
+  spec="animated/agents/tool-choice-modes"
+  minWidth={620}
+  caption="Most agents run on auto; forcing a call trades the model's judgement for a guaranteed tool call."
+/>
+
+**How to read it.** Read down a column to see what the model may return under that mode. `auto` lets it answer in words or call any number of tools. `any` makes it call at least one tool. `tool` makes it call the named tool, here `get_order`, with no words before it. `none` lets it answer in words only. Forcing a call suits extraction jobs, where the "tool" is a schema you want filled.
+
+Parallel calls are switched off inside the same object. With `auto`, this limits the model to at most one tool per response:
+
+```json
+{ "tool_choice": { "type": "auto", "disable_parallel_tool_use": true } }
+```
+
+Two provider differences matter. OpenAI calls `any` "required" and switches off parallel calls with a top-level `parallel_tool_calls: false`. On Claude, the newest models (Claude Opus 5.5, Claude Sonnet 5.5, Claude Fable 5.1 and 5.2) reject `any` and `tool` with a 400 error. On those, use `auto`, name the tool in the prompt, and set `"strict": true` so the arguments still match the schema.
 
 6. **MCP architecture.** A host application (an IDE, a chat app, an agent) runs MCP clients; each connects to an MCP server that exposes **tools** (actions), **resources** (readable data) and **prompts** (templates). Servers can run locally or remotely.
 
@@ -37,19 +209,79 @@ Imagine giving an assistant a phone with a set of apps. Each app has a label exp
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    USER["User"] --> HOST["AI application (host)"]
-    HOST --> LLM["LLM"]
-    LLM -->|"tool call: name + JSON args"| HOST
-    HOST --> C1["MCP client"] --> S1["MCP server: GitHub<br/>(tools, resources)"]
-    HOST --> C2["MCP client"] --> S2["MCP server: database"]
-    HOST --> C3["MCP client"] --> S3["MCP server: internal API"]
-    S1 --> HOST
-    S2 --> HOST
-    S3 --> HOST
-    HOST -->|"tool result"| LLM
-    HOST --> APPROVE["Permission policy<br/>+ user approval"]:::accent
+Here is Brightpost's agent rebuilt on MCP: the same four tools, now served by three MCP servers. Roles and methods follow the MCP specification, revision **2026-07-28**.
+
+<AnimatedDiagram
+  spec="animated/agents/mcp-architecture"
+  stepper
+  minWidth={620}
+  caption="The host owns the conversation and the model; each server sees only its own client's requests."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The host runs the conversation">
+    The host is the application the customer talks to, here Brightpost's chat service. It holds the whole conversation
+    and is the only part that calls the model. Gap: the host has no tools yet.
+  </StepCard>
+  <StepCard n={2} title="One client per server">
+    The host starts one MCP client for each server it trusts. The orders server runs on the same machine, so its client
+    talks over stdio (lines of JSON on a child process's standard streams). The help centre and email servers are
+    remote, so their clients use Streamable HTTP (each message an HTTP POST). Why one client each: a server never sees
+    another server's traffic or the conversation.
+  </StepCard>
+  <StepCard n={3} title="Each client lists its server's tools">
+    Each client sends `tools/list`. The host merges the answers, four tools from three servers, and sends them to the
+    model as ordinary tool definitions. The model cannot tell which tool lives where.
+  </StepCard>
+  <StepCard n={4} title="The model asks; the host routes the call">
+    The model returns a tool call for `get_order`, exactly as in the function-calling figure. The host checks its
+    policy, then the orders client sends `tools/call` to the orders server. The result goes back to the model as a
+    `tool_result`.
+  </StepCard>
+  <StepCard n={5} title="The host reads a resource for context">
+    Not everything is a tool. The host reads the "Damaged on arrival" help article with `resources/read` and adds it to
+    the model's context itself. Resources are data the application chooses to attach; the model does not call them.
+  </StepCard>
+</StepCards>
+
+Each server exposes up to three kinds of thing, and the spec says who controls each:
+
+| Primitive | Controlled by                                    | Brightpost example                                           |
+| --------- | ------------------------------------------------ | ------------------------------------------------------------ |
+| Tools     | The model: it decides when to call them          | `get_order` and `create_refund` on the orders server         |
+| Resources | The application: the host decides what to attach | The "Damaged on arrival" help article                        |
+| Prompts   | The user: picked from a menu or slash command    | A "refund confirmation" email template a support agent picks |
+
+Here is step 4's `tools/call` as the orders client sends it. The protocol is JSON-RPC 2.0. Since the 2026-07-28 revision MCP is stateless: there is no handshake, so every request carries its protocol version and the client's capabilities in `_meta`.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "method": "tools/call",
+  "params": {
+    "name": "get_order",
+    "arguments": { "order_id": "4471" },
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {}
+    }
+  }
+}
+```
+
+The orders server answers with the same text the model saw before:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "result": {
+    "resultType": "complete",
+    "content": [{ "type": "text", "text": "Order 4471: kettle, £42.00, delivered 12 Nov, status delivered" }],
+    "isError": false
+  }
+}
 ```
 
 A tool call end to end:
@@ -60,18 +292,67 @@ A tool call end to end:
 4. The client sends the call to the server, which executes it.
 5. The result returns to the model, which continues or answers.
 
+Clients can also offer features to servers. The one in active use is **elicitation**: a server asks, through the host, for more input from the user. The 2026-07-28 revision deprecates sampling (a server borrowing the host's model) and roots (a server asking which folders it may use).
+
+<Callout tone="red" title="What breaks">
+  Installing a server you do not control. Its tool descriptions go into the model's context like any other text, and the
+  spec says to treat descriptions and annotations as untrusted unless the server is trusted. A description that says
+  "always CC this address" can steer every call. Allow-list servers, review their descriptions as you would code, and
+  keep the host's approval step for anything that acts.
+</Callout>
+
 ## Deep dive
+
+### Worked example: `get_order` from definition to result
+
+This follows the [function-calling figure](#core-concepts) step by step, with the sizes and ids involved.
+
+| Step | What travels                                                                                          | Numbers                                           |
+| ---- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| 1    | Request 1: four tool definitions and the customer's message                                           | 286 + 410 = 696 tool tokens before the message    |
+| 2    | Response 1: `tool_use` `toolu_01`, `get_order` with `{"order_id": "4471"}`; `stop_reason: "tool_use"` | 1 call, 0 words                                   |
+| 3    | The app checks `order_id`, adds customer 1847 and calls the orders service                            | 7 fields back; 5 kept                             |
+| 4    | Request 2: request 1 + the `tool_use` + a `tool_result` for `toolu_01`                                | another 696 tool tokens, plus the growing history |
+| 5    | Response 2: `tool_use` `toolu_02`, `search_help("damaged item refund")`                               | 3 more calls before the reply                     |
+
+Now move `get_order` onto the orders MCP server and run it again. Steps 1, 2, 4 and 5 do not change by one byte: the model sees the same definition, writes the same call and reads the same result. Only step 3 changes, from a function call inside the app to `tools/call` through the orders client.
+
+Three things to take from it:
+
+- **The model's job is the same with or without MCP.** MCP changes how the host finds and reaches tools, not what the model sees.
+- **The ids tie the loop together.** Every `tool_result` names the `tool_use_id` it answers. With two parallel calls, that is how the model knows which result is which.
+- **Tokens repeat, results accumulate.** The 696 tool tokens come back on every request, and each result stays in the history for every later call. Trimming the result in step 3 from 7 fields to 5 saves those tokens on every later call.
 
 ### Designing a tool the model uses correctly
 
-```mermaid
-flowchart TB
-    NAME["Clear, specific name<br/>search_orders, not query"] --> DESC["Description: what it does,<br/>when to use, when not to"]
-    DESC --> SCHEMA["Small schema: typed fields,<br/>enums, required args, examples"]
-    SCHEMA --> OUTPUT["Compact, structured output<br/>(only what the model needs)"]
-    OUTPUT --> ERR["Actionable errors:<br/>'date must be YYYY-MM-DD'"]:::accent
-    ERR --> TEST["Eval: selection and argument accuracy"]
-```
+Work through these in order for each tool. Each one is a common reason the model picks the wrong tool or fills it in badly.
+
+<StepCards>
+  <StepCard n={1} title="A clear, specific name">
+    `get_order`, not `query` or `lookup`. With several servers, prefix by service (`orders_get`, `email_send`) so two
+    tools called `search` cannot collide.
+  </StepCard>
+  <StepCard n={2} title="A description that says when, and when not">
+    What it does, when to use it, what it returns and what it does not. "Use for one order by number. Does not list a
+    customer's orders." Three or four sentences beats one.
+  </StepCard>
+  <StepCard n={3} title="A small, strict schema">
+    Typed fields, enums for fixed choices, required fields marked, an example value in each field's description.
+    `create_refund` takes `order_id` and `amount`, not a free-text "instructions" field.
+  </StepCard>
+  <StepCard n={4} title="Compact, structured output">
+    Return what the next decision needs. The orders service sends seven fields; the model gets five. Return ids and
+    summaries, and let the model ask for detail.
+  </StepCard>
+  <StepCard n={5} title="Errors the model can act on">
+    "order_id must be digits, such as 4471" lets the model fix its call. "Error 500" makes it guess. Send tool failures
+    back as results marked as errors (`is_error: true` in Claude, `isError: true` in MCP), not as crashes.
+  </StepCard>
+  <StepCard n={6} title="An evaluation of selection and arguments">
+    Keep test prompts with the expected tool and arguments, and measure how often the model picks the right tool and
+    fills it in correctly. Re-run them after every description change.
+  </StepCard>
+</StepCards>
 
 Tips that make a big difference:
 
@@ -82,23 +363,25 @@ Tips that make a big difference:
 
 ## Trade-offs
 
-| Decision | Option A | Option B | Guidance |
-| --- | --- | --- | --- |
-| Many narrow tools vs few general tools | Precise | Fewer choices, less confusion | Group related actions; keep the count manageable |
-| Raw SQL tool vs specific query tools | Flexible | Safe, predictable | Specific tools for production; raw SQL only read-only and sandboxed |
-| Custom integrations vs MCP | Full control | Reusable across hosts, ecosystem of servers | MCP when tools should work across apps |
-| Auto-execute vs confirm | Fast | Safe | Confirm side effects and anything external |
+| Decision                               | Option A                         | Option B                                    | Guidance                                                            |
+| -------------------------------------- | -------------------------------- | ------------------------------------------- | ------------------------------------------------------------------- |
+| Many narrow tools vs few general tools | Precise                          | Fewer choices, less confusion               | Group related actions; keep the count manageable                    |
+| Raw SQL tool vs specific query tools   | Flexible                         | Safe, predictable                           | Specific tools for production; raw SQL only read-only and sandboxed |
+| Custom integrations vs MCP             | Full control                     | Reusable across hosts, ecosystem of servers | MCP when tools should work across apps                              |
+| Auto-execute vs confirm                | Fast                             | Safe                                        | Confirm side effects and anything external                          |
+| Parallel vs one call at a time         | Fewer model calls, lower latency | Fixed order, simpler error handling         | Parallel for independent reads; one at a time for writes            |
 
 ## Real-world examples
 
 - Toolformer showed language models can learn when to call APIs such as calculators and search.
 - Major LLM APIs support function calling with JSON schemas and parallel tool calls.
-- MCP was introduced as an open standard in late 2024 and is supported by a growing set of clients and servers for code hosts, databases, file systems and business tools.
+- MCP was introduced as an open standard in late 2024 and is supported by a growing set of clients and servers for code hosts, databases, file systems and business tools. In December 2025 Anthropic donated it to the Agentic AI Foundation, a fund under the Linux Foundation.
 
 ## Common pitfalls
 
 - Vague tool descriptions, so the model picks the wrong tool.
 - Returning thousands of tokens of raw data per call.
+- Dozens of tool definitions on every request, most of them never used.
 - Trusting tool outputs as instructions (indirect prompt injection).
 - Broad credentials on servers, which turn one bad call into a big incident.
 - No evaluation of tool-call accuracy.
@@ -117,28 +400,46 @@ Tips that make a big difference:
 
 ## Further reading
 
-- [Model Context Protocol documentation](https://modelcontextprotocol.io)
+- [Define tools (Claude API documentation)](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools)
+- [Parallel tool use (Claude API documentation)](https://platform.claude.com/docs/en/agents-and-tools/tool-use/parallel-tool-use)
+- [Tool use with Claude: pricing and tool-use tokens (Claude API documentation)](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview)
+- [Function calling (OpenAI API documentation)](https://developers.openai.com/api/docs/guides/function-calling)
+- [Model Context Protocol specification, revision 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
+- [MCP 2026-07-28: key changes from 2025-11-25](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
+- [Linux Foundation announces the Agentic AI Foundation (2025)](https://www.linuxfoundation.org/press/linux-foundation-announces-the-formation-of-the-agentic-ai-foundation)
 - [Toolformer: Language Models Can Teach Themselves to Use Tools (Schick et al., 2023)](https://arxiv.org/abs/2302.04761)
 - [Gorilla: Large Language Model Connected with Massive APIs (Patil et al., 2023)](https://arxiv.org/abs/2305.15334)
 - [Not What You've Signed Up For: Indirect Prompt Injection (Greshake et al., 2023)](https://arxiv.org/abs/2302.12173)
 
 <InterviewQuestions>
   <InterviewQuestion question="How does function calling work?" category="Concepts" level="Junior">
-    You give the model a list of tools, each with a name, description and JSON schema for its arguments. When the model decides a tool is needed, it outputs a structured call with arguments. Your application validates and executes the call, sends the result back as a message, and the model continues with that information.
+    You give the model a list of tools, each with a name, description and JSON schema for its arguments. When the model
+    decides a tool is needed, it outputs a structured call with arguments. Your application validates and executes the
+    call, sends the result back as a message, and the model continues with that information.
   </InterviewQuestion>
   <InterviewQuestion question="What is MCP and what problem does it solve?" category="Concepts" level="Mid">
-    The Model Context Protocol is an open standard for connecting AI applications to tools and data. Servers expose tools, resources and prompts through a common interface; clients in host applications discover and use them. It replaces many one-off integrations with reusable servers that work across any compatible application.
+    The Model Context Protocol is an open standard for connecting AI applications to tools and data. Servers expose
+    tools, resources and prompts through a common interface; clients in host applications discover and use them. It
+    replaces many one-off integrations with reusable servers that work across any compatible application.
   </InterviewQuestion>
   <InterviewQuestion question="What makes a tool easy for an LLM to use correctly?" category="Architecture" level="Mid">
-    A specific name, a description that says when to use it and when not to, a small strict schema with enums and examples, compact structured output, and clear error messages the model can act on. Overlapping tools and huge outputs are the most common causes of wrong calls.
+    A specific name, a description that says when to use it and when not to, a small strict schema with enums and
+    examples, compact structured output, and clear error messages the model can act on. Overlapping tools and huge
+    outputs are the most common causes of wrong calls.
   </InterviewQuestion>
   <InterviewQuestion question="How do you secure tool use?" category="Failure modes" level="Senior">
-    Give each tool least-privilege credentials, validate arguments in code, require user approval for side effects, sandbox execution, rate-limit and log every call, and treat tool outputs as untrusted data so injected instructions cannot trigger further actions. Review which MCP servers are allowed and how they authenticate.
+    Give each tool least-privilege credentials, validate arguments in code, require user approval for side effects,
+    sandbox execution, rate-limit and log every call, and treat tool outputs as untrusted data so injected instructions
+    cannot trigger further actions. Review which MCP servers are allowed and how they authenticate.
   </InterviewQuestion>
   <InterviewQuestion question="How would you evaluate tool use?" category="Evaluation" level="Mid">
-    Build test prompts with the expected tool and arguments, and measure tool selection accuracy, argument accuracy, unnecessary calls and recovery after errors. Then run end-to-end tasks in a sandbox and check outcomes. Track these per tool to find which descriptions or schemas need work.
+    Build test prompts with the expected tool and arguments, and measure tool selection accuracy, argument accuracy,
+    unnecessary calls and recovery after errors. Then run end-to-end tasks in a sandbox and check outcomes. Track these
+    per tool to find which descriptions or schemas need work.
   </InterviewQuestion>
   <InterviewQuestion question="What are MCP resources vs tools?" category="Concepts" level="Mid">
-    Tools are actions the model can invoke, such as creating an issue or running a query, and may have side effects. Resources are readable data the host can provide as context, such as files or records, identified by URIs. Prompts are reusable templates a server offers. Separating them clarifies what is read-only and what acts.
+    Tools are actions the model can invoke, such as creating an issue or running a query, and may have side effects.
+    Resources are readable data the host can provide as context, such as files or records, identified by URIs. Prompts
+    are reusable templates a server offers. Separating them clarifies what is read-only and what acts.
   </InterviewQuestion>
 </InterviewQuestions>

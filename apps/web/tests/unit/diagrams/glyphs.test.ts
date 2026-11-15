@@ -109,6 +109,11 @@ describe("diagram glyphs", () => {
       "reranker",
       "prompt",
       "graph",
+      // Agents batch.
+      "tool",
+      "plan",
+      "approval",
+      "sandbox",
     ];
     for (const name of expected) expect(GLYPH_NAMES, name).toContain(name);
     expect(GLYPH_NAMES).toHaveLength(expected.length);
@@ -159,6 +164,7 @@ describe("diagram glyphs", () => {
     expect(isGlyph("folder-share")).toBe(true);
     expect(isGlyph("pipeline")).toBe(true);
     expect(isGlyph("vector-index")).toBe(true);
+    expect(isGlyph("approval")).toBe(true);
     expect(isGlyph("not-a-glyph")).toBe(false);
     expect(isGlyph("")).toBe(false);
     expect(isGlyph(undefined)).toBe(false);

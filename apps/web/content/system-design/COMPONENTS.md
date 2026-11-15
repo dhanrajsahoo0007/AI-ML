@@ -765,7 +765,7 @@ Tones: `blue`, `green`, `orange`, `red`, `violet`, `teal`, `neutral` (the defaul
 Layout specs (shapes and groups) and architecture specs (nodes, zones and edges) may also use two diagram-only tones,
 `pink` and `lime` (type `LayoutTone`), and a third, stronger value per tone, the pastel block fill `--dg-<tone>-fill`
 (layout shape `fill: "pastel"`, architecture card node `fill: "pastel"`). Sequence lanes keep the seven tones. Pink and
-lime are not section tones. Two figure families have a fixed legend in code:
+lime are not section tones. Three figure families have a fixed legend in code:
 
 - Transformer: `ROLE_TONE` in `src/components/diagrams/presets/transformer.ts` (embeddings `pink`, attention
   `orange`, feed-forward `blue`, Add & Norm `lime`, Linear `violet`, Softmax `green`).
@@ -774,6 +774,10 @@ lime are not section tones. Two figure families have a fixed legend in code:
   the LLM and the answer `green`, failure `red`, user and orchestration `neutral`). At most four tones plus neutral in
   one figure; red only where something breaks. Case-study architectures keep the zone table in
   `CASE-STUDY-FORMAT.md`.
+- Agents: `AGENT_TONE` in `src/components/diagrams/presets/agents.ts` (the model, a thought and the answer `green`,
+  the user's task and a human approver `orange`, a tool call or tool `teal`, a tool result or observation `blue`,
+  memory and state `violet`, a check, grader or guardrail `lime`, failure `red`, harness and instructions `neutral`,
+  embeddings `pink`). Sequence lanes use `SEQUENCE_TONE` from the same file (no lime or pink on lanes).
 
 Zone `kind`:
 
@@ -989,6 +993,15 @@ document as token cells with chunk marks), `chunkRow`, `scatter` (a 2-D embeddin
 and `stageStrip` (the six-stage locator). A number that appears in two figures must come from one constant there.
 `assets/diagrams/animated/rag/pipeline.ts` is the reference architecture spec.
 
+Agents figures (`assets/diagrams/animated/agents/`) build theirs with `src/components/diagrams/presets/agents.ts`: the
+legend `AGENT_TONE`, the two running examples (the Brightpost support agent: `BRIGHTPOST`, `TOOLS`, `HAPPY_PATH`,
+`LATENCY_S`, `AUTONOMY_LADDER`; the bug-fix coding agent: `CODING_TASK`, `CODING_STEPS`, `CODING_CONTEXT`), the shared
+arithmetic (`COMPOUNDING`, `PASS_K`, `passAtK`, `passHatK`) and five builders: `loopRing` (the agent loop as stations
+on a ring with an exit to "Done"), `miniLoop` (the loop as a small locator row with one station coloured),
+`traceRows` (one row per step, chips in legend colours; columns size themselves to their labels), `contextBar` (the
+context window as a stacked token bar with free space) and `patternTile` (the five workflow patterns with identical
+node sizes). `assets/diagrams/animated/agents/agent-loop.ts` is the reference architecture spec.
+
 Example, `assets/diagrams/animated/databases/hash-buckets.ts`:
 
 ```ts
@@ -1186,6 +1199,10 @@ label underneath (data stores, logs), or the default `"card"` for a boxed node w
 | `reranker`      | Three list rows with a curved arrow lifting the bottom one to the top               |
 | `prompt`        | A framed stack: instruction band, a context block with lines, a filled question bar |
 | `graph`         | Six nodes joined by edges, the centre node filled (a knowledge graph)               |
+| `tool`          | Wrench: a round head with an open jaw on a diagonal handle (a tool the agent calls) |
+| `plan`          | Clipboard with three check boxes, the first two ticked (a plan or checklist)        |
+| `approval`      | A person with a filled check-mark badge (a human approver)                          |
+| `sandbox`       | A small box inside a dashed boundary (an isolated run environment)                  |
 
 ---
 

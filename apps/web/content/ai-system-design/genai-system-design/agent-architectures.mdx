@@ -10,6 +10,7 @@ Agent design questions test whether you can choose the simplest structure that s
 - Start from an **augmented LLM** (model plus retrieval, tools and memory), then add structure only as needed.
 - **Workflows** have code-defined control flow: prompt chaining, routing, parallelization, orchestrator-workers, evaluator-optimizer.
 - **Agents** let the model decide the next step in a loop: ReAct, plan-and-execute, reflection.
+- In every agent the model only **asks** for a tool; the **harness** (your code) runs it, keeps the state and decides when to stop or wait for a person.
 - **State machines and graphs** (for example with LangGraph) give agents explicit, testable control flow with checkpoints.
 - Choose by **predictability vs flexibility**, cost, latency and how verifiable the outcome is.
 
@@ -17,70 +18,264 @@ Agent design questions test whether you can choose the simplest structure that s
 
 A workflow is a recipe: the steps are written down, and the cook (the LLM) does each one. An agent is a chef who is told the dish and decides the steps, tasting as they go. Recipes are reliable and cheap; chefs handle new situations. Good kitchens use recipes for routine dishes and let the chef improvise only where needed.
 
+Here is the same task wired both ways. The tools do not change; what changes is who picks the next one.
+
+<AnimatedDiagram
+  spec="animated/agents/workflow-vs-agent"
+  caption="Same task, same tools. In a workflow your code fixes the order; in an agent the model chooses it, one turn at a time."
+/>
+
+**How to read it.** On the left, code calls four tools in a fixed order and then replies. Every message takes that path, even one that only asks where a parcel is. On the right, the message goes to the model, which asks for one tool per turn. The result comes back (dashed line), the model reads it and picks again. It stops when it asks for no tool at all, and that answer is the reply.
+
 ## Core concepts
 
-1. **Augmented LLM.** The building block: an LLM that can call retrieval, tools and memory in a single turn.
+Every figure on this page follows one task. Brightpost, the fictional shop from [AI security on the cloud](/cloud/resilience/ai-security), runs a support agent. Customer 1847 writes: "My kettle arrived cracked. It's order 4471. Can I get my money back?" The agent has four tools: `get_order(order_id)`, `search_help(query)` (the [RAG pipeline](/ai-system-design/genai-system-design/rag-fundamentals) over the help centre), `create_refund(order_id, amount)` and `send_email(to, subject, body)`. One rule matters: **refunds over £30 wait for a support agent**. The kettle cost £42, so this task always reaches that rule.
 
-2. **Prompt chaining.** Fixed sequence of LLM calls, each handling one sub-task with checks between steps.
+1. **Augmented LLM.** The building block: one model that can search, call tools and read or write memory within a single turn.
+
+<AnimatedDiagram
+  spec="animated/agents/augmented-llm"
+  caption="Every pattern below is built from this block; what changes is who decides when to call it again."
+/>
+
+**How to read it.** Each attachment is something the model can ask for during one call. Retrieval finds help articles, tools read and change orders, and memory holds facts that outlive one chat, such as "prefers email". The lines have no arrowheads because each attachment is read and written. One augmented call does not loop. The patterns below decide what happens after it.
+
+Concepts 2 to 6 are **workflows**: your code sets the order of calls. Each tile below uses the same shapes. Orange is the customer's message, green a model call, lime a check, grey plain code, and the green outline the reply.
+
+2. **Prompt chaining.** A fixed sequence of LLM calls, each handling one sub-task, with checks in code between steps.
+
+<AnimatedDiagram
+  spec="animated/agents/pattern-chaining"
+  minWidth={620}
+  caption="A fixed order of calls, with a check in code between steps."
+/>
+
+**How to read it.** The first call only finds the order number. The ringed check is code, not a model: if no number came back, the chain stops and asks the customer for it. Only then do two more calls draft and polish the reply. Each call has one small job, so each is easy to test.
 
 3. **Routing.** A classifier (LLM or model) sends each request to the specialized prompt, model or workflow that suits it.
 
-4. **Parallelization.** Independent sub-tasks run at the same time, or several attempts run and are voted on.
+<AnimatedDiagram
+  spec="animated/agents/pattern-routing"
+  minWidth={620}
+  caption="One call sorts the request; code picks the path."
+/>
 
-5. **Orchestrator-workers.** A central LLM breaks a task into sub-tasks dynamically and delegates them to workers, then combines results.
+**How to read it.** The ringed call reads the message and returns one label. Code then sends an order question to a model call with order data, a refund request to the refund workflow, and a complaint to a person. The router never answers; it only sorts.
+
+4. **Parallelization.** Independent sub-tasks run at the same time (sectioning), or several attempts at one task run and are voted on (voting).
+
+<AnimatedDiagram
+  spec="animated/agents/pattern-parallel"
+  minWidth={600}
+  caption="Independent calls run at once; code combines them."
+/>
+
+**How to read it.** Three calls read the same message at the same moment. One drafts the reply, one screens the message for injected instructions, one checks the refund rules. The ringed step is code: it sends the draft only if both checks pass. The three calls do not wait on each other, so the total time is the slowest call, not the sum.
+
+5. **Orchestrator-workers.** A central LLM breaks a task into sub-tasks at run time, delegates them to workers, then combines the results.
+
+<AnimatedDiagram
+  spec="animated/agents/pattern-orchestrator"
+  minWidth={620}
+  caption="A lead call decides the sub-tasks at run time and merges the results."
+/>
+
+**How to read it.** This message holds two problems: the cracked kettle (order 4471) and a late mug order (4502). The ringed lead call decides it needs three workers: one per order and one to search the help centre. Another message might need one worker, or five. That choice at run time is what separates this from parallelization, where code fixes the branches.
 
 6. **Evaluator-optimizer.** One call produces output, another critiques it against criteria, and the loop repeats until it passes.
 
-7. **ReAct loop.** The model alternates reasoning, a tool action and an observation until done; the most common autonomous agent.
+<AnimatedDiagram
+  spec="animated/agents/pattern-evaluator"
+  minWidth={600}
+  caption="A second call grades the draft and sends feedback until it passes."
+/>
 
-8. **Plan-and-execute.** Plan all steps first, execute them (possibly with cheaper models), and re-plan on failure.
+**How to read it.** The drafter writes a reply; the ringed checker compares it with the refund policy. A pass sends the reply. A fail sends written feedback back along the dashed line, and the drafter tries again. Cap the rounds (two or three): a checker that never passes is a loop with no exit.
 
-9. **Reflection.** After an attempt, the agent reflects on feedback (test failures, errors) and retries with that lesson in context.
+Concepts 7 to 9 are **agents**: the model decides the next step.
+
+7. **ReAct loop.** The model alternates a thought, a tool action and an observation until it is done. It is the most common autonomous agent (Yao et al., 2022).
+
+Here is the Brightpost refund as a ReAct trace, one loop per row.
+
+<AnimatedDiagram
+  spec="animated/agents/react-trace"
+  stepper
+  minWidth={620}
+  caption="Each loop is one thought, one tool call and one result; the loop ends on the first turn with no tool call."
+/>
+
+**How to read it.** Step through the rows. Loop 1 needs the facts, so the model asks for the order. Loop 2 needs the rule, so it searches the help centre. Loop 3 asks for the refund. The result arrives only after the support agent approves it, because £42 is over £30. Loop 4 confirms by email, since the customer may have left the chat during the wait. In row 5 the model asks for no tool, and that is the signal the loop is over.
+
+**The numbers.** Five model calls and four tool calls. At an illustrative 1.5 s per model call and 0.3 s per tool call, that is 5 × 1.5 + 4 × 0.3 = **8.7 s** of compute, plus however long the person takes.
+
+Each loop is three messages. Here are the three for loop 1, in the shape of the Anthropic Messages API (other APIs use different field names for the same parts). First, the tool definition the app sends with every request:
+
+```json
+{
+  "name": "get_order",
+  "description": "Look up one of the signed-in customer's orders by its number. Returns the item, price, delivery date and status.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "order_id": { "type": "string", "description": "The order number, such as 4471" }
+    },
+    "required": ["order_id"]
+  }
+}
+```
+
+The model's reply is not text but a tool call (the response's `stop_reason` is `"tool_use"`):
+
+```json
+{
+  "type": "tool_use",
+  "id": "toolu_01",
+  "name": "get_order",
+  "input": { "order_id": "4471" }
+}
+```
+
+The app runs the tool and sends the result back in the next user message, matched by `tool_use_id`:
+
+```json
+{
+  "type": "tool_result",
+  "tool_use_id": "toolu_01",
+  "content": "Order 4471: kettle, £42.00, delivered 12 Nov, status delivered"
+}
+```
+
+Notice what the model never sends: a customer id. The chat service adds customer 1847 to every call itself, so a tricked model can only reach that customer's orders.
+
+<Callout tone="red" title="What breaks">
+  A ReAct loop has no built-in end. If `get_order` keeps returning an error the model does not understand, the model can ask for it again and again. Give the harness a step budget (say 10 tool calls), stop on the same call repeated three times, and return a clear error message the model can act on.
+</Callout>
+
+8. **Plan-and-execute.** Plan all steps first, execute them (possibly with a cheaper model), and re-plan on failure. Plan-and-Solve prompting (Wang et al., 2023) showed that planning first cuts missed steps. The [Deep dive](#plan-and-execute-as-a-state-machine) steps through one run.
+
+9. **Reflection.** After an attempt, the agent reflects on feedback (test failures, errors, a tool result) and retries with that lesson in context. Reflexion (Shinn et al., 2023) keeps those reflections in memory for later attempts.
+
+Suppose the model drafts its reply right after asking for the refund, before anyone has approved it.
+
+<AnimatedDiagram
+  spec="animated/agents/reflection"
+  minWidth={620}
+  caption="The critique is only as good as its signal; here a tool result contradicts the draft, and the lesson outlives the chat."
+/>
+
+**How to read it.** Draft 1 says the refund is done. The ringed critique checks the draft against a real signal: `create_refund` returned "pending approval". So the claim is false, and Draft 2 says a colleague will approve it. The critique is also stored as a one-line lesson that later conversations start with.
+
+<Callout tone="red" title="What breaks">
+  Reflection with no outside signal. If the critique only rereads the draft, it tends to approve it or reword it at the cost of another call. Feed the critic something it can check against: a tool result, a failing test, a policy rule.
+</Callout>
 
 10. **State machine or graph.** Nodes are steps, edges are transitions decided by code or the model, with persisted state, so runs can pause, resume and be inspected.
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    REQ["Request"] --> ROUTER{"Router"}
-    ROUTER -->|"simple FAQ"| CHAIN["Prompt chain:<br/>retrieve → answer → check"]
-    ROUTER -->|"known multi-step task"| WF["Workflow:<br/>parallel sub-tasks → merge"]
-    ROUTER -->|"open-ended task"| AGENT["Agent loop (ReAct)<br/>with tools and budget"]:::accent
-    AGENT --> EVAL["Evaluator: meets criteria?"]
-    EVAL -->|"No"| AGENT
-    EVAL -->|"Yes"| OUT["Response"]
-    CHAIN --> OUT
-    WF --> OUT
-```
+Here is one refund through the agent loop, piece by piece. Step through it; the same seven steps are written out below.
 
-How a mixed system handles requests:
+<AnimatedDiagram
+  spec="animated/agents/agent-loop"
+  stepper
+  minWidth={620}
+  caption="The model only ever asks; the harness does every call, keeps the run's state and stops for a person when the refund is over £30."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The message and the tool list reach the model">
+    The harness, Brightpost's chat service, sends the customer's message and the definitions of all four tools. The model sees each tool's name, description and parameters, not its code. Gap: the model cannot act yet; it can only ask.
+  </StepCard>
+  <StepCard n={2} title="The model asks for the order">
+    The model replies with a tool call, `get_order` for order 4471, instead of words. Why: it cannot judge the refund without the item, price and date. Gap: nothing has run yet.
+  </StepCard>
+  <StepCard n={3} title="The harness runs the tool and returns the result">
+    The harness checks the call, adds customer 1847 and runs it. The result goes back up the message line: a kettle, £42, delivered 12 Nov. Gap: the model knows the order but not the rule for damaged items.
+  </StepCard>
+  <StepCard n={4} title="The model looks up the refund rule">
+    A second tool call, `search_help("damaged item refund")`, returns the help article "Damaged on arrival": a full refund. Gap: the model now wants to refund £42, which is over the £30 limit.
+  </StepCard>
+  <StepCard n={5} title="The model asks to refund; the harness pauses">
+    The model asks for `create_refund(4471, 42.00)`. The harness, not the model, knows the £30 rule. It saves the run state and asks the support agent. Why save: a person may take minutes or hours, and the run must survive a restart.
+  </StepCard>
+  <StepCard n={6} title="The support agent approves; the refund runs">
+    The support agent approves at 10:20. The harness reloads the run, calls `create_refund` and gets refund R-2291. The result goes back to the model as if no time had passed.
+  </StepCard>
+  <StepCard n={7} title="The model answers and the loop ends">
+    The model calls `send_email` to confirm in writing, then replies with words and no tool call. That is the harness's signal to stop: it sends the reply and closes the run.
+  </StepCard>
+</StepCards>
+
+**The numbers.** Five model calls, four tool calls, one pause. The model's context grows each turn, because every call resends the whole conversation so far: the message, every tool call and every result.
+
+<Callout tone="red" title="What breaks">
+  Rules written only in the prompt. If "refunds over £30 need approval" lived in the instructions instead of the harness, a pasted note could talk the model out of it. That is how Brightpost refunded a stranger's order 5122 in [AI security on the cloud](/cloud/resilience/ai-security). Keep limits, permissions and approvals in code the model cannot argue with.
+</Callout>
+
+Most products do not send every message through an agent. Here is a design that uses each pattern where it fits.
+
+<AnimatedDiagram
+  spec="animated/agents/mixed-architecture"
+  stepper
+  minWidth={620}
+  caption="Only the open-ended share of traffic pays for an agent loop; everything else takes a cheaper, fixed path."
+/>
+
+How a mixed system handles requests (one step of the figure each):
 
 1. A router classifies the request.
 2. Simple, common requests go through a cheap, fixed chain.
 3. Known multi-step tasks run as a workflow with parallel steps.
 4. Only genuinely open-ended tasks go to an agent loop with tools and budgets.
-5. An evaluator checks output quality before responding.
+5. An evaluator checks the agent's output before responding, and sends it back on a fail.
 
 ## Deep dive
 
+### Worked example: a refund from first message to reply
+
+This follows the [agent loop figure](#architecture) call by call: what the model saw, what it returned and what the harness did. "Saw" grows each time because each call resends the whole conversation.
+
+| Call | The model saw | The model returned | The harness did |
+| --- | --- | --- | --- |
+| 1 | Instructions, 4 tool definitions, the customer's message | `get_order(4471)` | Added customer 1847, ran the lookup: kettle, £42, delivered 12 Nov |
+| 2 | All of the above + call 1 and its result | `search_help("damaged item refund")` | Ran the search: "Damaged on arrival": full refund |
+| 3 | All of the above + call 2 and its result | `create_refund(4471, 42.00)` | £42 is over £30: saved the run, asked the support agent, waited. Approved at 10:20; ran the refund: R-2291 |
+| 4 | All of the above + call 3 and its result | `send_email(customer, "Your refund", …)` | Sent the email |
+| 5 | All of the above + call 4 and its result | Text, no tool call: "Your £42 refund for order 4471 is on its way." | Sent the reply and ended the run |
+
+Three things to take from it:
+
+- **The model made four decisions and wrote one reply.** Everything else (running tools, adding the customer id, the £30 check, saving state, the wait) was the harness.
+- **The pause is not a model feature.** The model's call 3 simply took longer to come back. Because the harness saved the run, the support agent could approve after a restart, a deploy or lunch.
+- **The stop condition is a turn with no tool call.** Add the safety stops yourself: a step budget, a time limit and a cost limit.
+
 ### Plan-and-execute as a state machine
 
-```mermaid
-stateDiagram-v2
-    [*] --> Plan
-    Plan --> Execute: plan of steps
-    Execute --> Execute: next step succeeded
-    Execute --> Replan: step failed or new information
-    Replan --> Execute
-    Execute --> Review: all steps done
-    Review --> Replan: does not meet goal
-    Review --> [*]: goal met
-```
+Plan-and-execute splits the agent in two: a planner writes the steps, and an executor runs them one at a time.
 
-Representing the agent as explicit states makes it easier to test each transition, add human approval at specific states, and resume after failures.
+<AnimatedDiagram
+  spec="animated/agents/plan-and-execute"
+  stepper
+  minWidth={620}
+  caption="The plan is data the harness can read, change and resume; a failed step changes the plan, not the whole run."
+/>
+
+**How to read it.** Step 1: the planner writes three rows. Step 2: the executor runs row 1 and gets the order. Step 3: row 2 searches "kettle refund" and finds nothing (red). Step 4: instead of starting over, the failure goes back to the planner, which adds row 2′ with a better query; it finds "Damaged on arrival". Step 5: row 3 asks for the refund, which waits for approval, and a review checks the goal before the run ends.
+
+The states are Plan, Execute, Re-plan and Review. Writing the agent as explicit states makes it easier to test each transition, add human approval at specific states, and resume after failures. The executor can be a cheaper model, because each row is a small, well-defined job.
 
 ### Choosing a pattern
+
+Each pattern hands the model more of the decisions. More decisions buy flexibility with calls, time and risk.
+
+<AnimatedDiagram
+  spec="animated/agents/autonomy-ladder"
+  minWidth={620}
+  caption="Climb only as far as the task needs; each rung buys flexibility with calls, time and risk."
+/>
+
+**How to read it.** Read left to right. On the grey rungs your code decides every step, so the path is the same each time and easy to test. On the green rungs a model decides. The ringed rung is the Brightpost agent: 5 calls. Planning and reflection add calls for the plan and the critique. A team of agents multiplies the loops. The seconds are model time only, at an illustrative 1.5 s per call.
 
 | Situation | Pattern |
 | --- | --- |
@@ -106,13 +301,14 @@ Representing the agent as explicit states makes it easier to test each transitio
 
 - ReAct introduced interleaved reasoning and acting and is the basis of many agent frameworks.
 - Reflexion showed agents improve on coding and reasoning tasks by reflecting on feedback across attempts.
-- Anthropic's "Building effective agents" guide recommends starting with simple, composable workflow patterns and adding autonomy only when needed.
+- Anthropic's "Building effective agents" guide (December 2024) names the five workflow patterns on this page and recommends starting with the simplest one, adding autonomy only when it measurably helps.
 - LangGraph models agents as graphs with persisted state and human-in-the-loop checkpoints.
 
 ## Common pitfalls
 
 - Reaching for a fully autonomous agent when a workflow suffices.
 - No step budget or stop condition.
+- Business rules (limits, approvals, permissions) written in the prompt instead of the harness.
 - Hidden control flow inside framework abstractions that nobody can debug.
 - Reflection without a real feedback signal, which mostly burns tokens.
 
@@ -133,7 +329,8 @@ Representing the agent as explicit states makes it easier to test each transitio
 - [ReAct: Synergizing Reasoning and Acting (Yao et al., 2022)](https://arxiv.org/abs/2210.03629)
 - [Reflexion: Language Agents with Verbal Reinforcement Learning (Shinn et al., 2023)](https://arxiv.org/abs/2303.11366)
 - [Plan-and-Solve Prompting (Wang et al., 2023)](https://arxiv.org/abs/2305.04091)
-- [Building effective agents (Anthropic)](https://www.anthropic.com/research/building-effective-agents)
+- [Building effective agents (Anthropic, 2024)](https://www.anthropic.com/research/building-effective-agents)
+- [Handle tool calls (Claude API documentation)](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
 - [LangGraph documentation](https://langchain-ai.github.io/langgraph/)
 
 <InterviewQuestions>

@@ -89,7 +89,11 @@ export type GlyphName =
   | "vector-index"
   | "reranker"
   | "prompt"
-  | "graph";
+  | "graph"
+  | "tool"
+  | "plan"
+  | "approval"
+  | "sandbox";
 
 const ink = (t: LayoutTone) => `var(--dg-${t})`;
 const soft = (t: LayoutTone) => `var(--dg-${t}-soft)`;
@@ -1304,6 +1308,57 @@ const GLYPHS: Record<GlyphName, (t: LayoutTone) => ReactNode> = {
       <circle cx={12} cy={39} r={3.5} style={{ fill: PAPER, stroke: ink(t) }} />
       <circle cx={37} cy={41} r={3.5} style={{ fill: PAPER, stroke: ink(t) }} />
       <circle cx={22} cy={29} r={5.5} style={{ fill: ink(t), stroke: ink(t) }} />
+    </>
+  ),
+  // Agents batch.
+  tool: (t) => (
+    <>
+      <path d="M11 37 L26.5 21.5" style={{ stroke: ink(t) }} strokeWidth={7} strokeLinecap="round" />
+      <circle cx={31} cy={17} r={10} style={{ fill: ink(t), stroke: ink(t) }} />
+      <path d="M29.6 15.6 L32.4 18.4 L42.3 8.5 L39.5 5.7 Z" style={{ fill: PAPER }} />
+      <circle cx={31} cy={17} r={2.6} style={{ fill: PAPER }} />
+      <circle cx={11} cy={37} r={1.6} style={{ fill: PAPER }} />
+    </>
+  ),
+  plan: (t) => (
+    <>
+      <rect x={8} y={7} width={32} height={37} rx={3} style={{ fill: soft(t), stroke: ink(t) }} />
+      <rect x={17} y={4} width={14} height={6} rx={2} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={12} y={15} width={7} height={7} rx={1.5} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={12} y={25} width={7} height={7} rx={1.5} style={{ fill: ink(t), stroke: ink(t) }} />
+      <rect x={12} y={35} width={7} height={7} rx={1.5} style={{ fill: PAPER, stroke: ink(t) }} />
+      <path
+        d="M13.6 18.6 L15.2 20.2 L17.6 17 M13.6 28.6 L15.2 30.2 L17.6 27"
+        fill="none"
+        style={{ stroke: PAPER }}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M23 18.5 H35 M23 28.5 H35" style={{ stroke: ink(t) }} strokeLinecap="round" strokeOpacity={0.7} />
+      <path d="M23 38.5 H31" style={{ stroke: ink(t) }} strokeLinecap="round" strokeOpacity={0.4} />
+    </>
+  ),
+  approval: (t) => (
+    <>
+      <circle cx={19} cy={14} r={7} style={{ fill: soft(t), stroke: ink(t) }} />
+      <path d="M5 41 A14 14 0 0 1 33 41 Z" style={{ fill: soft(t), stroke: ink(t) }} />
+      <circle cx={35} cy={32} r={9} style={{ fill: ink(t), stroke: PAPER }} />
+      <path
+        d="M30.8 32.2 L33.8 35.2 L39.4 29.2"
+        fill="none"
+        style={{ stroke: PAPER }}
+        strokeWidth={2.2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </>
+  ),
+  sandbox: (t) => (
+    <>
+      <rect x={4} y={4} width={40} height={40} rx={5} fill="none" style={{ stroke: ink(t) }} strokeDasharray="4 3" />
+      <path d="M14 20 L20 14 H35 L29 20 Z" style={{ fill: soft(t), stroke: ink(t) }} strokeLinejoin="round" />
+      <path d="M29 20 L35 14 V29 L29 35 Z" style={{ fill: soft(t), stroke: ink(t) }} strokeLinejoin="round" />
+      <rect x={14} y={20} width={15} height={15} style={{ fill: ink(t), stroke: ink(t) }} />
     </>
   ),
 };
