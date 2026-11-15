@@ -2,43 +2,183 @@
 title: "State Space Models (Mamba) & Hybrid Architectures"
 description: "Linear-time sequence modeling with selective state spaces and hybrid designs combining SSM layers, attention and MoE."
 icon: git-merge
-status: outline
+updated: 2026-11-15
 ---
 
-> **Outline.** This topic is planned and will be written up in a future iteration.
-
-**What it will cover:** Linear-time sequence modeling with selective state spaces and hybrid designs combining SSM layers, attention and MoE.
+Attention costs grow with context: quadratic compute in prefill and a KV cache that gains entries with every token. State space models replace that with a fixed-size memory, and hybrids such as Jamba, Nemotron-H and Granite 4.0 now ship them in production. Interviewers ask about them to see whether you understand what attention buys, what a recurrent state gives up, and why the best answer so far mixes the two.
 
 ## TL;DR
 
+- A **state space model (SSM)** layer reads a sequence through a **fixed-size state** $h_t = \bar{A} h_{t-1} + \bar{B} x_t$. Training is **linear in length** (a convolution or a parallel scan), and decoding costs the **same memory and time per token** however long the context is: no KV cache.
+- **S4** (Gu et al., 2021) made SSMs work on long sequences; **Mamba** (Gu & Dao, 2023) made them **selective**: $\Delta$, $B$ and $C$ depend on each token, computed by a **hardware-aware scan**. Mamba reported **5× higher inference throughput** than Transformers of similar size.
+- **Mamba-2** (Dao & Gu, 2024) showed SSMs and a masked form of linear attention are two views of one computation (**state space duality**), giving a core layer **2–8× faster** than Mamba's.
+- A fixed state cannot hold everything, so pure SSMs are weaker at **copying and exact recall** from long context (Jelassi et al., 2024) and at **5-shot MMLU and phonebook lookup** (Waleffe et al., 2024).
+- **Hybrids** keep a few attention layers for recall: Jamba uses **1 attention layer per 8** plus MoE every other layer (52B total, 12B active, 256K context, **4 GB KV cache vs 32 GB for Mixtral** at 256K). Most hybrids keep attention in **about 1 of every 6 to 10 token-mixing layers**.
+
 ## The idea in plain English
+
+Picture two court reporters. The first keeps a transcript of every word and, before each new sentence, rereads the whole thing to decide what matters. The transcript grows all day, and so does the rereading. The second reporter carries one index card. After each sentence they rewrite the card, keeping what seems important and crossing out the rest. Their work per sentence never grows, but if a lawyer asks for the exact wording of a phone number read out at 9 a.m., the card may not have it. Attention is the first reporter, an SSM is the second, and a hybrid hires mostly card-keepers plus one reporter with the full transcript for exact lookups.
 
 ## Core concepts
 
-### Quadratic attention vs. linear recurrent state spaces
+1. **Quadratic attention vs linear recurrent state spaces.** Self-attention compares every token with every earlier token, so prefill compute grows with $n^2$ and decoding reads a KV cache that grows with $n$ (see [efficient attention](/ai-system-design/genai-system-design/efficient-attention)). A recurrent layer instead compresses everything seen so far into a state of fixed size and updates it once per token. Work is linear in $n$ and the memory per sequence is constant. The catch is the compression: what the state drops is gone.
 
-### Selective SSMs (Mamba / Mamba-2) and hardware-aware scans
+2. **The state space model.** An SSM maps an input sequence $x_t$ to an output $y_t$ through a hidden state $h_t$ with $N$ numbers per channel:
 
-### Where pure SSMs struggle: exact recall and in-context copying
+   $$
+   h_t = \bar{A}\, h_{t-1} + \bar{B}\, x_t, \qquad y_t = C\, h_t
+   $$
 
-### Hybrid SSM + Attention + MoE architectures
+   $\bar{A}$ decides how much of the old state survives, $\bar{B}$ how the new input is written in, and $C$ how the state is read out. The barred matrices come from a continuous-time system $h'(t) = A h(t) + B x(t)$ discretized with a step size $\Delta$. Mamba uses the zero-order hold: $\bar{A} = \exp(\Delta A)$ and $\bar{B} = (\Delta A)^{-1}(\exp(\Delta A) - I)\, \Delta B$. Each channel of the model dimension runs its own small SSM, so a layer's state is $D \times N$ numbers.
+
+3. **Three ways to compute the same layer.** Run the recurrence step by step (constant memory, ideal for decoding). Or, if $\bar{A}$, $\bar{B}$ and $C$ are the same at every step, unroll it into one long convolution with kernel $(C\bar{B}, C\bar{A}\bar{B}, C\bar{A}^2\bar{B}, \dots)$ and compute it with FFTs in $O(n \log n)$, which parallelizes across the sequence for training. Or, when the parameters change per step, use a **parallel scan**: the update is associative, so a GPU can combine pairs of steps in a tree with $O(n)$ total work. Either way, training is near-linear in length instead of quadratic.
+
+4. **S4 (Gu, Goel & Ré, 2021).** Early deep SSMs were unstable and slow because powers of a dense $A$ are expensive and blow up. S4 initialized $A$ with the HiPPO matrix, which is designed to remember a compressed history of the input, and added a low-rank correction that lets it be diagonalized stably, so the convolution kernel is cheap to compute. It was the first model to solve the 16K-token Path-X task in the Long Range Arena benchmark, reached 91% on sequential CIFAR-10, and generated 60× faster than a Transformer. Its weakness for language is that it is **time-invariant**: every token is written into the state the same way, whatever it says.
+
+5. **Selective SSMs (Mamba / Mamba-2) and hardware-aware scans.** Mamba (Gu & Dao, 2023) makes $\Delta$, $B$ and $C$ functions of the current token, computed by small linear projections, while $A$ stays a learned constant. Now each token chooses: a large $\Delta$ resets the state and takes in this token; a small $\Delta$ keeps the state and skips it. That is how a recurrent model ignores filler words and holds on to a name.
+
+<AnimatedDiagram
+  spec="animated/llm/ssm-selective-scan"
+  caption="Each token sets its own Δ, B and C, so it decides how much of the old state survives and how much of itself is written in; A stays fixed. After Gu and Dao (2023), Section 3."
+/>
+
+Input-dependent parameters break the convolution trick, so Mamba computes the recurrence with a parallel scan in one fused GPU kernel. It loads $\Delta$, $A$, $B$ and $C$ into fast on-chip SRAM, discretizes and scans there, and writes only the outputs back to slower HBM; the large expanded state never touches HBM, and the backward pass recomputes it instead of storing it. The paper reports the scan up to 20–40× faster than a standard PyTorch implementation and faster than FlashAttention-2 beyond 2K tokens. A Mamba block wraps the SSM with an input projection that expands the width 2×, a short convolution, and a SiLU gate, and replaces both the attention and the MLP of a Transformer layer.
+
+6. **Mamba-2 and state space duality.** Dao & Gu (2024) restricted $A$ to a scalar times the identity per head. With that change, the whole layer can be written as a matrix that multiplies the input, $y = M x$, where $M$ is lower-triangular and **semiseparable**; that same matrix is a masked linear attention, $(L \circ QK^\top)V$, with $C$ as the queries, $B$ as the keys and a decay mask $L$. The SSD algorithm splits the sequence into chunks, uses matrix multiplications (tensor cores) inside each chunk and the recurrence between chunks. The core layer is 2–8× faster than Mamba's scan, crosses over FlashAttention-2 at 2K tokens and is 6× faster at 16K, and allows a much larger state: Mamba-1 models such as Jamba use $N = 16$, while the 8B Mamba-2 models of Waleffe et al. (2024) use $N = 128$.
+
+7. **Where pure SSMs struggle: exact recall and in-context copying.** A state of fixed size $S$ bits cannot store an arbitrary string of $L$ tokens once $L \log(\text{vocab})$ exceeds $S$. Jelassi et al. (2024) proved that a two-layer Transformer can copy strings of length exponential in its size, while a fixed-state model fails beyond its capacity. In their tests, Transformers learned copying with about 100× fewer training examples, and a 410M-parameter Pythia beat a 2.8B Mamba at copying natural text and at phone-book lookup with 70 or more entries. Waleffe et al. (2024) trained 8B Mamba, Mamba-2 and Transformer models on the same data: after 1.1T tokens, pure Mamba-2 trailed the Transformer by about 17 points on 5-shot MMLU, and it started answering phone-book lookups wrongly beyond about 500 tokens. At 3.5T tokens the MMLU gap closed to 1.4 points, but Mamba-2 still could not retrieve phone numbers from books much longer than 1,000 tokens, while the hybrid did it perfectly beyond 150K tokens after long-context training. Jamba's authors also saw pure Mamba ignore the required answer format in few-shot prompts (48.8 vs 84.1 on IMDB).
+
+8. **Hybrid SSM + attention + MoE architectures.** The fix is to keep a few attention layers. SSM layers do most of the sequence mixing cheaply; attention layers act as a precise lookup into the full context, and in-context-learning circuits such as induction heads can form there. Jamba (Lieber et al., 2024) puts 1 attention layer in every 8 and swaps every second MLP for a 16-expert [mixture of experts](/ai-system-design/genai-system-design/mixture-of-experts) layer with top-2 routing, reaching 52B total and 12B active parameters. Waleffe et al.'s 8B hybrid uses 4 attention layers among 24 Mamba-2 and 28 MLP layers (7% attention) and beat the same-data Transformer by 2.65 points on average across 12 tasks. Many hybrids drop explicit positional encodings, since the SSM layers already carry order.
 
 ## Architecture
+
+Here is one Jamba block, the repeating unit of the first production-scale hybrid. Read it from the bottom: each layer normalizes, mixes tokens (Mamba or attention), normalizes again, then runs an MLP or an MoE layer.
+
+<AnimatedDiagram
+  spec="animated/llm/ssm-jamba-block"
+  caption="Teal marks Mamba (SSM) layers: seven of every eight layers mix tokens with a fixed-size state, one uses attention, and every other MLP is a 16-expert MoE. Residual additions are not drawn. After Lieber et al. (2024), Figure 1."
+/>
+
+How a token passes through the block:
+
+1. RMSNorm, then a **Mamba layer** mixes the token with the past through its selective state; Jamba adds extra RMSNorms inside Mamba layers because large activations caused loss spikes at scale.
+2. RMSNorm, then an **MLP**, or in every second layer an **MoE layer** that routes the token to 2 of 16 experts.
+3. Steps 1–2 repeat for layers 1–4 and 6–8. **Layer 5 swaps Mamba for attention** (32 query heads sharing 8 KV heads), the only place in the block that keeps a KV cache and can look up any earlier token exactly.
+4. The released model stacks **4 blocks**: 32 layers, of which 4 are attention, 28 Mamba and 16 MoE. With no explicit positional encoding, it supports 256K tokens of context.
+5. At decode time each Mamba layer updates its state in place, and only the 4 attention layers append to a KV cache.
 
 ## Deep dive
 
 ### Constant-memory decode vs. growing KV cache
 
+At inference the difference is concrete. Each attention layer stores a key and a value for every past token; each SSM layer stores one state and overwrites it.
+
+<AnimatedDiagram
+  spec="animated/llm/ssm-kv-vs-state"
+  stepper
+  caption="Attention keeps a key and a value for every past token, so its cache grows without end; an SSM layer folds each token into a state of fixed size. Toy numbers."
+/>
+
+Put numbers on Jamba. Its attention layers have 8 KV heads of size 128, so in 16-bit each attention layer stores $2 \times 8 \times 128 \times 2 = 4{,}096$ bytes per token. With 4 attention layers that is 16 KB per token, about 4.3 GB at 262,144 tokens, which matches the 4 GB the paper reports at 256K. If all 32 layers were attention with the same shape, it would be 128 KB per token and 32 GB, the figure the paper gives for Mixtral. The 28 Mamba layers each keep $8{,}192 \times 16 = 131{,}072$ state numbers (2× expanded width times $N = 16$), about 3.7 million in total, roughly 7 MB in 16-bit plus a small convolution buffer, the same at token 10 as at token 256,000. **The KV cache of a hybrid shrinks in proportion to the share of attention layers**, and the rest of the memory is constant.
+
+Two consequences follow. A server can batch many more long sequences on the same GPU, which is where most of the throughput gain comes from. And each decode step reads a fixed amount of memory per SSM layer, so time per token stops growing with context length in those layers.
+
 ### Layer interleaving ratios (SSM vs. attention blocks)
+
+Published hybrids keep converging on a small share of attention:
+
+| Model | Attention share | Pattern |
+| --- | --- | --- |
+| Jamba (AI21, 2024) | 1 of 8 mixer layers (1 : 7) | Attention in the middle of each 8-layer block; MoE every 2nd layer |
+| Mamba-2 hybrid ablation (Dao & Gu, 2024) | About 10% | Best 350M model: 6 attention layers of 48; 2.7B: 6 attention + 58 SSD layers |
+| Mamba-2-Hybrid 8B (Waleffe et al., 2024) | 4 of 56 layers (7%), 1 in 7 mixers | 24 Mamba-2, 4 attention, 28 MLP, spread evenly, first layer Mamba-2 |
+| Nemotron-H (NVIDIA, 2025) | About 8% of layers | 8B: 4 attention of 52 layers; 56B: 10 attention, 54 Mamba-2, 54 FFN of 118 |
+| Zamba (Zyphra, 2024) | One shared block | A single attention + MLP block with shared weights, applied every 6 Mamba blocks |
+| Granite 4.0-H (IBM, 2025) | 1 in 10 | 9 Mamba-2 blocks per transformer block |
+| Samba (Microsoft, 2024) | Half the mixers, but local | Alternates Mamba and sliding-window attention (2,048-token window) |
+
+Three lessons recur. One attention layer in every 6 to 10 token-mixing layers keeps most of the memory saving while restoring recall and few-shot behavior. Designs spread attention through the depth rather than clustering it, and several start with SSM layers, which Jamba's authors suggest give the attention layers implicit position information. Samba shows the other axis: its attention is cheap because the window is fixed, so it trades exact recall beyond 2,048 tokens for constant memory everywhere, and relies on the Mamba layers for long-range memory.
 
 ### Long-context throughput and memory scaling
 
+All the gains below are as reported by the authors, on their hardware and settings:
+
+- **Mamba:** 4–5× higher inference throughput than a Transformer of similar size, mostly because the missing KV cache allows much larger batches.
+- **Jamba:** about 3× Mixtral's throughput at 128K context on 4 A100 GPUs, and on one 80 GB GPU about 2× Mixtral's maximum context (140K tokens fit).
+- **Samba 3.8B:** 3.73× higher throughput than a grouped-query-attention Transformer for 128K-token prompts, and 3.64× faster when generating 64K tokens.
+- **Nemotron-H:** up to 3× higher throughput than Llama-3.1-8B and similar Transformers with 65,536 input and 1,024 output tokens on H100 GPUs.
+- **Mamba-2-Hybrid 8B:** predicted (not measured) to generate tokens up to 8× faster than the Transformer at long context.
+
+The pattern: gains are small at a few thousand tokens and grow with context length and batch size, because the KV cache, not the weights, is what grows. Prefill still pays the quadratic cost in every attention layer that remains, so a hybrid's time to first token on a 256K prompt is lower than a Transformer's but not flat. Kernel support matters too: the scan and SSD kernels are newer than FlashAttention, and features such as prefix caching need care, because an SSM state is a snapshot at one position rather than a list of per-token entries.
+
 ## Trade-offs
+
+| Choice | Pros | Cons | When to use |
+| --- | --- | --- | --- |
+| Pure Transformer (GQA, FlashAttention) | Best exact recall and in-context learning; mature kernels and tooling | KV cache grows with context; quadratic prefill | Default for most models, short to medium context |
+| Pure SSM (Mamba, Mamba-2) | Constant memory and time per token; linear training | Weak copying, lookup and few-shot format; fewer tools | Streaming, very long inputs, on-device, tasks without exact lookup |
+| Hybrid SSM + attention | Near-Transformer recall with a KV cache several times smaller | Two kinds of kernels; ratio and placement need tuning | Long-context serving where memory or batch size is the limit |
+| Hybrid + MoE (Jamba, Granite 4.0-H Tiny and Small) | Large capacity at small active compute and small cache | All experts in memory; routing and expert parallelism to run | Large models aimed at long context on limited GPUs |
+| SSM + sliding-window attention (Samba) | Memory constant everywhere; strong length extrapolation | No exact lookup beyond the window | Very long streams where local precision and global gist are enough |
 
 ## Real-world examples
 
+- **Jamba** (AI21, March 2024): 52B total and 12B active parameters, 1 : 7 attention to Mamba, 16-expert MoE every other layer, 256K context. **Jamba 1.5** (August 2024) scaled to 94B active parameters in the Large model with an effective 256K context on 8 × 80 GB GPUs.
+- **Codestral Mamba** (Mistral, July 2024): a 7.3B-parameter Mamba-based code model under Apache 2.0, tested on in-context retrieval up to 256K tokens.
+- **IBM Granite 4.0-H** (October 2025): hybrids with 9 Mamba-2 blocks per transformer block, from the 3B dense H-Micro to the 32B-total, 9B-active MoE H-Small; IBM reports over 70% less RAM for long inputs and concurrent batches.
+- **NVIDIA Nemotron-H** (2025): 8B and 56B hybrids with about 8% attention layers, up to 3× higher long-context throughput than similar Transformers as reported.
+- **Research hybrids:** Zamba 7B (Zyphra, 1T training tokens, one shared attention block) and Samba 3.8B (Microsoft, 3.2T tokens, trained at 4K and extrapolating to 256K with perfect passkey retrieval after fine-tuning).
+
 ## Common pitfalls
+
+- Saying SSMs "have infinite context". They read any length, but the state has a fixed size, so what they can recall exactly is bounded.
+- Judging an SSM only on perplexity. Pure SSMs can match Transformers on perplexity and still fail copying, phone-book lookup or few-shot formats; test recall tasks such as needle and multi-key retrieval.
+- Assuming a hybrid has no KV cache. Its attention layers still keep one, sized by the number of attention layers, and they still pay quadratic prefill.
+- Quoting throughput multipliers without their settings. "3×" in these papers is at 64K–128K tokens and large batches; at 2K tokens the gain is small.
+- Confusing S4 with Mamba: S4 is time-invariant (a convolution), Mamba is selective (input-dependent, computed with a scan).
+- Porting Transformer serving tricks unchanged. Prefix caching, speculative decoding rollback and beam search all need the SSM state saved or copied at the right positions.
 
 ## How to answer in an interview
 
+1. Start with the cost of attention: quadratic prefill and a KV cache that grows per token, with a quick KV size estimate.
+2. Write the SSM recurrence and explain the fixed-size state: linear training through a convolution or parallel scan, constant memory per token at decode.
+3. Explain Mamba's selection ($\Delta$, $B$, $C$ from the token), the hardware-aware scan, and Mamba-2's duality with linear attention in one sentence each.
+4. Name the weakness with evidence: copying and recall from long context, phone-book lookup, few-shot format.
+5. Propose a hybrid: about 1 attention layer in every 6 to 10 mixing layers, spread through depth, optionally MoE, and size the smaller KV cache.
+
+**What interviewers listen for:** the fixed-state trade-off stated plainly, the difference between S4 and Mamba, real ratios (Jamba 1 : 7, about 10% attention), and KV-cache arithmetic that shows why hybrids batch better.
+
+**Red flags:** "Mamba replaces Transformers", "SSMs have unlimited memory", or throughput claims with no context length attached.
+
 ## Further reading
+
+- [Efficiently Modeling Long Sequences with Structured State Spaces (Gu, Goel & Ré, 2021)](https://arxiv.org/abs/2111.00396)
+- [Mamba: Linear-Time Sequence Modeling with Selective State Spaces (Gu & Dao, 2023)](https://arxiv.org/abs/2312.00752)
+- [Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality (Dao & Gu, 2024)](https://arxiv.org/abs/2405.21060)
+- [Jamba: A Hybrid Transformer-Mamba Language Model (Lieber et al., 2024)](https://arxiv.org/abs/2403.19887)
+- [Repeat After Me: Transformers are Better than State Space Models at Copying (Jelassi et al., 2024)](https://arxiv.org/abs/2402.01032)
+- [An Empirical Study of Mamba-based Language Models (Waleffe et al., 2024)](https://arxiv.org/abs/2406.07887)
+
+<InterviewQuestions>
+  <InterviewQuestion question="What is a state space model, and why is it linear in sequence length?" category="Concepts" level="Junior">
+    An SSM layer keeps a hidden state of fixed size and updates it once per token: the new state is the old state times A-bar plus the input times B-bar, and the output reads the state through C. Each step does the same fixed amount of work, so a sequence of n tokens costs work proportional to n, unlike attention, which compares every pair of tokens. For training, the recurrence is computed in parallel, as a convolution when the parameters are fixed (S4) or as a parallel scan when they depend on the input (Mamba). At decode time the model keeps only the latest state, so memory per sequence does not grow.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why does a Mamba layer need no KV cache, and what does it store instead?" category="Concepts" level="Junior">
+    Attention needs the keys and values of every earlier token because each new token may attend to any of them. A Mamba layer has already folded every earlier token into its state, so the state is all it needs to process the next token. It stores the expanded width times the state size per layer, for example 8,192 times 16 numbers in Jamba's Mamba layers, plus a short convolution buffer. That memory is the same at token 10 and at token 256,000.
+  </InterviewQuestion>
+  <InterviewQuestion question="What makes Mamba selective, and why could S4 not do the same thing?" category="Architecture" level="Mid">
+    In Mamba the step size Δ and the matrices B and C are computed from each token by small projections, so each token decides how much of the old state to keep and how strongly to write itself in. A large Δ resets the state toward the current token; a small Δ preserves the state and skips the token, which lets the model ignore filler and hold on to important words. S4 used the same parameters at every step, which is what allowed it to be computed as one fast convolution. Making the parameters depend on the input breaks the convolution, so Mamba needed a new hardware-aware parallel scan that runs in on-chip SRAM.
+  </InterviewQuestion>
+  <InterviewQuestion question="Why are pure SSMs worse than Transformers at copying and phone-book lookup?" category="Failure modes" level="Mid">
+    The state has a fixed number of bits, so once a sequence holds more information than the state can store, some of it must be dropped, and the model cannot know in advance which detail will be asked for. Attention keeps every token's key and value, so it can look up any of them exactly. Jelassi et al. proved this gap for copying and found a 410M Transformer beating a 2.8B Mamba at copying and phone-book lookup. Waleffe et al. saw an 8B Mamba-2 lose phone-book lookups in books much longer than 1,000 tokens, while their hybrid with 4 attention layers solved them.
+  </InterviewQuestion>
+  <InterviewQuestion question="You serve a 32-layer GQA model at 128K context and the KV cache limits batch size. How would a Jamba-style hybrid change the memory picture?" category="Scaling" level="Senior">
+    With 8 KV heads of size 128 in 16-bit, each attention layer stores 4 KB per token, so 32 layers need 128 KB per token, about 16 GB per 128K-token sequence. A Jamba-style hybrid keeps attention in 4 of the 32 layers, so the cache drops 8× to 16 KB per token, about 2 GB per sequence. The 28 Mamba layers add a fixed few megabytes per sequence, regardless of length. That frees memory for roughly 8× as many concurrent long sequences, which helps explain Jamba's reported 3× throughput over Mixtral at 128K; prefill in the 4 attention layers is still quadratic.
+  </InterviewQuestion>
+  <InterviewQuestion question="What is state space duality in Mamba-2, and why does it make training faster?" category="Architecture" level="Senior">
+    Mamba-2 restricts A to a scalar times the identity per head. Then the whole layer is one lower-triangular semiseparable matrix applied to the input, and that matrix is the same as masked linear attention, with C playing the queries, B the keys and a decay mask in place of softmax. The SSD algorithm splits the sequence into chunks: inside a chunk it uses the attention-like form with matrix multiplications on tensor cores, and between chunks it passes the state like a recurrence. Matrix multiplications are far faster on GPUs than a scan, so the core layer runs 2–8× faster than Mamba's and can afford a larger state, such as 128 instead of 16.
+  </InterviewQuestion>
+  <InterviewQuestion question="How would you choose the ratio and placement of attention layers in a new hybrid?" category="Trade-offs" level="Senior">
+    Start from published results: Jamba uses 1 attention layer in 8, the Mamba-2 ablation found about 10% best, NVIDIA's 8B hybrids put attention in 4 of their 28 mixing layers, and Granite 4.0 uses 1 in 10. Spread the attention layers through the depth rather than stacking them; starting with SSM layers also lets you drop explicit positional encodings, as Jamba and NVIDIA's hybrids do. Then run ablations at small scale on recall-heavy tasks (multi-key needle, phone-book, few-shot formatting) as well as perplexity, because perplexity alone hides the recall gap. Finally size the KV cache at the target context and batch, since every extra attention layer adds to it linearly.
+  </InterviewQuestion>
+</InterviewQuestions>
