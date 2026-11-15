@@ -210,20 +210,22 @@ export function residual(
 /** Column centres and the bottom of both N× groups, in the hero's 780-wide viewBox. */
 export const ARCH = {
   width: 780,
-  height: 840,
+  height: 844,
   encX: 200,
   decX: 575,
   /** Bottom edge of both N× groups. */
-  groupBottom: 630,
+  groupBottom: 654,
   /** y of the ⊕ that adds positional encoding, and of the embeddings below it. */
-  addY: 672,
-  embY: 712,
+  addY: 696,
+  embY: 736,
   /** x of the vertical run of the residual lines: left of the encoder, right of the decoder. */
   encResidualX: 90,
   decResidualX: 668,
-  /** x where the encoder output runs down between the columns. */
+  /** The encoder output runs up to bridgeTopY, across, down at bridgeX and into the decoder at crossY. */
   bridgeX: 370,
-  encGroup: { x: 56, y: 338, w: 249 },
+  bridgeTopY: 324,
+  crossY: 494,
+  encGroup: { x: 56, y: 362, w: 249 },
   decGroup: { x: 430, y: 190, w: 250 },
 } as const;
 
@@ -264,13 +266,13 @@ const D = ARCH.decX;
 /** Every block of Figure 1, bottom to top in reading order. */
 const PARTS: PartGeom[] = [
   { id: "enc-emb", role: "embedding", cx: E, y: ARCH.embY, h: BLOCK_H, label: "Input\nEmbedding" },
-  { id: "enc-mha", role: "attention", cx: E, y: 548, h: BLOCK_H, label: "Multi-Head\nAttention" },
-  { id: "enc-norm1", role: "norm", cx: E, y: 488, h: THIN_H, label: "Add & Norm" },
-  { id: "enc-ffn", role: "ffn", cx: E, y: 414, h: BLOCK_H, label: "Feed\nForward" },
-  { id: "enc-norm2", role: "norm", cx: E, y: 362, h: THIN_H, label: "Add & Norm" },
+  { id: "enc-mha", role: "attention", cx: E, y: 572, h: BLOCK_H, label: "Multi-Head\nAttention" },
+  { id: "enc-norm1", role: "norm", cx: E, y: 512, h: THIN_H, label: "Add & Norm" },
+  { id: "enc-ffn", role: "ffn", cx: E, y: 438, h: BLOCK_H, label: "Feed\nForward" },
+  { id: "enc-norm2", role: "norm", cx: E, y: 386, h: THIN_H, label: "Add & Norm" },
   { id: "dec-emb", role: "embedding", cx: D, y: ARCH.embY, h: BLOCK_H, label: "Output\nEmbedding" },
-  { id: "dec-mmha", role: "attention", cx: D, y: 544, h: 52, label: "Masked\nMulti-Head\nAttention" },
-  { id: "dec-norm1", role: "norm", cx: D, y: 488, h: THIN_H, label: "Add & Norm" },
+  { id: "dec-mmha", role: "attention", cx: D, y: 568, h: 52, label: "Masked\nMulti-Head\nAttention" },
+  { id: "dec-norm1", role: "norm", cx: D, y: 512, h: THIN_H, label: "Add & Norm" },
   { id: "dec-xattn", role: "attention", cx: D, y: 404, h: BLOCK_H, label: "Multi-Head\nAttention" },
   { id: "dec-norm2", role: "norm", cx: D, y: 350, h: THIN_H, label: "Add & Norm" },
   { id: "dec-ffn", role: "ffn", cx: D, y: 276, h: BLOCK_H, label: "Feed\nForward" },
@@ -285,10 +287,10 @@ const bottom = (id: ArchPart) => geom(id).y + geom(id).h;
 const middle = (id: ArchPart) => geom(id).y + geom(id).h / 2;
 
 /** Where the input fans out into the three attention inputs (Q, K, V), below each self-attention block. */
-const FAN_Y = 618;
+const FAN_Y = 642;
 const FAN_DX = 45;
 /** y where a residual leaves the main line below each N× group. */
-const TAP_Y = 644;
+const TAP_Y = 668;
 
 /**
  * The full Figure 1: blocks, the two ⊕ adders with their positional-encoding circles, the main data path, residual
@@ -310,8 +312,8 @@ export function architectureShapes(steps: Partial<Record<string, number>> = {}) 
     label: symbol === "plus" ? "Add" : "Positional encoding",
   });
   const arrow = (id: string, from: string, to: string): LayoutShape => ({ id, type: "arrow", x: 0, y: 0, from, to });
-  /** A free arrow (or plain line) from (x, y) by (w, h). */
-  const free = (id: string, x: number, y: number, w: number, h: number, head = true): LayoutShape => ({
+  /** A free arrow (or plain line) from (x, y) by (w, h), with an optional label pill at its middle. */
+  const free = (id: string, x: number, y: number, w: number, h: number, head = true, label?: string): LayoutShape => ({
     id,
     type: "arrow",
     x,
@@ -319,6 +321,7 @@ export function architectureShapes(steps: Partial<Record<string, number>> = {}) 
     w,
     h,
     head: head ? undefined : false,
+    label,
   });
   /** The input to a self-attention block: up from the ⊕, then a fan of three arrows (queries, keys, values). */
   const fan = (pre: string, cx: number, add: string, target: ArchPart): LayoutShape[] => {
@@ -354,14 +357,14 @@ export function architectureShapes(steps: Partial<Record<string, number>> = {}) 
       y: 0,
       points: [
         [E, top("enc-norm2") - 4],
-        [E, 300],
-        [ARCH.bridgeX, 300],
-        [ARCH.bridgeX, 470],
-        [D - 15, 470],
+        [E, ARCH.bridgeTopY],
+        [ARCH.bridgeX, ARCH.bridgeTopY],
+        [ARCH.bridgeX, ARCH.crossY],
       ],
     },
-    free("enc-out-k", D - FAN_DX, 470, 0, bottom("dec-xattn") + 4 - 470),
-    free("enc-out-v", D - 15, 470, 0, bottom("dec-xattn") + 4 - 470),
+    free("enc-out-kv", ARCH.bridgeX, ARCH.crossY, D - 15 - ARCH.bridgeX, 0, false, "K, V"),
+    free("enc-out-k", D - FAN_DX, ARCH.crossY, 0, bottom("dec-xattn") + 4 - ARCH.crossY),
+    free("enc-out-v", D - 15, ARCH.crossY, 0, bottom("dec-xattn") + 4 - ARCH.crossY),
     // Decoder: embedding + position, masked self-attention, Add & Norm, cross-attention, Add & Norm, FFN, Add & Norm.
     arrow("dec-emb>add", "dec-emb", "dec-add"),
     arrow("dec-pe>add", "dec-pe", "dec-add"),
@@ -369,8 +372,8 @@ export function architectureShapes(steps: Partial<Record<string, number>> = {}) 
     residual("dec-res1", [D, TAP_Y], byId.get("dec-norm1")!, ARCH.decResidualX),
     arrow("dec-mmha>norm1", "dec-mmha", "dec-norm1"),
     // Queries come up from the decoder's own Add & Norm.
-    free("dec-q", D + FAN_DX, top("dec-norm1") - 4, 0, bottom("dec-xattn") + 8 - top("dec-norm1")),
-    residual("dec-res2", [D + FAN_DX, 468], byId.get("dec-norm2")!, ARCH.decResidualX),
+    free("dec-q", D + FAN_DX, top("dec-norm1") - 4, 0, bottom("dec-xattn") + 8 - top("dec-norm1"), true, "Q"),
+    residual("dec-res2", [D + FAN_DX, top("dec-norm1") - 12], byId.get("dec-norm2")!, ARCH.decResidualX),
     arrow("dec-xattn>norm2", "dec-xattn", "dec-norm2"),
     arrow("dec-norm2>ffn", "dec-norm2", "dec-ffn"),
     residual("dec-res3", [D, (top("dec-norm2") + bottom("dec-ffn")) / 2], byId.get("dec-norm3")!, ARCH.decResidualX),
@@ -451,10 +454,10 @@ export function miniMap(
     ]),
     line("bridge", [
       [E, middle("enc-norm2")],
-      [E, 300],
-      [ARCH.bridgeX, 300],
-      [ARCH.bridgeX, 470],
-      [D, 470],
+      [E, ARCH.bridgeTopY],
+      [ARCH.bridgeX, ARCH.bridgeTopY],
+      [ARCH.bridgeX, ARCH.crossY],
+      [D, ARCH.crossY],
     ]),
     ...PARTS.map((p): LayoutShape => ({
       id: `${id}-${p.id}`,
