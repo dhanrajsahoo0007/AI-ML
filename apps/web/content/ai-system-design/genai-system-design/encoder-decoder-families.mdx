@@ -25,6 +25,14 @@ An **encoder** is a careful reader: it reads the whole page at once, looking bot
 
 3. **Next sentence prediction (NSP).** BERT's second objective, predicting whether two sentences are consecutive. RoBERTa later showed removing it and training longer on more data works better.
 
+BERT trains one encoder on both objectives at once, then reuses it. For a task it keeps every pre-trained weight, adds one small head on the `[CLS]` output, and fine-tunes the whole model.
+
+<AnimatedDiagram
+  spec="animated/transformer/bert-pretrain-finetune"
+  stepper
+  caption="BERT pre-trains one encoder with two heads, masked-word prediction and next-sentence prediction, then fine-tunes all of its weights with a small new head on [CLS]. Adapted from Devlin et al. (2018), Figure 1."
+/>
+
 4. **Causal language modeling.** GPT models predict each next token from all previous ones. Every position is a training example, which makes it very data-efficient for generation.
 
 5. **Span corruption.** T5 replaces random spans with sentinel tokens and trains the decoder to output the missing spans. BART corrupts text in several ways (masking, deletion, shuffling) and trains the decoder to rebuild it.
