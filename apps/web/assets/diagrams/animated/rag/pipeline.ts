@@ -25,6 +25,21 @@ const X = [90, 265, 440, 615, 790] as const;
 const ROW = { offline: 95, online: 290, answer: 410 } as const;
 const W = 150;
 
+// Managed services per role, for the Services toggle on provider pages (cloud/aws/ai-ml uses cloud="aws"). The
+// managed RAG services (Bedrock Knowledge Bases, Vertex AI RAG Engine, the Azure AI Search indexer) do parse, chunk
+// and retrieve for you; the embedding models are Amazon Titan Text Embeddings V2, Gemini Embedding and Azure OpenAI
+// embeddings. Labels stay short so they fit beside the icon.
+const KB = {
+  aws: { id: "aws-bedrock", label: "Bedrock KB" },
+  gcp: { id: "gcp-vertex-ai", label: "RAG Engine" },
+  azure: { id: "azure-ai-search", label: "AI Search" },
+};
+const EMBED = {
+  aws: { id: "aws-bedrock", label: "Titan Embed v2" },
+  gcp: { id: "gcp-vertex-ai", label: "Gemini Embed" },
+  azure: { id: "azure-foundry", label: "Azure OpenAI" },
+};
+
 const spec: DiagramSpec = {
   title: "RAG: ingest the help centre offline, answer a question online",
   width: 880,
@@ -47,6 +62,11 @@ const spec: DiagramSpec = {
     // Offline lane
     {
       id: "sources",
+      cloud: {
+        aws: { id: "aws-s3", label: "S3" },
+        gcp: { id: "gcp-cloud-storage", label: "Cloud Storage" },
+        azure: { id: "azure-blob", label: "Blob Storage" },
+      },
       label: "Help centre",
       sub: `${fmt(CORPUS.articles)} articles`,
       icon: "folder",
@@ -57,6 +77,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "parse",
+      cloud: KB,
       label: "Parse",
       sub: "HTML to text",
       icon: "file",
@@ -68,6 +89,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "chunk",
+      cloud: KB,
       label: "Chunk",
       sub: `${CORPUS.chunkTokens} tokens each`,
       icon: "chunk",
@@ -80,6 +102,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "embed",
+      cloud: EMBED,
       label: "Embed",
       sub: `${fmt(CORPUS.dims)} numbers`,
       icon: "embedder",
@@ -92,6 +115,11 @@ const spec: DiagramSpec = {
     },
     {
       id: "index",
+      cloud: {
+        aws: { id: "aws-opensearch", label: "OpenSearch" },
+        gcp: { id: "gcp-vertex-ai", label: "Vector Search" },
+        azure: { id: "azure-ai-search", label: "AI Search" },
+      },
       label: "Vector index",
       sub: `${fmt(CORPUS.chunks)} vectors`,
       icon: "vector-index",
@@ -117,6 +145,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "qembed",
+      cloud: EMBED,
       label: "Embed",
       sub: "the same model",
       icon: "embedder",
@@ -129,6 +158,7 @@ const spec: DiagramSpec = {
     },
     {
       id: "retrieve",
+      cloud: KB,
       label: "Retrieve",
       sub: `top ${TOP_K}, permitted`,
       icon: "search",
@@ -141,6 +171,11 @@ const spec: DiagramSpec = {
     },
     {
       id: "prompt",
+      cloud: {
+        aws: { id: "aws-lambda", label: "Lambda" },
+        gcp: { id: "gcp-cloud-run", label: "Cloud Run" },
+        azure: { id: "azure-functions", label: "Functions" },
+      },
       label: "Build prompt",
       sub: PROMPT.rounded,
       icon: "prompt",
@@ -153,6 +188,11 @@ const spec: DiagramSpec = {
     },
     {
       id: "llm",
+      cloud: {
+        aws: { id: "aws-bedrock", label: "Bedrock" },
+        gcp: { id: "gcp-vertex-ai", label: "Vertex AI" },
+        azure: { id: "azure-foundry", label: "Foundry" },
+      },
       label: "LLM",
       sub: "writes the reply",
       icon: "model",
