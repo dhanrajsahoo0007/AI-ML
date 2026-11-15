@@ -1,6 +1,8 @@
 ---
 title: Fine-Tuning LLMs
 description: When and how to fine-tune, covering SFT, LoRA and QLoRA, RLHF vs DPO, data preparation, evaluation, and how fine-tuning compares with prompting and RAG.
+icon: wrench
+updated: 2026-11-15
 ---
 
 "Should we fine-tune?" is one of the most common LLM product questions. A strong answer starts with when not to, then explains the methods, the data you need, and how you would prove the fine-tuned model is better.
@@ -39,45 +41,76 @@ A pre-trained model is a well-read graduate. Prompting is giving them instructio
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    NEED["Product need"] --> BASE["Strong prompted baseline<br/>+ eval set"]
-    BASE --> GAP{"Gap is behavior or format,<br/>not missing knowledge?"}
-    GAP -->|"No, knowledge"| RAG["Use RAG instead"]
-    GAP -->|"Yes"| DATA["Curate data: real inputs,<br/>reviewed outputs, edge cases"]
-    DATA --> SPLIT["Train / validation / test split"]
-    SPLIT --> SFT["SFT with LoRA or QLoRA"]:::accent
-    SFT --> PREF["Optional: DPO on preference pairs"]
-    PREF --> EVAL["Evaluate vs baseline:<br/>task metrics, judge, regressions"]
-    EVAL --> SHIP{"Better and no regressions?"}
-    SHIP -->|"Yes"| DEPLOY["Deploy adapter, A/B test"]
-    SHIP -->|"No"| DATA
-```
+Fine-tuning is a loop with a decision at the front. Follow Brightpost, which wants its support assistant to answer in the shop's voice and follow the refund rule.
 
-The workflow:
+<AnimatedDiagram
+  spec="animated/finetune/ft-lifecycle"
+  stepper
+  caption="Six stages. The first can send you to RAG instead; the last feeds new resolved tickets back into the data."
+/>
 
-1. Build an evaluation set and a strong prompted baseline first.
-2. Confirm the gap is about behavior, not knowledge.
-3. Collect and clean training data that matches production inputs.
-4. Fine-tune with LoRA or QLoRA, tracking validation loss and task metrics.
-5. Optionally add preference tuning.
-6. Compare against the baseline and check general ability, then A/B test.
+<StepCards>
+  <StepCard n={1} title="Decide">
+    Build the evaluation set and a strong prompted baseline first. If the gap is a missing fact, use RAG. If it is behaviour or format, go on.
+  </StepCard>
+  <StepCard n={2} title="Data">
+    Collect real inputs, reviewed outputs and edge cases. Brightpost has 5,000 resolved tickets. Split into train, validation and test, and keep the 200-ticket golden set out of training.
+  </StepCard>
+  <StepCard n={3} title="Train">
+    SFT with LoRA or QLoRA, optionally followed by DPO on preference pairs. Track validation loss and task metrics, not training loss alone.
+  </StepCard>
+  <StepCard n={4} title="Evaluate">
+    Compare with the baseline on the golden set: task metrics, a judge, and general-ability checks for regressions. Better and no regressions means go; otherwise fix the data and loop.
+  </StepCard>
+  <StepCard n={5} title="Deploy">
+    Merge the adapter or serve it beside the base, then A/B test against the baseline.
+  </StepCard>
+  <StepCard n={6} title="Monitor">
+    Watch live quality and drift. New resolved tickets become the next training set. See [Automated Retraining & Fine-Tuning](/ai-system-design/genai-system-design/automated-retraining-finetuning).
+  </StepCard>
+</StepCards>
 
 ## Deep dive
 
+### Which weights change
+
+Full fine-tuning updates every weight. LoRA freezes them and trains small adapters beside the attention and feed-forward matrices.
+
+<AnimatedDiagram
+  spec="animated/finetune/ft-full-vs-peft"
+  stepper
+  caption="Orange is what training changes. Full fine-tuning changes all 6.74 billion numbers of a 7 B-shaped model; LoRA at rank 16 changes 0.59 % and stores an 80 MB file."
+/>
+
+**How to read it.** Steps 1 and 2 show the same four blocks. In step 1 all are orange (trained). In step 2 they are grey (frozen) and two small orange adapters hang beside attention and feed-forward. Step 3 counts the cost.
+
+**The numbers.** Full: 6.74 B × 12 bytes (2 weight, 2 gradient, 8 for Adam's two averages) = 80.9 GB in training, and 6.74 B × 2 bytes = 13.5 GB per task to store. LoRA, r = 16 on all linear layers: 39,976,960 numbers × 2 bytes = 80 MB per task. The derivation is on [LoRA, QLoRA & PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft).
+
 ### How LoRA works
 
-```mermaid
-flowchart LR
-    X["Input x"] --> W["Frozen weight W<br/>(d x d)"]
-    X --> A["A: d x r (trainable)"]
-    A --> B["B: r x d (trainable)"]:::accent
-    W --> SUM(("+"))
-    B --> SUM
-    SUM --> Y["Output = Wx + BAx"]
+LoRA learns a change to a frozen weight W as two thin matrices, A (r × d) and B (d × r), and the layer computes W·x + B·A·x (with a scale of alpha ÷ r). With rank r much smaller than d, A and B together have far fewer parameters than W. B starts at zero so training begins exactly at the base model. After training, BA can be merged into W for zero extra latency, or kept separate to swap adapters per customer or task.
+
+<AnimatedDiagram
+  spec="animated/finetune/lora-matrices"
+  stepper
+  caption="Only the orange pair is trained. The frozen matrix holds 16,777,216 numbers; the pair holds 65,536, and because B starts at zero the model begins exactly where the base model was."
+/>
+
+The full treatment (rank, alpha, QLoRA memory, merge or swap) is on [LoRA, QLoRA & PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft).
+
+### What one training example looks like
+
+SFT trains on prompt and response pairs. The common shape is a list of chat messages, with the loss computed on the assistant message only. This follows the "conversational" format of Hugging Face TRL, whose `SFTTrainer` reads a `messages` column (hosted fine-tuning APIs use the same list-of-messages idea; check your provider's exact schema). Brightpost's record, rewritten from a resolved ticket:
+
+```json
+{"messages": [
+  {"role": "system", "content": "You are Brightpost's support assistant. Be warm and brief."},
+  {"role": "user", "content": "My kettle (order 4471) arrived cracked. £42. Can I get my money back?"},
+  {"role": "assistant", "content": "I'm sorry the kettle arrived cracked. Refunds over £30 need a team member's approval, so I have sent order 4471 for review and they will confirm the refund by email."}
+]}
 ```
 
-With rank r much smaller than d, A and B together have far fewer parameters than W. B starts at zero so training begins exactly at the base model. After training, BA can be merged into W for zero extra latency, or kept separate to swap adapters per customer or task.
+The system message here is short on purpose: tone and policy now live in the weights, so the 200-token style prompt can shrink. Serving must use the same chat template as training, or the model sees a format it never learned.
 
 ### Data checklist
 
@@ -85,6 +118,34 @@ With rank r much smaller than d, A and B together have far fewer parameters than
 - Outputs reviewed for correctness and in the exact target format.
 - Diversity across intents; deduplicate near-identical examples.
 - A test set never used for tuning, ideally from a later time period.
+
+For building the set, see [Synthetic Data & Dataset Curation](/ai-system-design/genai-system-design/synthetic-data-and-dataset-curation) and [Building Eval Datasets](/ai-system-design/genai-system-design/building-eval-datasets).
+
+### Overfitting: what the loss curves say
+
+Training loss only measures how well the model fits what it has seen. Validation loss, on held-out tickets, measures what you care about.
+
+<AnimatedDiagram
+  spec="animated/finetune/ft-loss-curves"
+  caption="Shape only, not a measurement. Training loss keeps falling; validation loss bottoms out and rises. Stop at the best checkpoint."
+/>
+
+**How to read it.** Both curves fall together at first. After the lowest validation point the curves part: the model is memorising the 5,000 tickets, not learning the pattern. Keep the checkpoint at the lowest validation loss, or lower the epochs and learning rate. A small dataset reaches that point in few epochs.
+
+<Callout tone="red" title="What breaks">
+  A model past its best checkpoint can still score well on its own training tickets and fail on new phrasings. If the golden set overlaps the training set, the score hides it.
+</Callout>
+
+### Worked example: Brightpost's tone and refund rule
+
+Follow the stepper above with real numbers. **Decide:** the prompted baseline answers well but needs 200 tokens of style rules on each of 200,000 daily requests (40 M tokens a day), and sometimes forgets that refunds over £30 need approval. The gap is behaviour, so fine-tuning fits. Live order status still comes from a tool call. **Data:** the 5,000 resolved tickets are cleaned, deduplicated, reviewed and split; the 200 golden tickets are held out. **Train:** QLoRA with r = 16 on a 7 B open-weight base, validation loss tracked each epoch (see [LoRA, QLoRA & PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft) for the memory working). **Evaluate:** run the golden set on the baseline and on the adapter with a short prompt, check tone and the approval decision on every refund ticket, and run a general-ability set for regressions. **Deploy:** merge the adapter, A/B test. **Monitor:** every month's new resolved tickets, minus any near-duplicates, queue for the next round.
+
+### Related pages
+
+- Preference tuning in depth: [Reinforcement & Preference Learning](/ai-system-design/genai-system-design/reinforcement-preference-learning).
+- A smaller student from a big teacher: [Distillation & Small Models](/ai-system-design/genai-system-design/distillation-and-small-models).
+- Prompting and RAG first: [Prompt vs RAG vs Fine-Tuning](/ai-system-design/genai-system-design/prompt-vs-rag-vs-fine-tuning).
+- Fine-tuning the retriever, not the generator: [Fine-Tuning Embeddings & Rerankers](/ai-system-design/genai-system-design/fine-tuning-embeddings-and-rerankers).
 
 ## Trade-offs
 
@@ -131,6 +192,8 @@ With rank r much smaller than d, A and B together have far fewer parameters than
 - [QLoRA: Efficient Finetuning of Quantized LLMs (Dettmers et al., 2023)](https://arxiv.org/abs/2305.14314)
 - [Direct Preference Optimization (Rafailov et al., 2023)](https://arxiv.org/abs/2305.18290)
 - [Training Language Models to Follow Instructions, InstructGPT (Ouyang et al., 2022)](https://arxiv.org/abs/2203.02155)
+- [Dataset formats and types (Hugging Face TRL documentation)](https://huggingface.co/docs/trl/dataset_formats)
+- Related pages: [LoRA, QLoRA & PEFT](/ai-system-design/genai-system-design/lora-qlora-and-peft) · [Distillation & Small Models](/ai-system-design/genai-system-design/distillation-and-small-models) · [Synthetic Data & Dataset Curation](/ai-system-design/genai-system-design/synthetic-data-and-dataset-curation)
 
 <InterviewQuestions>
   <InterviewQuestion question="When should you fine-tune instead of prompting or using RAG?" category="Trade-offs" level="Junior">
@@ -145,7 +208,7 @@ With rank r much smaller than d, A and B together have far fewer parameters than
   <InterviewQuestion question="Compare RLHF and DPO." category="Trade-offs" level="Senior">
     RLHF trains a reward model on preference comparisons and then optimizes the LLM against it with reinforcement learning such as PPO, with a KL penalty to stay close to the reference model. DPO derives a direct loss on preference pairs that targets the same objective without a reward model or RL loop. DPO is simpler and more stable; RLHF is more flexible, for example for online data collection.
   </InterviewQuestion>
-  <InterviewQuestion question="How much data do you need to fine-tune an LLM?" category="Data" level="Mid">
+  <InterviewQuestion question="How much data do you need to fine-tune an LLM?" category="Concepts" level="Mid">
     It depends on the task, but for adapting format or a narrow skill, a few hundred to a few thousand high-quality, diverse examples often suffice with LoRA. Quality and coverage of real input variety matter more than volume. Start small, measure on a held-out set, and add data targeted at the failure cases.
   </InterviewQuestion>
   <InterviewQuestion question="How do you evaluate a fine-tuned model?" category="Evaluation" level="Mid">
@@ -153,5 +216,11 @@ With rank r much smaller than d, A and B together have far fewer parameters than
   </InterviewQuestion>
   <InterviewQuestion question="Your fine-tuned model performs worse than the base model on some tasks. What happened?" category="Failure modes" level="Senior">
     Likely catastrophic forgetting from narrow training data, too many epochs or too high a learning rate, or a mismatch in chat template or system prompt between training and evaluation. Fixes include mixing in general instruction data, lowering the learning rate and epochs, using LoRA with a lower rank, and verifying the prompt format end to end.
+  </InterviewQuestion>
+  <InterviewQuestion question="Training loss keeps falling but validation loss has started to rise. What do you do?" category="Failure modes" level="Mid">
+    The model is overfitting: it memorises the training examples instead of learning the pattern. Stop at the epoch with the lowest validation loss and keep that checkpoint. Then fewer epochs, a lower learning rate, a lower LoRA rank or more diverse data all help. Check that validation tickets are not near-duplicates of training tickets, since that would hide the problem.
+  </InterviewQuestion>
+  <InterviewQuestion question="Walk through the fine-tuning lifecycle for a support assistant, and where it can send you away from fine-tuning." category="Architecture" level="Senior">
+    Decide first, with an evaluation set and a strong prompted baseline; if the gap is knowledge, use RAG and stop. Otherwise curate real, reviewed examples and split them, keeping the golden set out. Train with LoRA or QLoRA and watch validation loss. Evaluate against the baseline for task quality and regressions, deploy by merging or swapping the adapter, A/B test, and monitor. Monitoring feeds new resolved tickets back into the data, so the loop repeats.
   </InterviewQuestion>
 </InterviewQuestions>
