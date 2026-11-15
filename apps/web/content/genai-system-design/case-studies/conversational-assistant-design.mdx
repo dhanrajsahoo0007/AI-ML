@@ -40,26 +40,46 @@ The assistant is a new, very fast colleague with access to the company wiki and 
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    U["Employee (SSO)"] --> GW["Chat UI / API gateway<br/>(auth, rate limits)"]
-    GW --> ORCH["Orchestrator"]:::accent
-    ORCH --> IG["Input guardrails"]
-    IG --> ROUTE{"Intent router"}
-    ROUTE -->|"knowledge"| RAG["RAG: rewrite query → hybrid search<br/>(ACL filtered) → re-rank"]
-    ROUTE -->|"action"| AGENT["Tool-using agent<br/>(scoped tools, budgets)"]
-    ROUTE -->|"out of scope"| HANDOFF["Human handoff"]
-    RAG --> GEN["LLM: grounded answer with citations"]
-    AGENT --> CONFIRM["User confirmation for changes"]
-    CONFIRM --> TOOLS["Ticketing, calendar, HR APIs"]
-    TOOLS --> GEN
-    MEM[("Conversation + user memory")] --> ORCH
-    GEN --> OG["Output guardrails"]
-    OG --> GW
-    ORCH -.-> OBS["Tracing, evals, feedback, cost"]
-    IDX[("Search indexes + ACLs")] --> RAG
-    SRC["Wikis, drives, tickets"] --> CONN["Connectors + permission sync"] --> IDX
-```
+Start from the smallest assistant that answers anything, then add one part at a time. Each step closes a gap the step before it left open.
+
+<AnimatedDiagram
+  spec="animated/rag/assistant-architecture"
+  stepper
+  caption="One orchestrator routes each message to a cited answer, a confirmed action or a person, and guardrails sit on both sides of it."
+/>
+
+**How to read it**, one card per step. Zones follow the site's case-study colours: the core request path is green, supporting services teal, stores violet, background pipelines orange.
+
+<StepCards>
+  <StepCard n={1} title="Chat over one model">
+    The employee signs in with SSO, and the API gateway checks the token and applies rate limits. The orchestrator, the service that runs each turn, passes the message to the LLM and returns its reply. This is the smallest design that answers, and it is quick to ship. The gap: the model knows nothing about the company, so it guesses about internal policies.
+  </StepCard>
+  <StepCard n={2} title="Answer from company documents">
+    A retriever searches an index of document chunks with keywords and vectors together (hybrid search). It keeps only the chunks the employee may read, using the access-control list (ACL) stored with each chunk. The orchestrator puts those chunks in the prompt, and the LLM answers with citations. Retrieval is chosen over fine-tuning because documents change every day. The gap: nothing fills the index or keeps its permissions current.
+  </StepCard>
+  <StepCard n={3} title="Keep the index and its permissions in sync">
+    Connectors read wikis, drives and tickets, split them into chunks and copy each document's ACL with them. When a page or its sharing changes, the connector updates the index. Indexing documents without their permissions is the classic leak. The gap: every message still goes to retrieval, even "create a ticket for my laptop".
+  </StepCard>
+  <StepCard n={4} title="Route each message by intent">
+    An intent router classifies the message as a knowledge question, an action request, chit-chat or out of scope, and the orchestrator follows the matching path. Out-of-scope messages go to a human handoff with a summary of the conversation. Routed pipelines are cheaper and more predictable than one general agent. The gap: the action path has nothing to call yet.
+  </StepCard>
+  <StepCard n={5} title="Act through scoped tools">
+    A tool agent picks one of a few tools with strict schemas: create a ticket, book a meeting, look up leave. It calls the company APIs with the employee's own permissions and asks the employee to confirm before any change. Operations are idempotent, so a retry does not file two tickets. The gap: a follow-up such as "and for my team?" arrives without the turn before it.
+  </StepCard>
+  <StepCard n={6} title="Remember the conversation">
+    The memory store keeps recent turns, a running summary and the employee's saved preferences, which they can view and delete. The orchestrator loads it on every turn and rewrites follow-ups into standalone questions before retrieval. The gap: retrieved pages and user messages can now carry instructions that steer the model, and the model can take actions.
+  </StepCard>
+  <StepCard n={7} title="Screen what goes in and what comes out">
+    Guardrails sit between the gateway and the orchestrator. On the way in they screen for prompt injection, personal data and off-topic requests; on the way out they check the LLM's draft for policy violations and leaked data before it reaches the employee. The early shortcuts around them are gone. The gap: no one can tell whether the answers are right.
+  </StepCard>
+  <StepCard n={8} title="Trace and evaluate every turn">
+    Every turn is logged with its retrieved chunks, tool calls, latency, cost and the employee's thumbs up or down. Sampled turns are scored by evaluation sets and LLM judges calibrated against human reviewers. Failures go back into sources, prompts and test sets, which closes the loop.
+  </StepCard>
+</StepCards>
+
+<Callout tone="red" title="What breaks">
+  Permissions drift. A document is unshared in the drive, but its chunks keep the old ACL until the next sync, so the retriever still returns them to people who lost access. Fix: sync permission changes as events rather than in the nightly crawl, check access again against the source for the final chunks, and run leak tests with accounts of different roles.
+</Callout>
 
 A request end to end:
 

@@ -39,21 +39,21 @@ A search engine is a shop assistant who hears a vague request ("comfy running sh
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    Q["User query"] --> QU["Query understanding<br/>(spell, synonyms, entities, intent)"]
-    QU --> LEX["Lexical retrieval<br/>(BM25, inverted index)"]
-    QU --> DENSE["Dense retrieval<br/>(two-tower + ANN)"]
-    LEX --> FUSE["Fuse candidates (~1,000)"]
-    DENSE --> FUSE
-    FUSE --> LTR["Learning-to-rank model<br/>(GBDT / neural) → top ~100"]:::accent
-    LTR --> CE["Cross-encoder re-rank → top ~20"]
-    CE --> BIZ["Business rules: diversity,<br/>availability, ads"]
-    BIZ --> SERP["Results page"]
-    SERP -->|"clicks, purchases, dwell"| LOGS[("Logs")]
-    LOGS --> TRAIN["Training data<br/>(debiased clicks + judgments)"]
-    TRAIN --> LTR
-```
+Search is a funnel: every stage throws away most of what it receives so the next, more expensive stage can afford to look closely. Follow one shopper's query through it.
+
+<AnimatedDiagram
+  spec="animated/rag/search-ranking-funnel"
+  stepper
+  caption="Each stage scores fewer products with a costlier model, so the precise models only ever see a few hundred."
+/>
+
+**How to read it.** Step 1 is the input: the query, cleaned up by query understanding, and the whole catalog. Step 2 retrieves candidates cheaply from an inverted index (BM25) and an embedding index in parallel and fuses the two lists. Steps 3 and 4 rank: a learning-to-rank model scores every candidate with many features, then a cross-encoder rereads only the top ones. Step 5 applies business rules and renders the page, and step 6 closes the loop: logged clicks and purchases become training labels for the ranker. Widths are on a log scale, so the cut from 1,000 to 100 and the cut from 20 to 10 are both visible.
+
+**The numbers.** With an illustrative catalog of 10,000,000 products, retrieval keeps about 1,000, so the ranker scores 1 product in 10,000. Learning to rank keeps 100 of those 1,000 (1 in 10), the cross-encoder keeps 20 of 100 (1 in 5), and the page shows 10 (an illustrative page size).
+
+<Callout tone="red" title="What breaks">
+  A product that retrieval misses never reaches the ranker, however good the ranker is. A query like "sneakers for overpronation" can miss shoes described only as "stability" if retrieval is BM25 alone. Fix: measure the recall of candidate generation separately, add synonyms and dense retrieval, and fuse both lists.
+</Callout>
 
 The query path:
 
@@ -68,13 +68,19 @@ The query path:
 
 ### Pointwise, pairwise and listwise ranking
 
-```mermaid
-flowchart LR
-    PW["Pointwise:<br/>predict relevance of each item"] --> PA["Pairwise:<br/>predict which of two items ranks higher"]
-    PA --> LW["Listwise:<br/>optimize the whole list (e.g. nDCG)"]:::accent
-```
+The three families differ in what the loss looks at: one item, one pair, or the whole list. One query with three products shows the difference.
 
-LambdaMART, a gradient-boosted tree method using listwise-style gradients, has long been a strong production baseline because it handles heterogeneous features well.
+<AnimatedDiagram
+  spec="animated/rag/search-ranking-losses"
+  stepper
+  caption="The same mistake, B above A, looks small to a pointwise loss, is one wrong pair to a pairwise loss, and costs 0.20 of nDCG to a listwise one."
+/>
+
+**How to read it.** A human labelled the stability shoe A as the best match (2), the neutral shoe B as partly relevant (1) and the socks C as irrelevant (0), but the model scores B above A. Pointwise (step 1) regresses each score toward its label, one product at a time. Pairwise (step 2), as in RankNet, checks each pair's order and pushes the higher-labelled item up. Listwise (step 3) scores the whole ranked list with a ranking metric such as nDCG (normalized discounted cumulative gain), which rewards relevant items near the top.
+
+**The numbers.** Pointwise: (2 − 1.2)² + (1 − 1.5)² + (0 − 0.3)² = 0.64 + 0.25 + 0.09, mean 0.33. Pairwise: 1 of 3 pairs out of order. Listwise, with gain (2^label − 1) ÷ log2(rank + 1): the model's order B, A, C gives 1 + 3 ÷ 1.585 + 0 = 2.89, the ideal order A, B, C gives 3 + 1 ÷ 1.585 = 3.63, so nDCG@3 = 0.80. Swapping A and B is worth 0.20. Labels and scores are illustrative.
+
+LambdaMART, a gradient-boosted tree method using listwise-style gradients, has long been a strong production baseline because it handles heterogeneous features well. It starts from RankNet's pairwise gradient and multiplies it by the change in nDCG that swapping the pair would cause (Burges, 2010), which is the 0.20 in the example.
 
 ### Offline and online evaluation
 
