@@ -1,6 +1,8 @@
 ---
 title: Multimodal and Voice AI
 description: How vision-language models, speech recognition, text-to-speech and real-time voice agents work, with latency budgets, evaluation and robot VLA models.
+icon: layers
+updated: 2026-11-15
 ---
 
 Multimodal questions now appear across labs, voice-AI startups, healthcare scribes and robotics companies. Interviewers want to know how images and audio get into a language model, how real-time voice agents hit their latency targets, and how you evaluate outputs that have no single right answer.
@@ -9,7 +11,7 @@ Multimodal questions now appear across labs, voice-AI startups, healthcare scrib
 
 - **Vision-language models** turn images into tokens with a vision encoder, then connect them to an LLM through a **projector**, **cross-attention** or **native multimodal tokens**.
 - **ASR** (speech to text) and **TTS** (text to speech) are the building blocks of voice products; **streaming** versions of both are essential for real time.
-- A **real-time voice agent** must respond in well under a second end to end, so every stage (VAD, ASR, LLM, TTS, network) gets a latency budget.
+- A **real-time voice agent** must respond in about a second or less end to end, so every stage (VAD, ASR, LLM, TTS, network) gets a latency budget.
 - **Cascaded** voice systems (ASR + LLM + TTS) are controllable and debuggable; **native speech-to-speech** models are faster and more expressive but harder to control.
 - Evaluate beyond single numbers: **WER** misses meaning-critical errors, and TTS quality needs **human ratings** and targeted tests.
 - **Vision-language-action models** extend VLMs to output robot actions, often with **action chunking** and a fast low-level controller.
@@ -43,51 +45,82 @@ A language model only understands tokens. Multimodal AI is about translating oth
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    MIC["User speech"] --> VAD["VAD + endpointing"]
-    VAD --> ASR["Streaming ASR"]
-    ASR --> LLM["LLM (streaming tokens)<br/>+ tools, retrieval"]:::accent
-    LLM --> TTS["Streaming TTS"]
-    TTS --> SPK["Audio playback<br/>(jitter buffer)"]
-    MIC -.->|"barge-in: user starts talking"| CANCEL["Stop TTS, cancel LLM"]
-    CANCEL -.-> ASR
-```
+The one idea behind every multimodal system: a language model reads a sequence of vectors, so each input type gets an encoder that turns it into vectors, and they all go into one sequence. Take what a Brightpost customer can send.
 
-The real-time voice loop:
+<AnimatedDiagram
+  spec="animated/multimodal/modality-map"
+  caption="Four inputs, four encoders, one token sequence. Colour marks the modality; the counts show that an image, a call or a clip is far longer than a question."
+/>
 
-1. VAD detects speech; streaming ASR transcribes as the user talks.
-2. Endpointing decides the turn is over (or a model predicts it), and the transcript goes to the LLM.
-3. The LLM streams tokens; text is cut into speakable chunks (clauses or sentences).
-4. Streaming TTS converts each chunk to audio as soon as it arrives.
-5. Audio plays through a small jitter buffer; if the user speaks, playback stops and the LLM is cancelled.
+**How to read it.** Each row is one modality: the input, its encoder, and the tokens it becomes. The question is 15 tokens. The kettle photo is 576: LLaVA-1.5 cuts a 336 px image into 14 px patches, 336 ÷ 14 = 24 per side, 24 × 24 = 576. Whisper's encoder turns a 30-second window into 1,500 positions (3,000 frames of 10 ms, halved by a stride-2 convolution). A 10-second clip sampled at one frame a second, each frame as one image, would be 10 × 576 = 5,760 tokens (illustrative; real systems compress frames). Different systems use different encoders, so these are examples, not constants.
+
+Voice products add a second problem: time. The cascaded voice loop is below. It is covered in full on [Real-Time Voice Agents](/ai-system-design/genai-system-design/real-time-voice-agents).
+
+<AnimatedDiagram
+  spec="animated/multimodal/voice-pipeline"
+  stepper
+  caption="A cascaded agent: the turn detector gates the recogniser, the model may call a tool, synthesis starts on the first clause, and a barge-in sends a stop to the buffer and a cancel to the model."
+/>
+
+<StepCards>
+  <StepCard n={1} title="The caller speaks; audio streams in">
+    Audio reaches the agent in small chunks, not as a finished file.
+  </StepCard>
+  <StepCard n={2} title="Turn detection">
+    Voice activity detection finds speech and endpointing decides the turn is over.
+  </StepCard>
+  <StepCard n={3} title="Recognition to the model">
+    Streaming ASR gives partial text early and a final text at the end of the turn.
+  </StepCard>
+  <StepCard n={4} title="A tool call">
+    For order 4471 the model asks for the order, then writes its reply.
+  </StepCard>
+  <StepCard n={5} title="Synthesis starts early">
+    The first clause goes to streaming TTS as soon as it exists.
+  </StepCard>
+  <StepCard n={6} title="Playback">
+    Audio waits in a small jitter buffer and plays to the caller.
+  </StepCard>
+  <StepCard n={7} title="Barge-in">
+    New caller speech stops playback and cancels the reply.
+  </StepCard>
+</StepCards>
 
 ## Deep dive
 
 ### A latency budget for a voice agent
 
-```mermaid
-flowchart LR
-    E["Endpointing<br/>~200-500 ms"] --> A["ASR finalization<br/>~50-200 ms"]
-    A --> L["LLM time to first token<br/>~200-600 ms"]:::accent
-    L --> T["TTS time to first audio<br/>~100-300 ms"]
-    T --> N["Network + buffering<br/>~50-150 ms"]
-```
+<AnimatedDiagram
+  spec="animated/multimodal/voice-latency-budget"
+  caption="Two budgets on one scale. All stage times are illustrative except the model's 400 ms; the 800 ms wait is one live API's documented default (read 16 November 2026)."
+/>
 
-Totals of roughly 700 ms to 1.5 s are typical; good systems aim for under about a second. Endpointing is often the biggest single item, which is why semantic turn-detection models that recognize a finished thought help so much. Time to first audio, not full response time, is what users feel.
+**How to read it.** Each row is a stage; the dashed line is when the reply starts. Top: 300 + 80 + 400 + 120 + 100 = 1,000 ms. Bottom: the same stages with an 800 ms wait for the end of the turn = 1,500 ms. The wait is the biggest single item, which is why semantic turn-detection models that recognise a finished thought help so much. Time to first audio, not full response time, is what users feel. The stage-by-stage levers are on [Real-Time Voice Agents](/ai-system-design/genai-system-design/real-time-voice-agents).
 
 ### Connecting images to an LLM
 
-```mermaid
-flowchart TB
-    IMG["Image"] --> VIT["Vision encoder (ViT)<br/>patch embeddings"]
-    VIT --> P1["Projector MLP → image tokens<br/>in the LLM's context"]
-    VIT --> P2["Resampler + cross-attention<br/>layers inside the LLM"]
-    P1 --> LLM2["LLM"]
-    P2 --> LLM2
-    TXT["Text prompt"] --> LLM2
-    LLM2 --> OUT["Answer"]
-```
+<AnimatedDiagram
+  spec="animated/multimodal/vlm-fusion"
+  stepper
+  caption="Both designs end with the language model reading an image. The projector makes images longer sequences; the cross-attention design keeps the sequence short and adds layers instead."
+/>
+
+**How to read it.** Step 1 is the projector design (LLaVA): the photo becomes 576 visual tokens that join the text tokens in the same sequence. Step 2 is the cross-attention design (Flamingo): a resampler reduces the image to 64 visual tokens that feed extra layers, so the text sequence stays its own length. More on [Vision-Language Models](/ai-system-design/genai-system-design/vision-language-models).
+
+### Worked example: a photo and a phone call at Brightpost
+
+A customer sends a photo of the cracked kettle (order 4471, £42) with the question "Where is my refund?". The text assistant's prompt is about 2,215 tokens (`PROMPT.total` on the RAG pages); the photo, read LLaVA-style, adds 576 more: 2,215 + 576 = 2,791 tokens in one sequence, 26 % longer. The model sees the crack and the question in one pass and writes the same refund-over-£30 reply as before, sent for approval.
+
+The same customer then phones. The voice loop adds the turn detector, recognition and synthesis around the same model, and the reply gap is 1,000 ms when the wait is tuned to 300 ms, or 1,500 ms at an 800 ms default wait. The model's own share is 400 ms in both. If the customer cuts in with "no, the other order", barge-in stops playback and cancels the reply. See the group pages for [speech](/ai-system-design/genai-system-design/speech-asr-and-tts), [generation](/ai-system-design/genai-system-design/image-and-video-generation) and [robots](/ai-system-design/genai-system-design/robotics-and-vla-models).
+
+### The pages in this group
+
+- [Vision-Language Models](/ai-system-design/genai-system-design/vision-language-models): patches, projectors, resolution and cost.
+- [Image & Video Generation](/ai-system-design/genai-system-design/image-and-video-generation): diffusion, latents, guidance.
+- [Speech: ASR & TTS](/ai-system-design/genai-system-design/speech-asr-and-tts): recognition, synthesis, WER.
+- [Real-Time Voice Agents](/ai-system-design/genai-system-design/real-time-voice-agents): budgets, turn-taking, transports.
+- [Robotics & VLA Models](/ai-system-design/genai-system-design/robotics-and-vla-models): vision, language and actions.
+- Related: [Multimodal RAG](/ai-system-design/genai-system-design/multimodal-rag).
 
 ## Trade-offs
 
@@ -133,6 +166,7 @@ flowchart TB
 - [Visual Instruction Tuning, LLaVA (Liu et al., 2023)](https://arxiv.org/abs/2304.08485)
 - [Flamingo: a Visual Language Model for Few-Shot Learning (Alayrac et al., 2022)](https://arxiv.org/abs/2204.14198)
 - [Robust Speech Recognition via Large-Scale Weak Supervision, Whisper (Radford et al., 2022)](https://arxiv.org/abs/2212.04356)
+- [Improved Baselines with Visual Instruction Tuning, LLaVA-1.5 (Liu et al., 2023)](https://arxiv.org/abs/2310.03744)
 - [RT-2: Vision-Language-Action Models (Brohan et al., 2023)](https://arxiv.org/abs/2307.15818)
 - [Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware, ACT (Zhao et al., 2023)](https://arxiv.org/abs/2304.13705)
 
@@ -154,5 +188,11 @@ flowchart TB
   </InterviewQuestion>
   <InterviewQuestion question="What is action chunking in robot learning?" category="Concepts" level="Senior">
     Instead of predicting one action per control step, the policy predicts a short sequence of future actions at once and executes them, often blending overlapping predictions. It reduces compounding errors and jitter, captures smooth multi-step motions, and lets a slower model control a fast robot.
+  </InterviewQuestion>
+  <InterviewQuestion question="A customer sends a photo with a text question. How many tokens does the model read, and why does it matter?" category="Scaling" level="Mid">
+    The photo adds tokens on top of the text. With a LLaVA-1.5 style model a 336 px image is 24 by 24 patches, 576 tokens, so a 2,215-token prompt becomes 2,791. The extra tokens cost latency and money on every request and fill the context window. Higher resolution, tiling or video multiplies the count, so teams budget tokens per image and choose resolution per task.
+  </InterviewQuestion>
+  <InterviewQuestion question="Your voice agent's reply gap is 1,500 ms and the target is 1,000 ms. Where do you look first?" category="Failure modes" level="Senior">
+    Break the gap into stages: wait for the end of the turn, recognition tail, model first token, synthesis first audio, and network. The wait is usually the largest, and an 800 ms default wait against a 300 ms tuned one accounts for the whole 500 ms. Move to a detector that reads meaning, or tune the silence window, then check streaming at each stage, and only after that tune the model. Measure each stage per call, since an average hides the slow turns.
   </InterviewQuestion>
 </InterviewQuestions>
