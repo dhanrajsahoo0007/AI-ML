@@ -18,9 +18,57 @@ Operations benefit from SLA timers on critical paths, data quality checks as sen
 
 RAG and agentic systems are only as current as the corpora they retrieve from. Continuous integration for knowledge means pipelines that ingest new documents, update structured records, and refresh vector indexes without taking the whole system offline. Architecture usually splits bulk backfills from incremental updates: message queues or change-data-capture streams carry create, update, and delete events from source systems into workers that normalize text, deduplicate by content hash, and enqueue embedding jobs.
 
+Change data capture (CDC) is the usual way to get those events out of a database without changing the application. The same pattern keeps any derived store in step with its source; here it feeds a search index.
+
+<AnimatedDiagram
+  spec="animated/databases/cdc-to-search"
+  stepper
+  caption="The application writes only to the source of truth; the index learns about every committed change from the log."
+/>
+
+**How to read it.** Step 1: the service writes only to Postgres, so there is one source of truth and no dual write that can half-fail. Step 2: a CDC connector such as Debezium reads the database's write-ahead log and publishes each committed change to a Kafka topic. Step 3: an indexer consumes the topic and upserts documents into the search index. Step 4: searches read the index, which trails the database by about a second. For a RAG index, the indexer's job grows: it re-chunks and re-embeds the changed text before the upsert, which is what makes the lag longer.
+
+
 Document change detection compares source revision ids, content hashes, or extracted entity signatures so unchanged paragraphs do not force redundant embedding calls. Incremental indexing strategies include per-collection segment files with periodic compaction, dual-write to shadow indexes followed by atomic swap, or versioned index aliases in Elasticsearch-style clusters. Embedding update strategies range from full re-embed on any text change to selective re-embed when semantic diff exceeds a threshold, trading fidelity against API cost and latency during peak update windows.
 
 Stale data handling belongs in product policy as much as in engineering. Some answers should carry freshness timestamps or disclaimers when source-of-truth systems lag. Freshness SLAs define maximum acceptable lag per data class: regulatory filings might need sub-hour propagation while marketing blogs tolerate a day. Operational monitors track ingestion backlog depth, embedding queue age, and retrieval hit rates for newly added content to catch silent failures in connectors.
+
+The lag between an edit and a searchable chunk is the **staleness window**: the time during which the source says one thing and the index another. Follow one edit to Brightpost's help centre (the fictional shop used across the RAG pages) to see where that time goes.
+
+<AnimatedDiagram
+  spec="animated/rag/freshness-pipeline"
+  stepper
+  caption="An edit is not live when it is saved; until the new vectors land, every question gets the old article."
+/>
+
+**How to read it**, one card per step:
+
+<StepCards>
+  <StepCard n={1} title="An editor saves a change to one article">
+    Brightpost changes its reset flow, and an editor updates "Reset a forgotten password" in the help centre's CMS. The CMS is the source of truth. The index still holds the old text.
+  </StepCard>
+  <StepCard n={2} title="The change becomes an event on a queue">
+    The CMS sends a webhook, or a CDC connector reads its database log, and an event with the article id and version lands on a queue 1 s later. A queue absorbs bursts (a product launch can touch hundreds of articles at once) and lets workers retry. The event says what changed, not the new chunks.
+  </StepCard>
+  <StepCard n={3} title="A worker re-chunks only that article">
+    Workers drain the queue in 30 s batches. A worker fetches the new text and cuts it into 3 chunks with the same rules as the first ingestion, so chunk ids stay stable. Only this article is touched; the other 1,199 are not read.
+  </StepCard>
+  <StepCard n={4} title="Only its chunks are re-embedded">
+    The embedding model turns the 3 new chunks into vectors in about 2 s, with the same model as the rest of the index; a vector from another model would land in a different space. The new vectors are not searchable yet.
+  </StepCard>
+  <StepCard n={5} title="The new vectors are upserted by chunk id">
+    An upsert (update or insert) keyed by chunk id replaces the 3 old vectors and their metadata, including the new version and timestamp. After the index refresh, 35 s after the save, the next question gets the new steps.
+  </StepCard>
+  <StepCard n={6} title="Inside the window, a question still gets the old chunks">
+    A customer who asks during those 35 s retrieves the old chunks and gets the old steps, cited and confident. Shortening the window costs money (smaller batches, more embedding calls); reporting it honestly is free: return each chunk's timestamp so the app can warn when a source is newer than the index.
+  </StepCard>
+</StepCards>
+
+**The numbers** (illustrative): 1 s to queue + up to 30 s waiting for the batch + 1 s to re-chunk + 2 s to embed 3 chunks + 1 s to upsert and refresh = 35 s. A nightly batch rebuild instead would leave a window of up to 24 hours, 86,400 s.
+
+<Callout tone="red" title="What breaks">
+  If the webhook is lost, the event never reaches the queue and the window never closes: the index serves the old article until someone notices. Fix: a periodic reconciliation job that compares each article's content hash in the source with the one stored in the index and enqueues any that differ.
+</Callout>
 
 Trade-offs include eventual consistency versus read-after-write expectations for internal tools. Stronger guarantees often require synchronous write paths that increase user-perceived latency on authoring flows. Another tension is global versus regional indexes: unified indexes simplify routing but may violate data residency; sharded indexes add routing complexity but align with compliance boundaries.
 
@@ -30,7 +78,30 @@ Retrieval-augmented systems go stale the moment documentation, pricing, or polic
 
 Change detection goes beyond file hashes: semantic diffing can skip re-embedding paragraphs that moved but did not edit, while structural edits in HTML might alter chunk boundaries enough to require full section re-chunking. Incremental re-embedding strategies embed only new or altered chunks and update vector stores with delete-insert semantics keyed by stable document and chunk identifiers. Stale content detection complements push updates by scoring last-reviewed dates, decaying trust for pages with conflicting numeric facts, or comparing live fetches to cached snapshots when legal requires periodic reaffirmation.
 
+A **content hash** is a short fingerprint of a document's text (for example SHA-256): the same text always gives the same hash, and any edit gives a different one. Storing the hash next to each indexed article turns "what changed?" into a comparison.
+
+<AnimatedDiagram
+  spec="animated/rag/incremental-reindex"
+  stepper
+  caption="Comparing hashes finds the 12 changed articles, so the embedder sees 36 chunks instead of 3,600."
+/>
+
+**How to read it.** Step 1 shows 5 of the 1,200 articles with the hash stored at the last indexing and the hash of today's text (the values are made up and shortened). Step 2 compares them: only "Reset a forgotten password" differs in this sample, and across the help centre 12 articles changed this week. Step 3 sends only their chunks to the embedding model; the two bars are drawn on one scale, so the incremental run is a sliver.
+
+**The numbers.** 12 articles × 3 chunks = 36 chunks instead of 3,600, which is 1%. In tokens, 36 × 400 = 14,400 instead of 1,440,000.
+
+<Callout tone="red" title="What breaks">
+  A hash per article catches edits but not deletions: a removed article has no new hash, so its 3 old chunks stay searchable. And if an edit changes where chunks are cut, new chunk ids no longer match the old ones, leaving orphan vectors behind. Fix: on any change, delete every chunk of that article by document id before inserting the new ones, and tombstone articles that disappear from the source.
+</Callout>
+
 Knowledge graph updates introduce entity resolution challenges: merging synonyms, deprecating nodes, and validating new edges against ontology rules. Freshness scoring helps rankers prefer recently verified facts without ignoring stable reference material. Scheduled jobs suit predictable publisher releases; event-driven workers suit bursty wiki edits. Reliability demands idempotent consumers, dead-letter queues for poison documents, and shadow indexing environments where new corpora are evaluated for retrieval precision and hallucination rate before the router switches production traffic.
+
+## Further reading
+
+- [Debezium architecture](https://debezium.io/documentation/reference/stable/architecture.html): connectors read a database's transaction log (the MySQL binlog, the PostgreSQL logical replication stream) and write each table's changes to a Kafka topic.
+- [Elasticsearch aliases](https://www.elastic.co/docs/manage-data/data-store/aliases): one request can move an alias from the old index to the new one atomically, the basis of build-then-swap re-indexing.
+- [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks (Lewis et al., 2020)](https://arxiv.org/abs/2005.11401): names updating a model's world knowledge as an open problem for models that store knowledge only in their weights, which retrieval from an index addresses.
+- On this site: [RAG Fundamentals](/ai-system-design/genai-system-design/rag-fundamentals) for the ingestion pipeline these updates re-run, and [Embedding Generation Pipeline](/ai-system-design/genai-system-design/embedding-generation-pipeline) for batching the re-embedding work.
 
 <InterviewQuestions>
   <InterviewQuestion question="How do you make a daily warehouse load resilient to partial failures?" category="Reliability">
