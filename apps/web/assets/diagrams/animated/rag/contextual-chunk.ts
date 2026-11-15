@@ -68,7 +68,7 @@ const spec: LayoutSpec = {
       y: 30,
       w: 400,
       h: 54,
-      label: "\"If you lost your phone, use one of\nyour backup codes to sign in.\"",
+      label: '"If you lost your phone, use one of\nyour backup codes to sign in."',
       tone: RAG_TONE.text,
       fill: "pastel",
     },

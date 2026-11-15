@@ -28,8 +28,24 @@ const ROWS: {
   boiler?: boolean;
 }[] = [
   { id: "nav", y: 50, h: 30, page: "Menu · Orders · Help · Sign in", boiler: true },
-  { id: "title", y: 92, h: 34, page: ARTICLES.twoFactor, type: "Title", sub: ARTICLES.twoFactor, meta: "URL, updated date" },
-  { id: "h2", y: 136, h: 32, page: "If you lost your phone", type: "Heading", sub: "starts section 2", meta: "section 2" },
+  {
+    id: "title",
+    y: 92,
+    h: 34,
+    page: ARTICLES.twoFactor,
+    type: "Title",
+    sub: ARTICLES.twoFactor,
+    meta: "URL, updated date",
+  },
+  {
+    id: "h2",
+    y: 136,
+    h: 32,
+    page: "If you lost your phone",
+    type: "Heading",
+    sub: "starts section 2",
+    meta: "section 2",
+  },
   {
     id: "para",
     y: 178,

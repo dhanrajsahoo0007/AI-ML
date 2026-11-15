@@ -38,7 +38,6 @@ export const RAG_TONE = {
   infra: "neutral",
 } as const satisfies Record<string, LayoutTone>;
 
-export type RagRole = keyof typeof RAG_TONE;
 
 // ── The running example: Brightpost's help centre ───────────────────────────────────────────────────────────────
 
@@ -567,7 +566,7 @@ export const STAGES = ["Parse", "Chunk", "Index", "Retrieve", "Prompt", "Generat
 export type Stage = (typeof STAGES)[number];
 
 /** The legend tone of each pipeline stage, for figures that colour the locator. */
-export const STAGE_TONE: Record<Stage, LayoutTone> = {
+const STAGE_TONE: Record<Stage, LayoutTone> = {
   Parse: RAG_TONE.text,
   Chunk: RAG_TONE.text,
   Index: RAG_TONE.store,
