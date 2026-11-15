@@ -15,6 +15,13 @@ export const pastel = (t: LayoutTone) => `var(--dg-${t}-fill)`;
 /** Estimated text width at the engine's label size, for pills and tabs. */
 export const textWidth = (text: string, perChar = 6.3) => text.length * perChar;
 
+/**
+ * Estimated width of an edge or arrow label pill's text (11.5 px): capitals are wider than the 6.3 px average, so
+ * relation names such as FROM_SOURCE or OWNED_BY stay inside their pill.
+ */
+export const pillTextWidth = (text: string) =>
+  [...text].reduce((w, c) => w + (c >= "A" && c <= "Z" ? 8 : c === "_" ? 6.8 : 6.3), 0);
+
 export const markerUrl = (uid: string, tone: LayoutTone) => `url(#${uid}-arrow-${tone})`;
 
 /** Opacity of a group by phase; `dim` (highlight/path) wins through the .dg-dim class. */

@@ -179,8 +179,10 @@ export const ADVANCED = {
  * - Product quantisation: 1,536 dimensions cut into 96 sub-vectors of 16 dimensions; each sub-vector is replaced by a
  *   one-byte code (256 centroids), so 96 bytes per vector instead of 6,144: 64 times smaller. 3,600 × 96 = 345,600
  *   bytes ≈ 0.35 MB.
- * - IVF: about √3,600 = 60 cells (clusters); a query probes the nearest 4, so it compares against about
- *   3,600 × 4 / 60 = 240 vectors instead of 3,600.
+ * - IVF: 60 cells (clusters), illustrative: √N is a common rule of thumb for large indexes (pgvector suggests
+ *   rows / 1,000 below a million rows, which would be far fewer cells here). A query first compares against the 60
+ *   centroids, then probes the nearest 4 cells: about 3,600 × 4 / 60 = 240 vectors instead of 3,600 (300
+ *   comparisons with the centroids).
  * - HNSW: M = 16 links per point and efSearch = 64 are common defaults (illustrative).
  */
 export const VECTOR_INDEX = {

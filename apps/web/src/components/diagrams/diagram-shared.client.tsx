@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 import type { Phase } from "./build-view";
 import type { Bounds } from "./geometry";
 import { Glyph, isGlyph } from "./glyphs";
-import { TONES, phaseOpacity, soft, stroke, textWidth } from "./diagram-style";
+import { TONES, phaseOpacity, pillTextWidth, soft, stroke, textWidth } from "./diagram-style";
 import type { DiagramStep, LayoutGroup, LayoutTone } from "./types";
 
 // Pieces shared by the architecture, sequence and layout renderers: tones, icons, the figure chrome (step header,
@@ -511,7 +511,7 @@ export function LabelPill({
   tone: LayoutTone;
   bold?: boolean;
 }) {
-  const w = textWidth(text) + 14;
+  const w = pillTextWidth(text) + 14;
   return (
     <g>
       <rect
