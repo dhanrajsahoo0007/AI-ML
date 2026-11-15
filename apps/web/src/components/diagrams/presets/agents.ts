@@ -108,10 +108,10 @@ export const HAPPY_PATH: readonly TraceTurn[] = [
   {
     thought: "What is the rule for damage?",
     action: TOOLS.searchHelp.call,
-    observation: `"${BRIGHTPOST.helpArticle}": ${BRIGHTPOST.helpRule.toLowerCase()}`,
+    observation: `${BRIGHTPOST.helpArticle}: full refund`,
   },
   {
-    thought: `Damaged and in time: refund £${BRIGHTPOST.price}`,
+    thought: `Damaged, in time: refund £${BRIGHTPOST.price}`,
     action: TOOLS.createRefund.call,
     observation: `Approved ${BRIGHTPOST.approvedAt}, refund ${BRIGHTPOST.refundId}`,
   },
